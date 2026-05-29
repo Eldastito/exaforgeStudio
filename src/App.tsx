@@ -55,7 +55,7 @@ export default function App() {
     
     socket.on("connect", () => {
       console.log("Conectado ao servidor via WebSocket", socket.id);
-      socket.emit("join_org", { organizationId: "default_org" });
+      socket.emit("join_org", { organizationId: user?.organizationId || "default_org" });
     });
 
     socket.on("new_message", (data: { contactId: string, contactName?: string, contactAvatar?: string, provider: string, text: string, sender: string }) => {
@@ -102,7 +102,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [receiveMessage, updateStageByContactId]);
+  }, [receiveMessage, updateStageByContactId, user?.organizationId]);
 
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Carregando...</div>;
   if (!user) return <LoginView />;

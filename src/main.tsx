@@ -1,18 +1,28 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
-import {ErrorBoundary} from './components/ErrorBoundary';
 import './index.css';
+import { AuthProvider } from './contexts/AuthContext.tsx';
 
-const rootElement = document.getElementById('root');
-if (!rootElement) {
-  throw new Error("Elemento raiz '#root' não encontrado no documento.");
-}
+const originalFetch = window.fetch;
+Object.defineProperty(window, 'fetch', {
+  writable: true,
+  configurable: true,
+  value: async (input: RequestInfo | URL, init?: RequestInit) => {
+    const token = localStorage.getItem('zappflow_token');
+    if (token && typeof input === 'string' && input.startsWith('/api') && !input.startsWith('/api/auth/register') && !input.startsWith('/api/auth/login')) {
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${token}`);
+      init = { ...init, headers };
+    }
+    return originalFetch(input, init);
+  }
+});
 
-createRoot(rootElement).render(
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ErrorBoundary>
+    <AuthProvider>
       <App />
-    </ErrorBoundary>
+    </AuthProvider>
   </StrictMode>,
 );

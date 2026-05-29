@@ -5,43 +5,155 @@ import { Server as SocketIOServer } from "socket.io";
 
 import multer from "multer";
 import { processDocument, generateRagResponse } from "./src/server/geminiRAG.js";
-import { suggestResponse, summarizeConversation } from "./src/lib/gemini.js";
+import channelsRoutes from "./src/server/routes/channels.js";
+import messagesRoutes from "./src/server/routes/messages.js";
+import ticketsRoutes from "./src/server/routes/tickets.js";
+import productsRoutes from "./src/server/routes/products.js";
+import appointmentsRoutes from "./src/server/routes/appointments.js";
+import integrationsRoutes from "./src/server/routes/integrations.js";
+import analyticsRoutes from "./src/server/routes/analytics.js";
+import adminRoutes from "./src/server/routes/admin.js";
+import notificationsRoutes from "./src/server/routes/notifications.js";
+import authRoutes from "./src/server/routes/auth.js";
+import usersRoutes from "./src/server/routes/users.js";
+import auditRoutes from "./src/server/routes/audit.js";
+import ragRoutes from "./src/server/routes/rag.js";
+import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
+import { processIncomingMessage } from "./src/server/webhookProcessor.js";
+import db from "./src/server/db.js";
+import { v4 as uuidv4 } from "uuid";
+import bcrypt from "bcrypt";
 
-// Tipos de arquivo de texto suportados pelo pipeline RAG (extração UTF-8).
-const ALLOWED_DOC_EXTENSIONS = [".txt", ".csv", ".md"];
-const MAX_DOC_SIZE = 10 * 1024 * 1024; // 10 MB
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_DOC_SIZE },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ALLOWED_DOC_EXTENSIONS.includes(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Tipo de arquivo não suportado. Envie .txt, .csv ou .md."));
-    }
-  },
-});
-
-// Avisa (sem derrubar o processo) quando variáveis de ambiente importantes faltam.
-function warnMissingEnv() {
-  const optional = ["GEMINI_API_KEY", "EVOLUTION_API_KEY", "META_VERIFY_TOKEN"];
-  for (const name of optional) {
-    if (!process.env[name]) {
-      console.warn(`[ENV] Aviso: ${name} não configurada. Funcionalidades relacionadas ficarão limitadas.`);
-    }
-  }
-}
+const upload = multer({ storage: multer.memoryStorage() });
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  warnMissingEnv();
+  // --- SECURITY HEADERS (Helmet-like) ---
+  app.use((req, res, next) => {
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    res.setHeader('X-Download-Options', 'noopen');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+  });
 
-  // Middleware for parsing JSON
-  app.use(express.json());
+  // --- CORS ---
+  app.use((req, res, next) => {
+    const origin = process.env.NODE_ENV === 'production' 
+       ? (process.env.CORS_ORIGIN || 'https://' + req.headers.host) 
+       : '*';
+    if (origin !== '*') {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+      res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,x-organization-id');
+      if (req.method === 'OPTIONS') {
+         return res.status(200).end();
+      }
+    }
+    next();
+  });
+
+  // --- RATE LIMTING (Simple Mock/Memory for prototype) ---
+  const rateLimitMap = new Map<string, { count: number, resetTime: number }>();
+  app.use((req, res, next) => {
+     // Apply rate limiting in production or if enabled
+     if (process.env.ENABLE_RATE_LIMIT === 'true' || process.env.NODE_ENV === 'production') {
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+        const now = Date.now();
+        const limitConfig = { max: 100, windowMs: 15 * 60 * 1000 }; 
+        const ipKey = String(ip);
+
+        let data = rateLimitMap.get(ipKey);
+        if (!data || now > data.resetTime) {
+           data = { count: 0, resetTime: now + limitConfig.windowMs };
+        }
+        data.count++;
+        rateLimitMap.set(ipKey, data);
+
+        if (data.count > limitConfig.max) {
+           return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+        }
+     }
+     next();
+  });
+
+  // --- Ensure Default Org Exists ---
+  const ensureDefaultOrg = () => {
+    const existing = db.prepare('SELECT id FROM organization_settings WHERE organization_id = ?').get('default_org');
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO organization_settings (id, organization_id, business_name, status)
+        VALUES (?, ?, ?, ?)
+      `).run(uuidv4(), 'default_org', 'Zappflow Mock Org', 'active');
+    }
+  };
+  ensureDefaultOrg();
+
+  // --- Ensure Master Admin Exists ---
+  const ensureMasterAdmin = async () => {
+    const email = 'eldastito@gmail.com';
+    const existingAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (!existingAdmin) {
+       const saltRounds = 10;
+       const passwordHash = await bcrypt.hash('Alice2020@', saltRounds);
+       const userId = uuidv4();
+       db.prepare(`
+         INSERT INTO users (id, organization_id, name, email, password_hash, role)
+         VALUES (?, 'default_org', 'Eldas Tito', ?, ?, 'owner')
+       `).run(userId, email, passwordHash);
+       console.log('Master admin created: ' + email);
+    }
+  };
+  await ensureMasterAdmin();
+
+  // Middleware for parsing JSON with limit blocker
+  app.use(express.json({ limit: '2mb' }));
+
+  // Financial Block Middleware (for API routes)
+  app.use("/api", (req, res, next) => {
+    // Allow these paths regardless of block status
+    if (req.path.startsWith('/admin') || req.path.startsWith('/analytics/settings') || req.path.startsWith('/notifications')) {
+      return next();
+    }
+    const orgId = req.headers['x-organization-id'] || 'default_org';
+    try {
+      const org: any = db.prepare('SELECT status, billing_status FROM organization_settings WHERE organization_id = ?').get(orgId);
+      // If it's blocked, block POST/PUT/DELETE
+      if (org && (org.status === 'blocked' || org.billing_status === 'blocked')) {
+          const method = req.method;
+          if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+             return res.status(403).json({ error: "CONTA BLOQUEADA. Entre em contato com o suporte." });
+          }
+      }
+    } catch(e) {}
+    next();
+  });
+
+  app.use("/api/auth", authRoutes);
+
+  // Apply Auth Middleware to all subsequent protected API routes
+  const protectedApi = express.Router();
+  protectedApi.use(requireAuth);
+  protectedApi.use(requireOrganizationAccess);
+  
+  protectedApi.use("/channels", channelsRoutes);
+  protectedApi.use("/messages", messagesRoutes);
+  protectedApi.use("/tickets", ticketsRoutes);
+  protectedApi.use("/products", productsRoutes);
+  protectedApi.use("/appointments", appointmentsRoutes);
+  protectedApi.use("/integrations", integrationsRoutes);
+  protectedApi.use("/analytics", analyticsRoutes);
+  protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
+  protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
+  protectedApi.use("/notifications", notificationsRoutes);
+  protectedApi.use("/users", usersRoutes);
+  protectedApi.use("/rag", ragRoutes);
+
+  app.use("/api", protectedApi);
 
   // --- META WEBHOOK (WhatsApp & Instagram) ---
   
@@ -53,9 +165,196 @@ async function startServer() {
   };
 
   app.post("/api/evolution/config", (req, res) => {
-    evolutionConfig = req.body;
-    console.log("[Evolution API] Configuração salva: ", evolutionConfig.baseUrl, evolutionConfig.instanceName);
+    // Only update instanceName if provided, keep URL/API Key from ENV if not in body
+    const { instanceName } = req.body;
+    evolutionConfig = {
+      ...evolutionConfig,
+      instanceName: instanceName || evolutionConfig.instanceName
+    };
+    console.log("[Evolution API] Configuração salva: ", evolutionConfig.instanceName);
     res.json({ success: true, message: 'Configuração salva na sessão atual.' });
+  });
+
+  app.post("/api/evolution/instance/connect", async (req, res) => {
+    try {
+      const { instanceName } = req.body;
+      const finalBaseUrl = (evolutionConfig.baseUrl || process.env.EVOLUTION_BASE_URL || '').replace(/\/$/, '');
+      const finalApiKey = (evolutionConfig.apiKey || process.env.EVOLUTION_API_KEY || '');
+      const finalInstance = instanceName || evolutionConfig.instanceName || process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || '';
+
+      if (!finalBaseUrl || !finalApiKey || !finalInstance) {
+        return res.status(400).json({ error: "Faltam parâmetros de conexão (URL, API Key ou Instance Name)." });
+      }
+
+      console.log(`[Evolution DEBUG] Final BaseURL: ${finalBaseUrl}, Final Instance: ${finalInstance}, Final APIKey (len): ${finalApiKey.length}`);
+
+      let token = finalApiKey;
+      let hasInstance = false;
+      let instanceToken = '';
+      
+      // 1. Tentar pegar a lista de instâncias
+      try {
+        const fetchAll = await fetch(`${finalBaseUrl}/instance/all`, { headers: { apikey: finalApiKey } });
+        if (fetchAll.ok) {
+           const data = await fetchAll.json();
+           const inst = data.data?.find((i: any) => (i.name === finalInstance || i.instanceName === finalInstance));
+           if (inst) {
+                console.log("[Evolution] Instância existente encontrada com token:", inst.token);
+                hasInstance = true;
+                instanceToken = inst.token || inst.apikey;
+           }
+        }
+      } catch (err) {}
+
+      // 2. Se não existe, Tentar Criar (Evolution Go ou Evolution API)
+      if (!hasInstance) {
+        try {
+          const createPayload = { 
+             instanceName: finalInstance, name: finalInstance, qrcode: true, 
+             webhook: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] 
+          };
+          
+          let createResp = await fetch(`${finalBaseUrl}/instance/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': finalApiKey },
+            body: JSON.stringify(createPayload) 
+          });
+          
+          if (!createResp.ok && createResp.status === 400) { // Evolution Go strict mode?
+             createResp = await fetch(`${finalBaseUrl}/instance/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': finalApiKey },
+                body: JSON.stringify({ name: finalInstance })
+             });
+          }
+          
+          if (createResp.ok) {
+             const data = await createResp.json();
+             instanceToken = data.data?.token || data.instance?.token || data.hash?.apikey;
+             
+             if (data.qrcode?.base64) {
+                 return res.json({ base64: data.qrcode.base64 }); // Retorno imeditado EvoAPI
+             }
+          }
+        } catch(err) {
+           console.log("[Evolution] Falha ao criar:", err);
+        }
+      }
+
+      const activeToken = instanceToken || finalApiKey;
+
+      // 3. Conectar e Configurar Webhook no ato (Evolution Go pattern)
+      try {
+        await fetch(`${finalBaseUrl}/instance/connect`, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json', 'apikey': activeToken, 'instance': finalInstance },
+           body: JSON.stringify({ 
+              webhookUrl: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`,
+              subscribe: ["messages", "connection"]
+           })
+        });
+      } catch(err) {}
+
+      // 4. Se for Evolution API v1/v2, configure webhook (legacy)
+      try {
+        await fetch(`${finalBaseUrl}/webhook/set/${finalInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': activeToken },
+          body: JSON.stringify({ 
+             webhook: {
+               url: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`,
+               byEvents: false,
+               base64: false,
+               events: [ "MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE" ]
+             }
+          })
+        });
+      } catch (err) {}
+
+      // 5. Pegar o QR Code
+      let base64qr = '';
+      try {
+         // Evolution Go pattern
+         console.log(`[Evolution] FINAL BASE URL: ${finalBaseUrl}`);
+         const qrUrl = `${finalBaseUrl}/api/v1/instance/qr`;
+         console.log(`[Evolution] Tentando pegar QR em: ${qrUrl}, Token: ${activeToken?.substring(0, 5)}...`);
+         
+         const qrResp = await fetch(qrUrl, {
+            headers: { 'apikey': activeToken, 'instance': finalInstance }
+         });
+         
+         if (!qrResp.ok) {
+            console.error(`[Evolution] Erro ao buscar QR (URL: ${qrUrl}, Status: ${qrResp.status}):`, await qrResp.text());
+         } else {
+             const contentType = qrResp.headers.get("content-type");
+             if (contentType && contentType.includes("application/json")) {
+                 const qrData = await qrResp.json();
+                 console.log("[Evolution] Resposta QR Code:", JSON.stringify(qrData).substring(0, 200));
+                 if (qrData.base64) base64qr = qrData.base64;
+                 else if (qrData.data?.Qrcode) base64qr = qrData.data.Qrcode;
+                 else if (qrData.qrcode?.base64) base64qr = qrData.qrcode.base64;
+             } else {
+                 console.error("[Evolution] Resposta do QR não é JSON:", await qrResp.text());
+             }
+         }
+      } catch(err) {
+         console.error("[Evolution] Erro ao buscar QR:", err);
+      }
+
+      if (!base64qr) {
+         // Evolution API pattern
+         try {
+             console.log(`[Evolution] FINAL BASE URL LEGACY: ${finalBaseUrl}`);
+             console.log(`[Evolution] Tentando conectar via legacy endpoint para: ${finalInstance}`);
+             const connectResp = await fetch(`${finalBaseUrl}/instance/connect/${finalInstance}`, {
+                headers: { 'apikey': finalApiKey }
+             });
+             
+             if (!connectResp.ok) {
+                console.error(`[Evolution] Erro na conexão legacy (Status: ${connectResp.status}):`, await connectResp.text());
+             } else {
+                 const contentType = connectResp.headers.get("content-type");
+                 if (contentType && contentType.includes("application/json")) {
+                     const connData = await connectResp.json();
+                     console.log("[Evolution] Resposta Conexão Legacy:", JSON.stringify(connData).substring(0, 200));
+                     if (connData.base64) base64qr = connData.base64;
+                     else if (connData.qrcode?.base64) base64qr = connData.qrcode.base64;
+                     else if ((connData.instance?.state === 'open' || connData.state === 'open') && !connData.base64) {
+                         return res.json({ state: 'open' }); // Já conectado
+                     }
+                 } else {
+                     console.error("[Evolution] Resposta de conexão legacy não é JSON:", await connectResp.text());
+                 }
+             }
+         } catch(e){
+             console.error("[Evolution] Erro na conexão legacy:", e);
+         }
+      }
+
+      if (base64qr) {
+         console.log(`[Evolution] QR Code Gerado (length: ${base64qr.length}):`, base64qr.substring(0, 50) + "...");
+         const finalQr = base64qr.startsWith('data:image') ? base64qr : `data:image/png;base64,${base64qr}`;
+         return res.json({ base64: finalQr, token: activeToken });
+      }
+
+      // Se já estava conectado
+      if (hasInstance || activeToken) {
+         try {
+           const orgId = req.headers['x-organization-id'] || 'default_org';
+           const existing = db.prepare('SELECT id FROM channels WHERE organization_id = ? AND provider = ? AND identifier = ?').get(orgId, 'evolution', finalInstance);
+           if (!existing) {
+             db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status, token_encrypted, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+               uuidv4(), orgId, 'evolution', 'Evolution API', finalInstance, 'connected', activeToken, JSON.stringify({ baseUrl: finalBaseUrl })
+             );
+           }
+         } catch(e) {}
+      }
+
+      return res.status(400).json({ error: "Instância pode já estar conectada ou hove um erro na geração do QR Code. Verifique seu painel ou recarregue a página." });
+    } catch (e: any) {
+      console.error("[Evolution] Erro ao conectar instância:", e);
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/webhooks/evolution", async (req, res) => {
@@ -63,7 +362,7 @@ async function startServer() {
       const payload = req.body;
       console.log(`[Evolution Webhook] Recebido Evento: ${payload.event}`);
 
-      if (payload.event === "messages.upsert") {
+      if (payload.event === "messages.upsert" || payload.event === "MESSAGE" || payload.event === "Message") {
         const messageData = payload.data?.message;
         if (!messageData) return res.status(200).send("OK");
 
@@ -71,22 +370,18 @@ async function startServer() {
         const senderId = payload.data?.key?.remoteJid?.split('@')[0];
         const fromMe = payload.data?.key?.fromMe;
         const pushName = payload.data?.pushName;
-        const businessId = evolutionConfig.instanceName || 'evolution_api';
+        const businessId = payload.instance || evolutionConfig.instanceName || 'evolution_api';
 
         if (fromMe || !incomingMessageText || !senderId) return res.status(200).send("OK");
 
-        const provider = 'whatsapp';
-        console.log(`[EVOLUTION WA] Mensagem de ${senderId}: ${incomingMessageText}`);
-
         let contactAvatar = undefined;
-
         // Tentar buscar imagem de perfil da Evolution API
         if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
            try {
-              const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/chat/fetchProfilePictureUrl/${evolutionConfig.instanceName}`;
+              const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/chat/fetchProfilePictureUrl/${businessId}`;
               const picResp = await fetch(picEndpoint, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey },
+                headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey, 'instance': businessId },
                 body: JSON.stringify({ number: senderId })
               });
               if (picResp.ok) {
@@ -95,70 +390,39 @@ async function startServer() {
                     contactAvatar = picData.picture;
                  }
               }
-           } catch(e) {
-              console.log("[Evolution] Não foi possível buscar avatar do contato.");
-           }
+           } catch(e) {}
         }
 
-        // Emite a mensagem do usuário para o frontend via WebSocket
-        if ((global as any).io) {
-          (global as any).io.emit("new_message", {
-            contactId: senderId,
-            contactName: pushName,
-            contactAvatar: contactAvatar,
-            provider,
-            text: incomingMessageText,
-            sender: "contact",
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // --- INTEGRAÇÃO RAG (Motor de IA) ---
-        try {
-          const iaResponse = await generateRagResponse(incomingMessageText, businessId);
-          console.log(`[IA RAG] Resposta Gerada: ${iaResponse.text} | Estágio: ${iaResponse.newStage}`);
-
-          if ((global as any).io) {
-            (global as any).io.emit("new_message", {
-              contactId: senderId,
-              provider,
-              text: iaResponse.text,
-              sender: "bot",
-              timestamp: new Date().toISOString()
-            });
-
-            if (iaResponse.newStage) {
-              (global as any).io.emit("ticket_stage_change", {
-                contactId: senderId,
-                newStage: iaResponse.newStage
-              });
-            }
-          }
-
-          // Disparar resposta para Evolution API
-          if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
-            const sendData = {
-               number: senderId,
-               options: { delay: 1200, presence: "composing" },
-               textMessage: { text: iaResponse.text }
-            };
-            const endpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/message/sendText/${evolutionConfig.instanceName}`;
-            
-            await fetch(endpoint, {
-               method: 'POST',
-               headers: {
-                 'Content-Type': 'application/json',
-                 'apikey': evolutionConfig.apiKey
-               },
-               body: JSON.stringify(sendData)
-            });
-            console.log(`[EVOLUTION API] Mensagem enviada para ${senderId}`);
-          } else {
-            console.warn(`[EVOLUTION API] Aviso: Dados da Evolution não configurados no backend, pulando envio real.`);
-          }
-
-        } catch (e) {
-          console.error("[IA RAG] Falha ao processar RAG no webhook Evolution", e);
+        await processIncomingMessage({
+           channelId: null, // mapped by identifier 
+           organizationId: null,
+           identifier: businessId,
+           provider: 'evolution',
+           senderId: senderId,
+           contactName: pushName,
+           contactAvatar: contactAvatar,
+           text: incomingMessageText
+        }, (global as any).io);
+        
+      } else if (payload.event === "connection.update") {
+        console.log(`[Evolution Webhook] Status da conexão: ${payload.data?.state || payload.data?.status}`);
+        if ((payload.data?.state === 'open' || payload.data?.status === 'open') && (global as any).io) {
+           (global as any).io.emit("wa_web_status", { status: 'connected_evo' });
+           // Save to DB
+           try {
+              const busId = payload.instance || evolutionConfig.instanceName;
+              if (busId) {
+                const orgId = 'default_org';
+                const existing = db.prepare('SELECT id FROM channels WHERE organization_id = ? AND provider = ? AND identifier = ?').get(orgId, 'evolution', busId);
+                if (!existing) {
+                  db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, ?, ?, ?, ?)`).run(
+                    uuidv4(), orgId, 'evolution', 'Evolution API', busId, 'connected'
+                  );
+                } else {
+                  db.prepare(`UPDATE channels SET status = 'connected' WHERE id = ?`).run((existing as any).id);
+                }
+              }
+           } catch(e) {}
         }
       }
 
@@ -170,17 +434,12 @@ async function startServer() {
   });
 
   // VERIFICAÇÃO DO WEBHOOK (GET)
-  const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN;
-
+  const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "meu_token_secreto_123";
+  
   app.get("/api/webhooks/meta", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
-
-    if (!META_VERIFY_TOKEN) {
-      console.warn("[Webhook] META_VERIFY_TOKEN não configurado; verificação rejeitada.");
-      return res.sendStatus(403);
-    }
 
     if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
       console.log("[Webhook] Verificado com sucesso pela Meta.");
@@ -203,14 +462,14 @@ async function startServer() {
       console.log(`[Webhook] Evento recebido - Source: ${payload.object}`);
 
       // 1. Tratamento do Payload (Diferenciar WhatsApp vs Instagram)
-      let provider: 'whatsapp' | 'instagram' = 'whatsapp';
+      let provider: 'whatsapp_cloud' | 'instagram' = 'whatsapp_cloud';
       let incomingMessageText = '';
       let senderId = '';
       let businessId = '';
       let contactName: string | undefined = undefined;
 
       if (payload.object === "whatsapp_business_account") {
-        provider = 'whatsapp';
+        provider = 'whatsapp_cloud';
         const entry = payload.entry?.[0];
         businessId = entry?.id;
         const changes = entry?.changes?.[0]?.value;
@@ -231,8 +490,6 @@ async function startServer() {
         businessId = entry?.id; // Page ID associado
         const messaging = entry?.messaging?.[0];
         
-        // No insta o profile precisa ser buscado na GraphAPI separadamente pelo senderId (não há contactData nativo no webhook de texto)
-
         if (messaging) {
           senderId = messaging.sender?.id;
           incomingMessageText = messaging.message?.text || '';
@@ -243,48 +500,15 @@ async function startServer() {
       if (incomingMessageText && senderId) {
         console.log(`[${provider.toUpperCase()}] Mensagem de ${senderId}: ${incomingMessageText}`);
         
-        // Emite a mensagem do usuário para o frontend via WebSocket
-        if ((global as any).io) {
-          (global as any).io.emit("new_message", {
-            contactId: senderId,
-            contactName,
-            provider,
-            text: incomingMessageText,
-            sender: "contact",
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // --- 2. INTEGRAÇÃO RAG (Motor de IA) ---
-        try {
-          const iaResponse = await generateRagResponse(incomingMessageText, businessId);
-          console.log(`[IA RAG] Resposta Gerada: ${iaResponse.text} | Estágio: ${iaResponse.newStage}`);
-
-          // Emite a resposta da IA para o frontend via WebSocket
-          if ((global as any).io) {
-            (global as any).io.emit("new_message", {
-              contactId: senderId,
-              provider,
-              text: iaResponse.text,
-              sender: "bot",
-              timestamp: new Date().toISOString()
-            });
-
-            if (iaResponse.newStage) {
-              (global as any).io.emit("ticket_stage_change", {
-                contactId: senderId,
-                newStage: iaResponse.newStage
-              });
-            }
-          }
-
-          // --- 3. DISPARO DE RESPOSTA (Simulação Meta Graph API) ---
-          // Aqui faria requisição POST para a Graph API apropriada
-          // Ex (WhatsApp): POST /v19.0/${businessId}/messages ...
-          // Ex (Insta): POST /v19.0/${businessId}/messages ...
-        } catch (e) {
-          console.error("[IA RAG] Falha ao processar RAG no webhook", e);
-        }
+        await processIncomingMessage({
+           channelId: null, // mapped by identifier
+           organizationId: null,
+           identifier: businessId,
+           provider: provider,
+           senderId: senderId,
+           contactName: contactName,
+           text: incomingMessageText
+        }, (global as any).io);
       }
       
       // Importante sempre retornar 200 OK para a Meta
@@ -296,85 +520,18 @@ async function startServer() {
   });
 
   // --- ENDPOINT UPLOAD RAG ---
-  app.post("/api/rag/upload", (req, res) => {
-    upload.single("document")(req, res, async (uploadErr) => {
-      if (uploadErr) {
-        // Erros de limite de tamanho ou tipo de arquivo (fileFilter)
-        return res.status(400).json({ error: (uploadErr as Error).message });
-      }
-      try {
-        if (!req.file) {
-          return res.status(400).json({ error: "Nenhum arquivo enviado" });
-        }
-        // Sanitiza o channelId para evitar valores inesperados como chave de metadados.
-        const rawChannelId = typeof req.body.channelId === "string" ? req.body.channelId : "global";
-        const channelId = rawChannelId.replace(/[^a-zA-Z0-9_-]/g, "") || "global";
-        const result = await processDocument(req.file.buffer, req.file.originalname, channelId);
-        res.json({ message: "Documento vetorizado com sucesso", ...result });
-      } catch (error) {
-        console.error("[RAG Upload]", error);
-        res.status(500).json({ error: "Erro ao vetorizar documento" });
-      }
-    });
-  });
-
-  // --- ENDPOINTS DE IA (mantém a GEMINI_API_KEY no backend) ---
-  app.post("/api/ai/suggest", async (req, res) => {
+  app.post("/api/rag/upload", upload.single("document"), async (req, res) => {
     try {
-      const { contact, history } = req.body || {};
-      if (!contact || !Array.isArray(history)) {
-        return res.status(400).json({ error: "Payload inválido: contact e history são obrigatórios." });
+      if (!req.file) {
+        return res.status(400).json({ error: "Nenhum arquivo enviado" });
       }
-      const text = await suggestResponse(contact, history);
-      res.json({ text });
+      const channelId = req.body.channelId || 'global';
+      const result = await processDocument(req.file.buffer, req.file.originalname, channelId);
+      res.json({ message: "Documento vetorizado com sucesso", ...result });
     } catch (error) {
-      console.error("[AI Suggest]", error);
-      res.status(500).json({ error: "Erro ao gerar sugestão" });
+      console.error("[RAG Upload]", error);
+      res.status(500).json({ error: "Erro ao vetorizar documento" });
     }
-  });
-
-  app.post("/api/ai/summarize", async (req, res) => {
-    try {
-      const { history } = req.body || {};
-      if (!Array.isArray(history)) {
-        return res.status(400).json({ error: "Payload inválido: history é obrigatório." });
-      }
-      const text = await summarizeConversation(history);
-      res.json({ text });
-    } catch (error) {
-      console.error("[AI Summarize]", error);
-      res.status(500).json({ error: "Erro ao resumir conversa" });
-    }
-  });
-
-  // --- WA WEB ENDPOINTS ---
-  app.get("/api/wa-web/status", async (req, res) => {
-     try {
-        const { getWhatsAppWebStatus } = await import("./src/server/whatsappWebClient.js");
-        res.json(getWhatsAppWebStatus());
-     } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-     }
-  });
-
-  app.post("/api/wa-web/connect", async (req, res) => {
-     try {
-        const { initializeWhatsAppWeb } = await import("./src/server/whatsappWebClient.js");
-        initializeWhatsAppWeb((global as any).io);
-        res.json({ success: true, message: 'Iniciando conexão...' });
-     } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-     }
-  });
-
-  app.post("/api/wa-web/disconnect", async (req, res) => {
-     try {
-        const { disconnectWhatsAppWeb } = await import("./src/server/whatsappWebClient.js");
-        disconnectWhatsAppWeb();
-        res.json({ success: true, message: 'Desconectado.' });
-     } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-     }
   });
 
   // Vite middleware for development
@@ -387,7 +544,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -396,18 +553,25 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
-  // Restringe origens permitidas para o WebSocket. Configure ALLOWED_ORIGINS
-  // (separado por vírgula) em produção; em dev usa localhost por padrão.
-  const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-    : ["http://localhost:3000", "http://127.0.0.1:3000"];
-
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: allowedOrigins, methods: ["GET", "POST"] }
+    cors: { origin: "*" }
   });
 
   io.on("connection", (socket) => {
     console.log("Client connected:", socket.id);
+    
+    socket.on("join_org", (data: { organizationId: string }) => {
+       if (data.organizationId) {
+          socket.join(`org:${data.organizationId}`);
+          console.log(`Socket ${socket.id} joined org ${data.organizationId}`);
+       }
+    });
+
+    socket.on("join_ticket", (data: { ticketId: string }) => {
+       if (data.ticketId) {
+          socket.join(`ticket:${data.ticketId}`);
+       }
+    });
   });
 
   // Torna o io acessível globalmente (para uso no webhook)

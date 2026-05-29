@@ -1,21 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { v4 as uuidv4 } from "uuid";
 
-// Inicialização tardia: evita crash no carregamento do módulo quando a
-// GEMINI_API_KEY ainda não está disponível.
-let ai: GoogleGenAI | null = null;
-
-function getAi(): GoogleGenAI {
-  if (!ai) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY não configurada. Defina a variável de ambiente para usar o RAG.");
-    }
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return ai;
-}
-
-const VALID_STAGES = ["novo_lead", "em_atendimento", "proposta", "fechado"] as const;
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 interface DocumentChunk {
   id: string;
@@ -47,37 +33,43 @@ export async function processDocument(fileBuffer: Buffer, fileName: string, chan
   // 1. Extração de texto (assumindo que seja um TXT simples para o exemplo)
   const text = fileBuffer.toString('utf-8');
   
+  // Salvar no DB
+  const docId = uuidv4();
+  const orgId = "default_org"; // Simulando auth
+  try {
+     import("./db.js").then((mod) => {
+        const db = mod.default;
+        db.prepare(`INSERT INTO knowledge_documents (id, organization_id, title, content) VALUES (?, ?, ?, ?)`).run(
+           docId, orgId, fileName, text
+        );
+     });
+  } catch(e) {}
+
   // 2. Chunks
   const chunks = splitIntoChunks(text);
   
-  if (chunks.length === 0) {
-    return { success: true, chunksProcessed: 0 };
-  }
-
   // 3. Vetorização via Gemini Embeddings
-  const response = await getAi().models.embedContent({
+  const response = await ai.models.embedContent({
     model: "text-embedding-004", // Modelo de embedding atual recomendado
     contents: chunks,
   });
 
   const embeddings = response.embeddings;
-
-  if (!embeddings || embeddings.length !== chunks.length) {
+  
+  if (!embeddings) {
     throw new Error("Falha ao gerar embeddings");
   }
 
   // 4. Salvar no "Banco Vector"
   for (let i = 0; i < chunks.length; i++) {
-    const values = embeddings[i]?.values;
-    if (!values || values.length === 0) continue; // pula chunk sem embedding válido
     vectorStore.push({
       id: uuidv4(),
       text: chunks[i],
-      embedding: values,
+      embedding: embeddings[i].values || [],
       metadata: { fileName, channelId }
     });
   }
-
+  
   return { success: true, chunksProcessed: chunks.length };
 }
 
@@ -103,7 +95,7 @@ function cosineSimilarity(A: number[], B: number[]): number {
  * Busca os N chunks de contexto mais relevantes
  */
 export async function searchContext(query: string, channelId: string, topK: number = 3): Promise<string[]> {
-  const queryEmbeddingRes = await getAi().models.embedContent({
+  const queryEmbeddingRes = await ai.models.embedContent({
     model: "text-embedding-004",
     contents: query
   });
@@ -128,9 +120,29 @@ export async function searchContext(query: string, channelId: string, topK: numb
 }
 
 /**
+ * Verifica tentativa de Prompt Injection baseado em heurísticas básicas
+ */
+function isPromptInjection(text: string): boolean {
+  const lowercase = text.toLowerCase();
+  const suspiciousKeywords = [
+    "ignore todas as instru", "ignore previous", "esqueça o que eu disse", "sistema:", "system prompt", "você é agora",
+    "you are now", "bypasse", "modo desenvolvedor", "desconsidere as regras"
+  ];
+  return suspiciousKeywords.some(keyword => lowercase.includes(keyword));
+}
+
+/**
  * RAG workflow: Busca RAG + Geração de Resposta via Gemini
  */
 export async function generateRagResponse(userMessage: string, channelId: string): Promise<{ text: string, newStage?: string }> {
+  // Guardrail 1: Filtro Rápido de Prompt Injection
+  if (isPromptInjection(userMessage)) {
+    return {
+      text: "Sinto muito, não posso ajudar com essa solicitação.",
+      newStage: "em_atendimento"
+    };
+  }
+
   const contextChunks = await searchContext(userMessage, channelId);
   const contextText = contextChunks.length > 0 ? contextChunks.join('\n\n---\n\n') : "Nenhum documento adicional encontrado na base de conhecimento.";
 
@@ -159,7 +171,7 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
 }
 `;
 
-  const response = await getAi().models.generateContent({
+  const response = await ai.models.generateContent({
     model: "gemini-3.1-pro-preview",
     contents: prompt
   });
@@ -169,11 +181,9 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
     // Tenta limpar o json caso venha com markdown ```json
     const cleanedJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleanedJson);
-    // Valida o estágio retornado pela IA contra a lista permitida.
-    const newStage = VALID_STAGES.includes(parsed.newStage) ? parsed.newStage : "em_atendimento";
     return {
       text: parsed.text || "Desculpe, ocorreu um erro.",
-      newStage,
+      newStage: parsed.newStage,
     };
   } catch (e) {
     console.error("Erro ao fazer parse do JSON RAG:", e);

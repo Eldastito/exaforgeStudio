@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/src/store/useStore';
 import { Button } from '@/src/components/ui/button';
-import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle } from 'lucide-react';
+import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { suggestResponse, summarizeConversation } from '@/src/lib/gemini';
 
 export function ChatPanel() {
-  const { activeTicketId, tickets, contacts, messages, sendMessage } = useStore();
+  const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket } = useStore();
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeReason, setCloseReason] = useState('');
+  const [closeStatus, setCloseStatus] = useState<'entregue_concluido' | 'perdido'>('entregue_concluido');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeTicket = activeTicketId ? tickets[activeTicketId] : null;
@@ -41,7 +46,7 @@ export function ChatPanel() {
 
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim() || !activeTicketId) return;
+    if (!inputText.trim()) return;
     sendMessage(activeTicketId, inputText, 'human');
     setInputText('');
   };
@@ -55,14 +60,8 @@ export function ChatPanel() {
   const generateSuggestion = async () => {
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/ai/suggest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact: activeContact, history: activeMessages.slice(-5) }),
-      });
-      if (!res.ok) throw new Error(`Falha na sugestão: ${res.status}`);
-      const data = await res.json();
-      setInputText(data.text || '');
+      const suggestion = await suggestResponse(activeContact, activeMessages.slice(-5));
+      setInputText(suggestion);
     } catch (e) {
       console.error(e);
     } finally {
@@ -73,14 +72,8 @@ export function ChatPanel() {
   const handleSummarize = async () => {
     setIsSummarizing(true);
     try {
-      const res = await fetch('/api/ai/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history: activeMessages }),
-      });
-      if (!res.ok) throw new Error(`Falha no resumo: ${res.status}`);
-      const data = await res.json();
-      setSummary(data.text || '');
+      const result = await summarizeConversation(activeMessages);
+      setSummary(result);
     } catch (e) {
       console.error(e);
     } finally {
@@ -104,6 +97,26 @@ export function ChatPanel() {
             <h3 className="font-medium text-zinc-100">{activeContact.name}</h3>
             <span className="text-xs text-zinc-500">{activeContact.number}</span>
           </div>
+        </div>
+        
+        <div className="flex flex-col items-end gap-2">
+           {!activeTicket?.aiPaused ? (
+             <Button variant="outline" size="sm" className="h-7 text-xs bg-zinc-900 border-zinc-700 hover:bg-zinc-800" onClick={() => takeOverTicket(activeTicketId)}>
+                <Hand className="w-3 h-3 mr-2" />
+                Assumir (Handoff)
+             </Button>
+           ) : (
+             <div className="flex items-center gap-2">
+               <Button variant="outline" size="sm" className="h-7 text-xs bg-zinc-900 border-zinc-700 hover:bg-zinc-800 text-indigo-400" onClick={() => returnToAI(activeTicketId)}>
+                  <Bot className="w-3 h-3 mr-2" />
+                  Devolver IA
+               </Button>
+               <Button variant="default" size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => setShowCloseModal(true)}>
+                  <CheckCircle className="w-3 h-3 mr-2" />
+                  Finalizar
+               </Button>
+             </div>
+           )}
         </div>
       </div>
 
@@ -218,6 +231,40 @@ export function ChatPanel() {
           Enter para enviar, Shift+Enter para quebrar linha
         </div>
       </div>
+
+      {/* Close Modal */}
+      {showCloseModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[320px]">
+              <h3 className="text-lg font-semibold text-zinc-100 mb-4">Finalizar Atendimento</h3>
+              <div className="space-y-4">
+                 <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Status</label>
+                    <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={closeStatus} onChange={(e: any) => setCloseStatus(e.target.value)}>
+                       <option value="entregue_concluido">Sucesso / Fechado</option>
+                       <option value="perdido">Perdido</option>
+                    </select>
+                 </div>
+                 <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Motivo</label>
+                    <textarea 
+                       className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none h-20" 
+                       placeholder="Motivo do fechamento"
+                       value={closeReason}
+                       onChange={(e) => setCloseReason(e.target.value)}
+                    />
+                 </div>
+                 <div className="flex gap-2 justify-end pt-2">
+                    <Button variant="ghost" onClick={() => setShowCloseModal(false)}>Cancelar</Button>
+                    <Button variant="default" className="bg-primary hover:bg-primary/90" onClick={() => {
+                       closeTicket(activeTicketId, closeReason, closeStatus);
+                       setShowCloseModal(false);
+                    }}>Confirmar</Button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }

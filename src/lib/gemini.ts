@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import type { Message, Contact } from "@/src/store/useStore";
+import { Message, Contact } from "@/src/store/useStore";
 
 // Initialize the API only when we need it
 let ai: GoogleGenAI | null = null;

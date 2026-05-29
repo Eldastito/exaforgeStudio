@@ -6,7 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-
-# Sessão/credenciais do WhatsApp Web (NUNCA versionar)
-.wwebjs_auth/
-.wwebjs_cache/

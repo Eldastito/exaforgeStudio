@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.github
+.wwebjs_auth
+.wwebjs_cache
+zappflow.db
+zappflow.db-shm
+zappflow.db-wal
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store

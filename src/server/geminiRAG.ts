@@ -1,7 +1,5 @@
-import { GoogleGenAI } from "@google/genai";
 import { v4 as uuidv4 } from "uuid";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+import { embed, chat } from "./llm.js";
 
 interface DocumentChunk {
   id: string;
@@ -18,63 +16,57 @@ const vectorStore: DocumentChunk[] = [];
 
 /**
  * Normaliza o texto e divide em pequenos chunks.
- * Em um cenário real, usariamos um TextSplitter mais sofisticado (como o do LangChain)
  */
-function splitIntoChunks(text: string, maxTokens: number = 500): string[] {
+function splitIntoChunks(text: string): string[] {
   const paragraphs = text.split(/\n\s*\n/);
-  // Simplificação: apenas quebrando por parágrafos para simular chunks
   return paragraphs.filter(p => p.trim().length > 0);
 }
 
 /**
- * Função para processar e indexar um documento no banco vetorial
+ * Processa e indexa um documento no banco vetorial (embeddings OpenAI).
  */
 export async function processDocument(fileBuffer: Buffer, fileName: string, channelId: string = 'global') {
-  // 1. Extração de texto (assumindo que seja um TXT simples para o exemplo)
   const text = fileBuffer.toString('utf-8');
-  
-  // Salvar no DB
+
+  // Salvar no DB (best-effort)
   const docId = uuidv4();
-  const orgId = "default_org"; // Simulando auth
+  const orgId = "default_org";
   try {
-     import("./db.js").then((mod) => {
-        const db = mod.default;
-        db.prepare(`INSERT INTO knowledge_documents (id, organization_id, title, content) VALUES (?, ?, ?, ?)`).run(
-           docId, orgId, fileName, text
-        );
-     });
-  } catch(e) {}
+    import("./db.js").then((mod) => {
+      const db = mod.default;
+      db.prepare(`INSERT INTO knowledge_documents (id, organization_id, title, content) VALUES (?, ?, ?, ?)`).run(
+        docId, orgId, fileName, text
+      );
+    });
+  } catch (e) {}
 
-  // 2. Chunks
   const chunks = splitIntoChunks(text);
-  
-  // 3. Vetorização via Gemini Embeddings
-  const response = await ai.models.embedContent({
-    model: "text-embedding-004", // Modelo de embedding atual recomendado
-    contents: chunks,
-  });
+  if (chunks.length === 0) {
+    return { success: true, chunksProcessed: 0 };
+  }
 
-  const embeddings = response.embeddings;
-  
-  if (!embeddings) {
+  // Vetorização via OpenAI Embeddings
+  const vectors = await embed(chunks);
+  if (!vectors || vectors.length !== chunks.length) {
     throw new Error("Falha ao gerar embeddings");
   }
 
-  // 4. Salvar no "Banco Vector"
   for (let i = 0; i < chunks.length; i++) {
+    const values = vectors[i];
+    if (!values || values.length === 0) continue;
     vectorStore.push({
       id: uuidv4(),
       text: chunks[i],
-      embedding: embeddings[i].values || [],
+      embedding: values,
       metadata: { fileName, channelId }
     });
   }
-  
+
   return { success: true, chunksProcessed: chunks.length };
 }
 
 /**
- * Calcula similaridade por Cosseno entre dois vetores
+ * Similaridade por cosseno entre dois vetores.
  */
 function cosineSimilarity(A: number[], B: number[]): number {
   let dotproduct = 0;
@@ -82,8 +74,8 @@ function cosineSimilarity(A: number[], B: number[]): number {
   let mB = 0;
   for (let i = 0; i < A.length; i++) {
     dotproduct += A[i] * B[i];
-    mA += Math.pow(A[i], 2);
-    mB += Math.pow(B[i], 2);
+    mA += A[i] * A[i];
+    mB += B[i] * B[i];
   }
   mA = Math.sqrt(mA);
   mB = Math.sqrt(mB);
@@ -92,35 +84,27 @@ function cosineSimilarity(A: number[], B: number[]): number {
 }
 
 /**
- * Busca os N chunks de contexto mais relevantes
+ * Busca os N chunks de contexto mais relevantes.
  */
 export async function searchContext(query: string, channelId: string, topK: number = 3): Promise<string[]> {
-  const queryEmbeddingRes = await ai.models.embedContent({
-    model: "text-embedding-004",
-    contents: query
-  });
-  
-  const queryVec = queryEmbeddingRes.embeddings?.[0]?.values;
+  if (vectorStore.length === 0) return [];
+
+  const [queryVec] = await embed([query]);
   if (!queryVec) return [];
 
-  // Filtrar apenas documentos globais ou específicos do canal
   const relevantDocs = vectorStore.filter(doc => doc.metadata.channelId === 'global' || doc.metadata.channelId === channelId);
 
-  // Calcular similaridade
   const scoredDocs = relevantDocs.map(doc => ({
     text: doc.text,
     score: cosineSimilarity(queryVec, doc.embedding)
   }));
 
-  // Ordenar por maior score
   scoredDocs.sort((a, b) => b.score - a.score);
-  
-  // Pegar os top K
   return scoredDocs.slice(0, topK).map(doc => doc.text);
 }
 
 /**
- * Verifica tentativa de Prompt Injection baseado em heurísticas básicas
+ * Verifica tentativa de Prompt Injection baseado em heurísticas básicas.
  */
 function isPromptInjection(text: string): boolean {
   const lowercase = text.toLowerCase();
@@ -132,10 +116,9 @@ function isPromptInjection(text: string): boolean {
 }
 
 /**
- * RAG workflow: Busca RAG + Geração de Resposta via Gemini
+ * RAG workflow: Busca RAG + Geração de Resposta via OpenAI.
  */
 export async function generateRagResponse(userMessage: string, channelId: string): Promise<{ text: string, newStage?: string }> {
-  // Guardrail 1: Filtro Rápido de Prompt Injection
   if (isPromptInjection(userMessage)) {
     return {
       text: "Sinto muito, não posso ajudar com essa solicitação.",
@@ -171,14 +154,8 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
 }
 `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
-    contents: prompt
-  });
-
-  const rawText = response.text || "";
+  const rawText = await chat(prompt, { temperature: 0.4, json: true });
   try {
-    // Tenta limpar o json caso venha com markdown ```json
     const cleanedJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleanedJson);
     return {
@@ -187,8 +164,6 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
     };
   } catch (e) {
     console.error("Erro ao fazer parse do JSON RAG:", e);
-    // Caso falhe, retorna apenas o texto cru, assumindo em_atendimento
     return { text: rawText.replace(/```json/g, '').replace(/```/g, '').trim(), newStage: 'em_atendimento' };
   }
 }
-

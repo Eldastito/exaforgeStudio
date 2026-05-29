@@ -4,7 +4,6 @@ import { Button } from '@/src/components/ui/button';
 import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { suggestResponse, summarizeConversation } from '@/src/lib/gemini';
 
 export function ChatPanel() {
   const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket } = useStore();
@@ -60,8 +59,14 @@ export function ChatPanel() {
   const generateSuggestion = async () => {
     setIsGenerating(true);
     try {
-      const suggestion = await suggestResponse(activeContact, activeMessages.slice(-5));
-      setInputText(suggestion);
+      const res = await fetch('/api/ai/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact: activeContact, history: activeMessages.slice(-5) }),
+      });
+      if (!res.ok) throw new Error(`Falha na sugestão: ${res.status}`);
+      const data = await res.json();
+      setInputText(data.text || '');
     } catch (e) {
       console.error(e);
     } finally {
@@ -72,8 +77,14 @@ export function ChatPanel() {
   const handleSummarize = async () => {
     setIsSummarizing(true);
     try {
-      const result = await summarizeConversation(activeMessages);
-      setSummary(result);
+      const res = await fetch('/api/ai/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history: activeMessages }),
+      });
+      if (!res.ok) throw new Error(`Falha no resumo: ${res.status}`);
+      const data = await res.json();
+      setSummary(data.text || '');
     } catch (e) {
       console.error(e);
     } finally {

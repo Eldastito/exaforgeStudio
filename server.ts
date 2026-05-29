@@ -18,13 +18,63 @@ import authRoutes from "./src/server/routes/auth.js";
 import usersRoutes from "./src/server/routes/users.js";
 import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
+import managersRoutes from "./src/server/routes/managers.js";
+import aiRoutes from "./src/server/routes/ai.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
+import { transcribeAudio } from "./src/server/llm.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Extrai texto de diferentes formatos de mensagem do WhatsApp (Baileys/Evolution).
+function extractEvolutionText(message: any): string {
+  if (!message) return "";
+  return (
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.documentMessage?.caption ||
+    message.buttonsResponseMessage?.selectedDisplayText ||
+    message.listResponseMessage?.title ||
+    ""
+  );
+}
+
+// Tenta transcrever uma mensagem de áudio do Evolution via Whisper (OpenAI).
+// Busca o base64 do áudio na Evolution API e envia ao modelo de transcrição.
+async function transcribeEvolutionAudio(
+  payload: any,
+  cfg: { baseUrl: string; apiKey: string; instanceName: string }
+): Promise<string> {
+  try {
+    if (!cfg.baseUrl || !cfg.apiKey) return "";
+    const instance = payload.instance || cfg.instanceName;
+    const endpoint = `${cfg.baseUrl.replace(/\/$/, '')}/chat/getBase64FromMediaMessage/${instance}`;
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': cfg.apiKey, 'instance': instance },
+      body: JSON.stringify({ message: payload.data, convertToMp4: false }),
+    });
+    if (!resp.ok) {
+      console.warn(`[Audio] Falha ao obter base64 do áudio (HTTP ${resp.status}).`);
+      return "";
+    }
+    const data: any = await resp.json();
+    const b64 = data.base64 || data.media || "";
+    if (!b64) return "";
+    const buffer = Buffer.from(b64, 'base64');
+    const transcript = await transcribeAudio(buffer, 'audio.ogg', 'audio/ogg');
+    console.log(`[Audio] Transcrição: ${transcript.slice(0, 80)}...`);
+    return transcript;
+  } catch (e) {
+    console.error("[Audio] Erro ao transcrever áudio:", e);
+    return "";
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -152,6 +202,8 @@ async function startServer() {
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/rag", ragRoutes);
+  protectedApi.use("/managers", managersRoutes);
+  protectedApi.use("/ai", aiRoutes);
 
   // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS
   // (Evolution, Meta) que NÃO enviam JWT. Elas são registradas abaixo, em `app`.
@@ -385,7 +437,12 @@ async function startServer() {
         const messageData = payload.data?.message;
         if (!messageData) return res.status(200).send("OK");
 
-        let incomingMessageText = messageData.conversation || messageData.extendedTextMessage?.text || "";
+        let incomingMessageText = extractEvolutionText(messageData);
+        // Mensagem de áudio (PTT/voz): transcreve via Whisper para que o
+        // atendimento e o Zapp (gestores) entendam áudios.
+        if (!incomingMessageText && (messageData.audioMessage || messageData.pttMessage)) {
+          incomingMessageText = await transcribeEvolutionAudio(payload, evolutionConfig);
+        }
         const senderId = payload.data?.key?.remoteJid?.split('@')[0];
         const fromMe = payload.data?.key?.fromMe;
         const pushName = payload.data?.pushName;
@@ -453,12 +510,17 @@ async function startServer() {
   });
 
   // VERIFICAÇÃO DO WEBHOOK (GET)
-  const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "meu_token_secreto_123";
+  const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN;
   
   app.get("/api/webhooks/meta", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
+
+    if (!META_VERIFY_TOKEN) {
+      console.warn("[Webhook] META_VERIFY_TOKEN não configurado; verificação rejeitada.");
+      return res.sendStatus(403);
+    }
 
     if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
       console.log("[Webhook] Verificado com sucesso pela Meta.");

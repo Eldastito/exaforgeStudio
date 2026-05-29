@@ -1,10 +1,8 @@
-import { GoogleGenAI } from "@google/genai";
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { searchContext } from "./geminiRAG.js";
 import { AnalyticsService } from "./AnalyticsService.js";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+import { chat } from "./llm.js";
 
 export class AIOrchestratorService {
   /**
@@ -59,16 +57,11 @@ export class AIOrchestratorService {
 
     const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData);
 
-    // 3. Chamar a IA com Schema JSON
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
-      contents: prompt,
-      config: {
-        temperature: agentToUse === "orchestrator_agent" ? 0.2 : 0.4, // Mais rígido para relatórios/orquestração
-      }
+    // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
+    const rawResponse = await chat(prompt, {
+      temperature: agentToUse === "orchestrator_agent" ? 0.2 : 0.4, // Mais rígido para relatórios/orquestração
+      json: true,
     });
-
-    const rawResponse = response.text || "";
     let resultJSON = null;
 
     try {

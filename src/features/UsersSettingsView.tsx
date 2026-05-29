@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { Users, UserPlus, Trash, Shield, Lock, Unlock } from 'lucide-react';
+import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 
@@ -11,6 +11,11 @@ export function UsersSettingsView() {
   const [loading, setLoading] = useState(true);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('agent');
+
+  // Gestores do Zapp (números de WhatsApp autorizados a usar a IA de gestão)
+  const [managers, setManagers] = useState<any[]>([]);
+  const [mgrNumber, setMgrNumber] = useState('');
+  const [mgrName, setMgrName] = useState('');
 
   const fetchData = async () => {
     try {
@@ -25,8 +30,49 @@ export function UsersSettingsView() {
     }
   };
 
+  const fetchManagers = async () => {
+    try {
+      const res = await apiFetch('/api/managers');
+      if (res.ok) setManagers(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const addManager = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch('/api/managers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: mgrNumber, name: mgrName })
+      });
+      if (res.ok) {
+        setMgrNumber('');
+        setMgrName('');
+        fetchManagers();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erro ao cadastrar gestor');
+      }
+    } catch (e) {
+      alert('Erro ao cadastrar gestor');
+    }
+  };
+
+  const removeManager = async (id: string) => {
+    if (!confirm('Remover este gestor do Zapp?')) return;
+    try {
+      const res = await apiFetch(`/api/managers/${id}`, { method: 'DELETE' });
+      if (res.ok) fetchManagers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchManagers();
   }, []);
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -139,6 +185,57 @@ export function UsersSettingsView() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Gestores do Zapp (IA por WhatsApp) */}
+      <div className="bg-zinc-900/50 border border-indigo-800/40 rounded-xl p-6">
+        <h3 className="text-lg font-medium text-zinc-100 mb-1 flex items-center gap-2">
+          <MessageSquare className="w-5 h-5 text-indigo-400" /> Gestores do Zapp (IA por WhatsApp)
+        </h3>
+        <p className="text-xs text-zinc-500 mb-4">
+          Números autorizados a conversar com o assistente de gestão pelo WhatsApp (por texto ou áudio).
+          Para ativar, a pessoa envia uma mensagem começando com <strong className="text-indigo-300">"Zapp"</strong>.
+          Use o formato internacional só com dígitos: DDI + DDD + número (ex.: <code className="text-indigo-300">5521999998888</code>).
+        </p>
+        <form onSubmit={addManager} className="flex flex-col md:flex-row md:items-end gap-3 mb-5">
+          <div className="flex-1">
+            <label className="text-xs font-medium text-zinc-400 mb-1 block">Número (WhatsApp)</label>
+            <input
+              type="text" required value={mgrNumber} onChange={e => setMgrNumber(e.target.value)}
+              placeholder="5521999998888"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs font-medium text-zinc-400 mb-1 block">Nome (opcional)</label>
+            <input
+              type="text" value={mgrName} onChange={e => setMgrName(e.target.value)}
+              placeholder="Ex: Eldas (Dono), Sócio João"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100"
+            />
+          </div>
+          <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white">
+            <Plus className="w-4 h-4 mr-1" /> Adicionar
+          </Button>
+        </form>
+
+        {managers.length === 0 ? (
+          <p className="text-sm text-zinc-500">Nenhum gestor cadastrado ainda.</p>
+        ) : (
+          <div className="divide-y divide-zinc-800/50 border border-zinc-800 rounded-lg overflow-hidden">
+            {managers.map(m => (
+              <div key={m.id} className="flex items-center justify-between px-4 py-3 hover:bg-zinc-800/20">
+                <div>
+                  <div className="font-medium text-zinc-200">{m.name || 'Sem nome'}</div>
+                  <div className="text-xs text-zinc-500 font-mono">{m.identifier}</div>
+                </div>
+                <button onClick={() => removeManager(m.id)} className="text-red-400 hover:text-red-300 transition-colors" title="Remover">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Invites List */}

@@ -1,41 +1,56 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Sidebar } from '@/src/features/Sidebar';
 import { KanbanBoard } from '@/src/features/KanbanBoard';
 import { ChatPanel } from '@/src/features/ChatPanel';
 import { ChannelsPanel } from '@/src/features/ChannelsPanel';
 import { DashboardPanel } from '@/src/features/DashboardPanel';
 import { useStore } from '@/src/store/useStore';
+import type { Stage } from '@/src/store/useStore';
 import { Search } from 'lucide-react';
 import io from 'socket.io-client';
+
+type NewMessagePayload = {
+  contactId: string;
+  contactName?: string;
+  contactAvatar?: string;
+  provider: string;
+  text: string;
+  sender: 'contact' | 'bot' | 'human';
+};
+
+type StageChangePayload = {
+  contactId: string;
+  newStage: Stage;
+};
 
 export default function App() {
   const { receiveMessage, viewMode, updateStageByContactId } = useStore();
 
   useEffect(() => {
-    // Conectar ao Socket.IO do backend
+    // Conectar ao Socket.IO do backend (uma única conexão por montagem)
     const socket = io(window.location.origin);
-    
+
     socket.on("connect", () => {
       console.log("Conectado ao servidor via WebSocket", socket.id);
     });
 
-    socket.on("new_message", (data: { contactId: string, contactName?: string, contactAvatar?: string, provider: string, text: string, sender: string }) => {
+    socket.on("new_message", (data: NewMessagePayload) => {
       console.log("Recebido novo evento via WebSocket:", data);
-      
       // Adiciona na store independentemente se é bot ou user
-      // receiveMessage assume text, mas podemos verificar o formato
-      receiveMessage(data.contactId, data.text, data.sender as any, data.contactName, data.contactAvatar);
+      receiveMessage(data.contactId, data.text, data.sender, data.contactName, data.contactAvatar);
     });
 
-    socket.on("ticket_stage_change", (data: { contactId: string, newStage: string }) => {
+    socket.on("ticket_stage_change", (data: StageChangePayload) => {
       console.log("Movendo cartão do lead...", data);
-      updateStageByContactId(data.contactId, data.newStage as any);
+      updateStageByContactId(data.contactId, data.newStage);
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [receiveMessage, updateStageByContactId]);
+    // As actions do zustand são estáveis; conectamos apenas uma vez por montagem.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#09090b] text-foreground font-sans">

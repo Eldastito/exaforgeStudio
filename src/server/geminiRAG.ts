@@ -1,7 +1,21 @@
 import { GoogleGenAI } from "@google/genai";
 import { v4 as uuidv4 } from "uuid";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Inicialização tardia: evita crash no carregamento do módulo quando a
+// GEMINI_API_KEY ainda não está disponível.
+let ai: GoogleGenAI | null = null;
+
+function getAi(): GoogleGenAI {
+  if (!ai) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY não configurada. Defina a variável de ambiente para usar o RAG.");
+    }
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return ai;
+}
+
+const VALID_STAGES = ["novo_lead", "em_atendimento", "proposta", "fechado"] as const;
 
 interface DocumentChunk {
   id: string;
@@ -36,28 +50,34 @@ export async function processDocument(fileBuffer: Buffer, fileName: string, chan
   // 2. Chunks
   const chunks = splitIntoChunks(text);
   
+  if (chunks.length === 0) {
+    return { success: true, chunksProcessed: 0 };
+  }
+
   // 3. Vetorização via Gemini Embeddings
-  const response = await ai.models.embedContent({
+  const response = await getAi().models.embedContent({
     model: "text-embedding-004", // Modelo de embedding atual recomendado
     contents: chunks,
   });
 
   const embeddings = response.embeddings;
-  
-  if (!embeddings) {
+
+  if (!embeddings || embeddings.length !== chunks.length) {
     throw new Error("Falha ao gerar embeddings");
   }
 
   // 4. Salvar no "Banco Vector"
   for (let i = 0; i < chunks.length; i++) {
+    const values = embeddings[i]?.values;
+    if (!values || values.length === 0) continue; // pula chunk sem embedding válido
     vectorStore.push({
       id: uuidv4(),
       text: chunks[i],
-      embedding: embeddings[i].values || [],
+      embedding: values,
       metadata: { fileName, channelId }
     });
   }
-  
+
   return { success: true, chunksProcessed: chunks.length };
 }
 
@@ -83,7 +103,7 @@ function cosineSimilarity(A: number[], B: number[]): number {
  * Busca os N chunks de contexto mais relevantes
  */
 export async function searchContext(query: string, channelId: string, topK: number = 3): Promise<string[]> {
-  const queryEmbeddingRes = await ai.models.embedContent({
+  const queryEmbeddingRes = await getAi().models.embedContent({
     model: "text-embedding-004",
     contents: query
   });
@@ -139,7 +159,7 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
 }
 `;
 
-  const response = await ai.models.generateContent({
+  const response = await getAi().models.generateContent({
     model: "gemini-3.1-pro-preview",
     contents: prompt
   });
@@ -149,9 +169,11 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
     // Tenta limpar o json caso venha com markdown ```json
     const cleanedJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleanedJson);
+    // Valida o estágio retornado pela IA contra a lista permitida.
+    const newStage = VALID_STAGES.includes(parsed.newStage) ? parsed.newStage : "em_atendimento";
     return {
       text: parsed.text || "Desculpe, ocorreu um erro.",
-      newStage: parsed.newStage,
+      newStage,
     };
   } catch (e) {
     console.error("Erro ao fazer parse do JSON RAG:", e);

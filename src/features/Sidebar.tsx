@@ -61,7 +61,7 @@ export function Sidebar() {
 function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
   return (
     <button onClick={onClick} className={`w-full flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${active ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200 border border-transparent'}`}>
-      {React.cloneElement(icon as React.ReactElement, { className: 'h-4 w-4 text-inherit' })}
+      {React.cloneElement(icon as React.ReactElement<{ className?: string }>, { className: 'h-4 w-4 text-inherit' })}
       {label}
     </button>
   );

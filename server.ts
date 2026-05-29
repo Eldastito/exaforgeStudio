@@ -5,12 +5,40 @@ import { Server as SocketIOServer } from "socket.io";
 
 import multer from "multer";
 import { processDocument, generateRagResponse } from "./src/server/geminiRAG.js";
+import { suggestResponse, summarizeConversation } from "./src/lib/gemini.js";
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Tipos de arquivo de texto suportados pelo pipeline RAG (extração UTF-8).
+const ALLOWED_DOC_EXTENSIONS = [".txt", ".csv", ".md"];
+const MAX_DOC_SIZE = 10 * 1024 * 1024; // 10 MB
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_DOC_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ALLOWED_DOC_EXTENSIONS.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Tipo de arquivo não suportado. Envie .txt, .csv ou .md."));
+    }
+  },
+});
+
+// Avisa (sem derrubar o processo) quando variáveis de ambiente importantes faltam.
+function warnMissingEnv() {
+  const optional = ["GEMINI_API_KEY", "EVOLUTION_API_KEY", "META_VERIFY_TOKEN"];
+  for (const name of optional) {
+    if (!process.env[name]) {
+      console.warn(`[ENV] Aviso: ${name} não configurada. Funcionalidades relacionadas ficarão limitadas.`);
+    }
+  }
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  warnMissingEnv();
 
   // Middleware for parsing JSON
   app.use(express.json());
@@ -142,12 +170,17 @@ async function startServer() {
   });
 
   // VERIFICAÇÃO DO WEBHOOK (GET)
-  const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "meu_token_secreto_123";
-  
+  const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN;
+
   app.get("/api/webhooks/meta", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
+
+    if (!META_VERIFY_TOKEN) {
+      console.warn("[Webhook] META_VERIFY_TOKEN não configurado; verificação rejeitada.");
+      return res.sendStatus(403);
+    }
 
     if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
       console.log("[Webhook] Verificado com sucesso pela Meta.");
@@ -263,17 +296,54 @@ async function startServer() {
   });
 
   // --- ENDPOINT UPLOAD RAG ---
-  app.post("/api/rag/upload", upload.single("document"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "Nenhum arquivo enviado" });
+  app.post("/api/rag/upload", (req, res) => {
+    upload.single("document")(req, res, async (uploadErr) => {
+      if (uploadErr) {
+        // Erros de limite de tamanho ou tipo de arquivo (fileFilter)
+        return res.status(400).json({ error: (uploadErr as Error).message });
       }
-      const channelId = req.body.channelId || 'global';
-      const result = await processDocument(req.file.buffer, req.file.originalname, channelId);
-      res.json({ message: "Documento vetorizado com sucesso", ...result });
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: "Nenhum arquivo enviado" });
+        }
+        // Sanitiza o channelId para evitar valores inesperados como chave de metadados.
+        const rawChannelId = typeof req.body.channelId === "string" ? req.body.channelId : "global";
+        const channelId = rawChannelId.replace(/[^a-zA-Z0-9_-]/g, "") || "global";
+        const result = await processDocument(req.file.buffer, req.file.originalname, channelId);
+        res.json({ message: "Documento vetorizado com sucesso", ...result });
+      } catch (error) {
+        console.error("[RAG Upload]", error);
+        res.status(500).json({ error: "Erro ao vetorizar documento" });
+      }
+    });
+  });
+
+  // --- ENDPOINTS DE IA (mantém a GEMINI_API_KEY no backend) ---
+  app.post("/api/ai/suggest", async (req, res) => {
+    try {
+      const { contact, history } = req.body || {};
+      if (!contact || !Array.isArray(history)) {
+        return res.status(400).json({ error: "Payload inválido: contact e history são obrigatórios." });
+      }
+      const text = await suggestResponse(contact, history);
+      res.json({ text });
     } catch (error) {
-      console.error("[RAG Upload]", error);
-      res.status(500).json({ error: "Erro ao vetorizar documento" });
+      console.error("[AI Suggest]", error);
+      res.status(500).json({ error: "Erro ao gerar sugestão" });
+    }
+  });
+
+  app.post("/api/ai/summarize", async (req, res) => {
+    try {
+      const { history } = req.body || {};
+      if (!Array.isArray(history)) {
+        return res.status(400).json({ error: "Payload inválido: history é obrigatório." });
+      }
+      const text = await summarizeConversation(history);
+      res.json({ text });
+    } catch (error) {
+      console.error("[AI Summarize]", error);
+      res.status(500).json({ error: "Erro ao resumir conversa" });
     }
   });
 
@@ -317,7 +387,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
+    app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -326,8 +396,14 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
+  // Restringe origens permitidas para o WebSocket. Configure ALLOWED_ORIGINS
+  // (separado por vírgula) em produção; em dev usa localhost por padrão.
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+    : ["http://localhost:3000", "http://127.0.0.1:3000"];
+
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: "*" }
+    cors: { origin: allowedOrigins, methods: ["GET", "POST"] }
   });
 
   io.on("connection", (socket) => {

@@ -34,6 +34,28 @@ function warnMissingEnv() {
   }
 }
 
+// Normaliza o nome do evento do Evolution: aceita "messages.upsert",
+// "MESSAGES_UPSERT", "messages-upsert" etc. → "messages.upsert".
+function normalizeEvent(e: unknown): string {
+  return String(e ?? "").toLowerCase().replace(/[_-]/g, ".");
+}
+
+// Extrai texto de diferentes formatos de mensagem do WhatsApp (Baileys/Evolution).
+function extractMessageText(message: any): string {
+  if (!message) return "";
+  return (
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.documentMessage?.caption ||
+    message.buttonsResponseMessage?.selectedDisplayText ||
+    message.listResponseMessage?.title ||
+    message.templateButtonReplyMessage?.selectedDisplayText ||
+    ""
+  );
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -58,22 +80,39 @@ async function startServer() {
     res.json({ success: true, message: 'Configuração salva na sessão atual.' });
   });
 
-  app.post("/api/webhooks/evolution", async (req, res) => {
+  // Aceita tanto a URL base quanto a variante "Webhook by Events" do Evolution,
+  // que anexa o nome do evento ao caminho (ex.: /api/webhooks/evolution/messages-upsert).
+  app.post(["/api/webhooks/evolution", "/api/webhooks/evolution/:event"], async (req, res) => {
     try {
-      const payload = req.body;
-      console.log(`[Evolution Webhook] Recebido Evento: ${payload.event}`);
+      const payload = req.body ?? {};
+      const rawEvent = payload.event ?? req.params.event;
+      const event = normalizeEvent(rawEvent);
+      console.log(`[Evolution Webhook] Evento recebido: "${rawEvent}" (normalizado: "${event}")`);
 
-      if (payload.event === "messages.upsert") {
-        const messageData = payload.data?.message;
-        if (!messageData) return res.status(200).send("OK");
+      if (event === "messages.upsert") {
+        // O campo "data" pode vir como objeto único ou como array.
+        const data = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+        const messageData = data?.message;
 
-        let incomingMessageText = messageData.conversation || messageData.extendedTextMessage?.text || "";
-        const senderId = payload.data?.key?.remoteJid?.split('@')[0];
-        const fromMe = payload.data?.key?.fromMe;
-        const pushName = payload.data?.pushName;
+        const incomingMessageText = extractMessageText(messageData);
+        const senderId = data?.key?.remoteJid?.split('@')[0];
+        const fromMe = data?.key?.fromMe;
+        const pushName = data?.pushName;
         const businessId = evolutionConfig.instanceName || 'evolution_api';
 
-        if (fromMe || !incomingMessageText || !senderId) return res.status(200).send("OK");
+        // Diagnóstico explícito do motivo de cada descarte.
+        if (fromMe) {
+          console.log("[Evolution Webhook] Ignorado: mensagem enviada pelo próprio número (fromMe).");
+          return res.status(200).send("OK");
+        }
+        if (!senderId) {
+          console.warn("[Evolution Webhook] Ignorado: remoteJid ausente. Estrutura recebida em data.key:", JSON.stringify(data?.key));
+          return res.status(200).send("OK");
+        }
+        if (!incomingMessageText) {
+          console.warn(`[Evolution Webhook] Ignorado: sem texto extraível (mídia/áudio ou formato não suportado). Tipos em message: ${messageData ? Object.keys(messageData).join(', ') : 'nenhum'}`);
+          return res.status(200).send("OK");
+        }
 
         const provider = 'whatsapp';
         console.log(`[EVOLUTION WA] Mensagem de ${senderId}: ${incomingMessageText}`);
@@ -160,6 +199,8 @@ async function startServer() {
         } catch (e) {
           console.error("[IA RAG] Falha ao processar RAG no webhook Evolution", e);
         }
+      } else {
+        console.log(`[Evolution Webhook] Evento "${event}" ignorado (este endpoint trata apenas "messages.upsert"). Habilite o evento MESSAGES_UPSERT na Evolution.`);
       }
 
       res.status(200).send("EVENT_RECEIVED");
@@ -396,14 +437,16 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
-  // Restringe origens permitidas para o WebSocket. Configure ALLOWED_ORIGINS
-  // (separado por vírgula) em produção; em dev usa localhost por padrão.
-  const allowedOrigins = process.env.ALLOWED_ORIGINS
+  // CORS do WebSocket. Se ALLOWED_ORIGINS estiver definido (lista separada por
+  // vírgula), restringe a essas origens. Caso contrário, reflete a origem da
+  // requisição (equivalente a permitir todas) — preserva o comportamento padrão
+  // e evita bloquear conexões quando a variável não é configurada.
+  const corsOrigin: string[] | boolean = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-    : ["http://localhost:3000", "http://127.0.0.1:3000"];
+    : true;
 
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: allowedOrigins, methods: ["GET", "POST"] }
+    cors: { origin: corsOrigin, methods: ["GET", "POST"] }
   });
 
   io.on("connection", (socket) => {

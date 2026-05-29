@@ -77,7 +77,7 @@ export function AdminMasterView() {
     try {
       const res = await fetch('/api/admin/security-check');
       const data = await res.json();
-      setSecurityIssues(data);
+      setSecurityIssues(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -262,7 +262,10 @@ export function AdminMasterView() {
 function AuditLogsPanel() {
   const [logs, setLogs] = useState<any[]>([]);
   useEffect(() => {
-     fetch('/api/audit').then(res => res.json()).then(setLogs).catch(console.error);
+     fetch('/api/audit')
+       .then(res => res.json())
+       .then(data => setLogs(Array.isArray(data) ? data : []))
+       .catch(console.error);
   }, []);
 
   return (

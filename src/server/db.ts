@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const dbPath = path.join(process.cwd(), 'zappflow.db');
-const db = new Database(dbPath, { verbose: console.log });
+// DATA_DIR permite apontar o banco para um volume persistente (ex.: /data no
+// Coolify), evitando perda de dados a cada redeploy. Sem ela, usa o cwd.
+const dataDir = process.env.DATA_DIR || process.cwd();
+const dbPath = path.join(dataDir, 'zappflow.db');
+const db = new Database(dbPath, process.env.NODE_ENV === 'production' ? {} : { verbose: console.log });
 
 db.pragma('journal_mode = WAL');
 

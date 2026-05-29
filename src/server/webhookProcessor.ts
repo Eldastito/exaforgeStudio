@@ -18,27 +18,32 @@ export async function processIncomingMessage(
   },
   io: any
 ) {
+  // Resolve a organização "real" do dono (deploy single-tenant): a primeira org
+  // criada que não seja a 'default_org'. Em um cenário multi-tenant, o roteamento
+  // deveria ser por instância/canal (mapear cada número à sua organização).
+  const realOrgRow = db.prepare(
+    "SELECT organization_id FROM organization_settings WHERE COALESCE(status,'active') != 'cancelled' AND organization_id != 'default_org' ORDER BY created_at ASC LIMIT 1"
+  ).get() as any;
+  const targetOrg = realOrgRow?.organization_id || 'default_org';
+
   let channel;
-  
+
   if (payload.channelId) {
     channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(payload.channelId) as any;
   } else {
-    // try to find channel by identifier
-    channel = db.prepare('SELECT * FROM channels WHERE identifier = ? AND provider = ?').get(payload.identifier, payload.provider) as any;
+    // Procura o canal pelo identifier dentro da organização do dono.
+    channel = db.prepare('SELECT * FROM channels WHERE identifier = ? AND provider = ? AND organization_id = ?')
+      .get(payload.identifier, payload.provider, targetOrg) as any;
   }
 
-  // Fallback context when channel not yet created (for backward compatibility if requested)
-  // But Phase 2 instructs: "Não permitir conexão de canal sem organization_id."
+  // Se ainda não existe, cria o canal na organização do dono.
   if (!channel) {
-    // If no channel exists, we might reject or create a default if this is a single tenant dev environment.
-    // For safety, let's create a default org/channel if it's the legacy evolution behavior
-    const orgId = "default_org";
     const chId = uuidv4();
     db.prepare(`
       INSERT INTO channels (id, organization_id, provider, name, identifier, status)
       VALUES (?, ?, ?, ?, ?, 'connected')
-    `).run(chId, orgId, payload.provider, payload.identifier || "Default Channel", payload.identifier);
-    
+    `).run(chId, targetOrg, payload.provider, payload.identifier || "Default Channel", payload.identifier);
+
     channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(chId) as any;
   }
 

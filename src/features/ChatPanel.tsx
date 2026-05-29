@@ -6,7 +6,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export function ChatPanel() {
-  const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket } = useStore();
+  const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket, loadMessages } = useStore();
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -18,10 +18,11 @@ export function ChatPanel() {
 
   const activeTicket = activeTicketId ? tickets[activeTicketId] : null;
 
-  // Clear summary when switching tickets
+  // Clear summary when switching tickets + carrega o histórico real do banco
   useEffect(() => {
     setSummary(null);
-  }, [activeTicketId]);
+    if (activeTicketId) loadMessages(activeTicketId);
+  }, [activeTicketId, loadMessages]);
   const activeContact = activeTicket ? contacts[activeTicket.contactId] : null;
   const activeMessages = activeTicketId ? (messages[activeTicketId] || []) : [];
 

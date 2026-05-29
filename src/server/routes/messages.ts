@@ -6,6 +6,23 @@ import { AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
 
+// GET /api/messages/:ticketId — histórico de mensagens de um ticket
+router.get("/:ticketId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const rows = db.prepare(`
+      SELECT id, ticket_id, sender_type, content, created_at
+      FROM messages
+      WHERE ticket_id = ? AND organization_id = ?
+      ORDER BY created_at ASC
+    `).all(req.params.ticketId, orgId);
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
   try {
     db.prepare(`

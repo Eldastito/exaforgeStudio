@@ -5,6 +5,29 @@ import { AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
 
+// GET /api/tickets — lista os tickets abertos da organização (com contato e última mensagem)
+router.get("/", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const rows = db.prepare(`
+      SELECT t.id, t.contact_id, t.stage, t.priority, t.ai_paused, t.status, t.assigned_to,
+             t.created_at, t.updated_at,
+             c.name AS contact_name, c.identifier AS contact_identifier, c.profile_pic_url,
+             (SELECT m.content FROM messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+             (SELECT m.created_at FROM messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
+      FROM tickets t
+      JOIN contacts c ON t.contact_id = c.id
+      WHERE t.organization_id = ? AND t.status = 'open'
+      ORDER BY COALESCE(t.updated_at, t.created_at) DESC
+      LIMIT 500
+    `).all(orgId);
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
   try {
     db.prepare(`

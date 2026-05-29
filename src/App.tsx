@@ -18,10 +18,16 @@ import { Search, Bell, X } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    // Carrega os tickets/contatos reais do banco (substitui os dados de exemplo)
+    hydrate();
+  }, [token, hydrate]);
 
   useEffect(() => {
     if (!token) return;
@@ -49,7 +55,7 @@ export default function App() {
     
     socket.on("connect", () => {
       console.log("Conectado ao servidor via WebSocket", socket.id);
-      socket.emit("join_org", { organizationId: "default_org" });
+      socket.emit("join_org", { organizationId: user?.organizationId || "default_org" });
     });
 
     socket.on("new_message", (data: { contactId: string, contactName?: string, contactAvatar?: string, provider: string, text: string, sender: string }) => {
@@ -96,7 +102,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [receiveMessage, updateStageByContactId]);
+  }, [receiveMessage, updateStageByContactId, user?.organizationId]);
 
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Carregando...</div>;
   if (!user) return <LoginView />;

@@ -29,13 +29,17 @@ import { transcribeAudio } from "./src/server/llm.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Extrai texto de diferentes formatos de mensagem do WhatsApp (Baileys/Evolution).
+// Extrai texto de diferentes formatos de mensagem do WhatsApp.
+// Suporta Evolution API (camelCase) e Evolution GO/whatsmeow (camel + Pascal).
 function extractEvolutionText(message: any): string {
   if (!message) return "";
   return (
     message.conversation ||
+    message.Conversation ||
     message.extendedTextMessage?.text ||
+    message.ExtendedTextMessage?.text ||
     message.imageMessage?.caption ||
+    message.ImageMessage?.caption ||
     message.videoMessage?.caption ||
     message.documentMessage?.caption ||
     message.buttonsResponseMessage?.selectedDisplayText ||
@@ -434,21 +438,32 @@ async function startServer() {
 
       const normalizedEvent = String(rawEvent ?? "").toLowerCase().replace(/[_-]/g, ".");
       if (normalizedEvent === "messages.upsert" || normalizedEvent === "message") {
-        const messageData = payload.data?.message;
-        if (!messageData) return res.status(200).send("OK");
+        // O Evolution GO (whatsmeow) usa data.Info/data.Message (Pascal);
+        // o Evolution API usa data.key/data.message (camel). Suportamos os dois.
+        const data = Array.isArray(payload.data) ? payload.data[0] : (payload.data || {});
+        const info = data.Info || data.info || data.key || {};
+        const msgObj = data.Message || data.message || {};
 
-        let incomingMessageText = extractEvolutionText(messageData);
-        // Mensagem de áudio (PTT/voz): transcreve via Whisper para que o
-        // atendimento e o Zapp (gestores) entendam áudios.
-        if (!incomingMessageText && (messageData.audioMessage || messageData.pttMessage)) {
+        // Log de diagnóstico do formato real (ajuda a depurar payloads novos).
+        console.log("[Evolution Webhook] data(trunc):", JSON.stringify(data).slice(0, 900));
+
+        let incomingMessageText = extractEvolutionText(msgObj);
+        // Mensagem de áudio (PTT/voz): transcreve via Whisper.
+        if (!incomingMessageText && (msgObj.audioMessage || msgObj.AudioMessage || msgObj.pttMessage)) {
           incomingMessageText = await transcribeEvolutionAudio(payload, evolutionConfig);
         }
-        const senderId = payload.data?.key?.remoteJid?.split('@')[0];
-        const fromMe = payload.data?.key?.fromMe;
-        const pushName = payload.data?.pushName;
+
+        const rawJid = info.Sender || info.sender || info.Chat || info.chat || info.RemoteJid || data.key?.remoteJid || "";
+        const senderId = String(rawJid).split('@')[0].split(':')[0]; // remove sufixo de device (:NN)
+        const fromMe = info.IsFromMe ?? info.fromMe ?? data.key?.fromMe ?? false;
+        const pushName = info.PushName || info.pushName || data.pushName || undefined;
         const businessId = payload.instance || evolutionConfig.instanceName || 'evolution_api';
 
-        if (fromMe || !incomingMessageText || !senderId) return res.status(200).send("OK");
+        if (fromMe) { console.log("[Evolution Webhook] Ignorado: fromMe."); return res.status(200).send("OK"); }
+        if (!senderId) { console.warn("[Evolution Webhook] Ignorado: sem remetente. info=", JSON.stringify(info).slice(0, 300)); return res.status(200).send("OK"); }
+        if (!incomingMessageText) { console.warn("[Evolution Webhook] Ignorado: sem texto. chaves de Message=", Object.keys(msgObj).join(',')); return res.status(200).send("OK"); }
+
+        console.log(`[Evolution Webhook] Mensagem de ${senderId} (${pushName || 's/ nome'}): ${incomingMessageText}`);
 
         let contactAvatar = undefined;
         // Tentar buscar imagem de perfil da Evolution API

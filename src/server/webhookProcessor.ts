@@ -18,13 +18,13 @@ export async function processIncomingMessage(
   },
   io: any
 ) {
-  // Resolve a organização "real" do dono (deploy single-tenant): a primeira org
-  // criada que não seja a 'default_org'. Em um cenário multi-tenant, o roteamento
-  // deveria ser por instância/canal (mapear cada número à sua organização).
-  const realOrgRow = db.prepare(
-    "SELECT organization_id FROM organization_settings WHERE COALESCE(status,'active') != 'cancelled' AND organization_id != 'default_org' ORDER BY created_at ASC LIMIT 1"
+  // Resolve a organização do DONO (deploy single-tenant). O owner é criado pelo
+  // ensureMasterAdmin em 'default_org'; se houver outro owner, usa o dele.
+  // Em multi-tenant futuro, o roteamento deveria ser por instância/canal.
+  const ownerRow = db.prepare(
+    "SELECT organization_id FROM users WHERE role = 'owner' ORDER BY created_at ASC LIMIT 1"
   ).get() as any;
-  const targetOrg = realOrgRow?.organization_id || 'default_org';
+  const targetOrg = ownerRow?.organization_id || 'default_org';
 
   let channel;
 

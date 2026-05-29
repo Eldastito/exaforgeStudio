@@ -61,25 +61,28 @@ export class MessageProviderService {
         const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
         const instanceName = channel.identifier;
 
-        const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}/message/sendText/${instanceName}`;
+        const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}${process.env.EVOLUTION_SEND_PATH || '/message/sendText'}/${instanceName}`;
+        // Evolution GO usa corpo plano: { number, text, delay }
         const sendData = {
            number: recipientIdentifier,
-           options: { delay: 1200, presence: "composing" },
-           textMessage: { text: content }
+           text: content,
+           delay: 1200
         };
 
+        console.log(`[MessageProvider] POST ${endpoint}`);
         const response = await fetch(endpoint, {
            method: 'POST',
            headers: {
              'Content-Type': 'application/json',
              'apikey': token,
+             'token': token,
              'instance': instanceName
            },
            body: JSON.stringify(sendData)
         });
 
         if (!response.ok) {
-           throw new Error(`Erro na Evolution API: ${await response.text()}`);
+           throw new Error(`Erro na Evolution API (${response.status}) em ${endpoint}: ${await response.text()}`);
         }
         return true;
     }

@@ -90,7 +90,7 @@ type AppState = {
   closeTicket: (ticketId: string, reason: string, status: 'entregue_concluido' | 'perdido') => Promise<void>;
   sendMessage: (ticketId: string, text: string, sender?: 'human' | 'bot') => void;
   toggleAiPaused: (ticketId: string) => Promise<void>;
-  receiveMessage: (contactId: string, text: string, sender?: 'contact' | 'bot' | 'human', contactName?: string, contactAvatar?: string) => void;
+  receiveMessage: (contactId: string, text: string, sender?: 'contact' | 'bot' | 'human', contactName?: string, contactAvatar?: string, contactNumber?: string) => void;
   fetchChannels: () => Promise<void>;
   updateChannel: (id: string, updates: Partial<ChannelInfo>) => Promise<void>;
   connectInstagram: () => void;
@@ -424,15 +424,15 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
 
-  receiveMessage: (contactId, text, sender = 'contact', contactName, contactAvatar) => set((state) => {
+  receiveMessage: (contactId, text, sender = 'contact', contactName, contactAvatar, contactNumber) => set((state) => {
     // Check if contact exists, if not create it
     let newContacts = { ...state.contacts };
     const existingContact = newContacts[contactId];
-    
+
     newContacts[contactId] = {
       id: contactId,
       name: contactName || existingContact?.name || `Contato ${contactId.slice(0, 4)}`,
-      number: contactId,
+      number: contactNumber || existingContact?.number || contactId,
       avatar: contactAvatar || existingContact?.avatar,
     };
 

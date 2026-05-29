@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Banco SQLite local (runtime) — não versionar
+zappflow.db
+zappflow.db-shm
+zappflow.db-wal

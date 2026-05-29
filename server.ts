@@ -153,7 +153,17 @@ async function startServer() {
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/rag", ragRoutes);
 
-  app.use("/api", protectedApi);
+  // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS
+  // (Evolution, Meta) que NÃO enviam JWT. Elas são registradas abaixo, em `app`.
+  // Aqui garantimos que o requireAuth do protectedApi NÃO intercepte esses
+  // caminhos públicos — caso contrário o webhook recebe 401 e a mensagem nunca
+  // chega ao Kanban.
+  app.use("/api", (req, res, next) => {
+    if (req.path.startsWith('/webhooks')) {
+      return next(); // segue para os handlers públicos de webhook abaixo
+    }
+    return protectedApi(req, res, next);
+  });
 
   // --- META WEBHOOK (WhatsApp & Instagram) ---
   
@@ -357,12 +367,21 @@ async function startServer() {
     }
   });
 
-  app.post("/api/webhooks/evolution", async (req, res) => {
+  // Aceita ambas as URLs (Evolution API e Evolution GO) e a variante
+  // "Webhook by Events", que anexa o nome do evento ao caminho.
+  app.post([
+    "/api/webhooks/evolution",
+    "/api/webhooks/evolutiongo",
+    "/api/webhooks/evolution/:event",
+    "/api/webhooks/evolutiongo/:event",
+  ], async (req, res) => {
     try {
       const payload = req.body;
-      console.log(`[Evolution Webhook] Recebido Evento: ${payload.event}`);
+      const rawEvent = payload.event ?? req.params.event;
+      console.log(`[Evolution Webhook] Recebido Evento: ${rawEvent} (path: ${req.path})`);
 
-      if (payload.event === "messages.upsert" || payload.event === "MESSAGE" || payload.event === "Message") {
+      const normalizedEvent = String(rawEvent ?? "").toLowerCase().replace(/[_-]/g, ".");
+      if (normalizedEvent === "messages.upsert" || normalizedEvent === "message") {
         const messageData = payload.data?.message;
         if (!messageData) return res.status(200).send("OK");
 
@@ -404,7 +423,7 @@ async function startServer() {
            text: incomingMessageText
         }, (global as any).io);
         
-      } else if (payload.event === "connection.update") {
+      } else if (normalizedEvent === "connection.update") {
         console.log(`[Evolution Webhook] Status da conexão: ${payload.data?.state || payload.data?.status}`);
         if ((payload.data?.state === 'open' || payload.data?.status === 'open') && (global as any).io) {
            (global as any).io.emit("wa_web_status", { status: 'connected_evo' });
@@ -544,7 +563,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
+    app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

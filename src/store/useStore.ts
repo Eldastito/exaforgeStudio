@@ -95,6 +95,8 @@ type AppState = {
   updateChannel: (id: string, updates: Partial<ChannelInfo>) => Promise<void>;
   connectInstagram: () => void;
   addRagDocument: (doc: Omit<RagDocument, 'id' | 'status' | 'uploadDate'>) => void;
+  hydrate: () => Promise<void>;
+  loadMessages: (ticketId: string) => Promise<void>;
 };
 
 const initialContacts: Record<string, Contact> = {
@@ -202,6 +204,65 @@ export const useStore = create<AppState>((set, get) => ({
   setEvolutionConfig: (config) => set({ evolutionConfig: config }),
   setActiveTicket: (id) => set({ activeTicketId: id }),
 
+  // Carrega tickets/contatos reais do banco (substitui os dados de exemplo).
+  hydrate: async () => {
+    try {
+      const res = await fetch('/api/tickets');
+      if (!res.ok) return;
+      const rows = await res.json();
+      if (!Array.isArray(rows)) return;
+
+      const contacts: Record<string, Contact> = {};
+      const tickets: Record<string, Ticket> = {};
+      const messages: Record<string, Message[]> = {};
+
+      for (const r of rows) {
+        contacts[r.contact_id] = {
+          id: r.contact_id,
+          name: r.contact_name || r.contact_identifier,
+          number: r.contact_identifier,
+          avatar: r.profile_pic_url || undefined,
+        };
+        tickets[r.id] = {
+          id: r.id,
+          contactId: r.contact_id,
+          stage: (r.stage || 'novo_lead') as Stage,
+          priority: (r.priority || 'media'),
+          lastMessageAt: r.last_message_at || r.updated_at || r.created_at || new Date().toISOString(),
+          unreadCount: 0,
+          aiPaused: r.ai_paused === 1,
+        };
+        messages[r.id] = r.last_message
+          ? [{ id: `last_${r.id}`, contactId: r.contact_id, text: r.last_message, sender: 'contact', timestamp: r.last_message_at || r.updated_at }]
+          : [];
+      }
+
+      set({ contacts, tickets, messages });
+    } catch (e) {
+      console.error('Falha ao carregar tickets do servidor:', e);
+    }
+  },
+
+  // Carrega o histórico completo de mensagens de um ticket (ao abrir a conversa).
+  loadMessages: async (ticketId) => {
+    try {
+      const res = await fetch(`/api/messages/${ticketId}`);
+      if (!res.ok) return;
+      const rows = await res.json();
+      if (!Array.isArray(rows)) return;
+      const msgs: Message[] = rows.map((m: any) => ({
+        id: m.id,
+        contactId: '',
+        text: m.content,
+        sender: m.sender_type === 'agent' ? 'human' : (m.sender_type as 'contact' | 'bot' | 'human'),
+        timestamp: m.created_at,
+      }));
+      set((s) => ({ messages: { ...s.messages, [ticketId]: msgs } }));
+    } catch (e) {
+      console.error('Falha ao carregar mensagens:', e);
+    }
+  },
+
   connectInstagram: () => {
     // Simulando o delay do popup OAuth da Meta
     setTimeout(() => {
@@ -307,11 +368,13 @@ export const useStore = create<AppState>((set, get) => ({
     if (!ticket) return;
 
     if (sender === 'human') {
+       const contact = state.contacts[ticket.contactId];
        try {
           await fetch('/api/messages/send', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ contactId: ticket.contactId, text })
+             // O backend localiza o contato pelo identifier (número), não pelo uuid.
+             body: JSON.stringify({ contactId: contact?.number || ticket.contactId, text })
           });
        } catch(e) {
           console.error("Failed to send msg:", e);
@@ -343,12 +406,13 @@ export const useStore = create<AppState>((set, get) => ({
     const ticket = state.tickets[ticketId];
     if (!ticket) return;
     const newPaused = !ticket.aiPaused;
-    
+    const contact = state.contacts[ticket.contactId];
+
     try {
         await fetch('/api/messages/toggle-ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contactId: ticket.contactId, ai_paused: newPaused })
+            body: JSON.stringify({ contactId: contact?.number || ticket.contactId, ai_paused: newPaused })
         });
     } catch(e) {}
 

@@ -18,10 +18,16 @@ import { Search, Bell, X } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    // Carrega os tickets/contatos reais do banco (substitui os dados de exemplo)
+    hydrate();
+  }, [token, hydrate]);
 
   useEffect(() => {
     if (!token) return;

@@ -72,8 +72,18 @@ type AppState = {
   sendMessage: (ticketId: string, text: string, sender?: 'human' | 'bot') => void;
   receiveMessage: (contactId: string, text: string, sender?: 'contact' | 'bot' | 'human', contactName?: string, contactAvatar?: string) => void;
   connectInstagram: () => void;
-  addRagDocument: (doc: Omit<RagDocument, 'id' | 'status' | 'uploadDate'>) => void;
+  addRagDocument: (doc: Omit<RagDocument, 'id' | 'status' | 'uploadDate'>) => string;
+  setRagDocumentStatus: (id: string, status: RagDocument['status']) => void;
 };
+
+// Gera um ID único de forma robusta (crypto.randomUUID em contextos seguros).
+function genId(prefix: string): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}_${uuid}`;
+}
 
 const initialContacts: Record<string, Contact> = {
   c1: { id: 'c1', name: 'João Silva', number: '+55 11 99999-1111', avatar: 'https://i.pravatar.cc/150?u=c1' },
@@ -141,25 +151,21 @@ export const useStore = create<AppState>((set, get) => ({
     }, 1500);
   },
 
-  addRagDocument: (doc) => set((state) => {
+  addRagDocument: (doc) => {
     const newDoc: RagDocument = {
       ...doc,
-      id: `doc_${Date.now()}`,
+      id: genId('doc'),
       status: 'processing',
       uploadDate: new Date().toISOString()
     };
-    
-    // Simulate processing time
-    setTimeout(() => {
-      set((s) => ({
-        ragDocuments: s.ragDocuments.map(d => 
-          d.id === newDoc.id ? { ...d, status: 'ready' } : d
-        )
-      }));
-    }, 3000);
+    set((state) => ({ ragDocuments: [...state.ragDocuments, newDoc] }));
+    // Retorna o id para que o chamador atualize o status conforme o upload real.
+    return newDoc.id;
+  },
 
-    return { ragDocuments: [...state.ragDocuments, newDoc] };
-  }),
+  setRagDocumentStatus: (id, status) => set((state) => ({
+    ragDocuments: state.ragDocuments.map(d => (d.id === id ? { ...d, status } : d))
+  })),
 
   moveTicket: (ticketId, destStage) => set((state) => ({
     tickets: {
@@ -184,7 +190,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (!ticket) return state;
 
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: genId('msg'),
       contactId: ticket.contactId,
       text,
       sender,
@@ -221,7 +227,7 @@ export const useStore = create<AppState>((set, get) => ({
     
     // Create new ticket if none exists
     if (!ticketId) {
-      ticketId = `t_${Date.now()}`;
+      ticketId = genId('t');
       newTickets[ticketId] = {
         id: ticketId,
         contactId,
@@ -238,10 +244,10 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     const newMessage: Message = {
-      id: Date.now().toString() + Math.random().toString(),
+      id: genId('msg'),
       contactId,
       text,
-      sender: sender as 'contact' | 'bot' | 'human',
+      sender,
       timestamp: new Date().toISOString()
     };
 

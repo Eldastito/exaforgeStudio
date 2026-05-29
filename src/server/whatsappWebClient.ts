@@ -77,57 +77,56 @@ export function initializeWhatsAppWeb(io: any) {
   });
 
   client.on('message', async (msg) => {
-    if (msg.from === 'status@broadcast') return; // Ignore status broadcasts
-
-    // Só reage a mensagens de texto ou outras compatíveis se necessário
-    if (!msg.body) return;
-
-    const senderId = msg.from;
-    const provider = 'whatsapp';
-    const incomingMessageText = msg.body;
-
-    console.log(`[WA Web] Mensagem de ${senderId}: ${incomingMessageText}`);
-
-    // Emite mensagem para o frontend UX
-    if (ioInstance) {
-      ioInstance.emit("new_message", {
-        contactId: senderId,
-        provider,
-        text: incomingMessageText,
-        sender: "contact",
-        timestamp: new Date().toISOString()
-      });
-    }
-
     try {
-       // Usa o chatbot (RAG) para gerar resposta
-       const iaResponse = await generateRagResponse(incomingMessageText, "wa_web");
-       console.log(`[IA RAG] Resposta para WA Web: ${iaResponse.text} | Estágio: ${iaResponse.newStage}`);
+      if (msg.from === 'status@broadcast') return; // Ignore status broadcasts
 
-       // Emite a resposta da IA no front end
-       if (ioInstance) {
-         ioInstance.emit("new_message", {
-           contactId: senderId,
-           provider,
-           text: iaResponse.text,
-           sender: "bot",
-           timestamp: new Date().toISOString()
-         });
+      // Só reage a mensagens de texto ou outras compatíveis se necessário
+      if (!msg.body) return;
 
-         // Move o ticket se a IA sugeriu uma mudança de estágio
-         if (iaResponse.newStage) {
-           ioInstance.emit("ticket_stage_change", {
-             contactId: senderId,
-             newStage: iaResponse.newStage
-           });
-         }
-       }
+      const senderId = msg.from;
+      const provider = 'whatsapp';
+      const incomingMessageText = msg.body;
 
-       // Envia fisicamente a mensagem via WhatsApp
-       await client?.sendMessage(msg.from, iaResponse.text);
+      console.log(`[WA Web] Mensagem de ${senderId}: ${incomingMessageText}`);
 
+      // Emite mensagem para o frontend UX
+      if (ioInstance) {
+        ioInstance.emit("new_message", {
+          contactId: senderId,
+          provider,
+          text: incomingMessageText,
+          sender: "contact",
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Usa o chatbot (RAG) para gerar resposta
+      const iaResponse = await generateRagResponse(incomingMessageText, "wa_web");
+      console.log(`[IA RAG] Resposta para WA Web: ${iaResponse.text} | Estágio: ${iaResponse.newStage}`);
+
+      // Emite a resposta da IA no front end
+      if (ioInstance) {
+        ioInstance.emit("new_message", {
+          contactId: senderId,
+          provider,
+          text: iaResponse.text,
+          sender: "bot",
+          timestamp: new Date().toISOString()
+        });
+
+        // Move o ticket se a IA sugeriu uma mudança de estágio
+        if (iaResponse.newStage) {
+          ioInstance.emit("ticket_stage_change", {
+            contactId: senderId,
+            newStage: iaResponse.newStage
+          });
+        }
+      }
+
+      // Envia fisicamente a mensagem via WhatsApp
+      await client?.sendMessage(msg.from, iaResponse.text);
     } catch (error) {
-       console.error('[WA Web] Erro ao responder via IA', error);
+      console.error('[WA Web] Erro ao processar mensagem', error);
     }
   });
 
@@ -136,6 +135,8 @@ export function initializeWhatsAppWeb(io: any) {
   } catch (error) {
      console.error('[WA Web] Erro no Initialize', error);
      clientStatus = 'disconnected';
+     // Limpa a referência para permitir uma nova tentativa de conexão.
+     client = null;
   }
 }
 

@@ -5,30 +5,33 @@ import { Button } from '@/src/components/ui/button';
 import { Badge } from '@/src/components/ui/badge';
 import { format } from 'date-fns';
 import io from 'socket.io-client';
-
-let socketInstance: any = null;
+import type { Socket } from 'socket.io-client';
 
 export function ChannelsPanel() {
-  const { channels, connectInstagram, ragDocuments, addRagDocument } = useStore();
+  const { channels, connectInstagram, ragDocuments, addRagDocument, setRagDocumentStatus } = useStore();
   const [isConnecting, setIsConnecting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+  const socketRef = useRef<Socket | null>(null);
+
   // WA Web State
   const [waWebStatus, setWaWebStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [waWebQr, setWaWebQr] = useState<string | null>(null);
 
+  // Estado controlado dos toggles de "Modo IA" por canal.
+  const [whatsappAi, setWhatsappAi] = useState(() => channels.find(c => c.provider === 'whatsapp')?.isActiveAI ?? true);
+  const [instagramAi, setInstagramAi] = useState(() => channels.find(c => c.provider === 'instagram')?.isActiveAI ?? true);
+
   useEffect(() => {
-    // Setup socket for WA Web events
-    if (!socketInstance) {
-       socketInstance = io();
-    }
-    
-    socketInstance.on('wa_web_status', (data: { status: any }) => {
+    // Setup socket for WA Web events (instância própria do componente)
+    const socket = io();
+    socketRef.current = socket;
+
+    socket.on('wa_web_status', (data: { status: 'disconnected' | 'connecting' | 'connected' }) => {
        setWaWebStatus(data.status);
        if (data.status !== 'connecting') setWaWebQr(null);
     });
 
-    socketInstance.on('wa_web_qr', (data: { qrUrl: string }) => {
+    socket.on('wa_web_qr', (data: { qrUrl: string }) => {
        setWaWebQr(data.qrUrl);
        setWaWebStatus('connecting');
     });
@@ -40,8 +43,8 @@ export function ChannelsPanel() {
     }).catch(console.error);
 
     return () => {
-      socketInstance?.off('wa_web_status');
-      socketInstance?.off('wa_web_qr');
+      socket.disconnect();
+      socketRef.current = null;
     };
   }, []);
 
@@ -76,29 +79,36 @@ export function ChannelsPanel() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // First add UI optimistic
-      addRagDocument({
-        name: file.name,
-        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-        channelId: 'global'
+    // Reseta o input para permitir reenviar o mesmo arquivo posteriormente.
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+
+    // Adiciona otimisticamente em estado "processing".
+    const docId = addRagDocument({
+      name: file.name,
+      size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+      channelId: 'global'
+    });
+
+    // Faz o upload real e reflete o resultado no status do documento.
+    const formData = new FormData();
+    formData.append('document', file);
+    formData.append('channelId', 'global');
+
+    try {
+      const response = await fetch('/api/rag/upload', {
+        method: 'POST',
+        body: formData,
       });
-
-      // Then do real upload
-      const formData = new FormData();
-      formData.append('document', file);
-      formData.append('channelId', 'global');
-
-      try {
-        const response = await fetch('/api/rag/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await response.json();
-        console.log('RAG Upload response:', data);
-      } catch (error) {
-        console.error('RAG Upload failed:', error);
+      if (!response.ok) {
+        throw new Error(`Upload falhou: ${response.status}`);
       }
+      const data = await response.json();
+      console.log('RAG Upload response:', data);
+      setRagDocumentStatus(docId, 'ready');
+    } catch (error) {
+      console.error('RAG Upload failed:', error);
+      setRagDocumentStatus(docId, 'error');
     }
   };
 
@@ -275,7 +285,7 @@ export function ChannelsPanel() {
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-400">Modo IA</span>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" defaultChecked={whatsapp.isActiveAI} />
+                    <input type="checkbox" className="sr-only peer" checked={whatsappAi} onChange={(e) => setWhatsappAi(e.target.checked)} />
                     <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
                   </label>
                 </div>
@@ -335,7 +345,7 @@ export function ChannelsPanel() {
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-400">Modo IA</span>
                   <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" defaultChecked={instagram.isActiveAI} />
+                    <input type="checkbox" className="sr-only peer" checked={instagramAi} onChange={(e) => setInstagramAi(e.target.checked)} />
                     <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
                   </label>
                 </div>
@@ -480,11 +490,11 @@ export function ChannelsPanel() {
             </div>
             
             <div className="p-6">
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept=".pdf,.txt,.csv"
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".txt,.csv,.md"
                 onChange={handleFileUpload}
               />
               <div 
@@ -492,7 +502,7 @@ export function ChannelsPanel() {
                 className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-xl bg-slate-950/30 hover:bg-slate-800/30 transition-colors cursor-pointer py-10 mb-6"
               >
                  <UploadCloud className="w-10 h-10 text-slate-500 mb-4" />
-                 <p className="text-sm text-slate-300 font-medium">Arraste seus PDFs ou TXTs para cá</p>
+                 <p className="text-sm text-slate-300 font-medium">Envie arquivos de texto (.txt, .csv, .md)</p>
                  <p className="text-xs text-slate-500 mt-1">Arquivos processados são vetorizados automaticamente em tempo real.</p>
                  <Button variant="outline" className="mt-6 border-slate-700 text-slate-300 bg-slate-900 hover:text-white" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
                    Selecionar Arquivos

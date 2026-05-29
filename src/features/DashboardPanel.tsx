@@ -1,12 +1,12 @@
 import React from 'react';
 import { useStore } from '@/src/store/useStore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { BarChart3, TrendingUp, Users, Clock, MessageSquare, Briefcase } from 'lucide-react';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444']; // primary, emerald, amber, red
 
 export function DashboardPanel() {
-  const { tickets, messages, contacts } = useStore();
+  const { tickets, contacts } = useStore();
 
   const totalTickets = Object.keys(tickets).length;
   const inProgressTickets = Object.values(tickets).filter(t => t.stage === 'em_atendimento').length;

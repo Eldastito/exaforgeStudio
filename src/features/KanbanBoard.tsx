@@ -1,8 +1,7 @@
-import React from 'react';
 import { useStore } from '@/src/store/useStore';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Badge } from '@/src/components/ui/badge';
-import { Clock, MessageCircle, User } from 'lucide-react';
+import { Clock, User } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -65,7 +64,6 @@ export function KanbanBoard() {
                         const lastMsg = ticketMessages[ticketMessages.length - 1];
 
                         return (
-                          // @ts-expect-error React 18+ types issue with hello-pangea/dnd
                           <Draggable key={ticket.id} draggableId={ticket.id} index={index}>
                             {(provided, snapshot) => (
                               <div

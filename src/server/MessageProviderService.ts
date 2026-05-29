@@ -1,5 +1,5 @@
 import db from "./db.js";
-import fetch from "node-fetch";
+// Node 18+/22 já possui fetch global — não usar node-fetch (quebra no bundle CJS).
 
 export class MessageProviderService {
   /**
@@ -56,7 +56,8 @@ export class MessageProviderService {
        }
        return true;
     } else if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
-        const token = channel.token_encrypted; // API Key
+        // Token do canal ou, se vazio (canal auto-criado pelo webhook), o do ambiente.
+        const token = channel.token_encrypted || process.env.EVOLUTION_API_KEY || '';
         const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
         const instanceName = channel.identifier;
 

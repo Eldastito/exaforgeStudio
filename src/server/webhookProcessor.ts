@@ -100,6 +100,7 @@ export async function processIncomingMessage(
        ticketId: ticket.id,
        contactId: contact.id, // for backwards compat tracking
        contactName: contact.name,
+       contactNumber: contact.identifier, // telefone real, para exibir na UI ao vivo
        contactAvatar: contact.profile_pic_url,
        provider: channel.provider,
        text: payload.text,

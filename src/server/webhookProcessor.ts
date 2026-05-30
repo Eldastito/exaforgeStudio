@@ -108,8 +108,6 @@ export async function processIncomingMessage(
        timestamp: new Date().toISOString()
     };
     io.to(`org:${orgId}`).emit("new_message", msgPayload);
-    // Legacy global emit for backward compatibility with current frontend
-    io.emit("new_message", msgPayload);
   }
 
   // 5. Call AI if enabled
@@ -172,7 +170,6 @@ export async function processIncomingMessage(
              timestamp: new Date().toISOString()
           };
           io.to(`org:${orgId}`).emit("new_message", aiMsgPayload);
-          io.emit("new_message", aiMsgPayload);
        }
 
        // Send AI response back to provider

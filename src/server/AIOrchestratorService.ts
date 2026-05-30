@@ -2,6 +2,7 @@ import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { searchContext } from "./geminiRAG.js";
 import { AnalyticsService } from "./AnalyticsService.js";
+import { InventoryService } from "./InventoryService.js";
 import { chat } from "./llm.js";
 
 export class AIOrchestratorService {
@@ -15,7 +16,7 @@ export class AIOrchestratorService {
     contactName?: string;
     channelId: string;
     ticketStage?: string;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -141,14 +142,70 @@ export class AIOrchestratorService {
       newStage = moveAction.payload.stage;
     }
 
+    // PEDIDO proposto pela IA: resolvemos os itens contra o catálogo e validamos
+    // o estoque AQUI. Se faltar estoque/produto, NÃO criamos o pedido e trocamos
+    // a resposta por uma mensagem honesta (evita "confirmar" uma venda impossível).
+    let reply = resultJSON.reply || "Erro interno.";
+    let newOrder: { items: any[]; autoClose: boolean } | undefined;
+    const orderResolved = this.resolveOrderIntent(params.organizationId, resultJSON.new_order);
+    if (orderResolved) {
+      if (orderResolved.error) {
+        reply = orderResolved.error;
+      } else if (orderResolved.items.length > 0) {
+        newOrder = { items: orderResolved.items, autoClose: this.autoCloseEnabled(params.organizationId) };
+      }
+    }
+
     return {
-      reply: resultJSON.reply || "Erro interno.",
+      reply,
       actions: safeActions,
       newStage: newStage,
       needsHuman: !!resultJSON.needs_human,
       newAppointment: this.sanitizeAppointment(resultJSON.new_appointment),
       newDelivery: this.sanitizeDelivery(resultJSON.new_delivery),
+      newOrder,
     };
+  }
+
+  /** Lê o interruptor de autonomia de vendas da organização. */
+  private static autoCloseEnabled(orgId: string): boolean {
+    try {
+      const o = db.prepare('SELECT ai_auto_close_sales FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
+      return !!(o && o.ai_auto_close_sales);
+    } catch (e) { return false; }
+  }
+
+  /**
+   * Converte o `new_order` proposto pela IA (itens por nome) em itens resolvidos
+   * do catálogo, validando estoque vendável. Retorna { error } se algo impede a
+   * venda, ou { items } pronto para criar. Retorna null se não há pedido.
+   */
+  private static resolveOrderIntent(orgId: string, raw: any): { items: any[]; error?: string } | null {
+    if (!raw || !Array.isArray(raw.items) || raw.items.length === 0) return null;
+    const items: any[] = [];
+    for (const it of raw.items) {
+      const name = typeof it?.name === 'string' ? it.name.trim() : '';
+      const qty = parseInt(String(it?.quantity ?? 0), 10);
+      if (!name || !qty || qty <= 0) continue;
+
+      // Casa o produto por nome (case-insensitive) dentro da organização.
+      const product = db.prepare(
+        'SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND lower(name) = lower(?)'
+      ).get(orgId, name) as any;
+      if (!product) {
+        return { items: [], error: `Não encontrei "${name}" no nosso catálogo. Pode confirmar o nome do produto? 🙂` };
+      }
+      if (product.stock_control_enabled) {
+        const sellable = InventoryService.sellable(orgId, product.id) ?? 0;
+        if (qty > sellable) {
+          return { items: [], error: sellable > 0
+            ? `Temos só ${sellable} unidade(s) de "${product.name}" no momento. Quer levar ${sellable}, ou prefere outra coisa?`
+            : `Poxa, "${product.name}" está sem estoque no momento. Posso te avisar quando repor ou sugerir uma alternativa.` };
+        }
+      }
+      items.push({ productId: product.id, name: product.name, unitPrice: product.price ?? 0, quantity: qty });
+    }
+    return { items };
   }
 
   // Estágios válidos do Kanban (espelha o type Stage do frontend).
@@ -280,18 +337,19 @@ export class AIOrchestratorService {
   private static async getProductsContext(orgId: string): Promise<string> {
      try {
        const rows: any[] = db.prepare(`
-         SELECT ps.*, inv.quantity_available
+         SELECT ps.*, inv.quantity_available, inv.quantity_reserved
          FROM products_services ps
          LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id
          WHERE ps.organization_id = ? AND ps.active = 1
        `).all(orgId);
        if (!rows.length) return "";
-       return "Produtos/Serviços disponíveis:\n" + rows.map(r => {
+       return "Produtos/Serviços disponíveis (use EXATAMENTE estes nomes ao registrar um pedido):\n" + rows.map(r => {
           const price = (r.price !== null && r.price !== undefined) ? `${r.currency || 'R$'} ${Number(r.price).toFixed(2)}` : "preço sob consulta";
           const desc = r.description ? ` — ${r.description}` : "";
           let stock = "";
           if (r.stock_control_enabled) {
-             stock = (r.quantity_available && r.quantity_available > 0) ? ` (em estoque: ${r.quantity_available})` : " (sem estoque no momento)";
+             const sellable = Math.max(0, (r.quantity_available || 0) - (r.quantity_reserved || 0));
+             stock = sellable > 0 ? ` (em estoque: ${sellable})` : " (SEM ESTOQUE no momento)";
           }
           const dur = r.duration_minutes ? ` [duração: ${r.duration_minutes} min]` : "";
           return `- ${r.name} (${r.type}): ${price}${stock}${dur}${desc}`;
@@ -333,6 +391,7 @@ REGRAS OBRIGATÓRIAS:
 4. Mova o lead no kanban se notar intenção de compra ("MOVE_TICKET" para etapa "proposta").
 5. Se o cliente concordar com um horário de agendamento de serviço, pode usar "new_appointment".
 6. Se confirmar o envio ou retirada de um produto físico, pode usar "new_delivery".
+7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
 
 DOCUMENTOS (RAG):
 ${contextText}
@@ -365,6 +424,9 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   },
   "new_delivery": {
     "address": "Rua X"
+  },
+  "new_order": {
+    "items": [ { "name": "Nome EXATO do produto no catálogo", "quantity": 2 } ]
   }
 }`;
   }

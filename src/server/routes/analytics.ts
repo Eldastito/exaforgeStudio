@@ -10,10 +10,21 @@ const getOrgId = (req: any) => req.organizationId || req.headers['x-organization
 router.get("/metrics", (req, res) => {
   const orgId = getOrgId(req);
   const period = (req.query.period as any) || "month";
-  
+
   try {
     const metrics = AnalyticsService.getMetrics(orgId, { period });
     res.json(metrics);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Relatório de lucro/margem do período
+router.get("/profit", (req, res) => {
+  const orgId = getOrgId(req);
+  const period = (req.query.period as any) || "month";
+  try {
+    res.json(AnalyticsService.getProfit(orgId, { period }));
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

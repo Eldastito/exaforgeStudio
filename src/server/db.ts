@@ -467,6 +467,7 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE inventory_items ADD COLUMN variant_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE inventory_items ADD COLUMN avg_cost REAL DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN unit_cost REAL DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE products_services ADD COLUMN has_variants INTEGER DEFAULT 0`); } catch(e){}
   try {
     db.exec(`

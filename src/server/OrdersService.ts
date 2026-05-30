@@ -59,6 +59,9 @@ export class OrdersService {
         const lineTotal = unitPrice * it.quantity;
         total += lineTotal;
 
+        // Custo unitário no momento da venda (snapshot, para cálculo de lucro/margem).
+        const unitCost = product?.id ? InventoryService.avgCost(orgId, product.id, variant?.id || null) : 0;
+
         // Reserva (e valida) o estoque, se o produto controla estoque.
         if (product?.id) {
           InventoryService.reserve(orgId, product.id, it.quantity, variant?.id || null);
@@ -69,7 +72,7 @@ export class OrdersService {
 
         resolved.push({
           id: uuidv4(), product_service_id: product?.id || null, variant_id: variant?.id || null, name_snapshot: name,
-          unit_price: unitPrice, quantity: it.quantity, line_total: lineTotal,
+          unit_price: unitPrice, unit_cost: unitCost, quantity: it.quantity, line_total: lineTotal,
           stock_committed: params.autoClose ? 1 : 0,
         });
       }
@@ -80,11 +83,11 @@ export class OrdersService {
       `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, total, params.createdBy || null, params.notes || null);
 
       const insItem = db.prepare(`
-        INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, quantity, line_total, stock_committed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, unit_cost, quantity, line_total, stock_committed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const r of resolved) {
-        insItem.run(r.id, orderId, orgId, r.product_service_id, r.variant_id || null, r.name_snapshot, r.unit_price, r.quantity, r.line_total, r.stock_committed);
+        insItem.run(r.id, orderId, orgId, r.product_service_id, r.variant_id || null, r.name_snapshot, r.unit_price, r.unit_cost || 0, r.quantity, r.line_total, r.stock_committed);
       }
 
       return { total, resolved };

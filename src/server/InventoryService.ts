@@ -41,6 +41,12 @@ export class InventoryService {
     return (inv.quantity_available || 0) - (inv.quantity_reserved || 0);
   }
 
+  /** Custo médio atual de um item (produto ou variação). 0 se não houver. */
+  static avgCost(orgId: string, productId: string, variantId?: string | null): number {
+    const r = this.row(orgId, productId, variantId);
+    return r?.avg_cost || 0;
+  }
+
   static hasStockControl(orgId: string, productId: string): boolean {
     const p = db.prepare('SELECT stock_control_enabled FROM products_services WHERE id = ? AND organization_id = ?').get(productId, orgId) as any;
     return !!(p && p.stock_control_enabled);

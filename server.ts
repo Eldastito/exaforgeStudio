@@ -3,8 +3,6 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
 
-import multer from "multer";
-import { processDocument, generateRagResponse } from "./src/server/geminiRAG.js";
 import channelsRoutes from "./src/server/routes/channels.js";
 import messagesRoutes from "./src/server/routes/messages.js";
 import ticketsRoutes from "./src/server/routes/tickets.js";
@@ -43,8 +41,6 @@ function saveMediaBase64(base64: string, ext = 'jpg'): string | null {
     return null;
   }
 }
-
-const upload = multer({ storage: multer.memoryStorage() });
 
 // Extrai texto de diferentes formatos de mensagem do WhatsApp.
 // Suporta Evolution API (camelCase) e Evolution GO/whatsmeow (camel + Pascal).
@@ -666,20 +662,8 @@ async function startServer() {
     }
   });
 
-  // --- ENDPOINT UPLOAD RAG ---
-  app.post("/api/rag/upload", upload.single("document"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "Nenhum arquivo enviado" });
-      }
-      const channelId = req.body.channelId || 'global';
-      const result = await processDocument(req.file.buffer, req.file.originalname, channelId);
-      res.json({ message: "Documento vetorizado com sucesso", ...result });
-    } catch (error) {
-      console.error("[RAG Upload]", error);
-      res.status(500).json({ error: "Erro ao vetorizar documento" });
-    }
-  });
+  // O upload de RAG agora é autenticado e escopado por organização em
+  // src/server/routes/rag.ts (POST /api/rag/upload), montado em protectedApi.
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

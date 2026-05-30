@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { apiFetch } from '@/src/lib/api';
 
 export type Contact = {
   id: string;
@@ -95,7 +96,10 @@ type AppState = {
   fetchChannels: () => Promise<void>;
   updateChannel: (id: string, updates: Partial<ChannelInfo>) => Promise<void>;
   connectInstagram: () => void;
-  addRagDocument: (doc: Omit<RagDocument, 'id' | 'status' | 'uploadDate'>) => void;
+  addRagDocument: (doc: Omit<RagDocument, 'id' | 'status' | 'uploadDate'>) => string;
+  setRagDocumentStatus: (id: string, status: RagDocument['status'], patch?: Partial<RagDocument>) => void;
+  removeRagDocument: (id: string) => void;
+  loadRagDocuments: () => Promise<void>;
   hydrate: () => Promise<void>;
   loadMessages: (ticketId: string) => Promise<void>;
 };
@@ -130,9 +134,7 @@ const initialChannels: ChannelInfo[] = [
   { id: 'ch1', provider: 'whatsapp_cloud', name: 'WhatsApp Business', identifier: '+55 11 99822-4433', status: 'connected', isActiveAI: true },
 ];
 
-const initialRagDocuments: RagDocument[] = [
-  { id: 'doc1', name: 'tabela_precos_2024.pdf', size: '1.2 MB', status: 'ready', channelId: 'global', uploadDate: new Date().toISOString() },
-];
+const initialRagDocuments: RagDocument[] = [];
 
 export const useStore = create<AppState>((set, get) => ({
   viewMode: 'kanban',
@@ -160,7 +162,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   fetchChannels: async () => {
     try {
-      const res = await fetch('/api/channels');
+      const res = await apiFetch('/api/channels');
       if (res.ok) {
         const data = await res.json();
         // convert from db snake case to frontend camel case where needed
@@ -185,7 +187,7 @@ export const useStore = create<AppState>((set, get) => ({
        if (updates.status !== undefined) dbUpdates.status = updates.status;
        if (updates.isActiveAI !== undefined) dbUpdates.ai_enabled = updates.isActiveAI ? 1 : 0;
        
-       const res = await fetch(`/api/channels/${id}`, {
+       const res = await apiFetch(`/api/channels/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(dbUpdates)
@@ -208,7 +210,7 @@ export const useStore = create<AppState>((set, get) => ({
   // Carrega tickets/contatos reais do banco (substitui os dados de exemplo).
   hydrate: async () => {
     try {
-      const res = await fetch('/api/tickets');
+      const res = await apiFetch('/api/tickets');
       if (!res.ok) return;
       const rows = await res.json();
       if (!Array.isArray(rows)) return;
@@ -247,7 +249,7 @@ export const useStore = create<AppState>((set, get) => ({
   // Carrega o histórico completo de mensagens de um ticket (ao abrir a conversa).
   loadMessages: async (ticketId) => {
     try {
-      const res = await fetch(`/api/messages/${ticketId}`);
+      const res = await apiFetch(`/api/messages/${ticketId}`);
       if (!res.ok) return;
       const rows = await res.json();
       if (!Array.isArray(rows)) return;
@@ -277,25 +279,46 @@ export const useStore = create<AppState>((set, get) => ({
     }, 1500);
   },
 
-  addRagDocument: (doc) => set((state) => {
+  // Adiciona um documento de forma otimista (status 'processing') e devolve o id
+  // temporário para que o caller atualize o status conforme a resposta real do upload.
+  addRagDocument: (doc) => {
+    const tempId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `doc_${Date.now()}_${Math.random()}`;
     const newDoc: RagDocument = {
       ...doc,
-      id: `doc_${Date.now()}`,
+      id: tempId,
       status: 'processing',
       uploadDate: new Date().toISOString()
     };
-    
-    // Simulate processing time
-    setTimeout(() => {
-      set((s) => ({
-        ragDocuments: s.ragDocuments.map(d => 
-          d.id === newDoc.id ? { ...d, status: 'ready' } : d
-        )
-      }));
-    }, 3000);
+    set((state) => ({ ragDocuments: [newDoc, ...state.ragDocuments] }));
+    return tempId;
+  },
 
-    return { ragDocuments: [...state.ragDocuments, newDoc] };
-  }),
+  setRagDocumentStatus: (id, status, patch = {}) => set((state) => ({
+    ragDocuments: state.ragDocuments.map(d => d.id === id ? { ...d, ...patch, status } : d)
+  })),
+
+  removeRagDocument: (id) => set((state) => ({
+    ragDocuments: state.ragDocuments.filter(d => d.id !== id)
+  })),
+
+  loadRagDocuments: async () => {
+    try {
+      const res = await apiFetch('/api/rag/documents');
+      if (!res.ok) return;
+      const rows = await res.json();
+      const docs: RagDocument[] = (rows || []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        size: r.size_bytes ? `${(r.size_bytes / 1024 / 1024).toFixed(2)} MB` : '—',
+        status: (r.status === 'error' ? 'error' : 'ready') as RagDocument['status'],
+        channelId: r.channel_id || 'global',
+        uploadDate: r.created_at || new Date().toISOString()
+      }));
+      set({ ragDocuments: docs });
+    } catch (e) {
+      // silencioso: mantém o que já está em tela
+    }
+  },
 
   moveTicket: (ticketId, destStage) => set((state) => ({
     tickets: {
@@ -317,7 +340,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   takeOverTicket: async (ticketId) => {
     try {
-      const res = await fetch(`/api/tickets/${ticketId}/take-over`, { method: 'POST' });
+      const res = await apiFetch(`/api/tickets/${ticketId}/take-over`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         set((s) => ({
@@ -332,7 +355,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   returnToAI: async (ticketId) => {
     try {
-      const res = await fetch(`/api/tickets/${ticketId}/return-to-ai`, { method: 'POST' });
+      const res = await apiFetch(`/api/tickets/${ticketId}/return-to-ai`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         set((s) => ({
@@ -347,7 +370,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   closeTicket: async (ticketId, reason, status) => {
     try {
-      const res = await fetch(`/api/tickets/${ticketId}/close`, { 
+      const res = await apiFetch(`/api/tickets/${ticketId}/close`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason, status })
@@ -372,7 +395,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (sender === 'human') {
        const contact = state.contacts[ticket.contactId];
        try {
-          await fetch('/api/messages/send', {
+          await apiFetch('/api/messages/send', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
              // O backend localiza o contato pelo identifier (número), não pelo uuid.
@@ -411,7 +434,7 @@ export const useStore = create<AppState>((set, get) => ({
     const contact = state.contacts[ticket.contactId];
 
     try {
-        await fetch('/api/messages/toggle-ai', {
+        await apiFetch('/api/messages/toggle-ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contactId: contact?.number || ticket.contactId, ai_paused: newPaused })

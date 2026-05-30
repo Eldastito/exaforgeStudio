@@ -40,7 +40,7 @@ export class AIOrchestratorService {
     let agentToUse = isOrchestratorCommand ? "orchestrator_agent" : "attendance_agent";
     
     // 2. Coletar RAG / Knowledge Base e Produtos
-    const contextContent = await searchContext(text, params.channelId, 3);
+    const contextContent = await searchContext(text, params.organizationId, params.channelId, 3);
     const contextText = contextContent.length > 0 ? contextContent.join('\n\n') : "Nenhum documento encontrado na base de RAG.";
     
     const productsText = await this.getProductsContext(params.organizationId);
@@ -110,9 +110,23 @@ export class AIOrchestratorService {
 
   private static async getProductsContext(orgId: string): Promise<string> {
      try {
-       const rows: any[] = db.prepare('SELECT * FROM products_services WHERE organization_id = ? AND active = 1').all(orgId);
+       const rows: any[] = db.prepare(`
+         SELECT ps.*, inv.quantity_available
+         FROM products_services ps
+         LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id
+         WHERE ps.organization_id = ? AND ps.active = 1
+       `).all(orgId);
        if (!rows.length) return "";
-       return "Produtos/Serviços disponíveis:\n" + rows.map(r => `- ${r.name} (${r.type}): R$ ${r.price}`).join('\n');
+       return "Produtos/Serviços disponíveis:\n" + rows.map(r => {
+          const price = (r.price !== null && r.price !== undefined) ? `${r.currency || 'R$'} ${Number(r.price).toFixed(2)}` : "preço sob consulta";
+          const desc = r.description ? ` — ${r.description}` : "";
+          let stock = "";
+          if (r.stock_control_enabled) {
+             stock = (r.quantity_available && r.quantity_available > 0) ? ` (em estoque: ${r.quantity_available})` : " (sem estoque no momento)";
+          }
+          const dur = r.duration_minutes ? ` [duração: ${r.duration_minutes} min]` : "";
+          return `- ${r.name} (${r.type}): ${price}${stock}${dur}${desc}`;
+       }).join('\n');
      } catch (e) {
        return "";
      }

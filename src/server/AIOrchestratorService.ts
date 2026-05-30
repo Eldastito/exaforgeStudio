@@ -17,9 +17,8 @@ export class AIOrchestratorService {
     ticketStage?: string;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any }> {
     
-    // 1. Verificar se é um Gestor Autorizado
-    const manager = db.prepare('SELECT * FROM authorized_managers WHERE identifier = ? AND organization_id = ?')
-      .get(params.senderId, params.organizationId) as any;
+    // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
+    const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
 
     let isManager = !!manager;
     let text = params.message.trim();
@@ -106,6 +105,49 @@ export class AIOrchestratorService {
       newAppointment: resultJSON.new_appointment,
       newDelivery: resultJSON.new_delivery
     };
+  }
+
+  /**
+   * Gera variações plausíveis de um número brasileiro para lidar com a presença
+   * ou ausência do 9º dígito (ex.: 5521999998888 <-> 552199998888).
+   * Para outros DDIs, retorna apenas o próprio número.
+   */
+  private static phoneVariants(raw: string): string[] {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (!digits) return [];
+    const variants = new Set<string>([digits]);
+
+    // Número brasileiro: 55 + DDD(2) + assinante(8 ou 9)
+    if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+      const ddd = digits.slice(2, 4);
+      const subscriber = digits.slice(4);
+      if (subscriber.length === 9 && subscriber.startsWith("9")) {
+        // tira o 9 -> versão de 8 dígitos
+        variants.add(`55${ddd}${subscriber.slice(1)}`);
+      } else if (subscriber.length === 8) {
+        // adiciona o 9 -> versão de 9 dígitos
+        variants.add(`55${ddd}9${subscriber}`);
+      }
+    }
+    return Array.from(variants);
+  }
+
+  /**
+   * Busca um gestor autorizado tolerando variações do número (9º dígito BR).
+   */
+  private static findAuthorizedManager(senderId: string, orgId: string): any {
+    // Tentativa exata primeiro (mais rápida e cobre o caso comum)
+    const exact = db.prepare('SELECT * FROM authorized_managers WHERE identifier = ? AND organization_id = ?')
+      .get(senderId, orgId) as any;
+    if (exact) return exact;
+
+    const variants = this.phoneVariants(senderId);
+    if (variants.length <= 1) return undefined;
+
+    const placeholders = variants.map(() => '?').join(',');
+    return db.prepare(
+      `SELECT * FROM authorized_managers WHERE organization_id = ? AND identifier IN (${placeholders})`
+    ).get(orgId, ...variants) as any;
   }
 
   private static async getProductsContext(orgId: string): Promise<string> {

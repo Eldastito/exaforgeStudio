@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { searchContext } from "./geminiRAG.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { InventoryService } from "./InventoryService.js";
+import { CustomerProfileService } from "./CustomerProfileService.js";
 import { chat } from "./llm.js";
 
 export class AIOrchestratorService {
@@ -17,6 +18,7 @@ export class AIOrchestratorService {
     channelId: string;
     ticketStage?: string;
     history?: { role: string; text: string }[];
+    contactId?: string;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -84,7 +86,13 @@ export class AIOrchestratorService {
       }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData);
+    // Contexto de CRM do cliente (temperatura, histórico de compra) para o atendimento.
+    let profileText = "";
+    if (!isOrchestratorCommand && params.contactId) {
+      profileText = CustomerProfileService.profileLine(params.organizationId, params.contactId);
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -369,7 +377,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = ""): string {
     if (agent === "orchestrator_agent") {
       return `Você é o Zapp, o Agente Orquestrador / Analista de Dados da empresa.
 O usuário enviando esta mensagem é um GESTOR AUTORIZADO (${params.contactName || params.senderId}).
@@ -413,6 +421,9 @@ REGRAS OBRIGATÓRIAS:
 6. Se confirmar o envio ou retirada de um produto físico, pode usar "new_delivery".
 7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
 8. NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi confirmado/registrado, NÃO preencha "new_order" de novo. Apenas dê seguimento (confirmar agendamento, tirar dúvidas, etc.).
+9. INTELIGÊNCIA DE VENDA: adapte o tom ao PERFIL DO CLIENTE abaixo. Lead "frio" → desperte interesse e descubra a necessidade (sem pressão). "Morno" → mostre valor e conduza para a decisão. "Quente"/recorrente → seja ágil e ofereça um item complementar (cross-sell) quando fizer sentido. Use gatilhos de forma natural e honesta (prova social, escassez REAL de estoque, benefício claro) — nunca invente urgência falsa. Para clientes que já compram, reconheça o relacionamento.
+
+${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}

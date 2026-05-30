@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { generateRagResponse } from "./geminiRAG.js";
 import { AIOrchestratorService } from "./AIOrchestratorService.js";
+import { OrdersService } from "./OrdersService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
@@ -150,6 +151,24 @@ export async function processIncomingMessage(
              INSERT INTO deliveries (id, organization_id, ticket_id, contact_id, address)
              VALUES (?, ?, ?, ?, ?)
          `).run(uuidv4(), orgId, ticket.id, contact.id, aiResult.newDelivery.address);
+       }
+
+       // PEDIDO criado pela IA (canal de venda). O servidor valida o estoque de
+       // novo (atômico) e reserva/baixa conforme o interruptor de autonomia.
+       if (aiResult.newOrder && Array.isArray(aiResult.newOrder.items) && aiResult.newOrder.items.length) {
+         try {
+           const order = OrdersService.createOrder(orgId, {
+             contactId: contact.id,
+             ticketId: ticket.id,
+             items: aiResult.newOrder.items,
+             createdBy: 'ai',
+             autoClose: aiResult.newOrder.autoClose,
+           });
+           if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
+           console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
+         } catch (e) {
+           console.error("[Vendas] Falha ao criar pedido da IA (provável estoque insuficiente):", e);
+         }
        }
 
        // Save AI message

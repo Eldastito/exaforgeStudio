@@ -466,20 +466,18 @@ async function startServer() {
         console.log(`[Evolution Webhook] Mensagem de ${senderId} (${pushName || 's/ nome'}): ${incomingMessageText}`);
 
         let contactAvatar = undefined;
-        // Tentar buscar imagem de perfil da Evolution API
+        // Foto de perfil via Evolution GO: POST /user/avatar (a instância vai pelo token).
         if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
            try {
-              const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/chat/fetchProfilePictureUrl/${businessId}`;
+              const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/user/avatar`;
               const picResp = await fetch(picEndpoint, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey, 'instance': businessId },
+                headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey, 'token': evolutionConfig.apiKey, 'instance': businessId },
                 body: JSON.stringify({ number: senderId })
               });
               if (picResp.ok) {
-                 const picData = await picResp.json();
-                 if (picData && picData.picture) {
-                    contactAvatar = picData.picture;
-                 }
+                 const picData: any = await picResp.json();
+                 contactAvatar = picData?.url || picData?.URL || picData?.picture || picData?.profilePictureUrl || picData?.avatar || undefined;
               }
            } catch(e) {}
         }

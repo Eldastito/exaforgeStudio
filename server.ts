@@ -165,12 +165,18 @@ async function startServer() {
       }
       return true;
     }
-    const provided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
+    // Aceita o segredo via header (x-webhook-secret) OU query (?secret=).
+    // Caso "Webhook by Events" da Evolution: ela anexa /EVENTO ao fim da URL,
+    // o que pode corromper o valor do query (ex.: secret=ABC/MESSAGES_UPSERT).
+    // Por isso, normalizamos pegando só o trecho antes de uma eventual barra.
+    const rawProvided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
+    const provided = String(rawProvided).split('/')[0].trim();
     // Comparação em tempo constante para evitar timing attacks.
-    const a = Buffer.from(String(provided));
+    const a = Buffer.from(provided);
     const b = Buffer.from(WEBHOOK_SECRET);
     const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
     if (!ok) {
+      console.warn(`[SECURITY] Webhook rejeitado (segredo ausente/incorreto). path=${req.path}`);
       res.status(401).json({ error: "Unauthorized webhook" });
       return false;
     }

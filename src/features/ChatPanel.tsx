@@ -152,12 +152,17 @@ export function ChatPanel() {
                     <span className="text-[10px] text-zinc-400 bg-zinc-800 px-1.5 py-0.5 rounded">Bot</span>
                   )}
                 </div>
-                <div 
+                <div
                   className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm
-                    ${isContact ? 'bg-zinc-800 text-zinc-100 rounded-tl-sm border border-zinc-700' : 
+                    ${isContact ? 'bg-zinc-800 text-zinc-100 rounded-tl-sm border border-zinc-700' :
                       isBot ? 'bg-zinc-700 text-zinc-100 rounded-tr-sm' : 'bg-primary text-primary-foreground rounded-tr-sm'}`}
                 >
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                  {msg.mediaUrl && (
+                    <a href={msg.mediaUrl} target="_blank" rel="noreferrer">
+                      <img src={msg.mediaUrl} alt="imagem" className="mb-2 max-h-60 w-auto rounded-lg border border-zinc-600/50" />
+                    </a>
+                  )}
+                  {msg.text && <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
                 </div>
               </div>
             );

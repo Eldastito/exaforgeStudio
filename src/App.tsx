@@ -58,10 +58,10 @@ export default function App() {
       socket.emit("join_org", { organizationId: user?.organizationId || "default_org" });
     });
 
-    socket.on("new_message", (data: { contactId: string, contactName?: string, contactNumber?: string, contactAvatar?: string, provider: string, text: string, sender: string }) => {
+    socket.on("new_message", (data: { contactId: string, contactName?: string, contactNumber?: string, contactAvatar?: string, provider: string, text: string, sender: string, mediaUrl?: string }) => {
       console.log("Recebido novo evento via WebSocket:", data);
       // Adiciona na store independentemente se é bot ou user
-      receiveMessage(data.contactId, data.text, data.sender as any, data.contactName, data.contactAvatar, data.contactNumber);
+      receiveMessage(data.contactId, data.text, data.sender as any, data.contactName, data.contactAvatar, data.contactNumber, data.mediaUrl);
     });
 
     socket.on("ticket_stage_change", (data: { contactId: string, newStage: string }) => {

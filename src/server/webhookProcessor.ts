@@ -15,6 +15,7 @@ export async function processIncomingMessage(
     contactName?: string;
     contactAvatar?: string;
     text: string;
+    mediaUrl?: string;
   },
   io: any
 ) {
@@ -89,9 +90,9 @@ export async function processIncomingMessage(
   // 3. Save incoming message
   const msgId = uuidv4();
   db.prepare(`
-    INSERT INTO messages (id, organization_id, ticket_id, sender_type, content)
-    VALUES (?, ?, ?, 'contact', ?)
-  `).run(msgId, orgId, ticket.id, payload.text);
+    INSERT INTO messages (id, organization_id, ticket_id, sender_type, content, media_url)
+    VALUES (?, ?, ?, 'contact', ?, ?)
+  `).run(msgId, orgId, ticket.id, payload.text, payload.mediaUrl || null);
 
   // 4. Emit to Organization Room (Frontend multi-tenant support)
   if (io) {
@@ -104,6 +105,7 @@ export async function processIncomingMessage(
        contactAvatar: contact.profile_pic_url,
        provider: channel.provider,
        text: payload.text,
+       mediaUrl: payload.mediaUrl,
        sender: "contact",
        timestamp: new Date().toISOString()
     };

@@ -12,7 +12,7 @@ router.get("/:ticketId", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const rows = db.prepare(`
-      SELECT id, ticket_id, sender_type, content, created_at
+      SELECT id, ticket_id, sender_type, content, media_url, created_at
       FROM messages
       WHERE ticket_id = ? AND organization_id = ?
       ORDER BY created_at ASC

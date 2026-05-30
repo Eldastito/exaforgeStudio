@@ -70,3 +70,26 @@ export async function transcribeAudio(
   });
   return res.text || "";
 }
+
+/** Descreve/extrai texto (OCR) de uma imagem usando o modelo multimodal (GPT-4o). */
+export async function describeImage(
+  base64: string,
+  mimetype = "image/jpeg",
+  prompt = "Descreva o conteúdo desta imagem em português e extraia qualquer texto visível (OCR). Seja objetivo."
+): Promise<string> {
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0.2,
+    max_tokens: 500,
+  });
+  return res.choices[0]?.message?.content || "";
+}

@@ -504,29 +504,9 @@ async function startServer() {
 
         console.log(`[Evolution Webhook] Mensagem de ${senderId} (${pushName || 's/ nome'}): ${incomingMessageText}`);
 
+        // Foto de perfil: o endpoint /user/avatar do Evolution GO trava (504 após 60s),
+        // então não buscamos (evita latência). O card usa o avatar padrão/inicial.
         let contactAvatar = undefined;
-        // Foto de perfil via Evolution GO: POST /user/avatar (a instância vai pelo token).
-        if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
-           try {
-              const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/user/avatar`;
-              const ctrl = new AbortController();
-              const t = setTimeout(() => ctrl.abort(), 2500); // não bloqueia o fluxo
-              const picResp = await fetch(picEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey, 'token': evolutionConfig.apiKey, 'instance': businessId },
-                body: JSON.stringify({ number: senderId }),
-                signal: ctrl.signal
-              });
-              clearTimeout(t);
-              if (picResp.ok) {
-                 const picData: any = await picResp.json();
-                 console.log("[Avatar] resp:", JSON.stringify(picData).slice(0, 300));
-                 contactAvatar = picData?.url || picData?.URL || picData?.picture || picData?.profilePictureUrl || picData?.avatar || picData?.imgUrl || picData?.profilePicUrl || undefined;
-              } else {
-                 console.warn(`[Avatar] HTTP ${picResp.status}`);
-              }
-           } catch(e) { console.warn("[Avatar] erro:", (e as Error).message); }
-        }
 
         await processIncomingMessage({
            channelId: null, // mapped by identifier 

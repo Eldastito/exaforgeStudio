@@ -52,7 +52,20 @@ export class AIOrchestratorService {
     }
 
     let agentToUse = isOrchestratorCommand ? "orchestrator_agent" : "attendance_agent";
-    
+
+    // GUARDRAIL DE CUSTO (opt-in): se AI_DAILY_LIMIT estiver definido (>0),
+    // limita o nº de respostas automáticas por organização por dia. Sem a env,
+    // o comportamento é EXATAMENTE o de hoje (ilimitado). Ao exceder, em vez de
+    // chamar a OpenAI, transfere para um humano com uma mensagem educada.
+    if (this.dailyLimitReached(params.organizationId)) {
+      return {
+        reply: "No momento estou com um volume alto de atendimentos automáticos. Um de nossos atendentes vai te responder em breve. 🙏",
+        actions: [],
+        newStage: params.ticketStage,
+        needsHuman: true,
+      };
+    }
+
     // 2. Coletar RAG / Knowledge Base e Produtos
     const contextContent = await searchContext(text, params.organizationId, params.channelId, 3);
     const contextText = contextContent.length > 0 ? contextContent.join('\n\n') : "Nenhum documento encontrado na base de RAG.";
@@ -144,6 +157,24 @@ export class AIOrchestratorService {
     "qualificado", "proposta", "aguardando_pagamento", "agendado",
     "em_execucao", "entregue_concluido", "perdido",
   ]);
+
+  /**
+   * Guardrail de custo OPT-IN. Retorna true se a organização já atingiu o
+   * limite diário de respostas automáticas (env AI_DAILY_LIMIT). Sem a env
+   * (ou =0), nunca limita — comportamento idêntico ao atual.
+   */
+  private static dailyLimitReached(orgId: string): boolean {
+    const limit = parseInt(process.env.AI_DAILY_LIMIT || "0", 10);
+    if (!limit || limit <= 0) return false;
+    try {
+      const row = db.prepare(
+        `SELECT count(*) as count FROM ai_interactions_log WHERE organization_id = ? AND date(created_at) = date('now')`
+      ).get(orgId) as any;
+      return (row?.count || 0) >= limit;
+    } catch (e) {
+      return false; // em caso de erro, não bloqueia o atendimento
+    }
+  }
 
   /** Heurística simples de detecção de injeção de prompt. */
   private static isPromptInjection(text: string): boolean {

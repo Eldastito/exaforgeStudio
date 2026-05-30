@@ -35,12 +35,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const storedUser = localStorage.getItem('zappflow_user');
 
     if (storedToken && storedUser) {
-      setToken(storedToken);
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch(e){}
+      // Valida o token no servidor. Se estiver inválido/expirado (ex.: o
+      // JWT_SECRET mudou), limpamos a sessão para não deixar o usuário num
+      // estado "logado mas com 401 em tudo" (Kanban vazio, socket recusado).
+      fetch('/api/auth/me', { headers: { Authorization: `Bearer ${storedToken}` } })
+        .then(res => {
+          if (!res.ok) throw new Error('invalid token');
+          setToken(storedToken);
+          try { setUser(JSON.parse(storedUser)); } catch (e) {}
+        })
+        .catch(() => {
+          localStorage.removeItem('zappflow_token');
+          localStorage.removeItem('zappflow_user');
+          setToken(null);
+          setUser(null);
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const login = (newToken: string, newUser: User) => {

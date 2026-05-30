@@ -36,6 +36,8 @@ type Metrics = {
   aiResponseCount: number;
   averageFirstResponseTime: number;
   resolutionRateAI: number;
+  deltas?: { tickets: number; sales: number; ai: number; appointments: number };
+  series?: { tickets: number[]; ai: number[]; sales: number[]; appointments: number[] };
 };
 
 type TooltipLike = { active?: boolean; payload?: any[]; label?: string | number };
@@ -61,6 +63,20 @@ function ChartTooltip({ active, payload, label, suffix = '' }: TooltipLike & { s
 
 function fmtDate(name: string): string {
   try { return format(new Date(name), 'dd/MM'); } catch { return name; }
+}
+
+// Formata uma duração em segundos de forma legível (ex.: 45s, 2m 5s, 1h 3m).
+function fmtDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return s ? `${m}m ${s}s` : `${m}m`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 export function DashboardPanel() {
@@ -105,6 +121,10 @@ export function DashboardPanel() {
   const sales = m?.salesCount ?? 0;
   const conversion = totalTickets ? Math.round((sales / totalTickets) * 100) : 0;
   const automation = m?.resolutionRateAI ?? 0;
+  const frt = m?.averageFirstResponseTime ?? 0;
+
+  const D = m?.deltas;
+  const S = m?.series;
 
   const area = (m?.chartData ?? []).map(d => ({ name: fmtDate(d.name), tickets: d.tickets }));
   const donut = (m?.channelData ?? []).map((d, i) => ({
@@ -113,7 +133,7 @@ export function DashboardPanel() {
     color: DONUT[i % DONUT.length],
   }));
   const totalContacts = donut.reduce((s, d) => s + d.value, 0);
-  const spark = (a: number[]) => a.map((v, i) => ({ i, v }));
+  const spark = (a?: number[]) => (a ?? []).map((v, i) => ({ i, v }));
 
   return (
     <div className="custom-scroll relative flex-1 overflow-y-auto bg-gradient-to-b from-slate-950 via-slate-950 to-[#0b1020]">
@@ -168,18 +188,18 @@ export function DashboardPanel() {
           <>
             {/* KPI CARDS */}
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-              <KpiCard index={0} title="Total de Tickets" value={totalTickets.toLocaleString('pt-BR')} delta={12.5}
+              <KpiCard index={0} title="Total de Tickets" value={totalTickets.toLocaleString('pt-BR')} delta={D?.tickets ?? 0}
                 caption={`${m?.newLeadsCount ?? 0} novos leads`} icon={<Briefcase className="h-5 w-5" />} accent={C.indigo}
-                series={spark([8, 12, 10, 15, 13, 18, totalTickets + 4])} />
-              <KpiCard index={1} title="Taxa de Conversão" value={`${conversion}%`} delta={8.3}
+                series={spark(S?.tickets)} />
+              <KpiCard index={1} title="Taxa de Conversão" value={`${conversion}%`} delta={D?.sales ?? 0}
                 caption={`${sales} vendas`} icon={<Target className="h-5 w-5" />} accent={C.emerald}
-                series={spark([18, 22, 25, 24, 30, 28, conversion + 5])} />
-              <KpiCard index={2} title="Respostas da IA" value={(m?.aiResponseCount ?? 0).toLocaleString('pt-BR')} delta={15.7}
+                series={spark(S?.sales)} />
+              <KpiCard index={2} title="Respostas da IA" value={(m?.aiResponseCount ?? 0).toLocaleString('pt-BR')} delta={D?.ai ?? 0}
                 caption="Mensagens automáticas" icon={<Bot className="h-5 w-5" />} accent={C.violet}
-                series={spark([20, 28, 33, 35, 40, 38, (m?.aiResponseCount ?? 0) + 2])} />
-              <KpiCard index={3} title="Agendamentos" value={(m?.appointmentCount ?? 0).toLocaleString('pt-BR')} delta={4.0}
+                series={spark(S?.ai)} />
+              <KpiCard index={3} title="Agendamentos" value={(m?.appointmentCount ?? 0).toLocaleString('pt-BR')} delta={D?.appointments ?? 0}
                 caption={`${m?.handoffCount ?? 0} handoffs p/ humano`} icon={<CalendarCheck className="h-5 w-5" />} accent={C.amber}
-                series={spark([2, 3, 5, 4, 6, 5, (m?.appointmentCount ?? 0) + 1])} />
+                series={spark(S?.appointments)} />
             </div>
 
             {/* VOLUME + FUNIL */}
@@ -215,9 +235,15 @@ export function DashboardPanel() {
                   <p className="text-xs text-slate-400">Conversão fim a fim</p>
                   <div className="mt-1 flex items-end gap-2">
                     <span className="text-2xl font-bold text-white">{conversion}%</span>
-                    <span className="mb-1 inline-flex items-center text-xs font-medium text-emerald-400">
-                      <TrendingUp className="h-3.5 w-3.5" /> saudável
-                    </span>
+                    {(D?.sales ?? 0) >= 0 ? (
+                      <span className="mb-1 inline-flex items-center text-xs font-medium text-emerald-400">
+                        <TrendingUp className="h-3.5 w-3.5" /> {(D?.sales ?? 0) > 0 ? `+${D?.sales}% vs período anterior` : 'estável'}
+                      </span>
+                    ) : (
+                      <span className="mb-1 inline-flex items-center text-xs font-medium text-rose-400">
+                        <TrendingDown className="h-3.5 w-3.5" /> {D?.sales}% vs período anterior
+                      </span>
+                    )}
                   </div>
                 </div>
               </Panel>
@@ -282,12 +308,22 @@ export function DashboardPanel() {
               <Panel index={8} title="Tempo de Resposta" subtitle="Primeira resposta (média)" icon={<UserCheck className="h-4 w-4" />}>
                 <div className="flex h-[180px] flex-col items-center justify-center">
                   <span className="bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-5xl font-bold text-transparent">
-                    {m?.averageFirstResponseTime ?? 0}s
+                    {fmtDuration(frt)}
                   </span>
                   <span className="mt-2 text-xs text-slate-500">tempo médio até a 1ª resposta</span>
-                  <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">
-                    <TrendingDown className="h-3 w-3" /> dentro do SLA
-                  </span>
+                  {frt === 0 ? (
+                    <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-slate-500/10 px-2 py-0.5 text-xs font-semibold text-slate-400">
+                      sem dados no período
+                    </span>
+                  ) : frt <= 60 ? (
+                    <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">
+                      <TrendingDown className="h-3 w-3" /> dentro do SLA
+                    </span>
+                  ) : (
+                    <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">
+                      <TrendingUp className="h-3 w-3" /> acima de 1 min
+                    </span>
+                  )}
                 </div>
               </Panel>
             </div>

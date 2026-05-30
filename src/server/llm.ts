@@ -66,6 +66,7 @@ export async function transcribeAudio(
   const res = await getClient().audio.transcriptions.create({
     file,
     model: TRANSCRIBE_MODEL,
+    language: process.env.OPENAI_TRANSCRIBE_LANG || "pt", // melhora a precisão em PT-BR
   });
   return res.text || "";
 }

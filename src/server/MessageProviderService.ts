@@ -70,13 +70,14 @@ export class MessageProviderService {
            delay: 1200
         };
 
-        console.log(`[MessageProvider] POST ${endpoint} (number=${recipientIdentifier})`);
+        console.log(`[MessageProvider] POST ${endpoint} (number=${recipientIdentifier}, tokenLen=${token.length})`);
         const response = await fetch(endpoint, {
            method: 'POST',
            headers: {
              'Content-Type': 'application/json',
              'apikey': token,
              'token': token,
+             'Authorization': `Bearer ${token}`,
              'instance': instanceName
            },
            body: JSON.stringify(sendData)

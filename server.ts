@@ -448,9 +448,21 @@ async function startServer() {
         console.log("[Evolution Webhook] data(trunc):", JSON.stringify(data).slice(0, 900));
 
         let incomingMessageText = extractEvolutionText(msgObj);
-        // Mensagem de áudio (PTT/voz): transcreve via Whisper.
+        // Mensagem de áudio (PTT/voz): o Evolution GO já envia o base64 no webhook.
         if (!incomingMessageText && (msgObj.audioMessage || msgObj.AudioMessage || msgObj.pttMessage)) {
-          incomingMessageText = await transcribeEvolutionAudio(payload, evolutionConfig);
+          const audioB64 = msgObj.base64 || data.base64 || "";
+          if (audioB64) {
+            try {
+              const buffer = Buffer.from(audioB64, 'base64');
+              incomingMessageText = await transcribeAudio(buffer, 'audio.ogg', 'audio/ogg');
+              console.log(`[Audio] Transcrição: ${incomingMessageText.slice(0, 80)}`);
+            } catch (e) {
+              console.error("[Audio] Falha ao transcrever (base64 inline):", e);
+            }
+          } else {
+            // Fallback: tenta baixar da API (formatos antigos)
+            incomingMessageText = await transcribeEvolutionAudio(payload, evolutionConfig);
+          }
         }
 
         const rawJid = info.Sender || info.sender || info.Chat || info.chat || info.RemoteJid || data.key?.remoteJid || "";

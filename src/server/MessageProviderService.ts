@@ -61,7 +61,8 @@ export class MessageProviderService {
         const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
         const instanceName = channel.identifier;
 
-        const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}${process.env.EVOLUTION_SEND_PATH || '/message/sendText'}/${instanceName}`;
+        // Evolution GO: endpoint é /send/text (a instância vem pelo token no header, não na URL)
+        const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}${process.env.EVOLUTION_SEND_PATH || '/send/text'}`;
         // Evolution GO usa corpo plano: { number, text, delay }
         const sendData = {
            number: recipientIdentifier,
@@ -69,7 +70,7 @@ export class MessageProviderService {
            delay: 1200
         };
 
-        console.log(`[MessageProvider] POST ${endpoint}`);
+        console.log(`[MessageProvider] POST ${endpoint} (number=${recipientIdentifier})`);
         const response = await fetch(endpoint, {
            method: 'POST',
            headers: {

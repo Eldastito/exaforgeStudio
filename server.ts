@@ -766,27 +766,32 @@ async function startServer() {
   io.use((socket, next) => {
     try {
       const token = socket.handshake.auth?.token
+        || (socket.handshake.query?.token as string)
         || (socket.handshake.headers?.authorization as string || '').split(' ')[1];
-      if (!token) return next(new Error("unauthorized"));
+      if (!token) {
+        console.warn(`[Socket] Conexão sem token recusada (${socket.id}).`);
+        return next(new Error("unauthorized"));
+      }
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       (socket as any).organizationId = decoded.organizationId;
       (socket as any).userId = decoded.userId;
       return next();
     } catch (e) {
+      console.warn(`[Socket] Token inválido recusado (${socket.id}). Faça login novamente.`);
       return next(new Error("unauthorized"));
     }
   });
 
   io.on("connection", (socket) => {
     const orgId = (socket as any).organizationId;
-    console.log("Client connected:", socket.id, "org:", orgId);
+    console.log(`[Socket] Conectado ${socket.id} (org: ${orgId})`);
 
     // O usuário só pode entrar na sala da PRÓPRIA organização (do token),
     // ignorando qualquer organizationId enviado pelo cliente.
     socket.on("join_org", () => {
        if (orgId) {
           socket.join(`org:${orgId}`);
-          console.log(`Socket ${socket.id} joined org ${orgId}`);
+          console.log(`[Socket] ${socket.id} entrou em org:${orgId}`);
        }
     });
 

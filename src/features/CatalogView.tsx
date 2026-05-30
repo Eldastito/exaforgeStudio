@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Plus, X } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
+import { apiFetch } from '@/src/lib/api';
 
 export function CatalogView() {
   const [products, setProducts] = useState<any[]>([]);
@@ -8,9 +9,9 @@ export function CatalogView() {
   const [form, setForm] = useState({ type: 'product', name: '', description: '', price: '0', stock_control_enabled: false });
 
   const loadProducts = () => {
-    fetch('/api/products')
+    apiFetch('/api/products')
       .then(r => r.json())
-      .then(data => setProducts(data || []))
+      .then(data => setProducts(Array.isArray(data) ? data : []))
       .catch(console.error);
   };
 
@@ -21,7 +22,7 @@ export function CatalogView() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/products', {
+      await apiFetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, price: parseFloat(form.price) })

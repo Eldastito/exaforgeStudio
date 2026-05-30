@@ -103,6 +103,19 @@ const initDb = () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Chunks vetorizados (RAG) persistidos com o embedding em JSON.
+    -- Antes os vetores ficavam só em memória e eram perdidos a cada redeploy.
+    CREATE TABLE IF NOT EXISTS knowledge_chunks (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      channel_id TEXT DEFAULT 'global',
+      chunk_index INTEGER DEFAULT 0,
+      content TEXT NOT NULL,
+      embedding TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS ai_interactions_log (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,
@@ -352,6 +365,11 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reactivated_at DATETIME`); } catch(e){}
   // Mídia (imagem/etc) anexada a uma mensagem
   try { db.exec(`ALTER TABLE messages ADD COLUMN media_url TEXT`); } catch(e){}
+  // Metadados da base de conhecimento (RAG)
+  try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN channel_id TEXT DEFAULT 'global'`); } catch(e){}
+  try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN size_bytes INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_org ON knowledge_chunks(organization_id)`); } catch(e){}
 };
 
 initDb();

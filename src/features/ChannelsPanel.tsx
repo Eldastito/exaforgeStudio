@@ -5,11 +5,12 @@ import { Button } from '@/src/components/ui/button';
 import { Badge } from '@/src/components/ui/badge';
 import { format } from 'date-fns';
 import io from 'socket.io-client';
+import { apiFetch } from '@/src/lib/api';
 
 let socketInstance: any = null;
 
 export function ChannelsPanel() {
-  const { channels, connectInstagram, ragDocuments, addRagDocument, fetchChannels, updateChannel } = useStore();
+  const { channels, connectInstagram, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel } = useStore();
   const [isConnecting, setIsConnecting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -18,11 +19,12 @@ export function ChannelsPanel() {
   
   useEffect(() => {
     fetchChannels();
+    loadRagDocuments();
     // Setup socket
     if (!socketInstance) {
        socketInstance = io();
     }
-    
+
     return () => {
     };
   }, []);
@@ -40,29 +42,51 @@ export function ChannelsPanel() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // First add UI optimistic
-      addRagDocument({
-        name: file.name,
-        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-        channelId: 'global'
+    if (!file) return;
+
+    // Adiciona de forma otimista (status "processando")
+    const tempId = addRagDocument({
+      name: file.name,
+      size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+      channelId: 'global'
+    });
+
+    const formData = new FormData();
+    formData.append('document', file);
+    formData.append('channelId', 'global');
+
+    try {
+      const response = await apiFetch('/api/rag/upload', {
+        method: 'POST',
+        body: formData,
       });
-
-      // Then do real upload
-      const formData = new FormData();
-      formData.append('document', file);
-      formData.append('channelId', 'global');
-
-      try {
-        const response = await fetch('/api/rag/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await response.json();
-        console.log('RAG Upload response:', data);
-      } catch (error) {
-        console.error('RAG Upload failed:', error);
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setRagDocumentStatus(tempId, 'ready', { id: data.documentId || tempId });
+        // Recarrega a lista real do servidor (mantém ids/contagens corretos)
+        loadRagDocuments();
+      } else {
+        console.error('RAG Upload failed:', data?.error);
+        setRagDocumentStatus(tempId, 'error');
       }
+    } catch (error) {
+      console.error('RAG Upload failed:', error);
+      setRagDocumentStatus(tempId, 'error');
+    } finally {
+      // Permite reenviar o mesmo arquivo
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+    // remoção otimista
+    removeRagDocument(id);
+    try {
+      await apiFetch(`/api/rag/documents/${id}`, { method: 'DELETE' });
+    } catch (error) {
+      console.error('RAG delete failed:', error);
+    } finally {
+      loadRagDocuments();
     }
   };
 
@@ -417,20 +441,20 @@ export function ChannelsPanel() {
             </div>
             
             <div className="p-6">
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept=".pdf,.txt,.csv"
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".txt,.csv,.md,.json"
                 onChange={handleFileUpload}
               />
-              <div 
+              <div
                 onClick={() => fileInputRef.current?.click()}
                 className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-xl bg-slate-950/30 hover:bg-slate-800/30 transition-colors cursor-pointer py-10 mb-6"
               >
                  <UploadCloud className="w-10 h-10 text-slate-500 mb-4" />
-                 <p className="text-sm text-slate-300 font-medium">Arraste seus PDFs ou TXTs para cá</p>
-                 <p className="text-xs text-slate-500 mt-1">Arquivos processados são vetorizados automaticamente em tempo real.</p>
+                 <p className="text-sm text-slate-300 font-medium">Arraste seus arquivos de texto (.txt, .csv, .md) para cá</p>
+                 <p className="text-xs text-slate-500 mt-1">Os documentos são vetorizados automaticamente e usados pela IA no atendimento.</p>
                  <Button variant="outline" className="mt-6 border-slate-700 text-slate-300 bg-slate-900 hover:text-white" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
                    Selecionar Arquivos
                  </Button>
@@ -470,7 +494,7 @@ export function ChannelsPanel() {
                             <X className="w-3 h-3 mr-1" /> Erro
                           </div>
                         )}
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-400/10">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-400/10" onClick={() => handleDeleteDocument(doc.id)}>
                           <X className="h-4 w-4" />
                         </Button>
                       </div>

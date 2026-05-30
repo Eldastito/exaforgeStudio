@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
-
-const JWT_SECRET = process.env.JWT_SECRET || 'zappflow_secret_key_123';
+import { JWT_SECRET, MASTER_ADMIN_EMAIL } from "../config/secret.js";
 
 export interface AuthRequest extends Request {
   user?: any;
@@ -50,7 +49,7 @@ export const requireOrganizationAccess = (req: AuthRequest, res: Response, next:
 };
 
 export const requireMasterAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (!req.user || req.user.email !== 'eldastito@gmail.com') { // Basic check for master admin for now
+  if (!req.user || req.user.email !== MASTER_ADMIN_EMAIL) {
      return res.status(403).json({ error: "Forbidden: Master Admin Access Required" });
   }
   next();

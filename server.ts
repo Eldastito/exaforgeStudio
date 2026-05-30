@@ -23,7 +23,10 @@ import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { transcribeAudio, describeImage } from "./src/server/llm.js";
+import { JWT_SECRET } from "./src/server/config/secret.js";
 import fs from "fs";
 
 // Diretório onde as mídias (imagens) recebidas são salvas (volume persistente /data).
@@ -148,6 +151,43 @@ async function startServer() {
      next();
   });
 
+  // --- Verificação de autenticidade do webhook (C3/W1) ---
+  // Se WEBHOOK_SECRET estiver definido, exige que o provedor inclua o segredo
+  // (header x-webhook-secret OU query ?secret=). Sem a env, apenas avisa — assim
+  // o deploy ao vivo não quebra antes de você configurar a Evolution.
+  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+  let warnedNoWebhookSecret = false;
+  const verifyWebhookSecret = (req: express.Request, res: express.Response): boolean => {
+    if (!WEBHOOK_SECRET) {
+      if (!warnedNoWebhookSecret) {
+        console.warn("[SECURITY] WEBHOOK_SECRET não configurado: o webhook está aberto. Defina a env e adicione ?secret=... na URL do webhook na Evolution.");
+        warnedNoWebhookSecret = true;
+      }
+      return true;
+    }
+    const provided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
+    // Comparação em tempo constante para evitar timing attacks.
+    const a = Buffer.from(String(provided));
+    const b = Buffer.from(WEBHOOK_SECRET);
+    const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+    if (!ok) {
+      res.status(401).json({ error: "Unauthorized webhook" });
+      return false;
+    }
+    return true;
+  };
+
+  // --- Rate limit simples por chave (em memória), reutilizável ---
+  const buckets = new Map<string, { count: number; resetTime: number }>();
+  const rateLimit = (key: string, max: number, windowMs: number): boolean => {
+    const now = Date.now();
+    let b = buckets.get(key);
+    if (!b || now > b.resetTime) { b = { count: 0, resetTime: now + windowMs }; }
+    b.count++;
+    buckets.set(key, b);
+    return b.count <= max;
+  };
+
   // --- Ensure Default Org Exists ---
   const ensureDefaultOrg = () => {
     const existing = db.prepare('SELECT id FROM organization_settings WHERE organization_id = ?').get('default_org');
@@ -161,18 +201,34 @@ async function startServer() {
   ensureDefaultOrg();
 
   // --- Ensure Master Admin Exists ---
+  // A senha NUNCA é hardcoded. Vem de MASTER_ADMIN_PASSWORD (env). Se a env
+  // estiver definida, também ATUALIZA a senha do admin existente — assim é
+  // possível rotacionar a senha antiga (que estava exposta no código/histórico).
   const ensureMasterAdmin = async () => {
-    const email = 'eldastito@gmail.com';
-    const existingAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    const email = process.env.MASTER_ADMIN_EMAIL || 'eldastito@gmail.com';
+    const envPassword = process.env.MASTER_ADMIN_PASSWORD;
+    const saltRounds = 10;
+    const existingAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
+
     if (!existingAdmin) {
-       const saltRounds = 10;
-       const passwordHash = await bcrypt.hash('Alice2020@', saltRounds);
-       const userId = uuidv4();
+       // Sem env: gera uma senha aleatória forte e a exibe UMA vez no log,
+       // para não criar a conta com uma senha previsível.
+       const password = envPassword || crypto.randomBytes(12).toString('base64url');
+       const passwordHash = await bcrypt.hash(password, saltRounds);
        db.prepare(`
          INSERT INTO users (id, organization_id, name, email, password_hash, role)
          VALUES (?, 'default_org', 'Eldas Tito', ?, ?, 'owner')
-       `).run(userId, email, passwordHash);
-       console.log('Master admin created: ' + email);
+       `).run(uuidv4(), email, passwordHash);
+       if (envPassword) {
+         console.log('Master admin criado: ' + email);
+       } else {
+         console.warn(`[SECURITY] Master admin criado com senha aleatória (defina MASTER_ADMIN_PASSWORD): ${email} / ${password}`);
+       }
+    } else if (envPassword) {
+       // Rotaciona a senha do admin para a definida na env (corrige a senha vazada).
+       const passwordHash = await bcrypt.hash(envPassword, saltRounds);
+       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, existingAdmin.id);
+       console.log('[SECURITY] Senha do master admin atualizada a partir de MASTER_ADMIN_PASSWORD.');
     }
   };
   await ensureMasterAdmin();
@@ -448,6 +504,12 @@ async function startServer() {
     "/api/webhooks/evolutiongo/:event",
   ], async (req, res) => {
     try {
+      // Autenticidade + anti-abuso/custo (W1/M3)
+      if (!verifyWebhookSecret(req, res)) return;
+      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
+      if (!rateLimit(`wh:${ip}`, 120, 60 * 1000)) {
+        return res.status(429).json({ error: "Too many webhook requests" });
+      }
       const payload = req.body;
       const rawEvent = payload.event ?? req.params.event;
       console.log(`[Evolution Webhook] Recebido Evento: ${rawEvent} (path: ${req.path})`);
@@ -595,8 +657,9 @@ async function startServer() {
   // RECEBIMENTO DE EVENTOS (POST)
   app.post("/api/webhooks/meta", async (req, res) => {
     try {
+      if (!verifyWebhookSecret(req, res)) return;
       const payload = req.body;
-      
+
       // Validação rápida do formato padrão do Graph API
       if (payload.object !== "whatsapp_business_account" && payload.object !== "instagram" && payload.object !== "page") {
          return res.sendStatus(404);
@@ -684,23 +747,48 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
+  // CORS travado para a origem do app (em prod). "*" só em dev.
+  const socketOrigin = process.env.NODE_ENV === 'production'
+    ? (process.env.CORS_ORIGIN || process.env.APP_URL || true)
+    : "*";
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: "*" }
+    cors: { origin: socketOrigin as any, credentials: true }
+  });
+
+  // Autenticação do socket: exige um JWT válido no handshake. Anexa o org do
+  // token ao socket; o cliente NÃO escolhe em qual organização entra.
+  io.use((socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token
+        || (socket.handshake.headers?.authorization as string || '').split(' ')[1];
+      if (!token) return next(new Error("unauthorized"));
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      (socket as any).organizationId = decoded.organizationId;
+      (socket as any).userId = decoded.userId;
+      return next();
+    } catch (e) {
+      return next(new Error("unauthorized"));
+    }
   });
 
   io.on("connection", (socket) => {
-    console.log("Client connected:", socket.id);
-    
-    socket.on("join_org", (data: { organizationId: string }) => {
-       if (data.organizationId) {
-          socket.join(`org:${data.organizationId}`);
-          console.log(`Socket ${socket.id} joined org ${data.organizationId}`);
+    const orgId = (socket as any).organizationId;
+    console.log("Client connected:", socket.id, "org:", orgId);
+
+    // O usuário só pode entrar na sala da PRÓPRIA organização (do token),
+    // ignorando qualquer organizationId enviado pelo cliente.
+    socket.on("join_org", () => {
+       if (orgId) {
+          socket.join(`org:${orgId}`);
+          console.log(`Socket ${socket.id} joined org ${orgId}`);
        }
     });
 
     socket.on("join_ticket", (data: { ticketId: string }) => {
-       if (data.ticketId) {
-          socket.join(`ticket:${data.ticketId}`);
+       // Só permite ouvir um ticket que pertença à organização do token.
+       if (data?.ticketId && orgId) {
+          const t = db.prepare('SELECT id FROM tickets WHERE id = ? AND organization_id = ?').get(data.ticketId, orgId);
+          if (t) socket.join(`ticket:${data.ticketId}`);
        }
     });
   });

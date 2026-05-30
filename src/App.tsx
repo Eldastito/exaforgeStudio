@@ -50,12 +50,14 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Conectar ao Socket.IO do backend
-    const socket = io(window.location.origin);
-    
+    if (!token) return;
+    // Conectar ao Socket.IO do backend (autenticado via JWT no handshake)
+    const socket = io(window.location.origin, { auth: { token } });
+
     socket.on("connect", () => {
       console.log("Conectado ao servidor via WebSocket", socket.id);
-      socket.emit("join_org", { organizationId: user?.organizationId || "default_org" });
+      // O servidor decide a organização a partir do token; não enviamos o id.
+      socket.emit("join_org");
     });
 
     socket.on("new_message", (data: { contactId: string, contactName?: string, contactNumber?: string, contactAvatar?: string, provider: string, text: string, sender: string, mediaUrl?: string }) => {
@@ -100,7 +102,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [receiveMessage, updateStageByContactId, user?.organizationId]);
+  }, [token, receiveMessage, updateStageByContactId]);
 
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Carregando...</div>;
   if (!user) return <LoginView />;

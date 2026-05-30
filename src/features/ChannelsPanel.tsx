@@ -4,10 +4,7 @@ import { Smartphone, Instagram, AlertCircle, CheckCircle2, RefreshCw, UploadClou
 import { Button } from '@/src/components/ui/button';
 import { Badge } from '@/src/components/ui/badge';
 import { format } from 'date-fns';
-import io from 'socket.io-client';
 import { apiFetch } from '@/src/lib/api';
-
-let socketInstance: any = null;
 
 export function ChannelsPanel() {
   const { channels, connectInstagram, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel } = useStore();
@@ -20,13 +17,6 @@ export function ChannelsPanel() {
   useEffect(() => {
     fetchChannels();
     loadRagDocuments();
-    // Setup socket
-    if (!socketInstance) {
-       socketInstance = io();
-    }
-
-    return () => {
-    };
   }, []);
 
   const whatsappCloud = channels.find(c => c.provider === 'whatsapp_cloud');

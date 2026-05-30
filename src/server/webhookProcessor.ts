@@ -99,6 +99,13 @@ export async function processIncomingMessage(
   // CRM: registra o último contato e recalcula a temperatura do lead.
   CustomerProfileService.touchContact(contact.id);
 
+  // Opt-out de campanhas: se o cliente pedir para sair, marca e NÃO recebe mais
+  // mensagens ativas (obrigatório para não ser marcado como spam).
+  const optOutText = (payload.text || '').trim().toLowerCase();
+  if (/^(sair|parar|pare|cancelar|descadastrar|stop|remover|nao quero|não quero)\b/.test(optOutText)) {
+    try { db.prepare('UPDATE contacts SET marketing_opt_out = 1 WHERE id = ?').run(contact.id); } catch(e){}
+  }
+
   // 4. Emit to Organization Room (Frontend multi-tenant support)
   if (io) {
     const msgPayload = {

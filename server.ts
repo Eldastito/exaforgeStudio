@@ -20,6 +20,7 @@ import managersRoutes from "./src/server/routes/managers.js";
 import aiRoutes from "./src/server/routes/ai.js";
 import ordersRoutes from "./src/server/routes/orders.js";
 import contactsRoutes from "./src/server/routes/contacts.js";
+import campaignsRoutes from "./src/server/routes/campaigns.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
@@ -280,6 +281,7 @@ async function startServer() {
   protectedApi.use("/products", productsRoutes);
   protectedApi.use("/orders", ordersRoutes);
   protectedApi.use("/contacts", contactsRoutes);
+  protectedApi.use("/campaigns", campaignsRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
   protectedApi.use("/analytics", analyticsRoutes);

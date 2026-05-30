@@ -423,6 +423,43 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN tags TEXT`); } catch(e){} // CSV de tags
   try { db.exec(`ALTER TABLE contacts ADD COLUMN notes TEXT`); } catch(e){} // anotações/biografia do cliente
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contacts_org ON contacts(organization_id)`); } catch(e){}
+  // Opt-out de mensagens ativas (campanhas) — respeitar quem pediu para não receber.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN marketing_opt_out INTEGER DEFAULT 0`); } catch(e){}
+
+  // ===== Campanhas / Outbound (mensagem ativa) =====
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        segment TEXT,            -- json: { temperature?, tag?, inactiveDays?, topBuyers? }
+        status TEXT DEFAULT 'draft', -- draft | running | paused | completed | cancelled
+        channel_id TEXT,
+        total_targets INTEGER DEFAULT 0,
+        sent_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        started_at DATETIME,
+        completed_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS campaign_recipients (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        identifier TEXT NOT NULL,
+        status TEXT DEFAULT 'pending', -- pending | sent | failed | skipped
+        error TEXT,
+        sent_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_campaign_recipients ON campaign_recipients(campaign_id, status);
+      CREATE INDEX IF NOT EXISTS idx_campaigns_org ON campaigns(organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de campanhas', e); }
 };
 
 initDb();

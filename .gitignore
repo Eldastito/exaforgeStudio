@@ -15,3 +15,6 @@ zappflow.db-wal
 # Sessão/credenciais do WhatsApp Web (NUNCA versionar)
 .wwebjs_auth/
 .wwebjs_cache/
+
+# Mídias recebidas (runtime)
+media/

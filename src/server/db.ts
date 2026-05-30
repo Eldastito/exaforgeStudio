@@ -350,6 +350,8 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN blocked_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN blocked_by TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reactivated_at DATETIME`); } catch(e){}
+  // Mídia (imagem/etc) anexada a uma mensagem
+  try { db.exec(`ALTER TABLE messages ADD COLUMN media_url TEXT`); } catch(e){}
 };
 
 initDb();

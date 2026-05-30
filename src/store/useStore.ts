@@ -14,6 +14,7 @@ export type Message = {
   sender: 'human' | 'bot' | 'contact';
   timestamp: string;
   read?: boolean;
+  mediaUrl?: string;
 };
 
 export type Stage = 
@@ -90,7 +91,7 @@ type AppState = {
   closeTicket: (ticketId: string, reason: string, status: 'entregue_concluido' | 'perdido') => Promise<void>;
   sendMessage: (ticketId: string, text: string, sender?: 'human' | 'bot') => void;
   toggleAiPaused: (ticketId: string) => Promise<void>;
-  receiveMessage: (contactId: string, text: string, sender?: 'contact' | 'bot' | 'human', contactName?: string, contactAvatar?: string, contactNumber?: string) => void;
+  receiveMessage: (contactId: string, text: string, sender?: 'contact' | 'bot' | 'human', contactName?: string, contactAvatar?: string, contactNumber?: string, mediaUrl?: string) => void;
   fetchChannels: () => Promise<void>;
   updateChannel: (id: string, updates: Partial<ChannelInfo>) => Promise<void>;
   connectInstagram: () => void;
@@ -256,6 +257,7 @@ export const useStore = create<AppState>((set, get) => ({
         text: m.content,
         sender: m.sender_type === 'agent' ? 'human' : (m.sender_type as 'contact' | 'bot' | 'human'),
         timestamp: m.created_at,
+        mediaUrl: m.media_url || undefined,
       }));
       set((s) => ({ messages: { ...s.messages, [ticketId]: msgs } }));
     } catch (e) {
@@ -424,7 +426,7 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
 
-  receiveMessage: (contactId, text, sender = 'contact', contactName, contactAvatar, contactNumber) => set((state) => {
+  receiveMessage: (contactId, text, sender = 'contact', contactName, contactAvatar, contactNumber, mediaUrl) => set((state) => {
     // Check if contact exists, if not create it
     let newContacts = { ...state.contacts };
     const existingContact = newContacts[contactId];
@@ -463,7 +465,8 @@ export const useStore = create<AppState>((set, get) => ({
       contactId,
       text,
       sender: sender as 'contact' | 'bot' | 'human',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      mediaUrl,
     };
 
     return {

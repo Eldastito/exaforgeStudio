@@ -26,6 +26,23 @@ import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
 import { transcribeAudio, describeImage } from "./src/server/llm.js";
+import fs from "fs";
+
+// Diretório onde as mídias (imagens) recebidas são salvas (volume persistente /data).
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), 'media');
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) {}
+
+// Salva um base64 como arquivo e retorna a URL pública (/media/<arquivo>).
+function saveMediaBase64(base64: string, ext = 'jpg'): string | null {
+  try {
+    const name = `${uuidv4()}.${ext}`;
+    fs.writeFileSync(path.join(MEDIA_DIR, name), Buffer.from(base64, 'base64'));
+    return `/media/${name}`;
+  } catch (e) {
+    console.error("[Media] Falha ao salvar arquivo:", e);
+    return null;
+  }
+}
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -166,6 +183,9 @@ async function startServer() {
 
   // Middleware for parsing JSON with limit blocker
   app.use(express.json({ limit: '2mb' }));
+
+  // Servir mídias recebidas (imagens) — rota pública, fora do /api protegido.
+  app.use('/media', express.static(MEDIA_DIR));
 
   // Financial Block Middleware (for API routes)
   app.use("/api", (req, res, next) => {
@@ -465,21 +485,27 @@ async function startServer() {
           }
         }
 
+        // URL da mídia (imagem) para renderizar no chat.
+        let incomingMediaUrl: string | undefined = undefined;
+
         // Outras mídias sem legenda: registra um placeholder para aparecer no app.
         if (!incomingMessageText) {
           if (msgObj.imageMessage || msgObj.ImageMessage) {
-            // Visão/OCR: usa o base64 da imagem para a IA entender o conteúdo.
             const imgB64 = msgObj.base64 || data.base64 || "";
             const caption = msgObj.imageMessage?.caption || msgObj.ImageMessage?.caption || "";
             if (imgB64) {
+              // Salva a imagem para exibir a miniatura no chat.
+              const mime = msgObj.imageMessage?.mimetype || msgObj.ImageMessage?.mimetype || "image/jpeg";
+              const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+              incomingMediaUrl = saveMediaBase64(imgB64, ext) || undefined;
+              // Visão/OCR: a IA entende o conteúdo da imagem.
               try {
-                const mime = msgObj.imageMessage?.mimetype || msgObj.ImageMessage?.mimetype || "image/jpeg";
                 const desc = await describeImage(imgB64, mime);
                 console.log(`[Vision] Imagem analisada: ${desc.slice(0, 80)}`);
-                incomingMessageText = `📷 [Imagem]${caption ? ` (legenda: ${caption})` : ''}\nConteúdo da imagem: ${desc}`;
+                incomingMessageText = caption ? `${caption}\n\n[Conteúdo da imagem: ${desc}]` : `[Imagem] ${desc}`;
               } catch (e) {
                 console.error("[Vision] Falha ao analisar imagem:", e);
-                incomingMessageText = caption ? `📷 [Imagem] ${caption}` : "📷 [Imagem recebida]";
+                incomingMessageText = caption || "📷 [Imagem recebida]";
               }
             } else {
               incomingMessageText = caption ? `📷 [Imagem] ${caption}` : "📷 [Imagem recebida]";
@@ -516,7 +542,8 @@ async function startServer() {
            senderId: senderId,
            contactName: pushName,
            contactAvatar: contactAvatar,
-           text: incomingMessageText
+           text: incomingMessageText,
+           mediaUrl: incomingMediaUrl
         }, (global as any).io);
         
       } else if (normalizedEvent === "connection.update") {

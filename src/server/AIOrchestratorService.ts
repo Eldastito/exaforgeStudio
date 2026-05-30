@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { searchContext } from "./geminiRAG.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { BusinessContextService } from "./BusinessContextService.js";
+import { CampaignService } from "./CampaignService.js";
 import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { chat } from "./llm.js";
@@ -35,6 +36,28 @@ export class AIOrchestratorService {
     // comum pelo agente de atendimento.
     if (isManager && text.toLowerCase().startsWith("zapp")) {
       isOrchestratorCommand = true;
+    }
+
+    // CONFIRMAÇÃO de ação pendente (Zapp dispara campanha com confirmação):
+    // se um gestor tem uma ação aguardando "SIM", a resposta dele resolve a ação,
+    // mesmo sem o prefixo "zapp".
+    if (isManager) {
+      const pending = this.getPendingAction(params.organizationId, params.senderId);
+      if (pending) {
+        const t = text.toLowerCase();
+        const confirmed = /^(sim|confirmo|confirmar|pode|pode enviar|manda|envia|ok|isso|👍)\b/.test(t);
+        const denied = /^(n[ãa]o|cancela|cancelar|para|pare|deixa)\b/.test(t);
+        if (confirmed) {
+          const reply = await this.executePendingAction(params.organizationId, params.senderId, pending);
+          return { reply, actions: [], needsHuman: false };
+        }
+        if (denied) {
+          this.clearPendingAction(pending.id);
+          return { reply: "Tudo bem, cancelei. 👍 Se quiser, é só pedir de novo quando estiver pronto.", actions: [], needsHuman: false };
+        }
+        // Resposta ambígua: mantém a ação e pede confirmação explícita.
+        return { reply: "Você tem uma campanha aguardando confirmação. Responda *SIM* para enviar ou *NÃO* para cancelar.", actions: [], needsHuman: false };
+      }
     }
 
     // Guarda anti-injeção de prompt: no canal admin (Orquestrador), uma tentativa de
@@ -133,8 +156,26 @@ export class AIOrchestratorService {
     // executar qualquer ação que altere os dados do negócio — só responde texto.
     // Isso impede que uma injeção de prompt num comando de gestor cause mutações.
     if (isOrchestratorCommand) {
+      let reply = resultJSON.reply || "Não foi possível gerar a resposta.";
+      // Se o Zapp propôs uma campanha, NÃO dispara: guarda como ação pendente e
+      // pede confirmação explícita (trava de segurança contra disparo indevido).
+      const ci = resultJSON.campaign_intent;
+      if (ci && typeof ci === 'object' && ci.message) {
+        const segment = this.normalizeSegment(ci.segment);
+        const preview = CampaignService.resolveSegment(params.organizationId, segment);
+        if (preview.length === 0) {
+          reply = "Não encontrei contatos nesse público no momento. Quer tentar outro público (ex.: inativos há 30 dias)?";
+        } else {
+          this.savePendingAction(params.organizationId, params.senderId, 'create_campaign', {
+            name: ci.name || `Campanha Zapp ${new Date().toLocaleDateString('pt-BR')}`,
+            message: ci.message,
+            segment,
+          });
+          reply = `${reply}\n\n📣 *Pronto para enviar* para *${preview.length} contato(s)*.\nMensagem: "${ci.message}"\n\nResponda *SIM* para disparar ou *NÃO* para cancelar.`;
+        }
+      }
       return {
-        reply: resultJSON.reply || "Não foi possível gerar a resposta.",
+        reply,
         actions: [],
         newStage: params.ticketStage, // mantém o estágio atual (sem alteração)
         needsHuman: false,
@@ -344,6 +385,65 @@ export class AIOrchestratorService {
     ).get(orgId, ...variants) as any;
   }
 
+  // ---- Ações pendentes do gestor (Zapp dispara com confirmação) ----
+
+  /** Normaliza o segmento sugerido pela IA para o formato do CampaignService. */
+  private static normalizeSegment(seg: any): any {
+    if (!seg || typeof seg !== 'object') return {};
+    const out: any = {};
+    if (['quente', 'morno', 'frio'].includes(seg.temperature)) out.temperature = seg.temperature;
+    if (seg.tag && typeof seg.tag === 'string') out.tag = seg.tag.slice(0, 40);
+    const inactive = parseInt(String(seg.inactiveDays), 10);
+    if (inactive > 0) out.inactiveDays = inactive;
+    const top = parseInt(String(seg.topBuyers), 10);
+    if (top > 0) out.topBuyers = Math.min(top, 100);
+    return out;
+  }
+
+  private static getPendingAction(orgId: string, identifier: string): any {
+    try {
+      return db.prepare(`SELECT * FROM pending_manager_actions WHERE organization_id = ? AND identifier = ? ORDER BY created_at DESC LIMIT 1`).get(orgId, identifier);
+    } catch (e) { return null; }
+  }
+
+  private static savePendingAction(orgId: string, identifier: string, type: string, payload: any) {
+    try {
+      // Substitui qualquer pendência anterior do mesmo gestor.
+      db.prepare(`DELETE FROM pending_manager_actions WHERE organization_id = ? AND identifier = ?`).run(orgId, identifier);
+      db.prepare(`INSERT INTO pending_manager_actions (id, organization_id, identifier, action_type, payload_json, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now','+1 hour'))`)
+        .run(uuidv4(), orgId, identifier, type, JSON.stringify(payload));
+    } catch (e) { /* noop */ }
+  }
+
+  private static clearPendingAction(id: string) {
+    try { db.prepare(`DELETE FROM pending_manager_actions WHERE id = ?`).run(id); } catch (e) { /* noop */ }
+  }
+
+  /** Executa a ação confirmada pelo gestor. Hoje: criar e disparar campanha. */
+  private static async executePendingAction(orgId: string, identifier: string, pending: any): Promise<string> {
+    this.clearPendingAction(pending.id);
+    // Expiração de segurança (1h).
+    if (pending.expires_at && new Date(pending.expires_at).getTime() < Date.now()) {
+      return "Essa solicitação expirou. Pode pedir de novo que eu preparo na hora. 🙂";
+    }
+    let payload: any = {};
+    try { payload = JSON.parse(pending.payload_json); } catch (e) { return "Não consegui recuperar os detalhes da campanha. Pode pedir de novo?"; }
+
+    if (pending.action_type === 'create_campaign') {
+      try {
+        const created = CampaignService.createCampaign(orgId, {
+          name: payload.name, message: payload.message, segment: payload.segment, createdBy: 'zapp',
+        });
+        const started = await CampaignService.startCampaign(orgId, created.id, (global as any).io);
+        if (!started.started) return `Criei a campanha (${created.total} contatos), mas não consegui iniciar agora: ${started.reason}. Você pode iniciá-la na aba Campanhas.`;
+        return `✅ Disparando para *${created.total} contato(s)*! Acompanhe o progresso na aba *Campanhas*. As mensagens saem com intervalo entre elas para proteger seu número.`;
+      } catch (e: any) {
+        return `Não consegui criar a campanha: ${e?.message || 'erro'}.`;
+      }
+    }
+    return "Ação concluída.";
+  }
+
   private static async getProductsContext(orgId: string): Promise<string> {
      try {
        // Estoque do produto (linha sem variação) — evita duplicar linhas das variações.
@@ -413,8 +513,10 @@ O QUE VOCÊ SABE FAZER (e deve usar para orientar o gestor):
 COMO RESPONDER:
 - Seja direto, prático e formatado para WhatsApp (frases curtas, emojis com moderação, listas quando ajudar).
 - Baseie-se SOMENTE nos dados reais abaixo; se algo não estiver nos dados, diga que precisa de mais informação — não invente números.
-- Quando recomendar uma campanha/oferta, descreva o público (ex.: "inativos +60d"), a mensagem sugerida e o porquê. (Você ORIENTA; quem dispara é o gestor pela aba Campanhas.)
-- Você é READ-ONLY: aconselha e explica, mas não executa mudanças diretamente.
+- DISPARO DE CAMPANHA: se o gestor PEDIR para enviar/disparar uma campanha (ex.: "reative os inativos com 10% off", "manda uma oferta pros que mais compram"), preencha "campaign_intent" com a mensagem final (pronta para o cliente, use {nome} para personalizar) e o público. NÃO dispare você mesmo — o sistema vai pedir a confirmação do gestor antes de enviar.
+- Se o gestor só estiver pedindo análise/sugestão (não um disparo), deixe "campaign_intent" como null.
+
+PÚBLICOS VÁLIDOS para "segment": { "inactiveDays": N } (clientes com compra inativos há N dias), { "temperature": "quente|morno|frio" }, { "topBuyers": N } (os N que mais gastaram), { "tag": "texto" }, ou {} (todos).
 
 PANORAMA ATUAL DO NEGÓCIO (dados reais):
 ${metricsData}
@@ -428,8 +530,11 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
   "agent": "orchestrator_agent",
   "confidence": 0.95,
   "needs_human": false,
-  "actions": []
-}`;
+  "actions": [],
+  "campaign_intent": null
+}
+// Quando for um pedido de disparo, "campaign_intent" deve ser:
+// { "name": "nome curto", "message": "Olá {nome}! ...mensagem pronta...", "segment": { "inactiveDays": 60 } }`;
     }
 
     const { human: nowHuman, today: nowToday } = this.currentDateContext();

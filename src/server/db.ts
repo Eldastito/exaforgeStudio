@@ -500,6 +500,28 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_movements_org ON stock_movements(organization_id, product_service_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de estoque avançado', e); }
+
+  // ===== Zapp dispara campanhas (com confirmação) + auto-reativação =====
+  // Ação proposta pelo Zapp aguardando o "SIM" do gestor.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_manager_actions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        identifier TEXT NOT NULL,    -- número do gestor
+        action_type TEXT NOT NULL,   -- 'create_campaign'
+        payload_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_actions ON pending_manager_actions(organization_id, identifier);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar pending_manager_actions', e); }
+  // Auto-reativação semanal (cron): por organização.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_days INTEGER DEFAULT 60`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_message TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_last_run DATETIME`); } catch(e){}
 };
 
 initDb();

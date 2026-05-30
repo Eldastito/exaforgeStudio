@@ -32,8 +32,19 @@ export function CampaignsView() {
   const [preview, setPreview] = useState<{ total: number; sample: string[] } | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const [auto, setAuto] = useState<{ enabled: boolean; days: number; message: string } | null>(null);
+
   const load = () => apiFetch('/api/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {});
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  const loadAuto = () => apiFetch('/api/campaigns/settings').then(r => r.json()).then(setAuto).catch(() => {});
+  useEffect(() => { load(); loadAuto(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+
+  const saveAuto = async (patch: Partial<{ enabled: boolean; days: number; message: string }>) => {
+    const next = { enabled: auto?.enabled || false, days: auto?.days || 60, message: auto?.message || '', ...patch };
+    setAuto(next);
+    await apiFetch('/api/campaigns/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+    }).catch(() => {});
+  };
 
   const seg = () => SEGMENTS.find(s => s.id === segId)?.seg || {};
 
@@ -91,6 +102,37 @@ export function CampaignsView() {
           Envie só para quem tem relação com seu negócio e ofereça valor real.
         </div>
       </div>
+
+      {/* Reativação automática (cron) */}
+      {auto && (
+        <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-zinc-100">🔁 Reativação automática</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Toda semana, envia automaticamente para clientes com compra inativos há mais de{' '}
+                <input type="number" min="7" value={auto.days}
+                  onChange={e => setAuto({ ...auto, days: parseInt(e.target.value, 10) || 60 })}
+                  onBlur={e => saveAuto({ days: parseInt(e.target.value, 10) || 60 })}
+                  className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1 text-zinc-200 text-center" /> dias.
+              </p>
+            </div>
+            <button onClick={() => saveAuto({ enabled: !auto.enabled })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${auto.enabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${auto.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          {auto.enabled && (
+            <textarea
+              className="mt-3 w-full h-16 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+              placeholder="Mensagem (use {nome}). Ex.: Olá {nome}! Sentimos sua falta..."
+              value={auto.message}
+              onChange={e => setAuto({ ...auto, message: e.target.value })}
+              onBlur={e => saveAuto({ message: e.target.value })}
+            />
+          )}
+        </div>
+      )}
 
       <div className="space-y-3">
         {campaigns.length === 0 ? (

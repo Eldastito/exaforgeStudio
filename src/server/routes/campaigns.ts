@@ -13,6 +13,35 @@ const logEvent = (orgId?: string, actorId?: string, targetId?: string, eventType
   } catch (e) { /* noop */ }
 };
 
+// GET /api/campaigns/settings — config da reativação automática
+router.get("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const o = db.prepare(`SELECT auto_reactivation_enabled, auto_reactivation_days, auto_reactivation_message, auto_reactivation_last_run FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    res.json({
+      enabled: !!(o && o.auto_reactivation_enabled),
+      days: o?.auto_reactivation_days || 60,
+      message: o?.auto_reactivation_message || "",
+      lastRun: o?.auto_reactivation_last_run || null,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/campaigns/settings — liga/desliga a reativação automática
+router.put("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { enabled, days, message } = req.body || {};
+    db.prepare(`UPDATE organization_settings SET auto_reactivation_enabled = ?, auto_reactivation_days = ?, auto_reactivation_message = ? WHERE organization_id = ?`)
+      .run(enabled ? 1 : 0, parseInt(String(days), 10) || 60, message || null, orgId);
+    logEvent(orgId, userId, undefined, 'AUTO_REACTIVATION_CHANGED', { enabled, days });
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/campaigns — lista campanhas
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

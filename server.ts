@@ -21,6 +21,7 @@ import aiRoutes from "./src/server/routes/ai.js";
 import ordersRoutes from "./src/server/routes/orders.js";
 import contactsRoutes from "./src/server/routes/contacts.js";
 import campaignsRoutes from "./src/server/routes/campaigns.js";
+import { Scheduler } from "./src/server/Scheduler.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
@@ -812,6 +813,9 @@ async function startServer() {
 
   // Torna o io acessível globalmente (para uso no webhook)
   (global as any).io = io;
+
+  // Agendador interno (reativação automática semanal, opt-in por organização).
+  Scheduler.start(io);
 
 }
 

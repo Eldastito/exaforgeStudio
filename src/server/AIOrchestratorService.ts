@@ -21,7 +21,7 @@ export class AIOrchestratorService {
     ticketStage?: string;
     history?: { role: string; text: string }[];
     contactId?: string;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean } }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -207,6 +207,11 @@ export class AIOrchestratorService {
       }
     }
 
+    // CANCELAMENTO: a IA marca cancel_order=true quando o cliente CONFIRMA que
+    // quer cancelar. O webhook cancela o pedido ativo do contato (e o estoque
+    // volta automaticamente). A IA deve confirmar antes (usa o histórico).
+    const cancelOrder = resultJSON.cancel_order === true;
+
     return {
       reply,
       actions: safeActions,
@@ -215,6 +220,7 @@ export class AIOrchestratorService {
       newAppointment: this.sanitizeAppointment(resultJSON.new_appointment),
       newDelivery: this.sanitizeDelivery(resultJSON.new_delivery),
       newOrder,
+      cancelOrder,
     };
   }
 
@@ -560,6 +566,7 @@ REGRAS OBRIGATÓRIAS:
 7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
 8. NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi confirmado/registrado, NÃO preencha "new_order" de novo. Apenas dê seguimento (confirmar agendamento, tirar dúvidas, etc.).
 9. INTELIGÊNCIA DE VENDA: adapte o tom ao PERFIL DO CLIENTE abaixo. Lead "frio" → desperte interesse e descubra a necessidade (sem pressão). "Morno" → mostre valor e conduza para a decisão. "Quente"/recorrente → seja ágil e ofereça um item complementar (cross-sell) quando fizer sentido. Use gatilhos de forma natural e honesta (prova social, escassez REAL de estoque, benefício claro) — nunca invente urgência falsa. Para clientes que já compram, reconheça o relacionamento.
+10. CANCELAMENTO: se o cliente pedir para CANCELAR o pedido, primeiro confirme com empatia ("Você confirma o cancelamento do seu pedido?"). Só quando ele CONFIRMAR o cancelamento, defina "cancel_order": true (cancela o pedido ativo e devolve o estoque). Se ele já tiver confirmado no histórico, vá direto. Se o pedido já foi entregue, explique que para devolução/reembolso você vai encaminhar para um atendente (use "needs_human": true).
 
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 
@@ -600,7 +607,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   },
   "new_order": {
     "items": [ { "name": "Nome EXATO do produto no catálogo", "quantity": 2 } ]
-  }
+  },
+  "cancel_order": false
 }`;
   }
 

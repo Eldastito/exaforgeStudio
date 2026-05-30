@@ -171,4 +171,17 @@ export class OrdersService {
     order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
     return order;
   }
+
+  /**
+   * Pedido ATIVO mais recente de um contato que ainda pode ser cancelado pelo
+   * cliente (aguardando pagamento, pago ou em preparo — não cancela o que já foi entregue).
+   */
+  static latestCancelableOrder(orgId: string, contactId: string): any {
+    return db.prepare(`
+      SELECT * FROM orders
+      WHERE organization_id = ? AND contact_id = ?
+        AND status IN ('aguardando_pagamento','pago','em_preparo')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(orgId, contactId);
+  }
 }

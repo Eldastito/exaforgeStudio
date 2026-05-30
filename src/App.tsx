@@ -6,6 +6,7 @@ import { ChannelsPanel } from '@/src/features/ChannelsPanel';
 import { DashboardPanel } from '@/src/features/DashboardPanel';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
+import { SalesView } from '@/src/features/SalesView';
 import { ContactsView } from '@/src/features/ContactsView';
 import { IntegrationsView } from '@/src/features/IntegrationsView';
 import { SettingsView } from '@/src/features/SettingsView';
@@ -118,6 +119,7 @@ export default function App() {
              {viewMode === 'kanban' && 'Atendimento'}
              {viewMode === 'agenda' && 'Agenda'}
              {viewMode === 'catalog' && 'Catálogo'}
+             {viewMode === 'vendas' && 'Vendas'}
              {viewMode === 'contacts' && 'Contatos'}
              {viewMode === 'integrations' && 'Integrações'}
              {viewMode === 'settings' && 'Configurações'}
@@ -180,6 +182,7 @@ export default function App() {
           )}
           {viewMode === 'agenda' && <AgendaView />}
           {viewMode === 'catalog' && <CatalogView />}
+          {viewMode === 'vendas' && <SalesView />}
           {viewMode === 'contacts' && <ContactsView />}
           {viewMode === 'integrations' && <IntegrationsView />}
           {viewMode === 'settings' && <SettingsView />}

@@ -13,6 +13,29 @@ const logEvent = (orgId?: string, actorId?: string, targetId?: string, eventType
   } catch (e) { /* noop */ }
 };
 
+// GET /api/orders/settings — lê o interruptor de autonomia da IA nas vendas
+router.get("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const o = db.prepare('SELECT ai_auto_close_sales FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
+    res.json({ ai_auto_close_sales: !!(o && o.ai_auto_close_sales) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/orders/settings — atualiza o interruptor de autonomia
+router.put("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const val = req.body?.ai_auto_close_sales ? 1 : 0;
+    db.prepare('UPDATE organization_settings SET ai_auto_close_sales = ? WHERE organization_id = ?').run(val, orgId);
+    logEvent(orgId, userId, undefined, 'SALES_AUTONOMY_CHANGED', { ai_auto_close_sales: val });
+    res.json({ success: true, ai_auto_close_sales: !!val });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/orders?status=... — lista pedidos (com itens), opcionalmente por status
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

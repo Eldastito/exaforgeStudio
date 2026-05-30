@@ -24,15 +24,30 @@ export class AIOrchestratorService {
     let text = params.message.trim();
     let isOrchestratorCommand = false;
 
-    // Se é gestor e começa com Zapp, ativa o orchestrator
+    // Só ativa o Orquestrador (modo admin) se for um GESTOR autorizado e a mensagem
+    // começar com "Zapp". Se NÃO for gestor mas usar "Zapp", NÃO revelamos a
+    // existência do canal admin (anti-recon): a mensagem é tratada como um cliente
+    // comum pelo agente de atendimento.
     if (isManager && text.toLowerCase().startsWith("zapp")) {
       isOrchestratorCommand = true;
-    } else if (!isManager && text.toLowerCase().startsWith("zapp")) {
-      // Bloqueio de acesso para quem não é gestor
+    }
+
+    // Guarda anti-injeção de prompt: no canal admin (Orquestrador), uma tentativa de
+    // manipular as instruções é recusada sem executar nada (read-only por natureza).
+    if (isOrchestratorCommand && this.isPromptInjection(text)) {
+      this.logInteraction({
+        organizationId: params.organizationId,
+        agentUsed: "orchestrator_agent",
+        inputPrompt: "BLOCKED (prompt_injection): " + params.message.slice(0, 200),
+        outputResponse: "blocked",
+        confidence: 0,
+        needsHuman: 0,
+        actions: "[]",
+      });
       return {
-        reply: "Desculpe, este é um canal de comandos administrativos e seu número não está autorizado.",
+        reply: "Não consegui processar esse comando. Por segurança, reformule o pedido em linguagem natural (ex.: \"Zapp, me dá o resumo de vendas de hoje\").",
         actions: [],
-        needsHuman: false
+        needsHuman: false,
       };
     }
 
@@ -89,22 +104,103 @@ export class AIOrchestratorService {
        actions: JSON.stringify(resultJSON.actions || [])
     });
 
+    // 5. TRAVA DE SEGURANÇA: o Orquestrador (modo admin/gestor) é estritamente
+    // READ-ONLY. Ele NUNCA pode mover tickets, criar agendamentos/entregas nem
+    // executar qualquer ação que altere os dados do negócio — só responde texto.
+    // Isso impede que uma injeção de prompt num comando de gestor cause mutações.
+    if (isOrchestratorCommand) {
+      return {
+        reply: resultJSON.reply || "Não foi possível gerar a resposta.",
+        actions: [],
+        newStage: params.ticketStage, // mantém o estágio atual (sem alteração)
+        needsHuman: false,
+      };
+    }
+
+    // 6. Agente de atendimento: só aceitamos ações de uma WHITELIST e validamos
+    // cada payload. Tipos desconhecidos são descartados (defesa contra a IA
+    // "alucinar" uma ação destrutiva).
+    const safeActions = this.sanitizeActions(resultJSON.actions);
+
     let newStage = params.ticketStage;
-    if (resultJSON.actions && Array.isArray(resultJSON.actions)) {
-       const moveAction = resultJSON.actions.find((a: any) => a.type === "MOVE_TICKET");
-       if (moveAction && moveAction.payload && moveAction.payload.stage) {
-          newStage = moveAction.payload.stage;
-       }
+    const moveAction = safeActions.find((a: any) => a.type === "MOVE_TICKET");
+    if (moveAction?.payload?.stage) {
+      newStage = moveAction.payload.stage;
     }
 
     return {
       reply: resultJSON.reply || "Erro interno.",
-      actions: resultJSON.actions || [],
+      actions: safeActions,
       newStage: newStage,
       needsHuman: !!resultJSON.needs_human,
-      newAppointment: resultJSON.new_appointment,
-      newDelivery: resultJSON.new_delivery
+      newAppointment: this.sanitizeAppointment(resultJSON.new_appointment),
+      newDelivery: this.sanitizeDelivery(resultJSON.new_delivery),
     };
+  }
+
+  // Estágios válidos do Kanban (espelha o type Stage do frontend).
+  private static readonly VALID_STAGES = new Set([
+    "novo_lead", "ia_atendendo", "aguardando_humano", "em_atendimento_humano",
+    "qualificado", "proposta", "aguardando_pagamento", "agendado",
+    "em_execucao", "entregue_concluido", "perdido",
+  ]);
+
+  /** Heurística simples de detecção de injeção de prompt. */
+  private static isPromptInjection(text: string): boolean {
+    const lower = (text || "").toLowerCase();
+    const suspicious = [
+      "ignore todas as instru", "ignore as instru", "ignore previous", "ignore the above",
+      "esqueça o que eu disse", "esqueca o que", "system prompt", "system:", "</system",
+      "você é agora", "voce e agora", "you are now", "modo desenvolvedor", "developer mode",
+      "desconsidere as regras", "execute sql", "drop table", "delete from", "update ",
+      "act as", "jailbreak", "DAN ",
+    ];
+    return suspicious.some((k) => lower.includes(k));
+  }
+
+  /** Mantém apenas ações da whitelist, com payload validado. */
+  private static sanitizeActions(actions: any): any[] {
+    if (!Array.isArray(actions)) return [];
+    const out: any[] = [];
+    for (const a of actions) {
+      if (!a || typeof a.type !== "string") continue;
+      if (a.type === "MOVE_TICKET") {
+        const stage = a.payload?.stage;
+        if (typeof stage === "string" && this.VALID_STAGES.has(stage)) {
+          out.push({ type: "MOVE_TICKET", payload: { stage } });
+        }
+      }
+      // Qualquer outro tipo de ação é ignorado por segurança.
+    }
+    return out;
+  }
+
+  private static clampStr(v: any, max: number): string | undefined {
+    if (typeof v !== "string") return undefined;
+    const t = v.trim();
+    if (!t) return undefined;
+    return t.slice(0, max);
+  }
+
+  /** Valida/limita um agendamento sugerido pela IA. */
+  private static sanitizeAppointment(appt: any): any | undefined {
+    if (!appt || typeof appt !== "object") return undefined;
+    const title = this.clampStr(appt.title, 200);
+    if (!title) return undefined;
+    let scheduled_start: string | undefined = undefined;
+    if (typeof appt.scheduled_start === "string") {
+      const d = new Date(appt.scheduled_start);
+      if (!isNaN(d.getTime())) scheduled_start = d.toISOString();
+    }
+    return { title, scheduled_start };
+  }
+
+  /** Valida/limita uma entrega sugerida pela IA. */
+  private static sanitizeDelivery(del: any): any | undefined {
+    if (!del || typeof del !== "object") return undefined;
+    const address = this.clampStr(del.address, 300);
+    if (!address) return undefined;
+    return { address };
   }
 
   /**

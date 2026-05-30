@@ -116,13 +116,26 @@ export async function processIncomingMessage(
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {
       try {
+       // Histórico da conversa (sem a mensagem atual) para a IA continuar de onde
+       // parou, em vez de recomeçar a cada mensagem.
+       const historyRows = db.prepare(`
+         SELECT sender_type, content FROM messages
+         WHERE ticket_id = ? AND id != ?
+         ORDER BY created_at DESC LIMIT 20
+       `).all(ticket.id, msgId) as any[];
+       const history = historyRows.reverse().map(r => ({
+         role: r.sender_type === 'contact' ? 'Cliente' : (r.sender_type === 'agent' ? 'Atendente' : 'Assistente'),
+         text: r.content,
+       }));
+
        const aiResult = await AIOrchestratorService.processMessage({
           message: payload.text,
           organizationId: orgId,
           senderId: payload.senderId,
           contactName: contact.name,
           channelId: channel.id,
-          ticketStage: ticket.stage
+          ticketStage: ticket.stage,
+          history,
        });
        
        if (aiResult.newStage && aiResult.newStage !== ticket.stage) {
@@ -157,15 +170,21 @@ export async function processIncomingMessage(
        // novo (atômico) e reserva/baixa conforme o interruptor de autonomia.
        if (aiResult.newOrder && Array.isArray(aiResult.newOrder.items) && aiResult.newOrder.items.length) {
          try {
-           const order = OrdersService.createOrder(orgId, {
-             contactId: contact.id,
-             ticketId: ticket.id,
-             items: aiResult.newOrder.items,
-             createdBy: 'ai',
-             autoClose: aiResult.newOrder.autoClose,
-           });
-           if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
-           console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
+           // Trava anti-duplicidade: evita reservar o mesmo pedido várias vezes
+           // quando o cliente responde "sim" repetidas vezes.
+           if (OrdersService.hasRecentDuplicate(orgId, ticket.id, aiResult.newOrder.items)) {
+             console.log(`[Vendas] Pedido duplicado ignorado para o ticket ${ticket.id}.`);
+           } else {
+             const order = OrdersService.createOrder(orgId, {
+               contactId: contact.id,
+               ticketId: ticket.id,
+               items: aiResult.newOrder.items,
+               createdBy: 'ai',
+               autoClose: aiResult.newOrder.autoClose,
+             });
+             if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
+             console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
+           }
          } catch (e) {
            console.error("[Vendas] Falha ao criar pedido da IA (provável estoque insuficiente):", e);
          }

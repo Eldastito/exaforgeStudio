@@ -56,8 +56,9 @@ export class MessageProviderService {
        }
        return true;
     } else if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
-        // Token do canal ou, se vazio (canal auto-criado pelo webhook), o do ambiente.
-        const token = channel.token_encrypted || process.env.EVOLUTION_API_KEY || '';
+        // Prioriza a chave do ambiente (fonte da verdade no deploy) e só usa a do
+        // canal como fallback — evita um token antigo/errado salvo no banco vencer.
+        const token = process.env.EVOLUTION_API_KEY || channel.token_encrypted || '';
         const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
         const instanceName = channel.identifier;
 

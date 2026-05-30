@@ -125,6 +125,36 @@ export class OrdersService {
     tx();
   }
 
+  /**
+   * Verifica se já existe um pedido recente (não-terminal) para o mesmo ticket
+   * com EXATAMENTE os mesmos itens/quantidades — evita reservas duplicadas
+   * quando o cliente confirma "sim" várias vezes.
+   */
+  static hasRecentDuplicate(orgId: string, ticketId: string, items: { productId?: string; name: string; quantity: number }[], minutes = 60): boolean {
+    if (!ticketId) return false;
+    try {
+      const recent = db.prepare(`
+        SELECT id FROM orders
+        WHERE organization_id = ? AND ticket_id = ?
+          AND status NOT IN ('cancelado','reembolso','devolucao')
+          AND created_at >= datetime('now', ?)
+      `).all(orgId, ticketId, `-${minutes} minutes`) as any[];
+      if (!recent.length) return false;
+
+      const sig = (arr: { name: string; quantity: number }[]) =>
+        arr.map(i => `${(i.name || '').toLowerCase().trim()}x${i.quantity}`).sort().join('|');
+      const wanted = sig(items as any);
+
+      for (const o of recent) {
+        const its = db.prepare('SELECT name_snapshot as name, quantity FROM order_items WHERE order_id = ?').all(o.id) as any[];
+        if (sig(its) === wanted) return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static getOrder(orgId: string, orderId: string): any {
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND organization_id = ?').get(orderId, orgId) as any;
     if (!order) return null;

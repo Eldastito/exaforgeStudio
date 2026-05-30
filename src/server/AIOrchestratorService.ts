@@ -16,6 +16,7 @@ export class AIOrchestratorService {
     contactName?: string;
     channelId: string;
     ticketStage?: string;
+    history?: { role: string; text: string }[];
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -391,8 +392,11 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
     }
 
     const { human: nowHuman, today: nowToday } = this.currentDateContext();
+    const historyText = Array.isArray(params.history) && params.history.length
+      ? params.history.map((h: any) => `${h.role}: ${h.text}`).join('\n')
+      : "(início da conversa)";
     return `Você é o Agente de Atendimento e Vendas via WhatsApp/Instagram.
-O cliente enviou a mensagem abaixo.
+Você está NO MEIO de uma conversa contínua com o mesmo cliente.
 
 DATA E HORA ATUAL (fuso de Brasília, UTC-3): ${nowHuman}.
 HOJE é ${nowToday}. Use SEMPRE esta referência para interpretar datas relativas
@@ -400,6 +404,7 @@ HOJE é ${nowToday}. Use SEMPRE esta referência para interpretar datas relativa
 invente o ano/mês — calcule a partir da data atual acima.
 
 REGRAS OBRIGATÓRIAS:
+0. CONTINUIDADE: leia o HISTÓRICO abaixo e CONTINUE de onde parou. NÃO recomece, NÃO repita saudações ("Olá!", "Como posso ajudar?") se a conversa já começou, e NÃO repita perguntas já respondidas. Se o cliente disse "sim" confirmando algo, AVANCE para o próximo passo (não pergunte de novo).
 1. Use o contexto (RAG) e o catálogo quando disponíveis. Não invente preços, prazos ou promoções específicas — se não tiver um dado exato, seja honesto e diga que vai confirmar, mas SIGA ajudando.
 2. Responda SEMPRE de forma útil, cordial e objetiva, mesmo sem contexto/documentos. Só marque "needs_human": true quando o cliente PEDIR explicitamente falar com um humano/atendente, ou em caso de reclamação séria. Nos demais casos, mantenha "needs_human": false e continue a conversa.
 3. Não fale sobre sistemas internos ou tokens.
@@ -407,6 +412,10 @@ REGRAS OBRIGATÓRIAS:
 5. Se o cliente concordar com um horário de agendamento, use "new_appointment" e gere "scheduled_start" em ISO 8601 COM o fuso -03:00, calculado a partir da DATA ATUAL acima (ex.: amanhã às 10h = ${nowToday}T10:00:00-03:00, mas ajuste o dia conforme o pedido).
 6. Se confirmar o envio ou retirada de um produto físico, pode usar "new_delivery".
 7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
+8. NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi confirmado/registrado, NÃO preencha "new_order" de novo. Apenas dê seguimento (confirmar agendamento, tirar dúvidas, etc.).
+
+HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
+${historyText}
 
 DOCUMENTOS (RAG):
 ${contextText}
@@ -414,7 +423,7 @@ ${contextText}
 CATÁLOGO:
 ${productsText}
 
-MENSAGEM DO CLIENTE:
+MENSAGEM ATUAL DO CLIENTE (a mais recente, responda a ela continuando o histórico):
 "${params.message}"
 
 ESTÁGIO ATUAL DO TICKET: ${params.ticketStage || 'novo_lead'}

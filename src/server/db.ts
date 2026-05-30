@@ -460,6 +460,46 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_campaigns_org ON campaigns(organization_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de campanhas', e); }
+
+  // ===== Estoque avançado: variações + movimentações (loja física -> e-commerce) =====
+  // Variação de produto (tamanho/cor/tipo). Produto sem variação continua usando
+  // inventory_items com variant_id NULL (compatível com o que já existe).
+  try { db.exec(`ALTER TABLE inventory_items ADD COLUMN variant_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE inventory_items ADD COLUMN avg_cost REAL DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN has_variants INTEGER DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        name TEXT NOT NULL,            -- ex.: "M / Azul"
+        sku TEXT,
+        size TEXT,
+        color TEXT,
+        variant_type TEXT,
+        price REAL,                    -- preço próprio (opcional; senão usa o do produto)
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        type TEXT NOT NULL,            -- entrada | saida | ajuste | transferencia
+        quantity INTEGER NOT NULL,     -- sempre positivo; o type define a direção
+        unit_cost REAL DEFAULT 0,
+        origin TEXT,                   -- ex.: "loja física", "fornecedor X"
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_service_id);
+      CREATE INDEX IF NOT EXISTS idx_movements_org ON stock_movements(organization_id, product_service_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de estoque avançado', e); }
 };
 
 initDb();

@@ -346,22 +346,41 @@ export class AIOrchestratorService {
 
   private static async getProductsContext(orgId: string): Promise<string> {
      try {
+       // Estoque do produto (linha sem variação) — evita duplicar linhas das variações.
        const rows: any[] = db.prepare(`
          SELECT ps.*, inv.quantity_available, inv.quantity_reserved
          FROM products_services ps
-         LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id
+         LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
          WHERE ps.organization_id = ? AND ps.active = 1
        `).all(orgId);
        if (!rows.length) return "";
+       const variantStmt = db.prepare(`
+         SELECT pv.name, pv.price, inv.quantity_available, inv.quantity_reserved
+         FROM product_variants pv
+         LEFT JOIN inventory_items inv ON inv.variant_id = pv.id
+         WHERE pv.organization_id = ? AND pv.product_service_id = ? AND pv.active = 1
+       `);
        return "Produtos/Serviços disponíveis (use EXATAMENTE estes nomes ao registrar um pedido):\n" + rows.map(r => {
           const price = (r.price !== null && r.price !== undefined) ? `${r.currency || 'R$'} ${Number(r.price).toFixed(2)}` : "preço sob consulta";
           const desc = r.description ? ` — ${r.description}` : "";
+          const dur = r.duration_minutes ? ` [duração: ${r.duration_minutes} min]` : "";
+
+          // Se tem variações, lista o estoque por variação (tamanho/cor/tipo).
+          if (r.has_variants) {
+            const vs = variantStmt.all(orgId, r.id) as any[];
+            const lines = vs.map(v => {
+              const vsell = Math.max(0, (v.quantity_available || 0) - (v.quantity_reserved || 0));
+              const vprice = (v.price !== null && v.price !== undefined) ? ` R$ ${Number(v.price).toFixed(2)}` : '';
+              return `    · ${v.name}${vprice} ${vsell > 0 ? `(estoque: ${vsell})` : '(SEM ESTOQUE)'}`;
+            }).join('\n');
+            return `- ${r.name} (${r.type}): ${price}${dur}${desc}\n${lines}`;
+          }
+
           let stock = "";
           if (r.stock_control_enabled) {
              const sellable = Math.max(0, (r.quantity_available || 0) - (r.quantity_reserved || 0));
              stock = sellable > 0 ? ` (em estoque: ${sellable})` : " (SEM ESTOQUE no momento)";
           }
-          const dur = r.duration_minutes ? ` [duração: ${r.duration_minutes} min]` : "";
           return `- ${r.name} (${r.type}): ${price}${stock}${dur}${desc}`;
        }).join('\n');
      } catch (e) {

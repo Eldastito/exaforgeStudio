@@ -165,4 +165,56 @@ export class AnalyticsService {
   static getReportSettings(orgId: string) {
     return db.prepare('SELECT * FROM organization_settings WHERE organization_id = ?').get(orgId);
   }
+
+  /**
+   * Relatório de lucro/margem com base nas vendas faturadas
+   * (pago/em_preparo/entregue/concluido). Lucro = receita − custo (custo médio
+   * capturado no momento da venda).
+   */
+  static getProfit(orgId: string, options: FilterOptions) {
+    const dateFilter = currentFilter(options.period).replace(/created_at/g, 'o.created_at');
+    const fulfilled = "o.status IN ('pago','em_preparo','entregue','concluido')";
+    try {
+      // Totais do período.
+      const totals = db.prepare(`
+        SELECT
+          COALESCE(SUM(oi.line_total),0) AS revenue,
+          COALESCE(SUM(oi.unit_cost * oi.quantity),0) AS cost,
+          COUNT(DISTINCT o.id) AS orders
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE oi.organization_id = ? AND ${fulfilled} ${dateFilter}
+      `).get(orgId) as any;
+      const revenue = totals?.revenue || 0;
+      const cost = totals?.cost || 0;
+      const profit = revenue - cost;
+      const margin = revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : 0;
+
+      // Lucro por produto (top 10).
+      const byProduct = db.prepare(`
+        SELECT oi.name_snapshot AS name,
+          SUM(oi.quantity) AS qty,
+          COALESCE(SUM(oi.line_total),0) AS revenue,
+          COALESCE(SUM(oi.unit_cost * oi.quantity),0) AS cost,
+          COALESCE(SUM(oi.line_total),0) - COALESCE(SUM(oi.unit_cost * oi.quantity),0) AS profit
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE oi.organization_id = ? AND ${fulfilled} ${dateFilter}
+        GROUP BY oi.name_snapshot
+        ORDER BY profit DESC
+        LIMIT 10
+      `).all(orgId) as any[];
+
+      return {
+        revenue, cost, profit, margin,
+        orders: totals?.orders || 0,
+        hasCostData: cost > 0,
+        byProduct: byProduct.map(p => ({
+          ...p,
+          margin: p.revenue > 0 ? Math.round((p.profit / p.revenue) * 1000) / 10 : 0,
+        })),
+      };
+    } catch (e) {
+      console.error(e);
+      return { revenue: 0, cost: 0, profit: 0, margin: 0, orders: 0, hasCostData: false, byProduct: [] };
+    }
+  }
 }

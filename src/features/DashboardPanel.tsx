@@ -79,15 +79,23 @@ function fmtDuration(seconds: number): string {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+type Profit = {
+  revenue: number; cost: number; profit: number; margin: number; orders: number;
+  hasCostData: boolean; byProduct: { name: string; qty: number; revenue: number; cost: number; profit: number; margin: number }[];
+};
+
 export function DashboardPanel() {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('month');
   const [m, setM] = useState<Metrics | null>(null);
+  const [profit, setProfit] = useState<Profit | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    apiFetch(`/api/analytics/profit?period=${period}`)
+      .then(r => r.json()).then(d => { if (!cancelled) setProfit(d); }).catch(() => {});
     apiFetch(`/api/analytics/metrics?period=${period}`)
       .then(r => r.json())
       .then(data => { if (!cancelled) setM(data); })
@@ -201,6 +209,55 @@ export function DashboardPanel() {
                 caption={`${m?.handoffCount ?? 0} handoffs p/ humano`} icon={<CalendarCheck className="h-5 w-5" />} accent={C.amber}
                 series={spark(S?.appointments)} />
             </div>
+
+            {/* LUCRO / MARGEM */}
+            {profit && (
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <Panel index={3} className="lg:col-span-1" title="Lucro do período" subtitle={profit.hasCostData ? `${profit.orders} pedido(s) faturado(s)` : 'cadastre o custo no estoque'} icon={<TrendingUp className="h-4 w-4" />}>
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-end justify-between">
+                      <span className="text-3xl font-bold bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-transparent">
+                        R$ {Number(profit.profit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="mb-1 inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">
+                        {profit.margin}% margem
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
+                        <p className="text-sm font-bold text-slate-200">R$ {Number(profit.revenue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-[10px] text-slate-500">Receita</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
+                        <p className="text-sm font-bold text-rose-300">R$ {Number(profit.cost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-[10px] text-slate-500">Custo</p>
+                      </div>
+                    </div>
+                    {!profit.hasCostData && (
+                      <p className="text-[11px] text-amber-400/80">Registre o custo das mercadorias (Catálogo → 📦 → Entrada) para ver o lucro real.</p>
+                    )}
+                  </div>
+                </Panel>
+
+                <Panel index={4} className="lg:col-span-2" title="Lucro por produto" subtitle="Top itens por lucro no período" icon={<Target className="h-4 w-4" />}>
+                  {profit.byProduct.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">Sem vendas faturadas no período.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {profit.byProduct.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm border border-slate-800 rounded-lg px-3 py-2">
+                          <span className="text-slate-300 truncate pr-2">{p.name} <span className="text-slate-600">×{p.qty}</span></span>
+                          <span className="flex items-center gap-3 shrink-0">
+                            <span className="font-mono text-emerald-400">R$ {Number(p.profit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            <span className="text-[11px] text-slate-500 w-12 text-right">{p.margin}%</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Panel>
+              </div>
+            )}
 
             {/* VOLUME + FUNIL */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

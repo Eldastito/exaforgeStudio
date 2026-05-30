@@ -465,6 +465,16 @@ async function startServer() {
           }
         }
 
+        // Outras mídias sem legenda: registra um placeholder para aparecer no app.
+        if (!incomingMessageText) {
+          if (msgObj.imageMessage || msgObj.ImageMessage) incomingMessageText = "📷 [Imagem recebida]";
+          else if (msgObj.videoMessage || msgObj.VideoMessage) incomingMessageText = "🎥 [Vídeo recebido]";
+          else if (msgObj.documentMessage || msgObj.DocumentMessage) incomingMessageText = "📄 [Documento recebido]";
+          else if (msgObj.stickerMessage || msgObj.StickerMessage) incomingMessageText = "🔖 [Figurinha]";
+          else if (msgObj.locationMessage || msgObj.LocationMessage) incomingMessageText = "📍 [Localização]";
+          else if (msgObj.contactMessage || msgObj.ContactMessage) incomingMessageText = "👤 [Contato]";
+        }
+
         const rawJid = info.Sender || info.sender || info.Chat || info.chat || info.RemoteJid || data.key?.remoteJid || "";
         const senderId = String(rawJid).split('@')[0].split(':')[0]; // remove sufixo de device (:NN)
         const fromMe = info.IsFromMe ?? info.fromMe ?? data.key?.fromMe ?? false;
@@ -482,11 +492,15 @@ async function startServer() {
         if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
            try {
               const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/user/avatar`;
+              const ctrl = new AbortController();
+              const t = setTimeout(() => ctrl.abort(), 4000); // não bloqueia o fluxo
               const picResp = await fetch(picEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey, 'token': evolutionConfig.apiKey, 'instance': businessId },
-                body: JSON.stringify({ number: senderId })
+                body: JSON.stringify({ number: senderId }),
+                signal: ctrl.signal
               });
+              clearTimeout(t);
               if (picResp.ok) {
                  const picData: any = await picResp.json();
                  contactAvatar = picData?.url || picData?.URL || picData?.picture || picData?.profilePictureUrl || picData?.avatar || undefined;

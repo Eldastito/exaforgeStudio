@@ -2,6 +2,7 @@ import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { searchContext } from "./geminiRAG.js";
 import { AnalyticsService } from "./AnalyticsService.js";
+import { BusinessContextService } from "./BusinessContextService.js";
 import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { chat } from "./llm.js";
@@ -79,10 +80,10 @@ export class AIOrchestratorService {
 
     if (isOrchestratorCommand) {
       try {
-        const metrics = AnalyticsService.getMetrics(params.organizationId, { period: "month" });
-        metricsData = JSON.stringify(metrics, null, 2);
+        // Raio-x completo do negócio (CRM, funil, vendas, estoque, campanhas, agenda).
+        metricsData = BusinessContextService.build(params.organizationId);
       } catch (e) {
-        metricsData = "Não foi possível carregar as métricas no momento.";
+        metricsData = "Não foi possível carregar o panorama do negócio no momento.";
       }
     }
 
@@ -379,11 +380,24 @@ export class AIOrchestratorService {
 
   private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = ""): string {
     if (agent === "orchestrator_agent") {
-      return `Você é o Zapp, o Agente Orquestrador / Analista de Dados da empresa.
-O usuário enviando esta mensagem é um GESTOR AUTORIZADO (${params.contactName || params.senderId}).
-Responda ao pedido dele. Você pode fornecer resumos, relatórios gerenciais, explicar métricas, apontar anomalias e sugerir ações de melhoria com base nos DADOS REAIS abaixo:
+      const { human: nowHuman } = this.currentDateContext();
+      return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
 
-MÉTRICAS ATUAIS (Últimos 30 dias):
+QUEM ESTÁ FALANDO: um GESTOR AUTORIZADO (${params.contactName || params.senderId}). Data/hora: ${nowHuman}.
+
+O QUE VOCÊ SABE FAZER (e deve usar para orientar o gestor):
+- Ler o panorama do negócio abaixo (funil, CRM, vendas, estoque, campanhas, agenda) e traduzir em insights claros e acionáveis.
+- Recomendar AÇÕES concretas: quem reativar (inativos +60 dias), qual oferta enviar aos TOP compradores, o que promover (mais vendidos), o que repor (estoque baixo), onde o funil está travando.
+- Aplicar estratégia de vendas: transformar leads frios em quentes, sugerir gatilhos mentais honestos (prova social, escassez REAL, reciprocidade), aumentar ticket médio (upsell/cross-sell, combos), e melhorar a experiência.
+- Identificar oportunidades: novos públicos, padrões de compra, produtos para destacar, riscos (queda de conversão, estoque parado).
+
+COMO RESPONDER:
+- Seja direto, prático e formatado para WhatsApp (frases curtas, emojis com moderação, listas quando ajudar).
+- Baseie-se SOMENTE nos dados reais abaixo; se algo não estiver nos dados, diga que precisa de mais informação — não invente números.
+- Quando recomendar uma campanha/oferta, descreva o público (ex.: "inativos +60d"), a mensagem sugerida e o porquê. (Você ORIENTA; quem dispara é o gestor pela aba Campanhas.)
+- Você é READ-ONLY: aconselha e explica, mas não executa mudanças diretamente.
+
+PANORAMA ATUAL DO NEGÓCIO (dados reais):
 ${metricsData}
 
 MENSAGEM DO GESTOR:
@@ -391,9 +405,9 @@ MENSAGEM DO GESTOR:
 
 SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
 {
-  "reply": "Sua resposta com a análise para o gestor. Formate o texto de forma agradável para WhatsApp.",
+  "reply": "Sua análise/orientação para o gestor, formatada para WhatsApp.",
   "agent": "orchestrator_agent",
-  "confidence": 0.99,
+  "confidence": 0.95,
   "needs_human": false,
   "actions": []
 }`;

@@ -503,7 +503,10 @@ async function startServer() {
               clearTimeout(t);
               if (picResp.ok) {
                  const picData: any = await picResp.json();
-                 contactAvatar = picData?.url || picData?.URL || picData?.picture || picData?.profilePictureUrl || picData?.avatar || undefined;
+                 console.log("[Avatar] resp:", JSON.stringify(picData).slice(0, 300));
+                 contactAvatar = picData?.url || picData?.URL || picData?.picture || picData?.profilePictureUrl || picData?.avatar || picData?.imgUrl || picData?.profilePicUrl || undefined;
+              } else {
+                 console.warn(`[Avatar] HTTP ${picResp.status}`);
               }
            } catch(e) {}
         }

@@ -359,6 +359,15 @@ export class AIOrchestratorService {
      }
   }
 
+  // Data/hora atual no fuso de Brasília, para a IA interpretar datas relativas.
+  private static currentDateContext(): { human: string; today: string } {
+    const now = new Date();
+    const tz = process.env.TZ_DISPLAY || "America/Sao_Paulo";
+    const human = now.toLocaleString("pt-BR", { timeZone: tz, dateStyle: "full", timeStyle: "short" });
+    const today = now.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
+    return { human, today };
+  }
+
   private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = ""): string {
     if (agent === "orchestrator_agent") {
       return `Você é o Zapp, o Agente Orquestrador / Analista de Dados da empresa.
@@ -381,15 +390,21 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
 }`;
     }
 
+    const { human: nowHuman, today: nowToday } = this.currentDateContext();
     return `Você é o Agente de Atendimento e Vendas via WhatsApp/Instagram.
 O cliente enviou a mensagem abaixo.
+
+DATA E HORA ATUAL (fuso de Brasília, UTC-3): ${nowHuman}.
+HOJE é ${nowToday}. Use SEMPRE esta referência para interpretar datas relativas
+("hoje", "amanhã", "depois de amanhã", dias da semana, "semana que vem"). NUNCA
+invente o ano/mês — calcule a partir da data atual acima.
 
 REGRAS OBRIGATÓRIAS:
 1. Use o contexto (RAG) e o catálogo quando disponíveis. Não invente preços, prazos ou promoções específicas — se não tiver um dado exato, seja honesto e diga que vai confirmar, mas SIGA ajudando.
 2. Responda SEMPRE de forma útil, cordial e objetiva, mesmo sem contexto/documentos. Só marque "needs_human": true quando o cliente PEDIR explicitamente falar com um humano/atendente, ou em caso de reclamação séria. Nos demais casos, mantenha "needs_human": false e continue a conversa.
 3. Não fale sobre sistemas internos ou tokens.
 4. Mova o lead no kanban se notar intenção de compra ("MOVE_TICKET" para etapa "proposta").
-5. Se o cliente concordar com um horário de agendamento de serviço, pode usar "new_appointment".
+5. Se o cliente concordar com um horário de agendamento, use "new_appointment" e gere "scheduled_start" em ISO 8601 COM o fuso -03:00, calculado a partir da DATA ATUAL acima (ex.: amanhã às 10h = ${nowToday}T10:00:00-03:00, mas ajuste o dia conforme o pedido).
 6. Se confirmar o envio ou retirada de um produto físico, pode usar "new_delivery".
 7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
 
@@ -420,7 +435,7 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   ],
   "new_appointment": {
     "title": "Anotação do evento",
-    "scheduled_start": "2024-12-01T10:00:00Z"
+    "scheduled_start": "${nowToday}T10:00:00-03:00" // ISO 8601 com fuso -03:00, calculado a partir de HOJE
   },
   "new_delivery": {
     "address": "Rua X"

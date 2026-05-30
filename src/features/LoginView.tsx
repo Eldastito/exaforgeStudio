@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { Button } from '@/src/components/ui/button';
+import { Eye, EyeOff } from 'lucide-react';
 
 export function LoginView() {
   const { login } = useAuth();
@@ -20,6 +21,7 @@ export function LoginView() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,11 +218,22 @@ export function LoginView() {
                  <label className="block text-sm font-medium text-zinc-300 mb-1">
                    {view === 'reset' ? 'Nova Senha' : 'Senha'}
                  </label>
-                 <input 
-                   type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                   className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                   placeholder="••••••••"
-                 />
+                 <div className="relative">
+                   <input
+                     type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
+                     className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 pr-10 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                     placeholder="••••••••"
+                   />
+                   <button
+                     type="button"
+                     onClick={() => setShowPassword(s => !s)}
+                     className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                     tabIndex={-1}
+                     aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                   >
+                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                   </button>
+                 </div>
                </div>
              )}
 

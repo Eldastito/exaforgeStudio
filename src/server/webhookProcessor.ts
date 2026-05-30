@@ -202,6 +202,22 @@ export async function processIncomingMessage(
          }
        }
 
+       // CANCELAMENTO confirmado pelo cliente: cancela o pedido ativo (devolve o estoque).
+       if (aiResult.cancelOrder) {
+         try {
+           const cancelable = OrdersService.latestCancelableOrder(orgId, contact.id);
+           if (cancelable) {
+             OrdersService.updateStatus(orgId, cancelable.id, 'cancelado');
+             if (io) io.to(`org:${orgId}`).emit("order_updated", { orderId: cancelable.id, status: 'cancelado', contactId: contact.id });
+             console.log(`[Vendas] Pedido ${cancelable.id} cancelado a pedido do cliente (estoque devolvido).`);
+           } else {
+             console.log(`[Vendas] Cliente pediu cancelamento, mas não há pedido cancelável para o contato ${contact.id}.`);
+           }
+         } catch (e) {
+           console.error("[Vendas] Falha ao cancelar pedido:", e);
+         }
+       }
+
        // Save AI message
        const botMsgId = uuidv4();
        db.prepare(`

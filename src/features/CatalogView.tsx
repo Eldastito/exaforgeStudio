@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { StockModal } from '@/src/features/StockModal';
 
 type Product = {
   id: string; type: string; name: string; description?: string; price?: number;
@@ -20,6 +21,7 @@ export function CatalogView() {
   const [csv, setCsv] = useState('');
   const [importing, setImporting] = useState(false);
   const [form, setForm] = useState<any>(emptyForm);
+  const [stockProduct, setStockProduct] = useState<Product | null>(null);
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -118,9 +120,14 @@ export function CatalogView() {
             <div key={p.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors group">
               <div className="flex justify-between items-start mb-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">{p.type}</span>
-                <button onClick={() => openEdit(p)} className="text-zinc-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Editar">
-                  <Pencil className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => setStockProduct(p)} className="text-zinc-500 hover:text-emerald-400" title="Estoque, variações e movimentações">
+                    <Boxes className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => openEdit(p)} className="text-zinc-500 hover:text-indigo-400" title="Editar">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <h3 className="font-semibold text-zinc-100 mt-2">{p.name}</h3>
               <p className="text-zinc-500 text-sm mt-1 line-clamp-2">{p.description || 'Sem descrição'}</p>
@@ -221,6 +228,10 @@ export function CatalogView() {
             </div>
           </div>
         </div>
+      )}
+
+      {stockProduct && (
+        <StockModal product={stockProduct} onClose={() => { setStockProduct(null); loadProducts(); }} />
       )}
     </div>
   );

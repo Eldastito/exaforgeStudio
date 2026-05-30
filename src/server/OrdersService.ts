@@ -17,7 +17,7 @@ const ALL_STATUSES = new Set<OrderStatus>([
   "concluido", "cancelado", "reembolso", "devolucao",
 ]);
 
-interface NewOrderItem { productId?: string; name?: string; unitPrice?: number; quantity: number; }
+interface NewOrderItem { productId?: string; variantId?: string; name?: string; unitPrice?: number; quantity: number; }
 
 export class OrdersService {
   static isValidStatus(s: string): s is OrderStatus {
@@ -48,22 +48,27 @@ export class OrdersService {
         if (it.productId) {
           product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ? AND active = 1').get(it.productId, orgId);
         }
-        const name = product?.name || it.name;
+        // Resolve a variação (se houver) para nome/preço/estoque corretos.
+        let variant: any = null;
+        if (it.variantId) {
+          variant = db.prepare('SELECT * FROM product_variants WHERE id = ? AND organization_id = ?').get(it.variantId, orgId);
+        }
+        const name = variant ? `${product?.name || it.name} (${variant.name})` : (product?.name || it.name);
         if (!name) throw new Error("Item de pedido sem produto/nome.");
-        const unitPrice = (product?.price ?? it.unitPrice ?? 0);
+        const unitPrice = (variant?.price ?? product?.price ?? it.unitPrice ?? 0);
         const lineTotal = unitPrice * it.quantity;
         total += lineTotal;
 
         // Reserva (e valida) o estoque, se o produto controla estoque.
         if (product?.id) {
-          InventoryService.reserve(orgId, product.id, it.quantity);
+          InventoryService.reserve(orgId, product.id, it.quantity, variant?.id || null);
           if (params.autoClose) {
-            InventoryService.commit(orgId, product.id, it.quantity);
+            InventoryService.commit(orgId, product.id, it.quantity, variant?.id || null);
           }
         }
 
         resolved.push({
-          id: uuidv4(), product_service_id: product?.id || null, name_snapshot: name,
+          id: uuidv4(), product_service_id: product?.id || null, variant_id: variant?.id || null, name_snapshot: name,
           unit_price: unitPrice, quantity: it.quantity, line_total: lineTotal,
           stock_committed: params.autoClose ? 1 : 0,
         });
@@ -75,11 +80,11 @@ export class OrdersService {
       `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, total, params.createdBy || null, params.notes || null);
 
       const insItem = db.prepare(`
-        INSERT INTO order_items (id, order_id, organization_id, product_service_id, name_snapshot, unit_price, quantity, line_total, stock_committed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, quantity, line_total, stock_committed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const r of resolved) {
-        insItem.run(r.id, orderId, orgId, r.product_service_id, r.name_snapshot, r.unit_price, r.quantity, r.line_total, r.stock_committed);
+        insItem.run(r.id, orderId, orgId, r.product_service_id, r.variant_id || null, r.name_snapshot, r.unit_price, r.quantity, r.line_total, r.stock_committed);
       }
 
       return { total, resolved };
@@ -108,15 +113,15 @@ export class OrdersService {
 
         if (becomingFulfilled && !item.stock_committed) {
           // Baixa definitiva: reservado -> vendido.
-          InventoryService.commit(orgId, item.product_service_id, item.quantity);
+          InventoryService.commit(orgId, item.product_service_id, item.quantity, item.variant_id);
           db.prepare('UPDATE order_items SET stock_committed = 1 WHERE id = ?').run(item.id);
         } else if (becomingReversed) {
           if (item.stock_committed) {
             // Já tinha baixado: devolve à prateleira.
-            InventoryService.restock(orgId, item.product_service_id, item.quantity);
+            InventoryService.restock(orgId, item.product_service_id, item.quantity, item.variant_id);
           } else {
             // Só estava reservado: solta a reserva.
-            InventoryService.release(orgId, item.product_service_id, item.quantity);
+            InventoryService.release(orgId, item.product_service_id, item.quantity, item.variant_id);
           }
           db.prepare('UPDATE order_items SET stock_committed = 0 WHERE id = ?').run(item.id);
         }

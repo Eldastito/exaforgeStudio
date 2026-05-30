@@ -6,6 +6,73 @@ import { InventoryService } from "../InventoryService.js";
 
 const router = Router();
 
+// ---- Variações de produto (tamanho/cor/tipo) ----
+
+// GET /api/products/:id/variants
+router.get("/:id/variants", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const variants = db.prepare(`
+      SELECT pv.*, inv.quantity_available, inv.quantity_reserved
+      FROM product_variants pv
+      LEFT JOIN inventory_items inv ON inv.variant_id = pv.id
+      WHERE pv.organization_id = ? AND pv.product_service_id = ?
+      ORDER BY pv.created_at ASC
+    `).all(orgId, req.params.id) as any[];
+    res.json(variants.map(v => ({ ...v, sellable: Math.max(0, (v.quantity_available || 0) - (v.quantity_reserved || 0)) })));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/products/:id/variants — cria variação (e marca o produto com has_variants)
+router.post("/:id/variants", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  const { name, size, color, variant_type, sku, price, initial_stock } = req.body || {};
+  const label = name || [size, color, variant_type].filter(Boolean).join(' / ');
+  if (!label) return res.status(400).json({ error: "Informe ao menos tamanho/cor/tipo ou um nome." });
+  try {
+    const product = db.prepare('SELECT id FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
+    if (!product) return res.status(404).json({ error: "Produto não encontrado" });
+    const vid = uuidv4();
+    db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, sku, size, color, variant_type, price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(vid, orgId, req.params.id, label, sku || null, size || null, color || null, variant_type || null, price ?? null);
+    db.prepare(`UPDATE products_services SET has_variants = 1, stock_control_enabled = 1 WHERE id = ?`).run(req.params.id);
+    if (initial_stock) InventoryService.setQuantity(orgId, req.params.id, parseInt(String(initial_stock), 10) || 0, vid);
+    res.json({ success: true, id: vid });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Movimentações de estoque (entrada/saída/ajuste/transferência) ----
+
+// GET /api/products/:id/movements
+router.get("/:id/movements", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(InventoryService.listMovements(orgId, req.params.id)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/products/:id/movements — registra entrada/saída/ajuste/transferência
+router.post("/:id/movements", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  const { type, quantity, unit_cost, origin, note, variant_id } = req.body || {};
+  if (!['entrada', 'saida', 'ajuste', 'transferencia'].includes(type)) return res.status(400).json({ error: "Tipo de movimentação inválido." });
+  try {
+    const movId = InventoryService.recordMovement(orgId, {
+      productId: req.params.id, variantId: variant_id || null, type,
+      quantity: parseInt(String(quantity), 10) || 0, unitCost: parseFloat(String(unit_cost)) || 0,
+      origin, note, createdBy: userId,
+    });
+    db.prepare(`UPDATE products_services SET stock_control_enabled = 1 WHERE id = ? AND organization_id = ?`).run(req.params.id, orgId);
+    logAuthEvent(orgId, userId, req.params.id, 'STOCK_MOVEMENT', { type, quantity, origin });
+    res.json({ success: true, id: movId });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
   try {
     db.prepare(`
@@ -24,9 +91,16 @@ router.get("/", (req: AuthRequest, res): any => {
 
   try {
     const products = db.prepare(`
-      SELECT ps.*, inv.quantity_available, inv.quantity_reserved, inv.low_stock_threshold
+      SELECT ps.*,
+        COALESCE(prod.quantity_available, agg.qa) AS quantity_available,
+        COALESCE(prod.quantity_reserved, agg.qr) AS quantity_reserved,
+        prod.low_stock_threshold AS low_stock_threshold
       FROM products_services ps
-      LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id
+      LEFT JOIN inventory_items prod ON prod.product_service_id = ps.id AND prod.variant_id IS NULL
+      LEFT JOIN (
+        SELECT product_service_id, SUM(quantity_available) qa, SUM(quantity_reserved) qr
+        FROM inventory_items WHERE variant_id IS NOT NULL GROUP BY product_service_id
+      ) agg ON agg.product_service_id = ps.id
       WHERE ps.organization_id = ?
       ORDER BY ps.created_at DESC
     `).all(orgId) as any[];

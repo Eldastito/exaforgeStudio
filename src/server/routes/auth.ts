@@ -3,9 +3,44 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
+import { JWT_SECRET } from "../config/secret.js";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'zappflow_secret_key_123';
+
+// --- Proteção contra força-bruta no login (em memória, por e-mail) ---
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCK_MS = 15 * 60 * 1000; // 15 min
+const loginAttempts = new Map<string, { count: number; lockUntil: number }>();
+
+function loginLockRemainingMs(key: string): number {
+  const rec = loginAttempts.get(key);
+  if (!rec) return 0;
+  if (rec.lockUntil && Date.now() < rec.lockUntil) return rec.lockUntil - Date.now();
+  return 0;
+}
+function registerFailedLogin(key: string) {
+  const rec = loginAttempts.get(key) || { count: 0, lockUntil: 0 };
+  rec.count += 1;
+  if (rec.count >= LOGIN_MAX_ATTEMPTS) {
+    rec.lockUntil = Date.now() + LOGIN_LOCK_MS;
+    rec.count = 0;
+  }
+  loginAttempts.set(key, rec);
+}
+function clearLoginAttempts(key: string) {
+  loginAttempts.delete(key);
+}
+
+// Política mínima de senha (cadastro e troca de senha).
+function passwordPolicyError(pw: string): string | null {
+  if (typeof pw !== "string" || pw.length < 8) {
+    return "A senha deve ter pelo menos 8 caracteres.";
+  }
+  if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) {
+    return "A senha deve conter letras e números.";
+  }
+  return null;
+}
 
 const logAuthEvent = (orgId: string | null, actorId: string | null, targetId: string | null, eventType: string, meta: any = {}) => {
   try {
@@ -23,6 +58,11 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
   
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  const pwErr = passwordPolicyError(password);
+  if (pwErr) {
+    return res.status(400).json({ error: pwErr });
   }
 
   try {
@@ -84,10 +124,20 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     return res.status(400).json({ error: "Missing email or password" });
   }
 
+  const attemptKey = String(email).toLowerCase();
+  const lockMs = loginLockRemainingMs(attemptKey);
+  if (lockMs > 0) {
+    logAuthEvent(null, null, null, 'LOGIN_LOCKED', { email });
+    return res.status(429).json({
+      error: `Muitas tentativas. Tente novamente em ${Math.ceil(lockMs / 60000)} minuto(s).`,
+    });
+  }
+
   try {
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
     if (!user || !user.password_hash) {
       // Don't reveal if user exists
+      registerFailedLogin(attemptKey);
       logAuthEvent(null, null, null, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -99,9 +149,13 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
+      registerFailedLogin(attemptKey);
       logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
     }
+
+    // Login OK: zera o contador de tentativas
+    clearLoginAttempts(attemptKey);
 
     // Update last login
     db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
@@ -138,8 +192,14 @@ router.post("/forgot-password", async (req: Request, res: Response): Promise<any
       `).run(uuidv4(), user.id, hashedToken);
 
       logAuthEvent(user.organization_id, user.id, user.id, 'PASSWORD_RESET_REQUESTED', { email });
-      // Here you would send an email with the `token`. For now, we simulate success.
-      console.log(`[SIMULATED EMAIL] Password reset token for ${email}: ${token}`);
+      // O envio de e-mail é simulado. Por segurança, NÃO logamos o token em
+      // produção (apareceria nos logs do servidor). Configure um provedor de
+      // e-mail real para entregar o token ao usuário.
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[SIMULATED EMAIL] Password reset token for ${email}: ${token}`);
+      } else {
+        console.warn(`[AUTH] Pedido de reset de senha para ${email}. Configure um provedor de e-mail para entregar o token.`);
+      }
     }
     // Always return success to prevent enum
     res.json({ message: "Se este e-mail estiver cadastrado, enviaremos instruções para recuperação de acesso." });
@@ -152,8 +212,9 @@ router.post("/reset-password", async (req: Request, res: Response): Promise<any>
   const { token, newPassword, email } = req.body;
   if (!token || !newPassword || !email) return res.status(400).json({ error: "Missing fields" });
   
-  if (newPassword.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  const pwErr = passwordPolicyError(newPassword);
+  if (pwErr) {
+    return res.status(400).json({ error: pwErr });
   }
 
   try {

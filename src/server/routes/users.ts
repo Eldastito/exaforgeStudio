@@ -50,8 +50,12 @@ router.post("/invite", (req: Request, res: Response): any => {
       VALUES (?, ?, ?, ?, ?, datetime('now', '+7 days'), ?)
     `).run(uuidv4(), orgId, email, role, token, actor.userId);
 
-    // Simulate sending email
-    console.log(`[SIMULATED EMAIL] Invite to ${email} with role ${role}. Token is: ${token}`);
+    // Envio de e-mail simulado. Por segurança, não logamos o token em produção.
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[SIMULATED EMAIL] Invite to ${email} with role ${role}. Token is: ${token}`);
+    } else {
+      console.warn(`[USERS] Convite criado para ${email} (${role}). Configure um provedor de e-mail para entregar o token.`);
+    }
     
     db.prepare(`
       INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, event_type, metadata_json)

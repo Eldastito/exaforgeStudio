@@ -370,6 +370,47 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN size_bytes INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_org ON knowledge_chunks(organization_id)`); } catch(e){}
+
+  // ===== Vendas / Pedidos (canal de venda via WhatsApp) =====
+  // Interruptor de autonomia da IA nas vendas: 0 = reserva e humano confirma
+  // (padrão, mais seguro); 1 = IA fecha a venda e baixa o estoque sozinha.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ai_auto_close_sales INTEGER DEFAULT 0`); } catch(e){}
+  // SKU/estoque mínimo para alertas
+  try { db.exec(`ALTER TABLE inventory_items ADD COLUMN low_stock_threshold INTEGER DEFAULT 0`); } catch(e){}
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        ticket_id TEXT,
+        status TEXT NOT NULL DEFAULT 'aguardando_pagamento',
+        -- aguardando_pagamento | pago | em_preparo | entregue | concluido
+        -- | cancelado | reembolso | devolucao
+        total_amount REAL DEFAULT 0,
+        currency TEXT DEFAULT 'BRL',
+        created_by TEXT,           -- 'ai' | userId | null
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS order_items (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT,
+        name_snapshot TEXT NOT NULL,
+        unit_price REAL DEFAULT 0,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        line_total REAL DEFAULT 0,
+        stock_committed INTEGER DEFAULT 0, -- 1 = baixa definitiva ja aplicada
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_orders_org_status ON orders(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de pedidos', e); }
 };
 
 initDb();

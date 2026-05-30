@@ -18,6 +18,7 @@ import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
 import managersRoutes from "./src/server/routes/managers.js";
 import aiRoutes from "./src/server/routes/ai.js";
+import ordersRoutes from "./src/server/routes/orders.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
@@ -276,6 +277,7 @@ async function startServer() {
   protectedApi.use("/messages", messagesRoutes);
   protectedApi.use("/tickets", ticketsRoutes);
   protectedApi.use("/products", productsRoutes);
+  protectedApi.use("/orders", ordersRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
   protectedApi.use("/analytics", analyticsRoutes);

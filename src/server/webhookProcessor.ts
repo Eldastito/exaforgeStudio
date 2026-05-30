@@ -126,7 +126,6 @@ export async function processIncomingMessage(
           db.prepare('UPDATE tickets SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(aiResult.newStage, ticket.id);
           if (io) {
             io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, contactId: contact.id, newStage: aiResult.newStage });
-            io.emit("ticket_stage_change", { contactId: payload.senderId, newStage: aiResult.newStage });
           }
        }
 

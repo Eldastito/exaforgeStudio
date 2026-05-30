@@ -510,7 +510,7 @@ async function startServer() {
            try {
               const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/user/avatar`;
               const ctrl = new AbortController();
-              const t = setTimeout(() => ctrl.abort(), 4000); // não bloqueia o fluxo
+              const t = setTimeout(() => ctrl.abort(), 2500); // não bloqueia o fluxo
               const picResp = await fetch(picEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey, 'token': evolutionConfig.apiKey, 'instance': businessId },

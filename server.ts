@@ -25,7 +25,7 @@ import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
-import { transcribeAudio } from "./src/server/llm.js";
+import { transcribeAudio, describeImage } from "./src/server/llm.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -467,7 +467,24 @@ async function startServer() {
 
         // Outras mídias sem legenda: registra um placeholder para aparecer no app.
         if (!incomingMessageText) {
-          if (msgObj.imageMessage || msgObj.ImageMessage) incomingMessageText = "📷 [Imagem recebida]";
+          if (msgObj.imageMessage || msgObj.ImageMessage) {
+            // Visão/OCR: usa o base64 da imagem para a IA entender o conteúdo.
+            const imgB64 = msgObj.base64 || data.base64 || "";
+            const caption = msgObj.imageMessage?.caption || msgObj.ImageMessage?.caption || "";
+            if (imgB64) {
+              try {
+                const mime = msgObj.imageMessage?.mimetype || msgObj.ImageMessage?.mimetype || "image/jpeg";
+                const desc = await describeImage(imgB64, mime);
+                console.log(`[Vision] Imagem analisada: ${desc.slice(0, 80)}`);
+                incomingMessageText = `📷 [Imagem]${caption ? ` (legenda: ${caption})` : ''}\nConteúdo da imagem: ${desc}`;
+              } catch (e) {
+                console.error("[Vision] Falha ao analisar imagem:", e);
+                incomingMessageText = caption ? `📷 [Imagem] ${caption}` : "📷 [Imagem recebida]";
+              }
+            } else {
+              incomingMessageText = caption ? `📷 [Imagem] ${caption}` : "📷 [Imagem recebida]";
+            }
+          }
           else if (msgObj.videoMessage || msgObj.VideoMessage) incomingMessageText = "🎥 [Vídeo recebido]";
           else if (msgObj.documentMessage || msgObj.DocumentMessage) incomingMessageText = "📄 [Documento recebido]";
           else if (msgObj.stickerMessage || msgObj.StickerMessage) incomingMessageText = "🔖 [Figurinha]";
@@ -508,7 +525,7 @@ async function startServer() {
               } else {
                  console.warn(`[Avatar] HTTP ${picResp.status}`);
               }
-           } catch(e) {}
+           } catch(e) { console.warn("[Avatar] erro:", (e as Error).message); }
         }
 
         await processIncomingMessage({

@@ -2,6 +2,7 @@ import db from "./db.js";
 import { generateRagResponse } from "./geminiRAG.js";
 import { AIOrchestratorService } from "./AIOrchestratorService.js";
 import { OrdersService } from "./OrdersService.js";
+import { CustomerProfileService } from "./CustomerProfileService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
@@ -95,6 +96,9 @@ export async function processIncomingMessage(
     VALUES (?, ?, ?, 'contact', ?, ?)
   `).run(msgId, orgId, ticket.id, payload.text, payload.mediaUrl || null);
 
+  // CRM: registra o último contato e recalcula a temperatura do lead.
+  CustomerProfileService.touchContact(contact.id);
+
   // 4. Emit to Organization Room (Frontend multi-tenant support)
   if (io) {
     const msgPayload = {
@@ -136,6 +140,7 @@ export async function processIncomingMessage(
           channelId: channel.id,
           ticketStage: ticket.stage,
           history,
+          contactId: contact.id,
        });
        
        if (aiResult.newStage && aiResult.newStage !== ticket.stage) {

@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { InventoryService } from "./InventoryService.js";
+import { CustomerProfileService } from "./CustomerProfileService.js";
 
 export type OrderStatus =
   | "aguardando_pagamento" | "pago" | "em_preparo" | "entregue"
@@ -85,6 +86,8 @@ export class OrdersService {
     });
 
     const { total, resolved } = tx();
+    // Atualiza o perfil de CRM do contato (se já nasceu faturado via autoClose).
+    if (params.contactId) CustomerProfileService.recomputePurchaseStats(orgId, params.contactId);
     return { id: orderId, status, total, items: resolved };
   }
 
@@ -123,6 +126,8 @@ export class OrdersService {
     });
 
     tx();
+    // Recalcula o perfil de CRM (compra concretizada/estornada muda os agregados).
+    if (order.contact_id) CustomerProfileService.recomputePurchaseStats(orgId, order.contact_id);
   }
 
   /**

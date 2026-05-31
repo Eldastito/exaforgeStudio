@@ -5,30 +5,33 @@ import { Button } from '@/src/components/ui/button';
 import { Badge } from '@/src/components/ui/badge';
 import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
+import { InstagramConnectModal } from '@/src/features/InstagramConnectModal';
 
 export function ChannelsPanel() {
-  const { channels, connectInstagram, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel } = useStore();
-  const [isConnecting, setIsConnecting] = useState(false);
+  const { channels, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [evolutionStatus, setEvolutionStatus] = useState<'disconnected' | 'connecting_evo' | 'connected_evo'>('disconnected');
   const [evolutionQr, setEvolutionQr] = useState<string | null>(null);
-  
+  const [showInstagram, setShowInstagram] = useState(false);
+  const [forwardWhats, setForwardWhats] = useState('');
+
   useEffect(() => {
     fetchChannels();
     loadRagDocuments();
+    apiFetch('/api/channels/forward-whatsapp').then(r => r.json()).then(d => setForwardWhats(d.forward_whatsapp || '')).catch(() => {});
   }, []);
+
+  const saveForward = async () => {
+    await apiFetch('/api/channels/forward-whatsapp', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ forward_whatsapp: forwardWhats }),
+    }).catch(() => {});
+  };
 
   const whatsappCloud = channels.find(c => c.provider === 'whatsapp_cloud');
   const instagram = channels.find(c => c.provider === 'instagram');
   const evolution = channels.find(c => c.provider === 'evolution');
-
-  const handleConnectInstagram = () => {
-    setIsConnecting(true);
-    connectInstagram();
-    // Reset loading state after store simulate is done (1.5s)
-    setTimeout(() => setIsConnecting(false), 1600);
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -132,7 +135,7 @@ export function ChannelsPanel() {
         </div>
 
         {/* Status de Conexoes */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
           {/* Card WhatsApp API */}
           <div className="flex flex-col rounded-xl border border-slate-800 bg-slate-900/50 p-6 relative overflow-hidden">
@@ -164,9 +167,9 @@ export function ChannelsPanel() {
 
             {whatsappCloud ? (
               <div className="space-y-4 relative z-10 flex-1">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">Número</span>
-                  <span className="font-medium text-slate-200">{whatsappCloud.identifier}</span>
+                <div className="flex justify-between items-center text-sm gap-2">
+                  <span className="text-slate-400 shrink-0">Número</span>
+                  <span className="font-medium text-slate-200 truncate">{whatsappCloud.identifier}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-400">Modo IA</span>
@@ -220,13 +223,13 @@ export function ChannelsPanel() {
 
             {instagram ? (
               <div className="space-y-4 relative z-10 flex-1">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">Conta</span>
-                  <span className="font-medium text-slate-200">{instagram.identifier}</span>
+                <div className="flex justify-between items-center text-sm gap-2">
+                  <span className="text-slate-400 shrink-0">Conta</span>
+                  <span className="font-medium text-slate-200 truncate">{instagram.name || instagram.identifier}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">Página Raíz</span>
-                  <span className="font-mono text-xs text-slate-500">Minha Loja FB</span>
+                <div className="flex justify-between items-center text-sm gap-2">
+                  <span className="text-slate-400 shrink-0">IG Business ID</span>
+                  <span className="font-mono text-xs text-slate-500 truncate">{instagram.identifier}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-400">Modo IA</span>
@@ -249,19 +252,17 @@ export function ChannelsPanel() {
                   <RefreshCw className="w-4 h-4 mr-2" /> Sincronizar
                 </Button>
               ) : (
-               <Button 
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white border-0 transition-colors" 
-                onClick={handleConnectInstagram}
-                disabled={isConnecting}
+               <Button
+                className="w-full bg-pink-600 hover:bg-pink-700 text-white border-0 transition-colors"
+                onClick={() => setShowInstagram(true)}
                >
-                 {isConnecting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                 {isConnecting ? 'Autenticando na Meta...' : 'Conectar Instagram'}
+                 Conectar Instagram
                </Button>
               )}
             </div>
           </div>
           {/* Card Evolution API */}
-          <div className="flex flex-col rounded-xl border border-blue-900/40 bg-slate-900/50 p-6 relative overflow-hidden md:col-span-2 xl:col-span-2">
+          <div className="flex flex-col rounded-xl border border-blue-900/40 bg-slate-900/50 p-6 relative overflow-hidden lg:col-span-2">
              <div className="absolute top-0 right-0 p-4 opacity-[0.03]">
               <Smartphone className="w-48 h-48 text-blue-500" />
             </div>
@@ -408,6 +409,30 @@ export function ChannelsPanel() {
 
         </div>
 
+        {/* Encaminhamento de leads (Instagram -> WhatsApp) */}
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-emerald-400" /> Encaminhamento para WhatsApp
+              </h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Número que a IA vai oferecer aos clientes do <strong>Instagram</strong> para continuar o atendimento no WhatsApp.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={forwardWhats}
+                onChange={e => setForwardWhats(e.target.value)}
+                placeholder="5521999998888 (DDI+DDD+número)"
+                className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-emerald-500 w-64"
+              />
+              <Button onClick={saveForward} className="bg-emerald-600 hover:bg-emerald-700 text-white">Salvar</Button>
+            </div>
+          </div>
+        </div>
+
         {/* Secao base de conhecimento RAG */}
         <div className="mt-8">
           <div className="flex items-center gap-2 mb-4">
@@ -497,6 +522,10 @@ export function ChannelsPanel() {
         </div>
 
       </div>
+
+      {showInstagram && (
+        <InstagramConnectModal onClose={() => setShowInstagram(false)} onConnected={fetchChannels} />
+      )}
     </div>
   );
 }

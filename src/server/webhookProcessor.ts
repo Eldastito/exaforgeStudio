@@ -149,6 +149,7 @@ export async function processIncomingMessage(
           ticketStage: ticket.stage,
           history,
           contactId: contact.id,
+          provider: channel.provider,
        });
        
        if (aiResult.newStage && aiResult.newStage !== ticket.stage) {

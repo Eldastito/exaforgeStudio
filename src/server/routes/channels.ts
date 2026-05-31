@@ -20,9 +20,28 @@ const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, ta
 router.get("/", (req: AuthRequest, res) => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  
+
   const channels = db.prepare('SELECT id, organization_id, provider, name, identifier, status, ai_enabled, human_handoff_enabled, created_at, updated_at FROM channels WHERE organization_id = ?').all(orgId);
   res.json(channels);
+});
+
+// GET número de encaminhamento para WhatsApp (usado pela IA no Instagram)
+router.get("/forward-whatsapp", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const o = db.prepare('SELECT forward_whatsapp FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
+  res.json({ forward_whatsapp: o?.forward_whatsapp || '' });
+});
+
+// PUT número de encaminhamento para WhatsApp
+router.put("/forward-whatsapp", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const num = String(req.body?.forward_whatsapp || '').replace(/\D/g, '') || null;
+    db.prepare('UPDATE organization_settings SET forward_whatsapp = ? WHERE organization_id = ?').run(num, orgId);
+    res.json({ success: true, forward_whatsapp: num || '' });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // Create channel

@@ -523,6 +523,10 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_days INTEGER DEFAULT 60`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_message TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_last_run DATETIME`); } catch(e){}
+  // Lembretes automáticos de agendamento (cron): por organização.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN appointment_reminders_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN appointment_reminder_hours INTEGER DEFAULT 24`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN appointment_reminder_message TEXT`); } catch(e){}
 };
 
 initDb();

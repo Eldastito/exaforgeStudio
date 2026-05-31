@@ -85,87 +85,147 @@ router.post("/settings/onboarding", (req, res) => {
 
 router.post("/reports/pdf", (req, res) => {
   const orgId = getOrgId(req);
-  const { type, period } = req.body;
-  
+  const { period } = req.body;
+
   try {
     const settings = AnalyticsService.getReportSettings(orgId) as any;
-    const businessName = settings?.business_name || 'Relatório';
+    const businessName = settings?.business_name || 'Sua Empresa';
     const metrics = AnalyticsService.getMetrics(orgId, { period });
-    
-    // Aesthetic constants
-    const primaryColor = settings?.primary_color || '#1e293b';
-    const accentColor = '#6366f1';
-    const textColor = '#334155';
-    const bgHeader = '#f8fafc';
-    
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
-    
+    const profit = AnalyticsService.getProfit(orgId, { period });
+
+    // ===== Paleta e helpers (premium) =====
+    const C = {
+      ink: '#0f172a', body: '#334155', muted: '#64748b', faint: '#94a3b8',
+      line: '#e2e8f0', card: '#ffffff', soft: '#f8fafc',
+      indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981', amber: '#f59e0b', rose: '#f43f5e', sky: '#0ea5e9',
+    };
+    const PERIOD_LABEL: Record<string, string> = { today: 'Hoje', week: 'Últimos 7 dias', month: 'Últimos 30 dias', all: 'Todo o período' };
+    const periodLabel = PERIOD_LABEL[period] || period;
+    const brl = (v: number) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const conversion = metrics.totalTickets ? Math.round((metrics.salesCount / metrics.totalTickets) * 100) : 0;
+
+    const M = 48;
+    const doc = new PDFDocument({ margin: 0, size: 'A4' });
+    const W = doc.page.width;
+    const CW = W - M * 2;
+
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=relatorio_${type}_${Date.now()}.pdf`);
-    
+    res.setHeader('Content-Disposition', `attachment; filename=relatorio-${period}-${Date.now()}.pdf`);
     doc.pipe(res);
-    
-    // Header
-    doc.rect(0, 0, 600, 100).fill(bgHeader);
-    doc.fillColor(primaryColor).fontSize(24).font('Helvetica-Bold').text(businessName.toUpperCase(), 50, 40);
-    doc.fillColor(accentColor).fontSize(12).font('Helvetica-Bold').text(type.charAt(0).toUpperCase() + type.slice(1), 50, 65);
-    
-    doc.fillColor('#64748b').fontSize(9).font('Helvetica').text(`Gerado em: ${new Date().toLocaleString()}`, 350, 40, { align: 'right', width: 200 });
-    doc.text(`Período: ${period}`, 350, 52, { align: 'right', width: 200 });
-    
-    doc.moveDown(4); // Move below header
-    
-    // Metrics Section
-    doc.fillColor(primaryColor).fontSize(16).font('Helvetica-Bold').text('1. Panorama Estratégico', 50);
-    doc.moveDown(1);
-    
-    const cardWidth = 140;
-    const cardHeight = 80;
-    const cardGap = 37.5;
-    const startY = doc.y;
 
-    const drawCard = (title: string, value: string | number, index: number) => {
-        const x = 50 + index * (cardWidth + cardGap);
-        doc.roundedRect(x, startY, cardWidth, cardHeight, 8).fill('#ffffff');
-        doc.lineWidth(1).strokeColor('#e2e8f0').roundedRect(x, startY, cardWidth, cardHeight, 8).stroke();
-        
-        doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold').text(title.toUpperCase(), x + 10, startY + 20, { width: cardWidth - 20, align: 'center' });
-        doc.fillColor(primaryColor).fontSize(22).font('Helvetica-Bold').text(value.toString(), x + 10, startY + 40, { width: cardWidth - 20, align: 'center' });
-    };
-    
-    drawCard('Tickets', metrics.totalTickets, 0);
-    drawCard('Leads', metrics.newLeadsCount, 1);
-    drawCard('Vendas', metrics.salesCount, 2);
-    
-    doc.y = startY + cardHeight + 40;
+    const initial = (businessName.trim()[0] || 'E').toUpperCase();
 
-    // Detailed Metrics Section
-    doc.fillColor(primaryColor).fontSize(16).font('Helvetica-Bold').text('2. Diagnóstico Técnico', 50);
-    doc.moveDown(1);
-    
-    const drawRow = (label: string, value: string | number, isEven: boolean) => {
-        const y = doc.y;
-        if (isEven) {
-          doc.rect(50, y - 2, 495, 25).fill('#f8fafc');
-        }
-        doc.fillColor(textColor).fontSize(11).font('Helvetica').text(label, 60, y + 5, { width: 300 });
-        doc.fillColor(primaryColor).font('Helvetica-Bold').text(value.toString(), 350, y + 5, { width: 180, align: 'right' });
-        doc.moveDown(1.2);
+    // ---------- CABEÇALHO (faixa com gradiente) ----------
+    const headH = 132;
+    const grad = doc.linearGradient(0, 0, W, headH);
+    grad.stop(0, '#4f46e5').stop(0.55, '#6d28d9').stop(1, '#7c3aed');
+    doc.rect(0, 0, W, headH).fill(grad);
+
+    doc.roundedRect(M, 34, 44, 44, 10).fillOpacity(0.18).fill('#ffffff').fillOpacity(1);
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(22).text(initial, M, 46, { width: 44, align: 'center' });
+
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(22).text(businessName, M + 60, 40, { width: CW - 200 });
+    doc.fillColor('#e9d5ff').font('Helvetica').fontSize(10.5).text('Relatório de Performance · ZappFlow.ai', M + 60, 68, { width: CW - 200 });
+
+    const boxW = 150, boxX = W - M - boxW;
+    doc.roundedRect(boxX, 38, boxW, 56, 8).fillOpacity(0.14).fill('#ffffff').fillOpacity(1);
+    doc.fillColor('#ede9fe').font('Helvetica').fontSize(8).text('PERÍODO', boxX + 12, 48);
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12).text(periodLabel, boxX + 12, 59, { width: boxW - 24 });
+    doc.fillColor('#ddd6fe').font('Helvetica').fontSize(7.5).text(
+      'Gerado em ' + new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+      boxX + 12, 78, { width: boxW - 24 }
+    );
+
+    let y = headH + 30;
+
+    const sectionTitle = (label: string, accent: string) => {
+      doc.roundedRect(M, y + 1, 4, 14, 2).fill(accent);
+      doc.fillColor(C.ink).font('Helvetica-Bold').fontSize(13).text(label, M + 14, y);
+      y += 26;
     };
 
-    drawRow('Handoffs para Humano', metrics.handoffCount, true);
-    drawRow('Agendamentos', metrics.appointmentCount, false);
-    drawRow('Respostas IA', metrics.aiResponseCount, true);
-    
-    // Footer
-    doc.fontSize(8).fillColor('#94a3b8').text('Gerado automaticamente pelo sistema de analytics.', 50, 780, { align: 'center', width: 495 });
-    if (settings?.report_footer) {
-        doc.text(settings.report_footer, 50, 792, { align: 'center', width: 495 });
-    }
-    
+    // ---------- KPI cards ----------
+    sectionTitle('Panorama Geral', C.indigo);
+    const kpis = [
+      { label: 'TICKETS', value: String(metrics.totalTickets), sub: `${metrics.newLeadsCount} novos leads`, accent: C.indigo },
+      { label: 'VENDAS', value: String(metrics.salesCount), sub: `${conversion}% de conversão`, accent: C.emerald },
+      { label: 'RESPOSTAS IA', value: String(metrics.aiResponseCount), sub: `${metrics.resolutionRateAI}% resolvido por IA`, accent: C.violet },
+      { label: 'AGENDAMENTOS', value: String(metrics.appointmentCount), sub: `${metrics.handoffCount} p/ humano`, accent: C.amber },
+    ];
+    const gap = 14;
+    const cardW = (CW - gap * 3) / 4;
+    const cardH = 92;
+    kpis.forEach((k, i) => {
+      const x = M + i * (cardW + gap);
+      doc.roundedRect(x, y, cardW, cardH, 10).fillAndStroke(C.card, C.line);
+      doc.roundedRect(x, y, cardW, 3.5, 2).fill(k.accent);
+      doc.fillColor(C.muted).font('Helvetica-Bold').fontSize(7.5).text(k.label, x + 12, y + 16, { width: cardW - 24, characterSpacing: 0.5 });
+      doc.fillColor(C.ink).font('Helvetica-Bold').fontSize(26).text(k.value, x + 12, y + 30, { width: cardW - 24 });
+      doc.fillColor(C.faint).font('Helvetica').fontSize(7.5).text(k.sub, x + 12, y + 66, { width: cardW - 24 });
+    });
+    y += cardH + 30;
+
+    // ---------- Resultado Financeiro ----------
+    sectionTitle('Resultado Financeiro', C.emerald);
+    const finH = 96;
+    doc.roundedRect(M, y, CW, finH, 12).fillAndStroke(C.soft, C.line);
+    doc.fillColor(C.muted).font('Helvetica-Bold').fontSize(8).text('LUCRO NO PERÍODO', M + 20, y + 18);
+    doc.fillColor(C.emerald).font('Helvetica-Bold').fontSize(30).text(brl(profit.profit), M + 20, y + 32);
+    doc.fillColor(C.faint).font('Helvetica').fontSize(8).text(
+      profit.hasCostData ? `Margem de ${profit.margin}% · ${profit.orders} pedido(s) faturado(s)` : 'Cadastre o custo no estoque para ver o lucro real',
+      M + 20, y + 70
+    );
+    const rightX = M + CW * 0.62;
+    doc.moveTo(rightX - 16, y + 16).lineTo(rightX - 16, y + finH - 16).strokeColor(C.line).stroke();
+    doc.fillColor(C.muted).font('Helvetica-Bold').fontSize(8).text('RECEITA', rightX, y + 22);
+    doc.fillColor(C.ink).font('Helvetica-Bold').fontSize(15).text(brl(profit.revenue), rightX, y + 34);
+    doc.fillColor(C.muted).font('Helvetica-Bold').fontSize(8).text('CUSTO', rightX + (CW * 0.38) / 2, y + 22);
+    doc.fillColor(C.rose).font('Helvetica-Bold').fontSize(15).text(brl(profit.cost), rightX + (CW * 0.38) / 2, y + 34);
+    y += finH + 30;
+
+    // ---------- Funil de Vendas ----------
+    sectionTitle('Funil de Vendas', C.sky);
+    const funnel = [
+      { label: 'Leads recebidos', value: metrics.newLeadsCount || metrics.totalTickets, color: C.sky },
+      { label: 'Em atendimento', value: metrics.totalTickets, color: C.indigo },
+      { label: 'Agendamentos', value: metrics.appointmentCount, color: C.amber },
+      { label: 'Vendas concretizadas', value: metrics.salesCount, color: C.emerald },
+    ];
+    const fMax = Math.max(1, ...funnel.map(f => f.value));
+    funnel.forEach((f) => {
+      doc.fillColor(C.body).font('Helvetica').fontSize(9.5).text(f.label, M, y, { width: 200 });
+      doc.fillColor(C.ink).font('Helvetica-Bold').fontSize(9.5).text(String(f.value), M + CW - 40, y, { width: 40, align: 'right' });
+      const barY = y + 15, barW = CW;
+      doc.roundedRect(M, barY, barW, 7, 3.5).fill('#eef2f7');
+      const w = Math.max(6, (f.value / fMax) * barW);
+      doc.roundedRect(M, barY, w, 7, 3.5).fill(f.color);
+      y += 30;
+    });
+    y += 8;
+
+    // ---------- Eficiência do Atendimento ----------
+    sectionTitle('Eficiência do Atendimento', C.violet);
+    const rows: [string, string][] = [
+      ['Respostas automáticas da IA', String(metrics.aiResponseCount)],
+      ['Taxa de resolução pela IA', `${metrics.resolutionRateAI}%`],
+      ['Tempo médio de 1ª resposta', `${metrics.averageFirstResponseTime}s`],
+      ['Repasses para humano', String(metrics.handoffCount)],
+    ];
+    rows.forEach((r, i) => {
+      const rowY = y;
+      if (i % 2 === 0) doc.roundedRect(M, rowY, CW, 26, 5).fill(C.soft);
+      doc.fillColor(C.body).font('Helvetica').fontSize(10).text(r[0], M + 14, rowY + 8);
+      doc.fillColor(C.indigo).font('Helvetica-Bold').fontSize(10).text(r[1], M, rowY + 8, { width: CW - 14, align: 'right' });
+      y += 26;
+    });
+
+    // ---------- Rodapé ----------
+    const footY = doc.page.height - 50;
+    doc.moveTo(M, footY).lineTo(W - M, footY).strokeColor(C.line).stroke();
+    doc.fillColor(C.faint).font('Helvetica').fontSize(8).text(`${businessName} · Relatório gerado automaticamente`, M, footY + 10, { width: CW / 2 });
+    doc.fillColor(C.faint).font('Helvetica').fontSize(8).text(settings?.report_footer || 'ZappFlow.ai', M + CW / 2, footY + 10, { width: CW / 2, align: 'right' });
+
     doc.end();
-
-
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

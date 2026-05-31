@@ -202,7 +202,8 @@ export async function processIncomingMessage(
          }
        }
 
-       // CANCELAMENTO confirmado pelo cliente: cancela o pedido ativo (devolve o estoque).
+       // CANCELAMENTO confirmado pelo cliente: cancela o pedido ativo (devolve o estoque)
+       // e também cancela os agendamentos/entregas abertos do ticket.
        if (aiResult.cancelOrder) {
          try {
            const cancelable = OrdersService.latestCancelableOrder(orgId, contact.id);
@@ -213,8 +214,22 @@ export async function processIncomingMessage(
            } else {
              console.log(`[Vendas] Cliente pediu cancelamento, mas não há pedido cancelável para o contato ${contact.id}.`);
            }
+           // Cancela agendamentos abertos do contato (não os já concluídos/cancelados).
+           const apptInfo = db.prepare(`
+             UPDATE appointments SET status = 'cancelled'
+             WHERE organization_id = ? AND contact_id = ? AND status NOT IN ('cancelled','completed','no_show')
+           `).run(orgId, contact.id);
+           // Cancela entregas pendentes do contato.
+           db.prepare(`
+             UPDATE deliveries SET status = 'cancelled'
+             WHERE organization_id = ? AND contact_id = ? AND status NOT IN ('cancelled','delivered','completed')
+           `).run(orgId, contact.id);
+           if (apptInfo.changes > 0 && io) {
+             io.to(`org:${orgId}`).emit("appointment_updated", { contactId: contact.id, status: 'cancelled' });
+             console.log(`[Vendas] ${apptInfo.changes} agendamento(s) cancelado(s) junto com o pedido.`);
+           }
          } catch (e) {
-           console.error("[Vendas] Falha ao cancelar pedido:", e);
+           console.error("[Vendas] Falha ao cancelar pedido/agendamento:", e);
          }
        }
 

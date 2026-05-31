@@ -544,6 +544,8 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN payment_link TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN payment_external_id TEXT`); } catch(e){} // id do pagamento no gateway
   try { db.exec(`ALTER TABLE orders ADD COLUMN paid_at DATETIME`); } catch(e){}
+  // Número de WhatsApp da empresa para a IA encaminhar leads (ex.: vindos do Instagram).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN forward_whatsapp TEXT`); } catch(e){}
 };
 
 initDb();

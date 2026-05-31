@@ -21,6 +21,7 @@ export class AIOrchestratorService {
     ticketStage?: string;
     history?: { role: string; text: string }[];
     contactId?: string;
+    provider?: string;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -116,7 +117,21 @@ export class AIOrchestratorService {
       profileText = CustomerProfileService.profileLine(params.organizationId, params.contactId);
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText);
+    // Encaminhamento Instagram -> WhatsApp: se o canal é Instagram e há um número
+    // de WhatsApp configurado, instrui a IA a conduzir o lead para o WhatsApp.
+    let forwardText = "";
+    if (!isOrchestratorCommand && params.provider === 'instagram') {
+      try {
+        const o = db.prepare('SELECT forward_whatsapp FROM organization_settings WHERE organization_id = ?').get(params.organizationId) as any;
+        if (o?.forward_whatsapp) {
+          forwardText = `CANAL ATUAL: Instagram Direct. Sempre que fizer sentido (interesse de compra, dúvida que exige mais detalhes, fechamento), convide o cliente a continuar pelo WhatsApp para um atendimento mais ágil, informando o número: https://wa.me/${o.forward_whatsapp} (ou ${o.forward_whatsapp}). Seja natural, não force em toda mensagem.`;
+        } else {
+          forwardText = `CANAL ATUAL: Instagram Direct.`;
+        }
+      } catch (e) { /* noop */ }
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -503,7 +518,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -569,6 +584,7 @@ REGRAS OBRIGATÓRIAS:
 10. CANCELAMENTO: se o cliente pedir para CANCELAR o pedido, primeiro confirme com empatia ("Você confirma o cancelamento do seu pedido?"). Só quando ele CONFIRMAR o cancelamento, defina "cancel_order": true (cancela o pedido ativo e devolve o estoque). Se ele já tiver confirmado no histórico, vá direto. Se o pedido já foi entregue, explique que para devolução/reembolso você vai encaminhar para um atendente (use "needs_human": true).
 
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
+${forwardText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}

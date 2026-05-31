@@ -50,6 +50,26 @@ export function InstagramConnectModal({ onClose, onConnected }: { onClose: () =>
         </div>
         <p className="text-xs text-zinc-500 mb-4">Conecte o Direct para a IA atender as mensagens e encaminhar leads para o WhatsApp.</p>
 
+        {/* Conexão recomendada: login OAuth do Instagram */}
+        <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-4 mb-5">
+          <p className="text-sm font-medium text-zinc-100 mb-1">Conexão recomendada (1 clique)</p>
+          <p className="text-xs text-zinc-400 mb-3">Faça login com o Instagram e autorize — o token completo (que entrega o texto das mensagens) é capturado automaticamente.</p>
+          <Button
+            onClick={async () => {
+              try {
+                const res = await apiFetch('/api/integrations/instagram/login-url');
+                const d = await res.json();
+                if (d.url) { window.location.href = d.url; }
+                else alert(d.error || 'Configure as credenciais do app da Meta no servidor.');
+              } catch (e) { alert('Erro ao iniciar o login do Instagram.'); }
+            }}
+            className="w-full bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white">
+            <Instagram className="w-4 h-4 mr-2" /> Entrar com Instagram
+          </Button>
+        </div>
+
+        <p className="text-[11px] text-zinc-600 mb-3 text-center">— ou conecte manualmente colando as credenciais —</p>
+
         {/* Pré-requisitos */}
         <div className="rounded-lg border border-pink-500/20 bg-pink-500/5 p-3 mb-4 text-xs text-pink-200/80 space-y-1">
           <p className="font-semibold text-pink-300">Pré-requisitos (no Meta for Developers):</p>

@@ -758,18 +758,25 @@ async function startServer() {
         // Formato Messenger/IG: entry[].messaging[]  (DMs)
         const messaging = entry?.messaging?.[0] || entry?.standby?.[0];
         if (messaging) {
-          // Ignora "echo" (mensagem enviada pela própria conta), recibos de
-          // leitura e reações — não são mensagens do cliente para responder.
-          if (messaging.message?.is_echo) {
-            console.log("[IG Webhook] Ignorado: echo (mensagem da própria conta).");
-          } else if (messaging.read || messaging.reaction || messaging.delivery) {
+          // A conta que RECEBE é a nossa (entry.id). O remetente é messaging.sender.id.
+          const recipientId = messaging.recipient?.id;
+          const fromSelf = messaging.sender?.id && recipientId && messaging.sender.id === entry?.id;
+          // Texto pode vir em message.text (nova) ou message_edit.text (editada).
+          const msgObj = messaging.message || messaging.message_edit;
+
+          if (messaging.message?.is_echo || fromSelf) {
+            console.log("[IG Webhook] Ignorado: echo/mensagem da própria conta.");
+          } else if (messaging.read || messaging.reaction || messaging.delivery || messaging.postback) {
             console.log("[IG Webhook] Ignorado: recibo/leitura/reação.");
           } else {
             senderId = messaging.sender?.id || '';
-            incomingMessageText = messaging.message?.text || '';
+            incomingMessageText = msgObj?.text || '';
             // Anexo sem texto (figurinha/imagem): coloca um placeholder.
-            if (!incomingMessageText && messaging.message?.attachments?.length) {
+            if (!incomingMessageText && msgObj?.attachments?.length) {
               incomingMessageText = "📎 [Anexo recebido pelo Instagram]";
+            }
+            if (!incomingMessageText) {
+              console.log("[IG Webhook] Evento sem texto reconhecido (tipo):", Object.keys(messaging).join(','));
             }
           }
         } else if (entry?.changes?.[0]?.value?.from) {

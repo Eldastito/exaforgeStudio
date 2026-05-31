@@ -22,6 +22,7 @@ import ordersRoutes from "./src/server/routes/orders.js";
 import contactsRoutes from "./src/server/routes/contacts.js";
 import campaignsRoutes from "./src/server/routes/campaigns.js";
 import paymentsRoutes from "./src/server/routes/payments.js";
+import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
@@ -288,6 +289,7 @@ async function startServer() {
   protectedApi.use("/payments", paymentsRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
+  protectedApi.use("/integrations", instagramOAuthRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
@@ -306,8 +308,15 @@ async function startServer() {
     if (req.path.startsWith('/webhooks')) {
       return next(); // segue para os handlers públicos de webhook abaixo
     }
+    // Callback OAuth do Instagram: a Meta redireciona o navegador para cá SEM JWT.
+    if (req.path === '/integrations/instagram/callback') {
+      return next();
+    }
     return protectedApi(req, res, next);
   });
+
+  // Callback público do OAuth do Instagram (troca code -> token e salva o canal).
+  app.get("/api/integrations/instagram/callback", instagramCallback);
 
   // --- META WEBHOOK (WhatsApp & Instagram) ---
   

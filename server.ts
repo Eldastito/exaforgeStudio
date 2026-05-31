@@ -739,7 +739,7 @@ async function startServer() {
         const changes = entry?.changes?.[0]?.value;
         const message = changes?.messages?.[0];
         const contactData = changes?.contacts?.[0];
-        
+
         if (contactData && contactData.profile && contactData.profile.name) {
             contactName = contactData.profile.name;
         }
@@ -751,12 +751,32 @@ async function startServer() {
       } else if (payload.object === "instagram" || payload.object === "page") {
         provider = 'instagram';
         const entry = payload.entry?.[0];
-        businessId = entry?.id; // Page ID associado
-        const messaging = entry?.messaging?.[0];
-        
+        businessId = entry?.id; // ID da conta IG/Página associada
+        // Diagnóstico: estrutura real do evento do Instagram.
+        console.log("[IG Webhook] entry:", JSON.stringify(entry).slice(0, 800));
+
+        // Formato Messenger/IG: entry[].messaging[]  (DMs)
+        const messaging = entry?.messaging?.[0] || entry?.standby?.[0];
         if (messaging) {
-          senderId = messaging.sender?.id;
-          incomingMessageText = messaging.message?.text || '';
+          // Ignora "echo" (mensagem enviada pela própria conta), recibos de
+          // leitura e reações — não são mensagens do cliente para responder.
+          if (messaging.message?.is_echo) {
+            console.log("[IG Webhook] Ignorado: echo (mensagem da própria conta).");
+          } else if (messaging.read || messaging.reaction || messaging.delivery) {
+            console.log("[IG Webhook] Ignorado: recibo/leitura/reação.");
+          } else {
+            senderId = messaging.sender?.id || '';
+            incomingMessageText = messaging.message?.text || '';
+            // Anexo sem texto (figurinha/imagem): coloca um placeholder.
+            if (!incomingMessageText && messaging.message?.attachments?.length) {
+              incomingMessageText = "📎 [Anexo recebido pelo Instagram]";
+            }
+          }
+        } else if (entry?.changes?.[0]?.value?.from) {
+          // Formato alternativo via changes (alguns eventos de comentário/mensagem).
+          const v = entry.changes[0].value;
+          senderId = v.from?.id || v.sender?.id || '';
+          incomingMessageText = v.text || v.message || '';
         }
       }
 

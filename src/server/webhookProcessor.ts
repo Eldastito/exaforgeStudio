@@ -38,6 +38,14 @@ export async function processIncomingMessage(
     // Procura o canal pelo identifier dentro da organização do dono.
     channel = db.prepare('SELECT * FROM channels WHERE identifier = ? AND provider = ? AND organization_id = ?')
       .get(payload.identifier, payload.provider, targetOrg) as any;
+
+    // Fallback para o Instagram: o id que vem no webhook (entry.id) nem sempre é
+    // igual ao Instagram Business ID salvo na conexão. Se não casar exatamente,
+    // usa o canal de Instagram já conectado da organização (que tem o token).
+    if (!channel && payload.provider === 'instagram') {
+      channel = db.prepare("SELECT * FROM channels WHERE provider = 'instagram' AND organization_id = ? ORDER BY created_at DESC LIMIT 1")
+        .get(targetOrg) as any;
+    }
   }
 
   // Se ainda não existe, cria o canal na organização do dono.

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2 } from 'lucide-react';
+import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2, CreditCard } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import { PaymentSettingsModal } from '@/src/features/PaymentSettingsModal';
 
 type OrderItem = { id: string; name_snapshot: string; quantity: number; unit_price: number; line_total: number };
 type Order = {
   id: string; status: string; total_amount: number; currency?: string;
   created_by?: string; created_at: string; contact_name?: string; contact_number?: string;
+  payment_status?: string;
   items: OrderItem[];
 };
 
@@ -38,6 +40,7 @@ export function SalesView() {
   const [loading, setLoading] = useState(true);
   const [autoClose, setAutoClose] = useState(false);
   const [lowStock, setLowStock] = useState<any[]>([]);
+  const [showPayments, setShowPayments] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -79,6 +82,14 @@ export function SalesView() {
     } catch (e) { setAutoClose(!next); }
   };
 
+  const confirmPayment = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/payments/orders/${id}/confirm`, { method: 'POST' });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Erro'); return; }
+      load();
+    } catch (e) { alert('Erro ao confirmar pagamento'); }
+  };
+
   const countFor = (s: string) => summary.byStatus.find((b: any) => b.status === s)?.count || 0;
   const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
 
@@ -91,10 +102,17 @@ export function SalesView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Pedidos, estoque e status de entrega — vendas pelo WhatsApp via IA</p>
         </div>
+        <div className="flex items-center gap-2">
+        <button onClick={() => setShowPayments(true)} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-emerald-500/40">
+          <CreditCard className="w-4 h-4 text-emerald-400" /> Pagamentos
+        </button>
         <button onClick={load} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-indigo-500/40">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
         </button>
+        </div>
       </div>
+
+      {showPayments && <PaymentSettingsModal onClose={() => setShowPayments(false)} />}
 
       {/* Cards de resumo */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -184,7 +202,16 @@ export function SalesView() {
                   </div>
                   <div className="text-right">
                     <p className="text-lg font-bold text-zinc-100">{brl(o.total_amount)}</p>
+                    {o.payment_status === 'paid' && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 mt-1"><CheckCircle2 className="w-3 h-3" /> pago</span>
+                    )}
                     <div className="flex flex-wrap gap-2 justify-end mt-2">
+                      {o.status === 'aguardando_pagamento' && o.payment_status !== 'paid' && (
+                        <button onClick={() => confirmPayment(o.id)}
+                          className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10">
+                          Confirmar pagamento
+                        </button>
+                      )}
                       {transitions.length === 0 ? (
                         <span className="inline-flex items-center gap-1 text-xs text-zinc-500"><CheckCircle2 className="w-3.5 h-3.5" /> finalizado</span>
                       ) : transitions.map(t => (

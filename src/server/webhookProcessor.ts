@@ -2,6 +2,7 @@ import db from "./db.js";
 import { generateRagResponse } from "./geminiRAG.js";
 import { AIOrchestratorService } from "./AIOrchestratorService.js";
 import { OrdersService } from "./OrdersService.js";
+import { PaymentService } from "./PaymentService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { v4 as uuidv4 } from "uuid";
@@ -180,6 +181,9 @@ export async function processIncomingMessage(
 
        // PEDIDO criado pela IA (canal de venda). O servidor valida o estoque de
        // novo (atômico) e reserva/baixa conforme o interruptor de autonomia.
+       // Resposta final que será enviada (pode receber as instruções de pagamento).
+       let finalReply = aiResult.reply;
+
        if (aiResult.newOrder && Array.isArray(aiResult.newOrder.items) && aiResult.newOrder.items.length) {
          try {
            // Trava anti-duplicidade: evita reservar o mesmo pedido várias vezes
@@ -196,6 +200,11 @@ export async function processIncomingMessage(
              });
              if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
              console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
+             // Pix manual: anexa as instruções de pagamento à resposta, se configurado.
+             try {
+               const charge = PaymentService.buildChargeMessage(orgId, order.total);
+               if (charge) finalReply = `${finalReply}\n\n${charge}`;
+             } catch (e) { /* noop */ }
            }
          } catch (e) {
            console.error("[Vendas] Falha ao criar pedido da IA (provável estoque insuficiente):", e);
@@ -238,7 +247,7 @@ export async function processIncomingMessage(
        db.prepare(`
          INSERT INTO messages (id, organization_id, ticket_id, sender_type, content)
          VALUES (?, ?, ?, 'bot', ?)
-       `).run(botMsgId, orgId, ticket.id, aiResult.reply);
+       `).run(botMsgId, orgId, ticket.id, finalReply);
 
        // Emit AI response to frontend
        if (io) {
@@ -247,7 +256,7 @@ export async function processIncomingMessage(
              ticketId: ticket.id,
              contactId: contact.id,
              provider: channel.provider,
-             text: aiResult.reply,
+             text: finalReply,
              sender: "bot",
              timestamp: new Date().toISOString()
           };
@@ -255,7 +264,7 @@ export async function processIncomingMessage(
        }
 
        // Send AI response back to provider
-       await MessageProviderService.sendMessage(channel.id, payload.senderId, aiResult.reply);
+       await MessageProviderService.sendMessage(channel.id, payload.senderId, finalReply);
 
      } catch (e) {
        console.error("[IA RAG] Falha ao processar e responder:", e);

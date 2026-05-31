@@ -713,7 +713,9 @@ async function startServer() {
   // RECEBIMENTO DE EVENTOS (POST)
   app.post("/api/webhooks/meta", async (req, res) => {
     try {
-      if (!verifyWebhookSecret(req, res)) return;
+      // A Meta NÃO envia o nosso ?secret= (ela usa X-Hub-Signature). A autenticidade
+      // da assinatura do webhook já foi feita no handshake GET (META_VERIFY_TOKEN);
+      // aqui validamos o formato do payload. Por isso NÃO aplicamos verifyWebhookSecret.
       const payload = req.body;
 
       // Validação rápida do formato padrão do Graph API

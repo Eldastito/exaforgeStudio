@@ -21,7 +21,9 @@ import aiRoutes from "./src/server/routes/ai.js";
 import ordersRoutes from "./src/server/routes/orders.js";
 import contactsRoutes from "./src/server/routes/contacts.js";
 import campaignsRoutes from "./src/server/routes/campaigns.js";
+import paymentsRoutes from "./src/server/routes/payments.js";
 import { Scheduler } from "./src/server/Scheduler.js";
+import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import db from "./src/server/db.js";
@@ -283,6 +285,7 @@ async function startServer() {
   protectedApi.use("/orders", ordersRoutes);
   protectedApi.use("/contacts", contactsRoutes);
   protectedApi.use("/campaigns", campaignsRoutes);
+  protectedApi.use("/payments", paymentsRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
@@ -664,6 +667,46 @@ async function startServer() {
       res.status(200).send(challenge);
     } else {
       res.sendStatus(403);
+    }
+  });
+
+  // WEBHOOK DE PAGAMENTO (gateway externo) — público, autenticado pelo segredo
+  // da organização (?secret=... ou header x-pay-secret). Marca o pedido como pago.
+  // Genérico: aceita { orderId, status, externalId } ou o formato do Mercado Pago.
+  app.post(["/api/webhooks/payment", "/api/webhooks/payment/:event"], async (req, res) => {
+    try {
+      const secret = (req.query.secret as string) || (req.headers['x-pay-secret'] as string) || '';
+      const orgId = PaymentService.orgByWebhookSecret(secret);
+      if (!orgId) return res.status(401).json({ error: "Unauthorized payment webhook" });
+
+      const body = req.body || {};
+      // Formato genérico do app:
+      let orderId: string | undefined = body.orderId || body.order_id;
+      let paid = body.status ? ['paid', 'approved', 'pago', 'completed'].includes(String(body.status).toLowerCase()) : true;
+      let externalId: string | undefined = body.externalId || body.payment_id || body.id;
+
+      // Tolerância ao formato do Mercado Pago (data.id / action), quando aplicável:
+      if (!orderId && body.data && body.data.external_reference) {
+        orderId = body.data.external_reference;
+        externalId = body.data.id || externalId;
+        paid = body.action ? String(body.action).includes('payment') : paid;
+      }
+
+      if (!orderId) {
+        console.warn("[PayWebhook] Sem orderId/external_reference no payload.");
+        return res.status(200).send("IGNORED");
+      }
+      if (paid) {
+        const ok = PaymentService.markPaid(orgId, orderId, { method: 'gateway', externalId });
+        if (ok && (global as any).io) {
+          (global as any).io.to(`org:${orgId}`).emit("order_updated", { orderId, status: 'pago', payment_status: 'paid' });
+        }
+        console.log(`[PayWebhook] Pedido ${orderId} marcado como pago (org ${orgId}).`);
+      }
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("[PayWebhook] erro", e);
+      return res.status(200).send("OK"); // não devolve 500 para o gateway não reentregar em loop
     }
   });
 

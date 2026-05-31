@@ -527,6 +527,23 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN appointment_reminders_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN appointment_reminder_hours INTEGER DEFAULT 24`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN appointment_reminder_message TEXT`); } catch(e){}
+
+  // ===== Recebimento de pagamentos (por empresa / multi-tenant) =====
+  // Estrutura genérica: suporta Pix manual e gateways (Mercado Pago, etc.).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_provider TEXT DEFAULT 'pix_manual'`); } catch(e){} // pix_manual | mercadopago | custom
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_pix_key TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_pix_name TEXT`); } catch(e){}      // nome do beneficiário
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_pix_city TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_instructions TEXT`); } catch(e){} // instruções enviadas ao cliente
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_gateway_token TEXT`); } catch(e){} // credencial do gateway (quando houver)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_webhook_secret TEXT`); } catch(e){} // segredo do webhook de confirmação
+  // Campos de pagamento no pedido.
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payment_method TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'pending'`); } catch(e){} // pending | paid | failed | refunded
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payment_link TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payment_external_id TEXT`); } catch(e){} // id do pagamento no gateway
+  try { db.exec(`ALTER TABLE orders ADD COLUMN paid_at DATETIME`); } catch(e){}
 };
 
 initDb();

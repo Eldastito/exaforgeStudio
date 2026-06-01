@@ -17,10 +17,54 @@ const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, ta
   }
 };
 
-// Master Admin - List all organizations
+// Master Admin - SaaS overview (métricas agregadas de todas as empresas)
+router.get("/overview", (req: AuthRequest, res) => {
+  try {
+    const orgs = db.prepare(`SELECT status, billing_status FROM organization_settings WHERE deleted_at IS NULL`).all() as any[];
+    const totalOrgs = orgs.length;
+    const activeOrgs = orgs.filter(o => (o.status || 'active') === 'active').length;
+    const blockedOrgs = orgs.filter(o => o.status === 'blocked').length;
+    const pastDueOrgs = orgs.filter(o => ['past_due', 'suspended'].includes(o.billing_status)).length;
+
+    const safeCount = (sql: string): number => {
+      try { return (db.prepare(sql).get() as any)?.c || 0; } catch (e) { return 0; }
+    };
+    const safeSum = (sql: string): number => {
+      try { return (db.prepare(sql).get() as any)?.s || 0; } catch (e) { return 0; }
+    };
+
+    res.json({
+      totalOrgs,
+      activeOrgs,
+      blockedOrgs,
+      pastDueOrgs,
+      totalUsers: safeCount(`SELECT COUNT(*) as c FROM users`),
+      totalContacts: safeCount(`SELECT COUNT(*) as c FROM contacts`),
+      aiTotal: safeCount(`SELECT COUNT(*) as c FROM ai_interactions_log`),
+      aiLast30d: safeCount(`SELECT COUNT(*) as c FROM ai_interactions_log WHERE created_at >= datetime('now','-30 days')`),
+      aiLast24h: safeCount(`SELECT COUNT(*) as c FROM ai_interactions_log WHERE created_at >= datetime('now','-1 day')`),
+      totalRevenue: safeSum(`SELECT COALESCE(SUM(total_amount),0) as s FROM orders WHERE status IN ('pago','em_preparo','entregue','concluido')`),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Master Admin - List all organizations (com métricas por empresa)
 router.get("/organizations", (req: AuthRequest, res) => {
   try {
-    const orgs = db.prepare(`SELECT * FROM organization_settings WHERE deleted_at IS NULL`).all();
+    const orgs = db.prepare(`
+      SELECT os.*,
+        (SELECT COUNT(*) FROM users u WHERE u.organization_id = os.organization_id) AS user_count,
+        (SELECT COUNT(*) FROM contacts c WHERE c.organization_id = os.organization_id) AS contact_count,
+        (SELECT COUNT(*) FROM ai_interactions_log a WHERE a.organization_id = os.organization_id) AS ai_total,
+        (SELECT COUNT(*) FROM ai_interactions_log a WHERE a.organization_id = os.organization_id AND a.created_at >= datetime('now','-30 days')) AS ai_30d,
+        (SELECT COALESCE(SUM(o.total_amount),0) FROM orders o WHERE o.organization_id = os.organization_id AND o.status IN ('pago','em_preparo','entregue','concluido')) AS revenue,
+        (SELECT MAX(m.created_at) FROM messages m WHERE m.organization_id = os.organization_id) AS last_activity
+      FROM organization_settings os
+      WHERE os.deleted_at IS NULL
+      ORDER BY ai_30d DESC, os.created_at DESC
+    `).all();
     res.json(orgs);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

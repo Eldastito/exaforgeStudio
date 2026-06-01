@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity } from 'lucide-react';
+import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
 export function AdminMasterView() {
   const [organizations, setOrganizations] = useState<any[]>([]);
+  const [overview, setOverview] = useState<any>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [securityIssues, setSecurityIssues] = useState<any[] | null>(null);
   const [loadingSecurity, setLoadingSecurity] = useState(false);
@@ -20,11 +21,25 @@ export function AdminMasterView() {
         }
       })
       .catch(console.error);
+    fetch('/api/admin/overview')
+      .then(res => res.json())
+      .then(data => setOverview(data && !data.error ? data : null))
+      .catch(console.error);
   };
 
   useEffect(() => {
     loadData();
   }, []);
+
+  const brl = (v?: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const num = (v?: number) => Number(v || 0).toLocaleString('pt-BR');
+  const relTime = (d?: string) => {
+    if (!d) return 'nunca';
+    const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+    if (days <= 0) return 'hoje';
+    if (days === 1) return 'ontem';
+    return `há ${days}d`;
+  };
 
   const handleUpdateStatus = async (id: string, status: string) => {
     if (!window.confirm(`Tem certeza que deseja alterar o status para ${status}?`)) return;
@@ -95,12 +110,33 @@ export function AdminMasterView() {
         <p className="text-zinc-400 text-sm mt-1">Gestão de empresas, financeiro e auditoria (Acesso Restrito)</p>
       </div>
 
+      {/* SaaS Overview */}
+      {overview && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <OverviewCard icon={<Building2 className="w-5 h-5 text-indigo-400" />} label="Empresas ativas"
+            value={`${num(overview.activeOrgs)}/${num(overview.totalOrgs)}`}
+            sub={`${num(overview.blockedOrgs)} bloqueada(s) · ${num(overview.pastDueOrgs)} inadimplente(s)`} />
+          <OverviewCard icon={<Bot className="w-5 h-5 text-emerald-400" />} label="Respostas de IA (30d)"
+            value={num(overview.aiLast30d)}
+            sub={`${num(overview.aiLast24h)} nas últimas 24h · ${num(overview.aiTotal)} no total`} />
+          <OverviewCard icon={<UsersIcon className="w-5 h-5 text-sky-400" />} label="Contatos na base"
+            value={num(overview.totalContacts)}
+            sub={`${num(overview.totalUsers)} usuário(s) no SaaS`} />
+          <OverviewCard icon={<DollarSign className="w-5 h-5 text-amber-400" />} label="Receita total (SaaS)"
+            value={brl(overview.totalRevenue)}
+            sub="Pedidos faturados de todas as empresas" />
+        </div>
+      )}
+
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-zinc-900 border-b border-zinc-800">
               <tr>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Empresa (Org ID)</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Uso de IA (30d)</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Base / Receita</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Atividade</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Billing Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
@@ -112,6 +148,22 @@ export function AdminMasterView() {
                   <td className="px-6 py-4">
                     <div className="font-medium text-zinc-100">{org.business_name || 'Sem Nome'}</div>
                     <div className="text-xs text-zinc-500 font-mono mt-0.5">{org.organization_id}</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-1.5 text-zinc-100 font-semibold">
+                      <Bot className="w-3.5 h-3.5 text-emerald-400" /> {num(org.ai_30d)}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-0.5">{num(org.ai_total)} no total</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-zinc-200">{num(org.contact_count)} contato(s)</div>
+                    <div className="text-xs text-emerald-400/80 mt-0.5">{brl(org.revenue)}</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`text-xs ${org.last_activity && (Date.now() - new Date(org.last_activity).getTime()) < 7 * 86400000 ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                      {relTime(org.last_activity)}
+                    </span>
+                    <div className="text-xs text-zinc-600 mt-0.5">{num(org.user_count)} usuário(s)</div>
                   </td>
                   <td className="px-6 py-4">
                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
@@ -172,7 +224,7 @@ export function AdminMasterView() {
               ))}
               {organizations.length === 0 && (
                  <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-zinc-500">
+                    <td colSpan={7} className="px-6 py-8 text-center text-zinc-500">
                        Nenhuma organização encontrada.
                     </td>
                  </tr>
@@ -255,6 +307,16 @@ export function AdminMasterView() {
       </div>
 
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+function OverviewCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+      <div className="flex items-center gap-2 text-xs text-zinc-400">{icon} {label}</div>
+      <div className="text-2xl font-bold text-zinc-100 mt-2">{value}</div>
+      {sub && <div className="text-xs text-zinc-500 mt-1">{sub}</div>}
     </div>
   );
 }

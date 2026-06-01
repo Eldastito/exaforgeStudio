@@ -47,19 +47,30 @@ router.put("/settings", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/orders?status=... — lista pedidos (com itens), opcionalmente por status
+// Converte o parâmetro de período em uma cláusula SQL sobre created_at.
+// Retorna { clause, since } onde clause já vem com "AND ..." (ou vazio).
+const periodClause = (period?: string): { clause: string; since: string | null } => {
+  switch (period) {
+    case 'today': return { clause: ` AND o.created_at >= date('now','localtime')`, since: 'today' };
+    case 'week': return { clause: ` AND o.created_at >= datetime('now','-7 days')`, since: 'week' };
+    case 'month': return { clause: ` AND o.created_at >= datetime('now','-30 days')`, since: 'month' };
+    default: return { clause: '', since: null };
+  }
+};
+
+// GET /api/orders?status=...&period=... — lista pedidos (com itens)
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const status = req.query.status as string | undefined;
-    const rows = status
-      ? db.prepare(`SELECT o.*, c.name AS contact_name, c.identifier AS contact_number
+    const { clause } = periodClause(req.query.period as string | undefined);
+    const params: any[] = [orgId];
+    let where = `WHERE o.organization_id = ?${clause}`;
+    if (status) { where += ` AND o.status = ?`; params.push(status); }
+    const rows = db.prepare(`SELECT o.*, c.name AS contact_name, c.identifier AS contact_number
                     FROM orders o LEFT JOIN contacts c ON c.id = o.contact_id
-                    WHERE o.organization_id = ? AND o.status = ? ORDER BY o.created_at DESC`).all(orgId, status)
-      : db.prepare(`SELECT o.*, c.name AS contact_name, c.identifier AS contact_number
-                    FROM orders o LEFT JOIN contacts c ON c.id = o.contact_id
-                    WHERE o.organization_id = ? ORDER BY o.created_at DESC`).all(orgId);
+                    ${where} ORDER BY o.created_at DESC`).all(...params);
     const items = db.prepare('SELECT * FROM order_items WHERE organization_id = ?').all(orgId) as any[];
     const byOrder = new Map<string, any[]>();
     for (const it of items) {
@@ -72,16 +83,54 @@ router.get("/", (req: AuthRequest, res): any => {
   }
 });
 
-// GET /api/orders/summary — resumo por status (para a aba Vendas)
+// GET /api/orders/summary?period=... — resumo por status (para a aba Vendas)
 router.get("/summary", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const byStatus = db.prepare(`SELECT status, count(*) as count, COALESCE(SUM(total_amount),0) as total
-                                 FROM orders WHERE organization_id = ? GROUP BY status`).all(orgId);
-    const revenue = db.prepare(`SELECT COALESCE(SUM(total_amount),0) as total FROM orders
-                                WHERE organization_id = ? AND status IN ('pago','em_preparo','entregue','concluido')`).get(orgId) as any;
+    const { clause } = periodClause(req.query.period as string | undefined);
+    const byStatus = db.prepare(`SELECT o.status, count(*) as count, COALESCE(SUM(o.total_amount),0) as total
+                                 FROM orders o WHERE o.organization_id = ?${clause} GROUP BY o.status`).all(orgId);
+    const revenue = db.prepare(`SELECT COALESCE(SUM(o.total_amount),0) as total FROM orders o
+                                WHERE o.organization_id = ?${clause} AND o.status IN ('pago','em_preparo','entregue','concluido')`).get(orgId) as any;
     res.json({ byStatus, revenue: revenue?.total || 0 });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/orders/export.csv?status=...&period=... — exporta os pedidos em CSV
+router.get("/export.csv", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const status = req.query.status as string | undefined;
+    const { clause } = periodClause(req.query.period as string | undefined);
+    const params: any[] = [orgId];
+    let where = `WHERE o.organization_id = ?${clause}`;
+    if (status) { where += ` AND o.status = ?`; params.push(status); }
+    const rows = db.prepare(`SELECT o.id, o.created_at, o.status, o.total_amount, o.payment_status, o.created_by,
+                                    c.name AS contact_name, c.identifier AS contact_number
+                             FROM orders o LEFT JOIN contacts c ON c.id = o.contact_id
+                             ${where} ORDER BY o.created_at DESC`).all(...params) as any[];
+
+    const esc = (v: any) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ['ID', 'Data', 'Status', 'Pagamento', 'Origem', 'Cliente', 'Telefone', 'Total'];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push([
+        r.id, r.created_at, r.status, r.payment_status || '', r.created_by || '',
+        r.contact_name || '', r.contact_number || '', Number(r.total_amount || 0).toFixed(2),
+      ].map(esc).join(','));
+    }
+    const csv = '﻿' + lines.join('\n'); // BOM p/ Excel abrir acentos corretamente
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=vendas-${req.query.period || 'tudo'}-${Date.now()}.csv`);
+    res.send(csv);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2, CreditCard } from 'lucide-react';
+import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2, CreditCard, Download } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { PaymentSettingsModal } from '@/src/features/PaymentSettingsModal';
 
@@ -33,22 +33,39 @@ const TRANSITIONS: Record<string, { label: string; to: string; danger?: boolean 
 
 const FILTERS = ['todos', 'aguardando_pagamento', 'pago', 'em_preparo', 'entregue', 'concluido', 'reembolso', 'devolucao', 'cancelado'];
 
+const PERIODS: { id: string; label: string }[] = [
+  { id: 'today', label: 'Hoje' },
+  { id: 'week', label: '7 dias' },
+  { id: 'month', label: '30 dias' },
+  { id: 'all', label: 'Tudo' },
+];
+
 export function SalesView() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [summary, setSummary] = useState<{ byStatus: any[]; revenue: number }>({ byStatus: [], revenue: 0 });
   const [filter, setFilter] = useState('todos');
+  const [period, setPeriod] = useState('month');
   const [loading, setLoading] = useState(true);
   const [autoClose, setAutoClose] = useState(false);
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [showPayments, setShowPayments] = useState(false);
   const [neg, setNeg] = useState<{ enabled: boolean; max: number; rules: string }>({ enabled: false, max: 0, rules: '' });
 
+  // Monta a query string com status (se houver) e período (se != 'all').
+  const buildQuery = () => {
+    const p: string[] = [];
+    if (filter !== 'todos') p.push(`status=${filter}`);
+    if (period !== 'all') p.push(`period=${period}`);
+    return p.length ? `?${p.join('&')}` : '';
+  };
+
   const load = () => {
     setLoading(true);
-    const q = filter === 'todos' ? '' : `?status=${filter}`;
+    const q = buildQuery();
+    const sumQ = period !== 'all' ? `?period=${period}` : '';
     Promise.all([
       apiFetch(`/api/orders${q}`).then(r => r.json()).catch(() => []),
-      apiFetch('/api/orders/summary').then(r => r.json()).catch(() => ({ byStatus: [], revenue: 0 })),
+      apiFetch(`/api/orders/summary${sumQ}`).then(r => r.json()).catch(() => ({ byStatus: [], revenue: 0 })),
       apiFetch('/api/orders/settings').then(r => r.json()).catch(() => ({ ai_auto_close_sales: false })),
       apiFetch('/api/products').then(r => r.json()).catch(() => []),
     ]).then(([ord, sum, set, prods]) => {
@@ -60,7 +77,19 @@ export function SalesView() {
     }).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter, period]);
+
+  const exportCsv = async () => {
+    try {
+      const res = await apiFetch(`/api/orders/export.csv${buildQuery()}`);
+      if (!res.ok) { alert('Não foi possível exportar.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `vendas-${period}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Não foi possível exportar.'); }
+  };
 
   const changeStatus = async (id: string, to: string) => {
     try {
@@ -113,7 +142,18 @@ export function SalesView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Pedidos, estoque e status de entrega — vendas pelo WhatsApp via IA</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex rounded-lg border border-zinc-800 bg-zinc-900/60 p-1">
+          {PERIODS.map(p => (
+            <button key={p.id} onClick={() => setPeriod(p.id)}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${period === p.id ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={exportCsv} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-indigo-500/40">
+          <Download className="w-4 h-4 text-indigo-400" /> CSV
+        </button>
         <button onClick={() => setShowPayments(true)} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-emerald-500/40">
           <CreditCard className="w-4 h-4 text-emerald-400" /> Pagamentos
         </button>

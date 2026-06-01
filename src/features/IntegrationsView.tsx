@@ -4,6 +4,7 @@ import { getAuth, signInWithPopup, signInWithRedirect, GoogleAuthProvider, onAut
 import firebaseConfig from '../../firebase-applet-config.json';
 import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
+import { apiFetch } from '@/src/lib/api';
 
 let app;
 try {
@@ -50,8 +51,8 @@ export function IntegrationsView() {
   const [googleError, setGoogleError] = useState<string | null>(null);
 
   const loadData = () => {
-    fetch('/api/integrations/webhooks').then(r => r.json()).then(setWebhooks).catch(console.error);
-    fetch('/api/integrations/backups').then(r => r.json()).then(setBackups).catch(console.error);
+    apiFetch('/api/integrations/webhooks').then(r => r.json()).then(d => setWebhooks(Array.isArray(d) ? d : [])).catch(console.error);
+    apiFetch('/api/integrations/backups').then(r => r.json()).then(d => setBackups(Array.isArray(d) ? d : [])).catch(console.error);
   };
 
   useEffect(() => {
@@ -87,7 +88,7 @@ export function IntegrationsView() {
   const handleGenerateBackup = async () => {
     setIsBackingUp(true);
     try {
-      await fetch('/api/integrations/backups', {
+      await apiFetch('/api/integrations/backups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'manual' })
@@ -98,14 +99,24 @@ export function IntegrationsView() {
     }
   };
 
-  const handleDownloadBackup = (id: string) => {
-    window.location.href = `/api/integrations/backups/${id}/download`;
+  // Download autenticado: apiFetch adiciona o Bearer; baixa via blob (window.location
+  // não enviava o token, então o download retornava 401).
+  const handleDownloadBackup = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/integrations/backups/${id}/download`);
+      if (!res.ok) { alert('Não foi possível baixar o backup.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `backup-${id}.json`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Não foi possível baixar o backup.'); }
   };
 
   const handleDeleteBackup = async (id: string) => {
     if (!window.confirm('Apagar este backup? Esta ação é permanente.')) return;
     try {
-      await fetch(`/api/integrations/backups/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/integrations/backups/${id}`, { method: 'DELETE' });
       loadData();
     } catch (e) {}
   };
@@ -113,7 +124,7 @@ export function IntegrationsView() {
   const handleAddWebhook = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/integrations/webhooks', {
+      await apiFetch('/api/integrations/webhooks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(webhookForm)
@@ -126,7 +137,7 @@ export function IntegrationsView() {
 
   const handleTestWebhook = async (id: string) => {
     try {
-      const res = await fetch(`/api/integrations/webhooks/${id}/test`, { method: 'POST' });
+      const res = await apiFetch(`/api/integrations/webhooks/${id}/test`, { method: 'POST' });
       const data = await res.json();
       alert(`Webhook teste: ${data.status}`);
       loadData();

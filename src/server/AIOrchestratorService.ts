@@ -7,6 +7,7 @@ import { CampaignService } from "./CampaignService.js";
 import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { chat } from "./llm.js";
+import { PlanService } from "./PlanService.js";
 
 export class AIOrchestratorService {
   /**
@@ -89,6 +90,20 @@ export class AIOrchestratorService {
     if (this.dailyLimitReached(params.organizationId)) {
       return {
         reply: "No momento estou com um volume alto de atendimentos automáticos. Um de nossos atendentes vai te responder em breve. 🙏",
+        actions: [],
+        newStage: params.ticketStage,
+        needsHuman: true,
+      };
+    }
+
+    // Enforcement do plano (Fase 2): bloqueia se a org está suspensa/bloqueada ou
+    // estourou o limite mensal do plano. Transfere para humano em vez de cortar.
+    const planCheck = PlanService.aiAllowed(params.organizationId);
+    if (!planCheck.allowed) {
+      return {
+        reply: planCheck.reason === 'monthly_limit'
+          ? "Atingimos o limite de atendimentos automáticos do mês. Um atendente humano te responde em breve. 🙏"
+          : "No momento o atendimento automático está pausado. Um atendente humano te responde em breve. 🙏",
         actions: [],
         newStage: params.ticketStage,
         needsHuman: true,

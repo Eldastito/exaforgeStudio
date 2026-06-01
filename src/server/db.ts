@@ -556,6 +556,19 @@ const initDb = () => {
   // Número de WhatsApp da empresa para a IA encaminhar leads (ex.: vindos do Instagram).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN forward_whatsapp TEXT`); } catch(e){}
 
+  // ===== Planos / Billing (Fase 2) =====
+  // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit, channels_limit, users_limit, trial_days.
+  try {
+    const row = db.prepare(`SELECT COUNT(*) AS c FROM plans`).get() as any;
+    if (!row || row.c === 0) {
+      const seed = db.prepare(`INSERT INTO plans (id, name, price, features) VALUES (?, ?, ?, ?)`);
+      seed.run('starter', 'Starter',  99, JSON.stringify({ ai_monthly_limit:   500, contacts_limit:  1000, channels_limit: 1,  users_limit:  2, trial_days: 14 }));
+      seed.run('pro',     'Pro',     299, JSON.stringify({ ai_monthly_limit:  3000, contacts_limit: 10000, channels_limit: 3,  users_limit:  5, trial_days: 14 }));
+      seed.run('business','Business',799, JSON.stringify({ ai_monthly_limit: 15000, contacts_limit: 50000, channels_limit: 10, users_limit: 20, trial_days: 14 }));
+      console.log('[DB] Planos padrão criados (Starter, Pro, Business).');
+    }
+  } catch (e) { console.error('[DB] Falha ao popular planos', e); }
+
   // ===== Follow-up Sequencial (Cadências) =====
   // Cadência = sequência de mensagens automáticas quando o contato não responde.
   try {

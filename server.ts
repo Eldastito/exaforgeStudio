@@ -23,6 +23,7 @@ import contactsRoutes from "./src/server/routes/contacts.js";
 import campaignsRoutes from "./src/server/routes/campaigns.js";
 import paymentsRoutes from "./src/server/routes/payments.js";
 import cadencesRoutes from "./src/server/routes/cadences.js";
+import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { PaymentService } from "./src/server/PaymentService.js";
@@ -307,6 +308,7 @@ async function startServer() {
   protectedApi.use("/managers", managersRoutes);
   protectedApi.use("/ai", aiRoutes);
   protectedApi.use("/cadences", cadencesRoutes);
+  protectedApi.use("/plans", plansRoutes);
 
   // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS
   // (Evolution, Meta) que NÃO enviam JWT. Elas são registradas abaixo, em `app`.

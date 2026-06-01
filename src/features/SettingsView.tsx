@@ -181,20 +181,170 @@ export function SettingsView() {
           </>
           )}
 
-          {activeTab === 'cobranca' && (
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-               <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2"><CreditCard className="w-5 h-5" /> Plano Atual</h2>
-               <div className="p-4 bg-zinc-950 rounded-lg border border-zinc-800 mb-6">
-                  <p className="text-sm text-zinc-400">Seu plano atual é o <strong className="text-indigo-400">Pro Zapp</strong>.</p>
-                  <p className="text-sm text-zinc-400 mt-1">Status: <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-xs">Ativo</span></p>
-               </div>
-            </div>
-          )}
+          {activeTab === 'cobranca' && <BillingPanel />}
 
           {activeTab === 'usuarios' && (
              <UsersSettingsView />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+type Plan = { id: string; name: string; price: number; features: any };
+type Snapshot = {
+  plan: Plan | null;
+  billingStatus: string;
+  orgStatus: string;
+  trialEndsAt: string | null;
+  trialDaysLeft: number | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  usage: { ai_this_month: number; contacts: number; channels: number; users: number };
+  limits: any;
+};
+
+function BillingPanel() {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [selecting, setSelecting] = useState<string | null>(null);
+
+  const load = () => {
+    Promise.all([
+      fetch('/api/plans').then(r => r.json()).catch(() => []),
+      fetch('/api/plans/current').then(r => r.json()).catch(() => null),
+    ]).then(([ps, sn]) => {
+      setPlans(Array.isArray(ps) ? ps : []);
+      setSnap(sn && !sn.error ? sn : null);
+    });
+  };
+  useEffect(() => { load(); }, []);
+
+  const choose = async (planId: string) => {
+    if (snap?.plan?.id === planId) return;
+    if (!window.confirm('Confirmar troca de plano?')) return;
+    setSelecting(planId);
+    try {
+      await fetch('/api/plans/select', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      });
+      load();
+    } finally { setSelecting(null); }
+  };
+
+  const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+    active:    { label: 'Ativo',         cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+    trialing:  { label: 'Em teste',      cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
+    past_due:  { label: 'Atrasado',      cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+    suspended: { label: 'Suspenso',      cls: 'bg-red-500/15 text-red-300 border-red-500/30' },
+    blocked:   { label: 'Bloqueado',     cls: 'bg-red-500/15 text-red-300 border-red-500/30' },
+    cancelled: { label: 'Cancelado',     cls: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30' },
+  };
+  const badge = STATUS_BADGE[snap?.billingStatus || 'active'] || STATUS_BADGE.active;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-white flex items-center gap-2"><CreditCard className="w-5 h-5 text-indigo-400" /> Plano e Uso</h2>
+            <p className="text-zinc-400 text-sm mt-1">Plano atual, status e consumo no mês.</p>
+          </div>
+          <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${badge.cls}`}>{badge.label.toUpperCase()}</span>
+        </div>
+
+        {snap?.plan ? (
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <InfoCard label="Plano atual" value={snap.plan.name} sub={`R$ ${snap.plan.price.toFixed(2)} / mês`} />
+            <InfoCard label="Status" value={badge.label} sub={
+              snap.trialDaysLeft != null
+                ? (snap.trialDaysLeft > 0 ? `${snap.trialDaysLeft} dia(s) de teste restantes` : 'Trial encerrado')
+                : '—'
+            } />
+            <InfoCard label="Período atual" value={snap.currentPeriodEnd ? new Date(snap.currentPeriodEnd).toLocaleDateString('pt-BR') : '—'} sub="Próximo ciclo de cobrança" />
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+            Você ainda não escolheu um plano. Escolha abaixo para iniciar seu período de teste.
+          </p>
+        )}
+
+        {/* Uso vs Limites */}
+        {snap && (
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <UsageBar label="Respostas de IA (este mês)" used={snap.usage.ai_this_month} limit={snap.limits.ai_monthly_limit} />
+            <UsageBar label="Contatos na base" used={snap.usage.contacts} limit={snap.limits.contacts_limit} />
+            <UsageBar label="Canais conectados" used={snap.usage.channels} limit={snap.limits.channels_limit} />
+            <UsageBar label="Usuários" used={snap.usage.users} limit={snap.limits.users_limit} />
+          </div>
+        )}
+      </div>
+
+      {/* Planos disponíveis */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+        <h3 className="text-lg font-semibold text-white mb-1">Planos disponíveis</h3>
+        <p className="text-sm text-zinc-400 mb-5">Troque de plano a qualquer momento. A primeira escolha inicia seu período de teste gratuito.</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {plans.map(p => {
+            const isCurrent = snap?.plan?.id === p.id;
+            return (
+              <div key={p.id} className={`p-5 rounded-xl border ${isCurrent ? 'border-indigo-500/60 bg-indigo-500/5' : 'border-zinc-800 bg-zinc-950/40'}`}>
+                <div className="flex items-baseline justify-between">
+                  <h4 className="text-lg font-bold text-zinc-100">{p.name}</h4>
+                  {isCurrent && <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">Atual</span>}
+                </div>
+                <p className="text-2xl font-bold text-white mt-2">R$ {p.price.toFixed(0)}<span className="text-sm font-normal text-zinc-500">/mês</span></p>
+                <ul className="mt-4 space-y-1.5 text-sm text-zinc-400">
+                  <li>• <strong className="text-zinc-200">{(p.features?.ai_monthly_limit || 0).toLocaleString('pt-BR')}</strong> respostas de IA / mês</li>
+                  <li>• Até <strong className="text-zinc-200">{(p.features?.contacts_limit || 0).toLocaleString('pt-BR')}</strong> contatos</li>
+                  <li>• <strong className="text-zinc-200">{p.features?.channels_limit || 0}</strong> canal(is) conectado(s)</li>
+                  <li>• <strong className="text-zinc-200">{p.features?.users_limit || 0}</strong> usuário(s)</li>
+                  <li>• <strong className="text-zinc-200">{p.features?.trial_days || 14}</strong> dias de teste grátis</li>
+                </ul>
+                <Button
+                  onClick={() => choose(p.id)}
+                  disabled={isCurrent || selecting === p.id}
+                  className={`w-full mt-5 ${isCurrent ? 'bg-zinc-800 text-zinc-500' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
+                >
+                  {selecting === p.id ? 'Selecionando...' : isCurrent ? 'Plano atual' : (snap?.plan ? 'Trocar para este plano' : 'Iniciar teste grátis')}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="text-lg font-semibold text-zinc-100 mt-1">{value}</p>
+      {sub && <p className="text-xs text-zinc-500 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+function UsageBar({ label, used, limit }: { label: string; used: number; limit?: number }) {
+  const l = limit || 0;
+  const pct = l > 0 ? Math.min(100, Math.round((used / l) * 100)) : 0;
+  const over = l > 0 && used >= l;
+  const near = l > 0 && pct >= 80 && !over;
+  const bar = over ? 'bg-red-500' : near ? 'bg-amber-500' : 'bg-indigo-500';
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex items-baseline justify-between mb-1">
+        <p className="text-sm text-zinc-300">{label}</p>
+        <p className={`text-xs ${over ? 'text-red-400' : 'text-zinc-400'}`}>
+          {used.toLocaleString('pt-BR')}{l > 0 ? ` / ${l.toLocaleString('pt-BR')}` : ' / ∞'}
+        </p>
+      </div>
+      <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+        <div className={`h-full ${bar} transition-all`} style={{ width: `${pct || (l === 0 ? 0 : 0)}%` }} />
       </div>
     </div>
   );

@@ -134,14 +134,21 @@ async function startServer() {
     next();
   });
 
-  // --- RATE LIMTING (Simple Mock/Memory for prototype) ---
+  // --- RATE LIMITING (anti-abuso) ---
+  // Limite GENEROSO para não derrubar o uso normal do app (que faz polling e
+  // várias chamadas por tela). Só conta requisições que NÃO são do webhook/estáticos,
+  // e o teto é alto. Ajustável por env RATE_LIMIT_MAX (padrão 3000 / 15 min por IP).
   const rateLimitMap = new Map<string, { count: number, resetTime: number }>();
   app.use((req, res, next) => {
-     // Apply rate limiting in production or if enabled
      if (process.env.ENABLE_RATE_LIMIT === 'true' || process.env.NODE_ENV === 'production') {
+        // Não limita webhooks (serviços externos) nem assets/SPA.
+        const p = req.path || '';
+        if (p.startsWith('/api/webhooks') || p.startsWith('/media') || p.startsWith('/assets') || !p.startsWith('/api')) {
+           return next();
+        }
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
         const now = Date.now();
-        const limitConfig = { max: 100, windowMs: 15 * 60 * 1000 }; 
+        const limitConfig = { max: parseInt(process.env.RATE_LIMIT_MAX || '3000', 10), windowMs: 15 * 60 * 1000 };
         const ipKey = String(ip);
 
         let data = rateLimitMap.get(ipKey);

@@ -180,6 +180,8 @@ export async function processIncomingMessage(
           }
           // Inicia cadência de follow-up se houver uma configurada para o novo estágio.
           try { CadenceService.startForTicket(orgId, ticket.id, contact.id, aiResult.newStage); } catch (e) { /* noop */ }
+          // Reavalia o lead score: o novo estágio é um forte sinal de intenção.
+          try { CustomerProfileService.recomputeScore(contact.id); } catch (e) { /* noop */ }
        }
 
        if (aiResult.needsHuman) {

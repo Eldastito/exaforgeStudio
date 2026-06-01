@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/src/store/useStore';
 import { Button } from '@/src/components/ui/button';
-import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle } from 'lucide-react';
+import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export function ChatPanel() {
-  const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket, loadMessages } = useStore();
+  const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket, loadMessages, setActiveTicket } = useStore();
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -94,10 +94,14 @@ export function ChatPanel() {
   };
 
   return (
-    <div className="flex h-full w-[400px] min-w-[400px] flex-col border-l border-zinc-800 bg-zinc-950">
+    <div className="flex h-full w-full lg:w-[400px] lg:min-w-[400px] flex-col border-l border-zinc-800 bg-zinc-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 p-4">
         <div className="flex items-center gap-3">
+          {/* Voltar (somente mobile) */}
+          <button onClick={() => setActiveTicket(null)} className="lg:hidden -ml-1 p-1 text-zinc-400 hover:text-zinc-100" aria-label="Voltar">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
           {activeContact.avatar ? (
             <img src={activeContact.avatar} alt="" className="h-10 w-10 rounded-full border border-zinc-800" />
           ) : (

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, signInWithPopup, signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
@@ -19,6 +19,27 @@ provider.addScope('https://www.googleapis.com/auth/calendar.events');
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
 provider.addScope('https://www.googleapis.com/auth/gmail.send');
 
+// Traduz os erros mais comuns do Firebase Auth para uma mensagem acionável.
+function explainAuthError(err: any): string {
+  const code = err?.code || '';
+  switch (code) {
+    case 'auth/unauthorized-domain':
+      return `Este domínio (${window.location.hostname}) não está autorizado no Firebase. Vá em Firebase Console → Authentication → Settings → Authorized domains e adicione "${window.location.hostname}".`;
+    case 'auth/operation-not-allowed':
+      return 'O provedor Google não está habilitado. Ative em Firebase Console → Authentication → Sign-in method → Google.';
+    case 'auth/popup-blocked':
+      return 'O navegador bloqueou o popup. Permita popups para este site e tente de novo (vamos tentar via redirecionamento).';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'A janela de login foi fechada antes de concluir. Tente novamente.';
+    case 'auth/configuration-not-found':
+      return 'Configuração de Authentication não encontrada no projeto Firebase. Habilite o Google Sign-in no console.';
+    default:
+      return `Não foi possível conectar ao Google${code ? ` (${code})` : ''}: ${err?.message || 'erro desconhecido'}. ` +
+        'Se os escopos (Drive/Calendar/Sheets/Gmail) ainda não passaram pela verificação do Google, só "usuários de teste" conseguem entrar.';
+  }
+}
+
 export function IntegrationsView() {
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [webhooks, setWebhooks] = useState<any[]>([]);
@@ -26,6 +47,7 @@ export function IntegrationsView() {
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [webhookForm, setWebhookForm] = useState({ name: '', url: '', secret: '' });
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const loadData = () => {
     fetch('/api/integrations/webhooks').then(r => r.json()).then(setWebhooks).catch(console.error);
@@ -42,10 +64,19 @@ export function IntegrationsView() {
   }, []);
 
   const handleGoogleSignIn = async () => {
+    setGoogleError(null);
     try {
       await signInWithPopup(auth, provider);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('[GoogleLogin]', e?.code, e?.message);
+      // Popup bloqueado/fechado: tenta o fluxo por redirecionamento (mais robusto).
+      if (e?.code === 'auth/popup-blocked' || e?.code === 'auth/cancelled-popup-request') {
+        try { await signInWithRedirect(auth, provider); return; } catch (e2: any) {
+          setGoogleError(explainAuthError(e2));
+          return;
+        }
+      }
+      setGoogleError(explainAuthError(e));
     }
   };
 
@@ -164,7 +195,13 @@ export function IntegrationsView() {
                       <span className="text-sm font-medium">Sign in with Google</span>
                     </div>
                   </button>
-                  <p className="text-xs text-zinc-500 mt-4 text-center">Necessário para backup, agenda, e mais serviços.</p>
+                  <p className="text-xs text-zinc-500 mt-4 text-center">Necessário para agenda, e-mail e mais serviços do Google.</p>
+                  {googleError && (
+                    <div className="mt-4 w-full rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+                      <p className="text-xs text-rose-200/90">{googleError}</p>
+                    </div>
+                  )}
                </div>
             )}
           </div>

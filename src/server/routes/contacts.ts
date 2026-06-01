@@ -10,18 +10,22 @@ router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { temperature, tag, inactiveDays } = req.query as any;
-    let sql = `SELECT id, name, identifier, profile_pic_url, lead_temperature, purchase_count,
+    const { temperature, tag, inactiveDays, minScore, sort } = req.query as any;
+    let sql = `SELECT id, name, identifier, profile_pic_url, lead_temperature, lead_score, purchase_count,
                       total_spent, avg_ticket, last_purchase_at, last_contact_at, tags, notes, created_at
                FROM contacts WHERE organization_id = ?`;
     const params: any[] = [orgId];
     if (temperature) { sql += ` AND lead_temperature = ?`; params.push(temperature); }
     if (tag) { sql += ` AND tags LIKE ?`; params.push(`%${tag}%`); }
+    if (minScore) { sql += ` AND COALESCE(lead_score,0) >= ?`; params.push(parseInt(String(minScore), 10) || 0); }
     if (inactiveDays) {
       sql += ` AND (last_contact_at IS NULL OR last_contact_at < datetime('now', ?))`;
       params.push(`-${parseInt(String(inactiveDays), 10) || 0} days`);
     }
-    sql += ` ORDER BY total_spent DESC, last_contact_at DESC`;
+    // Ordenação: por score (padrão para priorização) ou por valor gasto.
+    sql += sort === 'spent'
+      ? ` ORDER BY total_spent DESC, last_contact_at DESC`
+      : ` ORDER BY COALESCE(lead_score,0) DESC, last_contact_at DESC`;
     res.json(db.prepare(sql).all(...params));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -36,10 +40,21 @@ router.get("/segments", (req: AuthRequest, res): any => {
     const byTemp = db.prepare(`SELECT lead_temperature as t, count(*) as c FROM contacts WHERE organization_id = ? GROUP BY lead_temperature`).all(orgId) as any[];
     const inactive60 = db.prepare(`SELECT count(*) as c FROM contacts WHERE organization_id = ? AND purchase_count > 0 AND (last_purchase_at IS NULL OR last_purchase_at < datetime('now','-60 days'))`).get(orgId) as any;
     const topBuyers = db.prepare(`SELECT id, name, identifier, purchase_count, total_spent FROM contacts WHERE organization_id = ? AND purchase_count > 0 ORDER BY total_spent DESC LIMIT 10`).all(orgId);
+    // Lead Scoring: contagem por faixa + os leads mais quentes para priorizar.
+    const score = db.prepare(`
+      SELECT
+        SUM(CASE WHEN COALESCE(lead_score,0) >= 70 THEN 1 ELSE 0 END) as alto,
+        SUM(CASE WHEN COALESCE(lead_score,0) >= 40 AND COALESCE(lead_score,0) < 70 THEN 1 ELSE 0 END) as medio,
+        SUM(CASE WHEN COALESCE(lead_score,0) < 40 THEN 1 ELSE 0 END) as baixo
+      FROM contacts WHERE organization_id = ?
+    `).get(orgId) as any;
+    const hotLeads = db.prepare(`SELECT id, name, identifier, lead_score, lead_temperature FROM contacts WHERE organization_id = ? ORDER BY COALESCE(lead_score,0) DESC LIMIT 10`).all(orgId);
     res.json({
       byTemperature: byTemp.reduce((acc: any, r) => { acc[r.t || 'frio'] = r.c; return acc; }, {}),
       inactive60Days: inactive60?.c || 0,
       topBuyers,
+      byScore: { alto: score?.alto || 0, medio: score?.medio || 0, baixo: score?.baixo || 0 },
+      hotLeads,
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

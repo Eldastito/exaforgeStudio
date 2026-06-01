@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw } from 'lucide-react';
+import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
 type Contact = {
   id: string; name?: string; identifier: string; profile_pic_url?: string;
-  lead_temperature?: string; purchase_count?: number; total_spent?: number;
+  lead_temperature?: string; lead_score?: number; purchase_count?: number; total_spent?: number;
   avg_ticket?: number; last_purchase_at?: string; last_contact_at?: string; tags?: string;
+};
+
+const scoreBand = (s?: number): { label: string; cls: string; bar: string } => {
+  const v = s || 0;
+  if (v >= 70) return { label: 'Alto', cls: 'text-emerald-400', bar: 'bg-emerald-500' };
+  if (v >= 40) return { label: 'Médio', cls: 'text-amber-400', bar: 'bg-amber-500' };
+  return { label: 'Baixo', cls: 'text-zinc-400', bar: 'bg-zinc-600' };
 };
 
 const TEMP: Record<string, { label: string; cls: string; Icon: any }> = {
@@ -16,6 +23,7 @@ const TEMP: Record<string, { label: string; cls: string; Icon: any }> = {
 
 const FILTERS = [
   { id: 'todos', label: 'Todos' },
+  { id: 'score', label: '🎯 Score alto' },
   { id: 'quente', label: '🔥 Quentes' },
   { id: 'morno', label: 'Mornos' },
   { id: 'frio', label: 'Frios' },
@@ -34,6 +42,7 @@ export function ContactsView() {
     let url = '/api/contacts';
     if (filter === 'quente' || filter === 'morno' || filter === 'frio') url += `?temperature=${filter}`;
     else if (filter === 'inativos') url += `?inactiveDays=60`;
+    else if (filter === 'score') url += `?minScore=70`;
     Promise.all([
       apiFetch(url).then(r => r.json()).catch(() => []),
       apiFetch('/api/contacts/segments').then(r => r.json()).catch(() => null),
@@ -73,9 +82,9 @@ export function ContactsView() {
       {/* Segmentos */}
       {segments && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <Seg label="🎯 Score alto (≥70)" value={segments.byScore?.alto || 0} accent="text-emerald-400" />
+          <Seg label="Score médio (40-69)" value={segments.byScore?.medio || 0} accent="text-amber-400" />
           <Seg label="🔥 Quentes" value={segments.byTemperature?.quente || 0} />
-          <Seg label="Mornos" value={segments.byTemperature?.morno || 0} />
-          <Seg label="Frios" value={segments.byTemperature?.frio || 0} />
           <Seg label="Inativos +60d" value={segments.inactive60Days || 0} accent="text-rose-400" />
         </div>
       )}
@@ -118,6 +127,21 @@ export function ContactsView() {
                   </div>
                 </div>
               </div>
+              {/* Lead Score */}
+              {(() => {
+                const sb = scoreBand(c.lead_score);
+                return (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-[11px] mb-1">
+                      <span className="flex items-center gap-1 text-zinc-500"><Target className="w-3 h-3" /> Lead Score</span>
+                      <span className={`font-semibold ${sb.cls}`}>{c.lead_score || 0}/100 · {sb.label}</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                      <div className={`h-full rounded-full ${sb.bar}`} style={{ width: `${Math.min(100, c.lead_score || 0)}%` }} />
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                 <Stat label="Compras" value={String(c.purchase_count || 0)} icon={<ShoppingBag className="w-3 h-3" />} />
                 <Stat label="Total" value={brl(c.total_spent)} />

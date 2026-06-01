@@ -420,6 +420,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN total_spent REAL DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN avg_ticket REAL DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN lead_temperature TEXT DEFAULT 'frio'`); } catch(e){} // frio | morno | quente
+  // Lead Scoring: pontuação 0-100 calculada por comportamento (recência, compras, intenção).
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN lead_score INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN lead_score_updated_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN tags TEXT`); } catch(e){} // CSV de tags
   try { db.exec(`ALTER TABLE contacts ADD COLUMN notes TEXT`); } catch(e){} // anotações/biografia do cliente
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contacts_org ON contacts(organization_id)`); } catch(e){}

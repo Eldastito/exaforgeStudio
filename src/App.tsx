@@ -8,6 +8,7 @@ import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
 import { CampaignsView } from '@/src/features/CampaignsView';
+import { CadencesView } from '@/src/features/CadencesView';
 import { ContactsView } from '@/src/features/ContactsView';
 import { IntegrationsView } from '@/src/features/IntegrationsView';
 import { SettingsView } from '@/src/features/SettingsView';
@@ -125,6 +126,7 @@ export default function App() {
              {viewMode === 'catalog' && 'Catálogo'}
              {viewMode === 'vendas' && 'Vendas'}
              {viewMode === 'campanhas' && 'Campanhas'}
+             {viewMode === 'cadencias' && 'Cadências'}
              {viewMode === 'contacts' && 'Contatos'}
              {viewMode === 'integrations' && 'Integrações'}
              {viewMode === 'settings' && 'Configurações'}
@@ -189,6 +191,7 @@ export default function App() {
           {viewMode === 'catalog' && <CatalogView />}
           {viewMode === 'vendas' && <SalesView />}
           {viewMode === 'campanhas' && <CampaignsView />}
+          {viewMode === 'cadencias' && <CadencesView />}
           {viewMode === 'contacts' && <ContactsView />}
           {viewMode === 'integrations' && <IntegrationsView />}
           {viewMode === 'settings' && <SettingsView />}

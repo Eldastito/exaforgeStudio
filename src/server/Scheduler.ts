@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { CampaignService } from "./CampaignService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { CadenceService } from "./CadenceService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -21,12 +22,13 @@ export class Scheduler {
     this.timer = setInterval(() => this.tick().catch(e => console.error('[Scheduler] tick falhou', e)), INTERVAL);
     // Primeira checagem logo após o boot (com um pequeno atraso).
     setTimeout(() => this.tick().catch(() => {}), 30_000);
-    console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento).');
+    console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento + cadências de follow-up).');
   }
 
   static async tick() {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
+    await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
   }
 
   /** Reativação automática semanal (opt-in por organização). */

@@ -45,7 +45,7 @@ export type Ticket = {
   handoffReason?: string;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'contacts' | 'integrations' | 'settings' | 'admin';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin';
 
 export type EvolutionConfig = {
   baseUrl: string;

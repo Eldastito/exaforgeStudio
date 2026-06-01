@@ -552,6 +552,47 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN paid_at DATETIME`); } catch(e){}
   // Número de WhatsApp da empresa para a IA encaminhar leads (ex.: vindos do Instagram).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN forward_whatsapp TEXT`); } catch(e){}
+
+  // ===== Follow-up Sequencial (Cadências) =====
+  // Cadência = sequência de mensagens automáticas quando o contato não responde.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cadences (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        trigger_stage TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS cadence_steps (
+        id TEXT PRIMARY KEY,
+        cadence_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        step_order INTEGER NOT NULL,
+        delay_hours REAL NOT NULL,
+        message TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS contact_cadences (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        cadence_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        contact_identifier TEXT NOT NULL,
+        contact_name TEXT,
+        current_step INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        next_send_at DATETIME,
+        last_contact_message_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_contact_cadences_ticket ON contact_cadences(ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_contact_cadences_org ON contact_cadences(organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de cadências', e); }
 };
 
 initDb();

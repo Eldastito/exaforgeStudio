@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, MessageSquare, Users, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X } from 'lucide-react';
+import { Layers, MessageSquare, Users, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/contexts/AuthContext';
 
@@ -34,6 +34,7 @@ export function Sidebar() {
              <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />
              <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />
              <NavItem icon={<Megaphone />} label="Campanhas" active={viewMode === 'campanhas'} onClick={() => setViewMode('campanhas')} />
+             <NavItem icon={<GitMerge />} label="Cadências" active={viewMode === 'cadencias'} onClick={() => setViewMode('cadencias')} />
              <NavItem icon={<Webhook />} label="Canais e I.A." active={viewMode === 'channels'} onClick={() => setViewMode('channels')} />
              <NavItem icon={<Users />} label="Contatos" active={viewMode === 'contacts'} onClick={() => setViewMode('contacts')} />
              <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />

@@ -5,6 +5,7 @@ import { OrdersService } from "./OrdersService.js";
 import { PaymentService } from "./PaymentService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { CadenceService } from "./CadenceService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -114,6 +115,12 @@ export async function processIncomingMessage(
   // CRM: registra o último contato e recalcula a temperatura do lead.
   CustomerProfileService.touchContact(contact.id);
 
+  // Cadência: ao receber mensagem do contato, cancela o follow-up pendente e
+  // atualiza o timestamp para que o próximo delay conte a partir de agora.
+  try {
+    CadenceService.cancelForTicket(ticket.id);
+  } catch (e) { /* noop */ }
+
   // Opt-out de campanhas: se o cliente pedir para sair, marca e NÃO recebe mais
   // mensagens ativas (obrigatório para não ser marcado como spam).
   const optOutText = (payload.text || '').trim().toLowerCase();
@@ -171,6 +178,8 @@ export async function processIncomingMessage(
           if (io) {
             io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, contactId: contact.id, newStage: aiResult.newStage });
           }
+          // Inicia cadência de follow-up se houver uma configurada para o novo estágio.
+          try { CadenceService.startForTicket(orgId, ticket.id, contact.id, aiResult.newStage); } catch (e) { /* noop */ }
        }
 
        if (aiResult.needsHuman) {

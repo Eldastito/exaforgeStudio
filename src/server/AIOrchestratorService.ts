@@ -131,7 +131,14 @@ export class AIOrchestratorService {
       } catch (e) { /* noop */ }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText);
+    // Negociador: se ligado, injeta as regras de margem para a IA negociar com
+    // segurança (nunca abaixo do mínimo, só com gatilho do cliente).
+    let negotiatorText = "";
+    if (!isOrchestratorCommand) {
+      negotiatorText = this.negotiatorContext(params.organizationId);
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -246,6 +253,32 @@ export class AIOrchestratorService {
       newOrder,
       cancelOrder,
     };
+  }
+
+  /**
+   * Monta o contexto do NEGOCIADOR para o prompt. Só retorna texto se o dono
+   * ligou o recurso. Inclui o desconto máximo permitido, os preços mínimos por
+   * produto e as regras (gatilhos), com travas de segurança.
+   */
+  private static negotiatorContext(orgId: string): string {
+    try {
+      const o = db.prepare('SELECT negotiator_enabled, negotiator_max_discount, negotiator_rules FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
+      if (!o || !o.negotiator_enabled) return "";
+      const maxDisc = parseInt(String(o.negotiator_max_discount || 0), 10);
+
+      // Lista os produtos com preço mínimo definido (>0).
+      const prods = db.prepare("SELECT name, price, min_price FROM products_services WHERE organization_id = ? AND active = 1 AND min_price IS NOT NULL AND min_price > 0").all(orgId) as any[];
+      const minLines = prods.map(p => `- ${p.name}: preço R$ ${Number(p.price || 0).toFixed(2)}, MÍNIMO R$ ${Number(p.min_price).toFixed(2)}`).join('\n');
+
+      let txt = `NEGOCIADOR ATIVO — você pode negociar preço, MAS com regras rígidas:
+1. NUNCA ofereça desconto por conta própria. Só negocie se o CLIENTE acionar um gatilho: pedir desconto explicitamente, dizer que está caro, comparar com concorrente, ou demonstrar que vai DESISTIR após saber o preço (abandono).
+2. NUNCA baixe o preço abaixo do MÍNIMO de cada produto (listados abaixo). Se não houver mínimo definido para um produto, NÃO dê desconto nele.
+3. Desconto máximo permitido: ${maxDisc > 0 ? maxDisc + '%' : 'apenas até o preço mínimo do produto'}. Comece com um desconto pequeno; só chegue perto do limite se o cliente insistir e estiver prestes a fechar.
+4. Negocie com elegância: valorize o produto antes de ceder, e peça algo em troca quando possível (ex.: fechar agora, levar mais itens, pagamento à vista).`;
+      if (minLines) txt += `\n\nPREÇOS MÍNIMOS (NUNCA furar):\n${minLines}`;
+      if (o.negotiator_rules) txt += `\n\nREGRAS DO DONO: ${o.negotiator_rules}`;
+      return txt;
+    } catch (e) { return ""; }
   }
 
   /** Lê o interruptor de autonomia de vendas da organização. */
@@ -584,7 +617,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -652,6 +685,7 @@ REGRAS OBRIGATÓRIAS:
 
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 ${forwardText}
+${negotiatorText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}

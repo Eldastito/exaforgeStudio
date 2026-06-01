@@ -118,14 +118,14 @@ router.post("/", (req: AuthRequest, res): any => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { type, name, description, price, stock_control_enabled, duration_minutes } = req.body;
+  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price } = req.body;
   const id = uuidv4();
 
   try {
     db.prepare(`
-      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null);
+      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null, (min_price !== undefined && min_price !== '' ? Number(min_price) : null));
 
     if (stock_control_enabled) {
       db.prepare(`
@@ -152,7 +152,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     const product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
     if (!product) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold } = req.body;
+    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price } = req.body;
     const updates: string[] = [];
     const vals: any[] = [];
     if (name !== undefined) { updates.push("name = ?"); vals.push(name); }
@@ -161,6 +161,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     if (active !== undefined) { updates.push("active = ?"); vals.push(active ? 1 : 0); }
     if (type !== undefined) { updates.push("type = ?"); vals.push(type); }
     if (stock_control_enabled !== undefined) { updates.push("stock_control_enabled = ?"); vals.push(stock_control_enabled ? 1 : 0); }
+    if (min_price !== undefined) { updates.push("min_price = ?"); vals.push(min_price === '' || min_price === null ? null : Number(min_price)); }
     if (updates.length) {
       db.prepare(`UPDATE products_services SET ${updates.join(', ')} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
     }

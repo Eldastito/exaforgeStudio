@@ -469,6 +469,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE order_items ADD COLUMN unit_cost REAL DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE products_services ADD COLUMN has_variants INTEGER DEFAULT 0`); } catch(e){}
+  // Negociador: preço mínimo que o produto pode chegar numa negociação (0 = sem negociação).
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN min_price REAL`); } catch(e){}
+  // Negociador: config por organização.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN negotiator_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN negotiator_max_discount INTEGER DEFAULT 0`); } catch(e){} // % máximo de desconto
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN negotiator_rules TEXT`); } catch(e){} // instruções extras do dono
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS product_variants (

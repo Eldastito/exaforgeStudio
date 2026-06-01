@@ -73,6 +73,8 @@ export type RagDocument = {
 
 type AppState = {
   viewMode: ViewMode;
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
   contacts: Record<string, Contact>;
   tickets: Record<string, Ticket>;
   messages: Record<string, Message[]>;
@@ -137,7 +139,9 @@ const initialChannels: ChannelInfo[] = [
 const initialRagDocuments: RagDocument[] = [];
 
 export const useStore = create<AppState>((set, get) => ({
-  viewMode: 'kanban',
+  viewMode: ((): ViewMode => {
+    try { return (localStorage.getItem('zappflow_view') as ViewMode) || 'kanban'; } catch { return 'kanban'; }
+  })(),
   contacts: initialContacts,
   tickets: initialTickets,
   messages: initialMessages,
@@ -203,7 +207,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  setViewMode: (mode) => set({ viewMode: mode }),
+  sidebarOpen: false,
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  setViewMode: (mode) => { try { localStorage.setItem('zappflow_view', mode); } catch {} set({ viewMode: mode, sidebarOpen: false }); },
   setEvolutionConfig: (config) => set({ evolutionConfig: config }),
   setActiveTicket: (id) => set({ activeTicketId: id }),
 

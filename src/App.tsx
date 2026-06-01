@@ -15,9 +15,10 @@ import { SettingsView } from '@/src/features/SettingsView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
+import { GlobalSearch } from '@/src/features/GlobalSearch';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useStore } from '@/src/store/useStore';
-import { Search, Bell, X, Menu } from 'lucide-react';
+import { Bell, X, Menu } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
@@ -143,15 +144,8 @@ export default function App() {
              {viewMode === 'dashboard' && 'Dashboard'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
-              <div className="relative hidden md:block">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
-                <input
-                  type="text"
-                  placeholder="Buscar leads ou tags..."
-                  className="h-9 w-[180px] lg:w-[250px] rounded-md border border-zinc-800 bg-zinc-900 pl-9 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 transition-colors"
-                />
-              </div>
-              <button 
+              <GlobalSearch />
+              <button
                 onClick={() => setShowNotifications(!showNotifications)} 
                 className="relative p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
               >

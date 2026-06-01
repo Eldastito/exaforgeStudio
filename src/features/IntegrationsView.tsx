@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play } from 'lucide-react';
+import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
 let app;
@@ -65,6 +65,18 @@ export function IntegrationsView() {
     } catch (e) {} finally {
       setIsBackingUp(false);
     }
+  };
+
+  const handleDownloadBackup = (id: string) => {
+    window.location.href = `/api/integrations/backups/${id}/download`;
+  };
+
+  const handleDeleteBackup = async (id: string) => {
+    if (!window.confirm('Apagar este backup? Esta ação é permanente.')) return;
+    try {
+      await fetch(`/api/integrations/backups/${id}`, { method: 'DELETE' });
+      loadData();
+    } catch (e) {}
   };
 
   const handleAddWebhook = async (e: React.FormEvent) => {
@@ -131,10 +143,9 @@ export function IntegrationsView() {
                      </div>
                      <Button variant="ghost" size="sm" onClick={handleGoogleSignOut} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
                   </div>
-                  <Button onClick={handleGenerateBackup} disabled={isBackingUp} className="w-full bg-blue-600 hover:bg-blue-700">
-                    {isBackingUp ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <HardDrive className="w-4 h-4 mr-2" />}
-                    {isBackingUp ? 'Gerando...' : 'Gerar Backup no Drive agora'}
-                  </Button>
+                  <p className="text-xs text-zinc-500 text-center">
+                    Conexão usada para Drive, Calendar, Sheets e Gmail (em desenvolvimento).
+                  </p>
                </div>
             ) : (
                <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 rounded-lg border border-zinc-800 h-full">
@@ -194,31 +205,66 @@ export function IntegrationsView() {
         </div>
       </div>
 
-      {/* Backup History */}
+      {/* Backups do Banco (real, sem dependência do Google) */}
       <div className="mt-6 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
-         <h3 className="font-semibold text-zinc-100 mb-4 flex items-center justify-between">
-           Histórico de Backups
-           <span className="text-xs bg-zinc-800 text-zinc-300 px-2 py-1 rounded-full">{backups.length} registros</span>
-         </h3>
-         <div className="space-y-2">
-            {backups.map(b => (
-              <div key={b.id} className="flex justify-between items-center p-3 border border-zinc-800/50 rounded-lg text-sm">
-                <div className="flex items-center gap-3">
-                   {b.status === 'completed' ? <HardDrive className="w-4 h-4 text-emerald-400" /> : <RefreshCw className="w-4 h-4 text-amber-400 animate-spin" />}
-                   <span className="text-zinc-300 capitalize">{b.type} Backup</span>
-                   <span className="text-zinc-500 text-xs">{new Date(b.created_at).toLocaleString()}</span>
+        <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+          <div>
+            <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
+              <HardDrive className="w-5 h-5 text-emerald-400" /> Backups da Conta
+            </h3>
+            <p className="text-sm text-zinc-400 mt-1">Snapshot completo dos seus dados em JSON. Fica em disco no servidor; você pode baixar a qualquer momento.</p>
+          </div>
+          <Button onClick={handleGenerateBackup} disabled={isBackingUp} className="bg-emerald-600 hover:bg-emerald-700">
+            {isBackingUp ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <HardDrive className="w-4 h-4 mr-2" />}
+            {isBackingUp ? 'Gerando...' : 'Gerar backup agora'}
+          </Button>
+        </div>
+
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 flex items-start gap-2 mb-4">
+          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-200/80">
+            O arquivo contém dados sensíveis do seu negócio (contatos, conversas, pedidos). Guarde em local seguro depois de baixar.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {backups.length === 0 ? (
+            <p className="text-zinc-500 text-sm text-center py-6">Nenhum backup gerado ainda. Clique em "Gerar backup agora".</p>
+          ) : backups.map(b => {
+            const ready = b.status === 'completed' && b.file_url;
+            const failed = b.status === 'failed';
+            return (
+              <div key={b.id} className="flex items-center justify-between gap-3 p-3 border border-zinc-800/50 rounded-lg text-sm bg-zinc-950/40 flex-wrap">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {ready ? <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
+                    : failed ? <X className="w-4 h-4 text-rose-400 shrink-0" />
+                    : <RefreshCw className="w-4 h-4 text-amber-400 animate-spin shrink-0" />}
+                  <div className="min-w-0">
+                    <p className="text-zinc-200 capitalize truncate">{b.type || 'manual'} Backup</p>
+                    <p className="text-xs text-zinc-500">{new Date(b.created_at).toLocaleString('pt-BR')}</p>
+                  </div>
                 </div>
-                <div>
-                   {b.status === 'completed' && b.file_url ? (
-                      <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded">Arquivado</span>
-                   ) : (
-                      <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded">Processando</span>
-                   )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {ready ? (
+                    <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded">Pronto</span>
+                  ) : failed ? (
+                    <span className="text-xs bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-1 rounded">Falhou</span>
+                  ) : (
+                    <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded">Processando</span>
+                  )}
+                  {ready && (
+                    <Button variant="ghost" size="sm" onClick={() => handleDownloadBackup(b.id)} className="h-7 px-2 text-indigo-300 hover:text-indigo-200" title="Baixar">
+                      <Download className="w-4 h-4" />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => handleDeleteBackup(b.id)} className="h-7 px-2 text-rose-400 hover:text-rose-300" title="Apagar">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
-            ))}
-            {backups.length === 0 && <p className="text-zinc-500 text-sm py-2">Nenhum backup realizado ainda.</p>}
-         </div>
+            );
+          })}
+        </div>
       </div>
 
       {showWebhookModal && (

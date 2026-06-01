@@ -74,6 +74,14 @@ export default function App() {
       updateStageByContactId(data.contactId, data.newStage as any);
     });
 
+    // Notificação in-app em tempo real (sino no topo).
+    socket.on("notification", (n: any) => {
+      setNotifications(prev => {
+        if (prev.some(p => p.id === n.id)) return prev;
+        return [n, ...prev].slice(0, 30);
+      });
+    });
+
     socket.on("ticket_ai_paused", (data: { ticketId: string }) => {
        console.log("Pausando IA do ticket...", data);
        const state = useStore.getState();
@@ -168,12 +176,19 @@ export default function App() {
                  {notifications.length === 0 ? (
                     <p className="text-sm text-zinc-500 text-center py-4">Nenhuma notificação</p>
                  ) : (
-                    notifications.map(n => (
-                       <div key={n.id} className={`p-3 rounded-lg border ${n.is_read ? 'border-zinc-800 bg-zinc-900/50' : 'border-indigo-500/30 bg-indigo-500/10'} cursor-pointer`} onClick={() => !n.is_read && handleMarkAsRead(n.id)}>
-                          <p className="text-sm font-semibold text-zinc-100">{n.title}</p>
-                          <p className="text-xs text-zinc-400 mt-1">{n.message}</p>
-                       </div>
-                    ))
+                    notifications.map(n => {
+                       const accent = n.is_read ? 'border-zinc-800 bg-zinc-900/50'
+                         : n.type === 'success' ? 'border-emerald-500/30 bg-emerald-500/10'
+                         : n.type === 'warning' ? 'border-amber-500/30 bg-amber-500/10'
+                         : n.type === 'alert' ? 'border-rose-500/30 bg-rose-500/10'
+                         : 'border-indigo-500/30 bg-indigo-500/10';
+                       return (
+                         <div key={n.id} className={`p-3 rounded-lg border ${accent} cursor-pointer`} onClick={() => !n.is_read && handleMarkAsRead(n.id)}>
+                            <p className="text-sm font-semibold text-zinc-100">{n.title}</p>
+                            <p className="text-xs text-zinc-400 mt-1">{n.message}</p>
+                         </div>
+                       );
+                    })
                  )}
               </div>
            </div>

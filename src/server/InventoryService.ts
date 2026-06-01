@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
+import { NotificationService } from "./NotificationService.js";
 
 /**
  * Movimentação de estoque atômica e validada. Modelo:
@@ -73,6 +74,25 @@ export class InventoryService {
     if (!this.hasStockControl(orgId, productId)) return;
     const r = this.row(orgId, productId, variantId);
     if (r) db.prepare('UPDATE inventory_items SET quantity_available = MAX(0, quantity_available - ?), quantity_reserved = MAX(0, quantity_reserved - ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(qty, qty, r.id);
+    this.checkLowStock(orgId, productId, variantId);
+  }
+
+  /**
+   * Após uma baixa, avisa se o disponível cruzou o limite de alerta
+   * (inventory_items.low_stock_threshold). Notifica com dedupe (1x por 12h).
+   */
+  private static checkLowStock(orgId: string, productId: string, variantId?: string | null) {
+    try {
+      const r = this.row(orgId, productId, variantId);
+      if (!r) return;
+      const threshold = r.low_stock_threshold || 0;
+      if (threshold <= 0) return;
+      const available = (r.quantity_available || 0) - (r.quantity_reserved || 0);
+      if (available <= threshold) {
+        const p = db.prepare('SELECT name FROM products_services WHERE id = ?').get(productId) as any;
+        if (p?.name) NotificationService.lowStock(orgId, p.name, available);
+      }
+    } catch (e) { /* noop */ }
   }
 
   static restock(orgId: string, productId: string, qty: number, variantId?: string | null) {

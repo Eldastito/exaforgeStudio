@@ -2,6 +2,7 @@ import db from "./db.js";
 import { CampaignService } from "./CampaignService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
+import { NotificationService } from "./NotificationService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -29,6 +30,24 @@ export class Scheduler {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
     await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
+    this.trialPass();
+  }
+
+  /** Avisa as orgs em trial quando faltam 3 dias ou menos para acabar. */
+  static trialPass() {
+    try {
+      const orgs = db.prepare(`
+        SELECT organization_id, trial_ends_at FROM organization_settings
+        WHERE billing_status = 'trialing' AND trial_ends_at IS NOT NULL
+          AND deleted_at IS NULL
+          AND trial_ends_at >= datetime('now')
+          AND trial_ends_at <= datetime('now', '+3 days')
+      `).all() as any[];
+      for (const o of orgs) {
+        const daysLeft = Math.max(0, Math.ceil((new Date(o.trial_ends_at).getTime() - Date.now()) / 86400000));
+        NotificationService.trialEnding(o.organization_id, daysLeft);
+      }
+    } catch (e) { /* noop — tabela/colunas podem não existir ainda */ }
   }
 
   /** Reativação automática semanal (opt-in por organização). */

@@ -6,6 +6,7 @@ import { PaymentService } from "./PaymentService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
+import { NotificationService } from "./NotificationService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -103,6 +104,8 @@ export async function processIncomingMessage(
       VALUES (?, ?, ?, 'open', 'novo_lead', 0)
     `).run(ticketId, orgId, contact.id);
     ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticketId) as any;
+    // Notifica a equipe: novo lead iniciou conversa.
+    try { NotificationService.newLead(orgId, contact.name, channel.provider); } catch (e) { /* noop */ }
   }
 
   // 3. Save incoming message
@@ -189,6 +192,8 @@ export async function processIncomingMessage(
           if (io) {
             io.to(`org:${orgId}`).emit("ticket_ai_paused", { ticketId: ticket.id, contactId: contact.id });
           }
+          // Notifica a equipe: cliente precisa de atendente humano.
+          try { NotificationService.handoff(orgId, contact.name); } catch (e) { /* noop */ }
        }
        
        if (aiResult.newAppointment) {
@@ -225,6 +230,7 @@ export async function processIncomingMessage(
                autoClose: aiResult.newOrder.autoClose,
              });
              if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
+             try { NotificationService.orderCreated(orgId, contact.name, order.total); } catch (e) { /* noop */ }
              console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
              // Pix manual: anexa as instruções de pagamento à resposta, se configurado.
              try {

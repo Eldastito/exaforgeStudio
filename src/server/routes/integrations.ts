@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { BackupService } from "../BackupService.js";
+import { NotificationService } from "../NotificationService.js";
 
 const router = Router();
 
@@ -151,11 +152,13 @@ router.post("/backups", (req: AuthRequest, res): any => {
           UPDATE backup_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP, file_url = ? WHERE id = ?
         `).run(result.fileName, id);
         logAuthEvent(orgId, userId, id, 'BACKUP_COMPLETED', { size: result.sizeBytes, records: result.recordCount });
+        try { NotificationService.backupReady(orgId, true); } catch (e) { /* noop */ }
       } catch (err: any) {
         console.error('[Backup] Falha ao gerar:', err);
         try {
           db.prepare(`UPDATE backup_jobs SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
           logAuthEvent(orgId, userId, id, 'BACKUP_FAILED', { error: String(err?.message || err).slice(0, 300) });
+          NotificationService.backupReady(orgId, false);
         } catch (e) { /* noop */ }
       }
     });

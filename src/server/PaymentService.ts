@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { OrdersService } from "./OrdersService.js";
+import { NotificationService } from "./NotificationService.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -96,6 +97,11 @@ export class PaymentService {
     if (order.status === 'aguardando_pagamento') {
       try { OrdersService.updateStatus(orgId, orderId, 'pago'); } catch (e) { /* noop */ }
     }
+    // Notifica a equipe: pagamento recebido.
+    try {
+      const c = order.contact_id ? db.prepare('SELECT name FROM contacts WHERE id = ?').get(order.contact_id) as any : null;
+      NotificationService.paymentConfirmed(orgId, order.total_amount, c?.name);
+    } catch (e) { /* noop */ }
     return true;
   }
 }

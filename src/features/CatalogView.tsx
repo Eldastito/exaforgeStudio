@@ -11,7 +11,7 @@ type Product = {
   low_stock_threshold?: number;
 };
 
-const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0' };
+const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '' };
 
 export function CatalogView() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -39,6 +39,7 @@ export function CatalogView() {
       type: p.type || 'product', name: p.name, description: p.description || '',
       price: String(p.price ?? 0), stock_control_enabled: !!p.stock_control_enabled,
       initial_stock: String(p.quantity_available ?? 0),
+      min_price: (p as any).min_price != null ? String((p as any).min_price) : '',
     });
     setShowModal(true);
   };
@@ -53,6 +54,7 @@ export function CatalogView() {
             name: form.name, description: form.description, price: parseFloat(form.price),
             type: form.type, stock_control_enabled: form.stock_control_enabled,
             quantity: form.stock_control_enabled ? parseInt(form.initial_stock || '0', 10) : undefined,
+            min_price: form.min_price === '' ? null : parseFloat(form.min_price),
           }),
         });
       } else {
@@ -172,10 +174,17 @@ export function CatalogView() {
                 <input required className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
                   value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} />
               </div>
-              <div>
-                <label className="text-sm text-zinc-400 mb-1 block">Preço (R$)</label>
-                <input required type="number" step="0.01" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
-                  value={form.price} onChange={(e) => setForm({...form, price: e.target.value})} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Preço (R$)</label>
+                  <input required type="number" step="0.01" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                    value={form.price} onChange={(e) => setForm({...form, price: e.target.value})} />
+                </div>
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Preço mínimo <span className="text-zinc-600">(negociação)</span></label>
+                  <input type="number" step="0.01" placeholder="opcional" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                    value={form.min_price} onChange={(e) => setForm({...form, min_price: e.target.value})} />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input id="stockctl" type="checkbox" checked={form.stock_control_enabled}

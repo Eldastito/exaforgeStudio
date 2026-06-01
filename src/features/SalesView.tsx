@@ -41,6 +41,7 @@ export function SalesView() {
   const [autoClose, setAutoClose] = useState(false);
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [showPayments, setShowPayments] = useState(false);
+  const [neg, setNeg] = useState<{ enabled: boolean; max: number; rules: string }>({ enabled: false, max: 0, rules: '' });
 
   const load = () => {
     setLoading(true);
@@ -54,6 +55,7 @@ export function SalesView() {
       setOrders(Array.isArray(ord) ? ord : []);
       setSummary(sum || { byStatus: [], revenue: 0 });
       setAutoClose(!!set?.ai_auto_close_sales);
+      setNeg({ enabled: !!set?.negotiator_enabled, max: set?.negotiator_max_discount || 0, rules: set?.negotiator_rules || '' });
       setLowStock((Array.isArray(prods) ? prods : []).filter((p: any) => p.stock_control_enabled && (p.sellable ?? 0) <= (p.low_stock_threshold || 0)));
     }).finally(() => setLoading(false));
   };
@@ -80,6 +82,15 @@ export function SalesView() {
         body: JSON.stringify({ ai_auto_close_sales: next }),
       });
     } catch (e) { setAutoClose(!next); }
+  };
+
+  const saveNeg = async (patch: Partial<{ enabled: boolean; max: number; rules: string }>) => {
+    const nx = { ...neg, ...patch };
+    setNeg(nx);
+    await apiFetch('/api/orders/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ negotiator_enabled: nx.enabled, negotiator_max_discount: nx.max, negotiator_rules: nx.rules }),
+    }).catch(() => {});
   };
 
   const confirmPayment = async (id: string) => {
@@ -158,6 +169,41 @@ export function SalesView() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Negociador */}
+      <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-100">🤝 Negociador da IA</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              A IA negocia preço <strong>só quando o cliente aciona</strong> (pede desconto, acha caro, vai desistir) e <strong>nunca abaixo do preço mínimo</strong> de cada produto (definido no Catálogo).
+            </p>
+          </div>
+          <button onClick={() => saveNeg({ enabled: !neg.enabled })}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${neg.enabled ? 'bg-indigo-600' : 'bg-zinc-700'}`}>
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${neg.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+        {neg.enabled && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+              Desconto máximo:
+              <input type="number" min="0" max="90" value={neg.max}
+                onChange={e => setNeg({ ...neg, max: parseInt(e.target.value, 10) || 0 })}
+                onBlur={e => saveNeg({ max: parseInt(e.target.value, 10) || 0 })}
+                className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 text-center" /> %
+              <span className="text-xs text-zinc-600">(0 = só até o preço mínimo do produto)</span>
+            </div>
+            <textarea
+              className="w-full h-16 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+              placeholder="Regras extras para a IA negociar (opcional). Ex.: priorize pagamento à vista; ofereça brinde antes de baixar o preço."
+              value={neg.rules}
+              onChange={e => setNeg({ ...neg, rules: e.target.value })}
+              onBlur={e => saveNeg({ rules: e.target.value })}
+            />
+          </div>
+        )}
       </div>
 
       {/* Filtros */}

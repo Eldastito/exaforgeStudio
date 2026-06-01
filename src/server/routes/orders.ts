@@ -18,21 +18,32 @@ router.get("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const o = db.prepare('SELECT ai_auto_close_sales FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
-    res.json({ ai_auto_close_sales: !!(o && o.ai_auto_close_sales) });
+    const o = db.prepare('SELECT ai_auto_close_sales, negotiator_enabled, negotiator_max_discount, negotiator_rules FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
+    res.json({
+      ai_auto_close_sales: !!(o && o.ai_auto_close_sales),
+      negotiator_enabled: !!(o && o.negotiator_enabled),
+      negotiator_max_discount: o?.negotiator_max_discount || 0,
+      negotiator_rules: o?.negotiator_rules || '',
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/orders/settings — atualiza o interruptor de autonomia
+// PUT /api/orders/settings — atualiza autonomia e/ou negociador
 router.put("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const val = req.body?.ai_auto_close_sales ? 1 : 0;
-    db.prepare('UPDATE organization_settings SET ai_auto_close_sales = ? WHERE organization_id = ?').run(val, orgId);
-    logEvent(orgId, userId, undefined, 'SALES_AUTONOMY_CHANGED', { ai_auto_close_sales: val });
-    res.json({ success: true, ai_auto_close_sales: !!val });
+    const b = req.body || {};
+    if (b.ai_auto_close_sales !== undefined) {
+      db.prepare('UPDATE organization_settings SET ai_auto_close_sales = ? WHERE organization_id = ?').run(b.ai_auto_close_sales ? 1 : 0, orgId);
+    }
+    if (b.negotiator_enabled !== undefined || b.negotiator_max_discount !== undefined || b.negotiator_rules !== undefined) {
+      db.prepare('UPDATE organization_settings SET negotiator_enabled = ?, negotiator_max_discount = ?, negotiator_rules = ? WHERE organization_id = ?')
+        .run(b.negotiator_enabled ? 1 : 0, parseInt(String(b.negotiator_max_discount || 0), 10) || 0, b.negotiator_rules || null, orgId);
+    }
+    logEvent(orgId, userId, undefined, 'SALES_SETTINGS_CHANGED', {});
+    res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

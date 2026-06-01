@@ -16,11 +16,11 @@ import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useStore } from '@/src/store/useStore';
-import { Search, Bell, X } from 'lucide-react';
+import { Search, Bell, X, Menu } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId, hydrate } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -115,8 +115,11 @@ export default function App() {
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         {/* Top Navbar */}
-        <header className="flex h-16 items-center justify-between border-b border-zinc-800 bg-zinc-950/50 px-6 backdrop-blur-sm">
-           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
+        <header className="flex h-16 items-center justify-between border-b border-zinc-800 bg-zinc-950/50 px-4 md:px-6 backdrop-blur-sm gap-2">
+           <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 -ml-1 text-zinc-300 hover:text-white" aria-label="Menu">
+             <Menu className="w-5 h-5" />
+           </button>
+           <h1 className="text-lg md:text-xl font-semibold tracking-tight text-zinc-100 truncate flex-1 lg:flex-none">
              {viewMode === 'kanban' && 'Atendimento'}
              {viewMode === 'agenda' && 'Agenda'}
              {viewMode === 'catalog' && 'Catálogo'}
@@ -129,13 +132,13 @@ export default function App() {
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'dashboard' && 'Dashboard'}
            </h1>
-           <div className="flex items-center gap-4">
-              <div className="relative">
+           <div className="flex items-center gap-2 md:gap-4">
+              <div className="relative hidden md:block">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
-                <input 
-                  type="text" 
-                  placeholder="Buscar leads ou tags..." 
-                  className="h-9 w-[250px] rounded-md border border-zinc-800 bg-zinc-900 pl-9 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 transition-colors"
+                <input
+                  type="text"
+                  placeholder="Buscar leads ou tags..."
+                  className="h-9 w-[180px] lg:w-[250px] rounded-md border border-zinc-800 bg-zinc-900 pl-9 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 transition-colors"
                 />
               </div>
               <button 

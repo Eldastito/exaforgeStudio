@@ -1,14 +1,21 @@
 import React from 'react';
-import { Layers, MessageSquare, Users, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck } from 'lucide-react';
+import { Layers, MessageSquare, Users, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen } = useStore();
   const { user, logout } = useAuth();
 
   return (
-    <div className="flex h-full w-[240px] flex-col border-r border-slate-800 bg-slate-950 z-20">
+    <>
+    {/* Overlay no mobile quando o menu está aberto */}
+    {sidebarOpen && (
+      <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />
+    )}
+    <div className={`fixed lg:static inset-y-0 left-0 z-40 flex h-full w-[240px] flex-col border-r border-slate-800 bg-slate-950 transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      {/* Botão fechar (mobile) */}
+      <button onClick={() => setSidebarOpen(false)} className="lg:hidden absolute top-4 right-3 text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
       <div className="flex h-16 items-center px-6 border-b border-slate-800 bg-slate-900/40">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-indigo-600 shadow-lg shadow-indigo-600/20">
@@ -72,6 +79,7 @@ export function Sidebar() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 

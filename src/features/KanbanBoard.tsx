@@ -38,13 +38,13 @@ export function KanbanBoard() {
     };
 
     return (
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-6">
       <DragDropContext onDragEnd={handleDragEnd}>
-        <div className="flex h-full items-start gap-6">
+        <div className="flex h-full items-start gap-4 md:gap-6">
           {stages.map((stage) => {
             const stageTickets = getTicketsForStage(stage.id);
             return (
-              <div key={stage.id} className="flex h-full w-[350px] min-w-[350px] flex-col rounded-xl bg-zinc-900/50 border border-zinc-800">
+              <div key={stage.id} className="flex h-full w-[82vw] min-w-[82vw] sm:w-[340px] sm:min-w-[340px] flex-col rounded-xl bg-zinc-900/50 border border-zinc-800">
                 <div className="flex items-center justify-between p-4 border-b border-zinc-800">
                   <h3 className="font-semibold text-zinc-100">{stage.title}</h3>
                   <Badge variant="secondary" className="bg-zinc-800 text-zinc-400">

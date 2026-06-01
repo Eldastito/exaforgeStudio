@@ -21,7 +21,7 @@ import { Search, Bell, X, Menu } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -183,8 +183,14 @@ export default function App() {
         <main className="flex-1 flex overflow-hidden">
           {viewMode === 'kanban' && (
             <>
-              <KanbanBoard />
-              <ChatPanel />
+              {/* Mobile: empilha — mostra o Kanban OU o Chat (quando um card está aberto).
+                  Desktop (lg+): mostra os dois lado a lado. */}
+              <div className={`${activeTicketId ? 'hidden lg:flex' : 'flex'} flex-1 min-w-0`}>
+                <KanbanBoard />
+              </div>
+              <div className={`${activeTicketId ? 'flex' : 'hidden lg:flex'} min-w-0`}>
+                <ChatPanel />
+              </div>
             </>
           )}
           {viewMode === 'agenda' && <AgendaView />}

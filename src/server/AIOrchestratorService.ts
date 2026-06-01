@@ -227,6 +227,15 @@ export class AIOrchestratorService {
     // volta automaticamente). A IA deve confirmar antes (usa o histórico).
     const cancelOrder = resultJSON.cancel_order === true;
 
+    // COTAÇÃO POR LISTA: o cliente mandou uma lista de itens (texto/áudio). A IA
+    // sinaliza quote_request com os itens; aqui montamos a cotação real (preços,
+    // estoque, faltantes, total) e ANEXAMOS à resposta. Não cria pedido — o
+    // cliente confirma depois (vira new_order). É read-only.
+    if (!newOrder && resultJSON.quote_request && Array.isArray(resultJSON.quote_request.items)) {
+      const quote = this.buildQuote(params.organizationId, resultJSON.quote_request.items);
+      if (quote) reply = `${reply}\n\n${quote}`;
+    }
+
     return {
       reply,
       actions: safeActions,
@@ -278,6 +287,63 @@ export class AIOrchestratorService {
       items.push({ productId: product.id, name: product.name, unitPrice: product.price ?? 0, quantity: qty });
     }
     return { items };
+  }
+
+  /**
+   * Monta uma COTAÇÃO a partir de uma lista de itens (cada um com nome + qtd).
+   * Casa por nome exato e, se falhar, por aproximação (LIKE). Para cada item:
+   * mostra preço, subtotal e disponibilidade (ajusta qtd se faltar estoque).
+   * Lista o que não foi encontrado. Retorna o texto pronto para o WhatsApp.
+   */
+  private static buildQuote(orgId: string, rawItems: any[]): string | null {
+    const reqs = (rawItems || []).map((it: any) => ({
+      name: typeof it?.name === 'string' ? it.name.trim() : '',
+      qty: Math.max(1, parseInt(String(it?.quantity ?? 1), 10) || 1),
+    })).filter(r => r.name);
+    if (reqs.length === 0) return null;
+
+    const currency = 'R$';
+    const lines: string[] = [];
+    const notFound: string[] = [];
+    let total = 0;
+
+    for (const r of reqs) {
+      // 1) match exato; 2) aproximado (contém).
+      let product = db.prepare(
+        'SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND lower(name) = lower(?)'
+      ).get(orgId, r.name) as any;
+      if (!product) {
+        product = db.prepare(
+          "SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND lower(name) LIKE lower(?) ORDER BY length(name) ASC LIMIT 1"
+        ).get(orgId, `%${r.name}%`) as any;
+      }
+      if (!product) { notFound.push(r.name); continue; }
+
+      const price = Number(product.price ?? 0);
+      let qty = r.qty;
+      let note = '';
+      if (product.stock_control_enabled) {
+        const sellable = InventoryService.sellable(orgId, product.id) ?? 0;
+        if (sellable <= 0) { note = ' — *sem estoque*'; qty = 0; }
+        else if (qty > sellable) { note = ` — só temos *${sellable}*`; qty = sellable; }
+      }
+      const sub = price * qty;
+      total += sub;
+      if (qty > 0) {
+        lines.push(`• ${qty}x ${product.name} — ${currency} ${price.toFixed(2)} = *${currency} ${sub.toFixed(2)}*${note}`);
+      } else {
+        lines.push(`• ${product.name}${note}`);
+      }
+    }
+
+    if (lines.length === 0 && notFound.length > 0) {
+      return `Não localizei esses itens no catálogo: ${notFound.join(', ')}. Pode me dizer de outro jeito? 🙂`;
+    }
+
+    let out = `🧾 *Sua cotação:*\n${lines.join('\n')}\n\n*Total: ${currency} ${total.toFixed(2)}*`;
+    if (notFound.length > 0) out += `\n\n⚠️ Não encontrei: ${notFound.join(', ')}.`;
+    out += `\n\nQuer que eu *feche o pedido* com esses itens? Posso te passar as formas de pagamento. 👍`;
+    return out;
   }
 
   // Estágios válidos do Kanban (espelha o type Stage do frontend).
@@ -582,6 +648,7 @@ REGRAS OBRIGATÓRIAS:
 8. NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi confirmado/registrado, NÃO preencha "new_order" de novo. Apenas dê seguimento (confirmar agendamento, tirar dúvidas, etc.).
 9. INTELIGÊNCIA DE VENDA: adapte o tom ao PERFIL DO CLIENTE abaixo. Lead "frio" → desperte interesse e descubra a necessidade (sem pressão). "Morno" → mostre valor e conduza para a decisão. "Quente"/recorrente → seja ágil e ofereça um item complementar (cross-sell) quando fizer sentido. Use gatilhos de forma natural e honesta (prova social, escassez REAL de estoque, benefício claro) — nunca invente urgência falsa. Para clientes que já compram, reconheça o relacionamento.
 10. CANCELAMENTO: se o cliente pedir para CANCELAR o pedido, primeiro confirme com empatia ("Você confirma o cancelamento do seu pedido?"). Só quando ele CONFIRMAR o cancelamento, defina "cancel_order": true (cancela o pedido ativo e devolve o estoque). Se ele já tiver confirmado no histórico, vá direto. Se o pedido já foi entregue, explique que para devolução/reembolso você vai encaminhar para um atendente (use "needs_human": true).
+11. COTAÇÃO POR LISTA: quando o cliente enviar uma LISTA de itens/quantidades para orçar (ex.: "quero 5 pães, 2 leites, 1 café" ou uma lista de mercado por texto/áudio), NÃO calcule preços você mesmo — preencha "quote_request" com os itens (nome aproximado + quantidade). O sistema vai montar a cotação real (preços, estoque, total) e anexar à sua resposta. Na sua "reply", apenas confirme com simpatia que está montando o orçamento (ex.: "Perfeito, já te mando os valores!"). Use "quote_request" para ORÇAR; use "new_order" só quando o cliente CONFIRMAR que quer fechar.
 
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 ${forwardText}
@@ -623,6 +690,9 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   },
   "new_order": {
     "items": [ { "name": "Nome EXATO do produto no catálogo", "quantity": 2 } ]
+  },
+  "quote_request": {
+    "items": [ { "name": "nome aproximado do item da lista", "quantity": 5 } ]
   },
   "cancel_order": false
 }`;

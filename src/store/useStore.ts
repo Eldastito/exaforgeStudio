@@ -97,6 +97,7 @@ type AppState = {
   receiveMessage: (contactId: string, text: string, sender?: 'contact' | 'bot' | 'human', contactName?: string, contactAvatar?: string, contactNumber?: string, mediaUrl?: string) => void;
   fetchChannels: () => Promise<void>;
   updateChannel: (id: string, updates: Partial<ChannelInfo>) => Promise<void>;
+  removeChannel: (id: string) => Promise<void>;
   connectInstagram: () => void;
   addRagDocument: (doc: Omit<RagDocument, 'id' | 'status' | 'uploadDate'>) => string;
   setRagDocumentStatus: (id: string, status: RagDocument['status'], patch?: Partial<RagDocument>) => void;
@@ -205,6 +206,15 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
        console.error(e);
     }
+  },
+
+  removeChannel: async (id) => {
+    try {
+      const res = await apiFetch(`/api/channels/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        set(state => ({ channels: state.channels.filter(c => c.id !== id) }));
+      }
+    } catch (e) { console.error(e); }
   },
 
   sidebarOpen: false,

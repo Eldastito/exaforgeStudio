@@ -8,7 +8,12 @@ import { apiFetch } from '@/src/lib/api';
 import { InstagramConnectModal } from '@/src/features/InstagramConnectModal';
 
 export function ChannelsPanel() {
-  const { channels, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel } = useStore();
+  const { channels, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel, removeChannel } = useStore();
+
+  const handleDisconnect = (id: string, label: string) => {
+    if (!window.confirm(`Desconectar ${label}? O canal será removido e as mensagens deixarão de chegar até reconectar.`)) return;
+    removeChannel(id);
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [evolutionStatus, setEvolutionStatus] = useState<'disconnected' | 'connecting_evo' | 'connected_evo'>('disconnected');
@@ -187,9 +192,14 @@ export function ChannelsPanel() {
             )}
 
             <div className="mt-6 pt-6 border-t border-slate-800 flex gap-3 relative z-10">
-              <Button variant="outline" className="w-full bg-slate-950 border-slate-800 text-slate-300 hover:text-white">
+              <Button variant="outline" className="flex-1 bg-slate-950 border-slate-800 text-slate-300 hover:text-white">
                 <RefreshCw className="w-4 h-4 mr-2" /> Sincronizar
               </Button>
+              {whatsappCloud && (
+                <Button variant="outline" className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10" onClick={() => handleDisconnect(whatsappCloud.id, 'WhatsApp')}>
+                  Desconectar
+                </Button>
+              )}
             </div>
           </div>
 
@@ -248,9 +258,14 @@ export function ChannelsPanel() {
 
             <div className="mt-6 pt-6 border-t border-slate-800 flex gap-3 relative z-10">
               {instagram ? (
-                <Button variant="outline" className="w-full bg-slate-950 border-slate-800 text-slate-300 hover:text-white">
-                  <RefreshCw className="w-4 h-4 mr-2" /> Sincronizar
-                </Button>
+                <>
+                  <Button variant="outline" className="flex-1 bg-slate-950 border-slate-800 text-slate-300 hover:text-white" onClick={() => setShowInstagram(true)}>
+                    <RefreshCw className="w-4 h-4 mr-2" /> Reconectar
+                  </Button>
+                  <Button variant="outline" className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10" onClick={() => handleDisconnect(instagram.id, 'Instagram')}>
+                    Desconectar
+                  </Button>
+                </>
               ) : (
                <Button
                 className="w-full bg-pink-600 hover:bg-pink-700 text-white border-0 transition-colors"

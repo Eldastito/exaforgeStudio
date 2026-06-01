@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import { BackupService } from "../BackupService.js";
 
 const router = Router();
 
@@ -126,7 +127,7 @@ router.get("/backups", (req: AuthRequest, res) => {
   }
 });
 
-router.post("/backups", (req: AuthRequest, res) => {
+router.post("/backups", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
@@ -139,20 +140,62 @@ router.post("/backups", (req: AuthRequest, res) => {
       INSERT INTO backup_jobs (id, organization_id, type, status)
       VALUES (?, ?, ?, 'pending')
     `).run(id, orgId, type || 'manual');
-    
+
     logAuthEvent(orgId, userId, id, 'BACKUP_STARTED', { type });
 
-    setTimeout(() => {
-       try {
-           db.prepare(`UPDATE backup_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP, file_url = ? WHERE id = ?`)
-             .run('https://storage.googleapis.com/fake-bucket/backup-file.zip', id);
-       } catch (err) {}
-    }, 2000);
+    // Roda em background para não bloquear a request — backup pode levar segundos.
+    setImmediate(() => {
+      try {
+        const result = BackupService.run(orgId, id, type || 'manual');
+        db.prepare(`
+          UPDATE backup_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP, file_url = ? WHERE id = ?
+        `).run(result.fileName, id);
+        logAuthEvent(orgId, userId, id, 'BACKUP_COMPLETED', { size: result.sizeBytes, records: result.recordCount });
+      } catch (err: any) {
+        console.error('[Backup] Falha ao gerar:', err);
+        try {
+          db.prepare(`UPDATE backup_jobs SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+          logAuthEvent(orgId, userId, id, 'BACKUP_FAILED', { error: String(err?.message || err).slice(0, 300) });
+        } catch (e) { /* noop */ }
+      }
+    });
 
     res.json({ success: true, id });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/integrations/backups/:id/download — baixa o arquivo gerado.
+router.get("/backups/:id/download", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const job = db.prepare(`SELECT * FROM backup_jobs WHERE id = ? AND organization_id = ?`).get(req.params.id, orgId) as any;
+    if (!job) return res.status(404).json({ error: "Backup não encontrado." });
+    if (job.status !== 'completed' || !job.file_url) return res.status(400).json({ error: "Backup ainda não está pronto." });
+
+    const fullPath = BackupService.resolveFile(orgId, job.file_url);
+    if (!fullPath) return res.status(404).json({ error: "Arquivo não encontrado no disco." });
+
+    res.download(fullPath, job.file_url);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/integrations/backups/:id — apaga registro + arquivo.
+router.delete("/backups/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const job = db.prepare(`SELECT * FROM backup_jobs WHERE id = ? AND organization_id = ?`).get(req.params.id, orgId) as any;
+    if (!job) return res.status(404).json({ error: "Backup não encontrado." });
+
+    if (job.file_url) BackupService.deleteFile(orgId, job.file_url);
+    db.prepare(`DELETE FROM backup_jobs WHERE id = ? AND organization_id = ?`).run(req.params.id, orgId);
+    logAuthEvent(orgId, userId, req.params.id, 'BACKUP_DELETED', {});
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

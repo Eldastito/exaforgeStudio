@@ -9,6 +9,7 @@ type Cadence = {
   name: string;
   trigger_stage: string;
   active: number;
+  min_lead_score?: number;
   steps: { id: string; step_order: number; delay_hours: number; message: string }[];
 };
 
@@ -36,7 +37,7 @@ export function CadencesView() {
   const [cadences, setCadences] = useState<Cadence[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ id: string | null; name: string; triggerStage: string; steps: Step[] } | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null; name: string; triggerStage: string; minLeadScore: number; steps: Step[] } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -53,12 +54,13 @@ export function CadencesView() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => setEditing({ id: null, name: '', triggerStage: 'proposta', steps: DEFAULT_STEPS });
+  const openNew = () => setEditing({ id: null, name: '', triggerStage: 'proposta', minLeadScore: 0, steps: DEFAULT_STEPS });
 
   const openEdit = (c: Cadence) => setEditing({
     id: c.id,
     name: c.name,
     triggerStage: c.trigger_stage,
+    minLeadScore: c.min_lead_score || 0,
     steps: c.steps.map(s => ({ delayHours: s.delay_hours, message: s.message })),
   });
 
@@ -68,7 +70,7 @@ export function CadencesView() {
     if (!editing) return;
     setSaving(true); setError('');
     try {
-      const body = { name: editing.name, triggerStage: editing.triggerStage, steps: editing.steps };
+      const body = { name: editing.name, triggerStage: editing.triggerStage, minLeadScore: editing.minLeadScore, steps: editing.steps };
       const url = editing.id ? `/api/cadences/${editing.id}` : '/api/cadences';
       const method = editing.id ? 'PUT' : 'POST';
       const r = await fetch(url, { method, headers, body: JSON.stringify(body) });
@@ -145,6 +147,7 @@ export function CadencesView() {
                       <p className="text-xs text-zinc-400 mt-0.5">
                         Gatilho: <span className="text-indigo-400">{STAGE_LABELS[c.trigger_stage] || c.trigger_stage}</span>
                         {' · '}{c.steps.length} etapa{c.steps.length !== 1 ? 's' : ''}
+                        {(c.min_lead_score || 0) > 0 && <> · <span className="text-emerald-400">score ≥ {c.min_lead_score}</span></>}
                       </p>
                     </div>
                   </div>
@@ -215,6 +218,22 @@ export function CadencesView() {
                   >
                     {STAGES.map(s => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
                   </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">
+                  Lead Score Mínimo
+                  <span className="ml-2 font-normal text-zinc-500 normal-case tracking-normal">— só dispara se o lead score do contato for ≥ este valor (0 = todos)</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range" min={0} max={100} step={5}
+                    value={editing.minLeadScore}
+                    onChange={e => setEditing(ed => ed ? { ...ed, minLeadScore: parseInt(e.target.value, 10) } : ed)}
+                    className="flex-1 accent-indigo-500"
+                  />
+                  <span className="w-12 text-right text-sm font-semibold text-indigo-400">{editing.minLeadScore}</span>
                 </div>
               </div>
 

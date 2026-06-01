@@ -29,8 +29,8 @@ router.post("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { name, triggerStage, steps } = req.body || {};
-    const c = CadenceService.create(orgId, { name, triggerStage, steps });
+    const { name, triggerStage, steps, minLeadScore } = req.body || {};
+    const c = CadenceService.create(orgId, { name, triggerStage, steps, minLeadScore });
     res.status(201).json(c);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
@@ -40,8 +40,8 @@ router.put("/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { name, triggerStage, active, steps } = req.body || {};
-    const c = CadenceService.update(orgId, req.params.id, { name, triggerStage, active, steps });
+    const { name, triggerStage, active, steps, minLeadScore } = req.body || {};
+    const c = CadenceService.update(orgId, req.params.id, { name, triggerStage, active, steps, minLeadScore });
     res.json(c);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

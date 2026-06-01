@@ -596,6 +596,8 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_contact_cadences_org ON contact_cadences(organization_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de cadências', e); }
+  // Cadências só disparam para leads com score >= min_lead_score (0 = todos).
+  try { db.exec(`ALTER TABLE cadences ADD COLUMN min_lead_score INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

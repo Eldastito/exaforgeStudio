@@ -21,6 +21,10 @@ export class CampaignService {
     const params: any[] = [orgId];
     if (segment?.temperature) { sql += ` AND lead_temperature = ?`; params.push(segment.temperature); }
     if (segment?.tag) { sql += ` AND tags LIKE ?`; params.push(`%${segment.tag}%`); }
+    if (segment?.minLeadScore) {
+      sql += ` AND COALESCE(lead_score,0) >= ?`;
+      params.push(Math.max(0, Math.min(100, parseInt(String(segment.minLeadScore), 10) || 0)));
+    }
     if (segment?.inactiveDays) {
       sql += ` AND purchase_count > 0 AND (last_purchase_at IS NULL OR last_purchase_at < datetime('now', ?))`;
       params.push(`-${parseInt(String(segment.inactiveDays), 10) || 0} days`);

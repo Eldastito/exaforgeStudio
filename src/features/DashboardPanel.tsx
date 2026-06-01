@@ -11,6 +11,8 @@ import {
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
+import { useStore } from '@/src/store/useStore';
+import { CheckCircle2, Circle, ArrowRight, Rocket, X } from 'lucide-react';
 
 const C = {
   indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
@@ -83,6 +85,82 @@ type Profit = {
   revenue: number; cost: number; profit: number; margin: number; orders: number;
   hasCostData: boolean; byProduct: { name: string; qty: number; revenue: number; cost: number; profit: number; margin: number }[];
 };
+
+type ChecklistItem = { key: string; label: string; done: boolean; view: string };
+type Checklist = { items: ChecklistItem[]; completed: number; total: number; pct: number };
+
+function SetupChecklist() {
+  const setViewMode = useStore(s => s.setViewMode);
+  const [data, setData] = useState<Checklist | null>(null);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem('zappflow_setup_dismissed') === '1'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    apiFetch('/api/analytics/setup-checklist')
+      .then(r => r.json())
+      .then(d => { if (d && Array.isArray(d.items)) setData(d); })
+      .catch(() => {});
+  }, []);
+
+  if (!data || dismissed) return null;
+  // Completou tudo: não polui o dashboard.
+  if (data.completed >= data.total) return null;
+
+  const dismiss = () => {
+    try { localStorage.setItem('zappflow_setup_dismissed', '1'); } catch {}
+    setDismissed(true);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+      className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/10 to-slate-900/40 p-6"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600/20 border border-indigo-500/30">
+            <Rocket className="h-5 w-5 text-indigo-300" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Configure sua conta</h3>
+            <p className="text-sm text-slate-400">Conclua os passos abaixo para começar a vender com a IA.</p>
+          </div>
+        </div>
+        <button onClick={dismiss} className="text-slate-500 hover:text-slate-300" title="Dispensar"><X className="h-4 w-4" /></button>
+      </div>
+
+      {/* Progresso */}
+      <div className="mt-4 flex items-center gap-3">
+        <div className="h-2 flex-1 rounded-full bg-slate-800 overflow-hidden">
+          <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${data.pct}%` }} />
+        </div>
+        <span className="text-xs font-semibold text-indigo-300">{data.completed}/{data.total}</span>
+      </div>
+
+      {/* Itens */}
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {data.items.map(it => (
+          <button
+            key={it.key}
+            onClick={() => !it.done && setViewMode(it.view as any)}
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+              it.done
+                ? 'border-emerald-500/20 bg-emerald-500/5 text-slate-400 cursor-default'
+                : 'border-slate-800 bg-slate-900/40 text-slate-200 hover:border-indigo-500/40'
+            }`}
+          >
+            {it.done
+              ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              : <Circle className="h-4 w-4 shrink-0 text-slate-600" />}
+            <span className={`flex-1 ${it.done ? 'line-through' : ''}`}>{it.label}</span>
+            {!it.done && <ArrowRight className="h-3.5 w-3.5 text-slate-500" />}
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
 
 export function DashboardPanel() {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('month');
@@ -187,6 +265,8 @@ export function DashboardPanel() {
             </button>
           </div>
         </motion.div>
+
+        <SetupChecklist />
 
         {loading && !m ? (
           <div className="flex h-64 items-center justify-center text-slate-500">

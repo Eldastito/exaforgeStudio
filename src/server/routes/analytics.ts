@@ -83,6 +83,40 @@ router.post("/settings/onboarding", (req, res) => {
   }
 });
 
+// GET /api/analytics/setup-checklist — status de configuração inicial (self-service).
+router.get("/setup-checklist", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const count = (sql: string): number => {
+      try { return (db.prepare(sql).get(orgId) as any)?.c || 0; } catch (e) { return 0; }
+    };
+    const settings = db.prepare(
+      'SELECT business_name, phone FROM organization_settings WHERE organization_id = ?'
+    ).get(orgId) as any;
+
+    const channels = count(`SELECT COUNT(*) as c FROM channels WHERE organization_id = ? AND status NOT IN ('disabled','disconnected')`);
+    const products = count(`SELECT COUNT(*) as c FROM products_services WHERE organization_id = ? AND active = 1`);
+    const aiOn = count(`SELECT COUNT(*) as c FROM channels WHERE organization_id = ? AND ai_enabled = 1`);
+    const rag = count(`SELECT COUNT(*) as c FROM knowledge_documents WHERE organization_id = ?`);
+    const users = count(`SELECT COUNT(*) as c FROM users WHERE organization_id = ?`);
+    const managers = count(`SELECT COUNT(*) as c FROM authorized_managers WHERE organization_id = ?`);
+
+    const items = [
+      { key: 'business', label: 'Preencher os dados da empresa', done: !!(settings?.business_name && settings?.phone), view: 'settings' },
+      { key: 'channel', label: 'Conectar um canal (WhatsApp/Instagram)', done: channels > 0, view: 'channels' },
+      { key: 'ai', label: 'Ativar a IA em um canal', done: aiOn > 0, view: 'channels' },
+      { key: 'catalog', label: 'Cadastrar produtos/serviços', done: products > 0, view: 'catalog' },
+      { key: 'rag', label: 'Adicionar base de conhecimento (RAG)', done: rag > 0, view: 'channels' },
+      { key: 'manager', label: 'Cadastrar um gestor (comandos Zapp)', done: managers > 0, view: 'channels' },
+      { key: 'team', label: 'Convidar a equipe', done: users > 1, view: 'settings' },
+    ];
+    const completed = items.filter(i => i.done).length;
+    res.json({ items, completed, total: items.length, pct: Math.round((completed / items.length) * 100) });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post("/reports/pdf", (req, res) => {
   const orgId = getOrgId(req);
   const { period } = req.body;

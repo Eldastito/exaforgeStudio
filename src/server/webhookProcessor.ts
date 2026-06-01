@@ -22,33 +22,39 @@ export async function processIncomingMessage(
   },
   io: any
 ) {
-  // Resolve a organização do DONO (deploy single-tenant). O owner é criado pelo
-  // ensureMasterAdmin em 'default_org'; se houver outro owner, usa o dele.
-  // Em multi-tenant futuro, o roteamento deveria ser por instância/canal.
-  const ownerRow = db.prepare(
-    "SELECT organization_id FROM users WHERE role = 'owner' ORDER BY created_at ASC LIMIT 1"
-  ).get() as any;
-  const targetOrg = ownerRow?.organization_id || 'default_org';
-
-  let channel;
+  // ===== Roteamento MULTI-TENANT =====
+  // A organização é derivada do CANAL que casa com a instância/identificador
+  // do webhook (entre TODAS as organizações). Só se não achar nada é que caímos
+  // no comportamento antigo (org do dono), preservando o ambiente atual.
+  let channel: any;
 
   if (payload.channelId) {
     channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(payload.channelId) as any;
   } else {
-    // Procura o canal pelo identifier dentro da organização do dono.
-    channel = db.prepare('SELECT * FROM channels WHERE identifier = ? AND provider = ? AND organization_id = ?')
-      .get(payload.identifier, payload.provider, targetOrg) as any;
+    // 1) Match exato por identifier+provider em QUALQUER organização.
+    channel = db.prepare('SELECT * FROM channels WHERE identifier = ? AND provider = ?')
+      .get(payload.identifier, payload.provider) as any;
 
-    // Fallback para o Instagram: o id que vem no webhook (entry.id) nem sempre é
-    // igual ao Instagram Business ID salvo na conexão. Se não casar exatamente,
-    // usa o canal de Instagram já conectado da organização (que tem o token).
+    // 2) Instagram: o entry.id do webhook nem sempre é o IG Business ID salvo.
+    //    Se houver só um canal de Instagram no sistema, usa ele.
     if (!channel && payload.provider === 'instagram') {
-      channel = db.prepare("SELECT * FROM channels WHERE provider = 'instagram' AND organization_id = ? ORDER BY created_at DESC LIMIT 1")
-        .get(targetOrg) as any;
+      const igs = db.prepare("SELECT * FROM channels WHERE provider = 'instagram'").all() as any[];
+      if (igs.length === 1) channel = igs[0];
     }
   }
 
-  // Se ainda não existe, cria o canal na organização do dono.
+  // Organização-alvo: a do canal encontrado; senão, a do dono (compatibilidade).
+  let targetOrg: string;
+  if (channel) {
+    targetOrg = channel.organization_id;
+  } else {
+    const ownerRow = db.prepare(
+      "SELECT organization_id FROM users WHERE role = 'owner' ORDER BY created_at ASC LIMIT 1"
+    ).get() as any;
+    targetOrg = ownerRow?.organization_id || 'default_org';
+  }
+
+  // Se ainda não existe canal, cria na organização-alvo (caminho legado/1ª vez).
   if (!channel) {
     const chId = uuidv4();
     db.prepare(`

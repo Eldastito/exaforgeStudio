@@ -18,6 +18,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 
 const SEGMENTS = [
   { id: 'todos', label: 'Todos os contatos', seg: {} },
+  { id: 'score', label: '🎯 Lead score alto (≥70)', seg: { minLeadScore: 70 } },
   { id: 'quentes', label: '🔥 Leads quentes', seg: { temperature: 'quente' } },
   { id: 'inativos', label: 'Inativos +60 dias (reativação)', seg: { inactiveDays: 60 } },
   { id: 'top', label: 'Top 10 compradores', seg: { topBuyers: 10 } },

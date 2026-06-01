@@ -29,6 +29,7 @@ export class CadenceService {
   static create(orgId: string, params: {
     name: string;
     triggerStage: string;
+    minLeadScore?: number;
     steps: { delayHours: number; message: string }[];
   }): any {
     if (!params.name?.trim()) throw new Error("Nome é obrigatório.");
@@ -38,8 +39,8 @@ export class CadenceService {
     const id = uuidv4();
     const tx = db.transaction(() => {
       db.prepare(
-        'INSERT INTO cadences (id, organization_id, name, trigger_stage, active) VALUES (?, ?, ?, ?, 1)'
-      ).run(id, orgId, params.name.trim(), params.triggerStage.trim());
+        'INSERT INTO cadences (id, organization_id, name, trigger_stage, active, min_lead_score) VALUES (?, ?, ?, ?, 1, ?)'
+      ).run(id, orgId, params.name.trim(), params.triggerStage.trim(), this.clampScore(params.minLeadScore));
 
       const insStep = db.prepare(
         'INSERT INTO cadence_steps (id, cadence_id, organization_id, step_order, delay_hours, message) VALUES (?, ?, ?, ?, ?, ?)'
@@ -56,18 +57,20 @@ export class CadenceService {
     name?: string;
     triggerStage?: string;
     active?: boolean;
+    minLeadScore?: number;
     steps?: { delayHours: number; message: string }[];
   }): any {
     const existing = db.prepare('SELECT id FROM cadences WHERE id = ? AND organization_id = ?').get(id, orgId);
     if (!existing) throw new Error("Cadência não encontrada.");
 
     const tx = db.transaction(() => {
-      if (params.name !== undefined || params.triggerStage !== undefined || params.active !== undefined) {
+      if (params.name !== undefined || params.triggerStage !== undefined || params.active !== undefined || params.minLeadScore !== undefined) {
         const fields: string[] = [];
         const vals: any[] = [];
         if (params.name !== undefined) { fields.push('name = ?'); vals.push(params.name.trim()); }
         if (params.triggerStage !== undefined) { fields.push('trigger_stage = ?'); vals.push(params.triggerStage.trim()); }
         if (params.active !== undefined) { fields.push('active = ?'); vals.push(params.active ? 1 : 0); }
+        if (params.minLeadScore !== undefined) { fields.push('min_lead_score = ?'); vals.push(this.clampScore(params.minLeadScore)); }
         db.prepare(`UPDATE cadences SET ${fields.join(', ')} WHERE id = ?`).run(...vals, id);
       }
 
@@ -117,8 +120,15 @@ export class CadenceService {
     ).all(cadence.id) as any[];
     if (steps.length === 0) return;
 
-    const contact = db.prepare('SELECT identifier, name, channel_id FROM contacts WHERE id = ?').get(contactId) as any;
+    const contact = db.prepare('SELECT identifier, name, channel_id, lead_score FROM contacts WHERE id = ?').get(contactId) as any;
     if (!contact?.identifier) return;
+
+    // Gating por Lead Score: pula contatos abaixo do mínimo configurado.
+    const minScore = cadence.min_lead_score || 0;
+    if (minScore > 0 && (contact.lead_score || 0) < minScore) {
+      console.log(`[Cadência] "${cadence.name}" não disparada: score ${contact.lead_score || 0} < ${minScore}.`);
+      return;
+    }
 
     db.transaction(() => {
       db.prepare("UPDATE contact_cadences SET status = 'cancelled' WHERE ticket_id = ? AND status = 'active'").run(ticketId);
@@ -149,6 +159,12 @@ export class CadenceService {
   /** Atualiza o timestamp da última mensagem do contato (ponto de partida para o delay). */
   static touchContactMessage(ticketId: string) {
     db.prepare("UPDATE contact_cadences SET last_contact_message_at = CURRENT_TIMESTAMP WHERE ticket_id = ? AND status = 'active'").run(ticketId);
+  }
+
+  /** Limita score em [0,100] e converte para inteiro. */
+  private static clampScore(s?: number): number {
+    const n = Math.round(Number(s ?? 0));
+    return Math.max(0, Math.min(100, isNaN(n) ? 0 : n));
   }
 
   // ── Scheduler ─────────────────────────────────────────────────────────────

@@ -115,7 +115,7 @@ function SetupChecklist() {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-      className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/10 to-slate-900/40 p-6"
+      className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/10 to-slate-900/40 p-4 md:p-6"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -224,7 +224,7 @@ export function DashboardPanel() {
   return (
     <div className="custom-scroll relative flex-1 overflow-y-auto bg-gradient-to-b from-slate-950 via-slate-950 to-[#0b1020]">
       <div className="pointer-events-none absolute right-0 top-16 h-72 w-72 rounded-full bg-indigo-600/10 blur-[120px]" />
-      <div className="relative mx-auto w-full max-w-7xl space-y-8 p-8">
+      <div className="relative mx-auto w-full max-w-7xl space-y-6 md:space-y-8 p-4 md:p-8">
 
         {/* HEADER */}
         <motion.div
@@ -240,18 +240,18 @@ export function DashboardPanel() {
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> Ao vivo
               </span>
             </div>
-            <h2 className="bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
+            <h2 className="bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-2xl md:text-3xl font-bold tracking-tight text-transparent">
               Performance de Atendimento
             </h2>
             <p className="mt-1 text-sm text-slate-400">Métricas de SLA, conversão e produtividade da IA em tempo real.</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-xl border border-slate-800 bg-slate-900/60 p-1 backdrop-blur">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-1 sm:flex-none rounded-xl border border-slate-800 bg-slate-900/60 p-1 backdrop-blur">
               {PERIODS.map(p => (
                 <button
                   key={p.id} onClick={() => setPeriod(p.id)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                  className={`flex-1 sm:flex-none rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-medium transition-all ${
                     period === p.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >{p.label}</button>
@@ -259,9 +259,11 @@ export function DashboardPanel() {
             </div>
             <button
               onClick={exportPdf} disabled={exporting}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2 text-xs font-medium text-slate-200 backdrop-blur transition-colors hover:border-indigo-500/40 hover:text-white disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 sm:px-4 py-2 text-xs font-medium text-slate-200 backdrop-blur transition-colors hover:border-indigo-500/40 hover:text-white disabled:opacity-50"
             >
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Exportar PDF
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              <span className="hidden sm:inline">Exportar PDF</span>
+              <span className="sm:hidden">PDF</span>
             </button>
           </div>
         </motion.div>
@@ -275,7 +277,7 @@ export function DashboardPanel() {
         ) : (
           <>
             {/* KPI CARDS */}
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:gap-5 sm:grid-cols-2 xl:grid-cols-4">
               <KpiCard index={0} title="Total de Tickets" value={totalTickets.toLocaleString('pt-BR')} delta={D?.tickets ?? 0}
                 caption={`${m?.newLeadsCount ?? 0} novos leads`} icon={<Briefcase className="h-5 w-5" />} accent={C.indigo}
                 series={spark(S?.tickets)} />
@@ -292,11 +294,11 @@ export function DashboardPanel() {
 
             {/* LUCRO / MARGEM */}
             {profit && (
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
                 <Panel index={3} className="lg:col-span-1" title="Lucro do período" subtitle={profit.hasCostData ? `${profit.orders} pedido(s) faturado(s)` : 'cadastre o custo no estoque'} icon={<TrendingUp className="h-4 w-4" />}>
                   <div className="space-y-3 pt-1">
                     <div className="flex items-end justify-between">
-                      <span className="text-3xl font-bold bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-transparent">
+                      <span className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-transparent break-all">
                         R$ {Number(profit.profit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </span>
                       <span className="mb-1 inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">
@@ -340,7 +342,7 @@ export function DashboardPanel() {
             )}
 
             {/* VOLUME + FUNIL */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
               <Panel index={4} className="lg:col-span-2" title="Volume de Atendimentos" subtitle="Tickets por dia (últimos 7 dias)" icon={<MessageSquare className="h-4 w-4" />}>
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -387,7 +389,7 @@ export function DashboardPanel() {
             </div>
 
             {/* ORIGEM + IA + SLA */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
               <Panel index={6} title="Origem dos Contatos" subtitle={`${totalContacts} atendimentos`} icon={<Users className="h-4 w-4" />}>
                 <div className="relative h-[180px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -542,7 +544,7 @@ function Panel({ index, title, subtitle, icon, className = '', children }: {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.05 }}
-      className={`rounded-2xl border border-slate-800 bg-slate-900/50 p-6 backdrop-blur ${className}`}
+      className={`rounded-2xl border border-slate-800 bg-slate-900/50 p-4 md:p-6 backdrop-blur ${className}`}
     >
       <div className="mb-5 flex items-center gap-3">
         <div className="rounded-lg border border-slate-700/60 bg-slate-800/60 p-2 text-slate-300">{icon}</div>

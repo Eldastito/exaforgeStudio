@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Plus, Trash2, Edit3, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Save, X, Zap } from 'lucide-react';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { Skeleton } from '@/src/components/ui/Skeleton';
+import { confirmDialog } from '@/src/lib/toast';
 
 type Step = { id?: string; delayHours: number; message: string };
 
@@ -91,7 +92,7 @@ export function CadencesView() {
   };
 
   const remove = async (id: string) => {
-    if (!confirm('Remover esta cadência? As sequências ativas serão canceladas.')) return;
+    if (!(await confirmDialog('Remover esta cadência? As sequências ativas serão canceladas.', { danger: true, confirmText: 'Remover' }))) return;
     await fetch(`/api/cadences/${id}`, { method: 'DELETE', headers });
     load();
   };

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, CreditCard, KeyRound, Copy, Check } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { toast } from '@/src/lib/toast';
 
 type Settings = {
   enabled: boolean; provider: string; pixKey: string; pixName: string; pixCity: string;
@@ -32,7 +33,7 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
       setGatewayToken('');
       const fresh = await apiFetch('/api/payments/settings').then(r => r.json());
       setS(fresh);
-    } catch (e) { alert('Erro ao salvar'); }
+    } catch (e) { toast.error('Erro ao salvar'); }
     finally { setSaving(false); }
   };
 

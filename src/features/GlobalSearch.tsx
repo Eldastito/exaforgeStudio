@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, User, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
+import { Avatar } from '@/src/components/ui/Avatar';
 import { useStore } from '@/src/store/useStore';
 
 /**
@@ -85,13 +86,7 @@ export function GlobalSearch() {
                 onMouseEnter={() => setHighlight(i)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${i === highlight ? 'bg-zinc-800' : 'hover:bg-zinc-800/60'}`}
               >
-                {c.avatar ? (
-                  <img src={c.avatar} alt="" className="h-8 w-8 rounded-full border border-zinc-800 object-cover" />
-                ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800">
-                    <User className="h-4 w-4 text-zinc-400" />
-                  </div>
-                )}
+                <Avatar name={c.name} src={c.avatar} size={32} className="border border-zinc-800" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-zinc-100 truncate">{c.name || 'Sem nome'}</p>
                   <p className="text-xs text-zinc-500 truncate">{c.number}</p>

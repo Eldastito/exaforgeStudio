@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toast, confirmDialog } from '@/src/lib/toast';
 import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
@@ -42,7 +43,7 @@ export function AdminMasterView() {
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
-    if (!window.confirm(`Tem certeza que deseja alterar o status para ${status}?`)) return;
+    if (!(await confirmDialog(`Tem certeza que deseja alterar o status para ${status}?`, {}))) return;
     setLoadingId(id);
     try {
       await fetch(`/api/admin/organizations/${id}/status`, {
@@ -75,7 +76,7 @@ export function AdminMasterView() {
   };
 
   const handleSoftDelete = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja remover esta empresa (Soft Delete)?')) return;
+    if (!(await confirmDialog('Tem certeza que deseja remover esta empresa (Soft Delete)?', { danger: true, confirmText: 'Remover' }))) return;
     setLoadingId(id);
     try {
       await fetch(`/api/admin/organizations/${id}`, { method: 'DELETE' });
@@ -252,7 +253,7 @@ export function AdminMasterView() {
                   headers: {'Content-Type': 'application/json'},
                   body: JSON.stringify({ title, message: 'Veja detalhes no painel.', type: 'alert' })
                 });
-                alert('Aviso enviado com sucesso!');
+                toast.success('Aviso enviado com sucesso!');
                 (document.getElementById('notif-title') as HTMLInputElement).value = '';
               } catch(e) {}
            }}>

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { toast } from '@/src/lib/toast';
 import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
+import { Avatar } from '@/src/components/ui/Avatar';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
 
@@ -67,13 +69,13 @@ export function ContactsView() {
   const exportCsv = async () => {
     try {
       const res = await apiFetch(`/api/contacts/export.csv${filterQuery()}`);
-      if (!res.ok) { alert('Não foi possível exportar.'); return; }
+      if (!res.ok) { toast.error('Não foi possível exportar.'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = 'contatos.csv'; a.click();
       URL.revokeObjectURL(url);
-    } catch (e) { alert('Não foi possível exportar.'); }
+    } catch (e) { toast.error('Não foi possível exportar.'); }
   };
 
   const recompute = async () => {
@@ -164,7 +166,7 @@ export function ContactsView() {
           return (
             <div key={c.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors">
               <div className="flex items-start gap-3">
-                <img src={c.profile_pic_url || 'https://via.placeholder.com/150'} alt={c.name || ''} className="w-11 h-11 rounded-full bg-zinc-800 object-cover" />
+                <Avatar name={c.name} src={c.profile_pic_url} size={44} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="font-semibold text-zinc-100 truncate">{c.name || 'Sem nome'}</h3>

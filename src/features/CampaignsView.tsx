@@ -3,6 +3,7 @@ import { Megaphone, Plus, X, Play, Pause, Users, AlertTriangle, Send } from 'luc
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
+import { toast } from '@/src/lib/toast';
 
 type Campaign = {
   id: string; name: string; message: string; status: string;
@@ -69,14 +70,14 @@ export function CampaignsView() {
       });
       const d = await res.json();
       if (res.ok) { setShowModal(false); setName(''); setMessage('Olá {nome}! '); load(); }
-      else alert(d.error || 'Erro ao criar campanha');
-    } catch (e) { alert('Erro ao criar campanha'); }
+      else toast.error(d.error || 'Erro ao criar campanha');
+    } catch (e) { toast.error('Erro ao criar campanha'); }
     finally { setCreating(false); }
   };
 
   const start = async (id: string) => {
     const res = await apiFetch(`/api/campaigns/${id}/start`, { method: 'POST' });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Erro ao iniciar'); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Erro ao iniciar'); }
     load();
   };
   const pause = async (id: string) => { await apiFetch(`/api/campaigns/${id}/pause`, { method: 'POST' }); load(); };

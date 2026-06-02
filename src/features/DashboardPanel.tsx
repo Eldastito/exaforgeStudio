@@ -13,7 +13,7 @@ import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
-import { CheckCircle2, Circle, ArrowRight, Rocket, X } from 'lucide-react';
+import { CheckCircle2, Circle, ArrowRight, Rocket, X, PartyPopper } from 'lucide-react';
 
 const C = {
   indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
@@ -90,11 +90,19 @@ type Profit = {
 type ChecklistItem = { key: string; label: string; done: boolean; view: string };
 type Checklist = { items: ChecklistItem[]; completed: number; total: number; pct: number };
 
+const COLLAPSED_KEY = 'zappflow_setup_collapsed';
+const DONE_ACK_KEY = 'zappflow_setup_done_ack';
+
 function SetupChecklist() {
   const setViewMode = useStore(s => s.setViewMode);
   const [data, setData] = useState<Checklist | null>(null);
-  const [dismissed, setDismissed] = useState(() => {
-    try { return localStorage.getItem('zappflow_setup_dismissed') === '1'; } catch { return false; }
+  // Recolhido: vira uma pílula discreta, mas continua reabrível.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSED_KEY) === '1'; } catch { return false; }
+  });
+  // Celebração "tudo pronto" já reconhecida pelo usuário.
+  const [doneAck, setDoneAck] = useState(() => {
+    try { return localStorage.getItem(DONE_ACK_KEY) === '1'; } catch { return false; }
   });
 
   useEffect(() => {
@@ -104,15 +112,82 @@ function SetupChecklist() {
       .catch(() => {});
   }, []);
 
-  if (!data || dismissed) return null;
-  // Completou tudo: não polui o dashboard.
-  if (data.completed >= data.total) return null;
+  if (!data) return null;
+  const allDone = data.completed >= data.total;
 
-  const dismiss = () => {
-    try { localStorage.setItem('zappflow_setup_dismissed', '1'); } catch {}
-    setDismissed(true);
+  const collapse = () => {
+    try { localStorage.setItem(COLLAPSED_KEY, '1'); } catch { /* noop */ }
+    setCollapsed(true);
+  };
+  const expand = () => {
+    try { localStorage.removeItem(COLLAPSED_KEY); } catch { /* noop */ }
+    setCollapsed(false);
+  };
+  const ackDone = () => {
+    try { localStorage.setItem(DONE_ACK_KEY, '1'); } catch { /* noop */ }
+    setDoneAck(true);
   };
 
+  // ===== Tudo concluído =====
+  if (allDone) {
+    // Já comemorou e reconheceu: some de vez (dashboard limpo).
+    if (doneAck) return null;
+    // Recolhido: pílula de celebração reabrível.
+    if (collapsed) {
+      return (
+        <button
+          onClick={expand}
+          className="group inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/15"
+        >
+          <PartyPopper className="h-4 w-4" /> Configuração concluída
+        </button>
+      );
+    }
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+        className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-600/15 via-emerald-500/5 to-slate-900/40 p-6 md:p-8 text-center"
+      >
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-500/20 blur-3xl" />
+        <button onClick={collapse} className="absolute right-4 top-4 text-slate-500 hover:text-slate-300" title="Recolher"><X className="h-4 w-4" /></button>
+        <div className="relative mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/15">
+          <PartyPopper className="h-7 w-7 text-emerald-300" />
+        </div>
+        <h3 className="relative text-xl md:text-2xl font-bold text-white">Tudo pronto! 🎉</h3>
+        <p className="relative mx-auto mt-2 max-w-md text-sm text-slate-300">
+          Você concluiu todos os passos de configuração. Sua IA está pronta para atender e vender. Bom trabalho!
+        </p>
+        <div className="relative mt-5 flex items-center justify-center gap-3">
+          <button
+            onClick={() => setViewMode('kanban' as any)}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+          >
+            Ir para o atendimento <ArrowRight className="h-4 w-4" />
+          </button>
+          <button onClick={ackDone} className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700">
+            Concluir
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // ===== Em progresso, recolhido: pílula reabrível =====
+  if (collapsed) {
+    return (
+      <button
+        onClick={expand}
+        className="group inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-300 transition-colors hover:bg-indigo-500/15"
+      >
+        <Rocket className="h-4 w-4" />
+        Primeiros passos
+        <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-xs font-semibold text-indigo-200">{data.completed}/{data.total}</span>
+        <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+      </button>
+    );
+  }
+
+  // ===== Em progresso, expandido: checklist completo =====
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
@@ -128,7 +203,7 @@ function SetupChecklist() {
             <p className="text-sm text-slate-400">Conclua os passos abaixo para começar a vender com a IA.</p>
           </div>
         </div>
-        <button onClick={dismiss} className="text-slate-500 hover:text-slate-300" title="Dispensar"><X className="h-4 w-4" /></button>
+        <button onClick={collapse} className="text-slate-500 hover:text-slate-300" title="Recolher"><X className="h-4 w-4" /></button>
       </div>
 
       {/* Progresso */}

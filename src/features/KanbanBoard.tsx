@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useStore } from '@/src/store/useStore';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Badge } from '@/src/components/ui/badge';
-import { Clock, MessageCircle, User, Filter, X } from 'lucide-react';
+import { Clock, MessageCircle, Filter, X } from 'lucide-react';
+import { Avatar } from '@/src/components/ui/Avatar';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -130,13 +131,7 @@ export function KanbanBoard() {
                                 
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
-                                    {contact.avatar ? (
-                                      <img src={contact.avatar} alt={contact.name} className="h-8 w-8 rounded-full border border-zinc-800" />
-                                    ) : (
-                                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800">
-                                        <User className="h-4 w-4 text-zinc-400" />
-                                      </div>
-                                    )}
+                                    <Avatar name={contact.name} src={contact.avatar} size={32} className="border border-zinc-800" />
                                     <div>
                                       <h4 className="text-sm font-medium leading-none text-zinc-100">{contact.name}</h4>
                                       <span className="text-xs text-zinc-500">{formatNumber(contact.number)}</span>

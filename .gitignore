@@ -7,6 +7,14 @@ coverage/
 .env*
 !.env.example
 
+# Banco SQLite local (runtime) — não versionar
+zappflow.db
+zappflow.db-shm
+zappflow.db-wal
+
 # Sessão/credenciais do WhatsApp Web (NUNCA versionar)
 .wwebjs_auth/
 .wwebjs_cache/
+
+# Mídias recebidas (runtime)
+media/

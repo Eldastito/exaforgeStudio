@@ -1,39 +1,47 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
-import { useStore } from '@/src/store/useStore';
+import { useState, useEffect } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell,
-  RadialBarChart, RadialBar, PolarAngleAxis,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
 import {
-  TrendingUp, TrendingDown, Users, Clock, Briefcase, Bot, Download,
-  ArrowUpRight, Target, Activity, Sparkles, Zap, MessageSquare,
+  TrendingUp, TrendingDown, Users, Briefcase, Bot, Download, Target,
+  Activity, Sparkles, Zap, MessageSquare, CalendarCheck, UserCheck, Loader2,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { format } from 'date-fns';
+import { apiFetch } from '@/src/lib/api';
+import { useStore } from '@/src/store/useStore';
+import { CheckCircle2, Circle, ArrowRight, Rocket, X } from 'lucide-react';
 
-// Paleta premium do relatório
 const C = {
-  indigo: '#6366f1',
-  violet: '#8b5cf6',
-  emerald: '#10b981',
-  amber: '#f59e0b',
-  rose: '#f43f5e',
-  sky: '#38bdf8',
+  indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
+  amber: '#f59e0b', rose: '#f43f5e', sky: '#38bdf8',
+};
+const DONUT = [C.emerald, C.rose, C.indigo, C.amber, C.sky, C.violet];
+
+const PERIODS: { id: 'today' | 'week' | 'month' | 'all'; label: string }[] = [
+  { id: 'today', label: 'Hoje' },
+  { id: 'week', label: '7 dias' },
+  { id: 'month', label: '30 dias' },
+  { id: 'all', label: 'Tudo' },
+];
+
+type Metrics = {
+  totalTickets: number;
+  newLeadsCount: number;
+  salesCount: number;
+  handoffCount: number;
+  appointmentCount: number;
+  chartData: { name: string; tickets: number }[];
+  channelData: { channel_id: string; count: number }[];
+  aiResponseCount: number;
+  averageFirstResponseTime: number;
+  resolutionRateAI: number;
+  deltas?: { tickets: number; sales: number; ai: number; appointments: number };
+  series?: { tickets: number[]; ai: number[]; sales: number[]; appointments: number[] };
 };
 
-const STAGE_COLORS: Record<string, string> = {
-  novo_lead: C.sky,
-  em_atendimento: C.indigo,
-  proposta: C.amber,
-  fechado: C.emerald,
-};
-
-const RANGES = ['Últimos 7 dias', 'Este Mês', 'Trimestre'] as const;
-
-// --- Tooltip customizado e reutilizável ---
 type TooltipLike = { active?: boolean; payload?: any[]; label?: string | number };
 
 function ChartTooltip({ active, payload, label, suffix = '' }: TooltipLike & { suffix?: string }) {
@@ -55,63 +63,168 @@ function ChartTooltip({ active, payload, label, suffix = '' }: TooltipLike & { s
   );
 }
 
+function fmtDate(name: string): string {
+  try { return format(new Date(name), 'dd/MM'); } catch { return name; }
+}
+
+// Formata uma duração em segundos de forma legível (ex.: 45s, 2m 5s, 1h 3m).
+function fmtDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return s ? `${m}m ${s}s` : `${m}m`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+type Profit = {
+  revenue: number; cost: number; profit: number; margin: number; orders: number;
+  hasCostData: boolean; byProduct: { name: string; qty: number; revenue: number; cost: number; profit: number; margin: number }[];
+};
+
+type ChecklistItem = { key: string; label: string; done: boolean; view: string };
+type Checklist = { items: ChecklistItem[]; completed: number; total: number; pct: number };
+
+function SetupChecklist() {
+  const setViewMode = useStore(s => s.setViewMode);
+  const [data, setData] = useState<Checklist | null>(null);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem('zappflow_setup_dismissed') === '1'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    apiFetch('/api/analytics/setup-checklist')
+      .then(r => r.json())
+      .then(d => { if (d && Array.isArray(d.items)) setData(d); })
+      .catch(() => {});
+  }, []);
+
+  if (!data || dismissed) return null;
+  // Completou tudo: não polui o dashboard.
+  if (data.completed >= data.total) return null;
+
+  const dismiss = () => {
+    try { localStorage.setItem('zappflow_setup_dismissed', '1'); } catch {}
+    setDismissed(true);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+      className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/10 to-slate-900/40 p-4 md:p-6"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600/20 border border-indigo-500/30">
+            <Rocket className="h-5 w-5 text-indigo-300" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Configure sua conta</h3>
+            <p className="text-sm text-slate-400">Conclua os passos abaixo para começar a vender com a IA.</p>
+          </div>
+        </div>
+        <button onClick={dismiss} className="text-slate-500 hover:text-slate-300" title="Dispensar"><X className="h-4 w-4" /></button>
+      </div>
+
+      {/* Progresso */}
+      <div className="mt-4 flex items-center gap-3">
+        <div className="h-2 flex-1 rounded-full bg-slate-800 overflow-hidden">
+          <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${data.pct}%` }} />
+        </div>
+        <span className="text-xs font-semibold text-indigo-300">{data.completed}/{data.total}</span>
+      </div>
+
+      {/* Itens */}
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {data.items.map(it => (
+          <button
+            key={it.key}
+            onClick={() => !it.done && setViewMode(it.view as any)}
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+              it.done
+                ? 'border-emerald-500/20 bg-emerald-500/5 text-slate-400 cursor-default'
+                : 'border-slate-800 bg-slate-900/40 text-slate-200 hover:border-indigo-500/40'
+            }`}
+          >
+            {it.done
+              ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              : <Circle className="h-4 w-4 shrink-0 text-slate-600" />}
+            <span className={`flex-1 ${it.done ? 'line-through' : ''}`}>{it.label}</span>
+            {!it.done && <ArrowRight className="h-3.5 w-3.5 text-slate-500" />}
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 export function DashboardPanel() {
-  const { tickets, contacts, messages, stages } = useStore();
-  const [range, setRange] = useState<(typeof RANGES)[number]>('Últimos 7 dias');
+  const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('month');
+  const [m, setM] = useState<Metrics | null>(null);
+  const [profit, setProfit] = useState<Profit | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
-  // --- Métricas reais derivadas da store ---
-  const ticketsArr = Object.values(tickets);
-  const totalTickets = ticketsArr.length;
-  const inProgress = ticketsArr.filter(t => t.stage === 'em_atendimento').length;
-  const closed = ticketsArr.filter(t => t.stage === 'fechado').length;
-  const urgent = ticketsArr.filter(t => t.priority === 'alta').length;
-  const totalContacts = Object.keys(contacts).length;
-  const conversion = totalTickets ? Math.round((closed / totalTickets) * 100) : 0;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch(`/api/analytics/profit?period=${period}`)
+      .then(r => r.json()).then(d => { if (!cancelled) setProfit(d); }).catch(() => {});
+    apiFetch(`/api/analytics/metrics?period=${period}`)
+      .then(r => r.json())
+      .then(data => { if (!cancelled) setM(data); })
+      .catch(err => console.error('Falha ao carregar métricas:', err))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [period]);
 
-  const allMessages = Object.values(messages).flat();
-  const botMessages = allMessages.filter(m => m.sender === 'bot').length;
-  const automation = allMessages.length ? Math.round((botMessages / allMessages.length) * 100) : 0;
+  const exportPdf = async () => {
+    setExporting(true);
+    try {
+      const res = await apiFetch('/api/analytics/reports/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'full', period }),
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `relatorio-${period}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert('Não foi possível gerar o PDF.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
-  // Funil de pipeline (contagem por estágio)
-  const funnel = stages.map(s => ({
-    id: s.id,
-    title: s.title,
-    count: ticketsArr.filter(t => t.stage === s.id).length,
-    color: STAGE_COLORS[s.id] ?? C.indigo,
+  const totalTickets = m?.totalTickets ?? 0;
+  const sales = m?.salesCount ?? 0;
+  const conversion = totalTickets ? Math.round((sales / totalTickets) * 100) : 0;
+  const automation = m?.resolutionRateAI ?? 0;
+  const frt = m?.averageFirstResponseTime ?? 0;
+
+  const D = m?.deltas;
+  const S = m?.series;
+
+  const area = (m?.chartData ?? []).map(d => ({ name: fmtDate(d.name), tickets: d.tickets }));
+  const donut = (m?.channelData ?? []).map((d, i) => ({
+    name: d.channel_id ? `Canal ${i + 1}` : 'Direto',
+    value: d.count,
+    color: DONUT[i % DONUT.length],
   }));
-  const funnelMax = Math.max(1, ...funnel.map(f => f.count));
-
-  // Atividade recente (tickets ordenados por última mensagem)
-  const recent = [...ticketsArr]
-    .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
-    .slice(0, 5);
-
-  // --- Séries para gráficos (demonstração de tendência) ---
-  const volumeData = [
-    { name: 'Seg', atend: 12, resolvidos: 8 },
-    { name: 'Ter', atend: 19, resolvidos: 14 },
-    { name: 'Qua', atend: 15, resolvidos: 12 },
-    { name: 'Qui', atend: 22, resolvidos: 18 },
-    { name: 'Sex', atend: 28, resolvidos: 23 },
-    { name: 'Sáb', atend: 10, resolvidos: 9 },
-    { name: 'Dom', atend: 5, resolvidos: 5 },
-  ];
-  const responseData = [
-    { name: 'Seg', tempo: 4.2 }, { name: 'Ter', tempo: 3.8 }, { name: 'Qua', tempo: 3.5 },
-    { name: 'Qui', tempo: 4.0 }, { name: 'Sex', tempo: 4.5 }, { name: 'Sáb', tempo: 2.1 }, { name: 'Dom', tempo: 1.5 },
-  ];
-  const sourceData = [
-    { name: 'WhatsApp', value: 65, color: C.emerald },
-    { name: 'Instagram', value: 27, color: C.rose },
-    { name: 'WhatsApp Web', value: 8, color: C.indigo },
-  ];
-  const spark = (a: number[]) => a.map((v, i) => ({ i, v }));
+  const totalContacts = donut.reduce((s, d) => s + d.value, 0);
+  const spark = (a?: number[]) => (a ?? []).map((v, i) => ({ i, v }));
 
   return (
     <div className="custom-scroll relative flex-1 overflow-y-auto bg-gradient-to-b from-slate-950 via-slate-950 to-[#0b1020]">
-      {/* glow decorativo */}
       <div className="pointer-events-none absolute right-0 top-16 h-72 w-72 rounded-full bg-indigo-600/10 blur-[120px]" />
-      <div className="relative mx-auto w-full max-w-7xl space-y-8 p-8">
+      <div className="relative mx-auto w-full max-w-7xl space-y-6 md:space-y-8 p-4 md:p-8">
 
         {/* HEADER */}
         <motion.div
@@ -127,271 +240,256 @@ export function DashboardPanel() {
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> Ao vivo
               </span>
             </div>
-            <h2 className="bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
+            <h2 className="bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-2xl md:text-3xl font-bold tracking-tight text-transparent">
               Performance de Atendimento
             </h2>
             <p className="mt-1 text-sm text-slate-400">Métricas de SLA, conversão e produtividade da IA em tempo real.</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-xl border border-slate-800 bg-slate-900/60 p-1 backdrop-blur">
-              {RANGES.map(r => (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-1 sm:flex-none rounded-xl border border-slate-800 bg-slate-900/60 p-1 backdrop-blur">
+              {PERIODS.map(p => (
                 <button
-                  key={r}
-                  onClick={() => setRange(r)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                    range === r ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:text-slate-200'
+                  key={p.id} onClick={() => setPeriod(p.id)}
+                  className={`flex-1 sm:flex-none rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-medium transition-all ${
+                    period === p.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:text-slate-200'
                   }`}
-                >
-                  {r}
-                </button>
+                >{p.label}</button>
               ))}
             </div>
-            <button className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2 text-xs font-medium text-slate-200 backdrop-blur transition-colors hover:border-indigo-500/40 hover:text-white">
-              <Download className="h-4 w-4" /> Exportar
+            <button
+              onClick={exportPdf} disabled={exporting}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 sm:px-4 py-2 text-xs font-medium text-slate-200 backdrop-blur transition-colors hover:border-indigo-500/40 hover:text-white disabled:opacity-50"
+            >
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              <span className="hidden sm:inline">Exportar PDF</span>
+              <span className="sm:hidden">PDF</span>
             </button>
           </div>
         </motion.div>
 
-        {/* KPI CARDS */}
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            index={0}
-            title="Total de Tickets"
-            value={totalTickets.toLocaleString('pt-BR')}
-            delta={12.5}
-            caption={`${urgent} marcados como urgentes`}
-            icon={<Briefcase className="h-5 w-5" />}
-            accent={C.indigo}
-            series={spark([8, 12, 10, 15, 13, 18, totalTickets + 14])}
-          />
-          <KpiCard
-            index={1}
-            title="Em Atendimento"
-            value={inProgress.toLocaleString('pt-BR')}
-            delta={-4.1}
-            caption="Carga atual da equipe"
-            icon={<Clock className="h-5 w-5" />}
-            accent={C.amber}
-            series={spark([5, 7, 6, 9, 8, 6, inProgress + 5])}
-          />
-          <KpiCard
-            index={2}
-            title="Taxa de Conversão"
-            value={`${conversion}%`}
-            delta={8.3}
-            caption={`${closed} negócios fechados`}
-            icon={<Target className="h-5 w-5" />}
-            accent={C.emerald}
-            series={spark([18, 22, 25, 24, 30, 28, conversion + 10])}
-          />
-          <KpiCard
-            index={3}
-            title="Automação IA (RAG)"
-            value={`${automation}%`}
-            delta={15.7}
-            caption={`${botMessages} respostas automáticas`}
-            icon={<Bot className="h-5 w-5" />}
-            accent={C.violet}
-            series={spark([20, 28, 33, 35, 40, 38, automation + 12])}
-          />
-        </div>
+        <SetupChecklist />
 
-        {/* LINHA PRINCIPAL: Volume + Funil */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <Panel index={4} className="lg:col-span-2" title="Volume de Atendimentos" subtitle="Recebidos vs. resolvidos" icon={<MessageSquare className="h-4 w-4" />}>
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={volumeData} margin={{ top: 10, right: 10, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gAtend" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.indigo} stopOpacity={0.45} />
-                      <stop offset="95%" stopColor={C.indigo} stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gResolv" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.emerald} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={C.emerald} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                  <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#334155', strokeWidth: 1 }} />
-                  <Area type="monotone" dataKey="atend" name="Recebidos" stroke={C.indigo} strokeWidth={2.5} fill="url(#gAtend)" />
-                  <Area type="monotone" dataKey="resolvidos" name="Resolvidos" stroke={C.emerald} strokeWidth={2.5} fill="url(#gResolv)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-2 flex items-center gap-5 pl-1">
-              <Legend color={C.indigo} label="Recebidos" />
-              <Legend color={C.emerald} label="Resolvidos" />
-            </div>
-          </Panel>
-
-          <Panel index={5} title="Funil de Vendas" subtitle="Distribuição do pipeline" icon={<Activity className="h-4 w-4" />}>
-            <div className="space-y-4 pt-1">
-              {funnel.map((f, i) => (
-                <div key={f.id}>
-                  <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span className="font-medium text-slate-300">{f.title}</span>
-                    <span className="font-mono text-xs text-slate-400">{f.count}</span>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-slate-800/70">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(f.count / funnelMax) * 100}%` }}
-                      transition={{ duration: 0.7, delay: 0.3 + i * 0.08, ease: 'easeOut' }}
-                      className="h-full rounded-full"
-                      style={{ background: `linear-gradient(90deg, ${f.color}, ${f.color}aa)` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-              <p className="text-xs text-slate-400">Conversão fim a fim</p>
-              <div className="mt-1 flex items-end gap-2">
-                <span className="text-2xl font-bold text-white">{conversion}%</span>
-                <span className="mb-1 inline-flex items-center text-xs font-medium text-emerald-400">
-                  <ArrowUpRight className="h-3.5 w-3.5" /> saudável
-                </span>
-              </div>
-            </div>
-          </Panel>
-        </div>
-
-        {/* SEGUNDA LINHA: Tempo + Origem + Gauge IA */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <Panel index={6} title="Tempo de Resposta" subtitle="Média em horas" icon={<TrendingUp className="h-4 w-4" />}>
-            <div className="h-[180px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={responseData} margin={{ top: 10, right: 10, left: -24, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                  <XAxis dataKey="name" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTooltip suffix="h" />} cursor={{ stroke: '#334155' }} />
-                  <Line type="monotone" dataKey="tempo" stroke={C.amber} strokeWidth={3}
-                    dot={{ fill: C.amber, r: 3, strokeWidth: 0 }} activeDot={{ r: 5 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </Panel>
-
-          <Panel index={7} title="Origem dos Contatos" subtitle={`${totalContacts} contatos`} icon={<Users className="h-4 w-4" />}>
-            <div className="relative h-[180px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={sourceData} cx="50%" cy="50%" innerRadius={52} outerRadius={72} paddingAngle={4} dataKey="value" stroke="none">
-                    {sourceData.map((s, i) => <Cell key={i} fill={s.color} />)}
-                  </Pie>
-                  <Tooltip content={<ChartTooltip suffix="%" />} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-bold text-white">{totalContacts}</span>
-                <span className="text-[10px] uppercase tracking-wider text-slate-500">contatos</span>
-              </div>
-            </div>
-            <div className="mt-2 space-y-1.5">
-              {sourceData.map(s => (
-                <div key={s.name} className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-2 text-slate-400">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} /> {s.name}
-                  </span>
-                  <span className="font-mono text-slate-300">{s.value}%</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel index={8} title="Eficiência da IA" subtitle="Resolução autônoma" icon={<Zap className="h-4 w-4" />}>
-            <div className="relative h-[180px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadialBarChart innerRadius="72%" outerRadius="100%" data={[{ name: 'IA', value: automation, fill: C.violet }]} startAngle={90} endAngle={-270}>
-                  <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
-                  <RadialBar background={{ fill: '#1e293b' }} dataKey="value" cornerRadius={20} />
-                </RadialBarChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-white">{automation}%</span>
-                <span className="text-[10px] uppercase tracking-wider text-slate-500">automatizado</span>
-              </div>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-center">
-              <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
-                <p className="text-lg font-bold text-violet-400">{botMessages}</p>
-                <p className="text-[10px] text-slate-500">Respostas IA</p>
-              </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
-                <p className="text-lg font-bold text-slate-200">{allMessages.length - botMessages}</p>
-                <p className="text-[10px] text-slate-500">Respostas humanas</p>
-              </div>
-            </div>
-          </Panel>
-        </div>
-
-        {/* ATIVIDADE RECENTE */}
-        <Panel index={9} title="Atividade Recente" subtitle="Últimos leads movimentados" icon={<Activity className="h-4 w-4" />}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wider text-slate-500">
-                  <th className="pb-3 pl-1 font-medium">Contato</th>
-                  <th className="pb-3 font-medium">Estágio</th>
-                  <th className="pb-3 font-medium">Prioridade</th>
-                  <th className="pb-3 pr-1 text-right font-medium">Última atividade</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recent.length === 0 ? (
-                  <tr><td colSpan={4} className="py-8 text-center text-slate-500">Nenhuma atividade ainda.</td></tr>
-                ) : recent.map(t => {
-                  const contact = contacts[t.contactId];
-                  const stage = funnel.find(f => f.id === t.stage);
-                  return (
-                    <tr key={t.id} className="border-b border-slate-800/50 transition-colors hover:bg-slate-800/20">
-                      <td className="py-3 pl-1">
-                        <div className="flex items-center gap-3">
-                          {contact?.avatar ? (
-                            <img src={contact.avatar} alt="" className="h-8 w-8 rounded-full border border-slate-700" />
-                          ) : (
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-xs font-semibold text-slate-300">
-                              {(contact?.name ?? '?').slice(0, 1).toUpperCase()}
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-medium text-slate-200">{contact?.name ?? 'Desconhecido'}</p>
-                            <p className="text-xs text-slate-500">{contact?.number ?? t.contactId}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3">
-                        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
-                          style={{ color: stage?.color, backgroundColor: `${stage?.color}1a` }}>
-                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: stage?.color }} />
-                          {stage?.title ?? t.stage}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <PriorityBadge priority={t.priority} />
-                      </td>
-                      <td className="py-3 pr-1 text-right text-xs text-slate-400">
-                        {formatDistanceToNow(new Date(t.lastMessageAt), { addSuffix: true, locale: ptBR })}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {loading && !m ? (
+          <div className="flex h-64 items-center justify-center text-slate-500">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando métricas...
           </div>
-        </Panel>
+        ) : (
+          <>
+            {/* KPI CARDS */}
+            <div className="grid grid-cols-1 gap-4 md:gap-5 sm:grid-cols-2 xl:grid-cols-4">
+              <KpiCard index={0} title="Total de Tickets" value={totalTickets.toLocaleString('pt-BR')} delta={D?.tickets ?? 0}
+                caption={`${m?.newLeadsCount ?? 0} novos leads`} icon={<Briefcase className="h-5 w-5" />} accent={C.indigo}
+                series={spark(S?.tickets)} />
+              <KpiCard index={1} title="Taxa de Conversão" value={`${conversion}%`} delta={D?.sales ?? 0}
+                caption={`${sales} vendas`} icon={<Target className="h-5 w-5" />} accent={C.emerald}
+                series={spark(S?.sales)} />
+              <KpiCard index={2} title="Respostas da IA" value={(m?.aiResponseCount ?? 0).toLocaleString('pt-BR')} delta={D?.ai ?? 0}
+                caption="Mensagens automáticas" icon={<Bot className="h-5 w-5" />} accent={C.violet}
+                series={spark(S?.ai)} />
+              <KpiCard index={3} title="Agendamentos" value={(m?.appointmentCount ?? 0).toLocaleString('pt-BR')} delta={D?.appointments ?? 0}
+                caption={`${m?.handoffCount ?? 0} handoffs p/ humano`} icon={<CalendarCheck className="h-5 w-5" />} accent={C.amber}
+                series={spark(S?.appointments)} />
+            </div>
 
+            {/* LUCRO / MARGEM */}
+            {profit && (
+              <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
+                <Panel index={3} className="lg:col-span-1" title="Lucro do período" subtitle={profit.hasCostData ? `${profit.orders} pedido(s) faturado(s)` : 'cadastre o custo no estoque'} icon={<TrendingUp className="h-4 w-4" />}>
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-end justify-between">
+                      <span className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-transparent break-all">
+                        R$ {Number(profit.profit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="mb-1 inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">
+                        {profit.margin}% margem
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
+                        <p className="text-sm font-bold text-slate-200">R$ {Number(profit.revenue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-[10px] text-slate-500">Receita</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
+                        <p className="text-sm font-bold text-rose-300">R$ {Number(profit.cost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-[10px] text-slate-500">Custo</p>
+                      </div>
+                    </div>
+                    {!profit.hasCostData && (
+                      <p className="text-[11px] text-amber-400/80">Registre o custo das mercadorias (Catálogo → 📦 → Entrada) para ver o lucro real.</p>
+                    )}
+                  </div>
+                </Panel>
+
+                <Panel index={4} className="lg:col-span-2" title="Lucro por produto" subtitle="Top itens por lucro no período" icon={<Target className="h-4 w-4" />}>
+                  {profit.byProduct.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">Sem vendas faturadas no período.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {profit.byProduct.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm border border-slate-800 rounded-lg px-3 py-2">
+                          <span className="text-slate-300 truncate pr-2">{p.name} <span className="text-slate-600">×{p.qty}</span></span>
+                          <span className="flex items-center gap-3 shrink-0">
+                            <span className="font-mono text-emerald-400">R$ {Number(p.profit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            <span className="text-[11px] text-slate-500 w-12 text-right">{p.margin}%</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Panel>
+              </div>
+            )}
+
+            {/* VOLUME + FUNIL */}
+            <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
+              <Panel index={4} className="lg:col-span-2" title="Volume de Atendimentos" subtitle="Tickets por dia (últimos 7 dias)" icon={<MessageSquare className="h-4 w-4" />}>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={area} margin={{ top: 10, right: 10, left: -18, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="gVol" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={C.indigo} stopOpacity={0.45} />
+                          <stop offset="95%" stopColor={C.indigo} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#334155', strokeWidth: 1 }} />
+                      <Area type="monotone" dataKey="tickets" name="Tickets" stroke={C.indigo} strokeWidth={2.5} fill="url(#gVol)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </Panel>
+
+              <Panel index={5} title="Resumo do Funil" subtitle="Indicadores principais" icon={<Activity className="h-4 w-4" />}>
+                <div className="space-y-3 pt-1">
+                  <FunnelRow label="Novos Leads" value={m?.newLeadsCount ?? 0} max={totalTickets} color={C.sky} />
+                  <FunnelRow label="Vendas" value={sales} max={totalTickets} color={C.emerald} />
+                  <FunnelRow label="Agendamentos" value={m?.appointmentCount ?? 0} max={totalTickets} color={C.amber} />
+                  <FunnelRow label="Handoffs (Humano)" value={m?.handoffCount ?? 0} max={totalTickets} color={C.rose} />
+                </div>
+                <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                  <p className="text-xs text-slate-400">Conversão fim a fim</p>
+                  <div className="mt-1 flex items-end gap-2">
+                    <span className="text-2xl font-bold text-white">{conversion}%</span>
+                    {(D?.sales ?? 0) >= 0 ? (
+                      <span className="mb-1 inline-flex items-center text-xs font-medium text-emerald-400">
+                        <TrendingUp className="h-3.5 w-3.5" /> {(D?.sales ?? 0) > 0 ? `+${D?.sales}% vs período anterior` : 'estável'}
+                      </span>
+                    ) : (
+                      <span className="mb-1 inline-flex items-center text-xs font-medium text-rose-400">
+                        <TrendingDown className="h-3.5 w-3.5" /> {D?.sales}% vs período anterior
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </Panel>
+            </div>
+
+            {/* ORIGEM + IA + SLA */}
+            <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
+              <Panel index={6} title="Origem dos Contatos" subtitle={`${totalContacts} atendimentos`} icon={<Users className="h-4 w-4" />}>
+                <div className="relative h-[180px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={donut.length ? donut : [{ name: 'Sem dados', value: 1, color: '#334155' }]}
+                        cx="50%" cy="50%" innerRadius={52} outerRadius={72} paddingAngle={4} dataKey="value" stroke="none">
+                        {(donut.length ? donut : [{ color: '#334155' }]).map((s: any, i) => <Cell key={i} fill={s.color} />)}
+                      </Pie>
+                      <Tooltip content={<ChartTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-2xl font-bold text-white">{totalContacts}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500">total</span>
+                  </div>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {donut.length === 0 && <p className="text-center text-xs text-slate-500">Sem dados de canal ainda.</p>}
+                  {donut.map(s => (
+                    <div key={s.name} className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-2 text-slate-400">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} /> {s.name}
+                      </span>
+                      <span className="font-mono text-slate-300">{s.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel index={7} title="Eficiência da IA" subtitle="Resolução autônoma" icon={<Zap className="h-4 w-4" />}>
+                <div className="relative h-[180px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadialBarChart innerRadius="72%" outerRadius="100%" data={[{ name: 'IA', value: automation, fill: C.violet }]} startAngle={90} endAngle={-270}>
+                      <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+                      <RadialBar background={{ fill: '#1e293b' }} dataKey="value" cornerRadius={20} />
+                    </RadialBarChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-bold text-white">{automation}%</span>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500">resolvido por IA</span>
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-center">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
+                    <p className="text-lg font-bold text-violet-400">{m?.aiResponseCount ?? 0}</p>
+                    <p className="text-[10px] text-slate-500">Respostas IA</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 py-2">
+                    <p className="text-lg font-bold text-slate-200">{m?.handoffCount ?? 0}</p>
+                    <p className="text-[10px] text-slate-500">Para humano</p>
+                  </div>
+                </div>
+              </Panel>
+
+              <Panel index={8} title="Tempo de Resposta" subtitle="Primeira resposta (média)" icon={<UserCheck className="h-4 w-4" />}>
+                <div className="flex h-[180px] flex-col items-center justify-center">
+                  <span className="bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-5xl font-bold text-transparent">
+                    {fmtDuration(frt)}
+                  </span>
+                  <span className="mt-2 text-xs text-slate-500">tempo médio até a 1ª resposta</span>
+                  {frt === 0 ? (
+                    <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-slate-500/10 px-2 py-0.5 text-xs font-semibold text-slate-400">
+                      sem dados no período
+                    </span>
+                  ) : frt <= 60 ? (
+                    <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">
+                      <TrendingDown className="h-3 w-3" /> dentro do SLA
+                    </span>
+                  ) : (
+                    <span className="mt-3 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">
+                      <TrendingUp className="h-3 w-3" /> acima de 1 min
+                    </span>
+                  )}
+                </div>
+              </Panel>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-// --- Subcomponentes ---
+function FunnelRow({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between text-sm">
+        <span className="font-medium text-slate-300">{label}</span>
+        <span className="font-mono text-xs text-slate-400">{value}</span>
+      </div>
+      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800/70">
+        <motion.div
+          initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.7, ease: 'easeOut' }}
+          className="h-full rounded-full" style={{ background: `linear-gradient(90deg, ${color}, ${color}aa)` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function KpiCard({ index, title, value, delta, caption, icon, accent, series }: {
   index: number; title: string; value: string; delta: number; caption: string;
@@ -446,7 +544,7 @@ function Panel({ index, title, subtitle, icon, className = '', children }: {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.05 }}
-      className={`rounded-2xl border border-slate-800 bg-slate-900/50 p-6 backdrop-blur ${className}`}
+      className={`rounded-2xl border border-slate-800 bg-slate-900/50 p-4 md:p-6 backdrop-blur ${className}`}
     >
       <div className="mb-5 flex items-center gap-3">
         <div className="rounded-lg border border-slate-700/60 bg-slate-800/60 p-2 text-slate-300">{icon}</div>
@@ -457,27 +555,5 @@ function Panel({ index, title, subtitle, icon, className = '', children }: {
       </div>
       {children}
     </motion.div>
-  );
-}
-
-function Legend({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="flex items-center gap-2 text-xs text-slate-400">
-      <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }} /> {label}
-    </span>
-  );
-}
-
-function PriorityBadge({ priority }: { priority: 'baixa' | 'media' | 'alta' }) {
-  const map = {
-    alta: { c: C.rose, t: 'Alta' },
-    media: { c: C.amber, t: 'Média' },
-    baixa: { c: C.emerald, t: 'Baixa' },
-  } as const;
-  const p = map[priority];
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium" style={{ color: p.c }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: p.c }} /> {p.t}
-    </span>
   );
 }

@@ -3,67 +3,333 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
 
-import multer from "multer";
-import { processDocument, generateRagResponse } from "./src/server/geminiRAG.js";
-import { suggestResponse, summarizeConversation } from "./src/lib/gemini.js";
+import channelsRoutes from "./src/server/routes/channels.js";
+import messagesRoutes from "./src/server/routes/messages.js";
+import ticketsRoutes from "./src/server/routes/tickets.js";
+import productsRoutes from "./src/server/routes/products.js";
+import appointmentsRoutes from "./src/server/routes/appointments.js";
+import integrationsRoutes from "./src/server/routes/integrations.js";
+import analyticsRoutes from "./src/server/routes/analytics.js";
+import adminRoutes from "./src/server/routes/admin.js";
+import notificationsRoutes from "./src/server/routes/notifications.js";
+import authRoutes from "./src/server/routes/auth.js";
+import usersRoutes from "./src/server/routes/users.js";
+import auditRoutes from "./src/server/routes/audit.js";
+import ragRoutes from "./src/server/routes/rag.js";
+import managersRoutes from "./src/server/routes/managers.js";
+import aiRoutes from "./src/server/routes/ai.js";
+import ordersRoutes from "./src/server/routes/orders.js";
+import contactsRoutes from "./src/server/routes/contacts.js";
+import campaignsRoutes from "./src/server/routes/campaigns.js";
+import paymentsRoutes from "./src/server/routes/payments.js";
+import cadencesRoutes from "./src/server/routes/cadences.js";
+import plansRoutes from "./src/server/routes/plans.js";
+import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
+import { Scheduler } from "./src/server/Scheduler.js";
+import { NotificationService } from "./src/server/NotificationService.js";
+import { seedOwnerFromEnv } from "./src/server/seedOwner.js";
+import { PaymentService } from "./src/server/PaymentService.js";
+import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
+import { processIncomingMessage } from "./src/server/webhookProcessor.js";
+import db from "./src/server/db.js";
+import { v4 as uuidv4 } from "uuid";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import { transcribeAudio, describeImage } from "./src/server/llm.js";
+import { JWT_SECRET } from "./src/server/config/secret.js";
+import fs from "fs";
 
-// Tipos de arquivo de texto suportados pelo pipeline RAG (extração UTF-8).
-const ALLOWED_DOC_EXTENSIONS = [".txt", ".csv", ".md"];
-const MAX_DOC_SIZE = 10 * 1024 * 1024; // 10 MB
+// Diretório onde as mídias (imagens) recebidas são salvas (volume persistente /data).
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), 'media');
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) {}
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_DOC_SIZE },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ALLOWED_DOC_EXTENSIONS.includes(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Tipo de arquivo não suportado. Envie .txt, .csv ou .md."));
-    }
-  },
-});
-
-// Avisa (sem derrubar o processo) quando variáveis de ambiente importantes faltam.
-function warnMissingEnv() {
-  const optional = ["GEMINI_API_KEY", "EVOLUTION_API_KEY", "META_VERIFY_TOKEN"];
-  for (const name of optional) {
-    if (!process.env[name]) {
-      console.warn(`[ENV] Aviso: ${name} não configurada. Funcionalidades relacionadas ficarão limitadas.`);
-    }
+// Salva um base64 como arquivo e retorna a URL pública (/media/<arquivo>).
+function saveMediaBase64(base64: string, ext = 'jpg'): string | null {
+  try {
+    const name = `${uuidv4()}.${ext}`;
+    fs.writeFileSync(path.join(MEDIA_DIR, name), Buffer.from(base64, 'base64'));
+    return `/media/${name}`;
+  } catch (e) {
+    console.error("[Media] Falha ao salvar arquivo:", e);
+    return null;
   }
 }
 
-// Normaliza o nome do evento do Evolution: aceita "messages.upsert",
-// "MESSAGES_UPSERT", "messages-upsert" etc. → "messages.upsert".
-function normalizeEvent(e: unknown): string {
-  return String(e ?? "").toLowerCase().replace(/[_-]/g, ".");
-}
-
-// Extrai texto de diferentes formatos de mensagem do WhatsApp (Baileys/Evolution).
-function extractMessageText(message: any): string {
+// Extrai texto de diferentes formatos de mensagem do WhatsApp.
+// Suporta Evolution API (camelCase) e Evolution GO/whatsmeow (camel + Pascal).
+function extractEvolutionText(message: any): string {
   if (!message) return "";
   return (
     message.conversation ||
+    message.Conversation ||
     message.extendedTextMessage?.text ||
+    message.ExtendedTextMessage?.text ||
     message.imageMessage?.caption ||
+    message.ImageMessage?.caption ||
     message.videoMessage?.caption ||
     message.documentMessage?.caption ||
     message.buttonsResponseMessage?.selectedDisplayText ||
     message.listResponseMessage?.title ||
-    message.templateButtonReplyMessage?.selectedDisplayText ||
     ""
   );
 }
 
+// Tenta transcrever uma mensagem de áudio do Evolution via Whisper (OpenAI).
+// Busca o base64 do áudio na Evolution API e envia ao modelo de transcrição.
+async function transcribeEvolutionAudio(
+  payload: any,
+  cfg: { baseUrl: string; apiKey: string; instanceName: string }
+): Promise<string> {
+  try {
+    if (!cfg.baseUrl || !cfg.apiKey) return "";
+    const instance = payload.instance || cfg.instanceName;
+    const endpoint = `${cfg.baseUrl.replace(/\/$/, '')}/chat/getBase64FromMediaMessage/${instance}`;
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': cfg.apiKey, 'instance': instance },
+      body: JSON.stringify({ message: payload.data, convertToMp4: false }),
+    });
+    if (!resp.ok) {
+      console.warn(`[Audio] Falha ao obter base64 do áudio (HTTP ${resp.status}).`);
+      return "";
+    }
+    const data: any = await resp.json();
+    const b64 = data.base64 || data.media || "";
+    if (!b64) return "";
+    const buffer = Buffer.from(b64, 'base64');
+    const transcript = await transcribeAudio(buffer, 'audio.ogg', 'audio/ogg');
+    console.log(`[Audio] Transcrição: ${transcript.slice(0, 80)}...`);
+    return transcript;
+  } catch (e) {
+    console.error("[Audio] Erro ao transcrever áudio:", e);
+    return "";
+  }
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
-  warnMissingEnv();
+  // --- SECURITY HEADERS (Helmet-like) ---
+  app.use((req, res, next) => {
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    res.setHeader('X-Download-Options', 'noopen');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+  });
 
-  // Middleware for parsing JSON
-  app.use(express.json());
+  // --- CORS ---
+  app.use((req, res, next) => {
+    const origin = process.env.NODE_ENV === 'production' 
+       ? (process.env.CORS_ORIGIN || 'https://' + req.headers.host) 
+       : '*';
+    if (origin !== '*') {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+      res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,x-organization-id');
+      if (req.method === 'OPTIONS') {
+         return res.status(200).end();
+      }
+    }
+    next();
+  });
+
+  // --- RATE LIMITING (anti-abuso) ---
+  // Limite GENEROSO para não derrubar o uso normal do app (que faz polling e
+  // várias chamadas por tela). Só conta requisições que NÃO são do webhook/estáticos,
+  // e o teto é alto. Ajustável por env RATE_LIMIT_MAX (padrão 3000 / 15 min por IP).
+  const rateLimitMap = new Map<string, { count: number, resetTime: number }>();
+  app.use((req, res, next) => {
+     if (process.env.ENABLE_RATE_LIMIT === 'true' || process.env.NODE_ENV === 'production') {
+        // Não limita webhooks (serviços externos) nem assets/SPA.
+        const p = req.path || '';
+        if (p.startsWith('/api/webhooks') || p.startsWith('/media') || p.startsWith('/assets') || !p.startsWith('/api')) {
+           return next();
+        }
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+        const now = Date.now();
+        const limitConfig = { max: parseInt(process.env.RATE_LIMIT_MAX || '3000', 10), windowMs: 15 * 60 * 1000 };
+        const ipKey = String(ip);
+
+        let data = rateLimitMap.get(ipKey);
+        if (!data || now > data.resetTime) {
+           data = { count: 0, resetTime: now + limitConfig.windowMs };
+        }
+        data.count++;
+        rateLimitMap.set(ipKey, data);
+
+        if (data.count > limitConfig.max) {
+           return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+        }
+     }
+     next();
+  });
+
+  // --- Verificação de autenticidade do webhook (C3/W1) ---
+  // Se WEBHOOK_SECRET estiver definido, exige que o provedor inclua o segredo
+  // (header x-webhook-secret OU query ?secret=). Sem a env, apenas avisa — assim
+  // o deploy ao vivo não quebra antes de você configurar a Evolution.
+  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+  let warnedNoWebhookSecret = false;
+  const verifyWebhookSecret = (req: express.Request, res: express.Response): boolean => {
+    if (!WEBHOOK_SECRET) {
+      if (!warnedNoWebhookSecret) {
+        console.warn("[SECURITY] WEBHOOK_SECRET não configurado: o webhook está aberto. Defina a env e adicione ?secret=... na URL do webhook na Evolution.");
+        warnedNoWebhookSecret = true;
+      }
+      return true;
+    }
+    // Aceita o segredo via header (x-webhook-secret) OU query (?secret=).
+    // Caso "Webhook by Events" da Evolution: ela anexa /EVENTO ao fim da URL,
+    // o que pode corromper o valor do query (ex.: secret=ABC/MESSAGES_UPSERT).
+    // Por isso, normalizamos pegando só o trecho antes de uma eventual barra.
+    const rawProvided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
+    const provided = String(rawProvided).split('/')[0].trim();
+    // Comparação em tempo constante para evitar timing attacks.
+    const a = Buffer.from(provided);
+    const b = Buffer.from(WEBHOOK_SECRET);
+    const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+    if (!ok) {
+      console.warn(`[SECURITY] Webhook rejeitado (segredo ausente/incorreto). path=${req.path}`);
+      res.status(401).json({ error: "Unauthorized webhook" });
+      return false;
+    }
+    return true;
+  };
+
+  // --- Rate limit simples por chave (em memória), reutilizável ---
+  const buckets = new Map<string, { count: number; resetTime: number }>();
+  const rateLimit = (key: string, max: number, windowMs: number): boolean => {
+    const now = Date.now();
+    let b = buckets.get(key);
+    if (!b || now > b.resetTime) { b = { count: 0, resetTime: now + windowMs }; }
+    b.count++;
+    buckets.set(key, b);
+    return b.count <= max;
+  };
+
+  // --- Ensure Default Org Exists ---
+  const ensureDefaultOrg = () => {
+    const existing = db.prepare('SELECT id FROM organization_settings WHERE organization_id = ?').get('default_org');
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO organization_settings (id, organization_id, business_name, status)
+        VALUES (?, ?, ?, ?)
+      `).run(uuidv4(), 'default_org', 'Zappflow Mock Org', 'active');
+    }
+  };
+  ensureDefaultOrg();
+
+  // --- Ensure Master Admin Exists ---
+  // A senha NUNCA é hardcoded. Vem de MASTER_ADMIN_PASSWORD (env). Se a env
+  // estiver definida, também ATUALIZA a senha do admin existente — assim é
+  // possível rotacionar a senha antiga (que estava exposta no código/histórico).
+  const ensureMasterAdmin = async () => {
+    const email = process.env.MASTER_ADMIN_EMAIL || 'eldastito@gmail.com';
+    const envPassword = process.env.MASTER_ADMIN_PASSWORD;
+    const saltRounds = 10;
+    const existingAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
+
+    if (!existingAdmin) {
+       // Sem env: gera uma senha aleatória forte e a exibe UMA vez no log,
+       // para não criar a conta com uma senha previsível.
+       const password = envPassword || crypto.randomBytes(12).toString('base64url');
+       const passwordHash = await bcrypt.hash(password, saltRounds);
+       db.prepare(`
+         INSERT INTO users (id, organization_id, name, email, password_hash, role)
+         VALUES (?, 'default_org', 'Eldas Tito', ?, ?, 'owner')
+       `).run(uuidv4(), email, passwordHash);
+       if (envPassword) {
+         console.log('Master admin criado: ' + email);
+       } else {
+         console.warn(`[SECURITY] Master admin criado com senha aleatória (defina MASTER_ADMIN_PASSWORD): ${email} / ${password}`);
+       }
+    } else if (envPassword) {
+       // Rotaciona a senha do admin para a definida na env (corrige a senha vazada).
+       const passwordHash = await bcrypt.hash(envPassword, saltRounds);
+       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, existingAdmin.id);
+       console.log('[SECURITY] Senha do master admin atualizada a partir de MASTER_ADMIN_PASSWORD.');
+    }
+  };
+  await ensureMasterAdmin();
+
+  // Middleware for parsing JSON with limit blocker
+  app.use(express.json({ limit: '2mb' }));
+
+  // Servir mídias recebidas (imagens) — rota pública, fora do /api protegido.
+  app.use('/media', express.static(MEDIA_DIR));
+
+  // Financial Block Middleware (for API routes)
+  app.use("/api", (req, res, next) => {
+    // Allow these paths regardless of block status
+    if (req.path.startsWith('/admin') || req.path.startsWith('/analytics/settings') || req.path.startsWith('/notifications')) {
+      return next();
+    }
+    const orgId = req.headers['x-organization-id'] || 'default_org';
+    try {
+      const org: any = db.prepare('SELECT status, billing_status FROM organization_settings WHERE organization_id = ?').get(orgId);
+      // If it's blocked, block POST/PUT/DELETE
+      if (org && (org.status === 'blocked' || org.billing_status === 'blocked')) {
+          const method = req.method;
+          if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+             return res.status(403).json({ error: "CONTA BLOQUEADA. Entre em contato com o suporte." });
+          }
+      }
+    } catch(e) {}
+    next();
+  });
+
+  app.use("/api/auth", authRoutes);
+
+  // Apply Auth Middleware to all subsequent protected API routes
+  const protectedApi = express.Router();
+  protectedApi.use(requireAuth);
+  protectedApi.use(requireOrganizationAccess);
+  
+  protectedApi.use("/channels", channelsRoutes);
+  protectedApi.use("/messages", messagesRoutes);
+  protectedApi.use("/tickets", ticketsRoutes);
+  protectedApi.use("/products", productsRoutes);
+  protectedApi.use("/orders", ordersRoutes);
+  protectedApi.use("/contacts", contactsRoutes);
+  protectedApi.use("/campaigns", campaignsRoutes);
+  protectedApi.use("/payments", paymentsRoutes);
+  protectedApi.use("/appointments", appointmentsRoutes);
+  protectedApi.use("/integrations", integrationsRoutes);
+  protectedApi.use("/integrations", instagramOAuthRoutes);
+  protectedApi.use("/analytics", analyticsRoutes);
+  protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
+  protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
+  protectedApi.use("/notifications", notificationsRoutes);
+  protectedApi.use("/users", usersRoutes);
+  protectedApi.use("/rag", ragRoutes);
+  protectedApi.use("/managers", managersRoutes);
+  protectedApi.use("/ai", aiRoutes);
+  protectedApi.use("/cadences", cadencesRoutes);
+  protectedApi.use("/plans", plansRoutes);
+
+  // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS
+  // (Evolution, Meta) que NÃO enviam JWT. Elas são registradas abaixo, em `app`.
+  // Aqui garantimos que o requireAuth do protectedApi NÃO intercepte esses
+  // caminhos públicos — caso contrário o webhook recebe 401 e a mensagem nunca
+  // chega ao Kanban.
+  app.use("/api", (req, res, next) => {
+    if (req.path.startsWith('/webhooks')) {
+      return next(); // segue para os handlers públicos de webhook abaixo
+    }
+    // Callback OAuth do Instagram: a Meta redireciona o navegador para cá SEM JWT.
+    if (req.path === '/integrations/instagram/callback') {
+      return next();
+    }
+    return protectedApi(req, res, next);
+  });
+
+  // Callback público do OAuth do Instagram (troca code -> token e salva o canal).
+  app.get("/api/integrations/instagram/callback", instagramCallback);
 
   // --- META WEBHOOK (WhatsApp & Instagram) ---
   
@@ -75,132 +341,327 @@ async function startServer() {
   };
 
   app.post("/api/evolution/config", (req, res) => {
-    evolutionConfig = req.body;
-    console.log("[Evolution API] Configuração salva: ", evolutionConfig.baseUrl, evolutionConfig.instanceName);
+    // Only update instanceName if provided, keep URL/API Key from ENV if not in body
+    const { instanceName } = req.body;
+    evolutionConfig = {
+      ...evolutionConfig,
+      instanceName: instanceName || evolutionConfig.instanceName
+    };
+    console.log("[Evolution API] Configuração salva: ", evolutionConfig.instanceName);
     res.json({ success: true, message: 'Configuração salva na sessão atual.' });
   });
 
-  // Aceita tanto a URL base quanto a variante "Webhook by Events" do Evolution,
-  // que anexa o nome do evento ao caminho (ex.: /api/webhooks/evolution/messages-upsert).
-  app.post(["/api/webhooks/evolution", "/api/webhooks/evolution/:event"], async (req, res) => {
+  app.post("/api/evolution/instance/connect", async (req, res) => {
     try {
-      const payload = req.body ?? {};
-      const rawEvent = payload.event ?? req.params.event;
-      const event = normalizeEvent(rawEvent);
-      console.log(`[Evolution Webhook] Evento recebido: "${rawEvent}" (normalizado: "${event}")`);
+      const { instanceName } = req.body;
+      const finalBaseUrl = (evolutionConfig.baseUrl || process.env.EVOLUTION_BASE_URL || '').replace(/\/$/, '');
+      const finalApiKey = (evolutionConfig.apiKey || process.env.EVOLUTION_API_KEY || '');
+      const finalInstance = instanceName || evolutionConfig.instanceName || process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || '';
 
-      if (event === "messages.upsert") {
-        // O campo "data" pode vir como objeto único ou como array.
-        const data = Array.isArray(payload.data) ? payload.data[0] : payload.data;
-        const messageData = data?.message;
+      if (!finalBaseUrl || !finalApiKey || !finalInstance) {
+        return res.status(400).json({ error: "Faltam parâmetros de conexão (URL, API Key ou Instance Name)." });
+      }
 
-        const incomingMessageText = extractMessageText(messageData);
-        const senderId = data?.key?.remoteJid?.split('@')[0];
-        const fromMe = data?.key?.fromMe;
-        const pushName = data?.pushName;
-        const businessId = evolutionConfig.instanceName || 'evolution_api';
+      console.log(`[Evolution DEBUG] Final BaseURL: ${finalBaseUrl}, Final Instance: ${finalInstance}, Final APIKey (len): ${finalApiKey.length}`);
 
-        // Diagnóstico explícito do motivo de cada descarte.
-        if (fromMe) {
-          console.log("[Evolution Webhook] Ignorado: mensagem enviada pelo próprio número (fromMe).");
-          return res.status(200).send("OK");
-        }
-        if (!senderId) {
-          console.warn("[Evolution Webhook] Ignorado: remoteJid ausente. Estrutura recebida em data.key:", JSON.stringify(data?.key));
-          return res.status(200).send("OK");
-        }
-        if (!incomingMessageText) {
-          console.warn(`[Evolution Webhook] Ignorado: sem texto extraível (mídia/áudio ou formato não suportado). Tipos em message: ${messageData ? Object.keys(messageData).join(', ') : 'nenhum'}`);
-          return res.status(200).send("OK");
-        }
-
-        const provider = 'whatsapp';
-        console.log(`[EVOLUTION WA] Mensagem de ${senderId}: ${incomingMessageText}`);
-
-        let contactAvatar = undefined;
-
-        // Tentar buscar imagem de perfil da Evolution API
-        if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
-           try {
-              const picEndpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/chat/fetchProfilePictureUrl/${evolutionConfig.instanceName}`;
-              const picResp = await fetch(picEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': evolutionConfig.apiKey },
-                body: JSON.stringify({ number: senderId })
-              });
-              if (picResp.ok) {
-                 const picData = await picResp.json();
-                 if (picData && picData.picture) {
-                    contactAvatar = picData.picture;
-                 }
-              }
-           } catch(e) {
-              console.log("[Evolution] Não foi possível buscar avatar do contato.");
+      let token = finalApiKey;
+      let hasInstance = false;
+      let instanceToken = '';
+      
+      // 1. Tentar pegar a lista de instâncias
+      try {
+        const fetchAll = await fetch(`${finalBaseUrl}/instance/all`, { headers: { apikey: finalApiKey } });
+        if (fetchAll.ok) {
+           const data = await fetchAll.json();
+           const inst = data.data?.find((i: any) => (i.name === finalInstance || i.instanceName === finalInstance));
+           if (inst) {
+                console.log("[Evolution] Instância existente encontrada com token:", inst.token);
+                hasInstance = true;
+                instanceToken = inst.token || inst.apikey;
            }
         }
+      } catch (err) {}
 
-        // Emite a mensagem do usuário para o frontend via WebSocket
-        if ((global as any).io) {
-          (global as any).io.emit("new_message", {
-            contactId: senderId,
-            contactName: pushName,
-            contactAvatar: contactAvatar,
-            provider,
-            text: incomingMessageText,
-            sender: "contact",
-            timestamp: new Date().toISOString()
+      // 2. Se não existe, Tentar Criar (Evolution Go ou Evolution API)
+      if (!hasInstance) {
+        try {
+          const createPayload = { 
+             instanceName: finalInstance, name: finalInstance, qrcode: true, 
+             webhook: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] 
+          };
+          
+          let createResp = await fetch(`${finalBaseUrl}/instance/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': finalApiKey },
+            body: JSON.stringify(createPayload) 
           });
+          
+          if (!createResp.ok && createResp.status === 400) { // Evolution Go strict mode?
+             createResp = await fetch(`${finalBaseUrl}/instance/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': finalApiKey },
+                body: JSON.stringify({ name: finalInstance })
+             });
+          }
+          
+          if (createResp.ok) {
+             const data = await createResp.json();
+             instanceToken = data.data?.token || data.instance?.token || data.hash?.apikey;
+             
+             if (data.qrcode?.base64) {
+                 return res.json({ base64: data.qrcode.base64 }); // Retorno imeditado EvoAPI
+             }
+          }
+        } catch(err) {
+           console.log("[Evolution] Falha ao criar:", err);
+        }
+      }
+
+      const activeToken = instanceToken || finalApiKey;
+
+      // 3. Conectar e Configurar Webhook no ato (Evolution Go pattern)
+      try {
+        await fetch(`${finalBaseUrl}/instance/connect`, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json', 'apikey': activeToken, 'instance': finalInstance },
+           body: JSON.stringify({ 
+              webhookUrl: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`,
+              subscribe: ["messages", "connection"]
+           })
+        });
+      } catch(err) {}
+
+      // 4. Se for Evolution API v1/v2, configure webhook (legacy)
+      try {
+        await fetch(`${finalBaseUrl}/webhook/set/${finalInstance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': activeToken },
+          body: JSON.stringify({ 
+             webhook: {
+               url: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`,
+               byEvents: false,
+               base64: false,
+               events: [ "MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE" ]
+             }
+          })
+        });
+      } catch (err) {}
+
+      // 5. Pegar o QR Code
+      let base64qr = '';
+      try {
+         // Evolution Go pattern
+         console.log(`[Evolution] FINAL BASE URL: ${finalBaseUrl}`);
+         const qrUrl = `${finalBaseUrl}/api/v1/instance/qr`;
+         console.log(`[Evolution] Tentando pegar QR em: ${qrUrl}, Token: ${activeToken?.substring(0, 5)}...`);
+         
+         const qrResp = await fetch(qrUrl, {
+            headers: { 'apikey': activeToken, 'instance': finalInstance }
+         });
+         
+         if (!qrResp.ok) {
+            console.error(`[Evolution] Erro ao buscar QR (URL: ${qrUrl}, Status: ${qrResp.status}):`, await qrResp.text());
+         } else {
+             const contentType = qrResp.headers.get("content-type");
+             if (contentType && contentType.includes("application/json")) {
+                 const qrData = await qrResp.json();
+                 console.log("[Evolution] Resposta QR Code:", JSON.stringify(qrData).substring(0, 200));
+                 if (qrData.base64) base64qr = qrData.base64;
+                 else if (qrData.data?.Qrcode) base64qr = qrData.data.Qrcode;
+                 else if (qrData.qrcode?.base64) base64qr = qrData.qrcode.base64;
+             } else {
+                 console.error("[Evolution] Resposta do QR não é JSON:", await qrResp.text());
+             }
+         }
+      } catch(err) {
+         console.error("[Evolution] Erro ao buscar QR:", err);
+      }
+
+      if (!base64qr) {
+         // Evolution API pattern
+         try {
+             console.log(`[Evolution] FINAL BASE URL LEGACY: ${finalBaseUrl}`);
+             console.log(`[Evolution] Tentando conectar via legacy endpoint para: ${finalInstance}`);
+             const connectResp = await fetch(`${finalBaseUrl}/instance/connect/${finalInstance}`, {
+                headers: { 'apikey': finalApiKey }
+             });
+             
+             if (!connectResp.ok) {
+                console.error(`[Evolution] Erro na conexão legacy (Status: ${connectResp.status}):`, await connectResp.text());
+             } else {
+                 const contentType = connectResp.headers.get("content-type");
+                 if (contentType && contentType.includes("application/json")) {
+                     const connData = await connectResp.json();
+                     console.log("[Evolution] Resposta Conexão Legacy:", JSON.stringify(connData).substring(0, 200));
+                     if (connData.base64) base64qr = connData.base64;
+                     else if (connData.qrcode?.base64) base64qr = connData.qrcode.base64;
+                     else if ((connData.instance?.state === 'open' || connData.state === 'open') && !connData.base64) {
+                         return res.json({ state: 'open' }); // Já conectado
+                     }
+                 } else {
+                     console.error("[Evolution] Resposta de conexão legacy não é JSON:", await connectResp.text());
+                 }
+             }
+         } catch(e){
+             console.error("[Evolution] Erro na conexão legacy:", e);
+         }
+      }
+
+      if (base64qr) {
+         console.log(`[Evolution] QR Code Gerado (length: ${base64qr.length}):`, base64qr.substring(0, 50) + "...");
+         const finalQr = base64qr.startsWith('data:image') ? base64qr : `data:image/png;base64,${base64qr}`;
+         return res.json({ base64: finalQr, token: activeToken });
+      }
+
+      // Se já estava conectado
+      if (hasInstance || activeToken) {
+         try {
+           const orgId = req.headers['x-organization-id'] || 'default_org';
+           const existing = db.prepare('SELECT id FROM channels WHERE organization_id = ? AND provider = ? AND identifier = ?').get(orgId, 'evolution', finalInstance);
+           if (!existing) {
+             db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status, token_encrypted, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+               uuidv4(), orgId, 'evolution', 'Evolution API', finalInstance, 'connected', activeToken, JSON.stringify({ baseUrl: finalBaseUrl })
+             );
+           }
+         } catch(e) {}
+      }
+
+      return res.status(400).json({ error: "Instância pode já estar conectada ou hove um erro na geração do QR Code. Verifique seu painel ou recarregue a página." });
+    } catch (e: any) {
+      console.error("[Evolution] Erro ao conectar instância:", e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Aceita ambas as URLs (Evolution API e Evolution GO) e a variante
+  // "Webhook by Events", que anexa o nome do evento ao caminho.
+  app.post([
+    "/api/webhooks/evolution",
+    "/api/webhooks/evolutiongo",
+    "/api/webhooks/evolution/:event",
+    "/api/webhooks/evolutiongo/:event",
+  ], async (req, res) => {
+    try {
+      // Autenticidade + anti-abuso/custo (W1/M3)
+      if (!verifyWebhookSecret(req, res)) return;
+      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
+      if (!rateLimit(`wh:${ip}`, 120, 60 * 1000)) {
+        return res.status(429).json({ error: "Too many webhook requests" });
+      }
+      const payload = req.body;
+      const rawEvent = payload.event ?? req.params.event;
+      console.log(`[Evolution Webhook] Recebido Evento: ${rawEvent} (path: ${req.path})`);
+
+      const normalizedEvent = String(rawEvent ?? "").toLowerCase().replace(/[_-]/g, ".");
+      if (normalizedEvent === "messages.upsert" || normalizedEvent === "message") {
+        // O Evolution GO (whatsmeow) usa data.Info/data.Message (Pascal);
+        // o Evolution API usa data.key/data.message (camel). Suportamos os dois.
+        const data = Array.isArray(payload.data) ? payload.data[0] : (payload.data || {});
+        const info = data.Info || data.info || data.key || {};
+        const msgObj = data.Message || data.message || {};
+
+        // Log de diagnóstico do formato real (ajuda a depurar payloads novos).
+        console.log("[Evolution Webhook] data(trunc):", JSON.stringify(data).slice(0, 900));
+
+        let incomingMessageText = extractEvolutionText(msgObj);
+        // Mensagem de áudio (PTT/voz): o Evolution GO já envia o base64 no webhook.
+        if (!incomingMessageText && (msgObj.audioMessage || msgObj.AudioMessage || msgObj.pttMessage)) {
+          const audioB64 = msgObj.base64 || data.base64 || "";
+          if (audioB64) {
+            try {
+              const buffer = Buffer.from(audioB64, 'base64');
+              incomingMessageText = await transcribeAudio(buffer, 'audio.ogg', 'audio/ogg');
+              console.log(`[Audio] Transcrição: ${incomingMessageText.slice(0, 80)}`);
+            } catch (e) {
+              console.error("[Audio] Falha ao transcrever (base64 inline):", e);
+            }
+          } else {
+            // Fallback: tenta baixar da API (formatos antigos)
+            incomingMessageText = await transcribeEvolutionAudio(payload, evolutionConfig);
+          }
         }
 
-        // --- INTEGRAÇÃO RAG (Motor de IA) ---
-        try {
-          const iaResponse = await generateRagResponse(incomingMessageText, businessId);
-          console.log(`[IA RAG] Resposta Gerada: ${iaResponse.text} | Estágio: ${iaResponse.newStage}`);
+        // URL da mídia (imagem) para renderizar no chat.
+        let incomingMediaUrl: string | undefined = undefined;
 
-          if ((global as any).io) {
-            (global as any).io.emit("new_message", {
-              contactId: senderId,
-              provider,
-              text: iaResponse.text,
-              sender: "bot",
-              timestamp: new Date().toISOString()
-            });
-
-            if (iaResponse.newStage) {
-              (global as any).io.emit("ticket_stage_change", {
-                contactId: senderId,
-                newStage: iaResponse.newStage
-              });
+        // Outras mídias sem legenda: registra um placeholder para aparecer no app.
+        if (!incomingMessageText) {
+          if (msgObj.imageMessage || msgObj.ImageMessage) {
+            const imgB64 = msgObj.base64 || data.base64 || "";
+            const caption = msgObj.imageMessage?.caption || msgObj.ImageMessage?.caption || "";
+            if (imgB64) {
+              // Salva a imagem para exibir a miniatura no chat.
+              const mime = msgObj.imageMessage?.mimetype || msgObj.ImageMessage?.mimetype || "image/jpeg";
+              const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+              incomingMediaUrl = saveMediaBase64(imgB64, ext) || undefined;
+              // Visão/OCR: a IA entende o conteúdo da imagem.
+              try {
+                const desc = await describeImage(imgB64, mime);
+                console.log(`[Vision] Imagem analisada: ${desc.slice(0, 80)}`);
+                incomingMessageText = caption ? `${caption}\n\n[Conteúdo da imagem: ${desc}]` : `[Imagem] ${desc}`;
+              } catch (e) {
+                console.error("[Vision] Falha ao analisar imagem:", e);
+                incomingMessageText = caption || "📷 [Imagem recebida]";
+              }
+            } else {
+              incomingMessageText = caption ? `📷 [Imagem] ${caption}` : "📷 [Imagem recebida]";
             }
           }
-
-          // Disparar resposta para Evolution API
-          if (evolutionConfig.baseUrl && evolutionConfig.apiKey) {
-            const sendData = {
-               number: senderId,
-               options: { delay: 1200, presence: "composing" },
-               textMessage: { text: iaResponse.text }
-            };
-            const endpoint = `${evolutionConfig.baseUrl.replace(/\/$/, '')}/message/sendText/${evolutionConfig.instanceName}`;
-            
-            await fetch(endpoint, {
-               method: 'POST',
-               headers: {
-                 'Content-Type': 'application/json',
-                 'apikey': evolutionConfig.apiKey
-               },
-               body: JSON.stringify(sendData)
-            });
-            console.log(`[EVOLUTION API] Mensagem enviada para ${senderId}`);
-          } else {
-            console.warn(`[EVOLUTION API] Aviso: Dados da Evolution não configurados no backend, pulando envio real.`);
-          }
-
-        } catch (e) {
-          console.error("[IA RAG] Falha ao processar RAG no webhook Evolution", e);
+          else if (msgObj.videoMessage || msgObj.VideoMessage) incomingMessageText = "🎥 [Vídeo recebido]";
+          else if (msgObj.documentMessage || msgObj.DocumentMessage) incomingMessageText = "📄 [Documento recebido]";
+          else if (msgObj.stickerMessage || msgObj.StickerMessage) incomingMessageText = "🔖 [Figurinha]";
+          else if (msgObj.locationMessage || msgObj.LocationMessage) incomingMessageText = "📍 [Localização]";
+          else if (msgObj.contactMessage || msgObj.ContactMessage) incomingMessageText = "👤 [Contato]";
         }
-      } else {
-        console.log(`[Evolution Webhook] Evento "${event}" ignorado (este endpoint trata apenas "messages.upsert"). Habilite o evento MESSAGES_UPSERT na Evolution.`);
+
+        const rawJid = info.Sender || info.sender || info.Chat || info.chat || info.RemoteJid || data.key?.remoteJid || "";
+        const senderId = String(rawJid).split('@')[0].split(':')[0]; // remove sufixo de device (:NN)
+        const fromMe = info.IsFromMe ?? info.fromMe ?? data.key?.fromMe ?? false;
+        const pushName = info.PushName || info.pushName || data.pushName || undefined;
+        const businessId = payload.instance || evolutionConfig.instanceName || 'evolution_api';
+
+        if (fromMe) { console.log("[Evolution Webhook] Ignorado: fromMe."); return res.status(200).send("OK"); }
+        if (!senderId) { console.warn("[Evolution Webhook] Ignorado: sem remetente. info=", JSON.stringify(info).slice(0, 300)); return res.status(200).send("OK"); }
+        if (!incomingMessageText) { console.warn("[Evolution Webhook] Ignorado: sem texto. chaves de Message=", Object.keys(msgObj).join(',')); return res.status(200).send("OK"); }
+
+        console.log(`[Evolution Webhook] Mensagem de ${senderId} (${pushName || 's/ nome'}): ${incomingMessageText}`);
+
+        // Foto de perfil: o endpoint /user/avatar do Evolution GO trava (504 após 60s),
+        // então não buscamos (evita latência). O card usa o avatar padrão/inicial.
+        let contactAvatar = undefined;
+
+        await processIncomingMessage({
+           channelId: null, // mapped by identifier 
+           organizationId: null,
+           identifier: businessId,
+           provider: 'evolution',
+           senderId: senderId,
+           contactName: pushName,
+           contactAvatar: contactAvatar,
+           text: incomingMessageText,
+           mediaUrl: incomingMediaUrl
+        }, (global as any).io);
+        
+      } else if (normalizedEvent === "connection.update") {
+        console.log(`[Evolution Webhook] Status da conexão: ${payload.data?.state || payload.data?.status}`);
+        if ((payload.data?.state === 'open' || payload.data?.status === 'open') && (global as any).io) {
+           (global as any).io.emit("wa_web_status", { status: 'connected_evo' });
+           // Save to DB
+           try {
+              const busId = payload.instance || evolutionConfig.instanceName;
+              if (busId) {
+                const orgId = 'default_org';
+                const existing = db.prepare('SELECT id FROM channels WHERE organization_id = ? AND provider = ? AND identifier = ?').get(orgId, 'evolution', busId);
+                if (!existing) {
+                  db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, ?, ?, ?, ?)`).run(
+                    uuidv4(), orgId, 'evolution', 'Evolution API', busId, 'connected'
+                  );
+                } else {
+                  db.prepare(`UPDATE channels SET status = 'connected' WHERE id = ?`).run((existing as any).id);
+                }
+              }
+           } catch(e) {}
+        }
       }
 
       res.status(200).send("EVENT_RECEIVED");
@@ -212,7 +673,7 @@ async function startServer() {
 
   // VERIFICAÇÃO DO WEBHOOK (GET)
   const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN;
-
+  
   app.get("/api/webhooks/meta", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -231,11 +692,54 @@ async function startServer() {
     }
   });
 
+  // WEBHOOK DE PAGAMENTO (gateway externo) — público, autenticado pelo segredo
+  // da organização (?secret=... ou header x-pay-secret). Marca o pedido como pago.
+  // Genérico: aceita { orderId, status, externalId } ou o formato do Mercado Pago.
+  app.post(["/api/webhooks/payment", "/api/webhooks/payment/:event"], async (req, res) => {
+    try {
+      const secret = (req.query.secret as string) || (req.headers['x-pay-secret'] as string) || '';
+      const orgId = PaymentService.orgByWebhookSecret(secret);
+      if (!orgId) return res.status(401).json({ error: "Unauthorized payment webhook" });
+
+      const body = req.body || {};
+      // Formato genérico do app:
+      let orderId: string | undefined = body.orderId || body.order_id;
+      let paid = body.status ? ['paid', 'approved', 'pago', 'completed'].includes(String(body.status).toLowerCase()) : true;
+      let externalId: string | undefined = body.externalId || body.payment_id || body.id;
+
+      // Tolerância ao formato do Mercado Pago (data.id / action), quando aplicável:
+      if (!orderId && body.data && body.data.external_reference) {
+        orderId = body.data.external_reference;
+        externalId = body.data.id || externalId;
+        paid = body.action ? String(body.action).includes('payment') : paid;
+      }
+
+      if (!orderId) {
+        console.warn("[PayWebhook] Sem orderId/external_reference no payload.");
+        return res.status(200).send("IGNORED");
+      }
+      if (paid) {
+        const ok = PaymentService.markPaid(orgId, orderId, { method: 'gateway', externalId });
+        if (ok && (global as any).io) {
+          (global as any).io.to(`org:${orgId}`).emit("order_updated", { orderId, status: 'pago', payment_status: 'paid' });
+        }
+        console.log(`[PayWebhook] Pedido ${orderId} marcado como pago (org ${orgId}).`);
+      }
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("[PayWebhook] erro", e);
+      return res.status(200).send("OK"); // não devolve 500 para o gateway não reentregar em loop
+    }
+  });
+
   // RECEBIMENTO DE EVENTOS (POST)
   app.post("/api/webhooks/meta", async (req, res) => {
     try {
+      // A Meta NÃO envia o nosso ?secret= (ela usa X-Hub-Signature). A autenticidade
+      // da assinatura do webhook já foi feita no handshake GET (META_VERIFY_TOKEN);
+      // aqui validamos o formato do payload. Por isso NÃO aplicamos verifyWebhookSecret.
       const payload = req.body;
-      
+
       // Validação rápida do formato padrão do Graph API
       if (payload.object !== "whatsapp_business_account" && payload.object !== "instagram" && payload.object !== "page") {
          return res.sendStatus(404);
@@ -244,20 +748,20 @@ async function startServer() {
       console.log(`[Webhook] Evento recebido - Source: ${payload.object}`);
 
       // 1. Tratamento do Payload (Diferenciar WhatsApp vs Instagram)
-      let provider: 'whatsapp' | 'instagram' = 'whatsapp';
+      let provider: 'whatsapp_cloud' | 'instagram' = 'whatsapp_cloud';
       let incomingMessageText = '';
       let senderId = '';
       let businessId = '';
       let contactName: string | undefined = undefined;
 
       if (payload.object === "whatsapp_business_account") {
-        provider = 'whatsapp';
+        provider = 'whatsapp_cloud';
         const entry = payload.entry?.[0];
         businessId = entry?.id;
         const changes = entry?.changes?.[0]?.value;
         const message = changes?.messages?.[0];
         const contactData = changes?.contacts?.[0];
-        
+
         if (contactData && contactData.profile && contactData.profile.name) {
             contactName = contactData.profile.name;
         }
@@ -269,14 +773,39 @@ async function startServer() {
       } else if (payload.object === "instagram" || payload.object === "page") {
         provider = 'instagram';
         const entry = payload.entry?.[0];
-        businessId = entry?.id; // Page ID associado
-        const messaging = entry?.messaging?.[0];
-        
-        // No insta o profile precisa ser buscado na GraphAPI separadamente pelo senderId (não há contactData nativo no webhook de texto)
+        businessId = entry?.id; // ID da conta IG/Página associada
+        // Diagnóstico: estrutura real do evento do Instagram.
+        console.log("[IG Webhook] entry:", JSON.stringify(entry).slice(0, 800));
 
+        // Formato Messenger/IG: entry[].messaging[]  (DMs)
+        const messaging = entry?.messaging?.[0] || entry?.standby?.[0];
         if (messaging) {
-          senderId = messaging.sender?.id;
-          incomingMessageText = messaging.message?.text || '';
+          // A conta que RECEBE é a nossa (entry.id). O remetente é messaging.sender.id.
+          const recipientId = messaging.recipient?.id;
+          const fromSelf = messaging.sender?.id && recipientId && messaging.sender.id === entry?.id;
+          // Texto pode vir em message.text (nova) ou message_edit.text (editada).
+          const msgObj = messaging.message || messaging.message_edit;
+
+          if (messaging.message?.is_echo || fromSelf) {
+            console.log("[IG Webhook] Ignorado: echo/mensagem da própria conta.");
+          } else if (messaging.read || messaging.reaction || messaging.delivery || messaging.postback) {
+            console.log("[IG Webhook] Ignorado: recibo/leitura/reação.");
+          } else {
+            senderId = messaging.sender?.id || '';
+            incomingMessageText = msgObj?.text || '';
+            // Anexo sem texto (figurinha/imagem): coloca um placeholder.
+            if (!incomingMessageText && msgObj?.attachments?.length) {
+              incomingMessageText = "📎 [Anexo recebido pelo Instagram]";
+            }
+            if (!incomingMessageText) {
+              console.log("[IG Webhook] Evento sem texto reconhecido (tipo):", Object.keys(messaging).join(','));
+            }
+          }
+        } else if (entry?.changes?.[0]?.value?.from) {
+          // Formato alternativo via changes (alguns eventos de comentário/mensagem).
+          const v = entry.changes[0].value;
+          senderId = v.from?.id || v.sender?.id || '';
+          incomingMessageText = v.text || v.message || '';
         }
       }
 
@@ -284,48 +813,15 @@ async function startServer() {
       if (incomingMessageText && senderId) {
         console.log(`[${provider.toUpperCase()}] Mensagem de ${senderId}: ${incomingMessageText}`);
         
-        // Emite a mensagem do usuário para o frontend via WebSocket
-        if ((global as any).io) {
-          (global as any).io.emit("new_message", {
-            contactId: senderId,
-            contactName,
-            provider,
-            text: incomingMessageText,
-            sender: "contact",
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // --- 2. INTEGRAÇÃO RAG (Motor de IA) ---
-        try {
-          const iaResponse = await generateRagResponse(incomingMessageText, businessId);
-          console.log(`[IA RAG] Resposta Gerada: ${iaResponse.text} | Estágio: ${iaResponse.newStage}`);
-
-          // Emite a resposta da IA para o frontend via WebSocket
-          if ((global as any).io) {
-            (global as any).io.emit("new_message", {
-              contactId: senderId,
-              provider,
-              text: iaResponse.text,
-              sender: "bot",
-              timestamp: new Date().toISOString()
-            });
-
-            if (iaResponse.newStage) {
-              (global as any).io.emit("ticket_stage_change", {
-                contactId: senderId,
-                newStage: iaResponse.newStage
-              });
-            }
-          }
-
-          // --- 3. DISPARO DE RESPOSTA (Simulação Meta Graph API) ---
-          // Aqui faria requisição POST para a Graph API apropriada
-          // Ex (WhatsApp): POST /v19.0/${businessId}/messages ...
-          // Ex (Insta): POST /v19.0/${businessId}/messages ...
-        } catch (e) {
-          console.error("[IA RAG] Falha ao processar RAG no webhook", e);
-        }
+        await processIncomingMessage({
+           channelId: null, // mapped by identifier
+           organizationId: null,
+           identifier: businessId,
+           provider: provider,
+           senderId: senderId,
+           contactName: contactName,
+           text: incomingMessageText
+        }, (global as any).io);
       }
       
       // Importante sempre retornar 200 OK para a Meta
@@ -336,87 +832,8 @@ async function startServer() {
     }
   });
 
-  // --- ENDPOINT UPLOAD RAG ---
-  app.post("/api/rag/upload", (req, res) => {
-    upload.single("document")(req, res, async (uploadErr) => {
-      if (uploadErr) {
-        // Erros de limite de tamanho ou tipo de arquivo (fileFilter)
-        return res.status(400).json({ error: (uploadErr as Error).message });
-      }
-      try {
-        if (!req.file) {
-          return res.status(400).json({ error: "Nenhum arquivo enviado" });
-        }
-        // Sanitiza o channelId para evitar valores inesperados como chave de metadados.
-        const rawChannelId = typeof req.body.channelId === "string" ? req.body.channelId : "global";
-        const channelId = rawChannelId.replace(/[^a-zA-Z0-9_-]/g, "") || "global";
-        const result = await processDocument(req.file.buffer, req.file.originalname, channelId);
-        res.json({ message: "Documento vetorizado com sucesso", ...result });
-      } catch (error) {
-        console.error("[RAG Upload]", error);
-        res.status(500).json({ error: "Erro ao vetorizar documento" });
-      }
-    });
-  });
-
-  // --- ENDPOINTS DE IA (mantém a GEMINI_API_KEY no backend) ---
-  app.post("/api/ai/suggest", async (req, res) => {
-    try {
-      const { contact, history } = req.body || {};
-      if (!contact || !Array.isArray(history)) {
-        return res.status(400).json({ error: "Payload inválido: contact e history são obrigatórios." });
-      }
-      const text = await suggestResponse(contact, history);
-      res.json({ text });
-    } catch (error) {
-      console.error("[AI Suggest]", error);
-      res.status(500).json({ error: "Erro ao gerar sugestão" });
-    }
-  });
-
-  app.post("/api/ai/summarize", async (req, res) => {
-    try {
-      const { history } = req.body || {};
-      if (!Array.isArray(history)) {
-        return res.status(400).json({ error: "Payload inválido: history é obrigatório." });
-      }
-      const text = await summarizeConversation(history);
-      res.json({ text });
-    } catch (error) {
-      console.error("[AI Summarize]", error);
-      res.status(500).json({ error: "Erro ao resumir conversa" });
-    }
-  });
-
-  // --- WA WEB ENDPOINTS ---
-  app.get("/api/wa-web/status", async (req, res) => {
-     try {
-        const { getWhatsAppWebStatus } = await import("./src/server/whatsappWebClient.js");
-        res.json(getWhatsAppWebStatus());
-     } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-     }
-  });
-
-  app.post("/api/wa-web/connect", async (req, res) => {
-     try {
-        const { initializeWhatsAppWeb } = await import("./src/server/whatsappWebClient.js");
-        initializeWhatsAppWeb((global as any).io);
-        res.json({ success: true, message: 'Iniciando conexão...' });
-     } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-     }
-  });
-
-  app.post("/api/wa-web/disconnect", async (req, res) => {
-     try {
-        const { disconnectWhatsAppWeb } = await import("./src/server/whatsappWebClient.js");
-        disconnectWhatsAppWeb();
-        res.json({ success: true, message: 'Desconectado.' });
-     } catch (e) {
-        res.status(500).json({ error: (e as Error).message });
-     }
-  });
+  // O upload de RAG agora é autenticado e escopado por organização em
+  // src/server/routes/rag.ts (POST /api/rag/upload), montado em protectedApi.
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -437,24 +854,66 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 
-  // CORS do WebSocket. Se ALLOWED_ORIGINS estiver definido (lista separada por
-  // vírgula), restringe a essas origens. Caso contrário, reflete a origem da
-  // requisição (equivalente a permitir todas) — preserva o comportamento padrão
-  // e evita bloquear conexões quando a variável não é configurada.
-  const corsOrigin: string[] | boolean = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-    : true;
-
+  // CORS travado para a origem do app (em prod). "*" só em dev.
+  const socketOrigin = process.env.NODE_ENV === 'production'
+    ? (process.env.CORS_ORIGIN || process.env.APP_URL || true)
+    : "*";
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: corsOrigin, methods: ["GET", "POST"] }
+    cors: { origin: socketOrigin as any, credentials: true }
+  });
+
+  // Autenticação do socket: exige um JWT válido no handshake. Anexa o org do
+  // token ao socket; o cliente NÃO escolhe em qual organização entra.
+  io.use((socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token
+        || (socket.handshake.query?.token as string)
+        || (socket.handshake.headers?.authorization as string || '').split(' ')[1];
+      if (!token) {
+        console.warn(`[Socket] Conexão sem token recusada (${socket.id}).`);
+        return next(new Error("unauthorized"));
+      }
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      (socket as any).organizationId = decoded.organizationId;
+      (socket as any).userId = decoded.userId;
+      return next();
+    } catch (e) {
+      console.warn(`[Socket] Token inválido recusado (${socket.id}). Faça login novamente.`);
+      return next(new Error("unauthorized"));
+    }
   });
 
   io.on("connection", (socket) => {
-    console.log("Client connected:", socket.id);
+    const orgId = (socket as any).organizationId;
+    console.log(`[Socket] Conectado ${socket.id} (org: ${orgId})`);
+
+    // O usuário só pode entrar na sala da PRÓPRIA organização (do token),
+    // ignorando qualquer organizationId enviado pelo cliente.
+    socket.on("join_org", () => {
+       if (orgId) {
+          socket.join(`org:${orgId}`);
+          console.log(`[Socket] ${socket.id} entrou em org:${orgId}`);
+       }
+    });
+
+    socket.on("join_ticket", (data: { ticketId: string }) => {
+       // Só permite ouvir um ticket que pertença à organização do token.
+       if (data?.ticketId && orgId) {
+          const t = db.prepare('SELECT id FROM tickets WHERE id = ? AND organization_id = ?').get(data.ticketId, orgId);
+          if (t) socket.join(`ticket:${data.ticketId}`);
+       }
+    });
   });
 
   // Torna o io acessível globalmente (para uso no webhook)
   (global as any).io = io;
+
+  // Agendador interno (reativação automática semanal, opt-in por organização).
+  Scheduler.start(io);
+  // Notificações in-app em tempo real (emite via Socket.io).
+  NotificationService.setIo(io);
+  // Seed opcional de uma conta de teste (dono de negócio), controlado por env.
+  seedOwnerFromEnv().catch(e => console.error("[SeedOwner] erro:", e));
 
 }
 

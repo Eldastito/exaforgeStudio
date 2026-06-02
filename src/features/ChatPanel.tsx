@@ -1,23 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/src/store/useStore';
 import { Button } from '@/src/components/ui/button';
-import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle } from 'lucide-react';
+import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 export function ChatPanel() {
-  const { activeTicketId, tickets, contacts, messages, sendMessage } = useStore();
+  const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket, loadMessages, setActiveTicket } = useStore();
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeReason, setCloseReason] = useState('');
+  const [closeStatus, setCloseStatus] = useState<'entregue_concluido' | 'perdido'>('entregue_concluido');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeTicket = activeTicketId ? tickets[activeTicketId] : null;
 
-  // Clear summary when switching tickets
+  // Clear summary when switching tickets + carrega o histórico real do banco
   useEffect(() => {
     setSummary(null);
-  }, [activeTicketId]);
+    if (activeTicketId) loadMessages(activeTicketId);
+  }, [activeTicketId, loadMessages]);
   const activeContact = activeTicket ? contacts[activeTicket.contactId] : null;
   const activeMessages = activeTicketId ? (messages[activeTicketId] || []) : [];
 
@@ -41,7 +46,7 @@ export function ChatPanel() {
 
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim() || !activeTicketId) return;
+    if (!inputText.trim()) return;
     sendMessage(activeTicketId, inputText, 'human');
     setInputText('');
   };
@@ -89,10 +94,14 @@ export function ChatPanel() {
   };
 
   return (
-    <div className="flex h-full w-[400px] min-w-[400px] flex-col border-l border-zinc-800 bg-zinc-950">
+    <div className="flex h-full w-full lg:w-[400px] lg:min-w-[400px] flex-col border-l border-zinc-800 bg-zinc-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 p-4">
         <div className="flex items-center gap-3">
+          {/* Voltar (somente mobile) */}
+          <button onClick={() => setActiveTicket(null)} className="lg:hidden -ml-1 p-1 text-zinc-400 hover:text-zinc-100" aria-label="Voltar">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
           {activeContact.avatar ? (
             <img src={activeContact.avatar} alt="" className="h-10 w-10 rounded-full border border-zinc-800" />
           ) : (
@@ -104,6 +113,26 @@ export function ChatPanel() {
             <h3 className="font-medium text-zinc-100">{activeContact.name}</h3>
             <span className="text-xs text-zinc-500">{activeContact.number}</span>
           </div>
+        </div>
+        
+        <div className="flex flex-col items-end gap-2">
+           {!activeTicket?.aiPaused ? (
+             <Button variant="outline" size="sm" className="h-7 text-xs bg-zinc-900 border-zinc-700 hover:bg-zinc-800" onClick={() => takeOverTicket(activeTicketId)}>
+                <Hand className="w-3 h-3 mr-2" />
+                Assumir (Handoff)
+             </Button>
+           ) : (
+             <div className="flex items-center gap-2">
+               <Button variant="outline" size="sm" className="h-7 text-xs bg-zinc-900 border-zinc-700 hover:bg-zinc-800 text-indigo-400" onClick={() => returnToAI(activeTicketId)}>
+                  <Bot className="w-3 h-3 mr-2" />
+                  Devolver IA
+               </Button>
+               <Button variant="default" size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => setShowCloseModal(true)}>
+                  <CheckCircle className="w-3 h-3 mr-2" />
+                  Finalizar
+               </Button>
+             </div>
+           )}
         </div>
       </div>
 
@@ -127,12 +156,17 @@ export function ChatPanel() {
                     <span className="text-[10px] text-zinc-400 bg-zinc-800 px-1.5 py-0.5 rounded">Bot</span>
                   )}
                 </div>
-                <div 
+                <div
                   className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm
-                    ${isContact ? 'bg-zinc-800 text-zinc-100 rounded-tl-sm border border-zinc-700' : 
+                    ${isContact ? 'bg-zinc-800 text-zinc-100 rounded-tl-sm border border-zinc-700' :
                       isBot ? 'bg-zinc-700 text-zinc-100 rounded-tr-sm' : 'bg-primary text-primary-foreground rounded-tr-sm'}`}
                 >
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                  {msg.mediaUrl && (
+                    <a href={msg.mediaUrl} target="_blank" rel="noreferrer">
+                      <img src={msg.mediaUrl} alt="imagem" className="mb-2 max-h-60 w-auto rounded-lg border border-zinc-600/50" />
+                    </a>
+                  )}
+                  {msg.text && <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
                 </div>
               </div>
             );
@@ -218,6 +252,40 @@ export function ChatPanel() {
           Enter para enviar, Shift+Enter para quebrar linha
         </div>
       </div>
+
+      {/* Close Modal */}
+      {showCloseModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[320px]">
+              <h3 className="text-lg font-semibold text-zinc-100 mb-4">Finalizar Atendimento</h3>
+              <div className="space-y-4">
+                 <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Status</label>
+                    <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={closeStatus} onChange={(e: any) => setCloseStatus(e.target.value)}>
+                       <option value="entregue_concluido">Sucesso / Fechado</option>
+                       <option value="perdido">Perdido</option>
+                    </select>
+                 </div>
+                 <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Motivo</label>
+                    <textarea 
+                       className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none h-20" 
+                       placeholder="Motivo do fechamento"
+                       value={closeReason}
+                       onChange={(e) => setCloseReason(e.target.value)}
+                    />
+                 </div>
+                 <div className="flex gap-2 justify-end pt-2">
+                    <Button variant="ghost" onClick={() => setShowCloseModal(false)}>Cancelar</Button>
+                    <Button variant="default" className="bg-primary hover:bg-primary/90" onClick={() => {
+                       closeTicket(activeTicketId, closeReason, closeStatus);
+                       setShowCloseModal(false);
+                    }}>Confirmar</Button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,8 +6,8 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
-    // A GEMINI_API_KEY NÃO é exposta ao bundle do cliente. As chamadas de IA
-    // são feitas pelos endpoints /api/ai/* no backend (server.ts).
+    // Nenhuma chave de IA é exposta ao cliente. As chamadas de IA passam pelo
+    // backend (/api/ai/*, /api/webhooks/*), que lê OPENAI_API_KEY do ambiente.
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

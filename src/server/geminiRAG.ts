@@ -1,97 +1,143 @@
-import { GoogleGenAI } from "@google/genai";
 import { v4 as uuidv4 } from "uuid";
-
-// Inicialização tardia: evita crash no carregamento do módulo quando a
-// GEMINI_API_KEY ainda não está disponível.
-let ai: GoogleGenAI | null = null;
-
-function getAi(): GoogleGenAI {
-  if (!ai) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY não configurada. Defina a variável de ambiente para usar o RAG.");
-    }
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return ai;
-}
-
-const VALID_STAGES = ["novo_lead", "em_atendimento", "proposta", "fechado"] as const;
+import { embed, chat } from "./llm.js";
+import db from "./db.js";
 
 interface DocumentChunk {
   id: string;
   text: string;
   embedding: number[];
-  metadata: {
-    fileName: string;
-    channelId: string | 'global';
-  };
+  channelId: string;
 }
 
-// Emulação de um banco de dados vetorial em memória (ex: PgVector, Pinecone)
-const vectorStore: DocumentChunk[] = [];
+/**
+ * Cache em memória dos chunks por organização para evitar reler/parsear o JSON
+ * dos embeddings do SQLite a cada mensagem. É populado sob demanda a partir do
+ * banco (que agora é a fonte da verdade e persiste entre redeploys) e
+ * invalidado sempre que documentos são adicionados/removidos.
+ */
+const orgCache = new Map<string, DocumentChunk[]>();
+
+function invalidateCache(orgId: string) {
+  orgCache.delete(orgId);
+}
+
+function loadOrgChunks(orgId: string): DocumentChunk[] {
+  const cached = orgCache.get(orgId);
+  if (cached) return cached;
+
+  let chunks: DocumentChunk[] = [];
+  try {
+    const rows: any[] = db.prepare(
+      `SELECT id, content, embedding, channel_id FROM knowledge_chunks WHERE organization_id = ?`
+    ).all(orgId);
+    chunks = rows.map((r) => {
+      let embedding: number[] = [];
+      try { embedding = JSON.parse(r.embedding); } catch (e) { embedding = []; }
+      return { id: r.id, text: r.content, embedding, channelId: r.channel_id || 'global' };
+    }).filter((c) => c.embedding.length > 0);
+  } catch (e) {
+    console.error("[RAG] Falha ao carregar chunks do banco:", e);
+  }
+  orgCache.set(orgId, chunks);
+  return chunks;
+}
 
 /**
- * Normaliza o texto e divide em pequenos chunks.
- * Em um cenário real, usariamos um TextSplitter mais sofisticado (como o do LangChain)
+ * Normaliza o texto e divide em pequenos chunks (por parágrafo / linha em branco).
  */
-function splitIntoChunks(text: string, maxTokens: number = 500): string[] {
+function splitIntoChunks(text: string): string[] {
   const paragraphs = text.split(/\n\s*\n/);
-  // Simplificação: apenas quebrando por parágrafos para simular chunks
-  return paragraphs.filter(p => p.trim().length > 0);
+  return paragraphs.map((p) => p.trim()).filter((p) => p.length > 0);
 }
 
 /**
- * Função para processar e indexar um documento no banco vetorial
+ * Processa e indexa um documento na base de conhecimento (embeddings OpenAI),
+ * persistindo o documento e seus chunks vetorizados no SQLite.
  */
-export async function processDocument(fileBuffer: Buffer, fileName: string, channelId: string = 'global') {
-  // 1. Extração de texto (assumindo que seja um TXT simples para o exemplo)
+export async function processDocument(
+  fileBuffer: Buffer,
+  fileName: string,
+  orgId: string,
+  channelId: string = 'global'
+): Promise<{ success: boolean; documentId: string; chunksProcessed: number }> {
   const text = fileBuffer.toString('utf-8');
-  
-  // 2. Chunks
+  const docId = uuidv4();
+
   const chunks = splitIntoChunks(text);
-  
-  if (chunks.length === 0) {
-    return { success: true, chunksProcessed: 0 };
+
+  // Persistência do documento (metadados)
+  try {
+    db.prepare(
+      `INSERT INTO knowledge_documents (id, organization_id, title, content, status, channel_id, chunk_count, size_bytes)
+       VALUES (?, ?, ?, ?, 'ready', ?, ?, ?)`
+    ).run(docId, orgId, fileName, text, channelId, chunks.length, fileBuffer.length);
+  } catch (e) {
+    console.error("[RAG] Falha ao salvar documento:", e);
+    throw new Error("Falha ao salvar o documento");
   }
 
-  // 3. Vetorização via Gemini Embeddings
-  const response = await getAi().models.embedContent({
-    model: "text-embedding-004", // Modelo de embedding atual recomendado
-    contents: chunks,
-  });
+  if (chunks.length === 0) {
+    invalidateCache(orgId);
+    return { success: true, documentId: docId, chunksProcessed: 0 };
+  }
 
-  const embeddings = response.embeddings;
-
-  if (!embeddings || embeddings.length !== chunks.length) {
+  // Vetorização via OpenAI Embeddings
+  const vectors = await embed(chunks);
+  if (!vectors || vectors.length !== chunks.length) {
+    // Marca como erro e propaga
+    try { db.prepare(`UPDATE knowledge_documents SET status = 'error' WHERE id = ?`).run(docId); } catch (e) {}
     throw new Error("Falha ao gerar embeddings");
   }
 
-  // 4. Salvar no "Banco Vector"
-  for (let i = 0; i < chunks.length; i++) {
-    const values = embeddings[i]?.values;
-    if (!values || values.length === 0) continue; // pula chunk sem embedding válido
-    vectorStore.push({
-      id: uuidv4(),
-      text: chunks[i],
-      embedding: values,
-      metadata: { fileName, channelId }
-    });
-  }
+  const insert = db.prepare(
+    `INSERT INTO knowledge_chunks (id, organization_id, document_id, channel_id, chunk_index, content, embedding)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  const insertMany = db.transaction((items: { i: number; values: number[] }[]) => {
+    for (const item of items) {
+      insert.run(uuidv4(), orgId, docId, channelId, item.i, chunks[item.i], JSON.stringify(item.values));
+    }
+  });
 
-  return { success: true, chunksProcessed: chunks.length };
+  const toInsert: { i: number; values: number[] }[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const values = vectors[i];
+    if (!values || values.length === 0) continue;
+    toInsert.push({ i, values });
+  }
+  insertMany(toInsert);
+
+  invalidateCache(orgId);
+  return { success: true, documentId: docId, chunksProcessed: toInsert.length };
 }
 
 /**
- * Calcula similaridade por Cosseno entre dois vetores
+ * Remove um documento e seus chunks vetorizados.
+ */
+export function deleteDocument(docId: string, orgId: string): boolean {
+  try {
+    db.prepare(`DELETE FROM knowledge_chunks WHERE document_id = ? AND organization_id = ?`).run(docId, orgId);
+    const info = db.prepare(`DELETE FROM knowledge_documents WHERE id = ? AND organization_id = ?`).run(docId, orgId);
+    invalidateCache(orgId);
+    return info.changes > 0;
+  } catch (e) {
+    console.error("[RAG] Falha ao remover documento:", e);
+    return false;
+  }
+}
+
+/**
+ * Similaridade por cosseno entre dois vetores.
  */
 function cosineSimilarity(A: number[], B: number[]): number {
   let dotproduct = 0;
   let mA = 0;
   let mB = 0;
-  for (let i = 0; i < A.length; i++) {
+  const len = Math.min(A.length, B.length);
+  for (let i = 0; i < len; i++) {
     dotproduct += A[i] * B[i];
-    mA += Math.pow(A[i], 2);
-    mB += Math.pow(B[i], 2);
+    mA += A[i] * A[i];
+    mB += B[i] * B[i];
   }
   mA = Math.sqrt(mA);
   mB = Math.sqrt(mB);
@@ -100,38 +146,66 @@ function cosineSimilarity(A: number[], B: number[]): number {
 }
 
 /**
- * Busca os N chunks de contexto mais relevantes
+ * Busca os N chunks de contexto mais relevantes para uma organização.
  */
-export async function searchContext(query: string, channelId: string, topK: number = 3): Promise<string[]> {
-  const queryEmbeddingRes = await getAi().models.embedContent({
-    model: "text-embedding-004",
-    contents: query
-  });
-  
-  const queryVec = queryEmbeddingRes.embeddings?.[0]?.values;
+export async function searchContext(
+  query: string,
+  orgId: string,
+  channelId: string = 'global',
+  topK: number = 3
+): Promise<string[]> {
+  const chunks = loadOrgChunks(orgId);
+  if (chunks.length === 0) return [];
+
+  let queryVec: number[] | undefined;
+  try {
+    [queryVec] = await embed([query]);
+  } catch (e) {
+    console.error("[RAG] Falha ao embeddar a query:", e);
+    return [];
+  }
   if (!queryVec) return [];
 
-  // Filtrar apenas documentos globais ou específicos do canal
-  const relevantDocs = vectorStore.filter(doc => doc.metadata.channelId === 'global' || doc.metadata.channelId === channelId);
+  const relevantDocs = chunks.filter((doc) => doc.channelId === 'global' || doc.channelId === channelId);
 
-  // Calcular similaridade
-  const scoredDocs = relevantDocs.map(doc => ({
+  const scoredDocs = relevantDocs.map((doc) => ({
     text: doc.text,
-    score: cosineSimilarity(queryVec, doc.embedding)
+    score: cosineSimilarity(queryVec!, doc.embedding),
   }));
 
-  // Ordenar por maior score
   scoredDocs.sort((a, b) => b.score - a.score);
-  
-  // Pegar os top K
-  return scoredDocs.slice(0, topK).map(doc => doc.text);
+  return scoredDocs.slice(0, topK).map((doc) => doc.text);
 }
 
 /**
- * RAG workflow: Busca RAG + Geração de Resposta via Gemini
+ * Verifica tentativa de Prompt Injection baseado em heurísticas básicas.
  */
-export async function generateRagResponse(userMessage: string, channelId: string): Promise<{ text: string, newStage?: string }> {
-  const contextChunks = await searchContext(userMessage, channelId);
+function isPromptInjection(text: string): boolean {
+  const lowercase = text.toLowerCase();
+  const suspiciousKeywords = [
+    "ignore todas as instru", "ignore previous", "esqueça o que eu disse", "sistema:", "system prompt", "você é agora",
+    "you are now", "bypasse", "modo desenvolvedor", "desconsidere as regras"
+  ];
+  return suspiciousKeywords.some((keyword) => lowercase.includes(keyword));
+}
+
+/**
+ * RAG workflow: Busca RAG + Geração de Resposta via OpenAI.
+ * (Mantido para compatibilidade; o fluxo principal usa o AIOrchestratorService.)
+ */
+export async function generateRagResponse(
+  userMessage: string,
+  orgId: string,
+  channelId: string = 'global'
+): Promise<{ text: string, newStage?: string }> {
+  if (isPromptInjection(userMessage)) {
+    return {
+      text: "Sinto muito, não posso ajudar com essa solicitação.",
+      newStage: "em_atendimento"
+    };
+  }
+
+  const contextChunks = await searchContext(userMessage, orgId, channelId);
   const contextText = contextChunks.length > 0 ? contextChunks.join('\n\n---\n\n') : "Nenhum documento adicional encontrado na base de conhecimento.";
 
   const prompt = `
@@ -159,26 +233,16 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
 }
 `;
 
-  const response = await getAi().models.generateContent({
-    model: "gemini-3.1-pro-preview",
-    contents: prompt
-  });
-
-  const rawText = response.text || "";
+  const rawText = await chat(prompt, { temperature: 0.4, json: true });
   try {
-    // Tenta limpar o json caso venha com markdown ```json
     const cleanedJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleanedJson);
-    // Valida o estágio retornado pela IA contra a lista permitida.
-    const newStage = VALID_STAGES.includes(parsed.newStage) ? parsed.newStage : "em_atendimento";
     return {
       text: parsed.text || "Desculpe, ocorreu um erro.",
-      newStage,
+      newStage: parsed.newStage,
     };
   } catch (e) {
     console.error("Erro ao fazer parse do JSON RAG:", e);
-    // Caso falhe, retorna apenas o texto cru, assumindo em_atendimento
     return { text: rawText.replace(/```json/g, '').replace(/```/g, '').trim(), newStage: 'em_atendimento' };
   }
 }
-

@@ -27,7 +27,6 @@ import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
-import { seedOwnerFromEnv } from "./src/server/seedOwner.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
@@ -912,8 +911,6 @@ async function startServer() {
   Scheduler.start(io);
   // Notificações in-app em tempo real (emite via Socket.io).
   NotificationService.setIo(io);
-  // Seed opcional de uma conta de teste (dono de negócio), controlado por env.
-  seedOwnerFromEnv().catch(e => console.error("[SeedOwner] erro:", e));
 
 }
 

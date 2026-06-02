@@ -31,6 +31,7 @@ import { seedOwnerFromEnv } from "./src/server/seedOwner.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
+import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
@@ -626,21 +627,30 @@ async function startServer() {
 
         console.log(`[Evolution Webhook] Mensagem de ${senderId} (${pushName || 's/ nome'}): ${incomingMessageText}`);
 
-        // Foto de perfil: o endpoint /user/avatar do Evolution GO trava (504 após 60s),
-        // então não buscamos (evita latência). O card usa o avatar padrão/inicial.
-        let contactAvatar = undefined;
-
+        // Foto de perfil: não buscamos de forma síncrona aqui (o endpoint de
+        // avatar pode travar e atrasar o atendimento). Processamos a mensagem
+        // primeiro e depois disparamos a busca da foto best-effort, com timeout
+        // e sem bloquear o webhook (ver maybeFetchEvolutionAvatar).
         await processIncomingMessage({
-           channelId: null, // mapped by identifier 
+           channelId: null, // mapped by identifier
            organizationId: null,
            identifier: businessId,
            provider: 'evolution',
            senderId: senderId,
            contactName: pushName,
-           contactAvatar: contactAvatar,
+           contactAvatar: undefined,
            text: incomingMessageText,
            mediaUrl: incomingMediaUrl
         }, (global as any).io);
+
+        // Foto de perfil do WhatsApp em segundo plano: atualiza o card de
+        // atendimento ao vivo assim que obtida, sem bloquear o atendimento.
+        maybeFetchEvolutionAvatar({
+          businessId,
+          senderId,
+          config: evolutionConfig,
+          io: (global as any).io,
+        });
         
       } else if (normalizedEvent === "connection.update") {
         console.log(`[Evolution Webhook] Status da conexão: ${payload.data?.state || payload.data?.status}`);

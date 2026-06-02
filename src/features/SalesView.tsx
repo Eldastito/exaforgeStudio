@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2, CreditCard, Download } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { PaymentSettingsModal } from '@/src/features/PaymentSettingsModal';
+import { EmptyState } from '@/src/components/EmptyState';
 
 type OrderItem = { id: string; name_snapshot: string; quantity: number; unit_price: number; line_total: number };
 type Order = {
@@ -260,9 +261,17 @@ export function SalesView() {
       {loading ? (
         <p className="text-zinc-500 text-sm py-8 text-center">Carregando...</p>
       ) : orders.length === 0 ? (
-        <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
-          Nenhum pedido {filter !== 'todos' ? `com status "${STATUS[filter]?.label || filter}"` : 'ainda'}.
-        </div>
+        filter !== 'todos' ? (
+          <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
+            Nenhum pedido com status "{STATUS[filter]?.label || filter}" neste período.
+          </div>
+        ) : (
+          <EmptyState
+            icon={<ShoppingCart className="w-6 h-6" />}
+            title="Nenhuma venda ainda"
+            description="Quando a IA fechar um pedido pelo WhatsApp (ou você criar um manualmente), ele aparece aqui com status, pagamento e estoque. Garanta que o catálogo e a IA estão configurados."
+          />
+        )
       ) : (
         <div className="space-y-3">
           {orders.map(o => {

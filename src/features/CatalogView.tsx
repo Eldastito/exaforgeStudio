@@ -3,6 +3,7 @@ import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes } from 'lucide-r
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
+import { EmptyState } from '@/src/components/EmptyState';
 
 type Product = {
   id: string; type: string; name: string; description?: string; price?: number;
@@ -114,9 +115,13 @@ export function CatalogView() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {products.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
-            Nenhum produto ou serviço cadastrado ainda.
-          </div>
+          <EmptyState
+            icon={<Package className="w-6 h-6" />}
+            title="Seu catálogo está vazio"
+            description="Cadastre produtos ou serviços com preço e estoque. A IA usa o catálogo para responder dúvidas, montar cotações e fechar vendas pelo WhatsApp."
+            actionLabel="Cadastrar primeiro item"
+            onAction={openNew}
+          />
         ) : (
           products.map(p => (
             <div key={p.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors group">

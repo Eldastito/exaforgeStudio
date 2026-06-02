@@ -11,10 +11,17 @@ const getOrgId = (req: any) => req.headers['x-organization-id'] || req.organizat
 // GET /api/users
 router.get("/", (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
+  const actor = (req as any).user;
   try {
     const users = db.prepare('SELECT id, name, email, role, phone, avatar_url, global_status, last_login_at, created_at FROM users WHERE organization_id = ?').all(orgId);
-    
-    const invites = db.prepare('SELECT id, email, role, status, expires_at, created_at FROM user_invitations WHERE organization_id = ?').all(orgId);
+
+    // O token só é exposto para owner/admin — são eles que compartilham o
+    // convite manualmente (o app não envia e-mail). Demais papéis não recebem.
+    const canSeeToken = actor && (actor.role === 'owner' || actor.role === 'admin');
+    const inviteCols = canSeeToken
+      ? 'id, email, role, status, expires_at, created_at, token_hash AS token'
+      : 'id, email, role, status, expires_at, created_at';
+    const invites = db.prepare(`SELECT ${inviteCols} FROM user_invitations WHERE organization_id = ? AND status = 'pending'`).all(orgId);
 
     res.json({ users, invites });
   } catch (error) {
@@ -62,7 +69,9 @@ router.post("/invite", (req: Request, res: Response): any => {
       VALUES (?, ?, ?, ?, ?)
     `).run(uuidv4(), orgId, actor.userId, 'USER_INVITED', JSON.stringify({ email, role }));
 
-    res.json({ message: "Invite sent successfully" });
+    // Retornamos o token para o owner/admin compartilhar o convite manualmente
+    // (o app não envia e-mail). O front monta o link de convite com esse token.
+    res.json({ message: "Invite sent successfully", token, email });
   } catch(e) {
     res.status(500).json({ error: "Internal error" });
   }

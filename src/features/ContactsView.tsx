@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target } from 'lucide-react';
+import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
 type Contact = {
@@ -54,6 +54,26 @@ export function ContactsView() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter]);
 
+  // Reaproveita o mesmo recorte do filtro atual para o CSV.
+  const filterQuery = () => {
+    if (filter === 'quente' || filter === 'morno' || filter === 'frio') return `?temperature=${filter}`;
+    if (filter === 'inativos') return `?inactiveDays=60`;
+    if (filter === 'score') return `?minScore=70`;
+    return '';
+  };
+
+  const exportCsv = async () => {
+    try {
+      const res = await apiFetch(`/api/contacts/export.csv${filterQuery()}`);
+      if (!res.ok) { alert('Não foi possível exportar.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'contatos.csv'; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Não foi possível exportar.'); }
+  };
+
   const recompute = async () => {
     await apiFetch('/api/contacts/recompute', { method: 'POST' }).catch(() => {});
     load();
@@ -74,9 +94,14 @@ export function ContactsView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Base de clientes com temperatura do lead e histórico de compra</p>
         </div>
-        <button onClick={recompute} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-indigo-500/40" title="Recalcular métricas de CRM">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Recalcular
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={exportCsv} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-indigo-500/40" title="Exportar contatos (CSV)">
+            <Download className="w-4 h-4 text-indigo-400" /> CSV
+          </button>
+          <button onClick={recompute} className="inline-flex items-center gap-2 text-sm text-zinc-300 border border-zinc-800 rounded-lg px-3 py-2 hover:border-indigo-500/40" title="Recalcular métricas de CRM">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Recalcular
+          </button>
+        </div>
       </div>
 
       {/* Segmentos */}

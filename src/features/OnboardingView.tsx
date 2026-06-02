@@ -44,6 +44,7 @@ export function OnboardingView() {
         <div className="bg-indigo-600/10 border-b border-indigo-500/20 px-8 py-6 text-center">
           <h2 className="text-xl font-semibold text-zinc-100">Bem-vindo ao Zappflow AI</h2>
           <p className="text-zinc-400 text-sm mt-1">Sua conta foi criada. Vamos configurar primeiros passos rápidos.</p>
+          <span className="mt-3 inline-block text-xs font-medium text-indigo-300">Passo {step} de 2</span>
         </div>
 
         <div className="p-8 space-y-6">
@@ -51,21 +52,37 @@ export function OnboardingView() {
             <div className="space-y-4 animate-in fade-in zoom-in-95">
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">Nome p/ Exibição</label>
-                <input 
+                <input
                   value={formData.business_name} onChange={e => setFormData({...formData, business_name: e.target.value})}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500" 
-                  placeholder="Nome Fantasia" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500"
+                  placeholder="Nome Fantasia"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-zinc-400 mb-1 block">Telefone de Contato</label>
+                <input
+                  value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500"
+                  placeholder="(11) 99999-9999"
+                  inputMode="tel"
                 />
               </div>
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">Endereço Comercial</label>
-                <input 
+                <input
                   value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500" 
-                  placeholder="Rua Exemplo, 123" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500"
+                  placeholder="Rua Exemplo, 123"
                 />
               </div>
-              <Button onClick={() => setStep(2)} className="w-full bg-indigo-600 hover:bg-indigo-700">Continuar</Button>
+              <Button
+                onClick={() => setStep(2)}
+                disabled={!formData.business_name.trim() || !formData.phone.trim()}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >Continuar</Button>
+              {(!formData.business_name.trim() || !formData.phone.trim()) && (
+                <p className="text-center text-xs text-zinc-500">Informe o nome e o telefone para continuar.</p>
+              )}
             </div>
           )}
 

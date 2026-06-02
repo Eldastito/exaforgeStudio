@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download } from 'lucide-react';
+import { Skeleton } from '@/src/components/ui/Skeleton';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
 
@@ -133,9 +134,20 @@ export function ContactsView() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.length === 0 ? (
           loading ? (
-            <div className="col-span-full py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
-              Carregando...
-            </div>
+            <>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50">
+                  <div className="flex items-start gap-3">
+                    <Skeleton className="w-11 h-11 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-2/3" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-1.5 w-full mt-4 rounded-full" />
+                </div>
+              ))}
+            </>
           ) : (q || filter !== 'todos') ? (
             <div className="col-span-full py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
               Nenhum contato neste filtro/busca.

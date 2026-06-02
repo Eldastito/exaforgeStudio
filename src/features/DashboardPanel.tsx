@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
 import { useStore } from '@/src/store/useStore';
 import { CheckCircle2, Circle, ArrowRight, Rocket, X } from 'lucide-react';
+import { Skeleton } from '@/src/components/ui/Skeleton';
 
 const C = {
   indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
@@ -271,8 +272,32 @@ export function DashboardPanel() {
         <SetupChecklist />
 
         {loading && !m ? (
-          <div className="flex h-64 items-center justify-center text-slate-500">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando métricas...
+          <div className="space-y-6">
+            {/* KPI cards skeleton */}
+            <div className="grid grid-cols-1 gap-4 md:gap-5 sm:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                  <div className="flex items-center justify-between">
+                    <Skeleton className="h-10 w-10 rounded-xl" />
+                    <Skeleton className="h-5 w-12 rounded-full" />
+                  </div>
+                  <Skeleton className="mt-4 h-7 w-24" />
+                  <Skeleton className="mt-2 h-3 w-28" />
+                  <Skeleton className="mt-4 h-10 w-full" />
+                </div>
+              ))}
+            </div>
+            {/* Charts skeleton */}
+            <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 lg:col-span-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="mt-4 h-64 w-full" />
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="mx-auto mt-6 h-44 w-44 rounded-full" />
+              </div>
+            </div>
           </div>
         ) : (
           <>

@@ -3,6 +3,7 @@ import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2, CreditCard, 
 import { apiFetch } from '@/src/lib/api';
 import { PaymentSettingsModal } from '@/src/features/PaymentSettingsModal';
 import { EmptyState } from '@/src/components/EmptyState';
+import { Skeleton } from '@/src/components/ui/Skeleton';
 
 type OrderItem = { id: string; name_snapshot: string; quantity: number; unit_price: number; line_total: number };
 type Order = {
@@ -259,7 +260,20 @@ export function SalesView() {
 
       {/* Lista de pedidos */}
       {loading ? (
-        <p className="text-zinc-500 text-sm py-8 text-center">Carregando...</p>
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-3 w-56" />
+                </div>
+                <Skeleton className="h-6 w-20" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : orders.length === 0 ? (
         filter !== 'todos' ? (
           <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">

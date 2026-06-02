@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Plus, Trash2, Edit3, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Save, X, Zap } from 'lucide-react';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { Skeleton } from '@/src/components/ui/Skeleton';
 
 type Step = { id?: string; delayHours: number; message: string };
 
@@ -121,7 +122,20 @@ export function CadencesView() {
 
         {/* List */}
         {loading ? (
-          <p className="text-zinc-500 text-sm">Carregando...</p>
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1">
+                  <Skeleton className="h-5 w-9 rounded-full" />
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                </div>
+                <Skeleton className="h-8 w-8 rounded-lg" />
+              </div>
+            ))}
+          </div>
         ) : cadences.length === 0 ? (
           <div className="text-center py-20 text-zinc-500">
             <Zap className="w-10 h-10 mx-auto mb-3 opacity-40" />

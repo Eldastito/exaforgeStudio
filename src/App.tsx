@@ -75,6 +75,17 @@ export default function App() {
       updateStageByContactId(data.contactId, data.newStage as any);
     });
 
+    // Foto de perfil do WhatsApp obtida em segundo plano: atualiza o card ao vivo.
+    socket.on("contact_avatar", (data: { contactId: string, avatar: string }) => {
+      const state = useStore.getState();
+      const contact = state.contacts[data.contactId];
+      if (contact && data.avatar) {
+        useStore.setState({
+          contacts: { ...state.contacts, [data.contactId]: { ...contact, avatar: data.avatar } },
+        });
+      }
+    });
+
     // Notificação in-app em tempo real (sino no topo).
     socket.on("notification", (n: any) => {
       setNotifications(prev => {

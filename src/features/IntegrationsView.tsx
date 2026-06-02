@@ -5,6 +5,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { toast, confirmDialog } from '@/src/lib/toast';
 
 let app;
 try {
@@ -104,17 +105,17 @@ export function IntegrationsView() {
   const handleDownloadBackup = async (id: string) => {
     try {
       const res = await apiFetch(`/api/integrations/backups/${id}/download`);
-      if (!res.ok) { alert('Não foi possível baixar o backup.'); return; }
+      if (!res.ok) { toast.error('Não foi possível baixar o backup.'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `backup-${id}.json`; a.click();
       URL.revokeObjectURL(url);
-    } catch (e) { alert('Não foi possível baixar o backup.'); }
+    } catch (e) { toast.error('Não foi possível baixar o backup.'); }
   };
 
   const handleDeleteBackup = async (id: string) => {
-    if (!window.confirm('Apagar este backup? Esta ação é permanente.')) return;
+    if (!(await confirmDialog('Apagar este backup? Esta ação é permanente.', { danger: true, confirmText: 'Excluir' }))) return;
     try {
       await apiFetch(`/api/integrations/backups/${id}`, { method: 'DELETE' });
       loadData();
@@ -139,7 +140,7 @@ export function IntegrationsView() {
     try {
       const res = await apiFetch(`/api/integrations/webhooks/${id}/test`, { method: 'POST' });
       const data = await res.json();
-      alert(`Webhook teste: ${data.status}`);
+      toast.info(`Webhook teste: ${data.status}`);
       loadData();
     } catch (e) {}
   };

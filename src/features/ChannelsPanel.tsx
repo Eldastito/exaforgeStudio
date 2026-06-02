@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { toast, confirmDialog } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
 import { Smartphone, Instagram, AlertCircle, CheckCircle2, RefreshCw, UploadCloud, BrainCircuit, FileText, Loader2, Check, X } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
@@ -10,8 +11,8 @@ import { InstagramConnectModal } from '@/src/features/InstagramConnectModal';
 export function ChannelsPanel() {
   const { channels, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel, removeChannel } = useStore();
 
-  const handleDisconnect = (id: string, label: string) => {
-    if (!window.confirm(`Desconectar ${label}? O canal será removido e as mensagens deixarão de chegar até reconectar.`)) return;
+  const handleDisconnect = async (id: string, label: string) => {
+    if (!(await confirmDialog(`Desconectar ${label}? O canal será removido e as mensagens deixarão de chegar até reconectar.`, { danger: true }))) return;
     removeChannel(id);
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -369,7 +370,7 @@ export function ChannelsPanel() {
                       headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ instanceName })
                     });
-                    alert('Configuração Salva! Siga para o Passo 4.');
+                    toast.success('Configuração Salva! Siga para o Passo 4.');
                   } catch (e) {
                     console.error(e);
                   }
@@ -399,12 +400,12 @@ export function ChannelsPanel() {
                     } else if (data.instance?.state === 'open' || data.state === 'open') {
                        setEvolutionStatus('connected_evo');
                     } else {
-                       alert('Não foi possível gerar QR Code. Talvez a instância já esteja conectada?');
+                       toast.error('Não foi possível gerar QR Code. Talvez a instância já esteja conectada?');
                        setEvolutionStatus('disconnected');
                     }
                   } catch (e) {
                     console.error(e);
-                    alert('Erro ao conectar Evolution.');
+                    toast.error('Erro ao conectar Evolution.');
                     setEvolutionStatus('disconnected');
                   }
                 }}

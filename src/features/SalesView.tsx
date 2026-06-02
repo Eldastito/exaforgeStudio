@@ -3,6 +3,7 @@ import { ShoppingCart, RefreshCw, AlertTriangle, Bot, CheckCircle2, CreditCard, 
 import { apiFetch } from '@/src/lib/api';
 import { PaymentSettingsModal } from '@/src/features/PaymentSettingsModal';
 import { EmptyState } from '@/src/components/EmptyState';
+import { toast } from '@/src/lib/toast';
 
 type OrderItem = { id: string; name_snapshot: string; quantity: number; unit_price: number; line_total: number };
 type Order = {
@@ -83,13 +84,13 @@ export function SalesView() {
   const exportCsv = async () => {
     try {
       const res = await apiFetch(`/api/orders/export.csv${buildQuery()}`);
-      if (!res.ok) { alert('Não foi possível exportar.'); return; }
+      if (!res.ok) { toast.error('Não foi possível exportar.'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `vendas-${period}.csv`; a.click();
       URL.revokeObjectURL(url);
-    } catch (e) { alert('Não foi possível exportar.'); }
+    } catch (e) { toast.error('Não foi possível exportar.'); }
   };
 
   const changeStatus = async (id: string, to: string) => {
@@ -98,9 +99,9 @@ export function SalesView() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: to }),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Erro ao atualizar'); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Erro ao atualizar'); return; }
       load();
-    } catch (e) { alert('Erro ao atualizar'); }
+    } catch (e) { toast.error('Erro ao atualizar'); }
   };
 
   const toggleAutonomy = async () => {
@@ -126,9 +127,9 @@ export function SalesView() {
   const confirmPayment = async (id: string) => {
     try {
       const res = await apiFetch(`/api/payments/orders/${id}/confirm`, { method: 'POST' });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Erro'); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Erro'); return; }
       load();
-    } catch (e) { alert('Erro ao confirmar pagamento'); }
+    } catch (e) { toast.error('Erro ao confirmar pagamento'); }
   };
 
   const countFor = (s: string) => summary.byStatus.find((b: any) => b.status === s)?.count || 0;

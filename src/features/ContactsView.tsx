@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { toast } from '@/src/lib/toast';
 import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
@@ -66,13 +67,13 @@ export function ContactsView() {
   const exportCsv = async () => {
     try {
       const res = await apiFetch(`/api/contacts/export.csv${filterQuery()}`);
-      if (!res.ok) { alert('Não foi possível exportar.'); return; }
+      if (!res.ok) { toast.error('Não foi possível exportar.'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = 'contatos.csv'; a.click();
       URL.revokeObjectURL(url);
-    } catch (e) { alert('Não foi possível exportar.'); }
+    } catch (e) { toast.error('Não foi possível exportar.'); }
   };
 
   const recompute = async () => {

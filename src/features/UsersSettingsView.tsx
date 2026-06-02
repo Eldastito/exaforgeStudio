@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toast, confirmDialog } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus, Copy, Check } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
@@ -54,15 +55,15 @@ export function UsersSettingsView() {
         fetchManagers();
       } else {
         const err = await res.json();
-        alert(err.error || 'Erro ao cadastrar gestor');
+        toast.error(err.error || 'Erro ao cadastrar gestor');
       }
     } catch (e) {
-      alert('Erro ao cadastrar gestor');
+      toast.error('Erro ao cadastrar gestor');
     }
   };
 
   const removeManager = async (id: string) => {
-    if (!confirm('Remover este gestor do Zapp?')) return;
+    if (!(await confirmDialog('Remover este gestor do Zapp?', { danger: true, confirmText: 'Remover' }))) return;
     try {
       const res = await apiFetch(`/api/managers/${id}`, { method: 'DELETE' });
       if (res.ok) fetchManagers();
@@ -112,16 +113,16 @@ export function UsersSettingsView() {
         if (data.token) {
           const link = buildInviteLink(data.token, email);
           await copyText(link, 'new');
-          alert(`Convite criado! O link foi copiado para a área de transferência.\n\nComo o app não envia e-mail, envie este link para a pessoa:\n\n${link}`);
+          toast.success(`Convite criado! O link foi copiado para a área de transferência.\n\nComo o app não envia e-mail, envie este link para a pessoa:\n\n${link}`);
         } else {
-          alert('Convite criado!');
+          toast.success('Convite criado!');
         }
       } else {
         const error = await res.json();
-        alert(error.error || 'Erro ao convidar');
+        toast.error(error.error || 'Erro ao convidar');
       }
     } catch(e) {
-      alert('Erro ao enviar convite');
+      toast.error('Erro ao enviar convite');
     }
   };
 

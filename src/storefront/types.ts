@@ -1,0 +1,69 @@
+// Tipos compartilhados da vitrine pública (Glass Toggle).
+
+export type SaleMode = 'unit' | 'size' | 'weight' | 'volume';
+export type Mode = 'day' | 'night';
+
+export interface SaleOptions {
+  sizes?: string[];
+  steps?: number[];
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  sale_mode: SaleMode;
+  sale_options: SaleOptions;
+  featured: boolean;
+  available: boolean;
+  images: string[];
+}
+
+export interface Store {
+  slug: string;
+  title: string;
+  subtitle: string;
+  logo_url: string | null;
+  banner_url: string | null;
+  accent_color: string;
+  default_mode: Mode;
+}
+
+export interface Customer {
+  name: string;
+}
+
+export interface StoreResponse {
+  store: Store;
+  customer: Customer | null;
+  products: Product[];
+}
+
+// Opção escolhida pelo cliente para um item.
+export type ChosenOption =
+  | { type: 'size'; value: string }
+  | { type: 'weight'; grams: number }
+  | { type: 'volume'; ml: number }
+  | null;
+
+export interface CartItem {
+  // Chave única por produto + opção (para permitir variações distintas).
+  key: string;
+  productId: string;
+  name: string;
+  image: string | null;
+  // preço unitário já calculado (considerando peso/volume).
+  unitPrice: number;
+  quantity: number;
+  optionLabel: string;
+  option: ChosenOption;
+}
+
+export interface OrderResponse {
+  ok: boolean;
+  orderId: string;
+  total: number;
+  whatsappUrl: string | null;
+}

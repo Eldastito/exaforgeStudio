@@ -4,6 +4,11 @@ import App from './App.tsx';
 import './index.css';
 import { AuthProvider } from './contexts/AuthContext.tsx';
 import { Toaster } from './components/ui/Toaster.tsx';
+import { Storefront } from './storefront/Storefront.tsx';
+
+// Vitrine pública (loja virtual) — renderizada fora do app autenticado.
+// Qualquer URL /loja/:slug abre a landing page Glass Toggle, sem login.
+const isStorefront = window.location.pathname.startsWith('/loja/');
 
 const originalFetch = window.fetch;
 Object.defineProperty(window, 'fetch', {
@@ -22,9 +27,13 @@ Object.defineProperty(window, 'fetch', {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AuthProvider>
-      <App />
-      <Toaster />
-    </AuthProvider>
+    {isStorefront ? (
+      <Storefront />
+    ) : (
+      <AuthProvider>
+        <App />
+        <Toaster />
+      </AuthProvider>
+    )}
   </StrictMode>,
 );

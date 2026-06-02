@@ -12,6 +12,7 @@ import { CadencesView } from '@/src/features/CadencesView';
 import { ContactsView } from '@/src/features/ContactsView';
 import { IntegrationsView } from '@/src/features/IntegrationsView';
 import { SettingsView } from '@/src/features/SettingsView';
+import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
@@ -145,6 +146,7 @@ export default function App() {
              {viewMode === 'agenda' && 'Agenda'}
              {viewMode === 'catalog' && 'Catálogo'}
              {viewMode === 'vendas' && 'Vendas'}
+             {viewMode === 'storefront' && 'Loja Virtual'}
              {viewMode === 'campanhas' && 'Campanhas'}
              {viewMode === 'cadencias' && 'Cadências'}
              {viewMode === 'contacts' && 'Contatos'}
@@ -216,6 +218,7 @@ export default function App() {
           {viewMode === 'agenda' && <AgendaView />}
           {viewMode === 'catalog' && <CatalogView />}
           {viewMode === 'vendas' && <SalesView />}
+          {viewMode === 'storefront' && <StorefrontSettingsView />}
           {viewMode === 'campanhas' && <CampaignsView />}
           {viewMode === 'cadencias' && <CadencesView />}
           {viewMode === 'contacts' && <ContactsView />}

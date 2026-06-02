@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Megaphone, Plus, X, Play, Pause, Users, AlertTriangle, Send } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { EmptyState } from '@/src/components/EmptyState';
 
 type Campaign = {
   id: string; name: string; message: string; status: string;
@@ -137,9 +138,13 @@ export function CampaignsView() {
 
       <div className="space-y-3">
         {campaigns.length === 0 ? (
-          <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
-            Nenhuma campanha ainda. Crie a primeira para reativar clientes inativos.
-          </div>
+          <EmptyState
+            icon={<Megaphone className="w-6 h-6" />}
+            title="Nenhuma campanha ainda"
+            description="Crie campanhas de WhatsApp para reativar clientes inativos ou ofertar para quem mais compra. O envio tem intervalo anti-ban e respeita quem pediu para sair."
+            actionLabel="Criar primeira campanha"
+            onAction={() => setShowModal(true)}
+          />
         ) : campaigns.map(c => {
           const st = STATUS[c.status] || STATUS.draft;
           const done = c.sent_count + c.failed_count;

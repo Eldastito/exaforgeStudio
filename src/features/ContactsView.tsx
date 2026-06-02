@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import { EmptyState } from '@/src/components/EmptyState';
 
 type Contact = {
   id: string; name?: string; identifier: string; profile_pic_url?: string;
@@ -131,9 +132,21 @@ export function ContactsView() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
-            {loading ? 'Carregando...' : 'Nenhum contato encontrado.'}
-          </div>
+          loading ? (
+            <div className="col-span-full py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
+              Carregando...
+            </div>
+          ) : (q || filter !== 'todos') ? (
+            <div className="col-span-full py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
+              Nenhum contato neste filtro/busca.
+            </div>
+          ) : (
+            <EmptyState
+              icon={<Users className="w-6 h-6" />}
+              title="Nenhum contato ainda"
+              description="Assim que alguém mandar mensagem nos seus canais, o contato entra aqui automaticamente — com temperatura do lead, lead score e histórico de compra."
+            />
+          )
         ) : filtered.map(c => {
           const t = TEMP[c.lead_temperature || 'frio'] || TEMP.frio;
           return (

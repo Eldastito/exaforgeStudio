@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/src/store/useStore';
 import { Button } from '@/src/components/ui/button';
-import { Send, Sparkles, Paperclip, Mic, User, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Send, Sparkles, Paperclip, Mic, BrainCircuit, X, MessageCircle, Hand, Bot, CheckCircle, ArrowLeft } from 'lucide-react';
+import { Avatar } from '@/src/components/ui/Avatar';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -102,13 +103,7 @@ export function ChatPanel() {
           <button onClick={() => setActiveTicket(null)} className="lg:hidden -ml-1 p-1 text-zinc-400 hover:text-zinc-100" aria-label="Voltar">
             <ArrowLeft className="h-5 w-5" />
           </button>
-          {activeContact.avatar ? (
-            <img src={activeContact.avatar} alt="" className="h-10 w-10 rounded-full border border-zinc-800" />
-          ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800">
-              <User className="h-5 w-5 text-zinc-400" />
-            </div>
-          )}
+          <Avatar name={activeContact.name} src={activeContact.avatar} size={40} className="border border-zinc-800" />
           <div>
             <h3 className="font-medium text-zinc-100">{activeContact.name}</h3>
             <span className="text-xs text-zinc-500">{activeContact.number}</span>

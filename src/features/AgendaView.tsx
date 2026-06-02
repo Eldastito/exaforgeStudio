@@ -4,6 +4,7 @@ import { Button } from '@/src/components/ui/button';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useStore } from '@/src/store/useStore';
+import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
 
 export function AgendaView() {
@@ -101,9 +102,11 @@ export function AgendaView() {
 
       <div className="space-y-4">
         {appointments.length === 0 ? (
-          <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">
-            Nenhum agendamento programado.
-          </div>
+          <EmptyState
+            icon={<CalendarIcon className="w-6 h-6" />}
+            title="Nenhum agendamento programado"
+            description="Quando a IA marcar um horário com um cliente pelo WhatsApp (ou você criar manualmente), ele aparece aqui. Ative os lembretes automáticos para reduzir faltas."
+          />
         ) : (
           appointments.map(a => (
             <div key={a.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 flex align-middle justify-between">

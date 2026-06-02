@@ -611,6 +611,61 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar tabelas de cadências', e); }
   // Cadências só disparam para leads com score >= min_lead_score (0 = todos).
   try { db.exec(`ALTER TABLE cadences ADD COLUMN min_lead_score INTEGER DEFAULT 0`); } catch(e){}
+
+  // ===== Loja virtual / Landing Page "Glass Toggle" =====
+  // Vitrine pública por organização. O dono configura tema, slug e quais
+  // produtos exibir; o cliente acessa via link gerado pela IA.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS storefront_settings (
+        organization_id TEXT PRIMARY KEY,
+        slug TEXT UNIQUE,
+        title TEXT,
+        subtitle TEXT,
+        logo_url TEXT,
+        banner_url TEXT,
+        accent_color TEXT DEFAULT '#ec4899',
+        default_mode TEXT DEFAULT 'night',     -- 'day' | 'night' (estado inicial do Glass Toggle)
+        whatsapp_number TEXT,                  -- número p/ finalizar a compra (IA cobra)
+        published INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      -- Múltiplas imagens por produto (a 1ª, menor position, é a capa).
+      CREATE TABLE IF NOT EXISTS product_images (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        position INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_service_id);
+      -- Token público que amarra um acesso da vitrine a um contato/ticket do WhatsApp.
+      CREATE TABLE IF NOT EXISTS storefront_links (
+        token TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        ticket_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_links_org ON storefront_links(organization_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas da loja virtual', e); }
+
+  // Modo de venda por produto: define o seletor que a vitrine mostra.
+  //   unit   -> quantidade simples (un.)
+  //   size   -> tamanhos (P/M/G...) em sale_options_json.sizes
+  //   weight -> peso (price é por kg); sale_options_json.steps = [100,250,500,1000] em gramas
+  //   volume -> volume (price por litro); sale_options_json.steps em ml
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN sale_mode TEXT DEFAULT 'unit'`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN sale_options_json TEXT`); } catch(e){}
+  // Visibilidade e destaque na vitrine.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_visible INTEGER DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN featured INTEGER DEFAULT 0`); } catch(e){}
+  // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_label TEXT`); } catch(e){}
 };
 
 initDb();

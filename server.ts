@@ -25,6 +25,8 @@ import paymentsRoutes from "./src/server/routes/payments.js";
 import cadencesRoutes from "./src/server/routes/cadences.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
+import storefrontRoutes from "./src/server/routes/storefront.js";
+import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
@@ -285,6 +287,10 @@ async function startServer() {
 
   app.use("/api/auth", authRoutes);
 
+  // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
+  // autenticado para que /api/public/* nunca exija JWT.
+  app.use("/api/public", storefrontPublicRoutes);
+
   // Apply Auth Middleware to all subsequent protected API routes
   const protectedApi = express.Router();
   protectedApi.use(requireAuth);
@@ -311,6 +317,7 @@ async function startServer() {
   protectedApi.use("/ai", aiRoutes);
   protectedApi.use("/cadences", cadencesRoutes);
   protectedApi.use("/plans", plansRoutes);
+  protectedApi.use("/storefront", storefrontRoutes);
 
   // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS
   // (Evolution, Meta) que NÃO enviam JWT. Elas são registradas abaixo, em `app`.

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toast } from '@/src/lib/toast';
 import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
@@ -81,12 +82,12 @@ export function CatalogView() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`Importação concluída: ${data.created} criados, ${data.updated} atualizados.`);
+        toast.success(`Importação concluída: ${data.created} criados, ${data.updated} atualizados.`);
         setShowImport(false); setCsv(''); loadProducts();
       } else {
-        alert(data.error || 'Erro na importação');
+        toast.error(data.error || 'Erro na importação');
       }
-    } catch (e) { alert('Erro na importação'); }
+    } catch (e) { toast.error('Erro na importação'); }
     finally { setImporting(false); }
   };
 

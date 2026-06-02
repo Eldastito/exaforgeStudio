@@ -11,6 +11,7 @@ import {
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
+import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
 import { CheckCircle2, Circle, ArrowRight, Rocket, X } from 'lucide-react';
 
@@ -197,7 +198,7 @@ export function DashboardPanel() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
-      alert('Não foi possível gerar o PDF.');
+      toast.error('Não foi possível gerar o PDF.');
     } finally {
       setExporting(false);
     }

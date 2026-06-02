@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
+import { toast, confirmDialog } from '@/src/lib/toast';
 
 import { UsersSettingsView } from './UsersSettingsView';
 
@@ -39,7 +40,7 @@ export function SettingsView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       });
-      alert('Configurações salvas com sucesso!');
+      toast.success('Configurações salvas com sucesso!');
     } catch (e) {
       console.error(e);
     } finally {
@@ -223,7 +224,7 @@ function BillingPanel() {
 
   const choose = async (planId: string) => {
     if (snap?.plan?.id === planId) return;
-    if (!window.confirm('Confirmar troca de plano?')) return;
+    if (!(await confirmDialog('Confirmar troca de plano?', {}))) return;
     setSelecting(planId);
     try {
       await fetch('/api/plans/select', {

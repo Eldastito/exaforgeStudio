@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Plus, ArrowDownToLine, ArrowUpFromLine, RotateCcw } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { toast } from '@/src/lib/toast';
 
 type Product = { id: string; name: string; quantity_available?: number; sellable?: number | null };
 
@@ -33,19 +34,19 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
     });
     const d = await res.json().catch(() => ({}));
     if (res.ok) { setMov({ ...mov, quantity: '', unit_cost: '', note: '' }); load(); }
-    else alert(d.error || 'Erro ao registrar movimentação');
+    else toast.error(d.error || 'Erro ao registrar movimentação');
   };
 
   const addVariant = async () => {
     const label = [vform.size, vform.color, vform.variant_type].filter(Boolean).join(' / ');
-    if (!label) { alert('Informe tamanho, cor ou tipo.'); return; }
+    if (!label) { toast.info('Informe tamanho, cor ou tipo.'); return; }
     const res = await apiFetch(`/api/products/${product.id}/variants`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...vform, price: vform.price ? parseFloat(vform.price) : undefined, initial_stock: vform.initial_stock ? parseInt(vform.initial_stock, 10) : 0 }),
     });
     const d = await res.json().catch(() => ({}));
     if (res.ok) { setVform({ size: '', color: '', variant_type: '', price: '', initial_stock: '' }); load(); }
-    else alert(d.error || 'Erro ao criar variação');
+    else toast.error(d.error || 'Erro ao criar variação');
   };
 
   return (

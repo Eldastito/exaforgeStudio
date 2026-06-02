@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Instagram, Copy, Check, ExternalLink } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { toast } from '@/src/lib/toast';
 
 /**
  * Conexão real do Instagram Direct por CREDENCIAIS (sem OAuth).
@@ -17,7 +18,7 @@ export function InstagramConnectModal({ onClose, onConnected }: { onClose: () =>
 
   const connect = async () => {
     if (!form.igBusinessId.trim() || !form.pageToken.trim()) {
-      alert('Informe o Instagram Business ID e o Token da Página.');
+      toast.info('Informe o Instagram Business ID e o Token da Página.');
       return;
     }
     setSaving(true);
@@ -34,8 +35,8 @@ export function InstagramConnectModal({ onClose, onConnected }: { onClose: () =>
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok) { onConnected(); onClose(); }
-      else alert(d.error || 'Erro ao conectar Instagram');
-    } catch (e) { alert('Erro ao conectar Instagram'); }
+      else toast.error(d.error || 'Erro ao conectar Instagram');
+    } catch (e) { toast.error('Erro ao conectar Instagram'); }
     finally { setSaving(false); }
   };
 
@@ -60,8 +61,8 @@ export function InstagramConnectModal({ onClose, onConnected }: { onClose: () =>
                 const res = await apiFetch('/api/integrations/instagram/login-url');
                 const d = await res.json();
                 if (d.url) { window.location.href = d.url; }
-                else alert(d.error || 'Configure as credenciais do app da Meta no servidor.');
-              } catch (e) { alert('Erro ao iniciar o login do Instagram.'); }
+                else toast.info(d.error || 'Configure as credenciais do app da Meta no servidor.');
+              } catch (e) { toast.error('Erro ao iniciar o login do Instagram.'); }
             }}
             className="w-full bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white">
             <Instagram className="w-4 h-4 mr-2" /> Entrar com Instagram

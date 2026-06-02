@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus } from 'lucide-react';
+import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus, Copy, Check } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 
@@ -11,6 +11,7 @@ export function UsersSettingsView() {
   const [loading, setLoading] = useState(true);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('agent');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Gestores do Zapp (números de WhatsApp autorizados a usar a IA de gestão)
   const [managers, setManagers] = useState<any[]>([]);
@@ -75,6 +76,26 @@ export function UsersSettingsView() {
     fetchManagers();
   }, []);
 
+  // Como o app não envia e-mail, o link de convite precisa ser compartilhado
+  // manualmente. O link abre a tela de cadastro já com o código preenchido.
+  const buildInviteLink = (token: string, email: string) =>
+    `${window.location.origin}/?invite=${encodeURIComponent(token)}&email=${encodeURIComponent(email || '')}`;
+
+  const copyText = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* noop */ }
+      document.body.removeChild(ta);
+    }
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(prev => (prev === id ? null : prev)), 2000);
+  };
+
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -84,9 +105,17 @@ export function UsersSettingsView() {
         body: JSON.stringify({ email: inviteEmail, role: inviteRole })
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        const email = data.email || inviteEmail;
         setInviteEmail('');
-        fetchData();
-        alert('Convite enviado!');
+        await fetchData();
+        if (data.token) {
+          const link = buildInviteLink(data.token, email);
+          await copyText(link, 'new');
+          alert(`Convite criado! O link foi copiado para a área de transferência.\n\nComo o app não envia e-mail, envie este link para a pessoa:\n\n${link}`);
+        } else {
+          alert('Convite criado!');
+        }
       } else {
         const error = await res.json();
         alert(error.error || 'Erro ao convidar');
@@ -241,7 +270,10 @@ export function UsersSettingsView() {
       {/* Invites List */}
       {invites.length > 0 && (
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden mt-8">
-          <h4 className="px-4 py-3 border-b border-zinc-800 text-sm font-medium text-zinc-300 bg-zinc-950">Convites Pendentes</h4>
+          <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-950">
+            <h4 className="text-sm font-medium text-zinc-300">Convites Pendentes</h4>
+            <p className="text-xs text-zinc-500 mt-0.5">O app não envia e-mail. Copie o link e envie para a pessoa (WhatsApp, e-mail, etc.) — ele abre o cadastro com o código já preenchido.</p>
+          </div>
           <table className="w-full text-left text-sm">
             <tbody className="divide-y divide-zinc-800/50">
               {invites.map(i => (
@@ -249,6 +281,20 @@ export function UsersSettingsView() {
                   <td className="px-4 py-3 text-zinc-400">{i.email}</td>
                   <td className="px-4 py-3 capitalize text-zinc-500">{i.role}</td>
                   <td className="px-4 py-3 text-zinc-500 text-xs">Expira em: {new Date(i.expires_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 text-right">
+                    {i.token && (
+                      <button
+                        type="button"
+                        onClick={() => copyText(buildInviteLink(i.token, i.email), i.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-indigo-500/50 hover:text-white"
+                        title="Copiar link de convite"
+                      >
+                        {copiedId === i.id
+                          ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado!</>
+                          : <><Copy className="w-3.5 h-3.5" /> Copiar link</>}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

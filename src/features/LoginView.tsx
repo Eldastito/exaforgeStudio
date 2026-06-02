@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { Button } from '@/src/components/ui/button';
 import { Eye, EyeOff } from 'lucide-react';
@@ -22,6 +22,24 @@ export function LoginView() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // Link de convite: ?invite=TOKEN&email=... abre o cadastro já preenchido.
+  // (o app não envia e-mail, então o owner compartilha esse link manualmente)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const invite = params.get('invite') || params.get('token');
+      const inviteEmail = params.get('email');
+      if (invite) {
+        setView('register');
+        setHasInvite(true);
+        setInviteToken(invite);
+        if (inviteEmail) setEmail(inviteEmail);
+        // Limpa a URL para não deixar o código exposto no histórico/barra.
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch { /* noop */ }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

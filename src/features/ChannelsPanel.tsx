@@ -21,11 +21,14 @@ export function ChannelsPanel() {
   const [evolutionQr, setEvolutionQr] = useState<string | null>(null);
   const [showInstagram, setShowInstagram] = useState(false);
   const [forwardWhats, setForwardWhats] = useState('');
+  const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
+  const [docAreaId, setDocAreaId] = useState('');
 
   useEffect(() => {
     fetchChannels();
     loadRagDocuments();
     apiFetch('/api/channels/forward-whatsapp').then(r => r.json()).then(d => setForwardWhats(d.forward_whatsapp || '')).catch(() => {});
+    apiFetch('/api/areas').then(r => r.json()).then(d => setAreas(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
 
   const saveForward = async () => {
@@ -53,6 +56,7 @@ export function ChannelsPanel() {
     const formData = new FormData();
     formData.append('document', file);
     formData.append('channelId', 'global');
+    if (docAreaId) formData.append('areaId', docAreaId);
 
     try {
       const response = await apiFetch('/api/rag/upload', {
@@ -461,14 +465,16 @@ export function ChannelsPanel() {
                  <h4 className="text-sm font-medium text-slate-200">Gerenciamento de Documentos</h4>
                  <p className="text-xs text-slate-500 mt-1">Faça upload de FAQs, catálogos e regras de negócio para treinar a IA do seu atendimento.</p>
               </div>
-               <div className="flex items-center gap-3 text-sm">
-                 <span className="text-slate-400">Canal:</span>
-                 <select className="bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2">
-                    <option>Global (Todos os Canais)</option>
-                    <option>Somente WhatsApp</option>
-                    <option>Somente Instagram</option>
-                 </select>
-               </div>
+               {areas.length > 0 && (
+                 <div className="flex items-center gap-3 text-sm">
+                   <span className="text-slate-400">Área:</span>
+                   <select value={docAreaId} onChange={(e) => setDocAreaId(e.target.value)}
+                     className="bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg focus:ring-primary focus:border-primary block p-2">
+                      <option value="">Geral (todas as áreas)</option>
+                      {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                   </select>
+                 </div>
+               )}
             </div>
             
             <div className="p-6">

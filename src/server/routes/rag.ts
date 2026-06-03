@@ -38,7 +38,7 @@ router.get("/documents", (req: AuthRequest, res): any => {
 
   try {
     const docs = db.prepare(`
-      SELECT id, title AS name, status, channel_id, chunk_count, size_bytes, created_at
+      SELECT id, title AS name, status, channel_id, area_id, chunk_count, size_bytes, created_at
       FROM knowledge_documents
       WHERE organization_id = ?
       ORDER BY created_at DESC
@@ -61,7 +61,8 @@ router.post("/upload", upload.single("document"), async (req: AuthRequest, res):
       return res.status(400).json({ error: "Formato não suportado. Envie .txt, .csv, .md ou .json." });
     }
     const channelId = req.body.channelId || 'global';
-    const result = await processDocument(req.file.buffer, req.file.originalname, orgId, channelId);
+    const areaId = req.body.areaId ? String(req.body.areaId) : null;
+    const result = await processDocument(req.file.buffer, req.file.originalname, orgId, channelId, areaId);
     logAuthEvent(orgId, userId, result.documentId, 'RAG_DOCUMENT_UPLOADED', { name: req.file.originalname, chunks: result.chunksProcessed });
     res.json({ message: "Documento vetorizado com sucesso", ...result });
   } catch (e: any) {
@@ -76,11 +77,11 @@ router.post("/documents", async (req: AuthRequest, res): Promise<any> => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { name, content, channelId } = req.body;
+  const { name, content, channelId, areaId } = req.body;
   if (!name || !content) return res.status(400).json({ error: "Missing name or content" });
 
   try {
-    const result = await processDocument(Buffer.from(String(content), 'utf-8'), name, orgId, channelId || 'global');
+    const result = await processDocument(Buffer.from(String(content), 'utf-8'), name, orgId, channelId || 'global', areaId ? String(areaId) : null);
     logAuthEvent(orgId, userId, result.documentId, 'RAG_DOCUMENT_CREATED', { name, chunks: result.chunksProcessed });
     res.json({ success: true, ...result });
   } catch (e: any) {

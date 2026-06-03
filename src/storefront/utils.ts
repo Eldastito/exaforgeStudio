@@ -48,6 +48,7 @@ export function unitPriceLabel(p: Product): string {
   const base = formatBRL(p.price, p.currency);
   if (p.sale_mode === 'weight') return `${base}/kg`;
   if (p.sale_mode === 'volume') return `${base}/L`;
+  if (p.sale_mode === 'slice') return `${base}/fatia`;
   return base;
 }
 

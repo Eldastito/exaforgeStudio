@@ -157,17 +157,9 @@ export function CatalogView() {
             <div key={p.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors group">
               <div className="flex justify-between items-start mb-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">{p.type}</span>
-                <div className="flex items-center gap-2.5">
-                  <button onClick={() => setStockProduct(p)} className="text-zinc-400 hover:text-emerald-400" title="Estoque, variações e movimentações">
-                    <Boxes className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => openEdit(p)} className="text-zinc-400 hover:text-indigo-400" title="Editar">
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => handleDelete(p)} className="text-zinc-400 hover:text-rose-400" title="Excluir">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <button onClick={() => setStockProduct(p)} className="text-zinc-400 hover:text-emerald-400" title="Estoque, variações e movimentações">
+                  <Boxes className="w-4 h-4" />
+                </button>
               </div>
               <h3 className="font-semibold text-zinc-100 mt-2">{p.name}</h3>
               <p className="text-zinc-500 text-sm mt-1 line-clamp-2">{p.description || 'Sem descrição'}</p>
@@ -185,6 +177,17 @@ export function CatalogView() {
               {p.stock_control_enabled && (p.quantity_reserved ?? 0) > 0 && (
                 <p className="mt-1 text-[11px] text-amber-400/80">{p.quantity_reserved} reservado(s) em pedidos</p>
               )}
+              {/* Ações do card — sempre visíveis e rotuladas */}
+              <div className="mt-4 grid grid-cols-2 gap-2 border-t border-zinc-800 pt-3">
+                <button onClick={() => openEdit(p)}
+                  className="inline-flex items-center justify-center gap-1.5 text-sm rounded-lg border border-zinc-700 text-zinc-200 hover:border-indigo-500/50 hover:text-indigo-300 py-1.5 transition-colors">
+                  <Pencil className="w-4 h-4" /> Editar
+                </button>
+                <button onClick={() => handleDelete(p)}
+                  className="inline-flex items-center justify-center gap-1.5 text-sm rounded-lg border border-zinc-700 text-zinc-200 hover:border-rose-500/50 hover:text-rose-300 py-1.5 transition-colors">
+                  <Trash2 className="w-4 h-4" /> Excluir
+                </button>
+              </div>
             </div>
           ))
         )}

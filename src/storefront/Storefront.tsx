@@ -179,16 +179,13 @@ export function Storefront() {
 
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
 
-  // Ordena: destaques primeiro, depois disponíveis.
+  // Mantém a ordem definida pelo lojista (storefront_position, já aplicada no
+  // backend); só empurra os esgotados para o fim.
   const products = useMemo(() => {
     if (!data) return [];
     let list = [...data.products];
     if (onlyFavs) list = list.filter((p) => favorites.includes(p.id));
-    list.sort((a, b) => {
-      if (a.featured !== b.featured) return a.featured ? -1 : 1;
-      if (a.available !== b.available) return a.available ? -1 : 1;
-      return 0;
-    });
+    list.sort((a, b) => (a.available === b.available ? 0 : a.available ? -1 : 1));
     return list;
   }, [data, onlyFavs, favorites]);
 

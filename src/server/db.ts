@@ -723,6 +723,8 @@ const initDb = () => {
   // Visibilidade e destaque na vitrine.
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_visible INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE products_services ADD COLUMN featured INTEGER DEFAULT 0`); } catch(e){}
+  // Ordem manual dos produtos na vitrine (drag-and-drop).
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_position INTEGER`); } catch(e){}
   // Coleções manuais: lista ordenada de IDs de produto escolhidos a dedo.
   try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.

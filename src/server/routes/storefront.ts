@@ -186,20 +186,34 @@ router.get("/analytics", (req: AuthRequest, res): any => {
 router.get("/products", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);
   const products = db.prepare(
-    "SELECT * FROM products_services WHERE organization_id = ? AND type = 'product' ORDER BY name ASC"
+    "SELECT * FROM products_services WHERE organization_id = ? AND type = 'product' ORDER BY COALESCE(storefront_position, 999999) ASC, name ASC"
   ).all(orgId) as any[];
   const imgsByProduct: Record<string, any[]> = {};
   for (const img of db.prepare("SELECT * FROM product_images WHERE organization_id = ? ORDER BY position ASC", ).all(orgId) as any[]) {
     (imgsByProduct[img.product_service_id] ||= []).push({ id: img.id, url: img.url, position: img.position });
   }
   res.json(products.map(p => ({
-    id: p.id, name: p.name, price: p.price, currency: p.currency,
+    id: p.id, name: p.name, price: p.price, currency: p.currency, description: p.description || "",
     sale_mode: p.sale_mode || "unit",
     sale_options: (() => { try { return p.sale_options_json ? JSON.parse(p.sale_options_json) : {}; } catch { return {}; } })(),
     storefront_visible: p.storefront_visible == null ? 1 : p.storefront_visible,
     featured: !!p.featured,
     images: imgsByProduct[p.id] || [],
   })));
+});
+
+// PUT /api/storefront/products/reorder -> ordem manual dos produtos na vitrine.
+// Body: { ids: [...] } na ordem desejada. Registrada ANTES de /products/:id.
+router.put("/products/reorder", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: any) => typeof x === 'string') : [];
+  const tx = db.transaction(() => {
+    ids.forEach((id, i) => {
+      db.prepare("UPDATE products_services SET storefront_position = ? WHERE id = ? AND organization_id = ?").run(i, id, orgId);
+    });
+  });
+  tx();
+  res.json({ success: true });
 });
 
 // POST /api/storefront/ai/featured -> curadoria de DESTAQUES pela IA.

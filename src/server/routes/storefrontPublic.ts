@@ -131,7 +131,7 @@ router.get("/store/:slug", (req, res): any => {
     `SELECT * FROM products_services
       WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1
         AND type = 'product'
-      ORDER BY featured DESC, name ASC`
+      ORDER BY COALESCE(storefront_position, 999999) ASC, name ASC`
   ).all(orgId) as any[];
 
   // Valida o token de contato (se veio) — só para registrar de quem é o acesso.

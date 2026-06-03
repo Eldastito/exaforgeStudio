@@ -5,10 +5,53 @@ import { AuthRequest } from "../middleware/auth.js";
 import { BackupService } from "../BackupService.js";
 import { NotificationService } from "../NotificationService.js";
 import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret } from "../webhookSecurity.js";
+import { GoogleOAuthService } from "../GoogleOAuthService.js";
 
 const router = Router();
 
 const APP_BASE = (process.env.APP_URL || "").replace(/\/$/, "");
+
+// ===== Google Workspace (OAuth server-side, acesso offline) =====
+// GET status da conexão Google
+router.get("/google/status", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(GoogleOAuthService.status(req.organizationId));
+});
+
+// GET URL de consentimento (inicia a conexão server-side)
+router.get("/google/login-url", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!GoogleOAuthService.isConfigured()) {
+    return res.status(400).json({ error: "Integração Google não configurada no servidor (defina GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e APP_URL)." });
+  }
+  res.json({ url: GoogleOAuthService.authUrl(req.organizationId) });
+});
+
+// POST desconectar
+router.post("/google/disconnect", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  GoogleOAuthService.disconnect(req.organizationId);
+  res.json({ success: true });
+});
+
+// POST /backups/:id/drive -> envia o backup para o Google Drive do dono.
+router.post("/backups/:id/drive", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const job = db.prepare("SELECT * FROM backup_jobs WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
+  if (!job || !job.file_url) return res.status(404).json({ error: "Backup não encontrado." });
+  const fullPath = BackupService.resolveFile(orgId, job.file_url);
+  if (!fullPath) return res.status(404).json({ error: "Arquivo do backup não encontrado." });
+  try {
+    const fs = await import("fs");
+    const content = fs.readFileSync(fullPath);
+    const result = await GoogleOAuthService.driveUpload(orgId, job.file_url, "application/json", content);
+    if ("error" in result) return res.status(400).json({ error: result.error });
+    res.json({ success: true, link: result.link });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao enviar ao Drive." });
+  }
+});
 
 // GET /api/integrations/whatsapp-webhook -> URL pronta (com segredo) + status.
 // Permite ativar a exigência do segredo sem mexer em variáveis de ambiente.

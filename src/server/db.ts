@@ -746,6 +746,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_position INTEGER`); } catch(e){}
   // Área de atendimento à qual a conversa foi direcionada.
   try { db.exec(`ALTER TABLE tickets ADD COLUMN area_id TEXT`); } catch(e){}
+  // Conta vinculada nas conexões OAuth (ex.: e-mail/nome do Google).
+  try { db.exec(`ALTER TABLE oauth_connections ADD COLUMN account_email TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE oauth_connections ADD COLUMN account_name TEXT`); } catch(e){}
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

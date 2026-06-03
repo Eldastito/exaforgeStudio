@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil, Tag, BarChart3 } from 'lucide-react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil, Tag, BarChart3, GripVertical } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
@@ -97,6 +98,21 @@ export function StorefrontSettingsView() {
     setCollections((list) => list.filter((c) => c.id !== id));
     try { await apiFetch(`/api/storefront/collections/${id}`, { method: 'DELETE' }); }
     catch (e) { toast.error('Erro ao remover coleção'); loadCollections(); }
+  };
+
+  // Reordena as coleções (drag-and-drop). A ordem definida aqui é a ordem de
+  // exibição na vitrine pública.
+  const onDragEndCollections = (result: DropResult) => {
+    if (!result.destination || result.destination.index === result.source.index) return;
+    const next = [...collections];
+    const [moved] = next.splice(result.source.index, 1);
+    next.splice(result.destination.index, 0, moved);
+    setCollections(next); // otimista
+    apiFetch('/api/storefront/collections/reorder', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: next.map((c) => c.id) }),
+    }).then((r) => { if (!r.ok) { toast.error('Erro ao salvar a ordem.'); loadCollections(); } })
+      .catch(() => { toast.error('Erro ao salvar a ordem.'); loadCollections(); });
   };
 
   const loadProducts = async () => {
@@ -462,26 +478,51 @@ export function StorefrontSettingsView() {
           {collections.length === 0 ? (
             <p className="text-sm text-zinc-500 py-4">Nenhuma coleção ainda. Use <span className="text-indigo-300">Montar coleções (IA)</span> ou crie uma <span className="text-zinc-300">Coleção manual</span>.</p>
           ) : (
-            <div className="space-y-2 mt-3">
-              {collections.map((c) => (
-                <div key={c.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5">
-                  <div>
-                    <p className="text-sm text-zinc-100 font-medium">{c.title}</p>
-                    <p className="text-[11px] text-zinc-500">
-                      {RULE_LABEL[c.rule] || c.rule}{c.rule === 'manual' ? ` — ${(c.productIds || []).length} produto(s)` : ''}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {c.rule === 'manual' && (
-                      <button onClick={() => { setManualEditing({ id: c.id, title: c.title, productIds: c.productIds || [] }); setShowManual(true); }}
-                        title="Editar coleção" className="text-zinc-400 hover:text-indigo-400"><Pencil className="w-4 h-4" /></button>
-                    )}
-                    <button onClick={() => deleteCollection(c.id)} title="Remover coleção"
-                      className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <>
+              <p className="text-[11px] text-zinc-500 mt-3 mb-1.5">Arraste para definir a ordem em que as seções aparecem na vitrine (de cima para baixo).</p>
+              <DragDropContext onDragEnd={onDragEndCollections}>
+                <Droppable droppableId="collections">
+                  {(dropProvided) => (
+                    <div ref={dropProvided.innerRef} {...dropProvided.droppableProps} className="space-y-2">
+                      {collections.map((c, index) => (
+                        // @ts-expect-error React 18+ types issue with hello-pangea/dnd
+                        <Draggable key={c.id} draggableId={c.id} index={index}>
+                          {(dragProvided, snapshot) => (
+                            <div
+                              ref={dragProvided.innerRef}
+                              {...dragProvided.draggableProps}
+                              className={`flex items-center justify-between rounded-lg border bg-zinc-950/40 px-3 py-2.5 ${snapshot.isDragging ? 'border-indigo-500/50 shadow-lg' : 'border-zinc-800'}`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span {...dragProvided.dragHandleProps} className="cursor-grab text-zinc-500 hover:text-zinc-300 active:cursor-grabbing" title="Arrastar para reordenar">
+                                  <GripVertical className="w-4 h-4" />
+                                </span>
+                                <span className="text-xs text-zinc-600 w-4 text-right">{index + 1}.</span>
+                                <div className="min-w-0">
+                                  <p className="text-sm text-zinc-100 font-medium truncate">{c.title}</p>
+                                  <p className="text-[11px] text-zinc-500 truncate">
+                                    {RULE_LABEL[c.rule] || c.rule}{c.rule === 'manual' ? ` — ${(c.productIds || []).length} produto(s)` : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                {c.rule === 'manual' && (
+                                  <button onClick={() => { setManualEditing({ id: c.id, title: c.title, productIds: c.productIds || [] }); setShowManual(true); }}
+                                    title="Editar coleção" className="text-zinc-400 hover:text-indigo-400"><Pencil className="w-4 h-4" /></button>
+                                )}
+                                <button onClick={() => deleteCollection(c.id)} title="Remover coleção"
+                                  className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+                              </div>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {dropProvided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
+            </>
           )}
         </section>
 

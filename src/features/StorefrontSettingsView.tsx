@@ -61,6 +61,18 @@ export function StorefrontSettingsView() {
 
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+
+  const loadProducts = async () => {
+    try {
+      const data = await apiFetch('/api/storefront/products').then((r) => r.json());
+      setProducts(Array.isArray(data) ? data.map(normalizeProduct) : []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -78,14 +90,7 @@ export function StorefrontSettingsView() {
       .catch((e) => console.error(e))
       .finally(() => active && setLoadingSettings(false));
 
-    apiFetch('/api/storefront/products')
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active) return;
-        setProducts(Array.isArray(data) ? data.map(normalizeProduct) : []);
-      })
-      .catch((e) => console.error(e))
-      .finally(() => active && setLoadingProducts(false));
+    loadProducts();
 
     return () => {
       active = false;
@@ -315,7 +320,12 @@ export function StorefrontSettingsView() {
 
         {/* Produtos na vitrine */}
         <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
-          <h3 className="text-lg font-semibold text-zinc-100 mb-4">Produtos na vitrine</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-zinc-100">Produtos na vitrine</h3>
+            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => setShowNew(true)}>
+              <Plus className="w-4 h-4 mr-2" /> Novo produto
+            </Button>
+          </div>
 
           {loadingProducts ? (
             <div className="flex items-center gap-2 text-zinc-400 py-8 justify-center">
@@ -325,8 +335,8 @@ export function StorefrontSettingsView() {
             <div className="grid grid-cols-1">
               <EmptyState
                 icon={<Store className="w-6 h-6" />}
-                title="Nenhum produto disponível"
-                description="Cadastre produtos no Catálogo para poder exibi-los na sua loja virtual."
+                title="Nenhum produto ainda"
+                description="Crie um produto aqui (ou no Catálogo) para exibi-lo na sua loja virtual."
               />
             </div>
           ) : (
@@ -337,6 +347,96 @@ export function StorefrontSettingsView() {
             </div>
           )}
         </section>
+      </div>
+
+      {showNew && (
+        <NewProductModal
+          onClose={() => setShowNew(false)}
+          onCreated={() => { setShowNew(false); loadProducts(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal enxuto para criar um produto direto da tela da loja. Depois de criado,
+// o dono ajusta imagens e modo de venda na própria linha do produto.
+function NewProductModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [description, setDescription] = useState('');
+  const [saleMode, setSaleMode] = useState<'unit' | 'size' | 'weight' | 'volume'>('unit');
+  const [saving, setSaving] = useState(false);
+
+  const priceHint =
+    saleMode === 'weight' ? 'Preço por quilo (kg)'
+    : saleMode === 'volume' ? 'Preço por litro (L)'
+    : 'Preço por unidade';
+
+  const create = async () => {
+    if (!name.trim()) { toast.error('Informe o nome do produto.'); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'product', name: name.trim(), description: description.trim(),
+          price: Number(price) || 0, stock_control_enabled: false,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.id) { toast.error(data?.error || 'Erro ao criar produto.'); return; }
+      // Define o modo de venda escolhido (se não for o padrão).
+      if (saleMode !== 'unit') {
+        await apiFetch(`/api/storefront/products/${data.id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sale_mode: saleMode }),
+        }).catch(() => {});
+      }
+      toast.success('Produto criado! Agora adicione fotos e ajuste as opções.');
+      onCreated();
+    } catch {
+      toast.error('Erro ao criar produto.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">Novo produto</h3>
+          <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>
+        </div>
+        <div className="space-y-3">
+          <Field label="Nome">
+            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Camiseta Premium" autoFocus />
+          </Field>
+          <Field label="Descrição (opcional)">
+            <input className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Breve descrição" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Modo de venda">
+              <select className={inputClass} value={saleMode} onChange={(e) => setSaleMode(e.target.value as any)}>
+                <option value="unit">Unidade</option>
+                <option value="size">Tamanho (P/M/G)</option>
+                <option value="weight">Peso (kg)</option>
+                <option value="volume">Volume (L)</option>
+              </select>
+            </Field>
+            <Field label={priceHint}>
+              <input className={inputClass} type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0,00" />
+            </Field>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={create} disabled={saving}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Criar produto'}
+          </Button>
+        </div>
       </div>
     </div>
   );

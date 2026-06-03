@@ -174,4 +174,70 @@ export class GoogleOAuthService {
       return { error: "Erro de rede ao enviar ao Drive." };
     }
   }
+
+  // ---- Google Calendar ----
+  static async calendarCreateEvent(orgId: string, ev: { summary: string; description?: string; start: string; end: string }): Promise<{ id: string; link: string } | { error: string }> {
+    const token = await this.getAccessToken(orgId);
+    if (!token) return { error: "Conta Google não conectada." };
+    const body = {
+      summary: ev.summary || "Agendamento",
+      description: ev.description || "",
+      start: { dateTime: ev.start, timeZone: "America/Sao_Paulo" },
+      end: { dateTime: ev.end, timeZone: "America/Sao_Paulo" },
+    };
+    try {
+      const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok || !data.id) { console.error("[Google Calendar] criar evento falhou:", data); return { error: data?.error?.message || "Falha ao criar evento." }; }
+      return { id: data.id, link: data.htmlLink || "" };
+    } catch (e: any) {
+      console.error("[Google Calendar] erro:", e);
+      return { error: "Erro de rede ao criar evento." };
+    }
+  }
+
+  static async calendarDeleteEvent(orgId: string, eventId: string): Promise<boolean> {
+    const token = await this.getAccessToken(orgId);
+    if (!token || !eventId) return false;
+    try {
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.ok || res.status === 410; // 410 = já removido
+    } catch { return false; }
+  }
+
+  // Cria o evento no Google Calendar para um agendamento (best-effort) e guarda
+  // o id/link no próprio agendamento. Só faz algo se a conta Google estiver ligada.
+  static async syncAppointment(orgId: string, appointmentId: string): Promise<void> {
+    try {
+      if (!this.getConnection(orgId)) return;
+      const a = db.prepare("SELECT * FROM appointments WHERE id = ? AND organization_id = ?").get(appointmentId, orgId) as any;
+      if (!a || !a.scheduled_start || a.google_event_id) return;
+      const start = toRfc3339(a.scheduled_start);
+      const end = a.scheduled_end ? toRfc3339(a.scheduled_end) : addOneHour(start);
+      const r = await this.calendarCreateEvent(orgId, { summary: a.title || "Agendamento", description: a.description || "", start, end });
+      if (r && "id" in r) {
+        db.prepare("UPDATE appointments SET google_event_id = ?, google_event_link = ? WHERE id = ?").run(r.id, (r as any).link || "", appointmentId);
+      }
+    } catch (e) { console.error("[Google Calendar] sync appointment:", e); }
+  }
+}
+
+// "2026-06-10 14:00:00" / "2026-06-10T14:00:00Z" -> "2026-06-10T14:00:00" (hora de parede)
+function toRfc3339(v: any): string {
+  return String(v || "").trim().replace(" ", "T").replace(/Z$/, "").slice(0, 19);
+}
+// Soma 1h tratando a string como hora de parede (o timeZone vai junto no evento).
+function addOneHour(rfc: string): string {
+  const [date, time = "00:00:00"] = rfc.split("T");
+  const [Y, Mo, D] = date.split("-").map((n) => parseInt(n, 10));
+  const [h, m, s] = time.split(":").map((n) => parseInt(n, 10) || 0);
+  const dt = new Date(Date.UTC(Y, (Mo || 1) - 1, D || 1, (h || 0) + 1, m, s));
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())}T${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}:${p(dt.getUTCSeconds())}`;
 }

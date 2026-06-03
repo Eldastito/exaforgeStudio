@@ -8,6 +8,7 @@ import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { chat } from "./llm.js";
 import { PlanService } from "./PlanService.js";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 export class AIOrchestratorService {
   /**
@@ -169,7 +170,14 @@ export class AIOrchestratorService {
       orderStatusText = this.orderStatusContext(params.organizationId, params.contactId);
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "");
+    // Agenda do Google: horários já ocupados, para a IA não marcar em cima de
+    // compromissos e oferecer apenas horários livres (best-effort, cacheado).
+    let agendaText = "";
+    if (!isOrchestratorCommand) {
+      try { agendaText = await GoogleOAuthService.getBusyText(params.organizationId); } catch (e) { /* noop */ }
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -745,7 +753,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -817,6 +825,7 @@ ${negotiatorText}
 ${storefrontText}
 ${orderStatusText}
 ${areaPersona}
+${agendaText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}

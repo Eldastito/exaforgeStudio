@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, BellRing, Bell } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, BellRing, Bell, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -11,7 +11,31 @@ export function AgendaView() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', scheduled_start: '', contact_id: '' });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const { contacts } = useStore();
+
+  // ISO -> valor do input datetime-local (YYYY-MM-DDTHH:MM) em horário local.
+  const toLocalInput = (iso: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  const openNew = () => { setEditingId(null); setForm({ title: '', description: '', scheduled_start: '', contact_id: '' }); setShowModal(true); };
+  const openEdit = (a: any) => {
+    setEditingId(a.id);
+    setForm({ title: a.title || '', description: a.description || '', scheduled_start: toLocalInput(a.scheduled_start), contact_id: a.contact_id || '' });
+    setShowModal(true);
+  };
+  const cancelAppointment = async (a: any) => {
+    if (!window.confirm(`Cancelar o agendamento "${a.title}"? Se estiver no Google Calendar, o evento também será removido.`)) return;
+    try {
+      await apiFetch(`/api/appointments/${a.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) });
+      loadAppointments();
+    } catch {}
+  };
   const [reminder, setReminder] = useState<{ enabled: boolean; hours: number; message: string } | null>(null);
 
   const loadAppointments = () => {
@@ -39,15 +63,19 @@ export function AgendaView() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiFetch('/api/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-           ...form,
-           scheduled_start: new Date(form.scheduled_start).toISOString()
-        })
-      });
+      const payload = { ...form, scheduled_start: new Date(form.scheduled_start).toISOString() };
+      if (editingId) {
+        await apiFetch(`/api/appointments/${editingId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: payload.title, description: payload.description, scheduled_start: payload.scheduled_start }),
+        });
+      } else {
+        await apiFetch('/api/appointments', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+      }
       setShowModal(false);
+      setEditingId(null);
       setForm({ title: '', description: '', scheduled_start: '', contact_id: '' });
       loadAppointments();
     } catch(e) { }
@@ -63,7 +91,7 @@ export function AgendaView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Visão geral de agendamentos e entregas</p>
         </div>
-        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setShowModal(true)}>
+        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={openNew}>
           <Plus className="w-4 h-4 mr-2" />
           Novo Agendamento
         </Button>
@@ -121,11 +149,22 @@ export function AgendaView() {
                  </div>
               </div>
               <div className="flex flex-col items-end justify-center gap-1.5">
-                 <span className="text-xs font-semibold uppercase tracking-wider bg-zinc-800 text-zinc-300 px-2 py-1 rounded">
-                    {a.status}
-                 </span>
+                 <div className="flex items-center gap-2">
+                   {a.google_event_link && (
+                     <a href={a.google_event_link} target="_blank" rel="noreferrer" title="Ver no Google Calendar" className="text-blue-400 hover:text-blue-300 text-[10px] underline">no Google</a>
+                   )}
+                   <span className="text-xs font-semibold uppercase tracking-wider bg-zinc-800 text-zinc-300 px-2 py-1 rounded">
+                      {a.status}
+                   </span>
+                 </div>
                  {a.reminder_status === 'sent' && (
                    <span className="text-[10px] inline-flex items-center gap-1 text-emerald-400"><Bell className="w-3 h-3" /> lembrete enviado</span>
+                 )}
+                 {a.status !== 'cancelled' && (
+                   <div className="flex items-center gap-2 mt-1">
+                     <button onClick={() => openEdit(a)} title="Remarcar" className="text-zinc-400 hover:text-indigo-400"><Pencil className="w-4 h-4" /></button>
+                     <button onClick={() => cancelAppointment(a)} title="Cancelar" className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+                   </div>
                  )}
               </div>
             </div>
@@ -137,13 +176,13 @@ export function AgendaView() {
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[400px]">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-zinc-100">Novo Agendamento</h3>
+              <h3 className="text-lg font-semibold text-zinc-100">{editingId ? 'Remarcar agendamento' : 'Novo Agendamento'}</h3>
               <button className="text-zinc-400 hover:text-white" onClick={() => setShowModal(false)}><X className="w-5 h-5"/></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="text-sm text-zinc-400 mb-1 block">Contato</label>
-                <select required className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" 
+                <select required={!editingId} disabled={!!editingId} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 disabled:opacity-60"
                   value={form.contact_id} onChange={(e) => setForm({...form, contact_id: e.target.value})}>
                    <option value="">Selecione um contato</option>
                    {Object.values(contacts).map(c => (
@@ -167,8 +206,8 @@ export function AgendaView() {
                   value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} />
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="ghost" onClick={() => setShowModal(false)}>Cancelar</Button>
-                <Button type="submit" variant="default" className="bg-emerald-600 hover:bg-emerald-700 text-white">Agendar</Button>
+                <Button type="button" variant="ghost" onClick={() => { setShowModal(false); setEditingId(null); }}>Cancelar</Button>
+                <Button type="submit" variant="default" className="bg-emerald-600 hover:bg-emerald-700 text-white">{editingId ? 'Salvar' : 'Agendar'}</Button>
               </div>
             </form>
           </div>

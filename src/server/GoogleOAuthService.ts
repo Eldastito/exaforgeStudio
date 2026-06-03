@@ -226,6 +226,68 @@ export class GoogleOAuthService {
       }
     } catch (e) { console.error("[Google Calendar] sync appointment:", e); }
   }
+
+  // Atualiza o evento (remarcação) ou cria se ainda não existir.
+  static async syncAppointmentUpdate(orgId: string, appointmentId: string): Promise<void> {
+    try {
+      if (!this.getConnection(orgId)) return;
+      const a = db.prepare("SELECT * FROM appointments WHERE id = ? AND organization_id = ?").get(appointmentId, orgId) as any;
+      if (!a || !a.scheduled_start) return;
+      const start = toRfc3339(a.scheduled_start);
+      const end = a.scheduled_end ? toRfc3339(a.scheduled_end) : addOneHour(start);
+      if (!a.google_event_id) { await this.syncAppointment(orgId, appointmentId); return; }
+      const token = await this.getAccessToken(orgId);
+      if (!token) return;
+      const body = {
+        summary: a.title || "Agendamento", description: a.description || "",
+        start: { dateTime: start, timeZone: "America/Sao_Paulo" },
+        end: { dateTime: end, timeZone: "America/Sao_Paulo" },
+      };
+      await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(a.google_event_id)}`, {
+        method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+    } catch (e) { console.error("[Google Calendar] update appointment:", e); }
+  }
+
+  // Remove o evento do Google (cancelamento) e limpa o vínculo no agendamento.
+  static async removeAppointmentEvent(orgId: string, appointmentId: string): Promise<void> {
+    try {
+      const a = db.prepare("SELECT google_event_id FROM appointments WHERE id = ? AND organization_id = ?").get(appointmentId, orgId) as any;
+      if (!a?.google_event_id) return;
+      await this.calendarDeleteEvent(orgId, a.google_event_id);
+      db.prepare("UPDATE appointments SET google_event_id = NULL, google_event_link = NULL WHERE id = ?").run(appointmentId);
+    } catch (e) { console.error("[Google Calendar] remove event:", e); }
+  }
+
+  // ---- Disponibilidade (Free/Busy) para a IA não marcar em cima de compromissos ----
+  private static busyCache = new Map<string, { text: string; exp: number }>();
+
+  static async getBusyText(orgId: string, days = 7): Promise<string> {
+    try {
+      if (!this.getConnection(orgId)) return "";
+      const cached = this.busyCache.get(orgId);
+      if (cached && cached.exp > Date.now()) return cached.text;
+      const token = await this.getAccessToken(orgId);
+      if (!token) return "";
+      const now = new Date();
+      const timeMin = now.toISOString();
+      const timeMax = new Date(now.getTime() + days * 24 * 3600 * 1000).toISOString();
+      const res = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ timeMin, timeMax, timeZone: "America/Sao_Paulo", items: [{ id: "primary" }] }),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      const busy: { start: string; end: string }[] = data?.calendars?.primary?.busy || [];
+      let text = "";
+      if (busy.length) {
+        const fmt = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        const lines = busy.slice(0, 15).map(b => `- ${fmt(b.start)} até ${fmt(b.end)}`);
+        text = `AGENDA DO PROFISSIONAL (Google Calendar) — horários JÁ OCUPADOS nos próximos ${days} dias. NUNCA ofereça nem confirme um horário que caia dentro destes intervalos; sugira horários livres fora deles:\n${lines.join("\n")}`;
+      }
+      this.busyCache.set(orgId, { text, exp: Date.now() + 5 * 60 * 1000 }); // cache 5 min
+      return text;
+    } catch (e) { return ""; }
+  }
 }
 
 // "2026-06-10 14:00:00" / "2026-06-10T14:00:00Z" -> "2026-06-10T14:00:00" (hora de parede)

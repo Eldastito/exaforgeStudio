@@ -56,6 +56,46 @@ function productPayload(orgId: string, p: any): any {
   };
 }
 
+// Resolve as coleções configuradas da loja para listas de IDs de produto,
+// dentro do conjunto visível (active=1 e visível na vitrine). Retorna apenas
+// coleções não-vazias. A LP renderiza cada uma como uma seção com título.
+function resolveCollections(orgId: string): { id: string; title: string; productIds: string[] }[] {
+  const collections = db.prepare(
+    `SELECT id, title, rule FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC`
+  ).all(orgId) as any[];
+  if (collections.length === 0) return [];
+
+  const visibleWhere = `organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1 AND type = 'product'`;
+  const out: { id: string; title: string; productIds: string[] }[] = [];
+
+  for (const c of collections) {
+    let ids: string[] = [];
+    if (c.rule === 'best_sellers') {
+      ids = (db.prepare(
+        `SELECT ps.id FROM products_services ps
+           JOIN (
+             SELECT oi.product_service_id, SUM(oi.quantity) units
+             FROM order_items oi JOIN orders o ON o.id = oi.order_id
+             WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
+             GROUP BY oi.product_service_id
+           ) s ON s.product_service_id = ps.id
+          WHERE ps.${visibleWhere}
+          ORDER BY s.units DESC LIMIT 12`
+      ).all(orgId, orgId) as any[]).map(r => r.id);
+    } else if (c.rule === 'newest') {
+      ids = (db.prepare(
+        `SELECT id FROM products_services WHERE ${visibleWhere} ORDER BY created_at DESC LIMIT 12`
+      ).all(orgId) as any[]).map(r => r.id);
+    } else { // 'featured' (padrão)
+      ids = (db.prepare(
+        `SELECT id FROM products_services WHERE ${visibleWhere} AND featured = 1 ORDER BY name ASC`
+      ).all(orgId) as any[]).map(r => r.id);
+    }
+    if (ids.length) out.push({ id: c.id, title: c.title, productIds: ids });
+  }
+  return out;
+}
+
 // GET /api/public/store/:slug  -> configurações da loja + produtos visíveis
 router.get("/store/:slug", (req, res): any => {
   const store = resolveStore(req.params.slug);
@@ -94,6 +134,7 @@ router.get("/store/:slug", (req, res): any => {
     },
     customer: linkedContact,
     products: products.map(p => productPayload(orgId, p)),
+    collections: resolveCollections(orgId),
   });
 });
 

@@ -671,6 +671,16 @@ const initDb = () => {
         expires_at DATETIME
       );
       CREATE INDEX IF NOT EXISTS idx_storefront_links_org ON storefront_links(organization_id);
+
+      CREATE TABLE IF NOT EXISTS storefront_collections (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        rule TEXT NOT NULL DEFAULT 'featured', -- featured | best_sellers | newest
+        position INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_collections_org ON storefront_collections(organization_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas da loja virtual', e); }
 

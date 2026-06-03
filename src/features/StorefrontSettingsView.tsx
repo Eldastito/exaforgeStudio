@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
@@ -64,6 +64,38 @@ export function StorefrontSettingsView() {
   const [showNew, setShowNew] = useState(false);
   const [curating, setCurating] = useState(false);
   const [curationTips, setCurationTips] = useState<{ name: string; reason: string }[] | null>(null);
+  const [collections, setCollections] = useState<{ id: string; title: string; rule: string }[]>([]);
+  const [buildingCollections, setBuildingCollections] = useState(false);
+
+  const RULE_LABEL: Record<string, string> = {
+    featured: 'Produtos em destaque', best_sellers: 'Mais vendidos', newest: 'Novidades (recém-adicionados)',
+  };
+
+  const loadCollections = async () => {
+    try {
+      const data = await apiFetch('/api/storefront/collections').then((r) => r.json());
+      setCollections(Array.isArray(data) ? data : []);
+    } catch (e) { console.error(e); }
+  };
+
+  const buildCollections = async () => {
+    setBuildingCollections(true);
+    try {
+      const res = await apiFetch('/api/storefront/ai/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao montar coleções.'); return; }
+      await loadCollections();
+      const n = Array.isArray(d.collections) ? d.collections.length : 0;
+      toast.success(n ? `Vitrine organizada em ${n} coleção(ões). ✨` : 'Sem produtos suficientes para montar coleções.');
+    } catch (e) { toast.error('Erro ao montar coleções com a IA'); }
+    finally { setBuildingCollections(false); }
+  };
+
+  const deleteCollection = async (id: string) => {
+    setCollections((list) => list.filter((c) => c.id !== id));
+    try { await apiFetch(`/api/storefront/collections/${id}`, { method: 'DELETE' }); }
+    catch (e) { toast.error('Erro ao remover coleção'); loadCollections(); }
+  };
 
   const loadProducts = async () => {
     try {
@@ -113,6 +145,7 @@ export function StorefrontSettingsView() {
       .finally(() => active && setLoadingSettings(false));
 
     loadProducts();
+    loadCollections();
 
     return () => {
       active = false;
@@ -382,6 +415,36 @@ export function StorefrontSettingsView() {
             <div className="space-y-4">
               {products.map((p: StorefrontProduct) => (
                 <ProductRow key={p.id} product={p} onPatch={(u) => patchProduct(p.id, u)} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Coleções da vitrine (curadoria pela IA) */}
+        <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <div>
+              <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Layers className="w-5 h-5 text-indigo-400" /> Coleções</h3>
+              <p className="text-xs text-zinc-500 mt-0.5">Seções da vitrine (ex.: Destaques, Mais vendidos, Novidades). A IA monta automaticamente a partir do seu catálogo.</p>
+            </div>
+            <Button variant="outline" className="border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10" onClick={buildCollections} disabled={buildingCollections}>
+              <Layers className="w-4 h-4 mr-2" /> {buildingCollections ? 'Montando...' : 'Montar coleções (IA)'}
+            </Button>
+          </div>
+
+          {collections.length === 0 ? (
+            <p className="text-sm text-zinc-500 py-4">Nenhuma coleção ainda. Clique em <span className="text-indigo-300">Montar coleções (IA)</span> para organizar a vitrine automaticamente.</p>
+          ) : (
+            <div className="space-y-2 mt-3">
+              {collections.map((c) => (
+                <div key={c.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5">
+                  <div>
+                    <p className="text-sm text-zinc-100 font-medium">{c.title}</p>
+                    <p className="text-[11px] text-zinc-500">{RULE_LABEL[c.rule] || c.rule}</p>
+                  </div>
+                  <button onClick={() => deleteCollection(c.id)} title="Remover coleção"
+                    className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+                </div>
               ))}
             </div>
           )}

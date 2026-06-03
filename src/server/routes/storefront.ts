@@ -139,6 +139,49 @@ router.delete("/coupons/:id", (req: AuthRequest, res): any => {
   res.json({ success: true });
 });
 
+// GET /api/storefront/analytics?days=30 -> relatório da vitrine
+// Visitas, produtos mais clicados, pedidos, receita e taxa de conversão.
+router.get("/analytics", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const days = Math.min(Math.max(parseInt(String(req.query.days ?? 30), 10) || 30, 1), 365);
+  const since = `-${days} days`;
+  try {
+    const visits = (db.prepare(
+      "SELECT COUNT(*) AS c FROM storefront_events WHERE organization_id = ? AND type = 'view' AND created_at >= datetime('now', ?)"
+    ).get(orgId, since) as any)?.c || 0;
+
+    const orderAgg = db.prepare(
+      `SELECT COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS revenue,
+              COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_revenue
+         FROM orders
+        WHERE organization_id = ? AND created_by = 'storefront' AND created_at >= datetime('now', ?)`
+    ).get(orgId, since) as any;
+
+    const topProducts = (db.prepare(
+      `SELECT e.product_id AS id, ps.name AS name, COUNT(*) AS clicks
+         FROM storefront_events e
+         LEFT JOIN products_services ps ON ps.id = e.product_id
+        WHERE e.organization_id = ? AND e.type = 'product_click' AND e.product_id IS NOT NULL
+          AND e.created_at >= datetime('now', ?)
+        GROUP BY e.product_id
+        ORDER BY clicks DESC LIMIT 8`
+    ).all(orgId, since) as any[]).map(r => ({ id: r.id, name: r.name || '(produto removido)', clicks: r.clicks }));
+
+    const orders = orderAgg?.orders || 0;
+    const conversion = visits > 0 ? Math.round((orders / visits) * 1000) / 10 : 0; // %
+
+    res.json({
+      days, visits, orders,
+      revenue: orderAgg?.revenue || 0,
+      paidRevenue: orderAgg?.paid_revenue || 0,
+      conversion, // % (pedidos / visitas)
+      topProducts,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/storefront/products  -> produtos com imagens + config de vitrine (p/ o dono)
 router.get("/products", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);

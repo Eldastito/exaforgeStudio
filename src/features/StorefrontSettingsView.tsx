@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Trash2, Tag } from 'lucide-react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Trash2, Tag, BarChart3 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
@@ -407,6 +407,9 @@ export function StorefrontSettingsView() {
           )}
         </section>
 
+        {/* Relatório da vitrine */}
+        <AnalyticsSection />
+
         {/* Cupons de desconto */}
         <CouponsSection />
       </div>
@@ -500,6 +503,96 @@ function NewProductModal({ onClose, onCreated }: { onClose: () => void; onCreate
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+type Analytics = {
+  days: number; visits: number; orders: number; revenue: number; paidRevenue: number;
+  conversion: number; topProducts: { id: string; name: string; clicks: number }[];
+};
+
+// Relatório da vitrine: visitas, conversão, pedidos e produtos mais clicados.
+function AnalyticsSection() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<Analytics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    apiFetch(`/api/storefront/analytics?days=${days}`).then((r) => r.json())
+      .then((d) => { if (active) setData(d); })
+      .catch(() => {})
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [days]);
+
+  const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
+
+  return (
+    <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-sky-400" /> Relatório da vitrine</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">Visitas, conversão e produtos mais clicados na sua loja virtual.</p>
+        </div>
+        <div className="flex rounded-lg border border-zinc-800 bg-zinc-900/60 p-1">
+          {[7, 30, 90].map((d) => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`text-xs px-3 py-1.5 rounded-md transition-colors ${days === d ? 'bg-sky-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+              {d} dias
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-400 py-6 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</div>
+      ) : !data ? (
+        <p className="text-sm text-zinc-500 py-4">Não foi possível carregar o relatório.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Metric label="Visitas" value={String(data.visits)} accent="text-sky-400" />
+            <Metric label="Pedidos" value={String(data.orders)} accent="text-indigo-400" />
+            <Metric label="Conversão" value={`${data.conversion}%`} accent="text-emerald-400" hint="pedidos ÷ visitas" />
+            <Metric label="Receita" value={brl(data.revenue)} accent="text-emerald-400" hint={`${brl(data.paidRevenue)} pago`} />
+          </div>
+
+          <p className="text-sm text-zinc-300 font-medium mt-5 mb-2">Produtos mais clicados</p>
+          {data.topProducts.length === 0 ? (
+            <p className="text-sm text-zinc-500">Ainda sem cliques registrados no período.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {data.topProducts.map((p, i) => {
+                const max = data.topProducts[0]?.clicks || 1;
+                return (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <span className="text-xs text-zinc-500 w-5 text-right">{i + 1}.</span>
+                    <span className="text-sm text-zinc-200 flex-1 truncate">{p.name}</span>
+                    <div className="hidden sm:block w-40 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                      <div className="h-full bg-sky-500/70" style={{ width: `${Math.max(6, (p.clicks / max) * 100)}%` }} />
+                    </div>
+                    <span className="text-xs font-mono text-zinc-400 w-12 text-right">{p.clicks}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-600 mt-4">As visitas e cliques começam a ser contados a partir de agora (após o deploy desta versão).</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function Metric({ label, value, accent, hint }: { label: string; value: string; accent: string; hint?: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className={`text-xl font-bold mt-1 ${accent}`}>{value}</p>
+      {hint && <p className="text-[10px] text-zinc-600 mt-0.5">{hint}</p>}
     </div>
   );
 }

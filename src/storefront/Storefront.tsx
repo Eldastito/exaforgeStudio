@@ -37,6 +37,18 @@ function readUrl(): { slug: string; token: string | null } {
 
 const DEFAULT_ACCENT = '#6366f1';
 
+// Registra um evento da vitrine (visita / clique em produto). Fire-and-forget.
+function logStoreEvent(slug: string, type: 'view' | 'product_click', productId?: string) {
+  try {
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, productId }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch { /* noop */ }
+}
+
 export function Storefront() {
   const { slug, token } = useMemo(readUrl, []);
 
@@ -69,6 +81,8 @@ export function Storefront() {
         const json = (await res.json()) as StoreResponse;
         if (!alive) return;
         setData(json);
+        // Registra a visita (relatório da vitrine) — best-effort.
+        logStoreEvent(slug, 'view');
         // Inicializa o tema a partir do default da loja (com persistência).
         const stored = lsGet<Mode | null>(`storefront_mode_${slug}`, null);
         setMode(stored ?? json.store.default_mode ?? 'night');
@@ -132,6 +146,11 @@ export function Storefront() {
     addToCart(product, option, qty);
     setActiveProduct(null);
   }, [addToCart]);
+
+  const openProduct = useCallback((product: Product) => {
+    logStoreEvent(slug, 'product_click', product.id);
+    setActiveProduct(product);
+  }, [slug]);
 
   const handleBuyNow = useCallback((product: Product, option: ChosenOption, qty: number) => {
     addToCart(product, option, qty);
@@ -241,7 +260,7 @@ export function Storefront() {
                         mode={mode}
                         isFavorite={favorites.includes(p.id)}
                         onToggleFavorite={toggleFavorite}
-                        onOpen={setActiveProduct}
+                        onOpen={openProduct}
                       />
                     ))}
                   </AnimatePresence>

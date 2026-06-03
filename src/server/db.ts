@@ -690,6 +690,16 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_storefront_coupons_org ON storefront_coupons(organization_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_storefront_coupons_code ON storefront_coupons(organization_id, code);
+
+      CREATE TABLE IF NOT EXISTS storefront_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        type TEXT NOT NULL,          -- view | product_click
+        product_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_events_org ON storefront_events(organization_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_storefront_events_prod ON storefront_events(organization_id, type, product_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas da loja virtual', e); }
 

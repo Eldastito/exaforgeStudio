@@ -125,6 +125,22 @@ router.post("/store/:slug/coupon", (req, res): any => {
   });
 });
 
+// POST /api/public/store/:slug/event  { type, productId? } -> registra visita/clique
+// Usado para o relatório da vitrine. Best-effort, nunca quebra a navegação.
+router.post("/store/:slug/event", (req, res): any => {
+  try {
+    const store = resolveStore(req.params.slug);
+    if (!store) return res.status(204).end();
+    const type = String(req.body?.type || "");
+    if (!["view", "product_click"].includes(type)) return res.status(204).end();
+    const productId = type === "product_click" ? (req.body?.productId || null) : null;
+    db.prepare(
+      "INSERT INTO storefront_events (id, organization_id, type, product_id) VALUES (?, ?, ?, ?)"
+    ).run(uuidv4(), store.organization_id, type, productId);
+  } catch (e) { /* best-effort */ }
+  res.status(204).end();
+});
+
 // POST /api/public/store/:slug/order
 // Body: { token?, customer?: {name, phone}, items: [{ productId, quantity, option }] }
 //   option: { type:'size', value:'M' } | { type:'weight', grams:500 } | { type:'volume', ml:500 } | null

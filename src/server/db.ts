@@ -237,6 +237,20 @@ const initDb = () => {
       value TEXT
     );
 
+    -- Áreas de Atendimento (departamentos/profissionais que dividem o mesmo número).
+    CREATE TABLE IF NOT EXISTS service_areas (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      persona TEXT,             -- instruções/tom da IA ao atender por esta área
+      assigned_user_id TEXT,    -- atendente responsável (recebe a conversa)
+      position INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_service_areas_org ON service_areas(organization_id);
+
     CREATE TABLE IF NOT EXISTS webhook_deliveries (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,
@@ -730,6 +744,8 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE products_services ADD COLUMN featured INTEGER DEFAULT 0`); } catch(e){}
   // Ordem manual dos produtos na vitrine (drag-and-drop).
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_position INTEGER`); } catch(e){}
+  // Área de atendimento à qual a conversa foi direcionada.
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN area_id TEXT`); } catch(e){}
   // Coleções manuais: lista ordenada de IDs de produto escolhidos a dedo.
   try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.

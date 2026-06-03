@@ -13,6 +13,7 @@ import { ContactsView } from '@/src/features/ContactsView';
 import { IntegrationsView } from '@/src/features/IntegrationsView';
 import { SettingsView } from '@/src/features/SettingsView';
 import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
+import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
@@ -154,6 +155,7 @@ export default function App() {
              {viewMode === 'settings' && 'Configurações'}
              {viewMode === 'admin' && 'Admin Master'}
              {viewMode === 'channels' && 'Canais e IA'}
+             {viewMode === 'areas' && 'Áreas de Atendimento'}
              {viewMode === 'dashboard' && 'Dashboard'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
@@ -226,6 +228,7 @@ export default function App() {
           {viewMode === 'settings' && <SettingsView />}
           {viewMode === 'admin' && <AdminMasterView />}
           {viewMode === 'channels' && <ChannelsPanel />}
+          {viewMode === 'areas' && <AreasView />}
           {viewMode === 'dashboard' && <DashboardPanel />}
         </main>
       </div>

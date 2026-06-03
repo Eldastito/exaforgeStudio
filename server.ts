@@ -18,6 +18,7 @@ import usersRoutes from "./src/server/routes/users.js";
 import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
 import managersRoutes from "./src/server/routes/managers.js";
+import areasRoutes from "./src/server/routes/areas.js";
 import aiRoutes from "./src/server/routes/ai.js";
 import ordersRoutes from "./src/server/routes/orders.js";
 import contactsRoutes from "./src/server/routes/contacts.js";
@@ -322,6 +323,7 @@ async function startServer() {
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/rag", ragRoutes);
   protectedApi.use("/managers", managersRoutes);
+  protectedApi.use("/areas", areasRoutes);
   protectedApi.use("/ai", aiRoutes);
   protectedApi.use("/cadences", cadencesRoutes);
   protectedApi.use("/plans", plansRoutes);

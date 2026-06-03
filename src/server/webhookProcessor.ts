@@ -7,6 +7,7 @@ import { CustomerProfileService } from "./CustomerProfileService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
+import { AttendanceAreaService } from "./AttendanceAreaService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -160,6 +161,46 @@ export async function processIncomingMessage(
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {
       try {
+       // Envia uma resposta do bot (persiste + emite + entrega ao provedor).
+       const sendBotReply = async (text: string) => {
+         const bId = uuidv4();
+         db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`)
+           .run(bId, orgId, ticket.id, text);
+         if (io) io.to(`org:${orgId}`).emit("new_message", { id: bId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text, sender: "bot", timestamp: new Date().toISOString() });
+         await MessageProviderService.sendMessage(channel.id, payload.senderId, text);
+       };
+
+       // ÁREAS DE ATENDIMENTO: se a org tem 2+ áreas, roteia ANTES da IA.
+       let areaPersona: string | undefined;
+       const areas = AttendanceAreaService.activeAreas(orgId);
+       if (areas.length >= 2) {
+         // Pedido de trocar de área -> volta ao menu.
+         if (ticket.area_id && AttendanceAreaService.wantsSwitch(payload.text)) {
+           db.prepare('UPDATE tickets SET area_id = NULL, assigned_to = NULL WHERE id = ?').run(ticket.id);
+           ticket.area_id = null;
+           await sendBotReply(AttendanceAreaService.buildMenu(orgId, contact.name));
+           return;
+         }
+         if (!ticket.area_id) {
+           const matched = AttendanceAreaService.match(orgId, payload.text);
+           if (matched) {
+             db.prepare('UPDATE tickets SET area_id = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+               .run(matched.id, matched.assigned_user_id || null, ticket.id);
+             ticket.area_id = matched.id;
+             if (io) io.to(`org:${orgId}`).emit("ticket_updated", { ticketId: ticket.id, contactId: contact.id, areaId: matched.id, assignedTo: matched.assigned_user_id || null });
+             areaPersona = AttendanceAreaService.personaText(matched);
+             // Segue para a IA responder já como a área escolhida.
+           } else {
+             // Ainda não escolheu: manda as boas-vindas + menu e aguarda.
+             await sendBotReply(AttendanceAreaService.buildMenu(orgId, contact.name));
+             return;
+           }
+         } else {
+           const area = AttendanceAreaService.getArea(orgId, ticket.area_id);
+           if (area) areaPersona = AttendanceAreaService.personaText(area);
+         }
+       }
+
        // Histórico da conversa (sem a mensagem atual) para a IA continuar de onde
        // parou, em vez de recomeçar a cada mensagem.
        const historyRows = db.prepare(`
@@ -182,6 +223,7 @@ export async function processIncomingMessage(
           history,
           contactId: contact.id,
           provider: channel.provider,
+          areaPersona,
        });
        
        if (aiResult.newStage && aiResult.newStage !== ticket.stage) {

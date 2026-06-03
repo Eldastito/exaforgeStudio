@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil } from 'lucide-react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil, Tag, BarChart3 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
@@ -484,6 +484,12 @@ export function StorefrontSettingsView() {
             </div>
           )}
         </section>
+
+        {/* Relatório da vitrine */}
+        <AnalyticsSection />
+
+        {/* Cupons de desconto */}
+        <CouponsSection />
       </div>
 
       {showManual && (
@@ -650,6 +656,218 @@ function NewProductModal({ onClose, onCreated }: { onClose: () => void; onCreate
         </div>
       </div>
     </div>
+  );
+}
+
+type Analytics = {
+  days: number; visits: number; orders: number; revenue: number; paidRevenue: number;
+  conversion: number; topProducts: { id: string; name: string; clicks: number }[];
+};
+
+// Relatório da vitrine: visitas, conversão, pedidos e produtos mais clicados.
+function AnalyticsSection() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<Analytics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    apiFetch(`/api/storefront/analytics?days=${days}`).then((r) => r.json())
+      .then((d) => { if (active) setData(d); })
+      .catch(() => {})
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [days]);
+
+  const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
+
+  return (
+    <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-sky-400" /> Relatório da vitrine</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">Visitas, conversão e produtos mais clicados na sua loja virtual.</p>
+        </div>
+        <div className="flex rounded-lg border border-zinc-800 bg-zinc-900/60 p-1">
+          {[7, 30, 90].map((d) => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`text-xs px-3 py-1.5 rounded-md transition-colors ${days === d ? 'bg-sky-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+              {d} dias
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-400 py-6 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</div>
+      ) : !data ? (
+        <p className="text-sm text-zinc-500 py-4">Não foi possível carregar o relatório.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Metric label="Visitas" value={String(data.visits)} accent="text-sky-400" />
+            <Metric label="Pedidos" value={String(data.orders)} accent="text-indigo-400" />
+            <Metric label="Conversão" value={`${data.conversion}%`} accent="text-emerald-400" hint="pedidos ÷ visitas" />
+            <Metric label="Receita" value={brl(data.revenue)} accent="text-emerald-400" hint={`${brl(data.paidRevenue)} pago`} />
+          </div>
+
+          <p className="text-sm text-zinc-300 font-medium mt-5 mb-2">Produtos mais clicados</p>
+          {data.topProducts.length === 0 ? (
+            <p className="text-sm text-zinc-500">Ainda sem cliques registrados no período.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {data.topProducts.map((p, i) => {
+                const max = data.topProducts[0]?.clicks || 1;
+                return (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <span className="text-xs text-zinc-500 w-5 text-right">{i + 1}.</span>
+                    <span className="text-sm text-zinc-200 flex-1 truncate">{p.name}</span>
+                    <div className="hidden sm:block w-40 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                      <div className="h-full bg-sky-500/70" style={{ width: `${Math.max(6, (p.clicks / max) * 100)}%` }} />
+                    </div>
+                    <span className="text-xs font-mono text-zinc-400 w-12 text-right">{p.clicks}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-600 mt-4">As visitas e cliques começam a ser contados a partir de agora (após o deploy desta versão).</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function Metric({ label, value, accent, hint }: { label: string; value: string; accent: string; hint?: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className={`text-xl font-bold mt-1 ${accent}`}>{value}</p>
+      {hint && <p className="text-[10px] text-zinc-600 mt-0.5">{hint}</p>}
+    </div>
+  );
+}
+
+type Coupon = {
+  id: string; code: string; type: 'percent' | 'fixed'; value: number; min_order: number;
+  active: boolean; expires_at: string | null; usage_limit: number | null; used_count: number;
+};
+
+// Seção de cupons de desconto da vitrine (CRUD próprio).
+function CouponsSection() {
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ code: '', type: 'percent', value: '', min_order: '', expires_at: '', usage_limit: '' });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    try {
+      const d = await apiFetch('/api/storefront/coupons').then((r) => r.json());
+      setCoupons(Array.isArray(d) ? d : []);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async () => {
+    if (!form.code.trim()) { toast.error('Informe o código.'); return; }
+    if (!(Number(form.value) > 0)) { toast.error('Informe um valor de desconto válido.'); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/storefront/coupons', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: form.code, type: form.type, value: Number(form.value),
+          min_order: form.min_order ? Number(form.min_order) : 0,
+          expires_at: form.expires_at || null,
+          usage_limit: form.usage_limit || null,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Erro ao criar cupom.'); return; }
+      toast.success('Cupom criado.');
+      setForm({ code: '', type: 'percent', value: '', min_order: '', expires_at: '', usage_limit: '' });
+      setShowForm(false); load();
+    } catch (e) { toast.error('Erro ao criar cupom.'); }
+    finally { setSaving(false); }
+  };
+
+  const toggle = async (c: Coupon) => {
+    setCoupons((list) => list.map((x) => (x.id === c.id ? { ...x, active: !x.active } : x)));
+    try { await apiFetch(`/api/storefront/coupons/${c.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !c.active }) }); }
+    catch (e) { load(); }
+  };
+
+  const remove = async (id: string) => {
+    if (!window.confirm('Excluir este cupom?')) return;
+    setCoupons((list) => list.filter((x) => x.id !== id));
+    try { await apiFetch(`/api/storefront/coupons/${id}`, { method: 'DELETE' }); }
+    catch (e) { load(); }
+  };
+
+  const fmtVal = (c: Coupon) => (c.type === 'percent' ? `${c.value}%` : `R$ ${Number(c.value).toFixed(2)}`);
+
+  return (
+    <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Tag className="w-5 h-5 text-emerald-400" /> Cupons de desconto</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">Crie cupons (% ou valor fixo). O cliente aplica no carrinho da vitrine.</p>
+        </div>
+        <Button variant="outline" className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10" onClick={() => setShowForm((v) => !v)}>
+          <Plus className="w-4 h-4 mr-2" /> Novo cupom
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Código"><input className={`${inputClass} uppercase`} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="BEMVINDO10" /></Field>
+          <Field label="Tipo">
+            <select className={inputClass} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="percent">Percentual (%)</option>
+              <option value="fixed">Valor fixo (R$)</option>
+            </select>
+          </Field>
+          <Field label={form.type === 'percent' ? 'Desconto (%)' : 'Desconto (R$)'}><input className={inputClass} type="number" min="0" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></Field>
+          <Field label="Pedido mínimo (R$, opcional)"><input className={inputClass} type="number" min="0" step="0.01" value={form.min_order} onChange={(e) => setForm({ ...form, min_order: e.target.value })} placeholder="0" /></Field>
+          <Field label="Validade (opcional)"><input className={inputClass} type="date" value={form.expires_at} onChange={(e) => setForm({ ...form, expires_at: e.target.value })} /></Field>
+          <Field label="Limite de usos (opcional)"><input className={inputClass} type="number" min="1" value={form.usage_limit} onChange={(e) => setForm({ ...form, usage_limit: e.target.value })} placeholder="ilimitado" /></Field>
+          <div className="sm:col-span-2 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={create} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Criar cupom'}</Button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-400 py-6 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</div>
+      ) : coupons.length === 0 ? (
+        <p className="text-sm text-zinc-500 py-4">Nenhum cupom ainda.</p>
+      ) : (
+        <div className="space-y-2 mt-3">
+          {coupons.map((c) => (
+            <div key={c.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-mono font-semibold text-zinc-100">{c.code} <span className="text-emerald-400">· {fmtVal(c)}</span></p>
+                <p className="text-[11px] text-zinc-500 truncate">
+                  {c.min_order > 0 ? `mín. R$ ${Number(c.min_order).toFixed(2)} · ` : ''}
+                  {c.expires_at ? `até ${new Date(c.expires_at).toLocaleDateString('pt-BR')} · ` : ''}
+                  {c.usage_limit != null ? `${c.used_count}/${c.usage_limit} usos` : `${c.used_count} uso(s)`}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <button onClick={() => toggle(c)}
+                  className={`text-xs px-2 py-1 rounded border ${c.active ? 'border-emerald-500/40 text-emerald-300' : 'border-zinc-700 text-zinc-500'}`}>
+                  {c.active ? 'Ativo' : 'Inativo'}
+                </button>
+                <button onClick={() => remove(c.id)} title="Excluir" className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

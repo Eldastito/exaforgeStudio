@@ -16,6 +16,22 @@ const parseJson = (s: any, fallback: any) => {
   try { return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 };
 
+// Avalia um cupom para um subtotal. Retorna o desconto e o motivo se inválido.
+// Usado tanto na validação (carrinho) quanto na criação do pedido.
+function evaluateCoupon(orgId: string, rawCode: string, subtotal: number): { valid: boolean; discount: number; message: string; coupon?: any } {
+  const code = String(rawCode || "").trim().toUpperCase();
+  if (!code) return { valid: false, discount: 0, message: "Informe um cupom." };
+  const c = db.prepare("SELECT * FROM storefront_coupons WHERE organization_id = ? AND code = ?").get(orgId, code) as any;
+  if (!c || !c.active) return { valid: false, discount: 0, message: "Cupom inválido." };
+  if (c.expires_at && new Date(c.expires_at).getTime() < Date.now()) return { valid: false, discount: 0, message: "Cupom expirado." };
+  if (c.usage_limit != null && c.used_count >= c.usage_limit) return { valid: false, discount: 0, message: "Cupom esgotado." };
+  if (subtotal < (c.min_order || 0)) return { valid: false, discount: 0, message: `Pedido mínimo de R$ ${Number(c.min_order).toFixed(2)} para este cupom.` };
+  let discount = c.type === "percent" ? subtotal * (Number(c.value) / 100) : Number(c.value);
+  discount = Math.min(discount, subtotal); // nunca maior que o subtotal
+  discount = Math.round(discount * 100) / 100;
+  return { valid: true, discount, message: "", coupon: c };
+}
+
 // Resolve a loja publicada a partir do slug. Retorna null se não existir/publicada.
 function resolveStore(slug: string): any {
   const store = db.prepare(
@@ -146,6 +162,34 @@ router.get("/store/:slug", (req, res): any => {
   });
 });
 
+// POST /api/public/store/:slug/coupon  { code, subtotal } -> valida o cupom
+router.post("/store/:slug/coupon", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  const r = evaluateCoupon(store.organization_id, req.body?.code || "", Number(req.body?.subtotal || 0));
+  res.json({
+    valid: r.valid, discount: r.discount, message: r.message,
+    code: String(req.body?.code || "").trim().toUpperCase(),
+    type: r.coupon?.type, value: r.coupon?.value,
+  });
+});
+
+// POST /api/public/store/:slug/event  { type, productId? } -> registra visita/clique
+// Usado para o relatório da vitrine. Best-effort, nunca quebra a navegação.
+router.post("/store/:slug/event", (req, res): any => {
+  try {
+    const store = resolveStore(req.params.slug);
+    if (!store) return res.status(204).end();
+    const type = String(req.body?.type || "");
+    if (!["view", "product_click"].includes(type)) return res.status(204).end();
+    const productId = type === "product_click" ? (req.body?.productId || null) : null;
+    db.prepare(
+      "INSERT INTO storefront_events (id, organization_id, type, product_id) VALUES (?, ?, ?, ?)"
+    ).run(uuidv4(), store.organization_id, type, productId);
+  } catch (e) { /* best-effort */ }
+  res.status(204).end();
+});
+
 // POST /api/public/store/:slug/order
 // Body: { token?, customer?: {name, phone}, items: [{ productId, quantity, option }] }
 //   option: { type:'size', value:'M' } | { type:'weight', grams:500 } | { type:'volume', ml:500 } | null
@@ -212,13 +256,23 @@ router.post("/store/:slug/order", (req, res): any => {
     }
 
     if (resolved.length === 0) return res.status(400).json({ error: "Nenhum item válido." });
-    const total = resolved.reduce((s, r) => s + r.total, 0);
+    const subtotal = resolved.reduce((s, r) => s + r.total, 0);
+
+    // Cupom (opcional): revalida no servidor e aplica o desconto.
+    let discount = 0;
+    let couponCode: string | null = null;
+    let couponId: string | null = null;
+    if (body.coupon) {
+      const cr = evaluateCoupon(orgId, body.coupon, subtotal);
+      if (cr.valid && cr.coupon) { discount = cr.discount; couponCode = cr.coupon.code; couponId = cr.coupon.id; }
+    }
+    const total = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
 
     const tx = db.transaction(() => {
       db.prepare(
-        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, created_by, notes)
-         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, 'storefront', ?)`
-      ).run(orderId, orgId, contactId, ticketId, total, body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null);
+        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes)
+         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?)`
+      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null);
 
       const stmt = db.prepare(
         `INSERT INTO order_items (id, order_id, organization_id, product_service_id, name_snapshot, unit_price, quantity, line_total, variant_label)
@@ -227,11 +281,16 @@ router.post("/store/:slug/order", (req, res): any => {
       for (const r of resolved) {
         stmt.run(r.id, orderId, orgId, r.pid, r.name, r.price, r.qty, r.total, r.label);
       }
+      if (couponId) db.prepare("UPDATE storefront_coupons SET used_count = used_count + 1 WHERE id = ?").run(couponId);
     });
     tx();
 
     const brl = (v: number) => `R$ ${Number(v).toFixed(2)}`;
     const lines = resolved.map(r => `• ${r.qty}× ${r.name} — ${brl(r.total)}`).join("\n");
+    // Bloco de totais: mostra desconto quando há cupom.
+    const totalsBlock = discount > 0
+      ? `Subtotal: ${brl(subtotal)}\nDesconto (${couponCode}): -${brl(discount)}\nTotal: ${brl(total)}`
+      : `Total: ${brl(total)}`;
 
     // O pedido CAI NO ATENDIMENTO: notifica a equipe (sino) e, se há contato
     // vinculado (via token), registra o pedido na conversa do Kanban ao vivo.
@@ -259,7 +318,7 @@ router.post("/store/:slug/order", (req, res): any => {
         }
         if (ticketId == null) db.prepare("UPDATE orders SET ticket_id = ? WHERE id = ?").run(ticket.id, orderId);
 
-        const noteText = `🛒 *Novo pedido pela vitrine*\n${lines}\n\nTotal: ${brl(total)} (pedido #${orderId.slice(0, 8)})`;
+        const noteText = `🛒 *Novo pedido pela vitrine*\n${lines}\n\n${totalsBlock}\n(pedido #${orderId.slice(0, 8)})`;
         const msgId = uuidv4();
         db.prepare(
           "INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)"
@@ -275,7 +334,7 @@ router.post("/store/:slug/order", (req, res): any => {
 
     // Link de WhatsApp para o cliente finalizar (a IA/loja cobra por lá).
     const phone = (store.whatsapp_number || store.org_phone || "").replace(/\D/g, "");
-    const msg = `Olá! Quero finalizar meu pedido da loja:\n\n${lines}\n\nTotal: ${brl(total)}\n(pedido #${orderId.slice(0, 8)})`;
+    const msg = `Olá! Quero finalizar meu pedido da loja:\n\n${lines}\n\n${totalsBlock}\n(pedido #${orderId.slice(0, 8)})`;
     const whatsappUrl = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : null;
 
     res.json({ ok: true, orderId, total, whatsappUrl });

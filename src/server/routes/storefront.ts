@@ -77,6 +77,111 @@ router.post("/link", (req: AuthRequest, res): any => {
   res.json({ token, path: `/loja/${s.slug}?c=${token}`, slug: s.slug });
 });
 
+// ============================================================================
+// CUPONS de desconto da vitrine.
+// ============================================================================
+const couponView = (c: any) => ({
+  id: c.id, code: c.code, type: c.type, value: c.value, min_order: c.min_order,
+  active: !!c.active, expires_at: c.expires_at, usage_limit: c.usage_limit, used_count: c.used_count,
+});
+
+// GET /api/storefront/coupons
+router.get("/coupons", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const rows = db.prepare("SELECT * FROM storefront_coupons WHERE organization_id = ? ORDER BY created_at DESC").all(orgId) as any[];
+  res.json(rows.map(couponView));
+});
+
+// POST /api/storefront/coupons  { code, type, value, min_order?, expires_at?, usage_limit? }
+router.post("/coupons", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const b = req.body || {};
+  const code = String(b.code || "").trim().toUpperCase().replace(/\s+/g, "");
+  const type = b.type === "fixed" ? "fixed" : "percent";
+  const value = Number(b.value);
+  if (!code) return res.status(400).json({ error: "Informe o código do cupom." });
+  if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: "Valor do desconto inválido." });
+  if (type === "percent" && value > 100) return res.status(400).json({ error: "Percentual não pode passar de 100%." });
+  const id = uuidv4();
+  try {
+    db.prepare(
+      `INSERT INTO storefront_coupons (id, organization_id, code, type, value, min_order, expires_at, usage_limit, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`
+    ).run(id, orgId, code, type, value, Number(b.min_order) || 0, b.expires_at || null,
+      b.usage_limit != null && b.usage_limit !== "" ? Math.max(1, parseInt(String(b.usage_limit), 10)) : null);
+  } catch (e: any) {
+    if (String(e.message || "").includes("UNIQUE")) return res.status(409).json({ error: "Já existe um cupom com esse código." });
+    return res.status(500).json({ error: e.message });
+  }
+  res.json(couponView(db.prepare("SELECT * FROM storefront_coupons WHERE id = ?").get(id)));
+});
+
+// PUT /api/storefront/coupons/:id  -> edita (ativar/desativar, valor, etc.)
+router.put("/coupons/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const c = db.prepare("SELECT id FROM storefront_coupons WHERE id = ? AND organization_id = ?").get(req.params.id, orgId);
+  if (!c) return res.status(404).json({ error: "Cupom não encontrado." });
+  const b = req.body || {};
+  const sets: string[] = []; const vals: any[] = [];
+  if (b.active !== undefined) { sets.push("active = ?"); vals.push(b.active ? 1 : 0); }
+  if (b.value !== undefined) { sets.push("value = ?"); vals.push(Number(b.value) || 0); }
+  if (b.min_order !== undefined) { sets.push("min_order = ?"); vals.push(Number(b.min_order) || 0); }
+  if (b.expires_at !== undefined) { sets.push("expires_at = ?"); vals.push(b.expires_at || null); }
+  if (b.usage_limit !== undefined) { sets.push("usage_limit = ?"); vals.push(b.usage_limit != null && b.usage_limit !== "" ? Math.max(1, parseInt(String(b.usage_limit), 10)) : null); }
+  if (sets.length) db.prepare(`UPDATE storefront_coupons SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// DELETE /api/storefront/coupons/:id
+router.delete("/coupons/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  db.prepare("DELETE FROM storefront_coupons WHERE id = ? AND organization_id = ?").run(req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// GET /api/storefront/analytics?days=30 -> relatório da vitrine
+// Visitas, produtos mais clicados, pedidos, receita e taxa de conversão.
+router.get("/analytics", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const days = Math.min(Math.max(parseInt(String(req.query.days ?? 30), 10) || 30, 1), 365);
+  const since = `-${days} days`;
+  try {
+    const visits = (db.prepare(
+      "SELECT COUNT(*) AS c FROM storefront_events WHERE organization_id = ? AND type = 'view' AND created_at >= datetime('now', ?)"
+    ).get(orgId, since) as any)?.c || 0;
+
+    const orderAgg = db.prepare(
+      `SELECT COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS revenue,
+              COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_revenue
+         FROM orders
+        WHERE organization_id = ? AND created_by = 'storefront' AND created_at >= datetime('now', ?)`
+    ).get(orgId, since) as any;
+
+    const topProducts = (db.prepare(
+      `SELECT e.product_id AS id, ps.name AS name, COUNT(*) AS clicks
+         FROM storefront_events e
+         LEFT JOIN products_services ps ON ps.id = e.product_id
+        WHERE e.organization_id = ? AND e.type = 'product_click' AND e.product_id IS NOT NULL
+          AND e.created_at >= datetime('now', ?)
+        GROUP BY e.product_id
+        ORDER BY clicks DESC LIMIT 8`
+    ).all(orgId, since) as any[]).map(r => ({ id: r.id, name: r.name || '(produto removido)', clicks: r.clicks }));
+
+    const orders = orderAgg?.orders || 0;
+    const conversion = visits > 0 ? Math.round((orders / visits) * 1000) / 10 : 0; // %
+
+    res.json({
+      days, visits, orders,
+      revenue: orderAgg?.revenue || 0,
+      paidRevenue: orderAgg?.paid_revenue || 0,
+      conversion, // % (pedidos / visitas)
+      topProducts,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/storefront/products  -> produtos com imagens + config de vitrine (p/ o dono)
 router.get("/products", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);

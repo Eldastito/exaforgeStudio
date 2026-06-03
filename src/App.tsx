@@ -4,6 +4,7 @@ import { KanbanBoard } from '@/src/features/KanbanBoard';
 import { ChatPanel } from '@/src/features/ChatPanel';
 import { ChannelsPanel } from '@/src/features/ChannelsPanel';
 import { DashboardPanel } from '@/src/features/DashboardPanel';
+import { ReportsPanel } from '@/src/features/ReportsPanel';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -157,6 +158,7 @@ export default function App() {
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'areas' && 'Áreas de Atendimento'}
              {viewMode === 'dashboard' && 'Dashboard'}
+             {viewMode === 'reports' && 'Relatórios'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -230,6 +232,7 @@ export default function App() {
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}
           {viewMode === 'dashboard' && <DashboardPanel />}
+          {viewMode === 'reports' && <ReportsPanel />}
         </main>
       </div>
     </div>

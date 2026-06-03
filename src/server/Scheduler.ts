@@ -13,6 +13,7 @@ import { NotificationService } from "./NotificationService.js";
  */
 export class Scheduler {
   private static timer: NodeJS.Timeout | null = null;
+  private static fastTimer: NodeJS.Timeout | null = null;
   private static io: any = null;
 
   static start(io?: any) {
@@ -23,7 +24,11 @@ export class Scheduler {
     this.timer = setInterval(() => this.tick().catch(e => console.error('[Scheduler] tick falhou', e)), INTERVAL);
     // Primeira checagem logo após o boot (com um pequeno atraso).
     setTimeout(() => this.tick().catch(() => {}), 30_000);
-    console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento + cadências de follow-up).');
+    // Timer rápido (5 min) só para os lembretes de PIX, que dependem de minutos.
+    const FAST = parseInt(process.env.SCHEDULER_FAST_INTERVAL_MS || `${5 * 60 * 1000}`, 10);
+    this.fastTimer = setInterval(() => this.pixReminderPass().catch(e => console.error('[Scheduler] lembrete PIX falhou', e)), FAST);
+    setTimeout(() => this.pixReminderPass().catch(() => {}), 45_000);
+    console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento + cadências de follow-up + lembretes de PIX).');
   }
 
   static async tick() {
@@ -149,6 +154,73 @@ export class Scheduler {
         }
       } catch (e) {
         console.error('[Scheduler] Falha nos lembretes da org', org.organization_id, e);
+      }
+    }
+  }
+
+  /**
+   * Lembrete de PIX não pago (opt-in por organização). Para cada cobrança PIX
+   * dinâmica ainda PENDENTE e criada há mais de X minutos, manda um "cutucão"
+   * gentil pelo WhatsApp com o código copia-e-cola de novo. Envia uma vez só
+   * (reminder_status='sent').
+   */
+  static async pixReminderPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id, pix_reminder_minutes, pix_reminder_message
+        FROM organization_settings
+        WHERE COALESCE(pix_reminder_enabled,0) = 1
+      `).all() as any[];
+    } catch (e) { return; }
+
+    for (const org of orgs) {
+      try {
+        const mins = Math.min(1440, Math.max(5, parseInt(String(org.pix_reminder_minutes || 30), 10) || 30));
+        // Cobranças PIX pendentes, antigas o bastante, sem lembrete e não expiradas,
+        // cujo pedido ainda não foi pago nem cancelado.
+        const charges = db.prepare(`
+          SELECT pc.id, pc.qr_code, pc.ticket_url, pc.amount,
+                 c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
+          FROM payment_charges pc
+          JOIN orders o ON o.id = pc.order_id
+          JOIN contacts c ON c.id = o.contact_id
+          WHERE pc.organization_id = ?
+            AND pc.status = 'pending'
+            AND COALESCE(pc.reminder_status,'') != 'sent'
+            AND pc.created_at <= datetime('now', ?)
+            AND (pc.expires_at IS NULL OR pc.expires_at >= datetime('now'))
+            AND o.status NOT IN ('pago','cancelado')
+        `).all(org.organization_id, `-${mins} minutes`) as any[];
+
+        if (!charges.length) continue;
+
+        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(org.organization_id) as any;
+
+        for (const ch of charges) {
+          try {
+            if (!ch.contact_number) { db.prepare(`UPDATE payment_charges SET reminder_status = 'skipped' WHERE id = ?`).run(ch.id); continue; }
+            const channelId = ch.contact_channel || fallbackChannel?.id;
+            if (!channelId) continue;
+
+            const first = (ch.contact_name || '').trim().split(/\s+/)[0] || '';
+            const tpl = org.pix_reminder_message
+              || "Oi {nome}! Vi que seu pedido ainda está aguardando o pagamento via Pix 😊 Pra facilitar, aqui está o código copia e cola de novo:";
+            const intro = tpl.replace(/\{nome\}/gi, first);
+            let message = intro;
+            if (ch.qr_code) message += `\n\n${ch.qr_code}`;
+            else if (ch.ticket_url) message += `\n\n${ch.ticket_url}`;
+            message += `\n\nAssim que o pagamento cair, seu pedido é confirmado automaticamente. ✅`;
+
+            await MessageProviderService.sendMessage(channelId, ch.contact_number, message);
+            db.prepare(`UPDATE payment_charges SET reminder_status = 'sent' WHERE id = ?`).run(ch.id);
+            console.log(`[Scheduler] Lembrete de PIX enviado para ${ch.contact_number} (cobrança ${ch.id}).`);
+          } catch (e) {
+            console.error('[Scheduler] Falha ao enviar lembrete de PIX', ch.id, e);
+          }
+        }
+      } catch (e) {
+        console.error('[Scheduler] Falha nos lembretes de PIX da org', org.organization_id, e);
       }
     }
   }

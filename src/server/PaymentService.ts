@@ -17,7 +17,8 @@ export class PaymentService {
   static getSettings(orgId: string): any {
     const o = db.prepare(`
       SELECT pay_enabled, pay_provider, pay_pix_key, pay_pix_name, pay_pix_city,
-             pay_instructions, pay_gateway_token, pay_webhook_secret
+             pay_instructions, pay_gateway_token, pay_webhook_secret,
+             pix_reminder_enabled, pix_reminder_minutes, pix_reminder_message
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any;
     return o || {};
@@ -35,6 +36,9 @@ export class PaymentService {
       instructions: o.pay_instructions || '',
       hasGatewayToken: !!o.pay_gateway_token,
       hasWebhookSecret: !!o.pay_webhook_secret,
+      pixReminderEnabled: !!o.pix_reminder_enabled,
+      pixReminderMinutes: o.pix_reminder_minutes || 30,
+      pixReminderMessage: o.pix_reminder_message || '',
     };
   }
 
@@ -48,6 +52,12 @@ export class PaymentService {
       p.enabled ? 1 : 0, p.provider || 'pix_manual', p.pixKey || null, p.pixName || null,
       p.pixCity || null, p.instructions || null, orgId
     );
+    // Lembrete de PIX não pago (opt-in). Minutos com piso de 5 e teto de 1440.
+    if (p.pixReminderEnabled !== undefined || p.pixReminderMinutes !== undefined || p.pixReminderMessage !== undefined) {
+      const mins = Math.min(1440, Math.max(5, parseInt(String(p.pixReminderMinutes ?? 30), 10) || 30));
+      db.prepare(`UPDATE organization_settings SET pix_reminder_enabled = ?, pix_reminder_minutes = ?, pix_reminder_message = ? WHERE organization_id = ?`)
+        .run(p.pixReminderEnabled ? 1 : 0, mins, (p.pixReminderMessage || '').trim() || null, orgId);
+    }
     // Token/segredo só são gravados quando enviados (não apagam sem querer).
     if (typeof p.gatewayToken === 'string' && p.gatewayToken) {
       db.prepare(`UPDATE organization_settings SET pay_gateway_token = ? WHERE organization_id = ?`).run(p.gatewayToken, orgId);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store } from 'lucide-react';
+import { Layers, MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/contexts/AuthContext';
 
@@ -41,6 +41,7 @@ export function Sidebar() {
              <NavItem icon={<Users />} label="Contatos" active={viewMode === 'contacts'} onClick={() => setViewMode('contacts')} />
              <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />
              <NavItem icon={<BarChart3 />} label="Dashboard" active={viewMode === 'dashboard'} onClick={() => setViewMode('dashboard')} />
+             <NavItem icon={<LineChart />} label="Relatórios" active={viewMode === 'reports'} onClick={() => setViewMode('reports')} />
              <NavItem icon={<Settings />} label="Configurações" active={viewMode === 'settings'} onClick={() => setViewMode('settings')} />
              {user?.email === 'eldastito@gmail.com' && (
                <NavItem icon={<ShieldCheck />} label="Admin Master" active={viewMode === 'admin'} onClick={() => setViewMode('admin')} />

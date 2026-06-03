@@ -7,6 +7,7 @@ import { toast } from '@/src/lib/toast';
 type Settings = {
   enabled: boolean; provider: string; pixKey: string; pixName: string; pixCity: string;
   instructions: string; hasGatewayToken: boolean; hasWebhookSecret: boolean;
+  pixReminderEnabled: boolean; pixReminderMinutes: number; pixReminderMessage: string;
 };
 
 export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
@@ -129,6 +130,30 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         )}
+
+        {/* Lembrete de PIX não pago (aplica-se ao Pix dinâmico do gateway) */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 mb-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-zinc-200">🔔 Lembrar cliente de PIX não pago</span>
+            <button onClick={() => setS({ ...s, pixReminderEnabled: !s.pixReminderEnabled })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${s.pixReminderEnabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${s.pixReminderEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          {s.pixReminderEnabled && (
+            <div className="mt-3 space-y-2">
+              <p className="text-[11px] text-zinc-500">
+                Se um pedido com Pix dinâmico não for pago em{' '}
+                <input type="number" min={5} max={1440} value={s.pixReminderMinutes}
+                  onChange={e => setS({ ...s, pixReminderMinutes: parseInt(e.target.value, 10) || 30 })}
+                  className="w-16 bg-zinc-950 border border-zinc-800 rounded px-1 text-zinc-200 text-center" /> minutos, a IA reenvia o código pelo WhatsApp (uma vez).
+              </p>
+              <textarea className="w-full h-16 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+                placeholder="Mensagem do lembrete. Use {nome}. Ex.: Oi {nome}! Seu Pix ainda está pendente 😊 Aqui vai o código de novo:"
+                value={s.pixReminderMessage} onChange={e => setS({ ...s, pixReminderMessage: e.target.value })} />
+            </div>
+          )}
+        </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Fechar</Button>

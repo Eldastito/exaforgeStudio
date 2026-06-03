@@ -28,6 +28,7 @@ type StorefrontProduct = {
   name: string;
   price: number;
   currency: string;
+  description?: string;
   sale_mode: SaleMode;
   sale_options: any;
   storefront_visible: 0 | 1;
@@ -69,6 +70,7 @@ export function StorefrontSettingsView() {
   const [buildingCollections, setBuildingCollections] = useState(false);
   const [manualEditing, setManualEditing] = useState<{ id: string; title: string; productIds: string[] } | null>(null);
   const [showManual, setShowManual] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<StorefrontProduct | null>(null);
 
   const RULE_LABEL: Record<string, string> = {
     featured: 'Produtos em destaque', best_sellers: 'Mais vendidos', newest: 'Novidades (recém-adicionados)', manual: 'Selecionada manualmente',
@@ -144,6 +146,20 @@ export function StorefrontSettingsView() {
       toast.success(tips.length ? `Destaques atualizados: ${tips.length} produto(s). ✨` : 'Nenhum produto para destacar ainda.');
     } catch (e) { toast.error('Erro na curadoria com a IA'); }
     finally { setCurating(false); }
+  };
+
+  // Reordena os produtos da vitrine (drag-and-drop). A ordem é a de exibição na LP.
+  const onDragEndProducts = (result: DropResult) => {
+    if (!result.destination || result.destination.index === result.source.index) return;
+    const next = [...products];
+    const [moved] = next.splice(result.source.index, 1);
+    next.splice(result.destination.index, 0, moved);
+    setProducts(next); // otimista
+    apiFetch('/api/storefront/products/reorder', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: next.map((p) => p.id) }),
+    }).then((r) => { if (!r.ok) { toast.error('Erro ao salvar a ordem.'); loadProducts(); } })
+      .catch(() => { toast.error('Erro ao salvar a ordem.'); loadProducts(); });
   };
 
   // Exclui o produto do catálogo (e, portanto, da vitrine). Reaproveita o
@@ -450,11 +466,34 @@ export function StorefrontSettingsView() {
               />
             </div>
           ) : (
-            <div className="space-y-4">
-              {products.map((p: StorefrontProduct) => (
-                <ProductRow key={p.id} product={p} onPatch={(u) => patchProduct(p.id, u)} onDelete={() => deleteProduct(p)} />
-              ))}
-            </div>
+            <>
+              <p className="text-[11px] text-zinc-500 mb-2">Arraste pela alça (⋮⋮) para definir a ordem em que os produtos aparecem na vitrine.</p>
+              <DragDropContext onDragEnd={onDragEndProducts}>
+                <Droppable droppableId="products">
+                  {(dropProvided) => (
+                    <div ref={dropProvided.innerRef} {...dropProvided.droppableProps} className="space-y-4">
+                      {products.map((p: StorefrontProduct, index: number) => (
+                        // @ts-expect-error React 18+ types issue with hello-pangea/dnd
+                        <Draggable key={p.id} draggableId={p.id} index={index}>
+                          {(dragProvided) => (
+                            <div ref={dragProvided.innerRef} {...dragProvided.draggableProps}>
+                              <ProductRow
+                                product={p}
+                                onPatch={(u) => patchProduct(p.id, u)}
+                                onDelete={() => deleteProduct(p)}
+                                onEdit={() => setEditingProduct(p)}
+                                dragHandleProps={dragProvided.dragHandleProps}
+                              />
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {dropProvided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
+            </>
           )}
         </section>
 
@@ -548,6 +587,94 @@ export function StorefrontSettingsView() {
           onCreated={() => { setShowNew(false); loadProducts(); }}
         />
       )}
+
+      {editingProduct && (
+        <EditProductModal
+          product={editingProduct}
+          onClose={() => setEditingProduct(null)}
+          onSaved={() => { setEditingProduct(null); loadProducts(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal de edição rápida de um produto (nome, preço, descrição) direto da
+// vitrine. Salva no catálogo via PATCH /api/products/:id.
+function EditProductModal({ product, onClose, onSaved }: {
+  product: StorefrontProduct;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(product.name);
+  const [price, setPrice] = useState(String(product.price ?? 0));
+  const [description, setDescription] = useState(product.description || '');
+  const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const generateAI = async () => {
+    if (!name.trim()) { toast.error('Preencha o nome primeiro.'); return; }
+    setAiLoading(true);
+    try {
+      const res = await apiFetch('/api/products/ai/describe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type: 'product', price: Number(price) || 0, description }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao gerar com a IA.'); return; }
+      if (d.description) setDescription(d.description);
+      toast.success('Descrição gerada pela IA. Revise antes de salvar. ✨');
+    } catch (e) { toast.error('Erro ao gerar com a IA'); }
+    finally { setAiLoading(false); }
+  };
+
+  const save = async () => {
+    if (!name.trim()) { toast.error('Informe o nome do produto.'); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/products/${product.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), price: Number(price) || 0 }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Erro ao salvar.'); return; }
+      toast.success('Produto atualizado.');
+      onSaved();
+    } catch (e) { toast.error('Erro ao salvar produto.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">Editar produto</h3>
+          <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>
+        </div>
+        <div className="space-y-3">
+          <Field label="Nome">
+            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          </Field>
+          <Field label="Preço (R$)">
+            <input className={inputClass} type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+          </Field>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm text-zinc-400">Descrição</label>
+              <button type="button" onClick={generateAI} disabled={aiLoading}
+                className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 disabled:opacity-50">
+                <Star className="w-3.5 h-3.5" /> {aiLoading ? 'Gerando...' : 'Gerar com IA'}
+              </button>
+            </div>
+            <textarea className={`${inputClass} h-20 resize-none`} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descrição do produto" />
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1042,6 +1169,7 @@ function normalizeProduct(p: any): StorefrontProduct {
     name: p.name,
     price: Number(p.price ?? 0),
     currency: p.currency || 'BRL',
+    description: p.description || '',
     sale_mode: (['unit', 'slice', 'size', 'weight', 'volume'].includes(p.sale_mode) ? p.sale_mode : 'unit') as SaleMode,
     sale_options: p.sale_options || {},
     storefront_visible: p.storefront_visible ? 1 : 0,
@@ -1054,9 +1182,11 @@ type ProductRowProps = {
   product: StorefrontProduct;
   onPatch: (updates: Partial<StorefrontProduct>) => void;
   onDelete: () => void;
+  onEdit: () => void;
+  dragHandleProps?: any;
 };
 
-const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete }) => {
+const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete, onEdit, dragHandleProps }) => {
   // texto editável das opções de venda (size/weight/volume)
   const optionsToText = (mode: SaleMode, opts: any): string => {
     if (mode === 'size') return Array.isArray(opts?.sizes) ? opts.sizes.join(',') : '';
@@ -1210,13 +1340,27 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete }) =
   return (
     <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950/50">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="font-semibold text-zinc-100">{product.name}</h4>
-          <p className="font-mono text-sm text-zinc-400 mt-0.5">
-            {product.currency} {product.price.toFixed(2)}
-          </p>
+        <div className="flex items-start gap-2 min-w-0">
+          {dragHandleProps && (
+            <span {...dragHandleProps} className="mt-0.5 cursor-grab text-zinc-500 hover:text-zinc-300 active:cursor-grabbing" title="Arrastar para reordenar">
+              <GripVertical className="w-4 h-4" />
+            </span>
+          )}
+          <div className="min-w-0">
+            <h4 className="font-semibold text-zinc-100 truncate">{product.name}</h4>
+            <p className="font-mono text-sm text-zinc-400 mt-0.5">
+              {product.currency} {product.price.toFixed(2)}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-indigo-500/50 hover:text-indigo-300"
+          >
+            <Pencil className="w-3.5 h-3.5" /> Editar
+          </button>
           <button
             type="button"
             onClick={toggleVisible}

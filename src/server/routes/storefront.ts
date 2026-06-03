@@ -178,6 +178,125 @@ router.post("/ai/featured", async (req: AuthRequest, res): Promise<any> => {
   }
 });
 
+// ============================================================================
+// COLEÇÕES da vitrine (curadoria pela IA): agrupam produtos por regra dinâmica
+// (destaques / mais vendidos / novidades) e aparecem como seções na LP.
+// ============================================================================
+const COLLECTION_RULES = new Set(["featured", "best_sellers", "newest"]);
+
+// GET /api/storefront/collections -> lista as coleções configuradas
+router.get("/collections", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const rows = db.prepare(
+    "SELECT id, title, rule, position, items_json FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC"
+  ).all(orgId) as any[];
+  res.json(rows.map(r => ({
+    id: r.id, title: r.title, rule: r.rule, position: r.position,
+    productIds: r.rule === 'manual' ? (() => { try { return JSON.parse(r.items_json || '[]'); } catch { return []; } })() : undefined,
+  })));
+});
+
+// POST /api/storefront/collections -> cria uma coleção MANUAL (produtos a dedo)
+router.post("/collections", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const title = String(req.body?.title || "").trim().slice(0, 40);
+  if (!title) return res.status(400).json({ error: "Informe o nome da coleção." });
+  const ids: string[] = Array.isArray(req.body?.productIds) ? req.body.productIds.filter((x: any) => typeof x === 'string') : [];
+  const pos = ((db.prepare("SELECT MAX(position) AS m FROM storefront_collections WHERE organization_id = ?").get(orgId) as any)?.m ?? -1) + 1;
+  const id = uuidv4();
+  db.prepare("INSERT INTO storefront_collections (id, organization_id, title, rule, position, items_json) VALUES (?, ?, ?, 'manual', ?, ?)")
+    .run(id, orgId, title, pos, JSON.stringify(ids));
+  res.json({ id, title, rule: 'manual', productIds: ids });
+});
+
+// PUT /api/storefront/collections/:id -> edita uma coleção manual (título/produtos)
+router.put("/collections/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const c = db.prepare("SELECT id, rule FROM storefront_collections WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
+  if (!c) return res.status(404).json({ error: "Coleção não encontrada." });
+  const sets: string[] = []; const vals: any[] = [];
+  if (req.body?.title !== undefined) { sets.push("title = ?"); vals.push(String(req.body.title).trim().slice(0, 40)); }
+  if (req.body?.productIds !== undefined && c.rule === 'manual') {
+    const ids = Array.isArray(req.body.productIds) ? req.body.productIds.filter((x: any) => typeof x === 'string') : [];
+    sets.push("items_json = ?"); vals.push(JSON.stringify(ids));
+  }
+  if (sets.length) db.prepare(`UPDATE storefront_collections SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// DELETE /api/storefront/collections/:id -> remove uma coleção
+router.delete("/collections/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  db.prepare("DELETE FROM storefront_collections WHERE id = ? AND organization_id = ?").run(req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// POST /api/storefront/ai/collections -> a IA monta as coleções da vitrine.
+// Substitui o conjunto atual. Com a IA, ela escolhe e nomeia as coleções a
+// partir do catálogo e dos sinais (destaques/vendas); sem IA, usa um conjunto
+// padrão coerente.
+router.post("/ai/collections", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = getOrgId(req);
+  try {
+    const hasFeatured = !!(db.prepare(
+      "SELECT 1 FROM products_services WHERE organization_id = ? AND type='product' AND active=1 AND COALESCE(storefront_visible,1)=1 AND featured=1 LIMIT 1"
+    ).get(orgId));
+    const hasSales = !!(db.prepare(
+      `SELECT 1 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido') LIMIT 1`
+    ).get(orgId));
+    const names = (db.prepare(
+      "SELECT name FROM products_services WHERE organization_id = ? AND type='product' AND active=1 AND COALESCE(storefront_visible,1)=1 ORDER BY created_at DESC LIMIT 40"
+    ).all(orgId) as any[]).map(r => r.name);
+
+    if (names.length === 0) return res.json({ collections: [], reason: "Nenhum produto visível na vitrine." });
+
+    let chosen: { title: string; rule: string }[] = [];
+
+    if (isAIConfigured()) {
+      const allowed: string[] = ["newest", ...(hasFeatured ? ["featured"] : []), ...(hasSales ? ["best_sellers"] : [])];
+      const system = "Você organiza a home de uma loja virtual brasileira em coleções (seções). Use APENAS as regras permitidas. Crie títulos curtos e atraentes em português. Responda SOMENTE em JSON.";
+      const prompt = `Produtos da loja: ${names.join(", ")}.
+Regras de coleção permitidas (id -> significado): ${allowed.map(r => r === 'featured' ? 'featured (produtos em destaque)' : r === 'best_sellers' ? 'best_sellers (mais vendidos)' : 'newest (novidades/recém-adicionados)').join("; ")}.
+Monte de 2 a 3 coleções para a vitrine, cada uma com uma regra da lista (sem repetir regra) e um título curto. Responda apenas o JSON: {"collections":[{"title":"...","rule":"..."}]}`;
+      try {
+        const parsed = JSON.parse(await chat(prompt, { json: true, temperature: 0.5, system }));
+        const seen = new Set<string>();
+        chosen = (parsed.collections || [])
+          .filter((c: any) => c && COLLECTION_RULES.has(c.rule) && allowed.includes(c.rule) && !seen.has(c.rule) && (seen.add(c.rule) || true))
+          .slice(0, 3)
+          .map((c: any) => ({ title: String(c.title || "").trim().slice(0, 40) || defaultTitle(c.rule), rule: c.rule }));
+      } catch (e) { chosen = []; }
+    }
+
+    // Fallback determinístico (sem IA ou retorno inválido).
+    if (chosen.length === 0) {
+      if (hasFeatured) chosen.push({ title: "Destaques", rule: "featured" });
+      if (hasSales) chosen.push({ title: "Mais vendidos", rule: "best_sellers" });
+      chosen.push({ title: "Novidades", rule: "newest" });
+    }
+
+    // Substitui o conjunto atual de coleções.
+    const replace = db.transaction(() => {
+      // Mantém as coleções MANUAIS do dono; só substitui as automáticas.
+      db.prepare("DELETE FROM storefront_collections WHERE organization_id = ? AND rule != 'manual'").run(orgId);
+      chosen.forEach((c, i) => {
+        db.prepare("INSERT INTO storefront_collections (id, organization_id, title, rule, position) VALUES (?, ?, ?, ?, ?)")
+          .run(uuidv4(), orgId, c.title, c.rule, i);
+      });
+    });
+    replace();
+
+    res.json({ collections: chosen });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function defaultTitle(rule: string): string {
+  return rule === "featured" ? "Destaques" : rule === "best_sellers" ? "Mais vendidos" : "Novidades";
+}
+
 // PUT /api/storefront/products/:id -> atualiza modo de venda / visibilidade / destaque
 router.put("/products/:id", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);

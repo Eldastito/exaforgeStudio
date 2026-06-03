@@ -172,6 +172,21 @@ export function Storefront() {
     return list;
   }, [data, onlyFavs, favorites]);
 
+  const productById = useMemo(() => {
+    const m: Record<string, Product> = {};
+    (data?.products || []).forEach((p) => { m[p.id] = p; });
+    return m;
+  }, [data]);
+
+  // Coleções (curadoria da IA): cada uma vira uma seção com seus produtos.
+  // Ocultas quando o cliente filtra só favoritos.
+  const collectionSections = useMemo(() => {
+    if (!data?.collections || onlyFavs) return [];
+    return data.collections
+      .map((c) => ({ id: c.id, title: c.title, items: c.productIds.map((id) => productById[id]).filter(Boolean) as Product[] }))
+      .filter((c) => c.items.length > 0);
+  }, [data, onlyFavs, productById]);
+
   // Fundo conforme tema.
   const pageBg = night
     ? 'bg-[#070914] text-white'
@@ -219,8 +234,31 @@ export function Storefront() {
               </p>
             )}
 
+            {/* Coleções (seções curadas pela IA) */}
+            {collectionSections.map((sec) => (
+              <section key={sec.id} className="mt-8">
+                <h2 className="mb-3 text-lg font-semibold tracking-tight">{sec.title}</h2>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {sec.items.map((p) => (
+                    <ProductCard
+                      key={`${sec.id}-${p.id}`}
+                      product={p}
+                      accent={accent}
+                      mode={mode}
+                      isFavorite={favorites.includes(p.id)}
+                      onToggleFavorite={toggleFavorite}
+                      onOpen={setActiveProduct}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+
             {/* Grid */}
-            <div className="mt-6">
+            <div className="mt-8">
+              {collectionSections.length > 0 && products.length > 0 && (
+                <h2 className="mb-3 text-lg font-semibold tracking-tight">Todos os produtos</h2>
+              )}
               {products.length === 0 ? (
                 <div className="grid place-items-center rounded-3xl border border-dashed py-20 text-center opacity-60"
                   style={{ borderColor: hexToRgba(accent, 0.3) }}>

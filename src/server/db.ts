@@ -671,6 +671,16 @@ const initDb = () => {
         expires_at DATETIME
       );
       CREATE INDEX IF NOT EXISTS idx_storefront_links_org ON storefront_links(organization_id);
+
+      CREATE TABLE IF NOT EXISTS storefront_collections (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        rule TEXT NOT NULL DEFAULT 'featured', -- featured | best_sellers | newest
+        position INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_collections_org ON storefront_collections(organization_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas da loja virtual', e); }
 
@@ -684,6 +694,8 @@ const initDb = () => {
   // Visibilidade e destaque na vitrine.
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_visible INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE products_services ADD COLUMN featured INTEGER DEFAULT 0`); } catch(e){}
+  // Coleções manuais: lista ordenada de IDs de produto escolhidos a dedo.
+  try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.
   try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_label TEXT`); } catch(e){}
 };

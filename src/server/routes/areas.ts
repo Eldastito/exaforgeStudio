@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import { chat, isAIConfigured } from "../llm.js";
 
 const router = Router();
 const orgOf = (req: any) => req.organizationId;
@@ -9,6 +10,32 @@ const orgOf = (req: any) => req.organizationId;
 const view = (a: any) => ({
   id: a.id, name: a.name, description: a.description || "", persona: a.persona || "",
   assigned_user_id: a.assigned_user_id || null, position: a.position, active: !!a.active,
+});
+
+// POST /api/areas/ai/persona  { name, description } -> a IA sugere a persona/
+// instruções da área, para o dono ajustar em vez de começar do zero.
+router.post("/ai/persona", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = orgOf(req);
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  const name = String(req.body?.name || "").trim();
+  const description = String(req.body?.description || "").trim();
+  if (!name && !description) return res.status(400).json({ error: "Preencha o nome ou a descrição da área primeiro." });
+
+  try {
+    const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const brand = biz?.business_name ? `A empresa se chama "${biz.business_name}". ` : "";
+    const system = "Você cria instruções (persona) para um assistente de atendimento por WhatsApp de uma empresa brasileira. Escreve em português do Brasil, em 2ª pessoa ('Você é...'), de forma objetiva e prática. NÃO invente serviços, preços ou políticas que não foram informados — descreva o comportamento, o tom e como conduzir o atendimento. Responda SOMENTE com o texto da persona, sem títulos nem aspas.";
+    const prompt = `${brand}Crie a persona/instruções de IA para a área de atendimento "${name}"${description ? ` (descrição: ${description})` : ""}.
+Inclua: quem a IA representa e o tom de voz; o que essa área atende; como acolher e conduzir (tirar dúvidas, oferecer agendamento/orçamento quando fizer sentido); e quando encaminhar para um humano. Seja conciso (até ~120 palavras).`;
+    const raw = await chat(prompt, { temperature: 0.7, system });
+    const persona = String(raw || "").trim().slice(0, 2000);
+    if (!persona) return res.status(502).json({ error: "A IA não retornou um texto válido. Tente novamente." });
+    res.json({ persona });
+  } catch (e: any) {
+    console.error("[Areas AI persona] erro", e);
+    res.status(500).json({ error: "Falha ao gerar com a IA. Tente novamente." });
+  }
 });
 
 // GET /api/areas

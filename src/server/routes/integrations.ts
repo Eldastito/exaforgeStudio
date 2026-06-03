@@ -54,7 +54,12 @@ router.get("/webhooks", (req: AuthRequest, res) => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
 
   try {
-    const webhooks = db.prepare('SELECT * FROM webhook_endpoints WHERE organization_id = ?').all(orgId);
+    // Não devolve a coluna `secret` (segredo do webhook) — só um indicador.
+    const webhooks = db.prepare(
+      `SELECT id, organization_id, name, url, events, active, created_at,
+              CASE WHEN secret IS NOT NULL AND secret != '' THEN 1 ELSE 0 END AS has_secret
+         FROM webhook_endpoints WHERE organization_id = ?`
+    ).all(orgId);
     res.json(webhooks);
   } catch (e: any) {
     res.status(500).json({ error: e.message });

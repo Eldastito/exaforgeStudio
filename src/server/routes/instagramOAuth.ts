@@ -1,9 +1,33 @@
 import { Router } from "express";
+import crypto from "crypto";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import { JWT_SECRET } from "../config/secret.js";
 
 const router = Router();
+
+// 'state' do OAuth ASSINADO (HMAC) para impedir que um atacante forje um state
+// apontando para outra organização (o callback é público). Validade de 10 min.
+const STATE_TTL_MS = 10 * 60 * 1000;
+function signState(orgId: string): string {
+  const payload = Buffer.from(JSON.stringify({ orgId, t: Date.now() })).toString("base64url");
+  const sig = crypto.createHmac("sha256", JWT_SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+function verifyState(state: string): string | null {
+  if (!state || typeof state !== "string" || !state.includes(".")) return null;
+  const [payload, sig] = state.split(".");
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac("sha256", JWT_SECRET).update(payload).digest("base64url");
+  const a = Buffer.from(sig), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const { orgId, t } = JSON.parse(Buffer.from(payload, "base64url").toString());
+    if (!orgId || typeof t !== "number" || Date.now() - t > STATE_TTL_MS) return null;
+    return String(orgId);
+  } catch { return null; }
+}
 
 // Credenciais do App da Meta (Instagram API with Instagram Login).
 const IG_APP_ID = process.env.INSTAGRAM_APP_ID || process.env.IG_APP_ID || '';
@@ -19,8 +43,8 @@ router.get("/instagram/login-url", (req: AuthRequest, res): any => {
   if (!IG_APP_ID || !IG_APP_SECRET) {
     return res.status(400).json({ error: "Configure INSTAGRAM_APP_ID e INSTAGRAM_APP_SECRET no servidor." });
   }
-  // 'state' carrega o org para sabermos a quem atribuir no callback.
-  const state = Buffer.from(JSON.stringify({ orgId, t: Date.now() })).toString('base64url');
+  // 'state' assinado (HMAC) carrega o org para sabermos a quem atribuir no callback.
+  const state = signState(orgId);
   const url = `https://www.instagram.com/oauth/authorize`
     + `?force_reauth=true&client_id=${encodeURIComponent(IG_APP_ID)}`
     + `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`
@@ -39,10 +63,12 @@ export async function instagramCallback(req: any, res: any) {
   if (!code) {
     return res.status(400).send("Falta o parâmetro 'code'.");
   }
-  let orgId = 'default_org';
-  try {
-    if (stateRaw) orgId = JSON.parse(Buffer.from(stateRaw, 'base64url').toString()).orgId || orgId;
-  } catch (e) { /* usa default */ }
+  // Valida a assinatura do state — rejeita state forjado/expirado (anti-CSRF/IDOR).
+  const orgId = verifyState(stateRaw);
+  if (!orgId) {
+    console.warn('[IG OAuth] state inválido/expirado — callback rejeitado.');
+    return res.redirect(`${APP_URL}/?ig=erro`);
+  }
 
   try {
     // 1. Troca o code por um token de CURTA duração.

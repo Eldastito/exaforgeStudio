@@ -6,7 +6,8 @@ import { v4 as uuidv4 } from "uuid";
 const router = Router();
 
 // Used inside requireOrganizationAccess and requireAuth middlewares
-const getOrgId = (req: any) => req.headers['x-organization-id'] || req.organizationId;
+// Sempre usa o org do JWT verificado; nunca confia no header x-organization-id.
+const getOrgId = (req: any) => req.organizationId;
 
 // GET /api/users
 router.get("/", (req: Request, res: Response): any => {

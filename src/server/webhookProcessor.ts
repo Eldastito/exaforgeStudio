@@ -45,15 +45,23 @@ export async function processIncomingMessage(
     }
   }
 
-  // Organização-alvo: a do canal encontrado; senão, a do dono (compatibilidade).
+  // Organização-alvo: a do canal encontrado. Se NÃO houver canal correspondente,
+  // só atribuímos a uma organização quando o sistema tem UMA única empresa
+  // (deploy single-tenant) — assim um remetente desconhecido não pode ser
+  // injetado no atendimento de um tenant específico num ambiente multi-empresa.
   let targetOrg: string;
   if (channel) {
     targetOrg = channel.organization_id;
   } else {
-    const ownerRow = db.prepare(
-      "SELECT organization_id FROM users WHERE role = 'owner' ORDER BY created_at ASC LIMIT 1"
-    ).get() as any;
-    targetOrg = ownerRow?.organization_id || 'default_org';
+    const orgs = db.prepare(
+      "SELECT DISTINCT organization_id FROM users WHERE role = 'owner'"
+    ).all() as any[];
+    if (orgs.length === 1) {
+      targetOrg = orgs[0].organization_id;
+    } else {
+      console.warn(`[Webhook] Mensagem de remetente sem canal correspondente ignorada (identifier=${payload.identifier ?? '?'}; ${orgs.length} organizações). Cadastre o canal para receber.`);
+      return;
+    }
   }
 
   // Se ainda não existe canal, cria na organização-alvo (caminho legado/1ª vez).

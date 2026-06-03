@@ -11,7 +11,8 @@ import { chat, isAIConfigured } from "../llm.js";
 // ============================================================================
 
 const router = Router();
-const getOrgId = (req: any) => req.organizationId || req.headers["x-organization-id"] || "default_org";
+// Sempre usa o org do JWT verificado; nunca confia no header x-organization-id.
+const getOrgId = (req: any) => req.organizationId;
 const slugify = (s: string) =>
   (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);

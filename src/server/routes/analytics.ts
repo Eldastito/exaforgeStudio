@@ -1,11 +1,22 @@
 import { Router } from "express";
 import { AnalyticsService } from "../AnalyticsService.js";
+import { ReportsService } from "../ReportsService.js";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from 'pdfkit';
 
 const router = Router();
 const getOrgId = (req: any) => req.organizationId;
+
+// Resumo de vendas para o painel de Relatórios (30 dias x total geral).
+router.get("/sales-summary", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    res.json(ReportsService.salesSummary(orgId));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.get("/metrics", (req, res) => {
   const orgId = getOrgId(req);

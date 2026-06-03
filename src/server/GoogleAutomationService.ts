@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { v4 as uuidv4 } from "uuid";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 // Automações Google que rodam no servidor (sem o dono presente). Hoje:
@@ -77,9 +78,43 @@ export class GoogleAutomationService {
       if (!a?.email) return;
       const when = a.scheduled_start ? new Date(a.scheduled_start).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "a combinar";
       const biz = this.businessName(orgId);
-      const body = `Olá${a.contact ? `, ${a.contact}` : ""}!\n\nSeu agendamento foi confirmado:\n\n• ${a.title || "Agendamento"}\n• Data/hora: ${when}\n${a.description ? `• ${a.description}\n` : ""}\nQualquer coisa, é só responder por aqui ou pelo WhatsApp.\n\n— ${biz}`;
-      await GoogleOAuthService.gmailSend(orgId, a.email, `Confirmação de agendamento — ${biz}`, body);
+      // Anexo .ics: o cliente adiciona o evento à própria agenda com 1 toque.
+      const ics = this.buildIcs(a.title || "Agendamento", a.description || "", a.scheduled_start, biz);
+      const body = `Olá${a.contact ? `, ${a.contact}` : ""}!\n\nSeu agendamento foi confirmado:\n\n• ${a.title || "Agendamento"}\n• Data/hora: ${when}\n${a.description ? `• ${a.description}\n` : ""}${ics ? "\nO convite de calendário (.ics) está em anexo — toque para adicionar à sua agenda." : ""}\nQualquer coisa, é só responder por aqui ou pelo WhatsApp.\n\n— ${biz}`;
+      const attachment = ics ? { filename: "agendamento.ics", mimeType: "text/calendar", content: ics } : undefined;
+      await GoogleOAuthService.gmailSend(orgId, a.email, `Confirmação de agendamento — ${biz}`, body, attachment);
     } catch (e) { console.error("[GoogleAutomation] confirmAppointment:", e); }
+  }
+
+  // Monta um VEVENT (iCalendar) para o cliente adicionar na agenda. Evento de 1h
+  // a partir do horário marcado. Retorna "" se o horário for inválido.
+  private static buildIcs(title: string, description: string, startIso: string, biz: string): string {
+    try {
+      const start = new Date(startIso);
+      if (isNaN(start.getTime())) return "";
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+      const esc = (s: string) => String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+      const uid = `${uuidv4()}@exaforge`;
+      return [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//ExaForge//Agendamento//PT-BR",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "BEGIN:VEVENT",
+        `UID:${uid}`,
+        `DTSTAMP:${fmt(new Date())}`,
+        `DTSTART:${fmt(start)}`,
+        `DTEND:${fmt(end)}`,
+        `SUMMARY:${esc(title)}`,
+        `DESCRIPTION:${esc(description || `Agendamento — ${biz}`)}`,
+        `ORGANIZER;CN=${esc(biz)}:mailto:noreply@exaforge`,
+        "STATUS:CONFIRMED",
+        "END:VEVENT",
+        "END:VCALENDAR",
+      ].join("\r\n");
+    } catch (e) { return ""; }
   }
 
   // Envia a confirmação do PEDIDO por e-mail ao cliente (se houver e-mail).

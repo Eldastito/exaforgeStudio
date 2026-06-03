@@ -329,7 +329,7 @@ export class GoogleOAuthService {
 
   // ---- Gmail ----
   // Envia um e-mail pela conta Google conectada (escopo gmail.send).
-  static async gmailSend(orgId: string, to: string, subject: string, body: string): Promise<{ id: string } | { error: string }> {
+  static async gmailSend(orgId: string, to: string, subject: string, body: string, attachment?: { filename: string; mimeType: string; content: string }): Promise<{ id: string } | { error: string }> {
     const token = await this.getAccessToken(orgId);
     if (!token) return { error: "Conta Google não conectada." };
     const conn = this.getConnection(orgId);
@@ -337,13 +337,35 @@ export class GoogleOAuthService {
     if (!to) return { error: "Informe o destinatário." };
     // Assunto com acentos: codificação MIME (=?UTF-8?B?...?=).
     const subjEnc = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf-8").toString("base64")}?=`;
-    const mime =
-      `To: ${to}\r\n` +
-      `From: ${from}\r\n` +
-      `Subject: ${subjEnc}\r\n` +
-      `MIME-Version: 1.0\r\n` +
-      `Content-Type: text/plain; charset="UTF-8"\r\n\r\n` +
-      String(body || "");
+    let mime: string;
+    if (attachment) {
+      // E-mail com anexo: multipart/mixed (corpo de texto + arquivo, ex.: .ics).
+      const boundary = "exaforge_" + uuidv4().replace(/-/g, "");
+      const att64 = Buffer.from(attachment.content, "utf-8").toString("base64").replace(/(.{76})/g, "$1\r\n");
+      mime =
+        `To: ${to}\r\n` +
+        `From: ${from}\r\n` +
+        `Subject: ${subjEnc}\r\n` +
+        `MIME-Version: 1.0\r\n` +
+        `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Type: text/plain; charset="UTF-8"\r\n\r\n` +
+        String(body || "") + `\r\n` +
+        `--${boundary}\r\n` +
+        `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"\r\n` +
+        `Content-Transfer-Encoding: base64\r\n` +
+        `Content-Disposition: attachment; filename="${attachment.filename}"\r\n\r\n` +
+        att64 + `\r\n` +
+        `--${boundary}--`;
+    } else {
+      mime =
+        `To: ${to}\r\n` +
+        `From: ${from}\r\n` +
+        `Subject: ${subjEnc}\r\n` +
+        `MIME-Version: 1.0\r\n` +
+        `Content-Type: text/plain; charset="UTF-8"\r\n\r\n` +
+        String(body || "");
+    }
     const raw = Buffer.from(mime, "utf-8").toString("base64url");
     try {
       const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {

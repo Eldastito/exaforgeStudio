@@ -759,6 +759,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN email TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_email_appointments INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_email_orders INTEGER DEFAULT 0`); } catch(e){}
+  // Lembrete automático de PIX não pago (cutucão gentil pelo WhatsApp).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pix_reminder_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pix_reminder_minutes INTEGER DEFAULT 30`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pix_reminder_message TEXT`); } catch(e){}
+  // Marca se já enviamos o lembrete de pagamento para uma cobrança (envia 1x).
+  try { db.exec(`ALTER TABLE payment_charges ADD COLUMN reminder_status TEXT`); } catch(e){}
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

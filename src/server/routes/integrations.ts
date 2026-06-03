@@ -7,6 +7,7 @@ import { NotificationService } from "../NotificationService.js";
 import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit } from "../webhookSecurity.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
+import { ReportsService } from "../ReportsService.js";
 
 const router = Router();
 
@@ -97,30 +98,14 @@ router.post("/google/sheets/export", async (req: AuthRequest, res): Promise<any>
     } else if (dataset === "summary") {
       title = `Resumo de vendas — ExaForge — ${today}`;
       header = ["Métrica", "Últimos 30 dias", "Total geral"];
-      // Helpers de período: pedidos não cancelados contam como faturamento.
-      const stat = (where: string, args: any[] = []) => db.prepare(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS sum
-           FROM orders WHERE organization_id = ? AND status != 'cancelado' ${where}`
-      ).get(orgId, ...args) as any;
-      const all = stat("");
-      const m30 = stat("AND created_at >= datetime('now','-30 days')");
-      const paid = (where: string) => (db.prepare(
-        `SELECT COUNT(*) AS n FROM orders WHERE organization_id = ? AND payment_status = 'pago' ${where}`
-      ).get(orgId) as any).n;
-      const appts = (where: string) => (db.prepare(
-        `SELECT COUNT(*) AS n FROM appointments WHERE organization_id = ? ${where}`
-      ).get(orgId) as any).n;
-      const contacts = (where: string) => (db.prepare(
-        `SELECT COUNT(*) AS n FROM contacts WHERE organization_id = ? ${where}`
-      ).get(orgId) as any).n;
-      const ticket = (s: any) => s.n > 0 ? Number(s.sum) / Number(s.n) : 0;
+      const sum = ReportsService.salesSummary(orgId);
       rows = [
-        ["Pedidos (não cancelados)", m30.n, all.n],
-        ["Faturamento", brl(m30.sum), brl(all.sum)],
-        ["Ticket médio", brl(ticket(m30)), brl(ticket(all))],
-        ["Pedidos pagos", paid("AND created_at >= datetime('now','-30 days')"), paid("")],
-        ["Agendamentos", appts("AND created_at >= datetime('now','-30 days')"), appts("")],
-        ["Contatos", contacts("AND created_at >= datetime('now','-30 days')"), contacts("")],
+        ["Pedidos (não cancelados)", sum.orders.d30, sum.orders.all],
+        ["Faturamento", brl(sum.revenue.d30), brl(sum.revenue.all)],
+        ["Ticket médio", brl(sum.ticket.d30), brl(sum.ticket.all)],
+        ["Pedidos pagos", sum.paidOrders.d30, sum.paidOrders.all],
+        ["Agendamentos", sum.appointments.d30, sum.appointments.all],
+        ["Contatos", sum.contacts.d30, sum.contacts.all],
       ];
     } else {
       title = `Pedidos — ExaForge — ${today}`;

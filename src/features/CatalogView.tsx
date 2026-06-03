@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
@@ -73,6 +73,16 @@ export function CatalogView() {
     } catch (e) { /* noop */ }
   };
 
+  const handleDelete = async (p: Product) => {
+    if (!window.confirm(`Excluir "${p.name}" do catálogo? Esta ação não pode ser desfeita. O histórico de pedidos é preservado.`)) return;
+    try {
+      const res = await apiFetch(`/api/products/${p.id}`, { method: 'DELETE' });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Erro ao excluir'); return; }
+      toast.success('Item excluído.');
+      loadProducts();
+    } catch (e) { toast.error('Erro ao excluir'); }
+  };
+
   const handleImport = async () => {
     setImporting(true);
     try {
@@ -128,12 +138,15 @@ export function CatalogView() {
             <div key={p.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors group">
               <div className="flex justify-between items-start mb-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">{p.type}</span>
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => setStockProduct(p)} className="text-zinc-500 hover:text-emerald-400" title="Estoque, variações e movimentações">
+                <div className="flex items-center gap-2.5">
+                  <button onClick={() => setStockProduct(p)} className="text-zinc-400 hover:text-emerald-400" title="Estoque, variações e movimentações">
                     <Boxes className="w-4 h-4" />
                   </button>
-                  <button onClick={() => openEdit(p)} className="text-zinc-500 hover:text-indigo-400" title="Editar">
+                  <button onClick={() => openEdit(p)} className="text-zinc-400 hover:text-indigo-400" title="Editar">
                     <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => handleDelete(p)} className="text-zinc-400 hover:text-rose-400" title="Excluir">
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>

@@ -182,6 +182,34 @@ router.patch("/:id", (req: AuthRequest, res): any => {
   }
 });
 
+// DELETE /:id — exclui o produto/serviço do catálogo (e da vitrine). Remove os
+// dados ligados ao produto (estoque, variações, imagens, movimentações), mas
+// PRESERVA o histórico de pedidos (order_items guardam o nome no snapshot).
+router.delete("/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const product = db.prepare('SELECT id, name FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
+    if (!product) return res.status(404).json({ error: "Produto não encontrado" });
+
+    const wipe = db.transaction((id: string) => {
+      db.prepare('DELETE FROM inventory_items WHERE organization_id = ? AND product_service_id = ?').run(orgId, id);
+      db.prepare('DELETE FROM product_variants WHERE organization_id = ? AND product_service_id = ?').run(orgId, id);
+      db.prepare('DELETE FROM stock_movements WHERE organization_id = ? AND product_service_id = ?').run(orgId, id);
+      db.prepare('DELETE FROM product_images WHERE organization_id = ? AND product_service_id = ?').run(orgId, id);
+      db.prepare('DELETE FROM products_services WHERE id = ? AND organization_id = ?').run(id, orgId);
+    });
+    wipe(req.params.id);
+
+    logAuthEvent(orgId, userId, req.params.id, 'PRODUCT_DELETED', { name: product.name });
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/products/import — importação em massa via CSV (texto colado)
 // Formato esperado (cabeçalho): nome,preco,quantidade,descricao,tipo
 router.post("/import", (req: AuthRequest, res): any => {

@@ -9,7 +9,7 @@ import ticketsRoutes from "./src/server/routes/tickets.js";
 import productsRoutes from "./src/server/routes/products.js";
 import appointmentsRoutes from "./src/server/routes/appointments.js";
 import integrationsRoutes from "./src/server/routes/integrations.js";
-import { effectiveWebhookSecret, isWebhookEnforced } from "./src/server/webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit } from "./src/server/webhookSecurity.js";
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
@@ -570,7 +570,9 @@ async function startServer() {
   ], async (req, res) => {
     try {
       // Autenticidade + anti-abuso/custo (W1/M3)
-      if (!verifyWebhookSecret(req, res)) return;
+      const okSecret = verifyWebhookSecret(req, res);
+      recordWebhookHit(okSecret, okSecret ? 'recebido' : 'segredo_incorreto');
+      if (!okSecret) return;
       const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
       if (!rateLimit(`wh:${ip}`, 120, 60 * 1000)) {
         return res.status(429).json({ error: "Too many webhook requests" });

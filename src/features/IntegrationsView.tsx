@@ -54,7 +54,7 @@ export function IntegrationsView() {
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<{ configured: boolean; connected: boolean; email: string; name: string } | null>(null);
   const [driveBusy, setDriveBusy] = useState<string | null>(null);
-  const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean } | null>(null);
+  const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean; lastHit?: { at: number; ok: boolean; reason: string } | null } | null>(null);
   const [waCopied, setWaCopied] = useState(false);
 
   const loadGoogleStatus = () => {
@@ -84,6 +84,17 @@ export function IntegrationsView() {
       if (d.url) window.open(d.url, '_blank');
     } catch { toast.error('Falha ao exportar.'); }
     finally { setSheetsBusy(null); }
+  };
+  const [gmailBusy, setGmailBusy] = useState(false);
+  const sendGmailTest = async () => {
+    setGmailBusy(true);
+    try {
+      const res = await apiFetch('/api/integrations/google/gmail/test', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao enviar o e-mail.'); return; }
+      toast.success('E-mail de teste enviado! Confira sua caixa de entrada. ✉️');
+    } catch { toast.error('Falha ao enviar o e-mail.'); }
+    finally { setGmailBusy(false); }
   };
   const sendBackupToDrive = async (id: string) => {
     setDriveBusy(id);
@@ -286,6 +297,14 @@ export function IntegrationsView() {
             ) : (
               <p className="mt-2 text-[11px] text-zinc-500">Segredo definido por variável de ambiente (sempre exigido).</p>
             )}
+            {/* Diagnóstico: última chamada recebida do WhatsApp */}
+            {waWebhook.lastHit && (
+              <p className={`mt-2 text-[11px] ${waWebhook.lastHit.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                Última chamada do WhatsApp: há {Math.max(0, Math.round((Date.now() - waWebhook.lastHit.at) / 1000))}s — {waWebhook.lastHit.ok
+                  ? 'recebida e aceita ✅'
+                  : 'REJEITADA ❌ (o segredo na Evolution não confere — copie a URL acima e cole de novo na Evolution).'}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -324,9 +343,12 @@ export function IntegrationsView() {
                      <Button variant="ghost" size="sm" onClick={disconnectGoogle} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
                   </div>
                   <p className="text-xs text-emerald-400/80 text-center">
-                    Conectado com acesso offline — a IA/servidor usa Drive e Agenda (e em breve Gmail e Sheets) mesmo com você offline. Agendamentos criados aqui viram eventos no seu Google Calendar.
+                    Conectado com acesso offline — a IA/servidor usa Drive, Agenda e Gmail (e em breve Sheets) mesmo com você offline. Agendamentos viram eventos no Google Calendar.
                   </p>
                   <div className="flex flex-wrap justify-center gap-2">
+                    <Button variant="outline" size="sm" onClick={sendGmailTest} disabled={gmailBusy} className="border-zinc-700 text-zinc-200">
+                      {gmailBusy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Enviar e-mail de teste (Gmail)
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => exportSheets('orders')} disabled={sheetsBusy === 'orders'} className="border-zinc-700 text-zinc-200">
                       {sheetsBusy === 'orders' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar pedidos p/ Sheets
                     </Button>

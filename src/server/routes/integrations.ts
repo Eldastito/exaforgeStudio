@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { BackupService } from "../BackupService.js";
 import { NotificationService } from "../NotificationService.js";
-import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret } from "../webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit } from "../webhookSecurity.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 
 const router = Router();
@@ -88,6 +88,28 @@ router.post("/google/sheets/export", async (req: AuthRequest, res): Promise<any>
   }
 });
 
+// POST /google/gmail/test -> envia um e-mail de teste para a conta conectada.
+router.post("/google/gmail/test", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const st = GoogleOAuthService.status(orgId);
+  if (!st.connected || !st.email) return res.status(400).json({ error: "Conecte uma conta Google primeiro." });
+  const r = await GoogleOAuthService.gmailSend(orgId, st.email, "Teste de e-mail — ExaForge", "Este é um e-mail de teste enviado pela sua conta Google conectada ao ExaForge. Se você recebeu, a integração de Gmail está funcionando. ✅");
+  if ("error" in r) return res.status(400).json({ error: r.error });
+  res.json({ success: true });
+});
+
+// POST /google/gmail/send { to, subject, body } -> envia um e-mail.
+router.post("/google/gmail/send", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { to, subject, body } = req.body || {};
+  if (!to) return res.status(400).json({ error: "Informe o destinatário." });
+  const r = await GoogleOAuthService.gmailSend(orgId, String(to).trim(), String(subject || ""), String(body || ""));
+  if ("error" in r) return res.status(400).json({ error: r.error });
+  res.json({ success: true });
+});
+
 // GET /api/integrations/whatsapp-webhook -> URL pronta (com segredo) + status.
 // Permite ativar a exigência do segredo sem mexer em variáveis de ambiente.
 router.get("/whatsapp-webhook", (req: AuthRequest, res): any => {
@@ -98,6 +120,7 @@ router.get("/whatsapp-webhook", (req: AuthRequest, res): any => {
     url: `${base}/api/webhooks/evolution?secret=${secret}`,
     enforced: isWebhookEnforced(),
     usingEnv: usingEnvSecret(),
+    lastHit: getLastWebhookHit(),
   });
 });
 

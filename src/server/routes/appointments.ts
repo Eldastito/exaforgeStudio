@@ -83,4 +83,40 @@ router.post("/", (req: AuthRequest, res) => {
   }
 });
 
+// PATCH /api/appointments/:id — remarcar/editar (sincroniza com o Calendar).
+router.patch("/:id", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  const a = db.prepare("SELECT * FROM appointments WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
+  if (!a) return res.status(404).json({ error: "Agendamento não encontrado." });
+  const b = req.body || {};
+  const sets: string[] = []; const vals: any[] = [];
+  for (const k of ["title", "description", "scheduled_start", "scheduled_end", "status"]) {
+    if (b[k] !== undefined) { sets.push(`${k} = ?`); vals.push(b[k]); }
+  }
+  if (sets.length) db.prepare(`UPDATE appointments SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+  logAuthEvent(orgId, userId, req.params.id, 'APPOINTMENT_UPDATED', {});
+  // Sincroniza o Google Calendar: cancelou -> remove o evento; senão -> atualiza.
+  if (b.status === 'cancelled') {
+    GoogleOAuthService.removeAppointmentEvent(orgId, req.params.id).catch(() => {});
+  } else {
+    GoogleOAuthService.syncAppointmentUpdate(orgId, req.params.id).catch(() => {});
+  }
+  res.json({ success: true });
+});
+
+// DELETE /api/appointments/:id — exclui o agendamento e remove o evento do Google.
+router.delete("/:id", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  const a = db.prepare("SELECT id FROM appointments WHERE id = ? AND organization_id = ?").get(req.params.id, orgId);
+  if (!a) return res.status(404).json({ error: "Agendamento não encontrado." });
+  await GoogleOAuthService.removeAppointmentEvent(orgId, req.params.id).catch(() => {});
+  db.prepare("DELETE FROM appointments WHERE id = ? AND organization_id = ?").run(req.params.id, orgId);
+  logAuthEvent(orgId, userId, req.params.id, 'APPOINTMENT_DELETED', {});
+  res.json({ success: true });
+});
+
 export default router;

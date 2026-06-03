@@ -315,10 +315,15 @@ export async function processIncomingMessage(
              console.log(`[Vendas] Cliente pediu cancelamento, mas não há pedido cancelável para o contato ${contact.id}.`);
            }
            // Cancela agendamentos abertos do contato (não os já concluídos/cancelados).
+           // Antes guarda os IDs para remover os eventos do Google Calendar.
+           const toCancel = db.prepare(
+             "SELECT id FROM appointments WHERE organization_id = ? AND contact_id = ? AND status NOT IN ('cancelled','completed','no_show')"
+           ).all(orgId, contact.id) as any[];
            const apptInfo = db.prepare(`
              UPDATE appointments SET status = 'cancelled'
              WHERE organization_id = ? AND contact_id = ? AND status NOT IN ('cancelled','completed','no_show')
            `).run(orgId, contact.id);
+           for (const ap of toCancel) GoogleOAuthService.removeAppointmentEvent(orgId, ap.id).catch(() => {});
            // Cancela entregas pendentes do contato.
            db.prepare(`
              UPDATE deliveries SET status = 'cancelled'

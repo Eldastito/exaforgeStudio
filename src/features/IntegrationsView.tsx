@@ -81,7 +81,7 @@ export function IntegrationsView() {
     try { await apiFetch('/api/integrations/google/disconnect', { method: 'POST' }); loadGoogleStatus(); } catch {}
   };
   const [sheetsBusy, setSheetsBusy] = useState<string | null>(null);
-  const exportSheets = async (dataset: 'orders' | 'contacts') => {
+  const exportSheets = async (dataset: 'orders' | 'contacts' | 'appointments' | 'summary') => {
     setSheetsBusy(dataset);
     try {
       const res = await apiFetch('/api/integrations/google/sheets/export', {
@@ -363,6 +363,12 @@ export function IntegrationsView() {
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => exportSheets('contacts')} disabled={sheetsBusy === 'contacts'} className="border-zinc-700 text-zinc-200">
                       {sheetsBusy === 'contacts' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar contatos p/ Sheets
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => exportSheets('appointments')} disabled={sheetsBusy === 'appointments'} className="border-zinc-700 text-zinc-200">
+                      {sheetsBusy === 'appointments' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar agendamentos p/ Sheets
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => exportSheets('summary')} disabled={sheetsBusy === 'summary'} className="border-zinc-700 text-zinc-200">
+                      {sheetsBusy === 'summary' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Relatório de vendas (resumo) p/ Sheets
                     </Button>
                   </div>
                   <div className="mt-3 space-y-2">

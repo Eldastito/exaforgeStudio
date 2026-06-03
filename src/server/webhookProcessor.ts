@@ -9,6 +9,7 @@ import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { AttendanceAreaService } from "./AttendanceAreaService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
+import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -248,6 +249,12 @@ export async function processIncomingMessage(
           try { NotificationService.handoff(orgId, contact.name); } catch (e) { /* noop */ }
        }
        
+       // E-mail capturado pela IA na conversa: salva no contato ANTES de criar
+       // pedido/agendamento, para que as confirmações por e-mail o encontrem.
+       if (aiResult.customerEmail) {
+          try { db.prepare('UPDATE contacts SET email = ? WHERE id = ?').run(aiResult.customerEmail, contact.id); } catch (e) { /* noop */ }
+       }
+
        if (aiResult.newAppointment) {
           const apptId = uuidv4();
           db.prepare(`
@@ -256,6 +263,8 @@ export async function processIncomingMessage(
           `).run(apptId, orgId, ticket.id, contact.id, aiResult.newAppointment.title, aiResult.newAppointment.scheduled_start);
           // Sincroniza com o Google Calendar (best-effort).
           GoogleOAuthService.syncAppointment(orgId, apptId).catch(() => {});
+          // Confirmação por e-mail ao cliente (best-effort; respeita o toggle do dono).
+          GoogleAutomationService.confirmAppointment(orgId, apptId).catch(() => {});
        }
        
        if (aiResult.newDelivery) {

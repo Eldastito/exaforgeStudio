@@ -67,24 +67,63 @@ router.post("/backups/:id/drive", async (req: AuthRequest, res): Promise<any> =>
   }
 });
 
-// POST /google/sheets/export { dataset: 'orders' | 'contacts' } -> cria uma
-// planilha no Google Sheets do dono com os dados e devolve o link.
+// POST /google/sheets/export { dataset: 'orders'|'contacts'|'appointments'|'summary' }
+// -> cria uma planilha no Google Sheets do dono com os dados e devolve o link.
 router.post("/google/sheets/export", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const dataset = req.body?.dataset === "contacts" ? "contacts" : "orders";
+  const allowed = ["orders", "contacts", "appointments", "summary"];
+  const dataset = allowed.includes(req.body?.dataset) ? req.body.dataset : "orders";
   const brl = (v: any) => `R$ ${Number(v || 0).toFixed(2)}`;
   const dt = (v: any) => v ? new Date(v).toLocaleString("pt-BR") : "";
+  const today = new Date().toLocaleDateString("pt-BR");
 
   let title = ""; let header: string[] = []; let rows: (string | number)[][] = [];
   try {
     if (dataset === "contacts") {
-      title = `Contatos — ExaForge — ${new Date().toLocaleDateString("pt-BR")}`;
-      header = ["Nome", "Telefone/ID", "Cadastrado em", "Compras", "Total gasto"];
-      const list = db.prepare("SELECT name, identifier, created_at, purchase_count, total_spent FROM contacts WHERE organization_id = ? ORDER BY created_at DESC LIMIT 5000").all(orgId) as any[];
-      rows = list.map(c => [c.name || "", c.identifier || "", dt(c.created_at), Number(c.purchase_count || 0), brl(c.total_spent)]);
+      title = `Contatos — ExaForge — ${today}`;
+      header = ["Nome", "Telefone/ID", "E-mail", "Cadastrado em", "Compras", "Total gasto"];
+      const list = db.prepare("SELECT name, identifier, email, created_at, purchase_count, total_spent FROM contacts WHERE organization_id = ? ORDER BY created_at DESC LIMIT 5000").all(orgId) as any[];
+      rows = list.map(c => [c.name || "", c.identifier || "", c.email || "", dt(c.created_at), Number(c.purchase_count || 0), brl(c.total_spent)]);
+    } else if (dataset === "appointments") {
+      title = `Agendamentos — ExaForge — ${today}`;
+      header = ["Data/hora", "Cliente", "Título", "Status", "E-mail", "Criado em"];
+      const list = db.prepare(
+        `SELECT a.scheduled_start, c.name AS contact, a.title, a.status, c.email AS email, a.created_at
+           FROM appointments a LEFT JOIN contacts c ON c.id = a.contact_id
+          WHERE a.organization_id = ? ORDER BY a.scheduled_start DESC LIMIT 2000`
+      ).all(orgId) as any[];
+      rows = list.map(a => [dt(a.scheduled_start), a.contact || "Cliente", a.title || "", a.status || "", a.email || "", dt(a.created_at)]);
+    } else if (dataset === "summary") {
+      title = `Resumo de vendas — ExaForge — ${today}`;
+      header = ["Métrica", "Últimos 30 dias", "Total geral"];
+      // Helpers de período: pedidos não cancelados contam como faturamento.
+      const stat = (where: string, args: any[] = []) => db.prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS sum
+           FROM orders WHERE organization_id = ? AND status != 'cancelado' ${where}`
+      ).get(orgId, ...args) as any;
+      const all = stat("");
+      const m30 = stat("AND created_at >= datetime('now','-30 days')");
+      const paid = (where: string) => (db.prepare(
+        `SELECT COUNT(*) AS n FROM orders WHERE organization_id = ? AND payment_status = 'pago' ${where}`
+      ).get(orgId) as any).n;
+      const appts = (where: string) => (db.prepare(
+        `SELECT COUNT(*) AS n FROM appointments WHERE organization_id = ? ${where}`
+      ).get(orgId) as any).n;
+      const contacts = (where: string) => (db.prepare(
+        `SELECT COUNT(*) AS n FROM contacts WHERE organization_id = ? ${where}`
+      ).get(orgId) as any).n;
+      const ticket = (s: any) => s.n > 0 ? Number(s.sum) / Number(s.n) : 0;
+      rows = [
+        ["Pedidos (não cancelados)", m30.n, all.n],
+        ["Faturamento", brl(m30.sum), brl(all.sum)],
+        ["Ticket médio", brl(ticket(m30)), brl(ticket(all))],
+        ["Pedidos pagos", paid("AND created_at >= datetime('now','-30 days')"), paid("")],
+        ["Agendamentos", appts("AND created_at >= datetime('now','-30 days')"), appts("")],
+        ["Contatos", contacts("AND created_at >= datetime('now','-30 days')"), contacts("")],
+      ];
     } else {
-      title = `Pedidos — ExaForge — ${new Date().toLocaleDateString("pt-BR")}`;
+      title = `Pedidos — ExaForge — ${today}`;
       header = ["Data", "Cliente", "Status", "Pagamento", "Total"];
       const list = db.prepare(
         `SELECT o.created_at, c.name AS contact, o.status, o.payment_status, o.total_amount

@@ -9,6 +9,7 @@ import { CustomerProfileService } from "./CustomerProfileService.js";
 import { chat } from "./llm.js";
 import { PlanService } from "./PlanService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
+import { GoogleAutomationService } from "./GoogleAutomationService.js";
 
 export class AIOrchestratorService {
   /**
@@ -26,7 +27,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -177,7 +178,26 @@ export class AIOrchestratorService {
       try { agendaText = await GoogleOAuthService.getBusyText(params.organizationId); } catch (e) { /* noop */ }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText);
+    // Captura de e-mail: só pedimos o e-mail ao cliente quando o dono ligou as
+    // confirmações por e-mail E o Google está conectado. Se o contato já tem
+    // e-mail salvo, não pedimos de novo (apenas continuamos capturando se mudar).
+    let emailCaptureText = "";
+    if (!isOrchestratorCommand && params.contactId) {
+      try {
+        const s = GoogleAutomationService.getSettings(params.organizationId);
+        if ((s.emailAppointments || s.emailOrders) && GoogleOAuthService.getConnection(params.organizationId)) {
+          const c = db.prepare("SELECT email FROM contacts WHERE id = ?").get(params.contactId) as any;
+          const has = c?.email ? `O e-mail atual do cliente é ${c.email} (use-o; só atualize se ele informar outro).` :
+            "Ainda NÃO temos o e-mail deste cliente.";
+          const para = s.emailOrders && s.emailAppointments ? "do pedido e do agendamento" : s.emailOrders ? "do pedido" : "do agendamento";
+          emailCaptureText = `CAPTURA DE E-MAIL: enviamos a confirmação ${para} por e-mail. ${has}
+- Quando o cliente informar um e-mail (a qualquer momento), coloque-o em "customer_email" (apenas o endereço, validado).
+- Ao FECHAR um pedido/agendamento, se ainda não tivermos o e-mail, peça-o de forma simpática e OPCIONAL na sua "reply" (ex.: "Quer que eu te envie a confirmação por e-mail? Se sim, me passa seu melhor e-mail 😊"). NÃO insista nem trave a venda se o cliente não quiser informar.`;
+        }
+      } catch (e) { /* noop */ }
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -302,6 +322,7 @@ export class AIOrchestratorService {
       newDelivery: this.sanitizeDelivery(resultJSON.new_delivery),
       newOrder,
       cancelOrder,
+      customerEmail: this.sanitizeEmail(resultJSON.customer_email),
     };
   }
 
@@ -590,6 +611,19 @@ export class AIOrchestratorService {
     return { title, scheduled_start };
   }
 
+  /**
+   * Valida um e-mail capturado pela IA na conversa (ex.: cliente forneceu o
+   * e-mail para receber a confirmação). Retorna o e-mail normalizado em
+   * minúsculas, ou undefined se não for um e-mail plausível.
+   */
+  private static sanitizeEmail(email: any): string | undefined {
+    if (typeof email !== "string") return undefined;
+    const e = email.trim().toLowerCase();
+    if (e.length > 254) return undefined;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return undefined;
+    return e;
+  }
+
   /** Valida/limita uma entrega sugerida pela IA. */
   private static sanitizeDelivery(del: any): any | undefined {
     if (!del || typeof del !== "object") return undefined;
@@ -753,7 +787,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -826,6 +860,7 @@ ${storefrontText}
 ${orderStatusText}
 ${areaPersona}
 ${agendaText}
+${emailCaptureText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}
@@ -869,7 +904,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
     "items": [ { "name": "nome aproximado do item da lista", "quantity": 5 } ]
   },
   "cancel_order": false,
-  "send_storefront": false
+  "send_storefront": false,
+  "customer_email": "" // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
 }`;
   }
 

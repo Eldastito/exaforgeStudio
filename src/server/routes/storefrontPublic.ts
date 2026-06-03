@@ -1,6 +1,7 @@
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
+import { NotificationService } from "../NotificationService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -180,10 +181,51 @@ router.post("/store/:slug/order", (req, res): any => {
     });
     tx();
 
-    // Link de WhatsApp para o cliente finalizar (a IA/loja cobra por lá).
-    const phone = (store.whatsapp_number || store.org_phone || "").replace(/\D/g, "");
     const brl = (v: number) => `R$ ${Number(v).toFixed(2)}`;
     const lines = resolved.map(r => `• ${r.qty}× ${r.name} — ${brl(r.total)}`).join("\n");
+
+    // O pedido CAI NO ATENDIMENTO: notifica a equipe (sino) e, se há contato
+    // vinculado (via token), registra o pedido na conversa do Kanban ao vivo.
+    // Best-effort: nunca quebra a resposta ao cliente.
+    try {
+      const custName = body.customer?.name || (contactId
+        ? (db.prepare("SELECT name FROM contacts WHERE id = ?").get(contactId) as any)?.name
+        : null) || "Cliente da vitrine";
+      NotificationService.storeOrder(orgId, custName, total);
+
+      const io = NotificationService.io;
+      if (io) io.to(`org:${orgId}`).emit("order_created", { orderId, status: "aguardando_pagamento", total, contactId });
+
+      if (contactId) {
+        // Acha (ou cria) um ticket aberto do contato e injeta a nota do pedido.
+        let ticket = db.prepare(
+          "SELECT id FROM tickets WHERE contact_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1"
+        ).get(contactId) as any;
+        if (!ticket) {
+          const tid = uuidv4();
+          db.prepare(
+            "INSERT INTO tickets (id, organization_id, contact_id, status, stage, ai_paused) VALUES (?, ?, ?, 'open', 'aguardando_pagamento', 0)"
+          ).run(tid, orgId, contactId);
+          ticket = { id: tid };
+        }
+        if (ticketId == null) db.prepare("UPDATE orders SET ticket_id = ? WHERE id = ?").run(ticket.id, orderId);
+
+        const noteText = `🛒 *Novo pedido pela vitrine*\n${lines}\n\nTotal: ${brl(total)} (pedido #${orderId.slice(0, 8)})`;
+        const msgId = uuidv4();
+        db.prepare(
+          "INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)"
+        ).run(msgId, orgId, ticket.id, noteText);
+        if (io) {
+          io.to(`org:${orgId}`).emit("new_message", {
+            id: msgId, ticketId: ticket.id, contactId,
+            text: noteText, sender: "bot", timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (e) { /* notificação/ticket é best-effort */ }
+
+    // Link de WhatsApp para o cliente finalizar (a IA/loja cobra por lá).
+    const phone = (store.whatsapp_number || store.org_phone || "").replace(/\D/g, "");
     const msg = `Olá! Quero finalizar meu pedido da loja:\n\n${lines}\n\nTotal: ${brl(total)}\n(pedido #${orderId.slice(0, 8)})`;
     const whatsappUrl = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : null;
 

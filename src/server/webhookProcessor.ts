@@ -232,9 +232,13 @@ export async function processIncomingMessage(
              if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
              try { NotificationService.orderCreated(orgId, contact.name, order.total); } catch (e) { /* noop */ }
              console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
-             // Pix manual: anexa as instruções de pagamento à resposta, se configurado.
+             // Cobrança: anexa as instruções de pagamento à resposta, se configurado.
+             // Pix manual = chave estática; Mercado Pago = PIX dinâmico (copia e
+             // cola + link) que confirma sozinho via webhook.
              try {
-               const charge = PaymentService.buildChargeMessage(orgId, order.total);
+               const charge = await PaymentService.chargeForOrder(orgId, {
+                 orderId: order.id, amount: order.total, contactName: contact.name, contactId: contact.id,
+               });
                if (charge) finalReply = `${finalReply}\n\n${charge}`;
              } catch (e) { /* noop */ }
            }

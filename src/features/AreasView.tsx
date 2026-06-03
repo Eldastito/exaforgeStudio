@@ -121,6 +121,23 @@ function AreaModal({ area, users, onClose, onSaved }: {
   const [persona, setPersona] = useState(area?.persona || '');
   const [assigned, setAssigned] = useState(area?.assigned_user_id || '');
   const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const generatePersona = async () => {
+    if (!name.trim() && !description.trim()) { toast.error('Preencha o nome ou a descrição da área primeiro.'); return; }
+    setAiLoading(true);
+    try {
+      const res = await apiFetch('/api/areas/ai/persona', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao gerar com a IA.'); return; }
+      if (d.persona) setPersona(d.persona);
+      toast.success('Persona gerada pela IA. Revise e ajuste como quiser. ✨');
+    } catch { toast.error('Erro ao gerar com a IA'); }
+    finally { setAiLoading(false); }
+  };
 
   const save = async () => {
     if (!name.trim()) { toast.error('Informe o nome da área.'); return; }
@@ -153,7 +170,13 @@ function AreaModal({ area, users, onClose, onSaved }: {
             <input className={inputClass} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ex.: avaliações e planos alimentares" />
           </div>
           <div>
-            <label className="text-sm text-zinc-400 mb-1 block flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-indigo-300" /> Persona / instruções da IA nesta área</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm text-zinc-400 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-indigo-300" /> Persona / instruções da IA nesta área</label>
+              <button type="button" onClick={generatePersona} disabled={aiLoading}
+                className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 disabled:opacity-50">
+                {aiLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} {aiLoading ? 'Gerando...' : 'Gerar com IA'}
+              </button>
+            </div>
             <textarea className={`${inputClass} h-28 resize-none`} value={persona} onChange={e => setPersona(e.target.value)}
               placeholder="Como a IA deve se comportar ao atender por esta área: nome, tom, o que oferece, o que NÃO faz, como encaminhar. Ex.: 'Você é a assistente da Dra. Ana, nutricionista. Tom acolhedor. Explique como funciona a consulta e ofereça agendar...'" />
           </div>

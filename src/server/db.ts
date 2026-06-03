@@ -752,6 +752,9 @@ const initDb = () => {
   // Sincronização do agendamento com o Google Calendar.
   try { db.exec(`ALTER TABLE appointments ADD COLUMN google_event_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN google_event_link TEXT`); } catch(e){}
+  // Automações Google: registrar pedidos numa planilha do Sheets.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_log_orders INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_orders_sheet_id TEXT`); } catch(e){}
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

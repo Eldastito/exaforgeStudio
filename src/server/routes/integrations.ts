@@ -6,6 +6,7 @@ import { BackupService } from "../BackupService.js";
 import { NotificationService } from "../NotificationService.js";
 import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit } from "../webhookSecurity.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
+import { GoogleAutomationService } from "../GoogleAutomationService.js";
 
 const router = Router();
 
@@ -25,6 +26,17 @@ router.get("/google/login-url", (req: AuthRequest, res): any => {
     return res.status(400).json({ error: "Integração Google não configurada no servidor (defina GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e APP_URL)." });
   }
   res.json({ url: GoogleOAuthService.authUrl(req.organizationId) });
+});
+
+// GET/POST automações Google (registrar pedidos no Sheets, etc.)
+router.get("/google/automations", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(GoogleAutomationService.getSettings(req.organizationId));
+});
+router.post("/google/automations", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (req.body?.logOrders !== undefined) GoogleAutomationService.setLogOrders(req.organizationId, !!req.body.logOrders);
+  res.json({ success: true, ...GoogleAutomationService.getSettings(req.organizationId) });
 });
 
 // POST desconectar

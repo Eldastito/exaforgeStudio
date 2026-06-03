@@ -232,6 +232,11 @@ const initDb = () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS app_config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS webhook_deliveries (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,

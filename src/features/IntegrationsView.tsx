@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle } from 'lucide-react';
+import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle, ShieldCheck, Copy, Check } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -50,6 +50,43 @@ export function IntegrationsView() {
   const [webhookForm, setWebhookForm] = useState({ name: '', url: '', secret: '' });
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean } | null>(null);
+  const [waCopied, setWaCopied] = useState(false);
+
+  const loadWaWebhook = () => {
+    apiFetch('/api/integrations/whatsapp-webhook').then(r => r.json()).then(setWaWebhook).catch(() => {});
+  };
+  useEffect(() => { loadWaWebhook(); }, []);
+
+  const copyWaUrl = () => {
+    if (!waWebhook) return;
+    navigator.clipboard?.writeText(waWebhook.url);
+    setWaCopied(true); setTimeout(() => setWaCopied(false), 1800);
+  };
+  const toggleWaEnforce = async () => {
+    if (!waWebhook) return;
+    const next = !waWebhook.enforced;
+    if (next && !window.confirm('Ativar a exigência do segredo? IMPORTANTE: só ative DEPOIS de colar a URL com ?secret=... na Evolution, senão as mensagens param de entrar. Continuar?')) return;
+    try {
+      const res = await apiFetch('/api/integrations/whatsapp-webhook/enforce', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Erro ao alterar.'); return; }
+      toast.success(next ? 'Segredo do webhook EXIGIDO.' : 'Exigência desativada.');
+      loadWaWebhook();
+    } catch { toast.error('Erro ao alterar.'); }
+  };
+  const rotateWaSecret = async () => {
+    if (!window.confirm('Gerar um novo segredo? A URL antiga deixa de valer; você terá que colar a nova na Evolution.')) return;
+    try {
+      const res = await apiFetch('/api/integrations/whatsapp-webhook/rotate', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Erro ao girar.'); return; }
+      toast.success('Novo segredo gerado. Atualize a URL na Evolution.');
+      loadWaWebhook();
+    } catch { toast.error('Erro ao girar.'); }
+  };
 
   const loadData = () => {
     apiFetch('/api/integrations/webhooks').then(r => r.json()).then(d => setWebhooks(Array.isArray(d) ? d : [])).catch(console.error);
@@ -154,6 +191,49 @@ export function IntegrationsView() {
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Gerencie integrações com Google e Webhooks</p>
       </div>
+
+      {/* Segurança do Webhook do WhatsApp */}
+      {waWebhook && (
+        <div className="mb-6 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <ShieldCheck className={`w-6 h-6 ${waWebhook.enforced ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <div>
+                <h3 className="font-semibold text-zinc-100">Segurança do WhatsApp (Webhook)</h3>
+                <p className="text-sm text-zinc-400">
+                  {waWebhook.enforced
+                    ? 'Protegido: o webhook exige o segredo. ✅'
+                    : 'Aberto: qualquer um poderia chamar o webhook. Recomendado proteger.'}
+                </p>
+              </div>
+            </div>
+            {!waWebhook.usingEnv && (
+              <button onClick={toggleWaEnforce}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${waWebhook.enforced ? 'bg-emerald-600' : 'bg-zinc-700'}`}
+                title="Exigir o segredo no webhook">
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${waWebhook.enforced ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            )}
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+            <p className="text-xs text-zinc-400 mb-2">
+              <strong className="text-zinc-200">Passo a passo:</strong> 1) copie a URL abaixo; 2) cole no campo de webhook da sua <strong>Evolution</strong> (substituindo a URL atual); 3) volte aqui e ative o interruptor.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 truncate">{waWebhook.url}</code>
+              <button onClick={copyWaUrl} className="shrink-0 inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10">
+                {waCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {waCopied ? 'Copiado' : 'Copiar'}
+              </button>
+            </div>
+            {!waWebhook.usingEnv ? (
+              <button onClick={rotateWaSecret} className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300">Gerar novo segredo</button>
+            ) : (
+              <p className="mt-2 text-[11px] text-zinc-500">Segredo definido por variável de ambiente (sempre exigido).</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Google Integration Card */}

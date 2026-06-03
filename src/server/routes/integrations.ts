@@ -4,8 +4,43 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { BackupService } from "../BackupService.js";
 import { NotificationService } from "../NotificationService.js";
+import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret } from "../webhookSecurity.js";
 
 const router = Router();
+
+const APP_BASE = (process.env.APP_URL || "").replace(/\/$/, "");
+
+// GET /api/integrations/whatsapp-webhook -> URL pronta (com segredo) + status.
+// Permite ativar a exigência do segredo sem mexer em variáveis de ambiente.
+router.get("/whatsapp-webhook", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const secret = effectiveWebhookSecret();
+  const base = APP_BASE || `${req.protocol}://${req.headers.host}`;
+  res.json({
+    url: `${base}/api/webhooks/evolution?secret=${secret}`,
+    enforced: isWebhookEnforced(),
+    usingEnv: usingEnvSecret(),
+  });
+});
+
+// POST /api/integrations/whatsapp-webhook/enforce { enabled }
+router.post("/whatsapp-webhook/enforce", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (usingEnvSecret()) return res.status(400).json({ error: "O segredo está definido por variável de ambiente (sempre exigido)." });
+  setWebhookEnforced(!!req.body?.enabled);
+  logAuthEvent(req.organizationId, req.user?.userId, undefined, 'WHATSAPP_WEBHOOK_ENFORCE', { enabled: !!req.body?.enabled });
+  res.json({ success: true, enforced: isWebhookEnforced() });
+});
+
+// POST /api/integrations/whatsapp-webhook/rotate -> gera um novo segredo.
+router.post("/whatsapp-webhook/rotate", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (usingEnvSecret()) return res.status(400).json({ error: "O segredo está definido por variável de ambiente; não dá para girar por aqui." });
+  const secret = rotateStoredWebhookSecret();
+  const base = APP_BASE || `${req.protocol}://${req.headers.host}`;
+  logAuthEvent(req.organizationId, req.user?.userId, undefined, 'WHATSAPP_WEBHOOK_ROTATE', {});
+  res.json({ success: true, url: `${base}/api/webhooks/evolution?secret=${secret}` });
+});
 
 const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
   try {

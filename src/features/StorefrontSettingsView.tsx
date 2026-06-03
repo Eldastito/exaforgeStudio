@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
@@ -94,6 +94,26 @@ export function StorefrontSettingsView() {
       toast.success(tips.length ? `Destaques atualizados: ${tips.length} produto(s). ✨` : 'Nenhum produto para destacar ainda.');
     } catch (e) { toast.error('Erro na curadoria com a IA'); }
     finally { setCurating(false); }
+  };
+
+  // Exclui o produto do catálogo (e, portanto, da vitrine). Reaproveita o
+  // endpoint do catálogo, que limpa estoque/imagens e preserva o histórico.
+  const deleteProduct = async (p: StorefrontProduct) => {
+    if (!window.confirm(`Excluir "${p.name}" do catálogo e da loja? Esta ação não pode ser desfeita. O histórico de pedidos é preservado.`)) return;
+    setProducts((list) => list.filter((x) => x.id !== p.id));
+    try {
+      const res = await apiFetch(`/api/products/${p.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast.error(d.error || 'Erro ao excluir.');
+        await loadProducts();
+        return;
+      }
+      toast.success('Produto excluído da loja.');
+    } catch (e) {
+      toast.error('Erro ao excluir.');
+      await loadProducts();
+    }
   };
 
   useEffect(() => {
@@ -381,7 +401,7 @@ export function StorefrontSettingsView() {
           ) : (
             <div className="space-y-4">
               {products.map((p: StorefrontProduct) => (
-                <ProductRow key={p.id} product={p} onPatch={(u) => patchProduct(p.id, u)} />
+                <ProductRow key={p.id} product={p} onPatch={(u) => patchProduct(p.id, u)} onDelete={() => deleteProduct(p)} />
               ))}
             </div>
           )}
@@ -578,9 +598,10 @@ function normalizeProduct(p: any): StorefrontProduct {
 type ProductRowProps = {
   product: StorefrontProduct;
   onPatch: (updates: Partial<StorefrontProduct>) => void;
+  onDelete: () => void;
 };
 
-const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch }) => {
+const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete }) => {
   // texto editável das opções de venda (size/weight/volume)
   const optionsToText = (mode: SaleMode, opts: any): string => {
     if (mode === 'size') return Array.isArray(opts?.sizes) ? opts.sizes.join(',') : '';
@@ -764,6 +785,15 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch }) => {
           >
             <Star className={`w-3.5 h-3.5 ${product.featured ? 'fill-amber-400' : ''}`} />
             Destaque
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Excluir produto do catálogo e da loja"
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:border-rose-500/40 hover:text-rose-300"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Excluir
           </button>
         </div>
       </div>

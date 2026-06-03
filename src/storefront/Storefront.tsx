@@ -140,10 +140,11 @@ export function Storefront() {
   }, [addToCart]);
 
   const submitOrder = useCallback(
-    async (extra: { name: string; phone: string }): Promise<OrderResponse | null> => {
+    async (extra: { name: string; phone: string; coupon?: string }): Promise<OrderResponse | null> => {
       const body = {
         token: token ?? undefined,
         customer: { name: extra.name, phone: extra.phone },
+        coupon: extra.coupon,
         items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })),
       };
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/order`, {
@@ -272,6 +273,7 @@ export function Storefront() {
         accent={accent}
         mode={mode}
         customer={data?.customer ?? null}
+        slug={slug}
         onClose={() => setCartOpen(false)}
         onChangeQty={changeQty}
         onRemove={removeItem}

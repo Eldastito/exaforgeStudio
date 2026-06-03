@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  X, Minus, Plus, Trash2, ShoppingBag, CheckCircle2, Loader2, ImageOff, MessageCircle,
+  X, Minus, Plus, Trash2, ShoppingBag, CheckCircle2, Loader2, ImageOff, MessageCircle, Tag,
 } from 'lucide-react';
 import type { CartItem, Customer, Mode, OrderResponse } from './types';
 import { formatBRL, hexToRgba } from './utils';
@@ -12,10 +12,11 @@ interface Props {
   accent: string;
   mode: Mode;
   customer: Customer | null;
+  slug: string;
   onClose: () => void;
   onChangeQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onSubmit: (extra: { name: string; phone: string }) => Promise<OrderResponse | null>;
+  onSubmit: (extra: { name: string; phone: string; coupon?: string }) => Promise<OrderResponse | null>;
   onClear: () => void;
 }
 
@@ -25,6 +26,7 @@ export function CartDrawer({
   accent,
   mode,
   customer,
+  slug,
   onClose,
   onChangeQty,
   onRemove,
@@ -38,7 +40,41 @@ export function CartDrawer({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OrderResponse | null>(null);
 
+  const [coupon, setCoupon] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [couponMsg, setCouponMsg] = useState<string | null>(null);
+  const [applied, setApplied] = useState<{ code: string; discount: number } | null>(null);
+
   const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  const discount = applied ? Math.min(applied.discount, total) : 0;
+  const finalTotal = Math.max(0, total - discount);
+
+  // Se o carrinho muda, o cupom aplicado deixa de valer (revalidar).
+  useEffect(() => { setApplied(null); setCouponMsg(null); }, [total]);
+
+  async function applyCoupon() {
+    const code = coupon.trim().toUpperCase();
+    if (!code) return;
+    setApplying(true); setCouponMsg(null);
+    try {
+      const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/coupon`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, subtotal: total }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (d.valid) {
+        setApplied({ code: d.code, discount: d.discount });
+        setCouponMsg(null);
+      } else {
+        setApplied(null);
+        setCouponMsg(d.message || 'Cupom inválido.');
+      }
+    } catch {
+      setCouponMsg('Não foi possível validar o cupom.');
+    } finally {
+      setApplying(false);
+    }
+  }
 
   const panel = night
     ? 'bg-slate-900/85 border-white/10 text-white'
@@ -52,7 +88,7 @@ export function CartDrawer({
     }
     setSubmitting(true);
     try {
-      const res = await onSubmit({ name: name.trim(), phone: phone.trim() });
+      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), coupon: applied?.code });
       if (res && res.ok) {
         setResult(res);
         onClear();
@@ -243,12 +279,52 @@ export function CartDrawer({
                     />
                   </div>
 
+                  {/* Cupom de desconto */}
+                  <div>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Tag className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 opacity-40" />
+                        <input
+                          value={coupon}
+                          onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoupon(); } }}
+                          placeholder="Cupom de desconto"
+                          className={[
+                            'w-full rounded-xl border pl-8 pr-3 py-2.5 text-sm outline-none uppercase',
+                            night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                          ].join(' ')}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applyCoupon}
+                        disabled={applying || !coupon.trim()}
+                        className="shrink-0 rounded-xl border px-3 text-sm font-semibold disabled:opacity-50"
+                        style={{ borderColor: hexToRgba(accent, 0.5), color: accent }}
+                      >
+                        {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Aplicar'}
+                      </button>
+                    </div>
+                    {couponMsg && <p className="mt-1 text-xs font-medium text-red-500">{couponMsg}</p>}
+                    {applied && <p className="mt-1 text-xs font-medium text-emerald-500">Cupom {applied.code} aplicado! 🎉</p>}
+                  </div>
+
                   {error && <p className="text-sm font-medium text-red-500">{error}</p>}
 
+                  {discount > 0 && (
+                    <div className="space-y-1 text-sm">
+                      <div className="flex items-center justify-between opacity-70">
+                        <span>Subtotal</span><span>{formatBRL(total)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-emerald-500">
+                        <span>Desconto ({applied?.code})</span><span>-{formatBRL(discount)}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-base">
                     <span className="opacity-60">Total</span>
                     <span className="text-xl font-extrabold" style={{ color: accent }}>
-                      {formatBRL(total)}
+                      {formatBRL(finalTotal)}
                     </span>
                   </div>
                   <button

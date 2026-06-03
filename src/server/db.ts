@@ -553,6 +553,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN payment_link TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN payment_external_id TEXT`); } catch(e){} // id do pagamento no gateway
   try { db.exec(`ALTER TABLE orders ADD COLUMN paid_at DATETIME`); } catch(e){}
+  // Cupom/desconto aplicado ao pedido (vitrine).
+  try { db.exec(`ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN coupon_code TEXT`); } catch(e){}
   // Cobranças dinâmicas (PIX do gateway). Guardamos o "copia e cola" e o link
   // para reaproveitar a mesma cobrança e exibir na UI sem recriar no gateway.
   try {
@@ -671,6 +674,22 @@ const initDb = () => {
         expires_at DATETIME
       );
       CREATE INDEX IF NOT EXISTS idx_storefront_links_org ON storefront_links(organization_id);
+
+      CREATE TABLE IF NOT EXISTS storefront_coupons (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'percent', -- percent | fixed
+        value REAL NOT NULL DEFAULT 0,        -- % (0-100) ou R$
+        min_order REAL DEFAULT 0,             -- pedido mínimo para valer
+        active INTEGER DEFAULT 1,
+        expires_at DATETIME,                  -- null = sem validade
+        usage_limit INTEGER,                  -- null = ilimitado
+        used_count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_coupons_org ON storefront_coupons(organization_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_storefront_coupons_code ON storefront_coupons(organization_id, code);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas da loja virtual', e); }
 

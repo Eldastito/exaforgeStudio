@@ -61,16 +61,24 @@ function productPayload(orgId: string, p: any): any {
 // coleções não-vazias. A LP renderiza cada uma como uma seção com título.
 function resolveCollections(orgId: string): { id: string; title: string; productIds: string[] }[] {
   const collections = db.prepare(
-    `SELECT id, title, rule FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC`
+    `SELECT id, title, rule, items_json FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC`
   ).all(orgId) as any[];
   if (collections.length === 0) return [];
 
   const visibleWhere = `organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1 AND type = 'product'`;
+  // Conjunto de IDs visíveis (para filtrar coleções manuais).
+  const visibleIds = new Set((db.prepare(
+    `SELECT id FROM products_services WHERE ${visibleWhere}`
+  ).all(orgId) as any[]).map(r => r.id));
   const out: { id: string; title: string; productIds: string[] }[] = [];
 
   for (const c of collections) {
     let ids: string[] = [];
-    if (c.rule === 'best_sellers') {
+    if (c.rule === 'manual') {
+      let chosen: string[] = [];
+      try { chosen = JSON.parse(c.items_json || '[]'); } catch { chosen = []; }
+      ids = chosen.filter((id: string) => visibleIds.has(id)); // preserva a ordem escolhida
+    } else if (c.rule === 'best_sellers') {
       ids = (db.prepare(
         `SELECT ps.id FROM products_services ps
            JOIN (

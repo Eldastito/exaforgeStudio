@@ -188,9 +188,40 @@ const COLLECTION_RULES = new Set(["featured", "best_sellers", "newest"]);
 router.get("/collections", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);
   const rows = db.prepare(
-    "SELECT id, title, rule, position FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC"
-  ).all(orgId);
-  res.json(rows);
+    "SELECT id, title, rule, position, items_json FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC"
+  ).all(orgId) as any[];
+  res.json(rows.map(r => ({
+    id: r.id, title: r.title, rule: r.rule, position: r.position,
+    productIds: r.rule === 'manual' ? (() => { try { return JSON.parse(r.items_json || '[]'); } catch { return []; } })() : undefined,
+  })));
+});
+
+// POST /api/storefront/collections -> cria uma coleção MANUAL (produtos a dedo)
+router.post("/collections", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const title = String(req.body?.title || "").trim().slice(0, 40);
+  if (!title) return res.status(400).json({ error: "Informe o nome da coleção." });
+  const ids: string[] = Array.isArray(req.body?.productIds) ? req.body.productIds.filter((x: any) => typeof x === 'string') : [];
+  const pos = ((db.prepare("SELECT MAX(position) AS m FROM storefront_collections WHERE organization_id = ?").get(orgId) as any)?.m ?? -1) + 1;
+  const id = uuidv4();
+  db.prepare("INSERT INTO storefront_collections (id, organization_id, title, rule, position, items_json) VALUES (?, ?, ?, 'manual', ?, ?)")
+    .run(id, orgId, title, pos, JSON.stringify(ids));
+  res.json({ id, title, rule: 'manual', productIds: ids });
+});
+
+// PUT /api/storefront/collections/:id -> edita uma coleção manual (título/produtos)
+router.put("/collections/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const c = db.prepare("SELECT id, rule FROM storefront_collections WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
+  if (!c) return res.status(404).json({ error: "Coleção não encontrada." });
+  const sets: string[] = []; const vals: any[] = [];
+  if (req.body?.title !== undefined) { sets.push("title = ?"); vals.push(String(req.body.title).trim().slice(0, 40)); }
+  if (req.body?.productIds !== undefined && c.rule === 'manual') {
+    const ids = Array.isArray(req.body.productIds) ? req.body.productIds.filter((x: any) => typeof x === 'string') : [];
+    sets.push("items_json = ?"); vals.push(JSON.stringify(ids));
+  }
+  if (sets.length) db.prepare(`UPDATE storefront_collections SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+  res.json({ success: true });
 });
 
 // DELETE /api/storefront/collections/:id -> remove uma coleção
@@ -247,7 +278,8 @@ Monte de 2 a 3 coleções para a vitrine, cada uma com uma regra da lista (sem r
 
     // Substitui o conjunto atual de coleções.
     const replace = db.transaction(() => {
-      db.prepare("DELETE FROM storefront_collections WHERE organization_id = ?").run(orgId);
+      // Mantém as coleções MANUAIS do dono; só substitui as automáticas.
+      db.prepare("DELETE FROM storefront_collections WHERE organization_id = ? AND rule != 'manual'").run(orgId);
       chosen.forEach((c, i) => {
         db.prepare("INSERT INTO storefront_collections (id, organization_id, title, rule, position) VALUES (?, ?, ?, ?, ?)")
           .run(uuidv4(), orgId, c.title, c.rule, i);

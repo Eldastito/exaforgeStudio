@@ -694,6 +694,8 @@ const initDb = () => {
   // Visibilidade e destaque na vitrine.
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_visible INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE products_services ADD COLUMN featured INTEGER DEFAULT 0`); } catch(e){}
+  // Coleções manuais: lista ordenada de IDs de produto escolhidos a dedo.
+  try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.
   try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_label TEXT`); } catch(e){}
 };

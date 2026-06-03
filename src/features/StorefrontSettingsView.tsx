@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2 } from 'lucide-react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
@@ -64,11 +64,13 @@ export function StorefrontSettingsView() {
   const [showNew, setShowNew] = useState(false);
   const [curating, setCurating] = useState(false);
   const [curationTips, setCurationTips] = useState<{ name: string; reason: string }[] | null>(null);
-  const [collections, setCollections] = useState<{ id: string; title: string; rule: string }[]>([]);
+  const [collections, setCollections] = useState<{ id: string; title: string; rule: string; productIds?: string[] }[]>([]);
   const [buildingCollections, setBuildingCollections] = useState(false);
+  const [manualEditing, setManualEditing] = useState<{ id: string; title: string; productIds: string[] } | null>(null);
+  const [showManual, setShowManual] = useState(false);
 
   const RULE_LABEL: Record<string, string> = {
-    featured: 'Produtos em destaque', best_sellers: 'Mais vendidos', newest: 'Novidades (recém-adicionados)',
+    featured: 'Produtos em destaque', best_sellers: 'Mais vendidos', newest: 'Novidades (recém-adicionados)', manual: 'Selecionada manualmente',
   };
 
   const loadCollections = async () => {
@@ -425,25 +427,38 @@ export function StorefrontSettingsView() {
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <div>
               <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Layers className="w-5 h-5 text-indigo-400" /> Coleções</h3>
-              <p className="text-xs text-zinc-500 mt-0.5">Seções da vitrine (ex.: Destaques, Mais vendidos, Novidades). A IA monta automaticamente a partir do seu catálogo.</p>
+              <p className="text-xs text-zinc-500 mt-0.5">Seções da vitrine (ex.: Destaques, Mais vendidos, Novidades). A IA monta automaticamente, ou você cria uma coleção escolhendo os produtos a dedo.</p>
             </div>
-            <Button variant="outline" className="border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10" onClick={buildCollections} disabled={buildingCollections}>
-              <Layers className="w-4 h-4 mr-2" /> {buildingCollections ? 'Montando...' : 'Montar coleções (IA)'}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => { setManualEditing(null); setShowManual(true); }}>
+                <Plus className="w-4 h-4 mr-2" /> Coleção manual
+              </Button>
+              <Button variant="outline" className="border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10" onClick={buildCollections} disabled={buildingCollections}>
+                <Layers className="w-4 h-4 mr-2" /> {buildingCollections ? 'Montando...' : 'Montar coleções (IA)'}
+              </Button>
+            </div>
           </div>
 
           {collections.length === 0 ? (
-            <p className="text-sm text-zinc-500 py-4">Nenhuma coleção ainda. Clique em <span className="text-indigo-300">Montar coleções (IA)</span> para organizar a vitrine automaticamente.</p>
+            <p className="text-sm text-zinc-500 py-4">Nenhuma coleção ainda. Use <span className="text-indigo-300">Montar coleções (IA)</span> ou crie uma <span className="text-zinc-300">Coleção manual</span>.</p>
           ) : (
             <div className="space-y-2 mt-3">
               {collections.map((c) => (
                 <div key={c.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5">
                   <div>
                     <p className="text-sm text-zinc-100 font-medium">{c.title}</p>
-                    <p className="text-[11px] text-zinc-500">{RULE_LABEL[c.rule] || c.rule}</p>
+                    <p className="text-[11px] text-zinc-500">
+                      {RULE_LABEL[c.rule] || c.rule}{c.rule === 'manual' ? ` — ${(c.productIds || []).length} produto(s)` : ''}
+                    </p>
                   </div>
-                  <button onClick={() => deleteCollection(c.id)} title="Remover coleção"
-                    className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+                  <div className="flex items-center gap-3">
+                    {c.rule === 'manual' && (
+                      <button onClick={() => { setManualEditing({ id: c.id, title: c.title, productIds: c.productIds || [] }); setShowManual(true); }}
+                        title="Editar coleção" className="text-zinc-400 hover:text-indigo-400"><Pencil className="w-4 h-4" /></button>
+                    )}
+                    <button onClick={() => deleteCollection(c.id)} title="Remover coleção"
+                      className="text-zinc-400 hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -451,12 +466,86 @@ export function StorefrontSettingsView() {
         </section>
       </div>
 
+      {showManual && (
+        <ManualCollectionModal
+          products={products}
+          editing={manualEditing}
+          onClose={() => { setShowManual(false); setManualEditing(null); }}
+          onSaved={() => { setShowManual(false); setManualEditing(null); loadCollections(); }}
+        />
+      )}
+
       {showNew && (
         <NewProductModal
           onClose={() => setShowNew(false)}
           onCreated={() => { setShowNew(false); loadProducts(); }}
         />
       )}
+    </div>
+  );
+}
+
+// Modal de coleção MANUAL: nome + seleção de produtos a dedo.
+function ManualCollectionModal({ products, editing, onClose, onSaved }: {
+  products: StorefrontProduct[];
+  editing: { id: string; title: string; productIds: string[] } | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(editing?.title || '');
+  const [selected, setSelected] = useState<string[]>(editing?.productIds || []);
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (id: string) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const save = async () => {
+    if (!title.trim()) { toast.error('Dê um nome à coleção.'); return; }
+    if (selected.length === 0) { toast.error('Selecione ao menos um produto.'); return; }
+    setSaving(true);
+    try {
+      const url = editing ? `/api/storefront/collections/${editing.id}` : '/api/storefront/collections';
+      const res = await apiFetch(url, {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim(), productIds: selected }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Erro ao salvar coleção.'); return; }
+      toast.success(editing ? 'Coleção atualizada.' : 'Coleção criada.');
+      onSaved();
+    } catch (e) { toast.error('Erro ao salvar coleção.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">{editing ? 'Editar coleção' : 'Nova coleção manual'}</h3>
+          <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>
+        </div>
+        <Field label="Nome da coleção">
+          <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Promoções da semana" autoFocus />
+        </Field>
+        <p className="text-xs text-zinc-400 mt-4 mb-2">Produtos da coleção ({selected.length} selecionado(s)):</p>
+        <div className="flex-1 overflow-auto space-y-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          {products.length === 0 ? (
+            <p className="text-sm text-zinc-500 p-3">Nenhum produto cadastrado ainda.</p>
+          ) : products.map((p) => (
+            <label key={p.id} className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-zinc-800/50 cursor-pointer">
+              <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggle(p.id)} className="accent-indigo-500" />
+              <span className="text-sm text-zinc-200 flex-1">{p.name}</span>
+              <span className="text-xs font-mono text-zinc-500">{p.currency} {p.price.toFixed(2)}</span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-5 flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editing ? 'Salvar' : 'Criar coleção')}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

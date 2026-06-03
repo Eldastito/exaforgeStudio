@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import { GoogleOAuthService } from "../GoogleOAuthService.js";
 
 const router = Router();
 
@@ -72,6 +73,9 @@ router.post("/", (req: AuthRequest, res) => {
     `).run(id, orgId, ticket_id, contact_id, product_service_id, title, description || '', scheduled_start, scheduled_end);
     
     logAuthEvent(orgId, userId, id, 'APPOINTMENT_CREATED', { ticket_id });
+
+    // Sincroniza com o Google Calendar (best-effort, se a conta estiver ligada).
+    GoogleOAuthService.syncAppointment(orgId, id).catch(() => {});
 
     res.json({ success: true, id });
   } catch (e: any) {

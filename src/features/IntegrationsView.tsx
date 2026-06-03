@@ -310,7 +310,7 @@ export function IntegrationsView() {
                      <Button variant="ghost" size="sm" onClick={disconnectGoogle} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
                   </div>
                   <p className="text-xs text-emerald-400/80 text-center">
-                    Conectado com acesso offline — a IA/servidor pode usar Drive (e em breve Agenda, Gmail e Sheets) mesmo com você offline.
+                    Conectado com acesso offline — a IA/servidor usa Drive e Agenda (e em breve Gmail e Sheets) mesmo com você offline. Agendamentos criados aqui viram eventos no seu Google Calendar.
                   </p>
                </div>
             ) : (

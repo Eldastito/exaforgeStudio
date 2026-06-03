@@ -8,6 +8,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { AttendanceAreaService } from "./AttendanceAreaService.js";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -248,10 +249,13 @@ export async function processIncomingMessage(
        }
        
        if (aiResult.newAppointment) {
+          const apptId = uuidv4();
           db.prepare(`
              INSERT INTO appointments (id, organization_id, ticket_id, contact_id, title, scheduled_start)
              VALUES (?, ?, ?, ?, ?, ?)
-          `).run(uuidv4(), orgId, ticket.id, contact.id, aiResult.newAppointment.title, aiResult.newAppointment.scheduled_start);
+          `).run(apptId, orgId, ticket.id, contact.id, aiResult.newAppointment.title, aiResult.newAppointment.scheduled_start);
+          // Sincroniza com o Google Calendar (best-effort).
+          GoogleOAuthService.syncAppointment(orgId, apptId).catch(() => {});
        }
        
        if (aiResult.newDelivery) {

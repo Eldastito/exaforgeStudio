@@ -54,7 +54,7 @@ export function IntegrationsView() {
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<{ configured: boolean; connected: boolean; email: string; name: string } | null>(null);
   const [driveBusy, setDriveBusy] = useState<string | null>(null);
-  const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean } | null>(null);
+  const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean; lastHit?: { at: number; ok: boolean; reason: string } | null } | null>(null);
   const [waCopied, setWaCopied] = useState(false);
 
   const loadGoogleStatus = () => {
@@ -271,6 +271,14 @@ export function IntegrationsView() {
               <button onClick={rotateWaSecret} className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300">Gerar novo segredo</button>
             ) : (
               <p className="mt-2 text-[11px] text-zinc-500">Segredo definido por variável de ambiente (sempre exigido).</p>
+            )}
+            {/* Diagnóstico: última chamada recebida do WhatsApp */}
+            {waWebhook.lastHit && (
+              <p className={`mt-2 text-[11px] ${waWebhook.lastHit.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                Última chamada do WhatsApp: há {Math.max(0, Math.round((Date.now() - waWebhook.lastHit.at) / 1000))}s — {waWebhook.lastHit.ok
+                  ? 'recebida e aceita ✅'
+                  : 'REJEITADA ❌ (o segredo na Evolution não confere — copie a URL acima e cole de novo na Evolution).'}
+              </p>
             )}
           </div>
         </div>

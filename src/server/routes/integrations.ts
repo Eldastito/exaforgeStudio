@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { BackupService } from "../BackupService.js";
 import { NotificationService } from "../NotificationService.js";
-import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret } from "../webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit } from "../webhookSecurity.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 
 const router = Router();
@@ -63,6 +63,7 @@ router.get("/whatsapp-webhook", (req: AuthRequest, res): any => {
     url: `${base}/api/webhooks/evolution?secret=${secret}`,
     enforced: isWebhookEnforced(),
     usingEnv: usingEnvSecret(),
+    lastHit: getLastWebhookHit(),
   });
 });
 

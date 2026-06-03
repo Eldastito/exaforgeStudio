@@ -50,3 +50,12 @@ export function rotateStoredWebhookSecret(): string {
 export function usingEnvSecret(): boolean {
   return !!process.env.WEBHOOK_SECRET;
 }
+
+// Diagnóstico: registra/expõe a última chamada do webhook do WhatsApp para o
+// dono ver na tela se as mensagens estão chegando e sendo aceitas ou rejeitadas.
+export function recordWebhookHit(ok: boolean, reason: string) {
+  try { setConfig("webhook_last", JSON.stringify({ at: Date.now(), ok, reason })); } catch (e) { /* noop */ }
+}
+export function getLastWebhookHit(): { at: number; ok: boolean; reason: string } | null {
+  try { const v = getConfig("webhook_last"); return v ? JSON.parse(v) : null; } catch { return null; }
+}

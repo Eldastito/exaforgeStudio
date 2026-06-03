@@ -71,6 +71,20 @@ export function IntegrationsView() {
     if (!(await confirmDialog('Desconectar a conta Google?', { danger: true }))) return;
     try { await apiFetch('/api/integrations/google/disconnect', { method: 'POST' }); loadGoogleStatus(); } catch {}
   };
+  const [sheetsBusy, setSheetsBusy] = useState<string | null>(null);
+  const exportSheets = async (dataset: 'orders' | 'contacts') => {
+    setSheetsBusy(dataset);
+    try {
+      const res = await apiFetch('/api/integrations/google/sheets/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao exportar.'); return; }
+      toast.success(`Planilha criada (${d.count} linhas)! Abrindo...`);
+      if (d.url) window.open(d.url, '_blank');
+    } catch { toast.error('Falha ao exportar.'); }
+    finally { setSheetsBusy(null); }
+  };
   const [gmailBusy, setGmailBusy] = useState(false);
   const sendGmailTest = async () => {
     setGmailBusy(true);
@@ -331,9 +345,15 @@ export function IntegrationsView() {
                   <p className="text-xs text-emerald-400/80 text-center">
                     Conectado com acesso offline — a IA/servidor usa Drive, Agenda e Gmail (e em breve Sheets) mesmo com você offline. Agendamentos viram eventos no Google Calendar.
                   </p>
-                  <div className="flex justify-center">
+                  <div className="flex flex-wrap justify-center gap-2">
                     <Button variant="outline" size="sm" onClick={sendGmailTest} disabled={gmailBusy} className="border-zinc-700 text-zinc-200">
                       {gmailBusy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Enviar e-mail de teste (Gmail)
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => exportSheets('orders')} disabled={sheetsBusy === 'orders'} className="border-zinc-700 text-zinc-200">
+                      {sheetsBusy === 'orders' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar pedidos p/ Sheets
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => exportSheets('contacts')} disabled={sheetsBusy === 'contacts'} className="border-zinc-700 text-zinc-200">
+                      {sheetsBusy === 'contacts' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar contatos p/ Sheets
                     </Button>
                   </div>
                </div>

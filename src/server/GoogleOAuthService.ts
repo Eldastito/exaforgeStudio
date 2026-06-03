@@ -289,6 +289,31 @@ export class GoogleOAuthService {
     } catch (e) { return ""; }
   }
 
+  // ---- Google Sheets ----
+  // Cria uma planilha no Drive do dono e preenche com cabeçalho + linhas.
+  static async sheetsCreate(orgId: string, title: string, header: string[], rows: (string | number)[][]): Promise<{ id: string; url: string } | { error: string }> {
+    const token = await this.getAccessToken(orgId);
+    if (!token) return { error: "Conta Google não conectada." };
+    try {
+      const cr = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: { title } }),
+      });
+      const sp: any = await cr.json().catch(() => ({}));
+      if (!cr.ok || !sp.spreadsheetId) { console.error("[Sheets] criar falhou:", sp); return { error: sp?.error?.message || "Falha ao criar a planilha." }; }
+      const values = [header, ...rows];
+      const up = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sp.spreadsheetId}/values/A1?valueInputOption=RAW`, {
+        method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ values }),
+      });
+      if (!up.ok) { const e = await up.json().catch(() => ({})); console.error("[Sheets] preencher falhou:", e); return { error: "Planilha criada, mas falhou ao preencher os dados." }; }
+      return { id: sp.spreadsheetId, url: sp.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sp.spreadsheetId}` };
+    } catch (e: any) {
+      console.error("[Sheets] erro:", e);
+      return { error: "Erro de rede ao criar a planilha." };
+    }
+  }
+
   // ---- Gmail ----
   // Envia um e-mail pela conta Google conectada (escopo gmail.send).
   static async gmailSend(orgId: string, to: string, subject: string, body: string): Promise<{ id: string } | { error: string }> {

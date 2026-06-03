@@ -153,7 +153,14 @@ export class AIOrchestratorService {
       negotiatorText = this.negotiatorContext(params.organizationId);
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText);
+    // Loja virtual: se a vitrine está publicada, a IA pode mandar o link dela
+    // quando o cliente quiser ver os produtos. Só injeta a instrução se houver loja.
+    let storefrontText = "";
+    if (!isOrchestratorCommand) {
+      storefrontText = this.storefrontContext(params.organizationId);
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -258,6 +265,17 @@ export class AIOrchestratorService {
       if (quote) reply = `${reply}\n\n${quote}`;
     }
 
+    // VITRINE: a IA pede para mostrar os produtos numa landing page (loja virtual)
+    // quando o cliente quer "ver os produtos/fotos/catálogo/loja". Geramos um link
+    // exclusivo (vinculado ao contato) e anexamos à resposta. Só se a loja estiver
+    // publicada e o link ainda não estiver na mensagem.
+    if (resultJSON.send_storefront === true && !/\/loja\//.test(reply)) {
+      const storeLink = this.buildStorefrontLink(params.organizationId, params.contactId);
+      if (storeLink) {
+        reply = `${reply}\n\n🛍️ Dá uma olhada nos nossos produtos e monte seu pedido por aqui:\n${storeLink}`;
+      }
+    }
+
     return {
       reply,
       actions: safeActions,
@@ -302,6 +320,47 @@ export class AIOrchestratorService {
       const o = db.prepare('SELECT ai_auto_close_sales FROM organization_settings WHERE organization_id = ?').get(orgId) as any;
       return !!(o && o.ai_auto_close_sales);
     } catch (e) { return false; }
+  }
+
+  /**
+   * Gera o link público da vitrine (loja virtual) JÁ VINCULADO ao contato, via
+   * um token de uso na storefront_links. Assim, o pedido feito na landing page
+   * nasce ligado a este cliente/conversa. Retorna null se a loja não estiver
+   * publicada (ou sem slug) — nesse caso a IA segue só com o catálogo em texto.
+   */
+  private static buildStorefrontLink(orgId: string, contactId?: string): string | null {
+    try {
+      const store = db.prepare(
+        'SELECT slug, published FROM storefront_settings WHERE organization_id = ?'
+      ).get(orgId) as any;
+      if (!store || !store.published || !store.slug) return null;
+
+      const token = uuidv4().replace(/-/g, '').slice(0, 16);
+      db.prepare(
+        `INSERT INTO storefront_links (token, organization_id, contact_id, ticket_id, expires_at)
+         VALUES (?, ?, ?, NULL, datetime('now', '+30 days'))`
+      ).run(token, orgId, contactId || null);
+
+      const base = (process.env.APP_URL || process.env.CORS_ORIGIN || '').replace(/\/$/, '');
+      const path = `/loja/${store.slug}?c=${token}`;
+      return base ? `${base}${path}` : path;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Instrução de LOJA VIRTUAL para o prompt. Só retorna texto se a vitrine
+   * estiver publicada — assim a IA nunca promete um link que não existe.
+   */
+  private static storefrontContext(orgId: string): string {
+    try {
+      const store = db.prepare(
+        'SELECT published, slug FROM storefront_settings WHERE organization_id = ?'
+      ).get(orgId) as any;
+      if (!store || !store.published || !store.slug) return "";
+      return `LOJA VIRTUAL (vitrine online): temos uma landing page com nossos produtos (fotos, opções de tamanho/peso e carrinho). Quando o cliente quiser VER os produtos, pedir o catálogo/as fotos, ou perguntar "o que vocês têm", defina "send_storefront": true — o sistema anexa automaticamente um link EXCLUSIVO dele à sua resposta (não invente nem escreva o link você mesmo). Na sua "reply", apenas convide de forma simpática (ex.: "Te mando nossa vitrine pra você escolher com calma 😊"). Continue podendo fechar o pedido por aqui também (new_order).`;
+    } catch (e) { return ""; }
   }
 
   /**
@@ -632,7 +691,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -701,6 +760,7 @@ REGRAS OBRIGATÓRIAS:
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 ${forwardText}
 ${negotiatorText}
+${storefrontText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}
@@ -743,7 +803,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "quote_request": {
     "items": [ { "name": "nome aproximado do item da lista", "quantity": 5 } ]
   },
-  "cancel_order": false
+  "cancel_order": false,
+  "send_storefront": false
 }`;
   }
 

@@ -76,6 +76,162 @@ export class PaymentService {
     return lines.join('\n');
   }
 
+  // ===== Mercado Pago (PIX dinâmico com confirmação automática) =====
+  private static MP_API = "https://api.mercadopago.com";
+
+  /** URL pública do webhook de pagamento (para o gateway notificar). */
+  private static notificationUrl(orgId: string): string | null {
+    const base = (process.env.APP_URL || "").replace(/\/$/, "");
+    if (!base) return null;
+    const o = this.getSettings(orgId);
+    let secret = o.pay_webhook_secret as string | undefined;
+    // Garante um segredo para casar a notificação com a organização.
+    if (!secret) secret = this.rotateWebhookSecret(orgId);
+    return `${base}/api/webhooks/payment?secret=${secret}`;
+  }
+
+  /**
+   * Cria (ou reaproveita) uma cobrança PIX dinâmica no Mercado Pago para um
+   * pedido. Retorna o "copia e cola", a imagem do QR e o link, ou null se não
+   * for possível (sem token, etc.). Idempotente por pedido enquanto pendente.
+   */
+  static async createMercadoPagoPix(
+    orgId: string,
+    p: { orderId: string; amount: number; contactName?: string; contactId?: string }
+  ): Promise<{ id: string; qrCode: string; qrCodeBase64: string; ticketUrl: string } | null> {
+    const o = this.getSettings(orgId);
+    const token = o.pay_gateway_token as string | undefined;
+    if (!token) return null;
+
+    // Reaproveita uma cobrança ainda pendente do mesmo pedido (evita duplicar).
+    const existing = db.prepare(
+      `SELECT id, qr_code, qr_code_base64, ticket_url FROM payment_charges
+        WHERE order_id = ? AND organization_id = ? AND status = 'pending'
+        ORDER BY created_at DESC LIMIT 1`
+    ).get(p.orderId, orgId) as any;
+    if (existing && existing.qr_code) {
+      return { id: existing.id, qrCode: existing.qr_code, qrCodeBase64: existing.qr_code_base64 || "", ticketUrl: existing.ticket_url || "" };
+    }
+
+    const notifUrl = this.notificationUrl(orgId);
+    const body: any = {
+      transaction_amount: Number(Number(p.amount || 0).toFixed(2)),
+      description: `Pedido #${String(p.orderId).slice(0, 8)}`,
+      payment_method_id: "pix",
+      external_reference: p.orderId,
+      payer: {
+        email: `cliente-${(p.contactId || p.orderId).toString().slice(0, 12)}@checkout.exaforge.app`,
+        first_name: (p.contactName || "Cliente").slice(0, 40),
+      },
+    };
+    if (notifUrl) body.notification_url = notifUrl;
+
+    try {
+      const res = await fetch(`${this.MP_API}/v1/payments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          // Idempotência no lado do MP: mesma chave não cria pagamento duplicado.
+          "X-Idempotency-Key": `order-${p.orderId}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("[MercadoPago] Falha ao criar PIX:", res.status, data?.message || data);
+        return null;
+      }
+      const tx = data?.point_of_interaction?.transaction_data || {};
+      const qrCode: string = tx.qr_code || "";
+      const qrCodeBase64: string = tx.qr_code_base64 || "";
+      const ticketUrl: string = tx.ticket_url || "";
+      const payId = String(data.id);
+      if (!qrCode && !ticketUrl) {
+        console.error("[MercadoPago] Resposta sem dados de PIX:", data);
+        return null;
+      }
+      // Persiste a cobrança e vincula ao pedido.
+      try {
+        db.prepare(
+          `INSERT OR REPLACE INTO payment_charges
+             (id, organization_id, order_id, provider, amount, status, qr_code, qr_code_base64, ticket_url, expires_at, created_at)
+           VALUES (?, ?, ?, 'mercadopago', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+        ).run(payId, orgId, p.orderId, body.transaction_amount, data.status || 'pending', qrCode, qrCodeBase64, ticketUrl, data.date_of_expiration || null);
+        db.prepare(`UPDATE orders SET payment_external_id = ?, payment_method = 'mercadopago', payment_link = ? WHERE id = ?`)
+          .run(payId, ticketUrl || null, p.orderId);
+      } catch (e) { /* noop */ }
+      return { id: payId, qrCode, qrCodeBase64, ticketUrl };
+    } catch (e) {
+      console.error("[MercadoPago] Erro de rede ao criar PIX:", e);
+      return null;
+    }
+  }
+
+  /**
+   * Consulta um pagamento no Mercado Pago (usado pelo webhook, que recebe só o
+   * id). Se aprovado, marca o pedido como pago. Retorna o status do MP.
+   */
+  static async syncMercadoPagoPayment(orgId: string, paymentId: string): Promise<string | null> {
+    const o = this.getSettings(orgId);
+    const token = o.pay_gateway_token as string | undefined;
+    if (!token || !paymentId) return null;
+    try {
+      const res = await fetch(`${this.MP_API}/v1/payments/${encodeURIComponent(paymentId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("[MercadoPago] Falha ao consultar pagamento:", res.status, data?.message || data);
+        return null;
+      }
+      const status: string = data.status || "";
+      const orderId: string | undefined = data.external_reference;
+      // Atualiza o status da cobrança guardada.
+      try { db.prepare(`UPDATE payment_charges SET status = ? WHERE id = ?`).run(status, String(data.id)); } catch (e) { /* noop */ }
+      if (status === "approved" && orderId) {
+        this.markPaid(orgId, orderId, { method: "mercadopago", externalId: String(data.id) });
+      }
+      return status;
+    } catch (e) {
+      console.error("[MercadoPago] Erro de rede ao consultar pagamento:", e);
+      return null;
+    }
+  }
+
+  /**
+   * Monta a mensagem de cobrança a enviar ao cliente ao fechar um pedido.
+   * - pix_manual: chave Pix estática (texto fixo).
+   * - mercadopago: cria um PIX dinâmico (copia e cola + link) que confirma sozinho.
+   * Retorna null se a cobrança não está configurada/possível.
+   */
+  static async chargeForOrder(
+    orgId: string,
+    p: { orderId: string; amount: number; contactName?: string; contactId?: string }
+  ): Promise<string | null> {
+    const o = this.getSettings(orgId);
+    if (!o.pay_enabled) return null;
+    const provider = o.pay_provider || "pix_manual";
+
+    if (provider === "mercadopago") {
+      const charge = await this.createMercadoPagoPix(orgId, p);
+      if (!charge) return null;
+      const val = `R$ ${Number(p.amount || 0).toFixed(2)}`;
+      const lines = [`Para concluir, o pagamento é via *Pix* (${val}):`];
+      if (charge.qrCode) {
+        lines.push(`\n📋 *Pix copia e cola:*`, charge.qrCode);
+      }
+      if (charge.ticketUrl) {
+        lines.push(`\n💳 Ou pague pelo link: ${charge.ticketUrl}`);
+      }
+      lines.push(`\nAssim que o pagamento cair, confirmo por aqui automaticamente. ✅`);
+      return lines.join("\n");
+    }
+
+    // pix_manual (e fallback): mensagem estática com a chave do lojista.
+    return this.buildChargeMessage(orgId, p.amount);
+  }
+
   /** Resolve a organização a partir do segredo do webhook (gateway). */
   static orgByWebhookSecret(secret: string): string | null {
     if (!secret) return null;

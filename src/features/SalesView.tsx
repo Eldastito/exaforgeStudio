@@ -53,6 +53,8 @@ export function SalesView() {
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [showPayments, setShowPayments] = useState(false);
   const [neg, setNeg] = useState<{ enabled: boolean; max: number; rules: string }>({ enabled: false, max: 0, rules: '' });
+  const [pixModal, setPixModal] = useState<{ qrCode: string; qrCodeBase64: string; ticketUrl: string } | null>(null);
+  const [pixLoading, setPixLoading] = useState<string | null>(null);
 
   // Monta a query string com status (se houver) e período (se != 'all').
   const buildQuery = () => {
@@ -133,6 +135,17 @@ export function SalesView() {
     } catch (e) { toast.error('Erro ao confirmar pagamento'); }
   };
 
+  const generatePix = async (id: string) => {
+    setPixLoading(id);
+    try {
+      const res = await apiFetch(`/api/payments/orders/${id}/pix`, { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível gerar o PIX.'); return; }
+      setPixModal({ qrCode: d.qrCode || '', qrCodeBase64: d.qrCodeBase64 || '', ticketUrl: d.ticketUrl || '' });
+    } catch (e) { toast.error('Erro ao gerar PIX'); }
+    finally { setPixLoading(null); }
+  };
+
   const countFor = (s: string) => summary.byStatus.find((b: any) => b.status === s)?.count || 0;
   const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
 
@@ -167,6 +180,7 @@ export function SalesView() {
       </div>
 
       {showPayments && <PaymentSettingsModal onClose={() => setShowPayments(false)} />}
+      {pixModal && <PixModal data={pixModal} onClose={() => setPixModal(null)} />}
 
       {/* Cards de resumo */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -317,10 +331,16 @@ export function SalesView() {
                     )}
                     <div className="flex flex-wrap gap-2 justify-end mt-2">
                       {o.status === 'aguardando_pagamento' && o.payment_status !== 'paid' && (
-                        <button onClick={() => confirmPayment(o.id)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10">
-                          Confirmar pagamento
-                        </button>
+                        <>
+                          <button onClick={() => generatePix(o.id)} disabled={pixLoading === o.id}
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 disabled:opacity-50">
+                            {pixLoading === o.id ? 'Gerando...' : 'Gerar PIX'}
+                          </button>
+                          <button onClick={() => confirmPayment(o.id)}
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10">
+                            Confirmar pagamento
+                          </button>
+                        </>
                       )}
                       {transitions.length === 0 ? (
                         <span className="inline-flex items-center gap-1 text-xs text-zinc-500"><CheckCircle2 className="w-3.5 h-3.5" /> finalizado</span>
@@ -338,6 +358,46 @@ export function SalesView() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function PixModal({ data, onClose }: { data: { qrCode: string; qrCodeBase64: string; ticketUrl: string }; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(data.qrCode);
+    setCopied(true); setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[420px] max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><CreditCard className="w-5 h-5 text-sky-400" /> Cobrança PIX</h3>
+          <button className="text-zinc-400 hover:text-white" onClick={onClose}>✕</button>
+        </div>
+        {data.qrCodeBase64 && (
+          <img src={`data:image/png;base64,${data.qrCodeBase64}`} alt="QR Code PIX"
+            className="w-48 h-48 mx-auto mb-4 rounded bg-white p-2" />
+        )}
+        {data.qrCode && (
+          <div className="mb-3">
+            <label className="text-xs text-zinc-500 mb-1 block">Pix copia e cola</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-[11px] text-zinc-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 truncate">{data.qrCode}</code>
+              <button onClick={copy} className="text-xs px-2.5 py-1.5 rounded-lg border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 whitespace-nowrap">
+                {copied ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+          </div>
+        )}
+        {data.ticketUrl && (
+          <a href={data.ticketUrl} target="_blank" rel="noreferrer"
+            className="block text-center text-sm text-indigo-300 hover:text-indigo-200 border border-indigo-500/30 rounded-lg py-2">
+            Abrir página de pagamento ↗
+          </a>
+        )}
+        <p className="text-[11px] text-zinc-500 mt-3 text-center">O pedido é confirmado automaticamente quando o pagamento cair.</p>
+      </div>
     </div>
   );
 }

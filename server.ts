@@ -720,16 +720,30 @@ async function startServer() {
       if (!orgId) return res.status(401).json({ error: "Unauthorized payment webhook" });
 
       const body = req.body || {};
-      // Formato genérico do app:
+      const q = req.query || {} as any;
+
+      // FORMATO MERCADO PAGO: a notificação traz apenas o id do pagamento
+      // (type/topic = 'payment'). NÃO confiar no payload — consultar a API do MP
+      // para verificar se está APROVADO e descobrir o pedido (external_reference).
+      const topic = String(body.type || body.topic || q.type || q.topic || '').toLowerCase();
+      const mpPaymentId = (body.data && body.data.id) || q['data.id'] || (topic === 'payment' ? q.id : undefined);
+      if (topic.includes('payment') && mpPaymentId) {
+        const status = await PaymentService.syncMercadoPagoPayment(orgId, String(mpPaymentId));
+        if (status === 'approved' && (global as any).io) {
+          (global as any).io.to(`org:${orgId}`).emit("order_updated", { status: 'pago', payment_status: 'paid' });
+        }
+        console.log(`[PayWebhook] Mercado Pago pagamento ${mpPaymentId} -> status '${status}' (org ${orgId}).`);
+        return res.status(200).send("OK");
+      }
+
+      // FORMATO GENÉRICO (gateway 'custom' que posta no nosso formato):
       let orderId: string | undefined = body.orderId || body.order_id;
       let paid = body.status ? ['paid', 'approved', 'pago', 'completed'].includes(String(body.status).toLowerCase()) : true;
       let externalId: string | undefined = body.externalId || body.payment_id || body.id;
 
-      // Tolerância ao formato do Mercado Pago (data.id / action), quando aplicável:
       if (!orderId && body.data && body.data.external_reference) {
         orderId = body.data.external_reference;
         externalId = body.data.id || externalId;
-        paid = body.action ? String(body.action).includes('payment') : paid;
       }
 
       if (!orderId) {

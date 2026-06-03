@@ -100,9 +100,16 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
         {(s.provider === 'mercadopago' || s.provider === 'custom') && (
           <div className="space-y-3 mb-4">
             <div>
-              <label className="text-sm text-zinc-400 mb-1 block">Token / credencial do gateway</label>
+              <label className="text-sm text-zinc-400 mb-1 block">
+                {s.provider === 'mercadopago' ? 'Access Token de produção (Mercado Pago)' : 'Token / credencial do gateway'}
+              </label>
               <input type="password" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
                 placeholder={s.hasGatewayToken ? '•••••••• (já configurado — preencha para substituir)' : 'Cole o access token'} value={gatewayToken} onChange={e => setGatewayToken(e.target.value)} />
+              {s.provider === 'mercadopago' && (
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Em <strong>Mercado Pago → Seu negócio → Configurações → Credenciais</strong>, copie o <strong>Access Token de produção</strong>. Com ele, a IA gera um <strong>Pix copia-e-cola</strong> a cada pedido e o pagamento é <strong>confirmado automaticamente</strong>.
+                </p>
+              )}
             </div>
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
               <p className="text-sm text-zinc-200 flex items-center gap-2 mb-2"><KeyRound className="w-4 h-4 text-indigo-400" /> Webhook de confirmação</p>

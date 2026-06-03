@@ -553,6 +553,26 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN payment_link TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN payment_external_id TEXT`); } catch(e){} // id do pagamento no gateway
   try { db.exec(`ALTER TABLE orders ADD COLUMN paid_at DATETIME`); } catch(e){}
+  // Cobranças dinâmicas (PIX do gateway). Guardamos o "copia e cola" e o link
+  // para reaproveitar a mesma cobrança e exibir na UI sem recriar no gateway.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS payment_charges (
+        id TEXT PRIMARY KEY,              -- id do pagamento no gateway (ex.: Mercado Pago)
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        provider TEXT,                    -- mercadopago | ...
+        amount REAL DEFAULT 0,
+        status TEXT DEFAULT 'pending',    -- pending | approved | cancelled | expired
+        qr_code TEXT,                     -- Pix copia e cola
+        qr_code_base64 TEXT,              -- imagem do QR (data base64)
+        ticket_url TEXT,                  -- link de pagamento do gateway
+        expires_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_payment_charges_order ON payment_charges(order_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar payment_charges', e); }
   // Número de WhatsApp da empresa para a IA encaminhar leads (ex.: vindos do Instagram).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN forward_whatsapp TEXT`); } catch(e){}
 

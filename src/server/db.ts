@@ -755,6 +755,10 @@ const initDb = () => {
   // Automações Google: registrar pedidos numa planilha do Sheets.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_log_orders INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_orders_sheet_id TEXT`); } catch(e){}
+  // E-mail do cliente (para confirmações) + interruptores das confirmações.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN email TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_email_appointments INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_email_orders INTEGER DEFAULT 0`); } catch(e){}
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

@@ -36,6 +36,8 @@ router.get("/google/automations", (req: AuthRequest, res): any => {
 router.post("/google/automations", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   if (req.body?.logOrders !== undefined) GoogleAutomationService.setLogOrders(req.organizationId, !!req.body.logOrders);
+  if (req.body?.emailAppointments !== undefined) GoogleAutomationService.setEmailAppointments(req.organizationId, !!req.body.emailAppointments);
+  if (req.body?.emailOrders !== undefined) GoogleAutomationService.setEmailOrders(req.organizationId, !!req.body.emailOrders);
   res.json({ success: true, ...GoogleAutomationService.getSettings(req.organizationId) });
 });
 

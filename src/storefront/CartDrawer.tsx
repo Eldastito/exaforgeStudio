@@ -16,7 +16,7 @@ interface Props {
   onClose: () => void;
   onChangeQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onSubmit: (extra: { name: string; phone: string; coupon?: string }) => Promise<OrderResponse | null>;
+  onSubmit: (extra: { name: string; phone: string; email?: string; coupon?: string }) => Promise<OrderResponse | null>;
   onClear: () => void;
 }
 
@@ -36,6 +36,7 @@ export function CartDrawer({
   const night = mode === 'night';
   const [name, setName] = useState(customer?.name ?? '');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OrderResponse | null>(null);
@@ -90,7 +91,7 @@ export function CartDrawer({
     }
     setSubmitting(true);
     try {
-      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), coupon: applied?.code });
+      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), coupon: applied?.code });
       if (res && res.ok) {
         setResult(res);
         onClear();
@@ -372,6 +373,19 @@ export function CartDrawer({
                       />
                     </div>
                   )}
+
+                  {/* E-mail opcional — usado só para enviar a confirmação do pedido. */}
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="E-mail (opcional — para receber a confirmação)"
+                    inputMode="email"
+                    className={[
+                      'w-full rounded-xl border px-3 py-2.5 text-sm outline-none',
+                      night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                    ].join(' ')}
+                  />
 
                   {/* Cupom de desconto */}
                   <div>

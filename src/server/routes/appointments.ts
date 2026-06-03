@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
+import { GoogleAutomationService } from "../GoogleAutomationService.js";
 
 const router = Router();
 
@@ -63,7 +64,7 @@ router.post("/", (req: AuthRequest, res) => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end } = req.body;
+    const { ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end, customer_email } = req.body;
   const id = uuidv4();
 
   try {
@@ -71,11 +72,16 @@ router.post("/", (req: AuthRequest, res) => {
       INSERT INTO appointments (id, organization_id, ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, ticket_id, contact_id, product_service_id, title, description || '', scheduled_start, scheduled_end);
-    
+    // Guarda o e-mail informado no contato (para a confirmação por e-mail).
+    if (customer_email && contact_id) {
+      try { db.prepare("UPDATE contacts SET email = ? WHERE id = ? AND organization_id = ?").run(String(customer_email).trim(), contact_id, orgId); } catch (e) { /* noop */ }
+    }
+
     logAuthEvent(orgId, userId, id, 'APPOINTMENT_CREATED', { ticket_id });
 
-    // Sincroniza com o Google Calendar (best-effort, se a conta estiver ligada).
+    // Sincroniza com o Google Calendar + confirmação por e-mail (best-effort).
     GoogleOAuthService.syncAppointment(orgId, id).catch(() => {});
+    GoogleAutomationService.confirmAppointment(orgId, id).catch(() => {});
 
     res.json({ success: true, id });
   } catch (e: any) {

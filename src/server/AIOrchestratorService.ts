@@ -24,6 +24,7 @@ export class AIOrchestratorService {
     contactId?: string;
     provider?: string;
     areaPersona?: string;
+    areaId?: string | null;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -112,7 +113,7 @@ export class AIOrchestratorService {
     }
 
     // 2. Coletar RAG / Knowledge Base e Produtos
-    const contextContent = await searchContext(text, params.organizationId, params.channelId, 3);
+    const contextContent = await searchContext(text, params.organizationId, params.channelId, 3, params.areaId ?? null);
     const contextText = contextContent.length > 0 ? contextContent.join('\n\n') : "Nenhum documento encontrado na base de RAG.";
     
     const productsText = await this.getProductsContext(params.organizationId);

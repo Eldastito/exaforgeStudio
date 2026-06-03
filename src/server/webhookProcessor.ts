@@ -224,6 +224,7 @@ export async function processIncomingMessage(
           contactId: contact.id,
           provider: channel.provider,
           areaPersona,
+          areaId: ticket.area_id || null,
        });
        
        if (aiResult.newStage && aiResult.newStage !== ticket.stage) {

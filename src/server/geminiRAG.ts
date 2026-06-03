@@ -7,6 +7,7 @@ interface DocumentChunk {
   text: string;
   embedding: number[];
   channelId: string;
+  areaId: string | null;
 }
 
 /**
@@ -28,12 +29,12 @@ function loadOrgChunks(orgId: string): DocumentChunk[] {
   let chunks: DocumentChunk[] = [];
   try {
     const rows: any[] = db.prepare(
-      `SELECT id, content, embedding, channel_id FROM knowledge_chunks WHERE organization_id = ?`
+      `SELECT id, content, embedding, channel_id, area_id FROM knowledge_chunks WHERE organization_id = ?`
     ).all(orgId);
     chunks = rows.map((r) => {
       let embedding: number[] = [];
       try { embedding = JSON.parse(r.embedding); } catch (e) { embedding = []; }
-      return { id: r.id, text: r.content, embedding, channelId: r.channel_id || 'global' };
+      return { id: r.id, text: r.content, embedding, channelId: r.channel_id || 'global', areaId: r.area_id || null };
     }).filter((c) => c.embedding.length > 0);
   } catch (e) {
     console.error("[RAG] Falha ao carregar chunks do banco:", e);
@@ -58,7 +59,8 @@ export async function processDocument(
   fileBuffer: Buffer,
   fileName: string,
   orgId: string,
-  channelId: string = 'global'
+  channelId: string = 'global',
+  areaId: string | null = null
 ): Promise<{ success: boolean; documentId: string; chunksProcessed: number }> {
   const text = fileBuffer.toString('utf-8');
   const docId = uuidv4();
@@ -68,9 +70,9 @@ export async function processDocument(
   // Persistência do documento (metadados)
   try {
     db.prepare(
-      `INSERT INTO knowledge_documents (id, organization_id, title, content, status, channel_id, chunk_count, size_bytes)
-       VALUES (?, ?, ?, ?, 'ready', ?, ?, ?)`
-    ).run(docId, orgId, fileName, text, channelId, chunks.length, fileBuffer.length);
+      `INSERT INTO knowledge_documents (id, organization_id, title, content, status, channel_id, area_id, chunk_count, size_bytes)
+       VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?)`
+    ).run(docId, orgId, fileName, text, channelId, areaId, chunks.length, fileBuffer.length);
   } catch (e) {
     console.error("[RAG] Falha ao salvar documento:", e);
     throw new Error("Falha ao salvar o documento");
@@ -90,12 +92,12 @@ export async function processDocument(
   }
 
   const insert = db.prepare(
-    `INSERT INTO knowledge_chunks (id, organization_id, document_id, channel_id, chunk_index, content, embedding)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO knowledge_chunks (id, organization_id, document_id, channel_id, area_id, chunk_index, content, embedding)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertMany = db.transaction((items: { i: number; values: number[] }[]) => {
     for (const item of items) {
-      insert.run(uuidv4(), orgId, docId, channelId, item.i, chunks[item.i], JSON.stringify(item.values));
+      insert.run(uuidv4(), orgId, docId, channelId, areaId, item.i, chunks[item.i], JSON.stringify(item.values));
     }
   });
 
@@ -152,7 +154,8 @@ export async function searchContext(
   query: string,
   orgId: string,
   channelId: string = 'global',
-  topK: number = 3
+  topK: number = 3,
+  areaId: string | null = null
 ): Promise<string[]> {
   const chunks = loadOrgChunks(orgId);
   if (chunks.length === 0) return [];
@@ -166,7 +169,14 @@ export async function searchContext(
   }
   if (!queryVec) return [];
 
-  const relevantDocs = chunks.filter((doc) => doc.channelId === 'global' || doc.channelId === channelId);
+  const relevantDocs = chunks.filter((doc) => {
+    const chanOk = doc.channelId === 'global' || doc.channelId === channelId;
+    if (!chanOk) return false;
+    // Conhecimento por área: quando a conversa está numa área, usa só o material
+    // daquela área + o geral (sem área). Sem área definida, mantém tudo.
+    if (areaId) return !doc.areaId || doc.areaId === areaId;
+    return true;
+  });
 
   const scoredDocs = relevantDocs.map((doc) => ({
     text: doc.text,

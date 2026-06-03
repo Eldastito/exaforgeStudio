@@ -746,6 +746,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_position INTEGER`); } catch(e){}
   // Área de atendimento à qual a conversa foi direcionada.
   try { db.exec(`ALTER TABLE tickets ADD COLUMN area_id TEXT`); } catch(e){}
+  // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
+  try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}
   // Coleções manuais: lista ordenada de IDs de produto escolhidos a dedo.
   try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.

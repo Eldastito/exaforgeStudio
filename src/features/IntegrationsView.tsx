@@ -57,8 +57,17 @@ export function IntegrationsView() {
   const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean; lastHit?: { at: number; ok: boolean; reason: string } | null } | null>(null);
   const [waCopied, setWaCopied] = useState(false);
 
+  const [logOrders, setLogOrders] = useState(false);
   const loadGoogleStatus = () => {
     apiFetch('/api/integrations/google/status').then(r => r.json()).then(setGoogleStatus).catch(() => {});
+    apiFetch('/api/integrations/google/automations').then(r => r.json()).then(d => setLogOrders(!!d.logOrders)).catch(() => {});
+  };
+  const toggleLogOrders = async () => {
+    const next = !logOrders; setLogOrders(next);
+    try {
+      await apiFetch('/api/integrations/google/automations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logOrders: next }) });
+      toast.success(next ? 'Pedidos passam a ser registrados no Sheets. 📊' : 'Registro no Sheets desativado.');
+    } catch { setLogOrders(!next); toast.error('Erro ao salvar.'); }
   };
   const connectGoogle = async () => {
     setGoogleError(null);
@@ -355,6 +364,13 @@ export function IntegrationsView() {
                     <Button variant="outline" size="sm" onClick={() => exportSheets('contacts')} disabled={sheetsBusy === 'contacts'} className="border-zinc-700 text-zinc-200">
                       {sheetsBusy === 'contacts' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar contatos p/ Sheets
                     </Button>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                    <span className="text-xs text-zinc-300">📊 Registrar novos pedidos numa planilha do Sheets (automático)</span>
+                    <button onClick={toggleLogOrders}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${logOrders ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${logOrders ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
                   </div>
                </div>
             ) : (

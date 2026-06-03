@@ -314,6 +314,19 @@ export class GoogleOAuthService {
     }
   }
 
+  // Acrescenta uma linha ao fim de uma planilha existente.
+  static async sheetsAppendRow(orgId: string, sheetId: string, row: (string | number)[]): Promise<boolean> {
+    const token = await this.getAccessToken(orgId);
+    if (!token || !sheetId) return false;
+    try {
+      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [row] }),
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
   // ---- Gmail ----
   // Envia um e-mail pela conta Google conectada (escopo gmail.send).
   static async gmailSend(orgId: string, to: string, subject: string, body: string): Promise<{ id: string } | { error: string }> {

@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { NotificationService } from "../NotificationService.js";
 import { PaymentService } from "../PaymentService.js";
+import { GoogleAutomationService } from "../GoogleAutomationService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -285,6 +286,8 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       if (couponId) db.prepare("UPDATE storefront_coupons SET used_count = used_count + 1 WHERE id = ?").run(couponId);
     });
     tx();
+    // Automação Google: registra o pedido da vitrine numa planilha do Sheets.
+    GoogleAutomationService.logOrder(orgId, orderId).catch(() => {});
 
     const brl = (v: number) => `R$ ${Number(v).toFixed(2)}`;
     const lines = resolved.map(r => `• ${r.qty}× ${r.name} — ${brl(r.total)}`).join("\n");

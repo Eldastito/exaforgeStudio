@@ -3,8 +3,48 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
+import { chat, isAIConfigured } from "../llm.js";
 
 const router = Router();
+
+// POST /ai/describe — curadoria pela IA: gera um título atraente e uma descrição
+// de venda para o produto. Não inventa especificações; só melhora a apresentação.
+router.post("/ai/describe", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Informe o nome do produto." });
+  const type = req.body?.type === "service" ? "serviço" : "produto";
+  const price = Number(req.body?.price || 0);
+  const current = String(req.body?.description || "").trim();
+
+  try {
+    const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const brand = biz?.business_name ? `A loja se chama "${biz.business_name}". ` : "";
+    const priceLine = price > 0 ? `Preço: R$ ${price.toFixed(2)}. ` : "";
+    const currentLine = current ? `Descrição atual (melhore-a, mantendo o sentido): "${current}". ` : "";
+
+    const system = "Você é um copywriter de e-commerce brasileiro. Escreve em português do Brasil, de forma atraente, honesta e objetiva. NUNCA invente características, medidas, materiais ou benefícios que não foram informados — apenas apresente bem o que existe. Responda SOMENTE em JSON.";
+    const prompt = `${brand}Crie a vitrine para este ${type}: "${name}". ${priceLine}${currentLine}
+Gere um JSON com:
+- "title": um título curto e chamativo (máx. 60 caracteres), sem inventar dados.
+- "description": uma descrição de venda persuasiva e honesta (2 a 3 frases, máx. ~320 caracteres), em português.
+Responda apenas o JSON: {"title": "...", "description": "..."}`;
+
+    const raw = await chat(prompt, { json: true, temperature: 0.7, system });
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+    const title = String(parsed.title || "").trim().slice(0, 80);
+    const description = String(parsed.description || "").trim().slice(0, 500);
+    if (!description && !title) return res.status(502).json({ error: "A IA não retornou um texto válido. Tente novamente." });
+    res.json({ title, description });
+  } catch (e: any) {
+    console.error("[AI describe] erro", e);
+    res.status(500).json({ error: "Falha ao gerar com a IA. Tente novamente." });
+  }
+});
 
 // ---- Variações de produto (tamanho/cor/tipo) ----
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2 } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
@@ -24,6 +24,8 @@ export function CatalogView() {
   const [importing, setImporting] = useState(false);
   const [form, setForm] = useState<any>(emptyForm);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [suggestedTitle, setSuggestedTitle] = useState('');
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -34,9 +36,9 @@ export function CatalogView() {
 
   useEffect(() => { loadProducts(); }, []);
 
-  const openNew = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
+  const openNew = () => { setEditing(null); setForm(emptyForm); setSuggestedTitle(''); setShowModal(true); };
   const openEdit = (p: Product) => {
-    setEditing(p);
+    setEditing(p); setSuggestedTitle('');
     setForm({
       type: p.type || 'product', name: p.name, description: p.description || '',
       price: String(p.price ?? 0), stock_control_enabled: !!p.stock_control_enabled,
@@ -71,6 +73,23 @@ export function CatalogView() {
       setShowModal(false); setEditing(null); setForm(emptyForm);
       loadProducts();
     } catch (e) { /* noop */ }
+  };
+
+  const generateAI = async () => {
+    if (!form.name.trim()) { toast.error('Preencha o nome do produto primeiro.'); return; }
+    setAiLoading(true); setSuggestedTitle('');
+    try {
+      const res = await apiFetch('/api/products/ai/describe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name, type: form.type, price: parseFloat(form.price) || 0, description: form.description }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao gerar com a IA.'); return; }
+      if (d.description) setForm((f: any) => ({ ...f, description: d.description }));
+      if (d.title && d.title.toLowerCase() !== form.name.trim().toLowerCase()) setSuggestedTitle(d.title);
+      toast.success('Descrição gerada pela IA. Revise antes de salvar. ✨');
+    } catch (e) { toast.error('Erro ao gerar com a IA'); }
+    finally { setAiLoading(false); }
   };
 
   const handleDelete = async (p: Product) => {
@@ -218,9 +237,21 @@ export function CatalogView() {
                 </div>
               )}
               <div>
-                <label className="text-sm text-zinc-400 mb-1 block">Descrição</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-zinc-400">Descrição</label>
+                  <button type="button" onClick={generateAI} disabled={aiLoading}
+                    className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 disabled:opacity-50">
+                    <Sparkles className="w-3.5 h-3.5" /> {aiLoading ? 'Gerando...' : 'Gerar com IA'}
+                  </button>
+                </div>
                 <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 h-20 resize-none"
                   value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} />
+                {suggestedTitle && (
+                  <button type="button" onClick={() => { setForm((f: any) => ({ ...f, name: suggestedTitle })); setSuggestedTitle(''); }}
+                    className="mt-1.5 text-[11px] text-indigo-300 hover:text-indigo-200 text-left">
+                    💡 Título sugerido: <span className="underline">{suggestedTitle}</span> — clique para usar
+                  </button>
+                )}
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="ghost" onClick={() => { setShowModal(false); setEditing(null); }}>Cancelar</Button>

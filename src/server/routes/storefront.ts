@@ -314,6 +314,21 @@ router.post("/collections", (req: AuthRequest, res): any => {
   res.json({ id, title, rule: 'manual', productIds: ids });
 });
 
+// PUT /api/storefront/collections/reorder -> define a ordem de exibição na
+// vitrine (drag-and-drop no admin). Body: { ids: [...] } na ordem desejada.
+// IMPORTANTE: registrada ANTES de /collections/:id para não colidir.
+router.put("/collections/reorder", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: any) => typeof x === 'string') : [];
+  const tx = db.transaction(() => {
+    ids.forEach((id, i) => {
+      db.prepare("UPDATE storefront_collections SET position = ? WHERE id = ? AND organization_id = ?").run(i, id, orgId);
+    });
+  });
+  tx();
+  res.json({ success: true });
+});
+
 // PUT /api/storefront/collections/:id -> edita uma coleção manual (título/produtos)
 router.put("/collections/:id", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);

@@ -26,7 +26,9 @@ function explainAuthError(err: any): string {
   const code = err?.code || '';
   switch (code) {
     case 'auth/unauthorized-domain':
-      return `Este domínio (${window.location.hostname}) não está autorizado no Firebase. Vá em Firebase Console → Authentication → Settings → Authorized domains e adicione "${window.location.hostname}".`;
+      return `Este domínio (${window.location.hostname}) não está autorizado no projeto Firebase "${(firebaseConfig as any).projectId}". ` +
+        `ATENÇÃO: precisa ser exatamente esse projeto (${(firebaseConfig as any).projectId}), não outro. ` +
+        `Abra https://console.firebase.google.com/project/${(firebaseConfig as any).projectId}/authentication/settings → Authorized domains → Add domain → "${window.location.hostname}".`;
     case 'auth/operation-not-allowed':
       return 'O provedor Google não está habilitado. Ative em Firebase Console → Authentication → Sign-in method → Google.';
     case 'auth/popup-blocked':

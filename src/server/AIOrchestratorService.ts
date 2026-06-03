@@ -23,6 +23,7 @@ export class AIOrchestratorService {
     history?: { role: string; text: string }[];
     contactId?: string;
     provider?: string;
+    areaPersona?: string;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -167,7 +168,7 @@ export class AIOrchestratorService {
       orderStatusText = this.orderStatusContext(params.organizationId, params.contactId);
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText);
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "");
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -743,7 +744,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -814,6 +815,7 @@ ${forwardText}
 ${negotiatorText}
 ${storefrontText}
 ${orderStatusText}
+${areaPersona}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}

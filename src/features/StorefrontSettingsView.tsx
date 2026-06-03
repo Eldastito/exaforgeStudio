@@ -62,6 +62,8 @@ export function StorefrontSettingsView() {
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [showNew, setShowNew] = useState(false);
+  const [curating, setCurating] = useState(false);
+  const [curationTips, setCurationTips] = useState<{ name: string; reason: string }[] | null>(null);
 
   const loadProducts = async () => {
     try {
@@ -72,6 +74,26 @@ export function StorefrontSettingsView() {
     } finally {
       setLoadingProducts(false);
     }
+  };
+
+  // Curadoria de destaques pela IA: sugere e aplica os produtos em destaque com
+  // base em vendas e margem. O dono pode ajustar depois com o toggle de cada item.
+  const curateFeatured = async () => {
+    if (!window.confirm('A IA vai escolher os produtos em destaque da vitrine (por vendas e margem) e aplicar agora. Você pode ajustar manualmente depois. Continuar?')) return;
+    setCurating(true); setCurationTips(null);
+    try {
+      const res = await apiFetch('/api/storefront/ai/featured', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply: true, max: 4 }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha na curadoria.'); return; }
+      const tips = Array.isArray(d.suggestions) ? d.suggestions.map((s: any) => ({ name: s.name, reason: s.reason })) : [];
+      setCurationTips(tips);
+      await loadProducts();
+      toast.success(tips.length ? `Destaques atualizados: ${tips.length} produto(s). ✨` : 'Nenhum produto para destacar ainda.');
+    } catch (e) { toast.error('Erro na curadoria com a IA'); }
+    finally { setCurating(false); }
   };
 
   useEffect(() => {
@@ -320,12 +342,29 @@ export function StorefrontSettingsView() {
 
         {/* Produtos na vitrine */}
         <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
             <h3 className="text-lg font-semibold text-zinc-100">Produtos na vitrine</h3>
-            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => setShowNew(true)}>
-              <Plus className="w-4 h-4 mr-2" /> Novo produto
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10" onClick={curateFeatured} disabled={curating}>
+                <Star className="w-4 h-4 mr-2" /> {curating ? 'Curando...' : 'Sugerir destaques (IA)'}
+              </Button>
+              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => setShowNew(true)}>
+                <Plus className="w-4 h-4 mr-2" /> Novo produto
+              </Button>
+            </div>
           </div>
+
+          {curationTips && curationTips.length > 0 && (
+            <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+              <p className="text-sm text-amber-300 font-medium mb-1 flex items-center gap-1.5"><Star className="w-4 h-4" /> Destaques escolhidos pela IA</p>
+              <ul className="text-xs text-zinc-300 space-y-0.5">
+                {curationTips.map((t, i) => (
+                  <li key={i}>• <span className="text-zinc-100">{t.name}</span> — <span className="text-zinc-400">{t.reason}</span></li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-zinc-500 mt-2">Ajuste manualmente no botão de estrela de cada produto, se quiser.</p>
+            </div>
+          )}
 
           {loadingProducts ? (
             <div className="flex items-center gap-2 text-zinc-400 py-8 justify-center">

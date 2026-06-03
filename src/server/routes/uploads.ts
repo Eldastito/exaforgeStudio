@@ -22,7 +22,7 @@ const EXT: Record<string, string> = {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB (o cliente já comprime antes)
   fileFilter: (_req, file, cb) => {
     if (EXT[file.mimetype]) cb(null, true);
     else cb(new Error("Formato de imagem não suportado (use PNG, JPG, WEBP ou GIF)."));

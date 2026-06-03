@@ -77,6 +77,111 @@ router.post("/link", (req: AuthRequest, res): any => {
   res.json({ token, path: `/loja/${s.slug}?c=${token}`, slug: s.slug });
 });
 
+// ============================================================================
+// CUPONS de desconto da vitrine.
+// ============================================================================
+const couponView = (c: any) => ({
+  id: c.id, code: c.code, type: c.type, value: c.value, min_order: c.min_order,
+  active: !!c.active, expires_at: c.expires_at, usage_limit: c.usage_limit, used_count: c.used_count,
+});
+
+// GET /api/storefront/coupons
+router.get("/coupons", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const rows = db.prepare("SELECT * FROM storefront_coupons WHERE organization_id = ? ORDER BY created_at DESC").all(orgId) as any[];
+  res.json(rows.map(couponView));
+});
+
+// POST /api/storefront/coupons  { code, type, value, min_order?, expires_at?, usage_limit? }
+router.post("/coupons", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const b = req.body || {};
+  const code = String(b.code || "").trim().toUpperCase().replace(/\s+/g, "");
+  const type = b.type === "fixed" ? "fixed" : "percent";
+  const value = Number(b.value);
+  if (!code) return res.status(400).json({ error: "Informe o código do cupom." });
+  if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: "Valor do desconto inválido." });
+  if (type === "percent" && value > 100) return res.status(400).json({ error: "Percentual não pode passar de 100%." });
+  const id = uuidv4();
+  try {
+    db.prepare(
+      `INSERT INTO storefront_coupons (id, organization_id, code, type, value, min_order, expires_at, usage_limit, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`
+    ).run(id, orgId, code, type, value, Number(b.min_order) || 0, b.expires_at || null,
+      b.usage_limit != null && b.usage_limit !== "" ? Math.max(1, parseInt(String(b.usage_limit), 10)) : null);
+  } catch (e: any) {
+    if (String(e.message || "").includes("UNIQUE")) return res.status(409).json({ error: "Já existe um cupom com esse código." });
+    return res.status(500).json({ error: e.message });
+  }
+  res.json(couponView(db.prepare("SELECT * FROM storefront_coupons WHERE id = ?").get(id)));
+});
+
+// PUT /api/storefront/coupons/:id  -> edita (ativar/desativar, valor, etc.)
+router.put("/coupons/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const c = db.prepare("SELECT id FROM storefront_coupons WHERE id = ? AND organization_id = ?").get(req.params.id, orgId);
+  if (!c) return res.status(404).json({ error: "Cupom não encontrado." });
+  const b = req.body || {};
+  const sets: string[] = []; const vals: any[] = [];
+  if (b.active !== undefined) { sets.push("active = ?"); vals.push(b.active ? 1 : 0); }
+  if (b.value !== undefined) { sets.push("value = ?"); vals.push(Number(b.value) || 0); }
+  if (b.min_order !== undefined) { sets.push("min_order = ?"); vals.push(Number(b.min_order) || 0); }
+  if (b.expires_at !== undefined) { sets.push("expires_at = ?"); vals.push(b.expires_at || null); }
+  if (b.usage_limit !== undefined) { sets.push("usage_limit = ?"); vals.push(b.usage_limit != null && b.usage_limit !== "" ? Math.max(1, parseInt(String(b.usage_limit), 10)) : null); }
+  if (sets.length) db.prepare(`UPDATE storefront_coupons SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// DELETE /api/storefront/coupons/:id
+router.delete("/coupons/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  db.prepare("DELETE FROM storefront_coupons WHERE id = ? AND organization_id = ?").run(req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// GET /api/storefront/analytics?days=30 -> relatório da vitrine
+// Visitas, produtos mais clicados, pedidos, receita e taxa de conversão.
+router.get("/analytics", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const days = Math.min(Math.max(parseInt(String(req.query.days ?? 30), 10) || 30, 1), 365);
+  const since = `-${days} days`;
+  try {
+    const visits = (db.prepare(
+      "SELECT COUNT(*) AS c FROM storefront_events WHERE organization_id = ? AND type = 'view' AND created_at >= datetime('now', ?)"
+    ).get(orgId, since) as any)?.c || 0;
+
+    const orderAgg = db.prepare(
+      `SELECT COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS revenue,
+              COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_revenue
+         FROM orders
+        WHERE organization_id = ? AND created_by = 'storefront' AND created_at >= datetime('now', ?)`
+    ).get(orgId, since) as any;
+
+    const topProducts = (db.prepare(
+      `SELECT e.product_id AS id, ps.name AS name, COUNT(*) AS clicks
+         FROM storefront_events e
+         LEFT JOIN products_services ps ON ps.id = e.product_id
+        WHERE e.organization_id = ? AND e.type = 'product_click' AND e.product_id IS NOT NULL
+          AND e.created_at >= datetime('now', ?)
+        GROUP BY e.product_id
+        ORDER BY clicks DESC LIMIT 8`
+    ).all(orgId, since) as any[]).map(r => ({ id: r.id, name: r.name || '(produto removido)', clicks: r.clicks }));
+
+    const orders = orderAgg?.orders || 0;
+    const conversion = visits > 0 ? Math.round((orders / visits) * 1000) / 10 : 0; // %
+
+    res.json({
+      days, visits, orders,
+      revenue: orderAgg?.revenue || 0,
+      paidRevenue: orderAgg?.paid_revenue || 0,
+      conversion, // % (pedidos / visitas)
+      topProducts,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/storefront/products  -> produtos com imagens + config de vitrine (p/ o dono)
 router.get("/products", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);
@@ -177,6 +282,125 @@ router.post("/ai/featured", async (req: AuthRequest, res): Promise<any> => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ============================================================================
+// COLEÇÕES da vitrine (curadoria pela IA): agrupam produtos por regra dinâmica
+// (destaques / mais vendidos / novidades) e aparecem como seções na LP.
+// ============================================================================
+const COLLECTION_RULES = new Set(["featured", "best_sellers", "newest"]);
+
+// GET /api/storefront/collections -> lista as coleções configuradas
+router.get("/collections", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const rows = db.prepare(
+    "SELECT id, title, rule, position, items_json FROM storefront_collections WHERE organization_id = ? ORDER BY position ASC, created_at ASC"
+  ).all(orgId) as any[];
+  res.json(rows.map(r => ({
+    id: r.id, title: r.title, rule: r.rule, position: r.position,
+    productIds: r.rule === 'manual' ? (() => { try { return JSON.parse(r.items_json || '[]'); } catch { return []; } })() : undefined,
+  })));
+});
+
+// POST /api/storefront/collections -> cria uma coleção MANUAL (produtos a dedo)
+router.post("/collections", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const title = String(req.body?.title || "").trim().slice(0, 40);
+  if (!title) return res.status(400).json({ error: "Informe o nome da coleção." });
+  const ids: string[] = Array.isArray(req.body?.productIds) ? req.body.productIds.filter((x: any) => typeof x === 'string') : [];
+  const pos = ((db.prepare("SELECT MAX(position) AS m FROM storefront_collections WHERE organization_id = ?").get(orgId) as any)?.m ?? -1) + 1;
+  const id = uuidv4();
+  db.prepare("INSERT INTO storefront_collections (id, organization_id, title, rule, position, items_json) VALUES (?, ?, ?, 'manual', ?, ?)")
+    .run(id, orgId, title, pos, JSON.stringify(ids));
+  res.json({ id, title, rule: 'manual', productIds: ids });
+});
+
+// PUT /api/storefront/collections/:id -> edita uma coleção manual (título/produtos)
+router.put("/collections/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  const c = db.prepare("SELECT id, rule FROM storefront_collections WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
+  if (!c) return res.status(404).json({ error: "Coleção não encontrada." });
+  const sets: string[] = []; const vals: any[] = [];
+  if (req.body?.title !== undefined) { sets.push("title = ?"); vals.push(String(req.body.title).trim().slice(0, 40)); }
+  if (req.body?.productIds !== undefined && c.rule === 'manual') {
+    const ids = Array.isArray(req.body.productIds) ? req.body.productIds.filter((x: any) => typeof x === 'string') : [];
+    sets.push("items_json = ?"); vals.push(JSON.stringify(ids));
+  }
+  if (sets.length) db.prepare(`UPDATE storefront_collections SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// DELETE /api/storefront/collections/:id -> remove uma coleção
+router.delete("/collections/:id", (req: AuthRequest, res): any => {
+  const orgId = getOrgId(req);
+  db.prepare("DELETE FROM storefront_collections WHERE id = ? AND organization_id = ?").run(req.params.id, orgId);
+  res.json({ success: true });
+});
+
+// POST /api/storefront/ai/collections -> a IA monta as coleções da vitrine.
+// Substitui o conjunto atual. Com a IA, ela escolhe e nomeia as coleções a
+// partir do catálogo e dos sinais (destaques/vendas); sem IA, usa um conjunto
+// padrão coerente.
+router.post("/ai/collections", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = getOrgId(req);
+  try {
+    const hasFeatured = !!(db.prepare(
+      "SELECT 1 FROM products_services WHERE organization_id = ? AND type='product' AND active=1 AND COALESCE(storefront_visible,1)=1 AND featured=1 LIMIT 1"
+    ).get(orgId));
+    const hasSales = !!(db.prepare(
+      `SELECT 1 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido') LIMIT 1`
+    ).get(orgId));
+    const names = (db.prepare(
+      "SELECT name FROM products_services WHERE organization_id = ? AND type='product' AND active=1 AND COALESCE(storefront_visible,1)=1 ORDER BY created_at DESC LIMIT 40"
+    ).all(orgId) as any[]).map(r => r.name);
+
+    if (names.length === 0) return res.json({ collections: [], reason: "Nenhum produto visível na vitrine." });
+
+    let chosen: { title: string; rule: string }[] = [];
+
+    if (isAIConfigured()) {
+      const allowed: string[] = ["newest", ...(hasFeatured ? ["featured"] : []), ...(hasSales ? ["best_sellers"] : [])];
+      const system = "Você organiza a home de uma loja virtual brasileira em coleções (seções). Use APENAS as regras permitidas. Crie títulos curtos e atraentes em português. Responda SOMENTE em JSON.";
+      const prompt = `Produtos da loja: ${names.join(", ")}.
+Regras de coleção permitidas (id -> significado): ${allowed.map(r => r === 'featured' ? 'featured (produtos em destaque)' : r === 'best_sellers' ? 'best_sellers (mais vendidos)' : 'newest (novidades/recém-adicionados)').join("; ")}.
+Monte de 2 a 3 coleções para a vitrine, cada uma com uma regra da lista (sem repetir regra) e um título curto. Responda apenas o JSON: {"collections":[{"title":"...","rule":"..."}]}`;
+      try {
+        const parsed = JSON.parse(await chat(prompt, { json: true, temperature: 0.5, system }));
+        const seen = new Set<string>();
+        chosen = (parsed.collections || [])
+          .filter((c: any) => c && COLLECTION_RULES.has(c.rule) && allowed.includes(c.rule) && !seen.has(c.rule) && (seen.add(c.rule) || true))
+          .slice(0, 3)
+          .map((c: any) => ({ title: String(c.title || "").trim().slice(0, 40) || defaultTitle(c.rule), rule: c.rule }));
+      } catch (e) { chosen = []; }
+    }
+
+    // Fallback determinístico (sem IA ou retorno inválido).
+    if (chosen.length === 0) {
+      if (hasFeatured) chosen.push({ title: "Destaques", rule: "featured" });
+      if (hasSales) chosen.push({ title: "Mais vendidos", rule: "best_sellers" });
+      chosen.push({ title: "Novidades", rule: "newest" });
+    }
+
+    // Substitui o conjunto atual de coleções.
+    const replace = db.transaction(() => {
+      // Mantém as coleções MANUAIS do dono; só substitui as automáticas.
+      db.prepare("DELETE FROM storefront_collections WHERE organization_id = ? AND rule != 'manual'").run(orgId);
+      chosen.forEach((c, i) => {
+        db.prepare("INSERT INTO storefront_collections (id, organization_id, title, rule, position) VALUES (?, ?, ?, ?, ?)")
+          .run(uuidv4(), orgId, c.title, c.rule, i);
+      });
+    });
+    replace();
+
+    res.json({ collections: chosen });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function defaultTitle(rule: string): string {
+  return rule === "featured" ? "Destaques" : rule === "best_sellers" ? "Mais vendidos" : "Novidades";
+}
 
 // PUT /api/storefront/products/:id -> atualiza modo de venda / visibilidade / destaque
 router.put("/products/:id", (req: AuthRequest, res): any => {

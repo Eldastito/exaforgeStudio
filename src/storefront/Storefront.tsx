@@ -37,6 +37,18 @@ function readUrl(): { slug: string; token: string | null } {
 
 const DEFAULT_ACCENT = '#6366f1';
 
+// Registra um evento da vitrine (visita / clique em produto). Fire-and-forget.
+function logStoreEvent(slug: string, type: 'view' | 'product_click', productId?: string) {
+  try {
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, productId }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch { /* noop */ }
+}
+
 export function Storefront() {
   const { slug, token } = useMemo(readUrl, []);
 
@@ -69,6 +81,8 @@ export function Storefront() {
         const json = (await res.json()) as StoreResponse;
         if (!alive) return;
         setData(json);
+        // Registra a visita (relatório da vitrine) — best-effort.
+        logStoreEvent(slug, 'view');
         // Inicializa o tema a partir do default da loja (com persistência).
         const stored = lsGet<Mode | null>(`storefront_mode_${slug}`, null);
         setMode(stored ?? json.store.default_mode ?? 'night');
@@ -133,6 +147,11 @@ export function Storefront() {
     setActiveProduct(null);
   }, [addToCart]);
 
+  const openProduct = useCallback((product: Product) => {
+    logStoreEvent(slug, 'product_click', product.id);
+    setActiveProduct(product);
+  }, [slug]);
+
   const handleBuyNow = useCallback((product: Product, option: ChosenOption, qty: number) => {
     addToCart(product, option, qty);
     setActiveProduct(null);
@@ -140,10 +159,11 @@ export function Storefront() {
   }, [addToCart]);
 
   const submitOrder = useCallback(
-    async (extra: { name: string; phone: string }): Promise<OrderResponse | null> => {
+    async (extra: { name: string; phone: string; coupon?: string }): Promise<OrderResponse | null> => {
       const body = {
         token: token ?? undefined,
         customer: { name: extra.name, phone: extra.phone },
+        coupon: extra.coupon,
         items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })),
       };
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/order`, {
@@ -171,6 +191,21 @@ export function Storefront() {
     });
     return list;
   }, [data, onlyFavs, favorites]);
+
+  const productById = useMemo(() => {
+    const m: Record<string, Product> = {};
+    (data?.products || []).forEach((p) => { m[p.id] = p; });
+    return m;
+  }, [data]);
+
+  // Coleções (curadoria da IA): cada uma vira uma seção com seus produtos.
+  // Ocultas quando o cliente filtra só favoritos.
+  const collectionSections = useMemo(() => {
+    if (!data?.collections || onlyFavs) return [];
+    return data.collections
+      .map((c) => ({ id: c.id, title: c.title, items: c.productIds.map((id) => productById[id]).filter(Boolean) as Product[] }))
+      .filter((c) => c.items.length > 0);
+  }, [data, onlyFavs, productById]);
 
   // Fundo conforme tema.
   const pageBg = night
@@ -219,8 +254,31 @@ export function Storefront() {
               </p>
             )}
 
+            {/* Coleções (seções curadas pela IA) */}
+            {collectionSections.map((sec) => (
+              <section key={sec.id} className="mt-8">
+                <h2 className="mb-3 text-lg font-semibold tracking-tight">{sec.title}</h2>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {sec.items.map((p) => (
+                    <ProductCard
+                      key={`${sec.id}-${p.id}`}
+                      product={p}
+                      accent={accent}
+                      mode={mode}
+                      isFavorite={favorites.includes(p.id)}
+                      onToggleFavorite={toggleFavorite}
+                      onOpen={setActiveProduct}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+
             {/* Grid */}
-            <div className="mt-6">
+            <div className="mt-8">
+              {collectionSections.length > 0 && products.length > 0 && (
+                <h2 className="mb-3 text-lg font-semibold tracking-tight">Todos os produtos</h2>
+              )}
               {products.length === 0 ? (
                 <div className="grid place-items-center rounded-3xl border border-dashed py-20 text-center opacity-60"
                   style={{ borderColor: hexToRgba(accent, 0.3) }}>
@@ -240,7 +298,7 @@ export function Storefront() {
                         mode={mode}
                         isFavorite={favorites.includes(p.id)}
                         onToggleFavorite={toggleFavorite}
-                        onOpen={setActiveProduct}
+                        onOpen={openProduct}
                       />
                     ))}
                   </AnimatePresence>
@@ -272,6 +330,7 @@ export function Storefront() {
         accent={accent}
         mode={mode}
         customer={data?.customer ?? null}
+        slug={slug}
         onClose={() => setCartOpen(false)}
         onChangeQty={changeQty}
         onRemove={removeItem}

@@ -35,10 +35,17 @@ export interface Customer {
   name: string;
 }
 
+export interface StoreCollection {
+  id: string;
+  title: string;
+  productIds: string[];
+}
+
 export interface StoreResponse {
   store: Store;
   customer: Customer | null;
   products: Product[];
+  collections?: StoreCollection[];
 }
 
 // Opção escolhida pelo cliente para um item.

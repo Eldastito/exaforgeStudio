@@ -53,6 +53,41 @@ router.post("/backups/:id/drive", async (req: AuthRequest, res): Promise<any> =>
   }
 });
 
+// POST /google/sheets/export { dataset: 'orders' | 'contacts' } -> cria uma
+// planilha no Google Sheets do dono com os dados e devolve o link.
+router.post("/google/sheets/export", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const dataset = req.body?.dataset === "contacts" ? "contacts" : "orders";
+  const brl = (v: any) => `R$ ${Number(v || 0).toFixed(2)}`;
+  const dt = (v: any) => v ? new Date(v).toLocaleString("pt-BR") : "";
+
+  let title = ""; let header: string[] = []; let rows: (string | number)[][] = [];
+  try {
+    if (dataset === "contacts") {
+      title = `Contatos — ExaForge — ${new Date().toLocaleDateString("pt-BR")}`;
+      header = ["Nome", "Telefone/ID", "Cadastrado em", "Compras", "Total gasto"];
+      const list = db.prepare("SELECT name, identifier, created_at, purchase_count, total_spent FROM contacts WHERE organization_id = ? ORDER BY created_at DESC LIMIT 5000").all(orgId) as any[];
+      rows = list.map(c => [c.name || "", c.identifier || "", dt(c.created_at), Number(c.purchase_count || 0), brl(c.total_spent)]);
+    } else {
+      title = `Pedidos — ExaForge — ${new Date().toLocaleDateString("pt-BR")}`;
+      header = ["Data", "Cliente", "Status", "Pagamento", "Total"];
+      const list = db.prepare(
+        `SELECT o.created_at, c.name AS contact, o.status, o.payment_status, o.total_amount
+           FROM orders o LEFT JOIN contacts c ON c.id = o.contact_id
+          WHERE o.organization_id = ? ORDER BY o.created_at DESC LIMIT 2000`
+      ).all(orgId) as any[];
+      rows = list.map(o => [dt(o.created_at), o.contact || "Cliente", o.status || "", o.payment_status || "", brl(o.total_amount)]);
+    }
+    if (rows.length === 0) return res.status(400).json({ error: "Nada para exportar ainda." });
+    const r = await GoogleOAuthService.sheetsCreate(orgId, title, header, rows);
+    if ("error" in r) return res.status(400).json({ error: r.error });
+    res.json({ success: true, url: r.url, count: rows.length });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao exportar." });
+  }
+});
+
 // GET /api/integrations/whatsapp-webhook -> URL pronta (com segredo) + status.
 // Permite ativar a exigência do segredo sem mexer em variáveis de ambiente.
 router.get("/whatsapp-webhook", (req: AuthRequest, res): any => {

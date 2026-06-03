@@ -68,9 +68,16 @@ export interface CartItem {
   option: ChosenOption;
 }
 
+export interface OrderPayment {
+  method: 'mercadopago' | 'pix_manual' | 'none';
+  pix?: { qrCode: string; qrCodeBase64: string; ticketUrl: string };
+  manual?: { key: string; name: string; instructions: string };
+}
+
 export interface OrderResponse {
   ok: boolean;
   orderId: string;
   total: number;
   whatsappUrl: string | null;
+  payment?: OrderPayment;
 }

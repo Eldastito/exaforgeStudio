@@ -882,11 +882,53 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// Carrega um File como <img> (para desenhar no canvas).
+function loadImageEl(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+// Redimensiona e comprime a imagem no navegador antes do upload. Assim, fotos
+// grandes (banners/logos em alta resolução) passam sem estourar limites de
+// tamanho. Usa WebP para preservar transparência (logos) com bom tamanho.
+// SVG/GIF passam intactos (vetor/animação).
+async function compressImage(file: File, maxDim = 1920, quality = 0.85): Promise<File> {
+  if (file.type === 'image/svg+xml' || file.type === 'image/gif') return file;
+  try {
+    const img = await loadImageEl(file);
+    const big = Math.max(img.width, img.height);
+    // Já é pequena o bastante: não recomprime.
+    if (big <= maxDim && file.size <= 1_200_000) return file;
+    const scale = Math.min(1, maxDim / big);
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+    if (!blob || blob.size === 0) return file;
+    // Se a "compressão" ficou maior que o original, mantém o original.
+    if (blob.size >= file.size && big <= maxDim) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '') + '.webp', { type: 'image/webp' });
+  } catch {
+    return file;
+  }
+}
+
 // Faz upload de um arquivo de imagem e devolve a URL pública (/media/...).
 export async function uploadImageFile(file: File): Promise<string> {
+  const prepared = await compressImage(file);
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', prepared);
   const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
+  if (res.status === 413) throw new Error('Imagem muito grande. Tente uma imagem menor.');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Falha no upload da imagem.');
   return data.url as string;

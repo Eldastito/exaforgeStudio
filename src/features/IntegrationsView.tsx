@@ -71,6 +71,17 @@ export function IntegrationsView() {
     if (!(await confirmDialog('Desconectar a conta Google?', { danger: true }))) return;
     try { await apiFetch('/api/integrations/google/disconnect', { method: 'POST' }); loadGoogleStatus(); } catch {}
   };
+  const [gmailBusy, setGmailBusy] = useState(false);
+  const sendGmailTest = async () => {
+    setGmailBusy(true);
+    try {
+      const res = await apiFetch('/api/integrations/google/gmail/test', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao enviar o e-mail.'); return; }
+      toast.success('E-mail de teste enviado! Confira sua caixa de entrada. ✉️');
+    } catch { toast.error('Falha ao enviar o e-mail.'); }
+    finally { setGmailBusy(false); }
+  };
   const sendBackupToDrive = async (id: string) => {
     setDriveBusy(id);
     try {
@@ -318,8 +329,13 @@ export function IntegrationsView() {
                      <Button variant="ghost" size="sm" onClick={disconnectGoogle} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
                   </div>
                   <p className="text-xs text-emerald-400/80 text-center">
-                    Conectado com acesso offline — a IA/servidor usa Drive e Agenda (e em breve Gmail e Sheets) mesmo com você offline. Agendamentos criados aqui viram eventos no seu Google Calendar.
+                    Conectado com acesso offline — a IA/servidor usa Drive, Agenda e Gmail (e em breve Sheets) mesmo com você offline. Agendamentos viram eventos no Google Calendar.
                   </p>
+                  <div className="flex justify-center">
+                    <Button variant="outline" size="sm" onClick={sendGmailTest} disabled={gmailBusy} className="border-zinc-700 text-zinc-200">
+                      {gmailBusy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Enviar e-mail de teste (Gmail)
+                    </Button>
+                  </div>
                </div>
             ) : (
                <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 rounded-lg border border-zinc-800 h-full">

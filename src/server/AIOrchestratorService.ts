@@ -160,7 +160,14 @@ export class AIOrchestratorService {
       storefrontText = this.storefrontContext(params.organizationId);
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText);
+    // Status do pedido/entrega do cliente: para a IA responder "cadê meu pedido?"
+    // com dados reais (read-only), sem inventar.
+    let orderStatusText = "";
+    if (!isOrchestratorCommand && params.contactId) {
+      orderStatusText = this.orderStatusContext(params.organizationId, params.contactId);
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -360,6 +367,51 @@ export class AIOrchestratorService {
       ).get(orgId) as any;
       if (!store || !store.published || !store.slug) return "";
       return `LOJA VIRTUAL (vitrine online): temos uma landing page com nossos produtos (fotos, opções de tamanho/peso e carrinho). Quando o cliente quiser VER os produtos, pedir o catálogo/as fotos, ou perguntar "o que vocês têm", defina "send_storefront": true — o sistema anexa automaticamente um link EXCLUSIVO dele à sua resposta (não invente nem escreva o link você mesmo). Na sua "reply", apenas convide de forma simpática (ex.: "Te mando nossa vitrine pra você escolher com calma 😊"). Continue podendo fechar o pedido por aqui também (new_order).`;
+    } catch (e) { return ""; }
+  }
+
+  /**
+   * Resumo do PEDIDO/ENTREGA mais recente do cliente para o prompt. Permite que
+   * a IA responda "cadê meu pedido?" com status real (read-only). Retorna "" se
+   * o cliente não tem pedidos.
+   */
+  private static orderStatusContext(orgId: string, contactId: string): string {
+    try {
+      const order = db.prepare(
+        `SELECT id, status, total_amount, created_at FROM orders
+          WHERE organization_id = ? AND contact_id = ?
+          ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId, contactId) as any;
+      if (!order) return "";
+
+      const ORDER_LABEL: Record<string, string> = {
+        aguardando_pagamento: 'aguardando pagamento', pago: 'pago', em_preparo: 'em preparo',
+        entregue: 'entregue', concluido: 'concluído', cancelado: 'cancelado',
+        reembolso: 'reembolso', devolucao: 'devolução',
+      };
+      const items = db.prepare(
+        'SELECT name_snapshot, quantity FROM order_items WHERE order_id = ?'
+      ).all(order.id) as any[];
+      const itemsTxt = items.map(i => `${i.quantity}× ${i.name_snapshot}`).join(', ');
+      const date = new Date(order.created_at).toLocaleDateString('pt-BR');
+
+      let txt = `STATUS DO PEDIDO DO CLIENTE (use para responder dúvidas sobre "meu pedido"/"minha entrega"; NÃO invente, use exatamente estes dados):
+- Pedido #${String(order.id).slice(0, 8)} de ${date} — status: ${ORDER_LABEL[order.status] || order.status} — total R$ ${Number(order.total_amount || 0).toFixed(2)}${itemsTxt ? ` — itens: ${itemsTxt}` : ''}`;
+
+      const delivery = db.prepare(
+        `SELECT status, delivery_window_start, delivery_window_end FROM deliveries
+          WHERE organization_id = ? AND contact_id = ?
+          ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId, contactId) as any;
+      if (delivery) {
+        const DELIV_LABEL: Record<string, string> = {
+          pending: 'a programar', scheduled: 'agendada', out_for_delivery: 'saiu para entrega',
+          delivered: 'entregue', failed: 'falhou', cancelled: 'cancelada',
+        };
+        txt += `\n- Entrega: ${DELIV_LABEL[delivery.status] || delivery.status}`;
+      }
+      txt += `\nSe o cliente perguntar e o status for "aguardando pagamento", lembre com gentileza como concluir o pagamento.`;
+      return txt;
     } catch (e) { return ""; }
   }
 
@@ -691,7 +743,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -761,6 +813,7 @@ ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 ${forwardText}
 ${negotiatorText}
 ${storefrontText}
+${orderStatusText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}

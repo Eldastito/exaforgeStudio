@@ -83,7 +83,8 @@ export function CartDrawer({
 
   async function handleSubmit() {
     setError(null);
-    if (!name.trim()) {
+    // Só exige o nome se o cliente NÃO veio pelo link (sem contato vinculado).
+    if (!customer && !name.trim()) {
       setError('Informe seu nome.');
       return;
     }
@@ -235,27 +236,25 @@ export function CartDrawer({
                       </div>
                     )}
 
-                    {/* WhatsApp: principal se não há pagamento na loja; senão, secundário */}
+                    {/* Sem pagamento na loja: o pedido já caiu no atendimento.
+                        Confirma aqui mesmo, sem forçar o WhatsApp. */}
+                    {!hasPix && !hasManual && (
+                      <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-sm">
+                        <p className="font-semibold text-emerald-500">Recebemos seu pedido! 🎉</p>
+                        <p className="mt-1 opacity-70">A loja já foi avisada e vai te chamar para combinar o pagamento e a entrega.</p>
+                      </div>
+                    )}
+
+                    {/* WhatsApp é sempre OPCIONAL (o cliente não precisa voltar pra lá). */}
                     {result.whatsappUrl && (
-                      hasPix || hasManual ? (
-                        <a
-                          href={result.whatsappUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-4 flex items-center justify-center gap-1.5 text-sm font-medium underline opacity-70 hover:opacity-100"
-                        >
-                          <MessageCircle className="h-4 w-4" /> Prefere finalizar no WhatsApp?
-                        </a>
-                      ) : (
-                        <a
-                          href={result.whatsappUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3 text-base font-bold text-white transition hover:brightness-105"
-                        >
-                          <MessageCircle className="h-5 w-5" /> Finalizar no WhatsApp
-                        </a>
-                      )
+                      <a
+                        href={result.whatsappUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-4 flex items-center justify-center gap-1.5 text-sm font-medium underline opacity-70 hover:opacity-100"
+                      >
+                        <MessageCircle className="h-4 w-4" /> Falar no WhatsApp (opcional)
+                      </a>
                     )}
 
                     <button
@@ -345,27 +344,34 @@ export function CartDrawer({
                 </div>
 
                 <footer className="space-y-3 border-t border-white/10 p-4">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Seu nome"
-                      className={[
-                        'rounded-xl border px-3 py-2.5 text-sm outline-none',
-                        night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
-                      ].join(' ')}
-                    />
-                    <input
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="WhatsApp (opcional)"
-                      inputMode="tel"
-                      className={[
-                        'rounded-xl border px-3 py-2.5 text-sm outline-none',
-                        night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
-                      ].join(' ')}
-                    />
-                  </div>
+                  {customer ? (
+                    // Cliente veio pelo link: já sabemos quem é — não pedimos nada.
+                    <p className="text-sm opacity-70">
+                      Comprando como <span className="font-semibold opacity-100">{customer.name || 'cliente'}</span>.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="Seu nome"
+                        className={[
+                          'rounded-xl border px-3 py-2.5 text-sm outline-none',
+                          night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                        ].join(' ')}
+                      />
+                      <input
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="WhatsApp (opcional)"
+                        inputMode="tel"
+                        className={[
+                          'rounded-xl border px-3 py-2.5 text-sm outline-none',
+                          night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                        ].join(' ')}
+                      />
+                    </div>
+                  )}
 
                   {/* Cupom de desconto */}
                   <div>

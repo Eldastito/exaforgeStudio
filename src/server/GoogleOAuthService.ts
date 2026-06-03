@@ -288,6 +288,39 @@ export class GoogleOAuthService {
       return text;
     } catch (e) { return ""; }
   }
+
+  // ---- Gmail ----
+  // Envia um e-mail pela conta Google conectada (escopo gmail.send).
+  static async gmailSend(orgId: string, to: string, subject: string, body: string): Promise<{ id: string } | { error: string }> {
+    const token = await this.getAccessToken(orgId);
+    if (!token) return { error: "Conta Google não conectada." };
+    const conn = this.getConnection(orgId);
+    const from = conn?.account_email || "me";
+    if (!to) return { error: "Informe o destinatário." };
+    // Assunto com acentos: codificação MIME (=?UTF-8?B?...?=).
+    const subjEnc = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf-8").toString("base64")}?=`;
+    const mime =
+      `To: ${to}\r\n` +
+      `From: ${from}\r\n` +
+      `Subject: ${subjEnc}\r\n` +
+      `MIME-Version: 1.0\r\n` +
+      `Content-Type: text/plain; charset="UTF-8"\r\n\r\n` +
+      String(body || "");
+    const raw = Buffer.from(mime, "utf-8").toString("base64url");
+    try {
+      const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ raw }),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok || !data.id) { console.error("[Gmail] envio falhou:", data); return { error: data?.error?.message || "Falha ao enviar o e-mail." }; }
+      return { id: data.id };
+    } catch (e: any) {
+      console.error("[Gmail] erro:", e);
+      return { error: "Erro de rede ao enviar o e-mail." };
+    }
+  }
 }
 
 // "2026-06-10 14:00:00" / "2026-06-10T14:00:00Z" -> "2026-06-10T14:00:00" (hora de parede)

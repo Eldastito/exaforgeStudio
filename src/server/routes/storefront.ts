@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import { chat, isAIConfigured } from "../llm.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -94,6 +95,87 @@ router.get("/products", (req: AuthRequest, res): any => {
     featured: !!p.featured,
     images: imgsByProduct[p.id] || [],
   })));
+});
+
+// POST /api/storefront/ai/featured -> curadoria de DESTAQUES pela IA.
+// Analisa vendas (unidades/receita) e margem (preço - preço mínimo) e sugere
+// quais produtos destacar na vitrine. Com a IA configurada, ela cura a lista e
+// justifica; sem IA, cai num ranking determinístico (mais vendidos / maior
+// margem). Se { apply: true }, aplica o destaque (featured) imediatamente.
+router.post("/ai/featured", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = getOrgId(req);
+  const apply = !!req.body?.apply;
+  const max = Math.min(Math.max(parseInt(String(req.body?.max ?? 4), 10) || 4, 1), 8);
+
+  try {
+    // Métricas por produto visível na vitrine.
+    const rows = db.prepare(`
+      SELECT ps.id, ps.name, ps.price, ps.min_price,
+        COALESCE(s.units, 0) AS units, COALESCE(s.revenue, 0) AS revenue
+      FROM products_services ps
+      LEFT JOIN (
+        SELECT oi.product_service_id, SUM(oi.quantity) AS units, SUM(oi.line_total) AS revenue
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
+        GROUP BY oi.product_service_id
+      ) s ON s.product_service_id = ps.id
+      WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
+        AND COALESCE(ps.storefront_visible, 1) = 1
+    `).all(orgId, orgId) as any[];
+
+    if (rows.length === 0) return res.json({ suggestions: [], applied: false, reason: "Nenhum produto visível na vitrine." });
+
+    const withMargin = rows.map(r => ({
+      ...r,
+      margin: (r.min_price != null && r.price != null) ? Number(r.price) - Number(r.min_price) : null,
+    }));
+
+    let suggestions: { id: string; name: string; reason: string }[] = [];
+
+    if (isAIConfigured() && rows.length > 1) {
+      const lines = withMargin.map(r =>
+        `- id:${r.id} | ${r.name} | preço R$ ${Number(r.price || 0).toFixed(2)} | vendidos ${r.units} | receita R$ ${Number(r.revenue || 0).toFixed(2)}${r.margin != null ? ` | margem R$ ${r.margin.toFixed(2)}` : ''}`
+      ).join("\n");
+      const system = "Você é um curador de vitrine de e-commerce brasileiro. Escolhe os produtos a destacar na home da loja, equilibrando campeões de venda e itens de boa margem, mantendo variedade. Responda SOMENTE em JSON.";
+      const prompt = `Produtos disponíveis (com métricas):\n${lines}\n\nEscolha até ${max} produtos para DESTACAR na vitrine. Para cada um, dê um motivo curto (ex.: "mais vendido", "ótima margem", "boa saída e ticket alto"). Responda apenas o JSON: {"featured":[{"id":"...","reason":"..."}]}`;
+      try {
+        const raw = await chat(prompt, { json: true, temperature: 0.4, system });
+        const parsed = JSON.parse(raw);
+        const valid = new Set(rows.map(r => r.id));
+        suggestions = (parsed.featured || [])
+          .filter((f: any) => f && valid.has(f.id))
+          .slice(0, max)
+          .map((f: any) => ({ id: f.id, name: rows.find(r => r.id === f.id)?.name || "", reason: String(f.reason || "destaque sugerido").slice(0, 80) }));
+      } catch (e) { suggestions = []; }
+    }
+
+    // Fallback determinístico (sem IA ou se a IA não retornou nada): ranqueia por
+    // unidades vendidas e, em empate, por margem/receita.
+    if (suggestions.length === 0) {
+      suggestions = [...withMargin]
+        .sort((a, b) => (b.units - a.units) || ((b.margin ?? 0) - (a.margin ?? 0)) || (b.revenue - a.revenue))
+        .slice(0, max)
+        .map(r => ({
+          id: r.id, name: r.name,
+          reason: r.units > 0 ? `${r.units} vendido(s)` : (r.margin != null ? `boa margem` : `produto em destaque`),
+        }));
+    }
+
+    if (apply) {
+      const ids = new Set(suggestions.map(s => s.id));
+      const setFeatured = db.transaction(() => {
+        for (const r of rows) {
+          db.prepare("UPDATE products_services SET featured = ? WHERE id = ? AND organization_id = ?")
+            .run(ids.has(r.id) ? 1 : 0, r.id, orgId);
+        }
+      });
+      setFeatured();
+    }
+
+    res.json({ suggestions, applied: apply });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // PUT /api/storefront/products/:id -> atualiza modo de venda / visibilidade / destaque

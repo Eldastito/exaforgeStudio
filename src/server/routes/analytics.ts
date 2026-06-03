@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import PDFDocument from 'pdfkit';
 
 const router = Router();
-const getOrgId = (req: any) => req.organizationId || req.headers['x-organization-id'] || 'default_org';
+const getOrgId = (req: any) => req.organizationId;
 
 router.get("/metrics", (req, res) => {
   const orgId = getOrgId(req);

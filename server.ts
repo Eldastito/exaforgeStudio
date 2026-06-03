@@ -126,12 +126,17 @@ async function startServer() {
   });
 
   // --- CORS ---
+  // Em produção liberamos APENAS uma origem explícita (CORS_ORIGIN ou APP_URL) —
+  // NUNCA refletimos o Host da requisição (que é falsificável). O SPA é servido
+  // pela mesma origem, então não precisa de CORS; só consumidores externos.
   app.use((req, res, next) => {
-    const origin = process.env.NODE_ENV === 'production' 
-       ? (process.env.CORS_ORIGIN || 'https://' + req.headers.host) 
-       : '*';
-    if (origin !== '*') {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+    const isProd = process.env.NODE_ENV === 'production';
+    const allowed = isProd
+      ? (process.env.CORS_ORIGIN || process.env.APP_URL || '')
+      : '*';
+    if (allowed) {
+      res.setHeader('Access-Control-Allow-Origin', allowed);
+      res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
       res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,x-organization-id');
       if (req.method === 'OPTIONS') {

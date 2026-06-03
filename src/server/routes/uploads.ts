@@ -16,7 +16,6 @@ const EXT: Record<string, string> = {
   "image/jpg": ".jpg",
   "image/webp": ".webp",
   "image/gif": ".gif",
-  "image/svg+xml": ".svg",
   "image/avif": ".avif",
 };
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { NotificationService } from "../NotificationService.js";
+import { PaymentService } from "../PaymentService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -194,7 +195,7 @@ router.post("/store/:slug/event", (req, res): any => {
 // Body: { token?, customer?: {name, phone}, items: [{ productId, quantity, option }] }
 //   option: { type:'size', value:'M' } | { type:'weight', grams:500 } | { type:'volume', ml:500 } | null
 // Cria um pedido 'aguardando_pagamento'. Vincula ao contato se houver token.
-router.post("/store/:slug/order", (req, res): any => {
+router.post("/store/:slug/order", async (req, res): Promise<any> => {
   const store = resolveStore(req.params.slug);
   if (!store) return res.status(404).json({ error: "Loja não encontrada." });
   const orgId = store.organization_id;
@@ -332,12 +333,34 @@ router.post("/store/:slug/order", (req, res): any => {
       }
     } catch (e) { /* notificação/ticket é best-effort */ }
 
-    // Link de WhatsApp para o cliente finalizar (a IA/loja cobra por lá).
+    // Link de WhatsApp para o cliente finalizar (vira opção SECUNDÁRIA).
     const phone = (store.whatsapp_number || store.org_phone || "").replace(/\D/g, "");
     const msg = `Olá! Quero finalizar meu pedido da loja:\n\n${lines}\n\n${totalsBlock}\n(pedido #${orderId.slice(0, 8)})`;
     const whatsappUrl = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : null;
 
-    res.json({ ok: true, orderId, total, whatsappUrl });
+    // PAGAMENTO NA PRÓPRIA LOJA: encurta a jornada — o cliente paga aqui, sem ir
+    // ao WhatsApp. Mercado Pago = PIX dinâmico (QR + copia-e-cola, confirma sozinho
+    // via webhook); pix_manual = chave do lojista. Best-effort.
+    let payment: any = { method: "none" };
+    try {
+      const pset = PaymentService.getSettings(orgId);
+      if (pset?.pay_enabled) {
+        const provider = pset.pay_provider || "pix_manual";
+        if (provider === "mercadopago") {
+          const custName = body.customer?.name || "Cliente";
+          const charge = await PaymentService.createMercadoPagoPix(orgId, {
+            orderId, amount: total, contactName: custName, contactId: contactId || undefined,
+          });
+          if (charge) {
+            payment = { method: "mercadopago", pix: { qrCode: charge.qrCode, qrCodeBase64: charge.qrCodeBase64, ticketUrl: charge.ticketUrl } };
+          }
+        } else if (provider === "pix_manual" && pset.pay_pix_key) {
+          payment = { method: "pix_manual", manual: { key: pset.pay_pix_key, name: pset.pay_pix_name || "", instructions: pset.pay_instructions || "" } };
+        }
+      }
+    } catch (e) { /* pagamento é best-effort; cai no WhatsApp se falhar */ }
+
+    res.json({ ok: true, orderId, total, whatsappUrl, payment });
   } catch (e: any) {
     res.status(500).json({ error: e.message || "Falha ao criar pedido." });
   }

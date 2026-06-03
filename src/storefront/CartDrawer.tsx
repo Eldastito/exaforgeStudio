@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  X, Minus, Plus, Trash2, ShoppingBag, CheckCircle2, Loader2, ImageOff, MessageCircle, Tag,
+  X, Minus, Plus, Trash2, ShoppingBag, CheckCircle2, Loader2, ImageOff, MessageCircle, Tag, Copy, Check, ExternalLink,
 } from 'lucide-react';
 import type { CartItem, Customer, Mode, OrderResponse } from './types';
 import { formatBRL, hexToRgba } from './utils';
@@ -41,6 +41,7 @@ export function CartDrawer({
   const [result, setResult] = useState<OrderResponse | null>(null);
 
   const [coupon, setCoupon] = useState('');
+  const [copiedPix, setCopiedPix] = useState(false);
   const [applying, setApplying] = useState(false);
   const [couponMsg, setCouponMsg] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ code: string; discount: number } | null>(null);
@@ -148,38 +149,125 @@ export function CartDrawer({
               </button>
             </header>
 
-            {/* Estado de sucesso */}
+            {/* Estado de sucesso — paga na própria loja (PIX) */}
             {result ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
-                <CheckCircle2 className="h-16 w-16" style={{ color: accent }} />
-                <div>
-                  <p className="text-lg font-bold">Pedido confirmado!</p>
-                  <p className="mt-1 text-sm opacity-60">
-                    Nº do pedido: <span className="font-mono font-semibold">{result.orderId}</span>
-                  </p>
-                  <p className="mt-1 text-sm opacity-60">
-                    Total: {formatBRL(result.total)}
-                  </p>
-                </div>
-                {result.whatsappUrl && (
-                  <a
-                    href={result.whatsappUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3 text-base font-bold text-white transition hover:brightness-105"
-                  >
-                    <MessageCircle className="h-5 w-5" />
-                    Finalizar no WhatsApp
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="text-sm font-medium underline opacity-70 hover:opacity-100"
-                >
-                  Continuar comprando
-                </button>
-              </div>
+              (() => {
+                const pay = result.payment;
+                const hasPix = pay?.method === 'mercadopago' && pay.pix && (pay.pix.qrCode || pay.pix.ticketUrl);
+                const hasManual = pay?.method === 'pix_manual' && pay.manual?.key;
+                const copyPix = (text: string) => {
+                  navigator.clipboard?.writeText(text);
+                  setCopiedPix(true); setTimeout(() => setCopiedPix(false), 1800);
+                };
+                return (
+                  <div className="flex-1 overflow-y-auto p-6 text-center">
+                    <CheckCircle2 className="mx-auto h-14 w-14" style={{ color: accent }} />
+                    <p className="mt-3 text-lg font-bold">Pedido criado!</p>
+                    <p className="mt-1 text-sm opacity-60">
+                      Nº <span className="font-mono font-semibold">#{result.orderId.slice(0, 8)}</span> · Total {formatBRL(result.total)}
+                    </p>
+
+                    {/* PIX dinâmico (Mercado Pago) — confirma sozinho */}
+                    {hasPix && (
+                      <div className="mt-5 text-left">
+                        <p className="text-center text-sm font-semibold">Pague com Pix para confirmar na hora</p>
+                        {pay!.pix!.qrCodeBase64 && (
+                          <img
+                            src={`data:image/png;base64,${pay!.pix!.qrCodeBase64}`}
+                            alt="QR Code Pix"
+                            className="mx-auto my-4 h-48 w-48 rounded-xl bg-white p-2"
+                          />
+                        )}
+                        {pay!.pix!.qrCode && (
+                          <>
+                            <p className="mb-1 text-xs opacity-60">Pix copia e cola:</p>
+                            <div className="flex items-center gap-2">
+                              <code className={['flex-1 truncate rounded-lg border px-2 py-2 text-[11px]', night ? 'border-white/15 bg-white/5' : 'border-slate-200 bg-white/70'].join(' ')}>
+                                {pay!.pix!.qrCode}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => copyPix(pay!.pix!.qrCode)}
+                                className="shrink-0 rounded-lg px-3 py-2 text-sm font-bold text-white"
+                                style={{ backgroundColor: accent }}
+                              >
+                                {copiedPix ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                        {pay!.pix!.ticketUrl && (
+                          <a
+                            href={pay!.pix!.ticketUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white"
+                            style={{ backgroundColor: accent }}
+                          >
+                            <ExternalLink className="h-4 w-4" /> Pagar pelo app do banco
+                          </a>
+                        )}
+                        <p className="mt-3 text-center text-xs opacity-60">Assim que o pagamento cair, seu pedido é confirmado automaticamente. ✅</p>
+                      </div>
+                    )}
+
+                    {/* PIX manual (chave do lojista) */}
+                    {hasManual && (
+                      <div className="mt-5 text-left">
+                        <p className="text-center text-sm font-semibold">Pague com Pix</p>
+                        <p className="mb-1 mt-3 text-xs opacity-60">Chave Pix:</p>
+                        <div className="flex items-center gap-2">
+                          <code className={['flex-1 truncate rounded-lg border px-2 py-2 text-sm', night ? 'border-white/15 bg-white/5' : 'border-slate-200 bg-white/70'].join(' ')}>
+                            {pay!.manual!.key}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyPix(pay!.manual!.key)}
+                            className="shrink-0 rounded-lg px-3 py-2 text-sm font-bold text-white"
+                            style={{ backgroundColor: accent }}
+                          >
+                            {copiedPix ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        {pay!.manual!.name && <p className="mt-1 text-xs opacity-60">Em nome de {pay!.manual!.name}</p>}
+                        {pay!.manual!.instructions && <p className="mt-2 text-xs opacity-70">{pay!.manual!.instructions}</p>}
+                        <p className="mt-2 text-center text-xs opacity-60">Depois de pagar, envie o comprovante no WhatsApp. 🙏</p>
+                      </div>
+                    )}
+
+                    {/* WhatsApp: principal se não há pagamento na loja; senão, secundário */}
+                    {result.whatsappUrl && (
+                      hasPix || hasManual ? (
+                        <a
+                          href={result.whatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-4 flex items-center justify-center gap-1.5 text-sm font-medium underline opacity-70 hover:opacity-100"
+                        >
+                          <MessageCircle className="h-4 w-4" /> Prefere finalizar no WhatsApp?
+                        </a>
+                      ) : (
+                        <a
+                          href={result.whatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3 text-base font-bold text-white transition hover:brightness-105"
+                        >
+                          <MessageCircle className="h-5 w-5" /> Finalizar no WhatsApp
+                        </a>
+                      )
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      className="mt-5 text-sm font-medium underline opacity-70 hover:opacity-100"
+                    >
+                      Continuar comprando
+                    </button>
+                  </div>
+                );
+              })()
             ) : items.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center opacity-60">
                 <ShoppingBag className="h-12 w-12" />

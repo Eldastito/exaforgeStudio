@@ -86,6 +86,14 @@ export class NotificationService {
     });
   }
 
+  static storeOrder(orgId: string, customerName: string, total: number) {
+    return this.push({
+      organizationId: orgId, type: 'success',
+      title: '🛍️ Pedido pela vitrine',
+      message: `${customerName || 'Um cliente'} fez um pedido de R$ ${Number(total || 0).toFixed(2)} na loja virtual.`,
+    });
+  }
+
   static paymentConfirmed(orgId: string, total: number, contactName?: string) {
     return this.push({
       organizationId: orgId, type: 'success',

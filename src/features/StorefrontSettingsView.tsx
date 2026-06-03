@@ -253,23 +253,21 @@ export function StorefrontSettingsView() {
                 />
               </Field>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="URL do logo">
-                  <input
-                    className={inputClass}
-                    value={settings.logo_url}
-                    onChange={(e) => setField('logo_url', e.target.value)}
-                    placeholder="https://..."
-                  />
-                </Field>
-                <Field label="URL do banner">
-                  <input
-                    className={inputClass}
-                    value={settings.banner_url}
-                    onChange={(e) => setField('banner_url', e.target.value)}
-                    placeholder="https://..."
-                  />
-                </Field>
+              <div className="grid grid-cols-1 gap-4">
+                <ImageUploadInput
+                  label="Logo da loja"
+                  hint="Quadrado, 512×512 px (1:1). PNG com fundo transparente. Aparece no topo da vitrine. Máx. 5 MB."
+                  value={settings.logo_url}
+                  onChange={(url) => setField('logo_url', url)}
+                  previewClass="h-16 w-16 rounded-xl object-cover"
+                />
+                <ImageUploadInput
+                  label="Banner da loja"
+                  hint="Retangular, 1600×500 px (≈3:1). JPG ou PNG. Faixa de destaque no topo da vitrine. Máx. 5 MB."
+                  value={settings.banner_url}
+                  onChange={(url) => setField('banner_url', url)}
+                  previewClass="h-16 w-28 rounded-lg object-cover"
+                />
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
@@ -355,6 +353,75 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// Faz upload de um arquivo de imagem e devolve a URL pública (/media/...).
+export async function uploadImageFile(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Falha no upload da imagem.');
+  return data.url as string;
+}
+
+// Campo de imagem com upload (botão) + URL manual + preview + dica de dimensões.
+function ImageUploadInput({
+  label, hint, value, onChange, previewClass = 'h-16 w-16 rounded-lg object-cover',
+}: {
+  label: string; hint: string; value: string;
+  onChange: (url: string) => void; previewClass?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    try {
+      const url = await uploadImageFile(file);
+      onChange(url);
+      toast.success('Imagem enviada!');
+    } catch (err: any) {
+      toast.error(err.message || 'Falha no upload.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Field label={label}>
+      <div className="flex items-start gap-3">
+        {value ? (
+          <img src={value} alt="" className={`${previewClass} border border-zinc-800 bg-zinc-900`} />
+        ) : (
+          <div className={`${previewClass} flex items-center justify-center border border-dashed border-zinc-700 bg-zinc-900 text-zinc-600`}>
+            <ImageIcon className="h-5 w-5" />
+          </div>
+        )}
+        <div className="flex-1 space-y-2">
+          <div className="flex gap-2">
+            <input
+              className={inputClass}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="https://... ou envie um arquivo"
+            />
+            <label className="shrink-0 inline-flex cursor-pointer items-center gap-1.5 rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-700">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+              Enviar
+              <input type="file" accept="image/*" className="hidden" onChange={handleFile} disabled={busy} />
+            </label>
+            {value && (
+              <button type="button" onClick={() => onChange('')} className="shrink-0 rounded border border-zinc-800 px-2 text-zinc-500 hover:text-zinc-300" title="Remover">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-zinc-500">{hint}</p>
+        </div>
+      </div>
+    </Field>
+  );
+}
+
 function normalizeProduct(p: any): StorefrontProduct {
   return {
     id: p.id,
@@ -384,6 +451,7 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch }) => {
 
   const [optionsText, setOptionsText] = useState(() => optionsToText(product.sale_mode, product.sale_options));
   const [imageUrl, setImageUrl] = useState('');
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [savingOptions, setSavingOptions] = useState(false);
 
   const persist = async (updates: Partial<StorefrontProduct> & { sale_options?: any }) => {
@@ -453,8 +521,8 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch }) => {
     if (ok) toast.success('Opções de venda salvas.');
   };
 
-  const addImage = async () => {
-    const url = imageUrl.trim();
+  const addImage = async (rawUrl?: string) => {
+    const url = (rawUrl ?? imageUrl).trim();
     if (!url) return;
     try {
       const res = await apiFetch(`/api/storefront/products/${product.id}/images`, {
@@ -465,12 +533,27 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch }) => {
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.id) {
         onPatch({ images: [...product.images, data] });
-        setImageUrl('');
+        if (rawUrl === undefined) setImageUrl('');
       } else {
         toast.error(data?.error || 'Erro ao adicionar imagem.');
       }
     } catch {
       toast.error('Erro ao adicionar imagem.');
+    }
+  };
+
+  const uploadProductImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingImg(true);
+    try {
+      const url = await uploadImageFile(file);
+      await addImage(url);
+    } catch (err: any) {
+      toast.error(err.message || 'Falha no upload.');
+    } finally {
+      setUploadingImg(false);
     }
   };
 
@@ -633,13 +716,19 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch }) => {
           <Button
             size="sm"
             variant="outline"
-            onClick={addImage}
+            onClick={() => addImage()}
             disabled={!imageUrl.trim()}
             className="border-zinc-700 text-zinc-200 shrink-0"
           >
             <Plus className="w-4 h-4 mr-1" /> Adicionar
           </Button>
+          <label className="shrink-0 inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-3 text-sm text-zinc-200 hover:bg-zinc-700">
+            {uploadingImg ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+            Enviar
+            <input type="file" accept="image/*" className="hidden" onChange={uploadProductImage} disabled={uploadingImg} />
+          </label>
         </div>
+        <p className="text-xs text-zinc-500 mt-1.5">Recomendado: quadrado, 1000×1000 px (1:1). JPG/PNG/WEBP, máx. 5 MB. A 1ª imagem é a capa.</p>
       </div>
     </div>
   );

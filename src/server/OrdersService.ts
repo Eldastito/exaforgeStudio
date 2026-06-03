@@ -97,8 +97,9 @@ export class OrdersService {
     const { total, resolved } = tx();
     // Atualiza o perfil de CRM do contato (se já nasceu faturado via autoClose).
     if (params.contactId) CustomerProfileService.recomputePurchaseStats(orgId, params.contactId);
-    // Automação Google: registra o pedido numa planilha do Sheets (best-effort).
+    // Automações Google (best-effort): planilha de vendas + confirmação por e-mail.
     GoogleAutomationService.logOrder(orgId, orderId).catch(() => {});
+    GoogleAutomationService.confirmOrder(orgId, orderId).catch(() => {});
     return { id: orderId, status, total, items: resolved };
   }
 

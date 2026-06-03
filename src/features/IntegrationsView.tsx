@@ -57,17 +57,17 @@ export function IntegrationsView() {
   const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean; lastHit?: { at: number; ok: boolean; reason: string } | null } | null>(null);
   const [waCopied, setWaCopied] = useState(false);
 
-  const [logOrders, setLogOrders] = useState(false);
+  const [auto, setAuto] = useState({ logOrders: false, emailAppointments: false, emailOrders: false });
   const loadGoogleStatus = () => {
     apiFetch('/api/integrations/google/status').then(r => r.json()).then(setGoogleStatus).catch(() => {});
-    apiFetch('/api/integrations/google/automations').then(r => r.json()).then(d => setLogOrders(!!d.logOrders)).catch(() => {});
+    apiFetch('/api/integrations/google/automations').then(r => r.json()).then(d => setAuto({ logOrders: !!d.logOrders, emailAppointments: !!d.emailAppointments, emailOrders: !!d.emailOrders })).catch(() => {});
   };
-  const toggleLogOrders = async () => {
-    const next = !logOrders; setLogOrders(next);
+  const toggleAuto = async (key: 'logOrders' | 'emailAppointments' | 'emailOrders') => {
+    const next = { ...auto, [key]: !auto[key] };
+    setAuto(next);
     try {
-      await apiFetch('/api/integrations/google/automations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logOrders: next }) });
-      toast.success(next ? 'Pedidos passam a ser registrados no Sheets. 📊' : 'Registro no Sheets desativado.');
-    } catch { setLogOrders(!next); toast.error('Erro ao salvar.'); }
+      await apiFetch('/api/integrations/google/automations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: next[key] }) });
+    } catch { setAuto(auto); toast.error('Erro ao salvar.'); }
   };
   const connectGoogle = async () => {
     setGoogleError(null);
@@ -365,12 +365,22 @@ export function IntegrationsView() {
                       {sheetsBusy === 'contacts' ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Exportar contatos p/ Sheets
                     </Button>
                   </div>
-                  <div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
-                    <span className="text-xs text-zinc-300">📊 Registrar novos pedidos numa planilha do Sheets (automático)</span>
-                    <button onClick={toggleLogOrders}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${logOrders ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${logOrders ? 'translate-x-5' : 'translate-x-1'}`} />
-                    </button>
+                  <div className="mt-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-wider text-zinc-500">Automações</p>
+                    {([
+                      { key: 'logOrders', label: '📊 Registrar novos pedidos numa planilha do Sheets' },
+                      { key: 'emailAppointments', label: '📅 Confirmar agendamento por e-mail ao cliente' },
+                      { key: 'emailOrders', label: '🛒 Confirmar pedido por e-mail ao cliente' },
+                    ] as const).map(({ key, label }) => (
+                      <div key={key} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                        <span className="text-xs text-zinc-300">{label}</span>
+                        <button onClick={() => toggleAuto(key)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${auto[key] ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${auto[key] ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-zinc-600">As confirmações por e-mail só são enviadas quando o cliente tem e-mail cadastrado (informado no agendamento ou no checkout da vitrine).</p>
                   </div>
                </div>
             ) : (

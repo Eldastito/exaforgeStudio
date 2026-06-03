@@ -286,8 +286,14 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       if (couponId) db.prepare("UPDATE storefront_coupons SET used_count = used_count + 1 WHERE id = ?").run(couponId);
     });
     tx();
-    // Automação Google: registra o pedido da vitrine numa planilha do Sheets.
+    // E-mail informado no checkout: guarda no contato (se houver) para confirmações.
+    const customerEmail = (body.customer?.email || "").trim();
+    if (customerEmail && contactId) {
+      try { db.prepare("UPDATE contacts SET email = ? WHERE id = ?").run(customerEmail, contactId); } catch (e) { /* noop */ }
+    }
+    // Automações Google: planilha de vendas + confirmação por e-mail (best-effort).
     GoogleAutomationService.logOrder(orgId, orderId).catch(() => {});
+    GoogleAutomationService.confirmOrder(orgId, orderId, customerEmail).catch(() => {});
 
     const brl = (v: number) => `R$ ${Number(v).toFixed(2)}`;
     const lines = resolved.map(r => `• ${r.qty}× ${r.name} — ${brl(r.total)}`).join("\n");

@@ -10,7 +10,7 @@ import { apiFetch } from '@/src/lib/api';
 export function AgendaView() {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', scheduled_start: '', contact_id: '' });
+  const [form, setForm] = useState({ title: '', description: '', scheduled_start: '', contact_id: '', customer_email: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const { contacts } = useStore();
 
@@ -23,10 +23,10 @@ export function AgendaView() {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   };
 
-  const openNew = () => { setEditingId(null); setForm({ title: '', description: '', scheduled_start: '', contact_id: '' }); setShowModal(true); };
+  const openNew = () => { setEditingId(null); setForm({ title: '', description: '', scheduled_start: '', contact_id: '', customer_email: '' }); setShowModal(true); };
   const openEdit = (a: any) => {
     setEditingId(a.id);
-    setForm({ title: a.title || '', description: a.description || '', scheduled_start: toLocalInput(a.scheduled_start), contact_id: a.contact_id || '' });
+    setForm({ title: a.title || '', description: a.description || '', scheduled_start: toLocalInput(a.scheduled_start), contact_id: a.contact_id || '', customer_email: a.customer_email || '' });
     setShowModal(true);
   };
   const cancelAppointment = async (a: any) => {
@@ -76,7 +76,7 @@ export function AgendaView() {
       }
       setShowModal(false);
       setEditingId(null);
-      setForm({ title: '', description: '', scheduled_start: '', contact_id: '' });
+      setForm({ title: '', description: '', scheduled_start: '', contact_id: '', customer_email: '' });
       loadAppointments();
     } catch(e) { }
   };
@@ -201,8 +201,13 @@ export function AgendaView() {
                   value={form.scheduled_start} onChange={(e) => setForm({...form, scheduled_start: e.target.value})} />
               </div>
               <div>
+                <label className="text-sm text-zinc-400 mb-1 block">E-mail do cliente <span className="text-zinc-600">(opcional — para confirmação)</span></label>
+                <input type="email" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                  placeholder="cliente@email.com" value={form.customer_email} onChange={(e) => setForm({...form, customer_email: e.target.value})} />
+              </div>
+              <div>
                 <label className="text-sm text-zinc-400 mb-1 block">Descrição</label>
-                <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 h-20 resize-none" 
+                <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 h-20 resize-none"
                   value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} />
               </div>
               <div className="flex justify-end gap-2 pt-2">

@@ -869,9 +869,16 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete }) =
             </div>
           )}
         </div>
-        <div className="flex gap-2 mt-3">
+        <div className="flex flex-wrap gap-2 mt-3 items-center">
+          {/* Upload do dispositivo — ação principal, sempre ativa */}
+          <label className="shrink-0 inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 px-3 py-2 text-sm font-medium text-white">
+            {uploadingImg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            {uploadingImg ? 'Enviando...' : 'Adicionar foto'}
+            <input type="file" accept="image/*" className="hidden" onChange={uploadProductImage} disabled={uploadingImg} />
+          </label>
+          <span className="text-xs text-zinc-600">ou cole o link de uma imagem:</span>
           <input
-            className={inputClass}
+            className={`${inputClass} flex-1 min-w-[160px]`}
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             onKeyDown={(e) => {
@@ -889,13 +896,8 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete }) =
             disabled={!imageUrl.trim()}
             className="border-zinc-700 text-zinc-200 shrink-0"
           >
-            <Plus className="w-4 h-4 mr-1" /> Adicionar
+            Usar link
           </Button>
-          <label className="shrink-0 inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-3 text-sm text-zinc-200 hover:bg-zinc-700">
-            {uploadingImg ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-            Enviar
-            <input type="file" accept="image/*" className="hidden" onChange={uploadProductImage} disabled={uploadingImg} />
-          </label>
         </div>
         <p className="text-xs text-zinc-500 mt-1.5">Recomendado: quadrado, 1000×1000 px (1:1). JPG/PNG/WEBP, máx. 5 MB. A 1ª imagem é a capa.</p>
       </div>

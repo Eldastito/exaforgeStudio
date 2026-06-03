@@ -746,6 +746,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE products_services ADD COLUMN storefront_position INTEGER`); } catch(e){}
   // Área de atendimento à qual a conversa foi direcionada.
   try { db.exec(`ALTER TABLE tickets ADD COLUMN area_id TEXT`); } catch(e){}
+  // Conta vinculada nas conexões OAuth (ex.: e-mail/nome do Google).
+  try { db.exec(`ALTER TABLE oauth_connections ADD COLUMN account_email TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE oauth_connections ADD COLUMN account_name TEXT`); } catch(e){}
   // Coleções manuais: lista ordenada de IDs de produto escolhidos a dedo.
   try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.

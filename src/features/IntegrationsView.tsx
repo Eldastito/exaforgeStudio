@@ -50,8 +50,35 @@ export function IntegrationsView() {
   const [webhookForm, setWebhookForm] = useState({ name: '', url: '', secret: '' });
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<{ configured: boolean; connected: boolean; email: string; name: string } | null>(null);
+  const [driveBusy, setDriveBusy] = useState<string | null>(null);
   const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean } | null>(null);
   const [waCopied, setWaCopied] = useState(false);
+
+  const loadGoogleStatus = () => {
+    apiFetch('/api/integrations/google/status').then(r => r.json()).then(setGoogleStatus).catch(() => {});
+  };
+  const connectGoogle = async () => {
+    setGoogleError(null);
+    try {
+      const d = await apiFetch('/api/integrations/google/login-url').then(r => r.json());
+      if (d.url) { window.location.href = d.url; } else { setGoogleError(d.error || 'Integração Google não configurada no servidor.'); }
+    } catch { setGoogleError('Não foi possível iniciar a conexão com o Google.'); }
+  };
+  const disconnectGoogle = async () => {
+    if (!(await confirmDialog('Desconectar a conta Google?', { danger: true }))) return;
+    try { await apiFetch('/api/integrations/google/disconnect', { method: 'POST' }); loadGoogleStatus(); } catch {}
+  };
+  const sendBackupToDrive = async (id: string) => {
+    setDriveBusy(id);
+    try {
+      const res = await apiFetch(`/api/integrations/backups/${id}/drive`, { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao enviar ao Drive.'); return; }
+      toast.success('Backup enviado ao Google Drive! ✅');
+    } catch { toast.error('Falha ao enviar ao Drive.'); }
+    finally { setDriveBusy(null); }
+  };
 
   const loadWaWebhook = () => {
     apiFetch('/api/integrations/whatsapp-webhook').then(r => r.json()).then(setWaWebhook).catch(() => {});
@@ -98,6 +125,18 @@ export function IntegrationsView() {
       setGoogleUser(user);
     });
     loadData();
+    loadGoogleStatus();
+    // Retorno do callback OAuth do Google (?google=conectado|erro).
+    try {
+      const u = new URL(window.location.href);
+      const g = u.searchParams.get('google');
+      if (g) {
+        if (g === 'conectado') toast.success('Google conectado! ✅'); else toast.error('Não foi possível conectar ao Google.');
+        u.searchParams.delete('google');
+        window.history.replaceState({}, '', u.pathname + u.search);
+        loadGoogleStatus();
+      }
+    } catch {}
     const interval = setInterval(loadData, 5000); // Polling for backup status
     return () => { unsub(); clearInterval(interval); };
   }, []);
@@ -247,7 +286,7 @@ export function IntegrationsView() {
                </div>
              </div>
              <div>
-                {googleUser ? (
+                {googleStatus?.connected ? (
                   <span className="text-xs font-semibold px-2 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded">Conectado</span>
                 ) : (
                   <span className="text-xs font-semibold px-2 py-1 bg-zinc-800 text-zinc-400 rounded">Desconectado</span>
@@ -256,38 +295,34 @@ export function IntegrationsView() {
           </div>
           
           <div className="flex-1 mt-4">
-            {googleUser ? (
+            {googleStatus?.connected ? (
                <div className="space-y-4">
                   <div className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg border border-zinc-800">
-                     <img src={googleUser.photoURL || ''} alt="User" className="w-8 h-8 rounded-full" />
-                     <div className="flex-1 text-sm">
-                        <p className="text-zinc-100">{googleUser.displayName}</p>
-                        <p className="text-zinc-500">{googleUser.email}</p>
+                     <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-500/20 text-blue-300 text-sm font-bold">
+                       {(googleStatus.name || googleStatus.email || 'G').slice(0, 1).toUpperCase()}
                      </div>
-                     <Button variant="ghost" size="sm" onClick={handleGoogleSignOut} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
+                     <div className="flex-1 text-sm min-w-0">
+                        <p className="text-zinc-100 truncate">{googleStatus.name || 'Conta Google'}</p>
+                        <p className="text-zinc-500 truncate">{googleStatus.email}</p>
+                     </div>
+                     <Button variant="ghost" size="sm" onClick={disconnectGoogle} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
                   </div>
-                  <p className="text-xs text-zinc-500 text-center">
-                    Conexão usada para Drive, Calendar, Sheets e Gmail (em desenvolvimento).
+                  <p className="text-xs text-emerald-400/80 text-center">
+                    Conectado com acesso offline — a IA/servidor pode usar Drive (e em breve Agenda, Gmail e Sheets) mesmo com você offline.
                   </p>
                </div>
             ) : (
                <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 rounded-lg border border-zinc-800 h-full">
-                  <button className="gsi-material-button w-full max-w-[240px]" onClick={handleGoogleSignIn}>
-                    <div className="gsi-material-button-state"></div>
-                    <div className="gsi-material-button-content-wrapper flex items-center justify-center py-2 px-4 bg-white text-black rounded-sm shadow-sm font-roboto border border-zinc-200">
-                      <div className="gsi-material-button-icon mr-3">
-                        <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" xmlnsXlink="http://www.w3.org/1999/xlink" style={{display: 'block', width: '18px', height: '18px'}}>
-                          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                          <path fill="none" d="M0 0h48v48H0z"></path>
-                        </svg>
-                      </div>
-                      <span className="text-sm font-medium">Sign in with Google</span>
+                  <Button onClick={connectGoogle} className="bg-white text-black hover:bg-zinc-100">
+                    Conectar conta Google
+                  </Button>
+                  <p className="text-xs text-zinc-500 mt-4 text-center">Necessário para Drive, Agenda, Gmail e Sheets (acesso server-side, offline).</p>
+                  {googleStatus && !googleStatus.configured && (
+                    <div className="mt-4 w-full rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                      <p className="text-xs text-amber-200/90">Falta configurar no servidor: <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> e <code>APP_URL</code> (e cadastrar a URL de callback no Google Cloud).</p>
                     </div>
-                  </button>
-                  <p className="text-xs text-zinc-500 mt-4 text-center">Necessário para agenda, e-mail e mais serviços do Google.</p>
+                  )}
                   {googleError && (
                     <div className="mt-4 w-full rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
@@ -384,6 +419,11 @@ export function IntegrationsView() {
                   {ready && (
                     <Button variant="ghost" size="sm" onClick={() => handleDownloadBackup(b.id)} className="h-7 px-2 text-indigo-300 hover:text-indigo-200" title="Baixar">
                       <Download className="w-4 h-4" />
+                    </Button>
+                  )}
+                  {ready && googleStatus?.connected && (
+                    <Button variant="ghost" size="sm" onClick={() => sendBackupToDrive(b.id)} disabled={driveBusy === b.id} className="h-7 px-2 text-blue-300 hover:text-blue-200" title="Salvar no Google Drive">
+                      {driveBusy === b.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
                     </Button>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => handleDeleteBackup(b.id)} className="h-7 px-2 text-rose-400 hover:text-rose-300" title="Apagar">

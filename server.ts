@@ -27,6 +27,7 @@ import paymentsRoutes from "./src/server/routes/payments.js";
 import cadencesRoutes from "./src/server/routes/cadences.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
+import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
 import storefrontRoutes from "./src/server/routes/storefront.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
@@ -339,8 +340,9 @@ async function startServer() {
     if (req.path.startsWith('/webhooks')) {
       return next(); // segue para os handlers públicos de webhook abaixo
     }
-    // Callback OAuth do Instagram: a Meta redireciona o navegador para cá SEM JWT.
-    if (req.path === '/integrations/instagram/callback') {
+    // Callbacks OAuth (Instagram/Google): o provedor redireciona o navegador
+    // para cá SEM o nosso JWT — precisam ficar fora do middleware autenticado.
+    if (req.path === '/integrations/instagram/callback' || req.path === '/integrations/google/callback') {
       return next();
     }
     return protectedApi(req, res, next);
@@ -348,6 +350,13 @@ async function startServer() {
 
   // Callback público do OAuth do Instagram (troca code -> token e salva o canal).
   app.get("/api/integrations/instagram/callback", instagramCallback);
+
+  // Callback público do OAuth do Google (troca code -> tokens com acesso offline).
+  app.get("/api/integrations/google/callback", async (req, res) => {
+    const base = (process.env.APP_URL || '').replace(/\/$/, '') || `${req.protocol}://${req.headers.host}`;
+    const orgId = await GoogleOAuthService.handleCallback(String(req.query.code || ''), String(req.query.state || ''));
+    res.redirect(`${base}/?google=${orgId ? 'conectado' : 'erro'}`);
+  });
 
   // --- META WEBHOOK (WhatsApp & Instagram) ---
   

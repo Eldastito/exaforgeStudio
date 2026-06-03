@@ -18,7 +18,7 @@ type StorefrontSettings = {
   published: boolean;
 };
 
-type SaleMode = 'unit' | 'size' | 'weight' | 'volume';
+type SaleMode = 'unit' | 'slice' | 'size' | 'weight' | 'volume';
 
 type ProductImage = { id: string; url: string; position: number };
 
@@ -582,12 +582,13 @@ function NewProductModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [description, setDescription] = useState('');
-  const [saleMode, setSaleMode] = useState<'unit' | 'size' | 'weight' | 'volume'>('unit');
+  const [saleMode, setSaleMode] = useState<'unit' | 'slice' | 'size' | 'weight' | 'volume'>('unit');
   const [saving, setSaving] = useState(false);
 
   const priceHint =
     saleMode === 'weight' ? 'Preço por quilo (kg)'
     : saleMode === 'volume' ? 'Preço por litro (L)'
+    : saleMode === 'slice' ? 'Preço por fatia'
     : 'Preço por unidade';
 
   const create = async () => {
@@ -638,6 +639,7 @@ function NewProductModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <Field label="Modo de venda">
               <select className={inputClass} value={saleMode} onChange={(e) => setSaleMode(e.target.value as any)}>
                 <option value="unit">Unidade</option>
+                <option value="slice">Fatia</option>
                 <option value="size">Tamanho (P/M/G)</option>
                 <option value="weight">Peso (kg)</option>
                 <option value="volume">Volume (L)</option>
@@ -999,7 +1001,7 @@ function normalizeProduct(p: any): StorefrontProduct {
     name: p.name,
     price: Number(p.price ?? 0),
     currency: p.currency || 'BRL',
-    sale_mode: (['unit', 'size', 'weight', 'volume'].includes(p.sale_mode) ? p.sale_mode : 'unit') as SaleMode,
+    sale_mode: (['unit', 'slice', 'size', 'weight', 'volume'].includes(p.sale_mode) ? p.sale_mode : 'unit') as SaleMode,
     sale_options: p.sale_options || {},
     storefront_visible: p.storefront_visible ? 1 : 0,
     featured: !!p.featured,
@@ -1219,13 +1221,14 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, onPatch, onDelete }) =
             onChange={(e) => changeMode(e.target.value as SaleMode)}
           >
             <option value="unit">Unidade</option>
+            <option value="slice">Fatia</option>
             <option value="size">Tamanho</option>
             <option value="weight">Peso</option>
             <option value="volume">Volume</option>
           </select>
         </div>
 
-        {product.sale_mode !== 'unit' && (
+        {(product.sale_mode === 'size' || product.sale_mode === 'weight' || product.sale_mode === 'volume') && (
           <div>
             <label className="text-xs text-zinc-400 mb-1 block">{optionsLabel}</label>
             <div className="flex gap-2">

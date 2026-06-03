@@ -1,6 +1,6 @@
 // Tipos compartilhados da vitrine pública (Glass Toggle).
 
-export type SaleMode = 'unit' | 'size' | 'weight' | 'volume';
+export type SaleMode = 'unit' | 'slice' | 'size' | 'weight' | 'volume';
 export type Mode = 'day' | 'night';
 
 export interface SaleOptions {

@@ -409,7 +409,7 @@ router.put("/products/:id", (req: AuthRequest, res): any => {
   if (!p) return res.status(404).json({ error: "Produto não encontrado." });
   const b = req.body || {};
   const fields: Record<string, any> = {};
-  if (b.sale_mode !== undefined) fields.sale_mode = ["unit", "size", "weight", "volume"].includes(b.sale_mode) ? b.sale_mode : "unit";
+  if (b.sale_mode !== undefined) fields.sale_mode = ["unit", "slice", "size", "weight", "volume"].includes(b.sale_mode) ? b.sale_mode : "unit";
   if (b.sale_options !== undefined) fields.sale_options_json = JSON.stringify(b.sale_options || {});
   if (b.storefront_visible !== undefined) fields.storefront_visible = b.storefront_visible ? 1 : 0;
   if (b.featured !== undefined) fields.featured = b.featured ? 1 : 0;

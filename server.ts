@@ -9,6 +9,7 @@ import ticketsRoutes from "./src/server/routes/tickets.js";
 import productsRoutes from "./src/server/routes/products.js";
 import appointmentsRoutes from "./src/server/routes/appointments.js";
 import integrationsRoutes from "./src/server/routes/integrations.js";
+import { effectiveWebhookSecret, isWebhookEnforced } from "./src/server/webhookSecurity.js";
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
@@ -178,19 +179,20 @@ async function startServer() {
   });
 
   // --- Verificação de autenticidade do webhook (C3/W1) ---
-  // Se WEBHOOK_SECRET estiver definido, exige que o provedor inclua o segredo
-  // (header x-webhook-secret OU query ?secret=). Sem a env, apenas avisa — assim
-  // o deploy ao vivo não quebra antes de você configurar a Evolution.
-  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+  // Self-service: o app já tem um segredo (gerado automaticamente, em app_config)
+  // OU a env WEBHOOK_SECRET. A exigência do segredo é controlada por um interruptor
+  // (na tela de Integrações) — por padrão NÃO exige, para o deploy ao vivo não
+  // quebrar antes de você atualizar a URL na Evolution.
   let warnedNoWebhookSecret = false;
   const verifyWebhookSecret = (req: express.Request, res: express.Response): boolean => {
-    if (!WEBHOOK_SECRET) {
+    if (!isWebhookEnforced()) {
       if (!warnedNoWebhookSecret) {
-        console.warn("[SECURITY] WEBHOOK_SECRET não configurado: o webhook está aberto. Defina a env e adicione ?secret=... na URL do webhook na Evolution.");
+        console.warn("[SECURITY] Webhook do WhatsApp ABERTO (segredo não exigido). Ative em Integrações > Segurança do WhatsApp depois de colar a URL com ?secret=... na Evolution.");
         warnedNoWebhookSecret = true;
       }
       return true;
     }
+    const expected = effectiveWebhookSecret();
     // Aceita o segredo via header (x-webhook-secret) OU query (?secret=).
     // Caso "Webhook by Events" da Evolution: ela anexa /EVENTO ao fim da URL,
     // o que pode corromper o valor do query (ex.: secret=ABC/MESSAGES_UPSERT).
@@ -199,7 +201,7 @@ async function startServer() {
     const provided = String(rawProvided).split('/')[0].trim();
     // Comparação em tempo constante para evitar timing attacks.
     const a = Buffer.from(provided);
-    const b = Buffer.from(WEBHOOK_SECRET);
+    const b = Buffer.from(expected);
     const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
     if (!ok) {
       console.warn(`[SECURITY] Webhook rejeitado (segredo ausente/incorreto). path=${req.path}`);

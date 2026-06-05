@@ -203,6 +203,18 @@ export class PaymentService {
     }
   }
 
+  /** Cria um PIX dinâmico (estruturado) para o SINAL de uma reserva — usado pela
+   *  loja virtual (QR + copia-e-cola). reference "res:<id>" ⇒ webhook confirma. */
+  static async createReservationPix(
+    orgId: string,
+    p: { reservationId: string; amount: number; contactName?: string; contactId?: string }
+  ): Promise<{ id: string; qrCode: string; qrCodeBase64: string; ticketUrl: string } | null> {
+    return this._mpPix(orgId, {
+      reference: `res:${p.reservationId}`, amount: p.amount, contactName: p.contactName, contactId: p.contactId,
+      description: `Sinal reserva #${String(p.reservationId).slice(0, 8)}`, idemKey: `res-${p.reservationId}`,
+    });
+  }
+
   /**
    * Mensagem de cobrança do SINAL de uma reserva (PIX manual ou dinâmico).
    * Para o MP dinâmico usa a reference "res:<id>" — o webhook confirma a reserva.

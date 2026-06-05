@@ -22,6 +22,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { ProductCard } from './ProductCard';
 import { ProductModal } from './ProductModal';
 import { CartDrawer } from './CartDrawer';
+import { ReservationWidget } from './ReservationWidget';
 
 // Lê o slug do pathname (/loja/:slug) e o token ?c=.
 function readUrl(): { slug: string; token: string | null } {
@@ -249,6 +250,18 @@ export function Storefront() {
                 <Sparkles className="h-4 w-4" style={{ color: accent }} />
                 Olá, <span className="font-semibold">{data.customer.name}</span>! Que bom te ver por aqui.
               </p>
+            )}
+
+            {/* Reservas (recursos por período: quartos, mesas, espaços) */}
+            {!onlyFavs && (
+              <ReservationWidget
+                resources={data.resources || []}
+                slug={slug}
+                token={token}
+                accent={accent}
+                mode={mode}
+                customer={data.customer}
+              />
             )}
 
             {/* Coleções (seções curadas pela IA) */}

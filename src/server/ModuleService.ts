@@ -22,6 +22,7 @@ export class ModuleService {
     cadences: "cadencias",
     areas: "areas",
     integrations: "integracoes",
+    reservations: "reservas",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

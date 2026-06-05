@@ -769,6 +769,36 @@ const initDb = () => {
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN enabled_modules TEXT`); } catch(e){}
+  // Reservas por período: o recurso reservável é um products_services (type
+  // 'reservation') com capacidade (unidades simultâneas) e unidade de tempo.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN capacity INTEGER DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN reservation_unit TEXT DEFAULT 'night'`); } catch(e){} // night | hour | slot | day
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS reservations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        resource_id TEXT NOT NULL,          -- products_services.id (type reservation)
+        contact_id TEXT,
+        ticket_id TEXT,
+        start_at DATETIME NOT NULL,
+        end_at DATETIME NOT NULL,
+        units INTEGER DEFAULT 1,            -- quantos quartos/mesas nesta reserva
+        guests INTEGER,
+        status TEXT DEFAULT 'pending',      -- pending | confirmed | cancelled | completed | no_show
+        total_amount REAL DEFAULT 0,
+        deposit_amount REAL DEFAULT 0,
+        payment_status TEXT DEFAULT 'pending',
+        order_id TEXT,
+        google_event_id TEXT,
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_reservations_avail
+        ON reservations(organization_id, resource_id, start_at, end_at, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar reservations', e); }
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

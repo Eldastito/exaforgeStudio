@@ -27,7 +27,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -323,6 +323,8 @@ export class AIOrchestratorService {
       newOrder,
       cancelOrder,
       customerEmail: this.sanitizeEmail(resultJSON.customer_email),
+      routeToArea: (typeof resultJSON.route_to_area === "string" && resultJSON.route_to_area.trim())
+        ? resultJSON.route_to_area.trim().slice(0, 80) : undefined,
     };
   }
 
@@ -905,7 +907,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   },
   "cancel_order": false,
   "send_storefront": false,
-  "customer_email": "" // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
+  "customer_email": "", // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
+  "route_to_area": "" // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
 }`;
   }
 

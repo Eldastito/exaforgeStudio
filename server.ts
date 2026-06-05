@@ -35,6 +35,7 @@ import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
+import { ModuleService } from "./src/server/ModuleService.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
@@ -305,6 +306,17 @@ async function startServer() {
   const protectedApi = express.Router();
   protectedApi.use(requireAuth);
   protectedApi.use(requireOrganizationAccess);
+
+  // GATING DE MÓDULOS: bloqueia rotas de módulos opcionais que a organização
+  // não tem habilitados (deriva o módulo do 1º segmento do path). Rotas core/
+  // infra não estão no mapa e seguem sempre. enabled_modules NULL = tudo ligado.
+  protectedApi.use((req: any, res, next) => {
+    const seg = (req.path || "").split("/")[1];
+    const mod = ModuleService.MODULE_BY_ROUTE[seg];
+    if (!mod) return next();
+    if (!req.organizationId || ModuleService.isEnabled(req.organizationId, mod)) return next();
+    return res.status(403).json({ error: "module_disabled", module: mod });
+  });
   
   protectedApi.use("/channels", channelsRoutes);
   protectedApi.use("/messages", messagesRoutes);

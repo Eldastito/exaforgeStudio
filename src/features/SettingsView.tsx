@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
+import { apiFetch } from '@/src/lib/api';
+import { useStore } from '@/src/store/useStore';
 
 import { UsersSettingsView } from './UsersSettingsView';
 
@@ -62,6 +64,9 @@ export function SettingsView() {
           </button>
   <button onClick={() => setActiveTab('cobranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'cobranca' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <CreditCard className="w-4 h-4" /> Cobrança e Plano
+          </button>
+          <button onClick={() => setActiveTab('modulos')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'modulos' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <LayoutGrid className="w-4 h-4" /> Módulos
           </button>
         </nav>
       </div>
@@ -183,6 +188,8 @@ export function SettingsView() {
           )}
 
           {activeTab === 'cobranca' && <BillingPanel />}
+
+          {activeTab === 'modulos' && <ModulesPanel />}
 
           {activeTab === 'usuarios' && (
              <UsersSettingsView />
@@ -348,5 +355,99 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
         <div className={`h-full ${bar} transition-all`} style={{ width: `${pct || (l === 0 ? 0 : 0)}%` }} />
       </div>
     </div>
+  );
+}
+
+// Lista de módulos OPCIONAIS (espelha OPTIONAL_MODULES do backend) + rótulos.
+const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
+  { key: 'agenda', label: 'Agenda', desc: 'Agendamentos e horários (Google Calendar).' },
+  { key: 'catalogo', label: 'Catálogo', desc: 'Produtos e serviços.' },
+  { key: 'vendas', label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
+  { key: 'loja', label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },
+  { key: 'pagamentos', label: 'Pagamentos', desc: 'Recebimento por PIX / gateway.' },
+  { key: 'campanhas', label: 'Campanhas', desc: 'Disparos segmentados.' },
+  { key: 'cadencias', label: 'Cadências', desc: 'Sequências de follow-up automático.' },
+  { key: 'areas', label: 'Áreas de Atendimento', desc: 'Vários profissionais num número.' },
+  { key: 'integracoes', label: 'Integrações', desc: 'Google Workspace e outras conexões.' },
+];
+
+function ModulesPanel() {
+  const loadOrgConfig = useStore(s => s.loadOrgConfig);
+  const [enabled, setEnabled] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/analytics/settings')
+      .then(r => r.json())
+      .then(s => {
+        let mods: string[] | null = null;
+        if (typeof s?.enabled_modules === 'string' && s.enabled_modules) {
+          try { const a = JSON.parse(s.enabled_modules); if (Array.isArray(a)) mods = a; } catch {}
+        } else if (Array.isArray(s?.enabled_modules)) mods = s.enabled_modules;
+        // null (legado) = todos ligados: refletimos isso marcando tudo.
+        setEnabled(mods ?? OPTIONAL_MODULES.map(m => m.key));
+      })
+      .catch(() => setEnabled(OPTIONAL_MODULES.map(m => m.key)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggle = (key: string) => {
+    setEnabled(prev => {
+      const cur = prev ?? [];
+      return cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
+    });
+  };
+
+  const save = async () => {
+    if (!enabled) return;
+    setSaving(true);
+    try {
+      await apiFetch('/api/analytics/settings/modules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled_modules: enabled }),
+      });
+      await loadOrgConfig(); // atualiza o menu lateral na hora
+      toast.success('Módulos atualizados!');
+    } catch (e) { toast.error('Falha ao salvar os módulos.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <>
+      <div className="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+            <LayoutGrid className="w-6 h-6 text-indigo-400" /> Módulos
+          </h2>
+          <p className="text-zinc-400 text-sm mt-1">Ative só o que faz sentido pro seu negócio. Atendimento, Contatos e Relatórios estão sempre ativos.</p>
+        </div>
+        <Button onClick={save} disabled={saving || loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+          <Save className="w-4 h-4 mr-2" /> {saving ? 'Salvando...' : 'Salvar'}
+        </Button>
+      </div>
+
+      {loading || !enabled ? (
+        <p className="text-zinc-500 text-sm">Carregando…</p>
+      ) : (
+        <div className="space-y-2">
+          {OPTIONAL_MODULES.map(m => {
+            const on = enabled.includes(m.key);
+            return (
+              <div key={m.key} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                <div>
+                  <p className="text-sm font-medium text-zinc-100">{m.label}</p>
+                  <p className="text-xs text-zinc-500">{m.desc}</p>
+                </div>
+                <button onClick={() => toggle(m.key)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }

@@ -25,7 +25,7 @@ import { Bell, X, Menu } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, isModuleEnabled, setViewMode } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -34,7 +34,19 @@ export default function App() {
     if (!token) return;
     // Carrega os tickets/contatos reais do banco (substitui os dados de exemplo)
     hydrate();
-  }, [token, hydrate]);
+    // Carrega a config da org (vertical + módulos habilitados) para o gating da UI.
+    loadOrgConfig();
+  }, [token, hydrate, loadOrgConfig]);
+
+  // Se a aba atual aponta para um módulo desligado, volta para o Atendimento.
+  useEffect(() => {
+    const map: Record<string, string> = {
+      agenda: 'agenda', catalog: 'catalogo', vendas: 'vendas', storefront: 'loja',
+      campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
+    };
+    const mod = map[viewMode];
+    if (mod && !isModuleEnabled(mod)) setViewMode('kanban');
+  }, [viewMode, isModuleEnabled, setViewMode]);
 
   useEffect(() => {
     if (!token) return;

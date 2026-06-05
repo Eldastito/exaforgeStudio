@@ -4,8 +4,9 @@ import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled } = useStore();
   const { user, logout } = useAuth();
+  const mod = (key: string) => isModuleEnabled(key);
 
   return (
     <>
@@ -30,16 +31,16 @@ export function Sidebar() {
           <p className="px-2 text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Workspace</p>
           <nav className="space-y-1">
              <NavItem icon={<MessageSquare />} label="Atendimento" active={viewMode === 'kanban'} onClick={() => setViewMode('kanban')} />
-             <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />
-             <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />
-             <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />
-             <NavItem icon={<Store />} label="Loja Virtual" active={viewMode === 'storefront'} onClick={() => setViewMode('storefront')} />
-             <NavItem icon={<Megaphone />} label="Campanhas" active={viewMode === 'campanhas'} onClick={() => setViewMode('campanhas')} />
-             <NavItem icon={<GitMerge />} label="Cadências" active={viewMode === 'cadencias'} onClick={() => setViewMode('cadencias')} />
+             {mod('agenda') && <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />}
+             {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}
+             {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
+             {mod('loja') && <NavItem icon={<Store />} label="Loja Virtual" active={viewMode === 'storefront'} onClick={() => setViewMode('storefront')} />}
+             {mod('campanhas') && <NavItem icon={<Megaphone />} label="Campanhas" active={viewMode === 'campanhas'} onClick={() => setViewMode('campanhas')} />}
+             {mod('cadencias') && <NavItem icon={<GitMerge />} label="Cadências" active={viewMode === 'cadencias'} onClick={() => setViewMode('cadencias')} />}
              <NavItem icon={<Webhook />} label="Canais e I.A." active={viewMode === 'channels'} onClick={() => setViewMode('channels')} />
-             <NavItem icon={<Users2 />} label="Áreas de Atend." active={viewMode === 'areas'} onClick={() => setViewMode('areas')} />
+             {mod('areas') && <NavItem icon={<Users2 />} label="Áreas de Atend." active={viewMode === 'areas'} onClick={() => setViewMode('areas')} />}
              <NavItem icon={<Users />} label="Contatos" active={viewMode === 'contacts'} onClick={() => setViewMode('contacts')} />
-             <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />
+             {mod('integracoes') && <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />}
              <NavItem icon={<BarChart3 />} label="Dashboard" active={viewMode === 'dashboard'} onClick={() => setViewMode('dashboard')} />
              <NavItem icon={<LineChart />} label="Relatórios" active={viewMode === 'reports'} onClick={() => setViewMode('reports')} />
              <NavItem icon={<Settings />} label="Configurações" active={viewMode === 'settings'} onClick={() => setViewMode('settings')} />

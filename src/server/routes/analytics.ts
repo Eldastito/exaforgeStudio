@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AnalyticsService } from "../AnalyticsService.js";
 import { ReportsService } from "../ReportsService.js";
+import { ModuleService } from "../ModuleService.js";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from 'pdfkit';
@@ -79,16 +80,35 @@ router.post("/settings", (req, res) => {
 
 router.post("/settings/onboarding", (req, res) => {
   const orgId = getOrgId(req);
-  const { business_name, address, phone, logo_url } = req.body;
-  
+  const { business_name, address, phone, logo_url, vertical } = req.body;
+
   try {
     db.prepare(`
-      UPDATE organization_settings 
+      UPDATE organization_settings
       SET business_name = ?, address = ?, phone = ?, logo_url = ?, onboarding_status = 'completed', updated_at = CURRENT_TIMESTAMP
       WHERE organization_id = ?
     `).run(business_name, address, phone, logo_url, orgId);
-    
+    // Aplica o preset da vertical escolhida (módulos habilitados).
+    if (vertical) { try { ModuleService.applyVertical(orgId, String(vertical)); } catch (e) { /* noop */ } }
+
     res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/analytics/verticals — catálogo de categorias p/ os cards do onboarding.
+router.get("/verticals", (_req, res) => {
+  res.json(ModuleService.catalog());
+});
+
+// POST /api/analytics/settings/modules { enabled_modules: string[] }
+// Override manual dos módulos opcionais (Configurações › Módulos).
+router.post("/settings/modules", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const saved = ModuleService.setModules(orgId, req.body?.enabled_modules);
+    res.json({ success: true, enabled_modules: saved });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

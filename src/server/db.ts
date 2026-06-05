@@ -765,6 +765,10 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pix_reminder_message TEXT`); } catch(e){}
   // Marca se já enviamos o lembrete de pagamento para uma cobrança (envia 1x).
   try { db.exec(`ALTER TABLE payment_charges ADD COLUMN reminder_status TEXT`); } catch(e){}
+  // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
+  // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN enabled_modules TEXT`); } catch(e){}
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

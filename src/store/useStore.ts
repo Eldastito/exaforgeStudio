@@ -75,6 +75,10 @@ type AppState = {
   viewMode: ViewMode;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  vertical: string | null;
+  enabledModules: string[] | null; // null = todos habilitados (legado)
+  loadOrgConfig: () => Promise<void>;
+  isModuleEnabled: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
   tickets: Record<string, Ticket>;
   messages: Record<string, Message[]>;
@@ -220,6 +224,27 @@ export const useStore = create<AppState>((set, get) => ({
   sidebarOpen: false,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setViewMode: (mode) => { try { localStorage.setItem('zappflow_view', mode); } catch {} set({ viewMode: mode, sidebarOpen: false }); },
+
+  vertical: null,
+  enabledModules: null,
+  loadOrgConfig: async () => {
+    try {
+      const res = await apiFetch('/api/analytics/settings');
+      const s = await res.json().catch(() => ({}));
+      let mods: string[] | null = null;
+      if (typeof s?.enabled_modules === 'string' && s.enabled_modules) {
+        try { const a = JSON.parse(s.enabled_modules); if (Array.isArray(a)) mods = a; } catch {}
+      } else if (Array.isArray(s?.enabled_modules)) {
+        mods = s.enabled_modules;
+      }
+      set({ vertical: s?.vertical || null, enabledModules: mods });
+    } catch (e) { /* mantém null = tudo liberado */ }
+  },
+  isModuleEnabled: (moduleKey) => {
+    const em = get().enabledModules;
+    if (em == null) return true; // sem config explícita ⇒ liberado
+    return em.includes(moduleKey);
+  },
   setEvolutionConfig: (config) => set({ evolutionConfig: config }),
   setActiveTicket: (id) => set({ activeTicketId: id }),
 

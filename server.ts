@@ -30,6 +30,7 @@ import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/ins
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
 import storefrontRoutes from "./src/server/routes/storefront.js";
 import reservationsRoutes from "./src/server/routes/reservations.js";
+import subscriptionsRoutes from "./src/server/routes/subscriptions.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
 import { Scheduler } from "./src/server/Scheduler.js";
@@ -343,6 +344,7 @@ async function startServer() {
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);
+  protectedApi.use("/subscriptions", subscriptionsRoutes);
   protectedApi.use("/uploads", uploadsRoutes);
 
   // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS

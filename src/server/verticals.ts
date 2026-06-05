@@ -20,7 +20,7 @@ export type Vertical = {
 // Todos os módulos OPCIONAIS conhecidos (usados por "outro" e validação).
 export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
-  "campanhas", "cadencias", "areas", "integracoes", "reservas",
+  "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
 ] as const;
 
 export const VERTICALS: Vertical[] = [
@@ -39,19 +39,19 @@ export const VERTICALS: Vertical[] = [
   {
     key: "servicos", label: "Prestadores de Serviço", icon: "🛠️",
     descricao: "Serviços com hora marcada e orçamento (oficinas, técnicos, autônomos).",
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas"],
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas"],
     saleMode: "unit",
   },
   {
     key: "saude", label: "Saúde / Bem-estar", icon: "💆",
     descricao: "Clínicas, consultórios, estética e terapias — foco em agendamento.",
-    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes"],
+    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas"],
     saleMode: "unit",
   },
   {
     key: "educacao", label: "Escolas / Cursos", icon: "🎓",
-    descricao: "Escolas e cursos: secretaria virtual, aulas e turmas. (recorrência em breve)",
-    modules: ["agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes"],
+    descricao: "Escolas e cursos: secretaria virtual, aulas, turmas e mensalidades.",
+    modules: ["assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes"],
     saleMode: "unit",
   },
   {

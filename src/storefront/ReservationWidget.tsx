@@ -21,23 +21,31 @@ export function ReservationWidget({ resources, slug, token, accent, mode, custom
   if (!resources || resources.length === 0) return null;
   const night = mode === 'night';
   return (
-    <section className="mt-8">
-      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold tracking-tight">
+    <section id="reservas" className="mt-8 scroll-mt-4">
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-semibold tracking-tight">
         <CalendarCheck className="h-5 w-5" style={{ color: accent }} /> Reservas
       </h2>
+      <p className="mb-3 text-sm opacity-60">Escolha as datas e reserve em segundos — confirmação na hora.</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {resources.map((r) => (
           <button
             key={r.id}
             type="button"
             onClick={() => setActive(r)}
-            className={['rounded-2xl border p-4 text-left transition hover:scale-[1.01]', night ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white/60'].join(' ')}
+            className={['group flex flex-col rounded-2xl border p-4 text-left transition hover:scale-[1.01]', night ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white/60'].join(' ')}
           >
             <p className="font-semibold">{r.name}</p>
             {r.description && <p className="mt-0.5 line-clamp-2 text-xs opacity-60">{r.description}</p>}
-            <p className="mt-2 text-sm font-bold" style={{ color: accent }}>
+            <p className="mt-2 text-sm opacity-60">a partir de</p>
+            <p className="text-lg font-extrabold" style={{ color: accent }}>
               {formatBRL(r.price)} <span className="text-xs font-normal opacity-60">/ {UNIT_LABEL[r.reservation_unit] || r.reservation_unit}</span>
             </p>
+            <span
+              className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold text-white transition group-hover:opacity-90"
+              style={{ backgroundColor: accent }}
+            >
+              <CalendarCheck className="h-4 w-4" /> Reservar
+            </span>
           </button>
         ))}
       </div>
@@ -53,8 +61,12 @@ function BookingModal({ resource, slug, token, accent, mode, customer, onClose }
 }) {
   const night = mode === 'night';
   const dateMode = resource.reservation_unit === 'night' || resource.reservation_unit === 'day';
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  // Pré-preenche datas (hoje → amanhã) para diárias, reduzindo o atrito.
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+  const today = new Date();
+  const tomorrow = new Date(today.getTime() + 86400000);
+  const [start, setStart] = useState(dateMode ? ymd(today) : '');
+  const [end, setEnd] = useState(dateMode ? ymd(tomorrow) : '');
   const [units, setUnits] = useState(1);
   const [guests, setGuests] = useState('');
   const [name, setName] = useState(customer?.name ?? '');
@@ -75,6 +87,16 @@ function BookingModal({ resource, slug, token, accent, mode, customer, onClose }
     if (isNaN(s.getTime()) || isNaN(e.getTime()) || e <= s) return null;
     return { start: s.toISOString(), end: e.toISOString() };
   }, [start, end, dateMode]);
+
+  // Total estimado: períodos × preço × unidades (espelha o cálculo do servidor).
+  const total = useMemo(() => {
+    if (!iso) return 0;
+    const ms = new Date(iso.end).getTime() - new Date(iso.start).getTime();
+    let periods = 1;
+    if (resource.reservation_unit === 'hour') periods = Math.ceil(ms / 3_600_000);
+    else if (resource.reservation_unit === 'night' || resource.reservation_unit === 'day') periods = Math.max(1, Math.ceil(ms / 86_400_000));
+    return resource.price * periods * units;
+  }, [iso, units, resource.price, resource.reservation_unit]);
 
   useEffect(() => {
     setAvail(null);
@@ -173,6 +195,13 @@ function BookingModal({ resource, slug, token, accent, mode, customer, onClose }
               : avail ? <p className={`text-xs font-medium ${avail.bookable ? 'text-emerald-500' : 'text-red-500'}`}>{avail.bookable ? `✓ Disponível — ${avail.livres} de ${avail.capacity} livre(s).` : `✗ Sem disponibilidade (${avail.livres} de ${avail.capacity}).`}</p>
               : null}
 
+            {total > 0 && (
+              <div className="flex items-center justify-between rounded-xl px-1 text-sm">
+                <span className="opacity-60">Total estimado</span>
+                <span className="text-lg font-extrabold" style={{ color: accent }}>{formatBRL(total)}</span>
+              </div>
+            )}
+
             {!customer && (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <input className={inp} placeholder="Seu nome" value={name} onChange={e => setName(e.target.value)} />
@@ -184,7 +213,7 @@ function BookingModal({ resource, slug, token, accent, mode, customer, onClose }
             {error && <p className="text-sm font-medium text-red-500">{error}</p>}
             <button type="button" disabled={submitting || (avail !== null && !avail.bookable)} onClick={submit}
               className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-bold text-white transition disabled:opacity-60" style={{ backgroundColor: accent }}>
-              {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}{submitting ? 'Enviando…' : 'Reservar'}
+              {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}{submitting ? 'Enviando…' : (total > 0 ? `Reservar · ${formatBRL(total)}` : 'Reservar')}
             </button>
           </div>
         )}

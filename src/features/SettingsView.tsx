@@ -362,6 +362,7 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
 const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
   { key: 'agenda', label: 'Agenda', desc: 'Agendamentos e horários (Google Calendar).' },
   { key: 'reservas', label: 'Reservas', desc: 'Reservas por período com controle de disponibilidade (quartos, mesas, aluguéis).' },
+  { key: 'assinaturas', label: 'Assinaturas', desc: 'Cobrança recorrente (mensalidades, planos, clubes).' },
   { key: 'catalogo', label: 'Catálogo', desc: 'Produtos e serviços.' },
   { key: 'vendas', label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
   { key: 'loja', label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },

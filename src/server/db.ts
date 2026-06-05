@@ -801,6 +801,56 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar reservations', e); }
   // % de sinal cobrado ao reservar (0 = sem sinal; cobra o total ao confirmar).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reservation_deposit_percent INTEGER DEFAULT 0`); } catch(e){}
+  // Assinaturas / cobrança recorrente (mensalidade, plano, clube).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        amount REAL DEFAULT 0,
+        interval TEXT DEFAULT 'monthly',      -- monthly | weekly | yearly
+        interval_count INTEGER DEFAULT 1,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        status TEXT DEFAULT 'active',          -- active | paused | past_due | cancelled
+        amount REAL DEFAULT 0,
+        interval TEXT DEFAULT 'monthly',
+        interval_count INTEGER DEFAULT 1,
+        start_date DATETIME,
+        next_charge_at DATETIME,
+        last_charge_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_due
+        ON subscriptions(organization_id, status, next_charge_at);
+      CREATE TABLE IF NOT EXISTS subscription_invoices (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        contact_id TEXT,
+        amount REAL DEFAULT 0,
+        due_date DATETIME,
+        period_start DATETIME,
+        period_end DATETIME,
+        status TEXT DEFAULT 'pending',         -- pending | paid | overdue | cancelled
+        charge_ref TEXT,
+        paid_at DATETIME,
+        reminder_status TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_sub_invoices
+        ON subscription_invoices(organization_id, subscription_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de assinaturas', e); }
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

@@ -8,6 +8,7 @@ type Settings = {
   enabled: boolean; provider: string; pixKey: string; pixName: string; pixCity: string;
   instructions: string; hasGatewayToken: boolean; hasWebhookSecret: boolean;
   pixReminderEnabled: boolean; pixReminderMinutes: number; pixReminderMessage: string;
+  reservationDepositPercent: number;
 };
 
 export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
@@ -153,6 +154,18 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
                 value={s.pixReminderMessage} onChange={e => setS({ ...s, pixReminderMessage: e.target.value })} />
             </div>
           )}
+        </div>
+
+        {/* Sinal de reservas */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 mb-4">
+          <p className="text-sm text-zinc-200 mb-1">🏨 Sinal de reservas</p>
+          <p className="text-[11px] text-zinc-500 mb-2">% do valor cobrado como sinal ao reservar (0 = sem sinal). Aplica-se às reservas por período.</p>
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={100} value={s.reservationDepositPercent ?? 0}
+              onChange={e => setS({ ...s, reservationDepositPercent: Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0)) })}
+              className="w-20 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 text-center" />
+            <span className="text-sm text-zinc-400">%</span>
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-2">

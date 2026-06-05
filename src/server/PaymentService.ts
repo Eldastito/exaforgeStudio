@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { OrdersService } from "./OrdersService.js";
 import { NotificationService } from "./NotificationService.js";
+import { ReservationService } from "./ReservationService.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -18,7 +19,8 @@ export class PaymentService {
     const o = db.prepare(`
       SELECT pay_enabled, pay_provider, pay_pix_key, pay_pix_name, pay_pix_city,
              pay_instructions, pay_gateway_token, pay_webhook_secret,
-             pix_reminder_enabled, pix_reminder_minutes, pix_reminder_message
+             pix_reminder_enabled, pix_reminder_minutes, pix_reminder_message,
+             reservation_deposit_percent
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any;
     return o || {};
@@ -39,6 +41,7 @@ export class PaymentService {
       pixReminderEnabled: !!o.pix_reminder_enabled,
       pixReminderMinutes: o.pix_reminder_minutes || 30,
       pixReminderMessage: o.pix_reminder_message || '',
+      reservationDepositPercent: o.reservation_deposit_percent || 0,
     };
   }
 
@@ -61,6 +64,11 @@ export class PaymentService {
     // Token/segredo só são gravados quando enviados (não apagam sem querer).
     if (typeof p.gatewayToken === 'string' && p.gatewayToken) {
       db.prepare(`UPDATE organization_settings SET pay_gateway_token = ? WHERE organization_id = ?`).run(p.gatewayToken, orgId);
+    }
+    // Sinal de reservas (% de 0 a 100).
+    if (p.reservationDepositPercent !== undefined) {
+      const pct = Math.min(100, Math.max(0, parseInt(String(p.reservationDepositPercent), 10) || 0));
+      db.prepare(`UPDATE organization_settings SET reservation_deposit_percent = ? WHERE organization_id = ?`).run(pct, orgId);
     }
   }
 
@@ -109,16 +117,37 @@ export class PaymentService {
     orgId: string,
     p: { orderId: string; amount: number; contactName?: string; contactId?: string }
   ): Promise<{ id: string; qrCode: string; qrCodeBase64: string; ticketUrl: string } | null> {
+    const charge = await this._mpPix(orgId, {
+      reference: p.orderId, amount: p.amount, contactName: p.contactName, contactId: p.contactId,
+      description: `Pedido #${String(p.orderId).slice(0, 8)}`, idemKey: `order-${p.orderId}`,
+    });
+    if (!charge) return null;
+    // Vincula a cobrança ao pedido (campos específicos de orders).
+    try {
+      db.prepare(`UPDATE orders SET payment_external_id = ?, payment_method = 'mercadopago', payment_link = ? WHERE id = ?`)
+        .run(charge.id, charge.ticketUrl || null, p.orderId);
+    } catch (e) { /* noop */ }
+    return charge;
+  }
+
+  /**
+   * Cria uma cobrança PIX dinâmica genérica no Mercado Pago para uma `reference`
+   * arbitrária (id de pedido OU "res:<reservaId>"). Persiste em payment_charges
+   * (order_id = reference). Reaproveita cobrança pendente da mesma reference.
+   */
+  private static async _mpPix(
+    orgId: string,
+    p: { reference: string; amount: number; contactName?: string; contactId?: string; description: string; idemKey: string }
+  ): Promise<{ id: string; qrCode: string; qrCodeBase64: string; ticketUrl: string } | null> {
     const o = this.getSettings(orgId);
     const token = o.pay_gateway_token as string | undefined;
     if (!token) return null;
 
-    // Reaproveita uma cobrança ainda pendente do mesmo pedido (evita duplicar).
     const existing = db.prepare(
       `SELECT id, qr_code, qr_code_base64, ticket_url FROM payment_charges
         WHERE order_id = ? AND organization_id = ? AND status = 'pending'
         ORDER BY created_at DESC LIMIT 1`
-    ).get(p.orderId, orgId) as any;
+    ).get(p.reference, orgId) as any;
     if (existing && existing.qr_code) {
       return { id: existing.id, qrCode: existing.qr_code, qrCodeBase64: existing.qr_code_base64 || "", ticketUrl: existing.ticket_url || "" };
     }
@@ -126,11 +155,11 @@ export class PaymentService {
     const notifUrl = this.notificationUrl(orgId);
     const body: any = {
       transaction_amount: Number(Number(p.amount || 0).toFixed(2)),
-      description: `Pedido #${String(p.orderId).slice(0, 8)}`,
+      description: p.description,
       payment_method_id: "pix",
-      external_reference: p.orderId,
+      external_reference: p.reference,
       payer: {
-        email: `cliente-${(p.contactId || p.orderId).toString().slice(0, 12)}@checkout.exaforge.app`,
+        email: `cliente-${(p.contactId || p.reference).toString().replace(/[^a-z0-9]/gi, "").slice(0, 12)}@checkout.exaforge.app`,
         first_name: (p.contactName || "Cliente").slice(0, 40),
       },
     };
@@ -142,8 +171,7 @@ export class PaymentService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          // Idempotência no lado do MP: mesma chave não cria pagamento duplicado.
-          "X-Idempotency-Key": `order-${p.orderId}`,
+          "X-Idempotency-Key": p.idemKey,
         },
         body: JSON.stringify(body),
       });
@@ -161,21 +189,48 @@ export class PaymentService {
         console.error("[MercadoPago] Resposta sem dados de PIX:", data);
         return null;
       }
-      // Persiste a cobrança e vincula ao pedido.
       try {
         db.prepare(
           `INSERT OR REPLACE INTO payment_charges
              (id, organization_id, order_id, provider, amount, status, qr_code, qr_code_base64, ticket_url, expires_at, created_at)
            VALUES (?, ?, ?, 'mercadopago', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-        ).run(payId, orgId, p.orderId, body.transaction_amount, data.status || 'pending', qrCode, qrCodeBase64, ticketUrl, data.date_of_expiration || null);
-        db.prepare(`UPDATE orders SET payment_external_id = ?, payment_method = 'mercadopago', payment_link = ? WHERE id = ?`)
-          .run(payId, ticketUrl || null, p.orderId);
+        ).run(payId, orgId, p.reference, body.transaction_amount, data.status || 'pending', qrCode, qrCodeBase64, ticketUrl, data.date_of_expiration || null);
       } catch (e) { /* noop */ }
       return { id: payId, qrCode, qrCodeBase64, ticketUrl };
     } catch (e) {
       console.error("[MercadoPago] Erro de rede ao criar PIX:", e);
       return null;
     }
+  }
+
+  /**
+   * Mensagem de cobrança do SINAL de uma reserva (PIX manual ou dinâmico).
+   * Para o MP dinâmico usa a reference "res:<id>" — o webhook confirma a reserva.
+   */
+  static async chargeForReservation(
+    orgId: string,
+    p: { reservationId: string; amount: number; contactName?: string; contactId?: string }
+  ): Promise<string | null> {
+    const o = this.getSettings(orgId);
+    if (!o.pay_enabled || !(Number(p.amount) > 0)) return null;
+    const provider = o.pay_provider || "pix_manual";
+    const val = `R$ ${Number(p.amount || 0).toFixed(2)}`;
+
+    if (provider === "mercadopago") {
+      const charge = await this._mpPix(orgId, {
+        reference: `res:${p.reservationId}`, amount: p.amount, contactName: p.contactName, contactId: p.contactId,
+        description: `Sinal reserva #${String(p.reservationId).slice(0, 8)}`, idemKey: `res-${p.reservationId}`,
+      });
+      if (!charge) return null;
+      const lines = [`Para garantir sua reserva, o *sinal* é via Pix (${val}):`];
+      if (charge.qrCode) lines.push(`\n📋 *Pix copia e cola:*`, charge.qrCode);
+      if (charge.ticketUrl) lines.push(`\n💳 Ou pague pelo link: ${charge.ticketUrl}`);
+      lines.push(`\nAssim que o sinal cair, confirmo sua reserva automaticamente. ✅`);
+      return lines.join("\n");
+    }
+    // pix_manual: chave estática.
+    const msg = this.buildChargeMessage(orgId, p.amount);
+    return msg ? msg.replace("Para concluir, o pagamento", "Para garantir sua reserva, o *sinal*") : null;
   }
 
   /**
@@ -196,11 +251,16 @@ export class PaymentService {
         return null;
       }
       const status: string = data.status || "";
-      const orderId: string | undefined = data.external_reference;
+      const ref: string | undefined = data.external_reference;
       // Atualiza o status da cobrança guardada.
       try { db.prepare(`UPDATE payment_charges SET status = ? WHERE id = ?`).run(status, String(data.id)); } catch (e) { /* noop */ }
-      if (status === "approved" && orderId) {
-        this.markPaid(orgId, orderId, { method: "mercadopago", externalId: String(data.id) });
+      if (status === "approved" && ref) {
+        if (ref.startsWith("res:")) {
+          // Sinal de reserva: confirma a reserva (não é um pedido).
+          try { ReservationService.markPaid(orgId, ref.slice(4)); } catch (e) { /* noop */ }
+        } else {
+          this.markPaid(orgId, ref, { method: "mercadopago", externalId: String(data.id) });
+        }
       }
       return status;
     } catch (e) {

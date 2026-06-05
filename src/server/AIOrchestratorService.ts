@@ -10,6 +10,7 @@ import { chat } from "./llm.js";
 import { PlanService } from "./PlanService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
+import { ReservationService } from "./ReservationService.js";
 
 export class AIOrchestratorService {
   /**
@@ -27,7 +28,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -197,7 +198,26 @@ export class AIOrchestratorService {
       } catch (e) { /* noop */ }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText);
+    // Reservas: se a org tem recursos reserváveis, ensina a IA a reservar por
+    // período (recurso + datas + unidades) via "reservation_request".
+    let reservationText = "";
+    if (!isOrchestratorCommand) {
+      try {
+        const recursos = ReservationService.listResources(params.organizationId);
+        if (recursos.length > 0) {
+          const unitLabel: Record<string, string> = { night: "diária", day: "dia", hour: "hora", slot: "turno" };
+          const lista = recursos.map((r: any) =>
+            `- ${r.name} (R$ ${Number(r.price || 0).toFixed(2)}/${unitLabel[r.reservation_unit] || r.reservation_unit}, ${r.capacity} unidade(s))`
+          ).join("\n");
+          reservationText = `RESERVAS POR PERÍODO — recursos reserváveis disponíveis:\n${lista}
+- Quando o cliente quiser RESERVAR (hospedagem, mesa, espaço, equipamento), colete o RECURSO, a DATA/HORA de início e fim e quantas UNIDADES, e preencha "reservation_request" com { "resource": NOME EXATO da lista, "start": ISO 8601 -03:00, "end": ISO 8601 -03:00, "units": número, "guests": número opcional }.
+- NÃO confirme a reserva você mesmo nem invente disponibilidade — o sistema checa a vaga e cria a reserva (e cobra o sinal, se houver). Na "reply", seja simpático e diga que está verificando/garantindo a reserva.
+- Calcule as datas a partir da DATA ATUAL. Para diárias, use horário de check-in/out plausível (ex.: 14:00 / 12:00) se o cliente não disser.`;
+        }
+      } catch (e) { /* noop */ }
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -325,6 +345,7 @@ export class AIOrchestratorService {
       customerEmail: this.sanitizeEmail(resultJSON.customer_email),
       routeToArea: (typeof resultJSON.route_to_area === "string" && resultJSON.route_to_area.trim())
         ? resultJSON.route_to_area.trim().slice(0, 80) : undefined,
+      newReservation: this.sanitizeReservation(resultJSON.reservation_request),
     };
   }
 
@@ -626,6 +647,23 @@ export class AIOrchestratorService {
     return e;
   }
 
+  /** Valida um pedido de reserva sugerido pela IA. */
+  private static sanitizeReservation(r: any): { resource: string; start: string; end: string; units: number; guests?: number } | undefined {
+    if (!r || typeof r !== "object") return undefined;
+    const resource = this.clampStr(r.resource, 120);
+    if (!resource) return undefined;
+    const toIso = (v: any): string | undefined => {
+      if (typeof v !== "string") return undefined;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? undefined : d.toISOString();
+    };
+    const start = toIso(r.start), end = toIso(r.end);
+    if (!start || !end || new Date(end) <= new Date(start)) return undefined;
+    const units = Math.max(1, Math.min(99, parseInt(String(r.units || 1), 10) || 1));
+    const guests = r.guests != null ? Math.max(1, Math.min(999, parseInt(String(r.guests), 10) || 1)) : undefined;
+    return { resource, start, end, units, guests };
+  }
+
   /** Valida/limita uma entrega sugerida pela IA. */
   private static sanitizeDelivery(del: any): any | undefined {
     if (!del || typeof del !== "object") return undefined;
@@ -789,7 +827,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -863,6 +901,7 @@ ${orderStatusText}
 ${areaPersona}
 ${agendaText}
 ${emailCaptureText}
+${reservationText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}
@@ -908,7 +947,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "cancel_order": false,
   "send_storefront": false,
   "customer_email": "", // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
-  "route_to_area": "" // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
+  "route_to_area": "", // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
+  "reservation_request": null // { resource, start, end, units, guests } SÓ quando o cliente quiser reservar um recurso por período (senão null)
 }`;
   }
 

@@ -10,6 +10,7 @@ import { NotificationService } from "./NotificationService.js";
 import { AttendanceAreaService } from "./AttendanceAreaService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
+import { ReservationService } from "./ReservationService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -387,6 +388,43 @@ export async function processIncomingMessage(
            }
          } catch (e) {
            console.error("[Vendas] Falha ao cancelar pedido/agendamento:", e);
+         }
+       }
+
+       // RESERVA proposta pela IA: resolve o recurso, checa a disponibilidade e
+       // cria a reserva. Se não houver vaga, troca a resposta por uma honesta.
+       if (aiResult.newReservation) {
+         try {
+           const nr = aiResult.newReservation;
+           const resource = ReservationService.matchResource(orgId, nr.resource);
+           if (!resource) {
+             console.log(`[Reservas] IA pediu recurso inexistente: "${nr.resource}".`);
+           } else {
+             const av = ReservationService.availability(orgId, resource.id, nr.start, nr.end, nr.units);
+             if (!av.ok || !av.bookable) {
+               finalReply = `Poxa, não temos *${resource.name}* disponível para esse período (${av.livres} de ${av.capacity} livre(s)). Quer tentar outras datas ou reduzir a quantidade? 🙏`;
+             } else {
+               const r = ReservationService.create(orgId, {
+                 resourceId: resource.id, contactId: contact.id, ticketId: ticket.id,
+                 startAt: nr.start, endAt: nr.end, units: nr.units, guests: nr.guests, createdBy: 'ai',
+               });
+               if (io) io.to(`org:${orgId}`).emit("reservation_created", { id: r.id, contactId: contact.id });
+               console.log(`[Reservas] Reserva criada pela IA: ${r.id} (${resource.name}).`);
+               // Sinal (se configurado): anexa as instruções de pagamento à resposta.
+               try {
+                 const resv = db.prepare("SELECT deposit_amount FROM reservations WHERE id = ?").get(r.id) as any;
+                 const dep = Number(resv?.deposit_amount || 0);
+                 if (dep > 0) {
+                   const charge = await PaymentService.chargeForReservation(orgId, {
+                     reservationId: r.id, amount: dep, contactName: contact.name, contactId: contact.id,
+                   });
+                   if (charge) finalReply = `${finalReply}\n\n${charge}`;
+                 }
+               } catch (e) { /* noop */ }
+             }
+           }
+         } catch (e) {
+           console.error("[Reservas] Falha ao criar reserva da IA:", e);
          }
        }
 

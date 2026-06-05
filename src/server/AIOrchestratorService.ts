@@ -11,6 +11,7 @@ import { PlanService } from "./PlanService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
+import { SubscriptionService } from "./SubscriptionService.js";
 
 export class AIOrchestratorService {
   /**
@@ -28,7 +29,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number } }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number }, sendSubscriptionPix?: boolean }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -217,7 +218,31 @@ export class AIOrchestratorService {
       } catch (e) { /* noop */ }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText);
+    // Assinatura/mensalidade do cliente: deixa a IA responder "quanto devo /
+    // estou em dia?" com dados reais e reenviar o PIX da fatura em aberto.
+    let subscriptionText = "";
+    if (!isOrchestratorCommand && params.contactId) {
+      try {
+        const sub = SubscriptionService.contactSubscription(params.organizationId, params.contactId);
+        if (sub) {
+          const inv = SubscriptionService.openInvoiceForContact(params.organizationId, params.contactId);
+          const brl = (v: any) => `R$ ${Number(v || 0).toFixed(2)}`;
+          const next = sub.next_charge_at ? new Date(sub.next_charge_at).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "a definir";
+          let txt = `ASSINATURA DO CLIENTE: plano "${sub.plan_name || "Mensalidade"}" (${brl(sub.amount)}), situação: ${sub.status === "past_due" ? "EM ATRASO" : "em dia/ativa"}. Próxima cobrança: ${next}.`;
+          if (inv) {
+            const venc = inv.due_date ? new Date(inv.due_date).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "—";
+            txt += ` Há uma fatura EM ABERTO de ${brl(inv.amount)} (vencimento ${venc}, ${inv.status === "overdue" ? "vencida" : "pendente"}).`;
+          } else {
+            txt += ` Não há faturas em aberto (está em dia).`;
+          }
+          txt += `\n- Responda com esses dados reais quando o cliente perguntar sobre mensalidade/pagamento ("quanto devo?", "estou em dia?", "quando vence?"). NÃO invente valores.`;
+          if (inv) txt += `\n- Se o cliente pedir para pagar/receber o PIX da mensalidade ("me manda o pix", "quero pagar"), defina "send_subscription_pix": true — o sistema anexa o PIX da fatura em aberto. NÃO escreva o PIX você mesmo.`;
+          subscriptionText = txt;
+        }
+      } catch (e) { /* noop */ }
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText, subscriptionText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -346,6 +371,7 @@ export class AIOrchestratorService {
       routeToArea: (typeof resultJSON.route_to_area === "string" && resultJSON.route_to_area.trim())
         ? resultJSON.route_to_area.trim().slice(0, 80) : undefined,
       newReservation: this.sanitizeReservation(resultJSON.reservation_request),
+      sendSubscriptionPix: resultJSON.send_subscription_pix === true,
     };
   }
 
@@ -827,7 +853,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = "", subscriptionText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -902,6 +928,7 @@ ${areaPersona}
 ${agendaText}
 ${emailCaptureText}
 ${reservationText}
+${subscriptionText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}
@@ -948,7 +975,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "send_storefront": false,
   "customer_email": "", // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
   "route_to_area": "", // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
-  "reservation_request": null // { resource, start, end, units, guests } SÓ quando o cliente quiser reservar um recurso por período (senão null)
+  "reservation_request": null, // { resource, start, end, units, guests } SÓ quando o cliente quiser reservar um recurso por período (senão null)
+  "send_subscription_pix": false // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
 }`;
   }
 

@@ -11,6 +11,7 @@ import { AttendanceAreaService } from "./AttendanceAreaService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
+import { SubscriptionService } from "./SubscriptionService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -426,6 +427,23 @@ export async function processIncomingMessage(
          } catch (e) {
            console.error("[Reservas] Falha ao criar reserva da IA:", e);
          }
+       }
+
+       // MENSALIDADE: o cliente pediu o PIX da assinatura em aberto — anexa a
+       // cobrança da fatura pendente/vencida à resposta (best-effort).
+       if (aiResult.sendSubscriptionPix) {
+         try {
+           const inv = SubscriptionService.openInvoiceForContact(orgId, contact.id);
+           if (inv && Number(inv.amount) > 0) {
+             const charge = await PaymentService.chargeForSubscription(orgId, {
+               invoiceId: inv.id, amount: inv.amount, contactName: contact.name, contactId: contact.id,
+             });
+             if (charge) {
+               finalReply = `${finalReply}\n\n${charge}`;
+               SubscriptionService.setInvoiceCharged(orgId, inv.id, 'sent');
+             }
+           }
+         } catch (e) { console.error("[Assinaturas] Falha ao reenviar PIX da mensalidade:", e); }
        }
 
        // Save AI message

@@ -799,6 +799,8 @@ const initDb = () => {
         ON reservations(organization_id, resource_id, start_at, end_at, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar reservations', e); }
+  // % de sinal cobrado ao reservar (0 = sem sinal; cobra o total ao confirmar).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reservation_deposit_percent INTEGER DEFAULT 0`); } catch(e){}
   // Conhecimento (RAG) por área de atendimento (null = geral, todas as áreas).
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN area_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_chunks ADD COLUMN area_id TEXT`); } catch(e){}

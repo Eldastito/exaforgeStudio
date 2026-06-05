@@ -95,6 +95,13 @@ export class ReservationService {
 
       const periods = this.periods(p.startAt, p.endAt, (r.reservation_unit || "night") as ReservationUnit);
       const total = Number(r.price || 0) * periods * units;
+      // Sinal: % configurado pela org (0 = sem sinal). depositAmount explícito tem prioridade.
+      let deposit = Number(p.depositAmount || 0);
+      if (!deposit) {
+        const o = db.prepare("SELECT reservation_deposit_percent FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+        const pct = Math.min(100, Math.max(0, Number(o?.reservation_deposit_percent || 0)));
+        if (pct > 0) deposit = Math.round(total * pct) / 100;
+      }
       const id = uuidv4();
       db.prepare(
         `INSERT INTO reservations
@@ -103,11 +110,30 @@ export class ReservationService {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
       ).run(
         id, orgId, p.resourceId, p.contactId || null, p.ticketId || null, p.startAt, p.endAt,
-        units, p.guests ?? null, total, Number(p.depositAmount || 0), p.createdBy || "owner"
+        units, p.guests ?? null, total, deposit, p.createdBy || "owner"
       );
       return id;
     });
     return { id: tx() };
+  }
+
+  /** Casa um recurso por nome (aproximado) — usado pela IA. */
+  static matchResource(orgId: string, name: string): any | null {
+    const norm = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+    const tn = norm(name);
+    if (!tn) return null;
+    const list = this.listResources(orgId);
+    for (const r of list) { if (norm(r.name) === tn) return r; }
+    for (const r of list) { const rn = norm(r.name); if (rn && (tn.includes(rn) || rn.includes(tn))) return r; }
+    return null;
+  }
+
+  /** Marca uma reserva como paga e confirmada (webhook de pagamento). */
+  static markPaid(orgId: string, reservationId: string): boolean {
+    const r = db.prepare("SELECT id, payment_status FROM reservations WHERE id = ? AND organization_id = ?").get(reservationId, orgId) as any;
+    if (!r) return false;
+    db.prepare("UPDATE reservations SET payment_status = 'paid', status = 'confirmed' WHERE id = ? AND organization_id = ?").run(reservationId, orgId);
+    return true;
   }
 
   static updateStatus(orgId: string, id: string, status: string): void {

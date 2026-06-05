@@ -41,11 +41,21 @@ export interface StoreCollection {
   productIds: string[];
 }
 
+export interface ReservableResource {
+  id: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  capacity: number;
+  reservation_unit: string; // night | day | hour | slot
+}
+
 export interface StoreResponse {
   store: Store;
   customer: Customer | null;
   products: Product[];
   collections?: StoreCollection[];
+  resources?: ReservableResource[];
 }
 
 // Opção escolhida pelo cliente para um item.

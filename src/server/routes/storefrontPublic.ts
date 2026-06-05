@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { NotificationService } from "../NotificationService.js";
 import { PaymentService } from "../PaymentService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
+import { ReservationService } from "../ReservationService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -161,7 +162,82 @@ router.get("/store/:slug", (req, res): any => {
     customer: linkedContact,
     products: products.map(p => productPayload(orgId, p)),
     collections: resolveCollections(orgId),
+    resources: ReservationService.listResources(orgId),
   });
+});
+
+// GET /api/public/store/:slug/reservations/availability?resource=&start=&end=&units=
+router.get("/store/:slug/reservations/availability", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  const { resource, start, end } = req.query as any;
+  const units = parseInt(String(req.query.units || "1"), 10) || 1;
+  if (!resource || !start || !end) return res.status(400).json({ error: "Informe resource, start e end." });
+  res.json(ReservationService.availability(store.organization_id, String(resource), String(start), String(end), units));
+});
+
+// POST /api/public/store/:slug/reservation — cria reserva pela vitrine (+ sinal).
+router.post("/store/:slug/reservation", async (req, res): Promise<any> => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  const orgId = store.organization_id;
+  const body = req.body || {};
+  if (!body.resourceId || !body.start || !body.end) return res.status(400).json({ error: "Dados incompletos." });
+
+  // Contato pelo token (se o cliente veio pelo link), senão segue sem contato.
+  let contactId: string | null = null; let ticketId: string | null = null;
+  if (body.token) {
+    const link = db.prepare(`SELECT contact_id, ticket_id FROM storefront_links WHERE token = ? AND organization_id = ?`).get(body.token, orgId) as any;
+    if (link) { contactId = link.contact_id || null; ticketId = link.ticket_id || null; }
+  }
+  const cust = body.customer || {};
+  if (!contactId && !String(cust.name || "").trim()) return res.status(400).json({ error: "Informe seu nome." });
+
+  try {
+    const resource = ReservationService.getResource(orgId, String(body.resourceId));
+    if (!resource) return res.status(400).json({ error: "Recurso não encontrado." });
+    const units = Math.max(1, Number(body.units) || 1);
+    const start = new Date(body.start).toISOString();
+    const end = new Date(body.end).toISOString();
+    const av = ReservationService.availability(orgId, resource.id, start, end, units);
+    if (!av.ok) return res.status(400).json({ error: "Período inválido." });
+    if (!av.bookable) return res.status(409).json({ error: `Sem disponibilidade (${av.livres} de ${av.capacity} livre(s)).` });
+
+    const r = ReservationService.create(orgId, {
+      resourceId: resource.id, contactId: contactId || undefined, ticketId: ticketId || undefined,
+      startAt: start, endAt: end, units, guests: body.guests, createdBy: "storefront",
+    });
+    // Guarda dados do cliente na reserva (e e-mail no contato, se houver).
+    const note = [cust.name && `Cliente: ${cust.name}`, cust.phone && `Tel: ${cust.phone}`, cust.email && `E-mail: ${cust.email}`].filter(Boolean).join(" · ");
+    if (note) { try { db.prepare("UPDATE reservations SET notes = ? WHERE id = ?").run(note, r.id); } catch {} }
+    if (contactId && String(cust.email || "").trim()) { try { db.prepare("UPDATE contacts SET email = ? WHERE id = ?").run(String(cust.email).trim(), contactId); } catch {} }
+
+    const resv = db.prepare("SELECT total_amount, deposit_amount FROM reservations WHERE id = ?").get(r.id) as any;
+    const total = Number(resv?.total_amount || 0);
+    const deposit = Number(resv?.deposit_amount || 0);
+
+    try { NotificationService.io?.to(`org:${orgId}`).emit("reservation_created", { id: r.id, contactId }); } catch {}
+
+    // Sinal: monta o bloco de pagamento (igual ao do pedido).
+    let payment: any = { method: "none" };
+    if (deposit > 0) {
+      try {
+        const pset = PaymentService.getSettings(orgId);
+        if (pset?.pay_enabled) {
+          const provider = pset.pay_provider || "pix_manual";
+          if (provider === "mercadopago") {
+            const charge = await PaymentService.createReservationPix(orgId, { reservationId: r.id, amount: deposit, contactName: cust.name || "Cliente", contactId: contactId || undefined });
+            if (charge) payment = { method: "mercadopago", pix: { qrCode: charge.qrCode, qrCodeBase64: charge.qrCodeBase64, ticketUrl: charge.ticketUrl } };
+          } else if (provider === "pix_manual" && pset.pay_pix_key) {
+            payment = { method: "pix_manual", manual: { key: pset.pay_pix_key, name: pset.pay_pix_name || "", instructions: pset.pay_instructions || "" } };
+          }
+        }
+      } catch (e) { /* best-effort */ }
+    }
+    res.json({ ok: true, reservationId: r.id, total, deposit, payment });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao reservar." });
+  }
 });
 
 // POST /api/public/store/:slug/coupon  { code, subtotal } -> valida o cupom

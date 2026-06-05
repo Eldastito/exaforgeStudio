@@ -117,6 +117,25 @@ export class SubscriptionService {
     db.prepare("UPDATE subscriptions SET status = 'past_due' WHERE id = ? AND organization_id = ? AND status = 'active'").run(subscriptionId, orgId);
   }
 
+  /** Assinatura "viva" do contato (active ou past_due), com nome do plano. */
+  static contactSubscription(orgId: string, contactId: string): any | null {
+    return (db.prepare(
+      `SELECT s.*, pl.name AS plan_name
+         FROM subscriptions s LEFT JOIN subscription_plans pl ON pl.id = s.plan_id
+        WHERE s.organization_id = ? AND s.contact_id = ? AND s.status IN ('active','past_due')
+        ORDER BY s.created_at DESC LIMIT 1`
+    ).get(orgId, contactId) as any) || null;
+  }
+
+  /** Fatura em aberto (pendente/vencida) mais antiga do contato. */
+  static openInvoiceForContact(orgId: string, contactId: string): any | null {
+    return (db.prepare(
+      `SELECT * FROM subscription_invoices
+        WHERE organization_id = ? AND contact_id = ? AND status IN ('pending','overdue')
+        ORDER BY due_date ASC LIMIT 1`
+    ).get(orgId, contactId) as any) || null;
+  }
+
   static listInvoices(orgId: string, subscriptionId?: string): any[] {
     if (subscriptionId) {
       return db.prepare(

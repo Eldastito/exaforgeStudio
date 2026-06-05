@@ -176,12 +176,23 @@ export async function processIncomingMessage(
        let areaPersona: string | undefined;
        const areas = AttendanceAreaService.activeAreas(orgId);
        if (areas.length >= 2) {
-         // Pedido de trocar de área -> volta ao menu.
+         // Pedido de trocar de área. Se a mensagem já nomeia OUTRA área, pula
+         // direto para ela; senão, volta ao menu para o cliente escolher.
          if (ticket.area_id && AttendanceAreaService.wantsSwitch(payload.text)) {
-           db.prepare('UPDATE tickets SET area_id = NULL, assigned_to = NULL WHERE id = ?').run(ticket.id);
-           ticket.area_id = null;
-           await sendBotReply(AttendanceAreaService.buildMenu(orgId, contact.name));
-           return;
+           const target = AttendanceAreaService.match(orgId, payload.text);
+           if (target && target.id !== ticket.area_id) {
+             db.prepare('UPDATE tickets SET area_id = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+               .run(target.id, target.assigned_user_id || null, ticket.id);
+             ticket.area_id = target.id;
+             if (io) io.to(`org:${orgId}`).emit("ticket_updated", { ticketId: ticket.id, contactId: contact.id, areaId: target.id, assignedTo: target.assigned_user_id || null });
+             areaPersona = AttendanceAreaService.personaText(target);
+             // Segue para a IA responder já como a nova área.
+           } else {
+             db.prepare('UPDATE tickets SET area_id = NULL, assigned_to = NULL WHERE id = ?').run(ticket.id);
+             ticket.area_id = null;
+             await sendBotReply(AttendanceAreaService.buildMenu(orgId, contact.name));
+             return;
+           }
          }
          if (!ticket.area_id) {
            const matched = AttendanceAreaService.match(orgId, payload.text);
@@ -215,7 +226,7 @@ export async function processIncomingMessage(
          text: r.content,
        }));
 
-       const aiResult = await AIOrchestratorService.processMessage({
+       let aiResult = await AIOrchestratorService.processMessage({
           message: payload.text,
           organizationId: orgId,
           senderId: payload.senderId,
@@ -228,7 +239,39 @@ export async function processIncomingMessage(
           areaPersona,
           areaId: ticket.area_id || null,
        });
-       
+
+       // ROTEAMENTO PELA IA: quando a IA sinaliza que o cliente quer outra área
+       // (route_to_area), trocamos o ticket de área e RE-EXECUTAMOS a IA já como
+       // a nova área, para responder na mesma mensagem (sem prometer e não cumprir).
+       if (areas.length >= 2 && aiResult.routeToArea) {
+         const target = AttendanceAreaService.match(orgId, aiResult.routeToArea);
+         if (target && target.id !== ticket.area_id) {
+           db.prepare('UPDATE tickets SET area_id = ?, assigned_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+             .run(target.id, target.assigned_user_id || null, ticket.id);
+           ticket.area_id = target.id;
+           if (io) io.to(`org:${orgId}`).emit("ticket_updated", { ticketId: ticket.id, contactId: contact.id, areaId: target.id, assignedTo: target.assigned_user_id || null });
+           aiResult = await AIOrchestratorService.processMessage({
+              message: payload.text,
+              organizationId: orgId,
+              senderId: payload.senderId,
+              contactName: contact.name,
+              channelId: channel.id,
+              ticketStage: ticket.stage,
+              history,
+              contactId: contact.id,
+              provider: channel.provider,
+              areaPersona: AttendanceAreaService.personaText(target),
+              areaId: target.id,
+           });
+         } else if (!target) {
+           // A IA pediu uma área que não existe: cai no menu para o cliente escolher.
+           db.prepare('UPDATE tickets SET area_id = NULL, assigned_to = NULL WHERE id = ?').run(ticket.id);
+           ticket.area_id = null;
+           await sendBotReply(AttendanceAreaService.buildMenu(orgId, contact.name));
+           return;
+         }
+       }
+
        if (aiResult.newStage && aiResult.newStage !== ticket.stage) {
           db.prepare('UPDATE tickets SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(aiResult.newStage, ticket.id);
           if (io) {

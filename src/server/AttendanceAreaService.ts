@@ -56,18 +56,29 @@ export class AttendanceAreaService {
     return null;
   }
 
-  /** Detecta pedido de trocar de área / voltar ao menu. */
+  /** Detecta pedido genérico de trocar de área / voltar ao menu. */
   static wantsSwitch(message: string): boolean {
-    const t = (message || "").trim().toLowerCase();
-    return /(trocar de [áa]rea|mudar de [áa]rea|outra [áa]rea|voltar ao menu|^menu$|falar com outr|outro atendimento)/.test(t);
+    const t = (message || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    return /(trocar de area|mudar de area|outra area|voltar ao menu|^menu$|falar com outr|outro atendimento|outro setor|outro departamento|me transfer|quero transfer|pode transfer|transferir)/.test(t);
   }
 
-  /** Bloco de contexto da área injetado no prompt da IA. */
+  /**
+   * Bloco de contexto da área injetado no prompt da IA. Quando há outras áreas
+   * ativas, ensina a IA a ROTEAR (route_to_area) em vez de prometer transferência
+   * que não acontece — esse era o bug do "vou transferir e não transfere".
+   */
   static personaText(area: ServiceArea): string {
-    let txt = `ÁREA DE ATENDIMENTO ATUAL: "${area.name}". Você atende EXCLUSIVAMENTE como esta área/profissional — não fale por outras áreas. `;
+    let txt = `ÁREA DE ATENDIMENTO ATUAL: "${area.name}". Você atende como esta área/profissional. `;
     if (area.description) txt += `Sobre a área: ${area.description}. `;
     if (area.persona) txt += `\nInstruções e tom desta área (siga à risca): ${area.persona}`;
-    txt += `\nSe o cliente quiser falar com OUTRA área, diga que ele pode responder "trocar de área" para voltar ao menu.`;
+
+    // Lista as OUTRAS áreas ativas e ensina o roteamento via route_to_area.
+    const others = this.activeAreas(area.organization_id).filter(a => a.id !== area.id);
+    if (others.length > 0) {
+      const list = others.map(a => `- ${a.name}${a.description ? ` (${a.description})` : ""}`).join("\n");
+      txt += `\n\nOUTRAS ÁREAS DISPONÍVEIS (para onde você PODE encaminhar o cliente):\n${list}\n`;
+      txt += `ROTEAMENTO: se o cliente quiser falar com outra área/profissional, pedir para ser transferido, ou pedir algo que claramente é de OUTRA área da lista acima, defina o campo "route_to_area" com o NOME EXATO dessa área. NÃO prometa a transferência no texto e NÃO diga que vai "verificar" — o sistema faz o encaminhamento na hora. Quando rotear, escreva uma "reply" curtinha, ex.: "Claro! Já te encaminho para {area} 😊". Se o cliente quiser apenas voltar ao menu de áreas, oriente-o a responder "trocar de área". Responda normalmente (sem route_to_area) quando o assunto for da SUA área.`;
+    }
     return txt;
   }
 }

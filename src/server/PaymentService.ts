@@ -2,6 +2,7 @@ import db from "./db.js";
 import { OrdersService } from "./OrdersService.js";
 import { NotificationService } from "./NotificationService.js";
 import { ReservationService } from "./ReservationService.js";
+import { SubscriptionService } from "./SubscriptionService.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -246,6 +247,35 @@ export class PaymentService {
   }
 
   /**
+   * Mensagem de cobrança de uma FATURA de assinatura (PIX manual ou dinâmico).
+   * MP dinâmico usa reference "sub:<faturaId>" — o webhook marca a fatura paga.
+   */
+  static async chargeForSubscription(
+    orgId: string,
+    p: { invoiceId: string; amount: number; contactName?: string; contactId?: string }
+  ): Promise<string | null> {
+    const o = this.getSettings(orgId);
+    if (!o.pay_enabled || !(Number(p.amount) > 0)) return null;
+    const provider = o.pay_provider || "pix_manual";
+    const val = `R$ ${Number(p.amount || 0).toFixed(2)}`;
+
+    if (provider === "mercadopago") {
+      const charge = await this._mpPix(orgId, {
+        reference: `sub:${p.invoiceId}`, amount: p.amount, contactName: p.contactName, contactId: p.contactId,
+        description: `Mensalidade #${String(p.invoiceId).slice(0, 8)}`, idemKey: `sub-${p.invoiceId}`,
+      });
+      if (!charge) return null;
+      const lines = [`Sua mensalidade está disponível para pagamento via *Pix* (${val}):`];
+      if (charge.qrCode) lines.push(`\n📋 *Pix copia e cola:*`, charge.qrCode);
+      if (charge.ticketUrl) lines.push(`\n💳 Ou pague pelo link: ${charge.ticketUrl}`);
+      lines.push(`\nAssim que o pagamento cair, dou baixa automaticamente. ✅`);
+      return lines.join("\n");
+    }
+    const msg = this.buildChargeMessage(orgId, p.amount);
+    return msg ? msg.replace("Para concluir, o pagamento", "Sua mensalidade") : null;
+  }
+
+  /**
    * Consulta um pagamento no Mercado Pago (usado pelo webhook, que recebe só o
    * id). Se aprovado, marca o pedido como pago. Retorna o status do MP.
    */
@@ -270,6 +300,9 @@ export class PaymentService {
         if (ref.startsWith("res:")) {
           // Sinal de reserva: confirma a reserva (não é um pedido).
           try { ReservationService.markPaid(orgId, ref.slice(4)); } catch (e) { /* noop */ }
+        } else if (ref.startsWith("sub:")) {
+          // Fatura de assinatura: marca a mensalidade paga.
+          try { SubscriptionService.markInvoicePaid(orgId, ref.slice(4)); } catch (e) { /* noop */ }
         } else {
           this.markPaid(orgId, ref, { method: "mercadopago", externalId: String(data.id) });
         }

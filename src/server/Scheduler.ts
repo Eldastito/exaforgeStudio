@@ -3,6 +3,9 @@ import { CampaignService } from "./CampaignService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
+import { SubscriptionService } from "./SubscriptionService.js";
+import { PaymentService } from "./PaymentService.js";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -35,6 +38,7 @@ export class Scheduler {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
     await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
+    await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
     this.trialPass();
   }
 
@@ -156,6 +160,87 @@ export class Scheduler {
         console.error('[Scheduler] Falha nos lembretes da org', org.organization_id, e);
       }
     }
+  }
+
+  /**
+   * Assinaturas / cobrança recorrente:
+   *  1) gera a fatura do ciclo das assinaturas ativas vencidas;
+   *  2) envia a cobrança (PIX) das faturas pendentes ainda não enviadas, pelo
+   *     WhatsApp (e e-mail, se houver) — uma vez só;
+   *  3) marca como vencidas as faturas pendentes há mais de N dias (atraso).
+   */
+  static async subscriptionPass() {
+    // 1) GERAÇÃO: assinaturas ativas com vencimento no passado.
+    let due: any[] = [];
+    try {
+      due = db.prepare(`
+        SELECT id, organization_id FROM subscriptions
+        WHERE status = 'active' AND next_charge_at IS NOT NULL AND next_charge_at <= datetime('now')
+        LIMIT 1000
+      `).all() as any[];
+    } catch (e) { return; }
+    for (const s of due) {
+      try { SubscriptionService.generateInvoice(s.organization_id, s.id); } catch (e) { /* noop */ }
+    }
+
+    // 2) ENVIO: faturas pendentes ainda não cobradas (charge_ref nulo).
+    let invs: any[] = [];
+    try {
+      invs = db.prepare(`
+        SELECT i.id, i.organization_id, i.subscription_id, i.amount,
+               c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel, c.id AS contact_id, c.email AS contact_email
+        FROM subscription_invoices i
+        JOIN subscriptions s ON s.id = i.subscription_id
+        JOIN contacts c ON c.id = i.contact_id
+        WHERE i.status = 'pending' AND (i.charge_ref IS NULL OR i.charge_ref = '')
+          AND s.status IN ('active','past_due')
+        LIMIT 500
+      `).all() as any[];
+    } catch (e) { invs = []; }
+
+    for (const inv of invs) {
+      try {
+        const orgId = inv.organization_id;
+        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channelId = inv.contact_channel || fallbackChannel?.id;
+        const first = (inv.contact_name || '').trim().split(/\s+/)[0] || '';
+
+        // Mensagem de cobrança: PIX (se configurado) ou aviso simples do valor.
+        let message = await PaymentService.chargeForSubscription(orgId, {
+          invoiceId: inv.id, amount: inv.amount, contactName: inv.contact_name, contactId: inv.contact_id,
+        });
+        if (!message) {
+          message = `Olá${first ? `, ${first}` : ''}! Sua mensalidade de R$ ${Number(inv.amount || 0).toFixed(2)} está disponível para pagamento. Qualquer dúvida, é só chamar. 🙂`;
+        } else if (first) {
+          message = `Olá, ${first}! ${message}`;
+        }
+
+        if (inv.contact_number && channelId) {
+          await MessageProviderService.sendMessage(channelId, inv.contact_number, message);
+        }
+        // E-mail (best-effort) se houver e-mail e Google conectado.
+        try {
+          if (inv.contact_email && GoogleOAuthService.getConnection(orgId)) {
+            await GoogleOAuthService.gmailSend(orgId, inv.contact_email, "Sua mensalidade", message);
+          }
+        } catch (e) { /* noop */ }
+
+        SubscriptionService.setInvoiceCharged(orgId, inv.id, 'sent');
+        console.log(`[Scheduler] Cobrança de assinatura enviada (fatura ${inv.id}).`);
+      } catch (e) {
+        console.error('[Scheduler] Falha ao cobrar assinatura', inv.id, e);
+      }
+    }
+
+    // 3) ATRASO: faturas pendentes vencidas há mais de 3 dias.
+    try {
+      const overdue = db.prepare(`
+        SELECT id, organization_id, subscription_id FROM subscription_invoices
+        WHERE status = 'pending' AND due_date IS NOT NULL AND due_date <= datetime('now','-3 days')
+        LIMIT 500
+      `).all() as any[];
+      for (const o of overdue) SubscriptionService.markOverdue(o.organization_id, o.id, o.subscription_id);
+    } catch (e) { /* noop */ }
   }
 
   /**

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Heart, ShoppingCart, Store as StoreIcon, AlertCircle, Sparkles } from 'lucide-react';
+import { Heart, ShoppingCart, Store as StoreIcon, AlertCircle, Sparkles, CalendarCheck } from 'lucide-react';
 import type {
   CartItem,
   ChosenOption,
@@ -234,6 +234,8 @@ export function Storefront() {
               onOpenCart={() => setCartOpen(true)}
               onToggleFavFilter={() => setOnlyFavs((v) => !v)}
               onlyFavs={onlyFavs}
+              hasReservations={(data.resources?.length || 0) > 0}
+              onReserve={() => document.getElementById('reservas')?.scrollIntoView({ behavior: 'smooth' })}
             />
 
             {data.store.banner_url && (
@@ -438,11 +440,13 @@ interface HeaderProps {
   onToggleMode: () => void;
   onOpenCart: () => void;
   onToggleFavFilter: () => void;
+  hasReservations?: boolean;
+  onReserve?: () => void;
 }
 
 function Header({
   title, subtitle, logoUrl, accent, mode, favCount, cartCount, onlyFavs,
-  onToggleMode, onOpenCart, onToggleFavFilter,
+  onToggleMode, onOpenCart, onToggleFavFilter, hasReservations, onReserve,
 }: HeaderProps) {
   const night = mode === 'night';
   const glass = night
@@ -477,6 +481,16 @@ function Header({
       </div>
 
       <div className="flex items-center gap-2">
+        {hasReservations && (
+          <button
+            type="button"
+            onClick={onReserve}
+            className="hidden items-center gap-1.5 rounded-full px-4 py-2 text-sm font-bold text-white transition hover:opacity-90 sm:inline-flex"
+            style={{ backgroundColor: accent }}
+          >
+            <CalendarCheck className="h-4 w-4" /> Reservar
+          </button>
+        )}
         <div className="hidden sm:block">
           <ThemeToggle mode={mode} accent={accent} onToggle={onToggleMode} />
         </div>

@@ -20,7 +20,7 @@ export type Vertical = {
 // Todos os módulos OPCIONAIS conhecidos (usados por "outro" e validação).
 export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
-  "campanhas", "cadencias", "areas", "integracoes",
+  "campanhas", "cadencias", "areas", "integracoes", "reservas",
 ] as const;
 
 export const VERTICALS: Vertical[] = [
@@ -39,7 +39,7 @@ export const VERTICALS: Vertical[] = [
   {
     key: "servicos", label: "Prestadores de Serviço", icon: "🛠️",
     descricao: "Serviços com hora marcada e orçamento (oficinas, técnicos, autônomos).",
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes"],
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas"],
     saleMode: "unit",
   },
   {
@@ -56,8 +56,8 @@ export const VERTICALS: Vertical[] = [
   },
   {
     key: "hospitalidade", label: "Hotéis / Restaurantes", icon: "🏨",
-    descricao: "Hospedagem e restaurantes/pensão: cardápio e atendimento. (reservas em breve)",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes"],
+    descricao: "Hospedagem e restaurantes/pensão: reservas, cardápio e atendimento.",
+    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes"],
     saleMode: "unit",
   },
   {

@@ -106,6 +106,17 @@ export class SubscriptionService {
     return true;
   }
 
+  /** Marca que a cobrança da fatura já foi enviada (evita reenvio). */
+  static setInvoiceCharged(orgId: string, invoiceId: string, ref: string): void {
+    db.prepare("UPDATE subscription_invoices SET charge_ref = ? WHERE id = ? AND organization_id = ?").run(ref, invoiceId, orgId);
+  }
+
+  /** Marca a fatura como vencida e coloca a assinatura em atraso. */
+  static markOverdue(orgId: string, invoiceId: string, subscriptionId: string): void {
+    db.prepare("UPDATE subscription_invoices SET status = 'overdue' WHERE id = ? AND organization_id = ? AND status = 'pending'").run(invoiceId, orgId);
+    db.prepare("UPDATE subscriptions SET status = 'past_due' WHERE id = ? AND organization_id = ? AND status = 'active'").run(subscriptionId, orgId);
+  }
+
   static listInvoices(orgId: string, subscriptionId?: string): any[] {
     if (subscriptionId) {
       return db.prepare(

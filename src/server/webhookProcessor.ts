@@ -12,6 +12,7 @@ import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
+import { ReportPdfService } from "./ReportPdfService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -444,6 +445,17 @@ export async function processIncomingMessage(
              }
            }
          } catch (e) { console.error("[Assinaturas] Falha ao reenviar PIX da mensalidade:", e); }
+       }
+
+       // RELATÓRIO EM PDF (Zapp gestor): gera o PDF (resumo + panorama) e anexa o
+       // link de download à resposta. Best-effort — se falhar, segue só com texto.
+       if (aiResult.exportPdf) {
+         try {
+           const pdf = await ReportPdfService.generateManagerReport(orgId, {
+             title: aiResult.pdfTitle, summary: aiResult.reply, panorama: aiResult.pdfBody,
+           });
+           if (pdf?.url) finalReply = `${finalReply}\n\n📄 Seu relatório em PDF: ${pdf.url}`;
+         } catch (e) { console.error("[Zapp] Falha ao gerar o PDF:", e); }
        }
 
        // Save AI message

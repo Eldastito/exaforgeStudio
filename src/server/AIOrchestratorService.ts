@@ -29,7 +29,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number }, sendSubscriptionPix?: boolean }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -305,6 +305,11 @@ export class AIOrchestratorService {
         actions: [],
         newStage: params.ticketStage, // mantém o estágio atual (sem alteração)
         needsHuman: false,
+        // PDF: se o gestor pediu "em pdf", o webhook gera o relatório (resumo +
+        // panorama) e envia o link. Read-only — não altera nada do negócio.
+        exportPdf: /\bpdf\b/i.test(params.message),
+        pdfTitle: params.message.replace(/^\s*zapp[,:\s]*/i, "").replace(/\b(em|no|formato|gera[r]?|me\s+manda|manda)\b.*pdf.*/i, "").trim().slice(0, 80) || "Relatório do negócio",
+        pdfBody: metricsData,
       };
     }
 

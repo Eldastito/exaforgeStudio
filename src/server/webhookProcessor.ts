@@ -447,14 +447,23 @@ export async function processIncomingMessage(
          } catch (e) { console.error("[Assinaturas] Falha ao reenviar PIX da mensalidade:", e); }
        }
 
-       // RELATÓRIO EM PDF (Zapp gestor): gera o PDF (resumo + panorama) e anexa o
-       // link de download à resposta. Best-effort — se falhar, segue só com texto.
+       // RELATÓRIO EM PDF (Zapp gestor): gera o PDF (resumo + panorama). Tenta
+       // enviar como DOCUMENTO nativo no WhatsApp; se não der, cai para o link em
+       // texto (best-effort — nunca quebra a resposta).
        if (aiResult.exportPdf) {
          try {
            const pdf = await ReportPdfService.generateManagerReport(orgId, {
              title: aiResult.pdfTitle, summary: aiResult.reply, panorama: aiResult.pdfBody,
            });
-           if (pdf?.url) finalReply = `${finalReply}\n\n📄 Seu relatório em PDF: ${pdf.url}`;
+           if (pdf?.url) {
+             const fileName = `${(aiResult.pdfTitle || "Relatório").replace(/[^\w\sÀ-ÿ-]/g, "").trim().slice(0, 40) || "Relatório"}.pdf`;
+             let nativeOk = false;
+             try {
+               await MessageProviderService.sendDocument(channel.id, payload.senderId, pdf.url, fileName, "📄 Seu relatório");
+               nativeOk = true;
+             } catch (e) { console.error("[Zapp] Envio nativo do PDF falhou, usando link:", e); }
+             if (!nativeOk) finalReply = `${finalReply}\n\n📄 Seu relatório em PDF: ${pdf.url}`;
+           }
          } catch (e) { console.error("[Zapp] Falha ao gerar o PDF:", e); }
        }
 

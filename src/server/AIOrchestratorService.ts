@@ -38,11 +38,11 @@ export class AIOrchestratorService {
     let text = params.message.trim();
     let isOrchestratorCommand = false;
 
-    // Só ativa o Orquestrador (modo admin) se for um GESTOR autorizado e a mensagem
-    // começar com "Zapp". Se NÃO for gestor mas usar "Zapp", NÃO revelamos a
-    // existência do canal admin (anti-recon): a mensagem é tratada como um cliente
-    // comum pelo agente de atendimento.
-    if (isManager && text.toLowerCase().startsWith("zapp")) {
+    // Só ativa o Orquestrador (modo admin) se for um GESTOR autorizado e a
+    // mensagem começar com "zap" (tolerante: Zap, Zapp, Zapflow, Zappflow…). Se
+    // NÃO for gestor mas usar "zap", NÃO revelamos a existência do canal admin
+    // (anti-recon): a mensagem é tratada como um cliente comum pelo atendimento.
+    if (isManager && text.toLowerCase().replace(/[^a-z]/g, "").startsWith("zap")) {
       isOrchestratorCommand = true;
     }
 
@@ -308,7 +308,7 @@ export class AIOrchestratorService {
         // PDF: se o gestor pediu "em pdf", o webhook gera o relatório (resumo +
         // panorama) e envia o link. Read-only — não altera nada do negócio.
         exportPdf: /\bpdf\b/i.test(params.message),
-        pdfTitle: params.message.replace(/^\s*zapp[,:\s]*/i, "").replace(/\b(em|no|formato|gera[r]?|me\s+manda|manda)\b.*pdf.*/i, "").trim().slice(0, 80) || "Relatório do negócio",
+        pdfTitle: params.message.replace(/^\s*zap\w*[,:\s]*/i, "").replace(/\b(em|no|formato|gera[r]?|me\s+manda|manda)\b.*pdf.*/i, "").trim().slice(0, 80) || "Relatório do negócio",
         pdfBody: metricsData,
       };
     }

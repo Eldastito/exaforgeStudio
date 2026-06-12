@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import { HandoffSummaryService } from "../HandoffSummaryService.js";
 
 const router = Router();
 
@@ -12,7 +13,7 @@ router.get("/", (req: AuthRequest, res): any => {
   try {
     const rows = db.prepare(`
       SELECT t.id, t.contact_id, t.stage, t.priority, t.ai_paused, t.status, t.assigned_to,
-             t.created_at, t.updated_at,
+             t.handoff_summary, t.handoff_reason, t.created_at, t.updated_at,
              c.name AS contact_name, c.identifier AS contact_identifier, c.profile_pic_url,
              (SELECT m.content FROM messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
              (SELECT m.created_at FROM messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
@@ -39,7 +40,7 @@ const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, ta
   }
 };
 
-router.post("/:id/take-over", (req: AuthRequest, res) => {
+router.post("/:id/take-over", async (req: AuthRequest, res) => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   const ticketId = req.params.id;
@@ -51,18 +52,28 @@ router.post("/:id/take-over", (req: AuthRequest, res) => {
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
 
     db.prepare('UPDATE tickets SET assigned_to = ?, ai_paused = 1, stage = ? WHERE id = ?').run(userId, 'em_atendimento_humano', ticket.id);
-    
+
     db.prepare('INSERT INTO ticket_stage_logs (id, organization_id, ticket_id, from_stage, to_stage, changed_by) VALUES (?, ?, ?, ?, ?, ?)')
       .run(uuidv4(), orgId, ticket.id, ticket.stage, 'em_atendimento_humano', userId);
 
     logAuthEvent(orgId, userId, ticketId, 'TICKET_TAKEN_OVER', { ticketId });
 
-    if ((global as any).io) {
-       (global as any).io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, newStage: 'em_atendimento_humano' });
-       (global as any).io.to(`org:${orgId}`).emit("ticket_ai_paused", { ticketId: ticket.id });
+    // TRANSIÇÃO INVISÍVEL: se ainda não há um resumo do handoff, a IA gera agora
+    // para o atendente assumir com contexto (sem reler a thread inteira).
+    let summary = ticket.handoff_summary || '';
+    if (!summary) {
+      try {
+        summary = await HandoffSummaryService.fromTicket(ticket.id);
+        HandoffSummaryService.save(orgId, ticket.id, summary);
+      } catch (e) { /* noop */ }
     }
 
-    res.json({ success: true, stage: 'em_atendimento_humano' });
+    if ((global as any).io) {
+       (global as any).io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, newStage: 'em_atendimento_humano' });
+       (global as any).io.to(`org:${orgId}`).emit("ticket_ai_paused", { ticketId: ticket.id, summary });
+    }
+
+    res.json({ success: true, stage: 'em_atendimento_humano', summary });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

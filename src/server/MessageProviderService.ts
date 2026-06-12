@@ -92,4 +92,67 @@ export class MessageProviderService {
     
     throw new Error("Provedor não suportado");
   }
+
+  /**
+   * Envia um DOCUMENTO (ex.: PDF) por link público. Best-effort: quem chama deve
+   * tratar a exceção e cair para o link em texto se necessário (não quebra nada).
+   * - whatsapp_cloud: mensagem type=document com document.link.
+   * - evolution/evolution_go: POST no endpoint de mídia (configurável por env).
+   * - instagram: não suportado (lança, para o chamador usar o link).
+   */
+  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string) {
+    const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
+    if (!channel) throw new Error("Canal não encontrado");
+    if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+
+    let metadada: any = {};
+    try { metadada = channel.metadata_json ? JSON.parse(channel.metadata_json) : {}; } catch (e) {}
+
+    if (channel.provider === 'whatsapp_cloud') {
+      const token = channel.token_encrypted;
+      if (!token) throw new Error("Token não configurado para este canal");
+      const endpoint = `https://graph.facebook.com/v19.0/${channel.identifier}/messages`;
+      const body: any = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: recipientIdentifier,
+        type: "document",
+        document: { link: fileUrl, filename: fileName, ...(caption ? { caption } : {}) },
+      };
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(`Erro na Graph API (documento): ${await response.text()}`);
+      return true;
+    }
+
+    if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
+      const token = process.env.EVOLUTION_API_KEY || channel.token_encrypted || '';
+      const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
+      const instanceName = channel.identifier;
+      const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}${process.env.EVOLUTION_SEND_MEDIA_PATH || '/send/media'}`;
+      const sendData: any = {
+        number: recipientIdentifier,
+        mediatype: 'document',
+        media: fileUrl,
+        fileName,
+        ...(caption ? { caption } : {}),
+        delay: 1200,
+      };
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': token, 'token': token, 'Authorization': `Bearer ${token}`, 'instance': instanceName,
+        },
+        body: JSON.stringify(sendData),
+      });
+      if (!response.ok) throw new Error(`Erro na Evolution API (documento, ${response.status}) em ${endpoint}: ${await response.text()}`);
+      return true;
+    }
+
+    throw new Error("Envio de documento não suportado neste provedor");
+  }
 }

@@ -112,7 +112,7 @@ export default function App() {
       });
     });
 
-    socket.on("ticket_ai_paused", (data: { ticketId: string }) => {
+    socket.on("ticket_ai_paused", (data: { ticketId: string, summary?: string }) => {
        console.log("Pausando IA do ticket...", data);
        const state = useStore.getState();
        const ticket = state.tickets[data.ticketId];
@@ -120,7 +120,7 @@ export default function App() {
           useStore.setState({
              tickets: {
                 ...state.tickets,
-                [data.ticketId]: { ...ticket, aiPaused: true }
+                [data.ticketId]: { ...ticket, aiPaused: true, handoffSummary: data.summary || ticket.handoffSummary }
              }
           });
        }

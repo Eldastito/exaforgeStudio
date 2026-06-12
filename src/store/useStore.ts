@@ -43,6 +43,7 @@ export type Ticket = {
   temperature?: 'cold' | 'warm' | 'hot';
   assignedTo?: string;
   handoffReason?: string;
+  handoffSummary?: string;
 };
 
 export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas';
@@ -275,6 +276,9 @@ export const useStore = create<AppState>((set, get) => ({
           lastMessageAt: r.last_message_at || r.updated_at || r.created_at || new Date().toISOString(),
           unreadCount: 0,
           aiPaused: r.ai_paused === 1,
+          assignedTo: r.assigned_to || undefined,
+          handoffSummary: r.handoff_summary || undefined,
+          handoffReason: r.handoff_reason || undefined,
         };
         messages[r.id] = r.last_message
           ? [{ id: `last_${r.id}`, contactId: r.contact_id, text: r.last_message, sender: 'contact', timestamp: r.last_message_at || r.updated_at }]
@@ -387,7 +391,7 @@ export const useStore = create<AppState>((set, get) => ({
         set((s) => ({
           tickets: {
             ...s.tickets,
-            [ticketId]: { ...s.tickets[ticketId], aiPaused: true, stage: data.stage as Stage, assignedTo: 'user_1' } // mocking current_user assignment
+            [ticketId]: { ...s.tickets[ticketId], aiPaused: true, stage: data.stage as Stage, assignedTo: 'user_1', handoffSummary: data.summary || s.tickets[ticketId]?.handoffSummary } // mocking current_user assignment
           }
         }));
       }

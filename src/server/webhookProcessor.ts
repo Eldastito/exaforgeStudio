@@ -13,6 +13,7 @@ import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
+import { HandoffSummaryService } from "./HandoffSummaryService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -288,8 +289,16 @@ export async function processIncomingMessage(
 
        if (aiResult.needsHuman) {
           db.prepare('UPDATE tickets SET ai_paused = 1 WHERE id = ?').run(ticket.id);
+          // TRANSIÇÃO INVISÍVEL: a IA gera um resumo do atendimento e já entrega
+          // na tela do atendente (que recebe via área/assigned_to), para o cliente
+          // não precisar repetir nada. Best-effort — nunca quebra o fluxo.
+          let handoffSummary = '';
+          try {
+            handoffSummary = await HandoffSummaryService.fromHistory(history, payload.text);
+            HandoffSummaryService.save(orgId, ticket.id, handoffSummary, aiResult.reply);
+          } catch (e) { /* noop */ }
           if (io) {
-            io.to(`org:${orgId}`).emit("ticket_ai_paused", { ticketId: ticket.id, contactId: contact.id });
+            io.to(`org:${orgId}`).emit("ticket_ai_paused", { ticketId: ticket.id, contactId: contact.id, summary: handoffSummary });
           }
           // Notifica a equipe: cliente precisa de atendente humano.
           try { NotificationService.handoff(orgId, contact.name); } catch (e) { /* noop */ }

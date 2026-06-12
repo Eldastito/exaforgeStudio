@@ -133,6 +133,17 @@ export function ChatPanel() {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Transição Invisível: resumo da IA para quem assume o atendimento, sem
+            o cliente precisar repetir a história. */}
+        {activeTicket?.aiPaused && activeTicket?.handoffSummary && (
+          <div className="rounded-xl border border-indigo-500/40 bg-indigo-500/10 p-3 text-xs text-zinc-200">
+            <div className="mb-1.5 flex items-center gap-2 font-medium text-indigo-300">
+              <BrainCircuit className="h-3.5 w-3.5" />
+              Contexto do cliente (resumo da IA)
+            </div>
+            <p className="whitespace-pre-wrap leading-relaxed text-zinc-300">{activeTicket.handoffSummary}</p>
+          </div>
+        )}
         {activeMessages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-zinc-500">
             Nenhuma mensagem ainda.

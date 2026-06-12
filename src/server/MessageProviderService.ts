@@ -130,27 +130,46 @@ export class MessageProviderService {
 
     if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
       const token = process.env.EVOLUTION_API_KEY || channel.token_encrypted || '';
-      const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
+      const baseUrl = (metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br').replace(/[\/\\]$/, '');
       const instanceName = channel.identifier;
-      const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}${process.env.EVOLUTION_SEND_MEDIA_PATH || '/send/media'}`;
-      const sendData: any = {
-        number: recipientIdentifier,
-        mediatype: 'document',
-        media: fileUrl,
-        fileName,
-        ...(caption ? { caption } : {}),
-        delay: 1200,
+      const headers: any = {
+        'Content-Type': 'application/json',
+        'apikey': token, 'token': token, 'Authorization': `Bearer ${token}`, 'instance': instanceName,
       };
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': token, 'token': token, 'Authorization': `Bearer ${token}`, 'instance': instanceName,
-        },
-        body: JSON.stringify(sendData),
-      });
-      if (!response.ok) throw new Error(`Erro na Evolution API (documento, ${response.status}) em ${endpoint}: ${await response.text()}`);
-      return true;
+
+      // Corpos candidatos (forks da Evolution divergem nos nomes de campo).
+      const bodyA = { number: recipientIdentifier, mediatype: 'document', mimetype: 'application/pdf', media: fileUrl, fileName, caption, delay: 1200 };
+      const bodyB = { number: recipientIdentifier, type: 'document', url: fileUrl, fileName, caption, delay: 1200 };
+      const bodyC = { number: recipientIdentifier, document: fileUrl, fileName, caption, delay: 1200 };
+
+      // Se o caminho foi fixado por env, usa só ele. Senão, tenta os mais comuns
+      // (o 1º que responder 2xx vence). Falhou tudo -> lança (chamador usa o link).
+      const envPath = process.env.EVOLUTION_SEND_MEDIA_PATH;
+      const attempts: { path: string; body: any }[] = envPath
+        ? [{ path: envPath, body: bodyA }, { path: envPath, body: bodyB }]
+        : [
+            { path: '/send/media', body: bodyA },
+            { path: '/send/media', body: bodyB },
+            { path: '/send/document', body: bodyC },
+            { path: '/message/sendMedia', body: bodyA },
+          ];
+
+      let lastErr = 'sem tentativa';
+      for (const a of attempts) {
+        try {
+          const response = await fetch(`${baseUrl}${a.path}`, { method: 'POST', headers, body: JSON.stringify(a.body) });
+          if (response.ok) {
+            console.log(`[MessageProvider] Documento enviado via ${a.path}`);
+            return true;
+          }
+          lastErr = `${a.path} -> HTTP ${response.status}: ${(await response.text()).slice(0, 160)}`;
+          console.warn(`[MessageProvider] Tentativa de documento falhou: ${lastErr}`);
+        } catch (e: any) {
+          lastErr = `${a.path} -> ${e?.message || e}`;
+          console.warn(`[MessageProvider] Tentativa de documento erro: ${lastErr}`);
+        }
+      }
+      throw new Error(`Evolution: nenhuma rota de mídia aceitou o documento. Último erro: ${lastErr}`);
     }
 
     throw new Error("Envio de documento não suportado neste provedor");

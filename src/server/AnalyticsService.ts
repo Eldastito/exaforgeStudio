@@ -188,6 +188,39 @@ export class AnalyticsService {
         lossCount = lossReasons.reduce((s, r) => s + r.count, 0);
       } catch (e) { lossReasons = []; }
 
+      // Velocidade do funil: tempo médio (horas) que os tickets passam em cada
+      // estágio antes de avançar — mostra onde a jornada "trava".
+      let stageVelocity: { stage: string; avgHours: number; n: number }[] = [];
+      try {
+        const rows = db.prepare(`
+          WITH ordered AS (
+            SELECT ticket_id, to_stage AS stage, created_at,
+                   LEAD(created_at) OVER (PARTITION BY ticket_id ORDER BY created_at) AS next_at
+            FROM ticket_stage_logs
+            WHERE organization_id = ? ${dateFilter}
+          )
+          SELECT stage, AVG((julianday(next_at) - julianday(created_at)) * 24.0) AS avg_hours, COUNT(*) AS n
+          FROM ordered WHERE next_at IS NOT NULL
+          GROUP BY stage
+        `).all(orgId) as any[];
+        const order = ['novo_lead','ia_atendendo','qualificado','proposta','aguardando_pagamento','agendado','em_execucao'];
+        stageVelocity = rows
+          .map(r => ({ stage: r.stage as string, avgHours: Math.round((r.avg_hours || 0) * 10) / 10, n: r.n as number }))
+          .sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
+      } catch (e) { stageVelocity = []; }
+
+      // Tempo médio até a venda (horas): da criação do ticket ao fechamento com sucesso.
+      let avgTimeToSaleHours = 0;
+      try {
+        const r = db.prepare(`
+          SELECT AVG((julianday(cl.created_at) - julianday(t.created_at)) * 24.0) AS h
+          FROM ticket_closures cl
+          JOIN tickets t ON t.id = cl.ticket_id
+          WHERE cl.organization_id = ? AND cl.result_status = 'sucesso' ${dateFilter.replace(/created_at/g, 'cl.created_at')}
+        `).get(orgId) as any;
+        avgTimeToSaleHours = r?.h ? Math.round(r.h * 10) / 10 : 0;
+      } catch (e) { avgTimeToSaleHours = 0; }
+
       return {
         totalTickets,
         newLeadsCount,
@@ -206,6 +239,8 @@ export class AnalyticsService {
         funnelByStage,
         lossReasons,
         lossCount,
+        stageVelocity,
+        avgTimeToSaleHours,
       };
     } catch (e) {
       console.error(e);

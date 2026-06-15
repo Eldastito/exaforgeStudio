@@ -12,6 +12,7 @@ import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
+import { ReferralService } from "./ReferralService.js";
 
 export class AIOrchestratorService {
   /**
@@ -29,7 +30,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -242,7 +243,20 @@ export class AIOrchestratorService {
       } catch (e) { /* noop */ }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText, subscriptionText);
+    // PROGRAMA DE INDICAÇÃO (opt-in): ensina a IA a oferecer/aplicar indicações.
+    let referralText = "";
+    if (!isOrchestratorCommand && params.contactId) {
+      try {
+        const cfg = ReferralService.config(params.organizationId);
+        if (cfg.enabled) {
+          referralText = `PROGRAMA DE INDICAÇÃO ATIVO: ao indicar um amigo, quem indica ganha ${cfg.rewardPercent}% de desconto na próxima compra e o indicado ganha ${cfg.welcomePercent}% na primeira.
+- Se o cliente quiser indicar alguém ou pedir o próprio código ("quero indicar", "tem programa de indicação?", "me dá meu código"), defina "referral_code_request": true — o sistema gera/anexa o código. NÃO invente o código.
+- Se o cliente informar um código de indicação que recebeu, coloque-o em "apply_referral_code" — o sistema valida e aplica o desconto. NÃO prometa o desconto você mesmo; deixe o sistema confirmar.`;
+        }
+      } catch (e) { /* noop */ }
+    }
+
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText, subscriptionText, referralText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -377,6 +391,9 @@ export class AIOrchestratorService {
         ? resultJSON.route_to_area.trim().slice(0, 80) : undefined,
       newReservation: this.sanitizeReservation(resultJSON.reservation_request),
       sendSubscriptionPix: resultJSON.send_subscription_pix === true,
+      referralCodeRequest: resultJSON.referral_code_request === true,
+      applyReferralCode: (typeof resultJSON.apply_referral_code === "string" && resultJSON.apply_referral_code.trim())
+        ? resultJSON.apply_referral_code.trim().slice(0, 20).toUpperCase() : undefined,
     };
   }
 
@@ -858,7 +875,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = "", subscriptionText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = "", subscriptionText: string = "", referralText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -940,6 +957,7 @@ ${agendaText}
 ${emailCaptureText}
 ${reservationText}
 ${subscriptionText}
+${referralText}
 
 HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):
 ${historyText}
@@ -987,7 +1005,9 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "customer_email": "", // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
   "route_to_area": "", // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
   "reservation_request": null, // { resource, start, end, units, guests } SÓ quando o cliente quiser reservar um recurso por período (senão null)
-  "send_subscription_pix": false // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
+  "send_subscription_pix": false, // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
+  "referral_code_request": false, // true SÓ quando o cliente quiser INDICAR alguém / pedir o próprio código de indicação (e o programa estiver ativo)
+  "apply_referral_code": "" // o código de indicação que o cliente informou para ganhar desconto (senão "")
 }`;
   }
 

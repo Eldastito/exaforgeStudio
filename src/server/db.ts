@@ -807,6 +807,45 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_delay_hours INTEGER DEFAULT 24`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_message TEXT`); } catch(e){}
+  // Fase 3b — Programa de indicação (cupom de desconto na próxima).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN referral_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN referral_reward_percent INTEGER DEFAULT 10`); } catch(e){}   // desconto p/ quem indica
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN referral_welcome_percent INTEGER DEFAULT 10`); } catch(e){} // desconto p/ o indicado
+  // Código de indicação por contato (compartilhável).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS referral_codes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_codes_code ON referral_codes(organization_id, code);
+      CREATE INDEX IF NOT EXISTS idx_referral_codes_contact ON referral_codes(organization_id, contact_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar referral_codes', e); }
+  // Cupons de desconto (boas-vindas do indicado e recompensa de quem indica).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS coupons (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        owner_contact_id TEXT NOT NULL,   -- quem pode usar o cupom
+        kind TEXT,                        -- referral_welcome | referral_reward
+        discount_percent INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',      -- active | used | expired
+        source_contact_id TEXT,           -- p/ recompensa: quem foi indicado e comprou
+        used_order_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        used_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_coupons_owner ON coupons(organization_id, owner_contact_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar coupons', e); }
+  // Atribuição da indicação no pedido.
+  try { db.exec(`ALTER TABLE orders ADD COLUMN coupon_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN referred_by_contact_id TEXT`); } catch(e){}
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

@@ -42,6 +42,7 @@ export function CampaignsView() {
     pixReminder: { enabled: boolean; minutes: number; max: number };
     abandonedCart: { enabled: boolean; hours: number; message: string };
     nps: { enabled: boolean; delayHours: number; message: string };
+    referral: { enabled: boolean; rewardPercent: number; welcomePercent: number };
   };
   const [recovery, setRecovery] = useState<Recovery | null>(null);
 
@@ -237,6 +238,22 @@ export function CampaignsView() {
                 onBlur={e => saveRecovery(recovery)}
               />
             )}
+          </div>
+
+          {/* Programa de indicação (cupom) */}
+          <div className="flex items-center justify-between py-2 border-t border-zinc-800/70">
+            <p className="text-xs text-zinc-400 pr-3">
+              🤝 Indicação — quem indica ganha{' '}
+              <input type="number" min="1" max="90" value={recovery.referral.rewardPercent}
+                onChange={e => setRecovery({ ...recovery, referral: { ...recovery.referral, rewardPercent: parseInt(e.target.value, 10) || 10 } })}
+                onBlur={e => saveRecovery({ ...recovery, referral: { ...recovery.referral, rewardPercent: parseInt(e.target.value, 10) || 10 } })}
+                className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" />% e o indicado ganha{' '}
+              <input type="number" min="1" max="90" value={recovery.referral.welcomePercent}
+                onChange={e => setRecovery({ ...recovery, referral: { ...recovery.referral, welcomePercent: parseInt(e.target.value, 10) || 10 } })}
+                onBlur={e => saveRecovery({ ...recovery, referral: { ...recovery.referral, welcomePercent: parseInt(e.target.value, 10) || 10 } })}
+                className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" />% de desconto.
+            </p>
+            <Toggle on={recovery.referral.enabled} onClick={() => saveRecovery({ ...recovery, referral: { ...recovery.referral, enabled: !recovery.referral.enabled } })} />
           </div>
         </div>
       )}

@@ -5,6 +5,8 @@ import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { CadenceService } from "./CadenceService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
+import { ReferralService } from "./ReferralService.js";
+import { MessageProviderService } from "./MessageProviderService.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -389,6 +391,23 @@ export class PaymentService {
       const c = order.contact_id ? db.prepare('SELECT name FROM contacts WHERE id = ?').get(order.contact_id) as any : null;
       NotificationService.paymentConfirmed(orgId, order.total_amount, c?.name);
     } catch (e) { /* noop */ }
+
+    // INDICAÇÃO: se este cliente foi indicado por alguém, recompensa quem indicou
+    // (cupom de desconto na próxima) e avisa o indicador pelo WhatsApp.
+    if (order.contact_id) {
+      try {
+        const reward = ReferralService.rewardReferrerIfDue(orgId, order.contact_id);
+        if (reward) {
+          const ref = db.prepare('SELECT name, identifier, channel_id FROM contacts WHERE id = ?').get(reward.referrerContactId) as any;
+          if (ref?.identifier) {
+            const channelId = ref.channel_id || (db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any)?.id;
+            const first = (ref.name || '').trim().split(/\s+/)[0] || '';
+            const msg = `Oi${first ? `, ${first}` : ''}! 🎉 Sua indicação fez a primeira compra — muito obrigado! Você ganhou *${reward.rewardPercent}% de desconto* na sua próxima compra com a gente. É só pedir quando quiser! 🎁`;
+            if (channelId) MessageProviderService.sendMessage(channelId, ref.identifier, msg).catch(() => {});
+          }
+        }
+      } catch (e) { /* noop */ }
+    }
     return true;
   }
 }

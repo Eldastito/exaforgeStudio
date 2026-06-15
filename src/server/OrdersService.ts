@@ -33,7 +33,8 @@ export class OrdersService {
   static createOrder(orgId: string, params: {
     contactId?: string; ticketId?: string; items: NewOrderItem[];
     createdBy?: string; autoClose?: boolean; notes?: string;
-  }): { id: string; status: OrderStatus; total: number; items: any[] } {
+    discountPercent?: number; couponId?: string;
+  }): { id: string; status: OrderStatus; total: number; items: any[]; discount: number } {
     const items = (params.items || []).filter(i => i && i.quantity > 0);
     if (items.length === 0) throw new Error("Pedido sem itens.");
 
@@ -78,10 +79,15 @@ export class OrdersService {
         });
       }
 
+      // Desconto (ex.: cupom de indicação): aplica % sobre o total dos itens.
+      const pct = Math.min(90, Math.max(0, Number(params.discountPercent || 0)));
+      const discount = pct > 0 ? Math.round(total * (pct / 100) * 100) / 100 : 0;
+      const finalTotal = Math.max(0, Math.round((total - discount) * 100) / 100);
+
       db.prepare(`
-        INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, created_by, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, total, params.createdBy || null, params.notes || null);
+        INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_id, created_by, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null);
 
       const insItem = db.prepare(`
         INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, unit_cost, quantity, line_total, stock_committed)
@@ -91,16 +97,16 @@ export class OrdersService {
         insItem.run(r.id, orderId, orgId, r.product_service_id, r.variant_id || null, r.name_snapshot, r.unit_price, r.unit_cost || 0, r.quantity, r.line_total, r.stock_committed);
       }
 
-      return { total, resolved };
+      return { total: finalTotal, discount, resolved };
     });
 
-    const { total, resolved } = tx();
+    const { total, discount, resolved } = tx();
     // Atualiza o perfil de CRM do contato (se já nasceu faturado via autoClose).
     if (params.contactId) CustomerProfileService.recomputePurchaseStats(orgId, params.contactId);
     // Automações Google (best-effort): planilha de vendas + confirmação por e-mail.
     GoogleAutomationService.logOrder(orgId, orderId).catch(() => {});
     GoogleAutomationService.confirmOrder(orgId, orderId).catch(() => {});
-    return { id: orderId, status, total, items: resolved };
+    return { id: orderId, status, total, items: resolved, discount };
   }
 
   /** Atualiza o status de um pedido, aplicando os efeitos de estoque corretos. */

@@ -80,9 +80,20 @@ Decisões aplicadas: formato **CSAT 1-5** (maior taxa de resposta), disparo **24
 após o pagamento**, detrator (nota 1-3) → **registra + pede desculpas automático**
 (a IA segue cuidando, sem acionar humano).
 
-## Roadmap — FASE 3b (próximo PR)
+## FASE 3b — entregue
 
-5. **Programa de indicação — cupom de desconto na próxima** (decisão tomada):
-   modelo de cupom/indicação (quem indicou quem), geração de código por cliente,
-   aplicação do desconto no pedido do indicado e atribuição da recompensa. Mexe no
-   cálculo de preço do pedido → PR próprio.
+**Programa de indicação — cupom de desconto na próxima** (`ReferralService`):
+- Cada cliente tem um **código** compartilhável (`referral_codes`).
+- O **indicado** que usa um código ganha um cupom de boas-vindas (desconto na 1ª compra); quem **indica** ganha um cupom de recompensa quando o indicado **paga** a primeira compra (`coupons`).
+- A IA conduz: intents `referral_code_request` (gera/entrega o código) e `apply_referral_code` (valida e aplica) — gated pelo programa ativo (`referralText` no prompt).
+- O desconto é **aplicado automaticamente** no pedido (`OrdersService.createOrder` com `discountPercent`/`couponId`; `orders.discount_amount`/`coupon_id`).
+- A recompensa do indicador é criada e **avisada por WhatsApp** no `PaymentService.markPaid`.
+- UI: toggle + percentuais no card de automações (`/recovery` estendida com `referral`).
+
+> Todas as features das fases 2/3 são **opt-in**; migrações aditivas/idempotentes.
+
+## Possíveis evoluções futuras (não priorizadas)
+
+- Cupons manuais/promocionais (além de indicação) e validade/expiração de cupom.
+- NPS com comentário aberto estruturado e visão de detratores ao longo do tempo.
+- Detecção de carrinho abandonado também ANTES da etapa de proposta (sinais de intenção no texto).

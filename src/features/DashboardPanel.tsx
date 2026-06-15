@@ -42,6 +42,11 @@ type Metrics = {
   resolutionRateAI: number;
   deltas?: { tickets: number; sales: number; ai: number; appointments: number };
   series?: { tickets: number[]; ai: number[]; sales: number[]; appointments: number[] };
+  averageOrderValue?: number;
+  paidRevenue?: number;
+  funnelByStage?: { stage: string; count: number }[];
+  lossReasons?: { reason: string; count: number }[];
+  lossCount?: number;
 };
 
 type TooltipLike = { active?: boolean; payload?: any[]; label?: string | number };
@@ -485,7 +490,25 @@ export function DashboardPanel() {
                       </span>
                     )}
                   </div>
+                  <p className="mt-3 text-xs text-slate-400">Ticket médio (venda paga)</p>
+                  <span className="text-lg font-bold text-white">
+                    {`R$ ${Number(m?.averageOrderValue ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                  </span>
                 </div>
+                {/* Por que perdemos vendas — agregação dos motivos de fechamento sem sucesso. */}
+                {(m?.lossReasons?.length ?? 0) > 0 && (
+                  <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                    <p className="text-xs text-slate-400">Por que perdemos ({m?.lossCount ?? 0})</p>
+                    <div className="mt-2 space-y-1.5">
+                      {(m?.lossReasons ?? []).slice(0, 5).map((r) => (
+                        <div key={r.reason} className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400">{r.reason}</span>
+                          <span className="font-mono text-rose-300">{r.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </Panel>
             </div>
 

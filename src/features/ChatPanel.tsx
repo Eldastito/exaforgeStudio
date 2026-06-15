@@ -274,8 +274,22 @@ export function ChatPanel() {
                  </div>
                  <div>
                     <label className="text-sm text-zinc-400 mb-1 block">Motivo</label>
-                    <textarea 
-                       className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none h-20" 
+                    {/* Motivos padronizados de PERDA: alimentam o relatório "por que
+                        perdemos vendas" (analytics agrega por motivo). */}
+                    {closeStatus === 'perdido' && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {['Preço / achou caro','Sem resposta','Comprou concorrente','Desistiu / sem momento','Sem estoque / prazo','Fora do perfil'].map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setCloseReason(r)}
+                            className={`text-[11px] px-2 py-1 rounded-full border transition-colors ${closeReason === r ? 'bg-primary/20 border-primary text-primary' : 'bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}
+                          >{r}</button>
+                        ))}
+                      </div>
+                    )}
+                    <textarea
+                       className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none h-20"
                        placeholder="Motivo do fechamento"
                        value={closeReason}
                        onChange={(e) => setCloseReason(e.target.value)}

@@ -108,6 +108,36 @@ router.post("/:id/return-to-ai", (req: AuthRequest, res) => {
   }
 });
 
+// POST /api/tickets/:id/stage — move o ticket de estágio no funil (kanban
+// drag-and-drop manual). Persiste e registra no histórico de estágios.
+router.post("/:id/stage", (req: AuthRequest, res) => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  const ticketId = req.params.id;
+  const { stage } = req.body || {};
+
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  if (!stage || typeof stage !== "string") return res.status(400).json({ error: "Missing stage" });
+
+  try {
+    const ticket = db.prepare('SELECT * FROM tickets WHERE id = ? AND organization_id = ?').get(ticketId, orgId) as any;
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    if (ticket.stage === stage) return res.json({ success: true, stage });
+
+    db.prepare('UPDATE tickets SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(stage, ticket.id);
+    db.prepare('INSERT INTO ticket_stage_logs (id, organization_id, ticket_id, from_stage, to_stage, changed_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(uuidv4(), orgId, ticket.id, ticket.stage, stage, userId);
+
+    if ((global as any).io) {
+      (global as any).io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, contactId: ticket.contact_id, newStage: stage });
+    }
+
+    res.json({ success: true, stage });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post("/:id/close", (req: AuthRequest, res) => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;

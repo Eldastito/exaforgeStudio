@@ -47,6 +47,8 @@ type Metrics = {
   funnelByStage?: { stage: string; count: number }[];
   lossReasons?: { reason: string; count: number }[];
   lossCount?: number;
+  stageVelocity?: { stage: string; avgHours: number; n: number }[];
+  avgTimeToSaleHours?: number;
 };
 
 type TooltipLike = { active?: boolean; payload?: any[]; label?: string | number };
@@ -490,10 +492,24 @@ export function DashboardPanel() {
                       </span>
                     )}
                   </div>
-                  <p className="mt-3 text-xs text-slate-400">Ticket médio (venda paga)</p>
-                  <span className="text-lg font-bold text-white">
-                    {`R$ ${Number(m?.averageOrderValue ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                  </span>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs text-slate-400">Ticket médio</p>
+                      <span className="text-lg font-bold text-white">
+                        {`R$ ${Number(m?.averageOrderValue ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400">Tempo até a venda</p>
+                      <span className="text-lg font-bold text-white">
+                        {(m?.avgTimeToSaleHours ?? 0) > 0
+                          ? ((m?.avgTimeToSaleHours ?? 0) >= 24
+                              ? `${Math.round((m?.avgTimeToSaleHours ?? 0) / 24 * 10) / 10} d`
+                              : `${m?.avgTimeToSaleHours} h`)
+                          : '—'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 {/* Por que perdemos vendas — agregação dos motivos de fechamento sem sucesso. */}
                 {(m?.lossReasons?.length ?? 0) > 0 && (

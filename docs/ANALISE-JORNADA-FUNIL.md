@@ -69,8 +69,20 @@ funil e (3) corrigir *bugs* que quebravam o fluxo.
 | 6. **Velocidade do funil** — tempo médio por estágio + tempo até a venda | **FEITO** | `AnalyticsService` (`stageVelocity`, `avgTimeToSaleHours`) + `DashboardPanel` |
 | 7. **Toggles na UI** das automações de recuperação | **FEITO** | `routes/campaigns.ts` (`/recovery`) + card "Recuperação de vendas" em `CampaignsView` |
 
-## Roadmap — FASE 3 (precisa de decisão de produto)
+## FASE 3a — entregue
 
-4. **NPS / pesquisa de satisfação** pós-entrega + tratamento de detratores — nova tabela de respostas + parsing da resposta do cliente + visão de detratores.
-5. **Programa de indicação** (incentivo/cashback) como ação rastreável — modelo de indicação (quem indicou quem), recompensa e atribuição.
-8. **Visualização de funil por etapa** (gráfico de drop-off) — os dados já existem (`funnelByStage`/`stageVelocity`); falta a viz dedicada.
+| Item | Status | Onde |
+|---|---|---|
+| 4. **Pesquisa de satisfação (CSAT 1-5)** pós-venda + tratamento de detrator | **FEITO** | `SatisfactionService`, `Scheduler.npsPass` (24h após o pagamento), captura da nota no `webhookProcessor`, métricas no `AnalyticsService`/`DashboardPanel`, toggle em `CampaignsView` |
+| 8. **Visualização de funil por etapa** (drop-off + tempo médio) | **FEITO** | painel "Funil por Etapa" no `DashboardPanel` (usa `funnelByStage` + `stageVelocity`) |
+
+Decisões aplicadas: formato **CSAT 1-5** (maior taxa de resposta), disparo **24h
+após o pagamento**, detrator (nota 1-3) → **registra + pede desculpas automático**
+(a IA segue cuidando, sem acionar humano).
+
+## Roadmap — FASE 3b (próximo PR)
+
+5. **Programa de indicação — cupom de desconto na próxima** (decisão tomada):
+   modelo de cupom/indicação (quem indicou quem), geração de código por cliente,
+   aplicação do desconto no pedido do indicado e atribuição da recompensa. Mexe no
+   cálculo de preço do pedido → PR próprio.

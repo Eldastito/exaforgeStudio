@@ -6,6 +6,7 @@ import { NotificationService } from "./NotificationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { PaymentService } from "./PaymentService.js";
 import { OrdersService } from "./OrdersService.js";
+import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 /**
@@ -42,6 +43,7 @@ export class Scheduler {
     await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
     await this.orderExpiryPass().catch(e => console.error('[Scheduler] expiração de pedidos falhou', e));
     await this.abandonedCartPass().catch(e => console.error('[Scheduler] carrinho abandonado falhou', e));
+    await this.npsPass().catch(e => console.error('[Scheduler] pesquisa de satisfação falhou', e));
     this.trialPass();
   }
 
@@ -402,6 +404,70 @@ export class Scheduler {
         }
       } catch (e) {
         console.error('[Scheduler] Falha nos lembretes de PIX da org', org.organization_id, e);
+      }
+    }
+  }
+
+  /**
+   * Pesquisa de satisfação / CSAT (opt-in por organização). N horas após o
+   * pagamento, envia UMA pergunta de nota 1-5 ao cliente (a resposta é capturada
+   * no webhookProcessor). Cria uma pesquisa por pedido pago.
+   */
+  static async npsPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id, COALESCE(nps_delay_hours,24) AS hours, nps_message
+        FROM organization_settings
+        WHERE COALESCE(nps_enabled,0) = 1
+      `).all() as any[];
+    } catch (e) { return; }
+
+    for (const org of orgs) {
+      try {
+        const orgId = org.organization_id;
+        const hours = Math.max(0, parseInt(String(org.hours || 24), 10) || 24);
+        const tpl = org.nps_message
+          || "Oi {nome}! Tudo certo com seu pedido? 😊 De *1 a 5*, que nota você dá para a sua experiência com a gente? (responda só com o número)";
+
+        // Pedidos pagos há mais de N horas, ainda sem pesquisa criada.
+        const orders = db.prepare(`
+          SELECT o.id, o.ticket_id, o.contact_id,
+                 c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
+          FROM orders o
+          JOIN contacts c ON c.id = o.contact_id
+          WHERE o.organization_id = ?
+            AND o.payment_status = 'paid'
+            AND o.paid_at IS NOT NULL
+            AND o.paid_at <= datetime('now', ?)
+            AND NOT EXISTS (SELECT 1 FROM satisfaction_surveys s WHERE s.order_id = o.id)
+          LIMIT 300
+        `).all(orgId, `-${hours} hours`) as any[];
+
+        if (!orders.length) continue;
+        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+
+        for (const o of orders) {
+          try {
+            if (!o.contact_number) {
+              // Sem número: registra a pesquisa como pulada para não tentar de novo.
+              const sid = SatisfactionService.create(orgId, { contactId: o.contact_id, ticketId: o.ticket_id, orderId: o.id });
+              if (sid) db.prepare(`UPDATE satisfaction_surveys SET status = 'skipped' WHERE id = ?`).run(sid);
+              continue;
+            }
+            const channelId = o.contact_channel || fallbackChannel?.id;
+            if (!channelId) continue;
+            const first = (o.contact_name || '').trim().split(/\s+/)[0] || '';
+            const message = tpl.replace(/\{nome\}/gi, first);
+            await MessageProviderService.sendMessage(channelId, o.contact_number, message);
+            SatisfactionService.create(orgId, { contactId: o.contact_id, ticketId: o.ticket_id, orderId: o.id });
+            console.log(`[Scheduler] Pesquisa de satisfação enviada para ${o.contact_number} (pedido ${o.id}).`);
+          } catch (e) {
+            console.error('[Scheduler] Falha ao enviar pesquisa de satisfação', o.id, e);
+          }
+        }
+      } catch (e) {
+        console.error('[Scheduler] Falha na pesquisa de satisfação da org', org.organization_id, e);
       }
     }
   }

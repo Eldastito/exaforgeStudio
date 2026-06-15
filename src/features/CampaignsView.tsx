@@ -41,6 +41,7 @@ export function CampaignsView() {
     orderExpiry: { enabled: boolean; hours: number };
     pixReminder: { enabled: boolean; minutes: number; max: number };
     abandonedCart: { enabled: boolean; hours: number; message: string };
+    nps: { enabled: boolean; delayHours: number; message: string };
   };
   const [recovery, setRecovery] = useState<Recovery | null>(null);
 
@@ -213,6 +214,29 @@ export function CampaignsView() {
                 className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> h.
             </p>
             <Toggle on={recovery.orderExpiry.enabled} onClick={() => saveRecovery({ ...recovery, orderExpiry: { ...recovery.orderExpiry, enabled: !recovery.orderExpiry.enabled } })} />
+          </div>
+
+          {/* Pesquisa de satisfação (CSAT) */}
+          <div className="py-2 border-t border-zinc-800/70">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-zinc-400 pr-3">
+                ⭐ Pesquisa de satisfação — pergunta a nota (1 a 5){' '}
+                <input type="number" min="0" value={recovery.nps.delayHours}
+                  onChange={e => setRecovery({ ...recovery, nps: { ...recovery.nps, delayHours: parseInt(e.target.value, 10) || 24 } })}
+                  onBlur={e => saveRecovery({ ...recovery, nps: { ...recovery.nps, delayHours: parseInt(e.target.value, 10) || 24 } })}
+                  className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> h após o pagamento.
+              </p>
+              <Toggle on={recovery.nps.enabled} onClick={() => saveRecovery({ ...recovery, nps: { ...recovery.nps, enabled: !recovery.nps.enabled } })} />
+            </div>
+            {recovery.nps.enabled && (
+              <textarea
+                className="mt-2 w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-xs text-zinc-100 resize-none"
+                placeholder="Mensagem (use {nome}). Ex.: Oi {nome}! De 1 a 5, que nota você dá para a sua experiência?"
+                value={recovery.nps.message}
+                onChange={e => setRecovery({ ...recovery, nps: { ...recovery.nps, message: e.target.value } })}
+                onBlur={e => saveRecovery(recovery)}
+              />
+            )}
           </div>
         </div>
       )}

@@ -14,6 +14,7 @@ import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
 import { HandoffSummaryService } from "./HandoffSummaryService.js";
+import { SatisfactionService } from "./SatisfactionService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -163,6 +164,29 @@ export async function processIncomingMessage(
     };
     io.to(`org:${orgId}`).emit("new_message", msgPayload);
   }
+
+  // 4.5 PESQUISA DE SATISFAÇÃO: se há uma pesquisa aberta e o cliente respondeu
+  // com uma nota (1-5), registra, responde automaticamente (pede desculpas se
+  // detrator) e encerra — sem acionar a IA normal nesta mensagem.
+  try {
+    const pending = SatisfactionService.pendingForContact(orgId, contact.id);
+    if (pending) {
+      const score = SatisfactionService.parseScore(payload.text);
+      if (score !== null) {
+        SatisfactionService.record(orgId, pending.id, score, payload.text);
+        const first = (contact.name || '').trim().split(/\s+/)[0] || '';
+        const reply = SatisfactionService.replyFor(score, first);
+        const sId = uuidv4();
+        db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`)
+          .run(sId, orgId, ticket.id, reply);
+        if (io) io.to(`org:${orgId}`).emit("new_message", { id: sId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: reply, sender: "bot", timestamp: new Date().toISOString() });
+        await MessageProviderService.sendMessage(channel.id, payload.senderId, reply);
+        // Detrator: apenas registra e pede desculpas (a IA segue cuidando da
+        // próxima mensagem do cliente). Sem acionar humano (escolha do produto).
+        return;
+      }
+    }
+  } catch (e) { console.error('[CSAT] Falha ao processar resposta de satisfação', e); }
 
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {

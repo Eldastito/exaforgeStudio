@@ -50,13 +50,15 @@ router.get("/recovery", (req: AuthRequest, res): any => {
     const o = db.prepare(`
       SELECT order_expiry_enabled, order_expiry_hours,
              pix_reminder_enabled, pix_reminder_minutes, pix_reminder_max,
-             abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message
+             abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message,
+             nps_enabled, nps_delay_hours, nps_message
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any || {};
     res.json({
       orderExpiry: { enabled: !!o.order_expiry_enabled, hours: o.order_expiry_hours || 48 },
       pixReminder: { enabled: !!o.pix_reminder_enabled, minutes: o.pix_reminder_minutes || 30, max: o.pix_reminder_max || 3 },
       abandonedCart: { enabled: !!o.abandoned_cart_enabled, hours: o.abandoned_cart_hours || 4, message: o.abandoned_cart_message || "" },
+      nps: { enabled: !!o.nps_enabled, delayHours: o.nps_delay_hours || 24, message: o.nps_message || "" },
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -67,21 +69,23 @@ router.put("/recovery", (req: AuthRequest, res): any => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { orderExpiry, pixReminder, abandonedCart } = req.body || {};
+    const { orderExpiry, pixReminder, abandonedCart, nps } = req.body || {};
     const clampInt = (v: any, def: number, min: number, max: number) => Math.min(max, Math.max(min, parseInt(String(v), 10) || def));
     db.prepare(`
       UPDATE organization_settings SET
         order_expiry_enabled = ?, order_expiry_hours = ?,
         pix_reminder_enabled = ?, pix_reminder_minutes = ?, pix_reminder_max = ?,
-        abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?
+        abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?,
+        nps_enabled = ?, nps_delay_hours = ?, nps_message = ?
       WHERE organization_id = ?
     `).run(
       orderExpiry?.enabled ? 1 : 0, clampInt(orderExpiry?.hours, 48, 1, 720),
       pixReminder?.enabled ? 1 : 0, clampInt(pixReminder?.minutes, 30, 5, 1440), clampInt(pixReminder?.max, 3, 1, 5),
       abandonedCart?.enabled ? 1 : 0, clampInt(abandonedCart?.hours, 4, 1, 168), abandonedCart?.message || null,
+      nps?.enabled ? 1 : 0, clampInt(nps?.delayHours, 24, 0, 720), nps?.message || null,
       orgId,
     );
-    logEvent(orgId, userId, undefined, 'RECOVERY_AUTOMATIONS_CHANGED', { orderExpiry: !!orderExpiry?.enabled, pixReminder: !!pixReminder?.enabled, abandonedCart: !!abandonedCart?.enabled });
+    logEvent(orgId, userId, undefined, 'RECOVERY_AUTOMATIONS_CHANGED', { orderExpiry: !!orderExpiry?.enabled, pixReminder: !!pixReminder?.enabled, abandonedCart: !!abandonedCart?.enabled, nps: !!nps?.enabled });
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

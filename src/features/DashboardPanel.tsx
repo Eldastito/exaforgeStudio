@@ -49,6 +49,7 @@ type Metrics = {
   lossCount?: number;
   stageVelocity?: { stage: string; avgHours: number; n: number }[];
   avgTimeToSaleHours?: number;
+  csat?: { responses: number; avgScore: number; detractors: number; satisfactionPct: number };
 };
 
 type TooltipLike = { active?: boolean; payload?: any[]; label?: string | number };
@@ -525,8 +526,59 @@ export function DashboardPanel() {
                     </div>
                   </div>
                 )}
+                {/* Satisfação (CSAT) — média, % satisfeitos e detratores. */}
+                {(m?.csat?.responses ?? 0) > 0 && (
+                  <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                    <p className="text-xs text-slate-400">Satisfação ({m?.csat?.responses ?? 0} respostas)</p>
+                    <div className="mt-1 flex items-end gap-2">
+                      <span className="text-2xl font-bold text-white">{m?.csat?.avgScore ?? 0}<span className="text-sm text-slate-500">/5</span></span>
+                      <span className="mb-1 text-xs font-medium text-emerald-400">{m?.csat?.satisfactionPct ?? 0}% satisfeitos</span>
+                      {(m?.csat?.detractors ?? 0) > 0 && (
+                        <span className="mb-1 text-xs font-medium text-rose-400">{m?.csat?.detractors} detrator(es)</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </Panel>
             </div>
+
+            {/* FUNIL POR ETAPA (drop-off) */}
+            {(m?.funnelByStage?.length ?? 0) > 0 && (
+              <Panel index={8} title="Funil por Etapa" subtitle="Quantos tickets alcançaram cada estágio (e o tempo médio)" icon={<Activity className="h-4 w-4" />}>
+                <div className="space-y-2.5 pt-1">
+                  {(() => {
+                    const STAGE_LABELS: Record<string, string> = {
+                      novo_lead: 'Novo Lead', ia_atendendo: 'IA Atendendo', qualificado: 'Qualificado',
+                      proposta: 'Proposta', aguardando_pagamento: 'Aguard. Pagto', agendado: 'Agendado',
+                      em_execucao: 'Em Execução', entregue_concluido: 'Concluído', pos_venda: 'Pós-venda', perdido: 'Perdido',
+                    };
+                    const fs = m?.funnelByStage ?? [];
+                    const top = Math.max(1, ...fs.map(s => s.count));
+                    const velMap = new Map<string, number>((m?.stageVelocity ?? []).map(v => [v.stage, v.avgHours] as [string, number]));
+                    return fs.filter(s => s.stage !== 'perdido').map((s, i) => {
+                      const prev = i > 0 ? fs[i - 1].count : s.count;
+                      const drop = prev > 0 && i > 0 ? Math.round((1 - s.count / prev) * 100) : 0;
+                      const h = velMap.get(s.stage);
+                      return (
+                        <div key={s.stage}>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300">{STAGE_LABELS[s.stage] || s.stage}</span>
+                            <span className="flex items-center gap-2">
+                              {h ? <span className="text-slate-500">{h >= 24 ? `${Math.round(h / 24 * 10) / 10}d` : `${h}h`} médio</span> : null}
+                              {drop > 0 ? <span className="text-rose-400">-{drop}%</span> : null}
+                              <span className="font-mono text-slate-200">{s.count}</span>
+                            </span>
+                          </div>
+                          <div className="mt-1 h-2 w-full rounded-full bg-slate-800">
+                            <div className="h-2 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${Math.max(4, (s.count / top) * 100)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </Panel>
+            )}
 
             {/* ORIGEM + IA + SLA */}
             <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">

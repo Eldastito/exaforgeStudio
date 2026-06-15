@@ -595,6 +595,26 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_payment_charges_order ON payment_charges(order_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar payment_charges', e); }
+  // Fase 3 — Pesquisa de satisfação (CSAT 1-5) enviada após a venda.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS satisfaction_surveys (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        ticket_id TEXT,
+        contact_id TEXT NOT NULL,
+        order_id TEXT,
+        status TEXT DEFAULT 'sent',     -- sent | answered | skipped
+        score INTEGER,                  -- 1..5 (1-3 detrator, 4 neutro, 5 promotor)
+        comment TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        answered_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_satisfaction_contact ON satisfaction_surveys(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_satisfaction_order ON satisfaction_surveys(order_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar satisfaction_surveys', e); }
   // Número de WhatsApp da empresa para a IA encaminhar leads (ex.: vindos do Instagram).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN forward_whatsapp TEXT`); } catch(e){}
 
@@ -783,6 +803,10 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_hours INTEGER DEFAULT 4`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_message TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE tickets ADD COLUMN abandoned_nudged_at DATETIME`); } catch(e){}
+  // Fase 3 — Pesquisa de satisfação (CSAT): opt-in + atraso após o pagamento.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_delay_hours INTEGER DEFAULT 24`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_message TEXT`); } catch(e){}
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

@@ -221,6 +221,25 @@ export class AnalyticsService {
         avgTimeToSaleHours = r?.h ? Math.round(r.h * 10) / 10 : 0;
       } catch (e) { avgTimeToSaleHours = 0; }
 
+      // Satisfação (CSAT 1-5): respostas, nota média, detratores e % satisfeitos.
+      let csat = { responses: 0, avgScore: 0, detractors: 0, satisfactionPct: 0 };
+      try {
+        const r = db.prepare(`
+          SELECT COUNT(*) AS n, AVG(score) AS avg,
+                 SUM(CASE WHEN score <= 3 THEN 1 ELSE 0 END) AS det,
+                 SUM(CASE WHEN score >= 4 THEN 1 ELSE 0 END) AS sat
+          FROM satisfaction_surveys
+          WHERE organization_id = ? AND status = 'answered' AND score IS NOT NULL ${dateFilter}
+        `).get(orgId) as any;
+        const n = r?.n || 0;
+        csat = {
+          responses: n,
+          avgScore: r?.avg ? Math.round(r.avg * 10) / 10 : 0,
+          detractors: r?.det || 0,
+          satisfactionPct: n > 0 ? Math.round(((r?.sat || 0) / n) * 100) : 0,
+        };
+      } catch (e) { /* tabela pode não existir ainda */ }
+
       return {
         totalTickets,
         newLeadsCount,
@@ -241,6 +260,7 @@ export class AnalyticsService {
         lossCount,
         stageVelocity,
         avgTimeToSaleHours,
+        csat,
       };
     } catch (e) {
       console.error(e);

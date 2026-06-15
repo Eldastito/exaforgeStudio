@@ -770,6 +770,19 @@ const initDb = () => {
   // Expiração de pedido não pago (opt-in): cancela e libera o estoque após N horas.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN order_expiry_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN order_expiry_hours INTEGER DEFAULT 48`); } catch(e){}
+  // Fase 2 — Retentativa PROGRESSIVA de PIX: nº máximo de lembretes (intervalos
+  // crescentes). Contagem por cobrança (dinâmico) e por pedido (PIX manual).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pix_reminder_max INTEGER DEFAULT 3`); } catch(e){}
+  try { db.exec(`ALTER TABLE payment_charges ADD COLUMN reminder_count INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE payment_charges ADD COLUMN last_reminder_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN pix_reminder_count INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN pix_last_reminder_at DATETIME`); } catch(e){}
+  // Fase 2 — Carrinho abandonado (opt-in): re-engaja tickets com intenção de
+  // compra (proposta/qualificado) que ficaram em silêncio sem fechar pedido.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_hours INTEGER DEFAULT 4`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_message TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN abandoned_nudged_at DATETIME`); } catch(e){}
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

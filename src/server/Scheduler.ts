@@ -41,6 +41,7 @@ export class Scheduler {
     await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
     await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
     await this.orderExpiryPass().catch(e => console.error('[Scheduler] expiração de pedidos falhou', e));
+    await this.abandonedCartPass().catch(e => console.error('[Scheduler] carrinho abandonado falhou', e));
     this.trialPass();
   }
 
@@ -295,16 +296,17 @@ export class Scheduler {
   }
 
   /**
-   * Lembrete de PIX não pago (opt-in por organização). Para cada cobrança PIX
-   * dinâmica ainda PENDENTE e criada há mais de X minutos, manda um "cutucão"
-   * gentil pelo WhatsApp com o código copia-e-cola de novo. Envia uma vez só
-   * (reminder_status='sent').
+   * Lembrete de PIX não pago (opt-in por organização) — RETENTATIVA PROGRESSIVA.
+   * Em vez de cutucar uma vez só, manda até `pix_reminder_max` lembretes em
+   * intervalos CRESCENTES (base, 2x, 3x...) enquanto o pedido não for pago.
+   * Cobre tanto o PIX dinâmico (payment_charges, com QR) quanto o PIX manual
+   * (pedido aguardando_pagamento sem cobrança no gateway — reenvia a chave).
    */
   static async pixReminderPass() {
     let orgs: any[] = [];
     try {
       orgs = db.prepare(`
-        SELECT organization_id, pix_reminder_minutes, pix_reminder_message
+        SELECT organization_id, pix_reminder_minutes, pix_reminder_message, COALESCE(pix_reminder_max,3) AS max
         FROM organization_settings
         WHERE COALESCE(pix_reminder_enabled,0) = 1
       `).all() as any[];
@@ -312,51 +314,152 @@ export class Scheduler {
 
     for (const org of orgs) {
       try {
-        const mins = Math.min(1440, Math.max(5, parseInt(String(org.pix_reminder_minutes || 30), 10) || 30));
-        // Cobranças PIX pendentes, antigas o bastante, sem lembrete e não expiradas,
-        // cujo pedido ainda não foi pago nem cancelado.
+        const orgId = org.organization_id;
+        const base = Math.min(1440, Math.max(5, parseInt(String(org.pix_reminder_minutes || 30), 10) || 30));
+        const max = Math.min(5, Math.max(1, parseInt(String(org.max || 3), 10) || 3));
+        const tpl = org.pix_reminder_message
+          || "Oi {nome}! Vi que seu pedido ainda está aguardando o pagamento via Pix 😊 Pra facilitar, aqui está o código de novo:";
+        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+
+        // O próximo lembrete (nº n, 0-based) só sai quando passou base*(n+1) do
+        // último envio (ou da criação). Assim os intervalos vão crescendo.
+        const isDue = (count: number, lastAt: string | null, createdAt: string) => {
+          const ref = String(lastAt || createdAt).replace(' ', 'T');
+          const elapsedMin = (Date.now() - new Date(ref + 'Z').getTime()) / 60000;
+          return elapsedMin >= base * (count + 1);
+        };
+
+        // (A) PIX DINÂMICO — cobranças no gateway ainda pendentes e não expiradas.
         const charges = db.prepare(`
-          SELECT pc.id, pc.qr_code, pc.ticket_url, pc.amount,
+          SELECT pc.id, pc.qr_code, pc.ticket_url, COALESCE(pc.reminder_count,0) AS reminder_count,
+                 pc.last_reminder_at, pc.created_at,
                  c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
           FROM payment_charges pc
           JOIN orders o ON o.id = pc.order_id
           JOIN contacts c ON c.id = o.contact_id
           WHERE pc.organization_id = ?
             AND pc.status = 'pending'
-            AND COALESCE(pc.reminder_status,'') != 'sent'
-            AND pc.created_at <= datetime('now', ?)
+            AND COALESCE(pc.reminder_count,0) < ?
             AND (pc.expires_at IS NULL OR pc.expires_at >= datetime('now'))
             AND o.status NOT IN ('pago','cancelado')
-        `).all(org.organization_id, `-${mins} minutes`) as any[];
-
-        if (!charges.length) continue;
-
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(org.organization_id) as any;
+        `).all(orgId, max) as any[];
 
         for (const ch of charges) {
           try {
-            if (!ch.contact_number) { db.prepare(`UPDATE payment_charges SET reminder_status = 'skipped' WHERE id = ?`).run(ch.id); continue; }
+            if (!ch.contact_number) { db.prepare(`UPDATE payment_charges SET reminder_status = 'skipped', reminder_count = ? WHERE id = ?`).run(max, ch.id); continue; }
+            if (!isDue(ch.reminder_count, ch.last_reminder_at, ch.created_at)) continue;
             const channelId = ch.contact_channel || fallbackChannel?.id;
             if (!channelId) continue;
 
             const first = (ch.contact_name || '').trim().split(/\s+/)[0] || '';
-            const tpl = org.pix_reminder_message
-              || "Oi {nome}! Vi que seu pedido ainda está aguardando o pagamento via Pix 😊 Pra facilitar, aqui está o código copia e cola de novo:";
-            const intro = tpl.replace(/\{nome\}/gi, first);
-            let message = intro;
+            let message = tpl.replace(/\{nome\}/gi, first);
             if (ch.qr_code) message += `\n\n${ch.qr_code}`;
             else if (ch.ticket_url) message += `\n\n${ch.ticket_url}`;
             message += `\n\nAssim que o pagamento cair, seu pedido é confirmado automaticamente. ✅`;
 
             await MessageProviderService.sendMessage(channelId, ch.contact_number, message);
-            db.prepare(`UPDATE payment_charges SET reminder_status = 'sent' WHERE id = ?`).run(ch.id);
-            console.log(`[Scheduler] Lembrete de PIX enviado para ${ch.contact_number} (cobrança ${ch.id}).`);
+            db.prepare(`UPDATE payment_charges SET reminder_count = COALESCE(reminder_count,0) + 1, last_reminder_at = CURRENT_TIMESTAMP, reminder_status = 'sent' WHERE id = ?`).run(ch.id);
+            console.log(`[Scheduler] Lembrete de PIX (dinâmico) #${ch.reminder_count + 1} para ${ch.contact_number} (cobrança ${ch.id}).`);
           } catch (e) {
-            console.error('[Scheduler] Falha ao enviar lembrete de PIX', ch.id, e);
+            console.error('[Scheduler] Falha no lembrete de PIX dinâmico', ch.id, e);
+          }
+        }
+
+        // (B) PIX MANUAL — pedidos aguardando pagamento SEM cobrança no gateway.
+        // Reenvia a mensagem de chave PIX estática progressivamente.
+        const manualMsg = PaymentService.buildChargeMessage(orgId, 0);
+        if (manualMsg !== null) {
+          const manualOrders = db.prepare(`
+            SELECT o.id, COALESCE(o.pix_reminder_count,0) AS reminder_count, o.pix_last_reminder_at, o.created_at, o.total_amount,
+                   c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
+            FROM orders o
+            JOIN contacts c ON c.id = o.contact_id
+            WHERE o.organization_id = ?
+              AND o.status = 'aguardando_pagamento'
+              AND COALESCE(o.pix_reminder_count,0) < ?
+              AND NOT EXISTS (SELECT 1 FROM payment_charges pc WHERE pc.order_id = o.id)
+          `).all(orgId, max) as any[];
+
+          for (const o of manualOrders) {
+            try {
+              if (!o.contact_number) { db.prepare(`UPDATE orders SET pix_reminder_count = ? WHERE id = ?`).run(max, o.id); continue; }
+              if (!isDue(o.reminder_count, o.pix_last_reminder_at, o.created_at)) continue;
+              const channelId = o.contact_channel || fallbackChannel?.id;
+              if (!channelId) continue;
+
+              const first = (o.contact_name || '').trim().split(/\s+/)[0] || '';
+              const charge = PaymentService.buildChargeMessage(orgId, Number(o.total_amount || 0));
+              if (!charge) continue;
+              const message = `${tpl.replace(/\{nome\}/gi, first)}\n\n${charge}`;
+
+              await MessageProviderService.sendMessage(channelId, o.contact_number, message);
+              db.prepare(`UPDATE orders SET pix_reminder_count = COALESCE(pix_reminder_count,0) + 1, pix_last_reminder_at = CURRENT_TIMESTAMP WHERE id = ?`).run(o.id);
+              console.log(`[Scheduler] Lembrete de PIX (manual) #${o.reminder_count + 1} para ${o.contact_number} (pedido ${o.id}).`);
+            } catch (e) {
+              console.error('[Scheduler] Falha no lembrete de PIX manual', o.id, e);
+            }
           }
         }
       } catch (e) {
         console.error('[Scheduler] Falha nos lembretes de PIX da org', org.organization_id, e);
+      }
+    }
+  }
+
+  /**
+   * Carrinho abandonado (opt-in por organização). Re-engaja UMA vez tickets que
+   * demonstraram intenção de compra (estágio 'proposta'/'qualificado'), estão
+   * abertos, NÃO geraram pedido e ficaram em silêncio por mais de N horas.
+   */
+  static async abandonedCartPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id, COALESCE(abandoned_cart_hours,4) AS hours, abandoned_cart_message
+        FROM organization_settings
+        WHERE COALESCE(abandoned_cart_enabled,0) = 1
+      `).all() as any[];
+    } catch (e) { return; }
+
+    for (const org of orgs) {
+      try {
+        const orgId = org.organization_id;
+        const hours = Math.max(1, parseInt(String(org.hours || 4), 10) || 4);
+        const tpl = org.abandoned_cart_message
+          || "Oi {nome}! Vi que ficamos no meio de uma conversa por aqui 😊 Ainda quer seguir? Posso te ajudar a finalizar agora.";
+
+        const tickets = db.prepare(`
+          SELECT t.id, t.contact_id,
+                 c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
+          FROM tickets t
+          JOIN contacts c ON c.id = t.contact_id
+          WHERE t.organization_id = ?
+            AND t.status = 'open'
+            AND t.stage IN ('proposta','qualificado')
+            AND t.abandoned_nudged_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.ticket_id = t.id AND o.status NOT IN ('cancelado'))
+            AND (SELECT MAX(m.created_at) FROM messages m WHERE m.ticket_id = t.id) <= datetime('now', ?)
+        `).all(orgId, `-${hours} hours`) as any[];
+
+        if (!tickets.length) continue;
+        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+
+        for (const t of tickets) {
+          try {
+            if (!t.contact_number) { db.prepare(`UPDATE tickets SET abandoned_nudged_at = CURRENT_TIMESTAMP WHERE id = ?`).run(t.id); continue; }
+            const channelId = t.contact_channel || fallbackChannel?.id;
+            if (!channelId) continue;
+            const first = (t.contact_name || '').trim().split(/\s+/)[0] || '';
+            const message = tpl.replace(/\{nome\}/gi, first);
+            await MessageProviderService.sendMessage(channelId, t.contact_number, message);
+            db.prepare(`UPDATE tickets SET abandoned_nudged_at = CURRENT_TIMESTAMP WHERE id = ?`).run(t.id);
+            console.log(`[Scheduler] Carrinho abandonado: cutucão enviado para ${t.contact_number} (ticket ${t.id}).`);
+          } catch (e) {
+            console.error('[Scheduler] Falha no cutucão de carrinho abandonado', t.id, e);
+          }
+        }
+      } catch (e) {
+        console.error('[Scheduler] Falha no carrinho abandonado da org', org.organization_id, e);
       }
     }
   }

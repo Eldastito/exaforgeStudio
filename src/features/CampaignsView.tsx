@@ -37,9 +37,17 @@ export function CampaignsView() {
 
   const [auto, setAuto] = useState<{ enabled: boolean; days: number; message: string } | null>(null);
 
+  type Recovery = {
+    orderExpiry: { enabled: boolean; hours: number };
+    pixReminder: { enabled: boolean; minutes: number; max: number };
+    abandonedCart: { enabled: boolean; hours: number; message: string };
+  };
+  const [recovery, setRecovery] = useState<Recovery | null>(null);
+
   const load = () => apiFetch('/api/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {});
   const loadAuto = () => apiFetch('/api/campaigns/settings').then(r => r.json()).then(setAuto).catch(() => {});
-  useEffect(() => { load(); loadAuto(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  const loadRecovery = () => apiFetch('/api/campaigns/recovery').then(r => r.json()).then(setRecovery).catch(() => {});
+  useEffect(() => { load(); loadAuto(); loadRecovery(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
 
   const saveAuto = async (patch: Partial<{ enabled: boolean; days: number; message: string }>) => {
     const next = { enabled: auto?.enabled || false, days: auto?.days || 60, message: auto?.message || '', ...patch };
@@ -48,6 +56,19 @@ export function CampaignsView() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
     }).catch(() => {});
   };
+
+  const saveRecovery = async (next: Recovery) => {
+    setRecovery(next);
+    await apiFetch('/api/campaigns/recovery', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+    }).catch(() => {});
+  };
+  const Toggle = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
+    <button onClick={onClick}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+    </button>
+  );
 
   const seg = () => SEGMENTS.find(s => s.id === segId)?.seg || {};
 
@@ -134,6 +155,65 @@ export function CampaignsView() {
               onBlur={e => saveAuto({ message: e.target.value })}
             />
           )}
+        </div>
+      )}
+
+      {/* Recuperação de vendas (automações do funil) */}
+      {recovery && (
+        <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <p className="text-sm font-medium text-zinc-100 mb-1">🧲 Recuperação de vendas</p>
+          <p className="text-xs text-zinc-500 mb-3">Automações que recuperam vendas que estavam escapando do funil.</p>
+
+          {/* Lembrete progressivo de PIX */}
+          <div className="flex items-center justify-between py-2 border-t border-zinc-800/70">
+            <p className="text-xs text-zinc-400 pr-3">
+              💸 Lembrete de PIX não pago — reenvia até{' '}
+              <input type="number" min="1" max="5" value={recovery.pixReminder.max}
+                onChange={e => setRecovery({ ...recovery, pixReminder: { ...recovery.pixReminder, max: parseInt(e.target.value, 10) || 3 } })}
+                onBlur={e => saveRecovery({ ...recovery, pixReminder: { ...recovery.pixReminder, max: parseInt(e.target.value, 10) || 3 } })}
+                className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> vezes, a partir de{' '}
+              <input type="number" min="5" value={recovery.pixReminder.minutes}
+                onChange={e => setRecovery({ ...recovery, pixReminder: { ...recovery.pixReminder, minutes: parseInt(e.target.value, 10) || 30 } })}
+                onBlur={e => saveRecovery({ ...recovery, pixReminder: { ...recovery.pixReminder, minutes: parseInt(e.target.value, 10) || 30 } })}
+                className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> min (intervalos crescentes).
+            </p>
+            <Toggle on={recovery.pixReminder.enabled} onClick={() => saveRecovery({ ...recovery, pixReminder: { ...recovery.pixReminder, enabled: !recovery.pixReminder.enabled } })} />
+          </div>
+
+          {/* Carrinho abandonado */}
+          <div className="py-2 border-t border-zinc-800/70">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-zinc-400 pr-3">
+                🛒 Carrinho abandonado — re-engaja quem mostrou interesse e sumiu há mais de{' '}
+                <input type="number" min="1" value={recovery.abandonedCart.hours}
+                  onChange={e => setRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, hours: parseInt(e.target.value, 10) || 4 } })}
+                  onBlur={e => saveRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, hours: parseInt(e.target.value, 10) || 4 } })}
+                  className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> h.
+              </p>
+              <Toggle on={recovery.abandonedCart.enabled} onClick={() => saveRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, enabled: !recovery.abandonedCart.enabled } })} />
+            </div>
+            {recovery.abandonedCart.enabled && (
+              <textarea
+                className="mt-2 w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-xs text-zinc-100 resize-none"
+                placeholder="Mensagem (use {nome}). Ex.: Oi {nome}! Ainda quer seguir? Posso te ajudar a finalizar."
+                value={recovery.abandonedCart.message}
+                onChange={e => setRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, message: e.target.value } })}
+                onBlur={e => saveRecovery(recovery)}
+              />
+            )}
+          </div>
+
+          {/* Expiração de pedido não pago */}
+          <div className="flex items-center justify-between py-2 border-t border-zinc-800/70">
+            <p className="text-xs text-zinc-400 pr-3">
+              ⏳ Expirar pedido não pago — cancela e libera o estoque após{' '}
+              <input type="number" min="1" value={recovery.orderExpiry.hours}
+                onChange={e => setRecovery({ ...recovery, orderExpiry: { ...recovery.orderExpiry, hours: parseInt(e.target.value, 10) || 48 } })}
+                onBlur={e => saveRecovery({ ...recovery, orderExpiry: { ...recovery.orderExpiry, hours: parseInt(e.target.value, 10) || 48 } })}
+                className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> h.
+            </p>
+            <Toggle on={recovery.orderExpiry.enabled} onClick={() => saveRecovery({ ...recovery, orderExpiry: { ...recovery.orderExpiry, enabled: !recovery.orderExpiry.enabled } })} />
+          </div>
         </div>
       )}
 

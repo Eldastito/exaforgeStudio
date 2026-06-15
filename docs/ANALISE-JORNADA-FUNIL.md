@@ -59,12 +59,18 @@ funil e (3) corrigir *bugs* que quebravam o fluxo.
 | Pedido → `aguardando_pagamento` (+cadência); pago → `pos_venda` (+cadência) | `webhookProcessor.ts`, `PaymentService.ts` |
 | Métricas de funil: AOV, conversão por etapa, motivos de perda | `AnalyticsService.ts`, `DashboardPanel.tsx`, `ChatPanel.tsx` (motivos padronizados) |
 
-## Roadmap — FASE 2 (próximos PRs)
+## FASE 2 — entregue
 
-1. **Retentativa progressiva de PIX** (1h/6h/24h, incluindo PIX manual) — coluna `reminder_count` + lógica no `Scheduler.pixReminderPass`.
-2. **Carrinho abandonado** — detectar lead com intenção de compra que sumiu antes do pedido e disparar cadência de re-engajamento.
-3. **Reativação em sequência** priorizando maior LTV (em vez de 1 disparo semanal).
-4. **NPS / pesquisa de satisfação** pós-entrega + tratamento de detratores.
-5. **Programa de indicação** (incentivo/cashback) como ação rastreável.
-6. **Velocidade do funil** — tempo médio por estágio e maior ponto de drop-off (já temos `ticket_stage_logs`).
-7. **Configuração na UI** dos novos toggles (expiração de pedido) e visualização de funil por etapa.
+| Item | Status | Onde |
+|---|---|---|
+| 1. Retentativa **progressiva de PIX** (intervalos crescentes, dinâmico **e** manual) | **FEITO** | `Scheduler.pixReminderPass` (`reminder_count`/`last_reminder_at` em `payment_charges`; `pix_reminder_count`/`pix_last_reminder_at` em `orders`; `pix_reminder_max`) |
+| 2. **Carrinho abandonado** — re-engaja intenção de compra que sumiu | **FEITO** | `Scheduler.abandonedCartPass` (`abandoned_cart_*`, `tickets.abandoned_nudged_at`) |
+| 3. **Reativação por LTV** | **JÁ EXISTIA** | `CampaignService.resolveSegment` já ordena por `total_spent DESC` |
+| 6. **Velocidade do funil** — tempo médio por estágio + tempo até a venda | **FEITO** | `AnalyticsService` (`stageVelocity`, `avgTimeToSaleHours`) + `DashboardPanel` |
+| 7. **Toggles na UI** das automações de recuperação | **FEITO** | `routes/campaigns.ts` (`/recovery`) + card "Recuperação de vendas" em `CampaignsView` |
+
+## Roadmap — FASE 3 (precisa de decisão de produto)
+
+4. **NPS / pesquisa de satisfação** pós-entrega + tratamento de detratores — nova tabela de respostas + parsing da resposta do cliente + visão de detratores.
+5. **Programa de indicação** (incentivo/cashback) como ação rastreável — modelo de indicação (quem indicou quem), recompensa e atribuição.
+8. **Visualização de funil por etapa** (gráfico de drop-off) — os dados já existem (`funnelByStage`/`stageVelocity`); falta a viz dedicada.

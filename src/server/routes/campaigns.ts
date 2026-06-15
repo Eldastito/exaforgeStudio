@@ -42,6 +42,50 @@ router.put("/settings", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/campaigns/recovery — automações de RECUPERAÇÃO de vendas (funil).
+router.get("/recovery", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const o = db.prepare(`
+      SELECT order_expiry_enabled, order_expiry_hours,
+             pix_reminder_enabled, pix_reminder_minutes, pix_reminder_max,
+             abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message
+      FROM organization_settings WHERE organization_id = ?
+    `).get(orgId) as any || {};
+    res.json({
+      orderExpiry: { enabled: !!o.order_expiry_enabled, hours: o.order_expiry_hours || 48 },
+      pixReminder: { enabled: !!o.pix_reminder_enabled, minutes: o.pix_reminder_minutes || 30, max: o.pix_reminder_max || 3 },
+      abandonedCart: { enabled: !!o.abandoned_cart_enabled, hours: o.abandoned_cart_hours || 4, message: o.abandoned_cart_message || "" },
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/campaigns/recovery — atualiza as automações de recuperação.
+router.put("/recovery", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { orderExpiry, pixReminder, abandonedCart } = req.body || {};
+    const clampInt = (v: any, def: number, min: number, max: number) => Math.min(max, Math.max(min, parseInt(String(v), 10) || def));
+    db.prepare(`
+      UPDATE organization_settings SET
+        order_expiry_enabled = ?, order_expiry_hours = ?,
+        pix_reminder_enabled = ?, pix_reminder_minutes = ?, pix_reminder_max = ?,
+        abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?
+      WHERE organization_id = ?
+    `).run(
+      orderExpiry?.enabled ? 1 : 0, clampInt(orderExpiry?.hours, 48, 1, 720),
+      pixReminder?.enabled ? 1 : 0, clampInt(pixReminder?.minutes, 30, 5, 1440), clampInt(pixReminder?.max, 3, 1, 5),
+      abandonedCart?.enabled ? 1 : 0, clampInt(abandonedCart?.hours, 4, 1, 168), abandonedCart?.message || null,
+      orgId,
+    );
+    logEvent(orgId, userId, undefined, 'RECOVERY_AUTOMATIONS_CHANGED', { orderExpiry: !!orderExpiry?.enabled, pixReminder: !!pixReminder?.enabled, abandonedCart: !!abandonedCart?.enabled });
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/campaigns — lista campanhas
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

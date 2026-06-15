@@ -92,7 +92,7 @@ type AppState = {
   setViewMode: (mode: ViewMode) => void;
   setEvolutionConfig: (config: EvolutionConfig) => void;
   setActiveTicket: (id: string | null) => void;
-  moveTicket: (ticketId: string, destStage: Stage) => void;
+  moveTicket: (ticketId: string, destStage: Stage) => Promise<void>;
   updateStageByContactId: (contactId: string, destStage: Stage) => void;
   takeOverTicket: (ticketId: string) => Promise<void>;
   returnToAI: (ticketId: string) => Promise<void>;
@@ -365,12 +365,28 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  moveTicket: (ticketId, destStage) => set((state) => ({
-    tickets: {
-      ...state.tickets,
-      [ticketId]: { ...state.tickets[ticketId], stage: destStage }
+  moveTicket: async (ticketId, destStage) => {
+    // Atualização otimista: move na hora e persiste no backend; se falhar, reverte.
+    const prevStage = get().tickets[ticketId]?.stage;
+    set((state) => ({
+      tickets: { ...state.tickets, [ticketId]: { ...state.tickets[ticketId], stage: destStage } }
+    }));
+    if (prevStage === destStage) return;
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: destStage }),
+      });
+      if (!res.ok) throw new Error(`Falha ao mover ticket: ${res.status}`);
+    } catch (e) {
+      console.error(e);
+      // Reverte para o estágio anterior se o backend não aceitou.
+      if (prevStage) set((state) => ({
+        tickets: { ...state.tickets, [ticketId]: { ...state.tickets[ticketId], stage: prevStage } }
+      }));
     }
-  })),
+  },
 
   updateStageByContactId: (contactId, destStage) => set((state) => {
     let ticketId = Object.keys(state.tickets).find(id => state.tickets[id].contactId === contactId);

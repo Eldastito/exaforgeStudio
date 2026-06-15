@@ -5,6 +5,7 @@ import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { PaymentService } from "./PaymentService.js";
+import { OrdersService } from "./OrdersService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 /**
@@ -39,7 +40,57 @@ export class Scheduler {
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
     await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
     await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
+    await this.orderExpiryPass().catch(e => console.error('[Scheduler] expiração de pedidos falhou', e));
     this.trialPass();
+  }
+
+  /**
+   * Expiração de pedidos não pagos (opt-in por organização). Cancela pedidos que
+   * ficaram em 'aguardando_pagamento' por mais de N horas — o que LIBERA o estoque
+   * reservado (via OrdersService.updateStatus) — e marca o ticket como 'perdido'.
+   * Evita estoque preso e dá visibilidade da venda perdida no funil.
+   */
+  static async orderExpiryPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id, COALESCE(order_expiry_hours,48) AS hours
+        FROM organization_settings
+        WHERE COALESCE(order_expiry_enabled,0) = 1
+      `).all() as any[];
+    } catch (e) { return; }
+
+    for (const org of orgs) {
+      try {
+        const hours = Math.max(1, parseInt(String(org.hours || 48), 10) || 48);
+        const stale = db.prepare(`
+          SELECT id, ticket_id FROM orders
+          WHERE organization_id = ?
+            AND status = 'aguardando_pagamento'
+            AND created_at <= datetime('now', ?)
+          LIMIT 500
+        `).all(org.organization_id, `-${hours} hours`) as any[];
+
+        for (const o of stale) {
+          try {
+            OrdersService.updateStatus(org.organization_id, o.id, 'cancelado');
+            if (o.ticket_id) {
+              const tk = db.prepare("SELECT stage, contact_id FROM tickets WHERE id = ?").get(o.ticket_id) as any;
+              // Só rebaixa para 'perdido' se o ticket ainda estava preso na cobrança.
+              if (tk && tk.stage === 'aguardando_pagamento') {
+                db.prepare("UPDATE tickets SET stage = 'perdido', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(o.ticket_id);
+                if (this.io) this.io.to(`org:${org.organization_id}`).emit("ticket_stage_change", { ticketId: o.ticket_id, contactId: tk.contact_id, newStage: 'perdido' });
+              }
+            }
+            console.log(`[Scheduler] Pedido ${o.id} expirado (não pago em ${hours}h): cancelado e estoque liberado.`);
+          } catch (e) {
+            console.error('[Scheduler] Falha ao expirar pedido', o.id, e);
+          }
+        }
+      } catch (e) {
+        console.error('[Scheduler] Falha na expiração de pedidos da org', org.organization_id, e);
+      }
+    }
   }
 
   /** Avisa as orgs em trial quando faltam 3 dias ou menos para acabar. */

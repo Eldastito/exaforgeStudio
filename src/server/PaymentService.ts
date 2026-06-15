@@ -3,6 +3,8 @@ import { OrdersService } from "./OrdersService.js";
 import { NotificationService } from "./NotificationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
+import { CadenceService } from "./CadenceService.js";
+import { CustomerProfileService } from "./CustomerProfileService.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -367,6 +369,20 @@ export class PaymentService {
     // Avança o ciclo de vida do pedido (e baixa o estoque) se ainda estava aguardando.
     if (order.status === 'aguardando_pagamento') {
       try { OrdersService.updateStatus(orgId, orderId, 'pago'); } catch (e) { /* noop */ }
+    }
+    // FUNIL: pagamento confirmado leva o ticket para 'pos_venda' (revive a etapa
+    // de pós-venda e pode disparar uma cadência de recompra/fidelização).
+    if (order.ticket_id) {
+      try {
+        const tk = db.prepare('SELECT stage, contact_id FROM tickets WHERE id = ? AND organization_id = ?').get(order.ticket_id, orgId) as any;
+        if (tk && tk.stage !== 'pos_venda') {
+          db.prepare("UPDATE tickets SET stage = 'pos_venda', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(order.ticket_id);
+          const io = (global as any).io;
+          if (io) io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: order.ticket_id, contactId: tk.contact_id, newStage: 'pos_venda' });
+          CadenceService.startForTicket(orgId, order.ticket_id, tk.contact_id, 'pos_venda');
+          if (tk.contact_id) CustomerProfileService.recomputeScore(tk.contact_id);
+        }
+      } catch (e) { /* noop */ }
     }
     // Notifica a equipe: pagamento recebido.
     try {

@@ -767,6 +767,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pix_reminder_message TEXT`); } catch(e){}
   // Marca se já enviamos o lembrete de pagamento para uma cobrança (envia 1x).
   try { db.exec(`ALTER TABLE payment_charges ADD COLUMN reminder_status TEXT`); } catch(e){}
+  // Expiração de pedido não pago (opt-in): cancela e libera o estoque após N horas.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN order_expiry_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN order_expiry_hours INTEGER DEFAULT 48`); } catch(e){}
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

@@ -142,6 +142,52 @@ export class AnalyticsService {
         appointments: buildDailySeries(dailyAppts),
       };
 
+      // ===== Métricas de FUNIL (jornada de vendas) =====
+
+      // Ticket médio (AOV): média do total dos pedidos faturados no período.
+      let averageOrderValue = 0;
+      let paidRevenue = 0;
+      try {
+        const r = db.prepare(`
+          SELECT AVG(total_amount) AS aov, SUM(total_amount) AS rev
+          FROM orders
+          WHERE organization_id = ? AND status IN ('pago','em_preparo','entregue','concluido') ${dateFilter}
+        `).get(orgId) as any;
+        averageOrderValue = r?.aov ? Math.round(r.aov * 100) / 100 : 0;
+        paidRevenue = r?.rev ? Math.round(r.rev * 100) / 100 : 0;
+      } catch (e) { averageOrderValue = 0; }
+
+      // Conversão por etapa: nº de tickets DISTINTOS que ALCANÇARAM cada estágio
+      // (via histórico de estágios). Mostra onde o funil perde gente (drop-off).
+      let funnelByStage: { stage: string; count: number }[] = [];
+      try {
+        const rows = db.prepare(`
+          SELECT to_stage AS stage, COUNT(DISTINCT ticket_id) AS count
+          FROM ticket_stage_logs
+          WHERE organization_id = ? ${dateFilter}
+          GROUP BY to_stage
+        `).all(orgId) as any[];
+        const order = ['novo_lead','ia_atendendo','qualificado','proposta','aguardando_pagamento','agendado','em_execucao','entregue_concluido','pos_venda','perdido'];
+        funnelByStage = rows
+          .map(r => ({ stage: r.stage as string, count: r.count as number }))
+          .sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
+      } catch (e) { funnelByStage = []; }
+
+      // Motivos de perda: tickets fechados SEM sucesso, agrupados pelo motivo.
+      let lossReasons: { reason: string; count: number }[] = [];
+      let lossCount = 0;
+      try {
+        const rows = db.prepare(`
+          SELECT COALESCE(NULLIF(TRIM(reason),''), '(sem motivo informado)') AS reason, COUNT(*) AS count
+          FROM ticket_closures
+          WHERE organization_id = ? AND result_status != 'sucesso' ${dateFilter}
+          GROUP BY reason
+          ORDER BY count DESC
+        `).all(orgId) as any[];
+        lossReasons = rows.map(r => ({ reason: r.reason as string, count: r.count as number }));
+        lossCount = lossReasons.reduce((s, r) => s + r.count, 0);
+      } catch (e) { lossReasons = []; }
+
       return {
         totalTickets,
         newLeadsCount,
@@ -155,6 +201,11 @@ export class AnalyticsService {
         resolutionRateAI,
         deltas,
         series,
+        averageOrderValue,
+        paidRevenue,
+        funnelByStage,
+        lossReasons,
+        lossCount,
       };
     } catch (e) {
       console.error(e);

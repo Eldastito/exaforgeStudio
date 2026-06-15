@@ -351,6 +351,19 @@ export async function processIncomingMessage(
              if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
              try { NotificationService.orderCreated(orgId, contact.name, order.total); } catch (e) { /* noop */ }
              console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
+             // FUNIL: pedido com pagamento pendente leva o ticket para 'aguardando_pagamento'
+             // (e dispara a cadência de recuperação de pagamento, se configurada).
+             // Se já nasceu pago (autoClose), vai direto para 'pos_venda'.
+             try {
+               const newOrderStage = order.status === 'pago' ? 'pos_venda' : 'aguardando_pagamento';
+               if (ticket.stage !== newOrderStage) {
+                 db.prepare('UPDATE tickets SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newOrderStage, ticket.id);
+                 ticket.stage = newOrderStage;
+                 if (io) io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, contactId: contact.id, newStage: newOrderStage });
+                 CadenceService.startForTicket(orgId, ticket.id, contact.id, newOrderStage);
+                 CustomerProfileService.recomputeScore(contact.id);
+               }
+             } catch (e) { /* noop */ }
              // Cobrança: anexa as instruções de pagamento à resposta, se configurado.
              // Pix manual = chave estática; Mercado Pago = PIX dinâmico (copia e
              // cola + link) que confirma sozinho via webhook.

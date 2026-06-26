@@ -846,6 +846,38 @@ const initDb = () => {
   // Atribuição da indicação no pedido.
   try { db.exec(`ALTER TABLE orders ADD COLUMN coupon_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN referred_by_contact_id TEXT`); } catch(e){}
+  // Supply (Fase 1) — Reposição inteligente: requisição de compra rascunho gerada
+  // pela IA quando o estoque cai abaixo do mínimo crítico, para aprovação humana.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS purchase_requisitions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        status TEXT DEFAULT 'draft',     -- draft | approved | dismissed | ordered
+        created_by TEXT,                 -- 'ai' | user_id
+        approved_by TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        approved_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS purchase_requisition_items (
+        id TEXT PRIMARY KEY,
+        requisition_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        current_stock INTEGER,
+        threshold INTEGER,
+        suggested_qty INTEGER,
+        avg_daily_consumption REAL,
+        days_of_cover REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_purchase_req_org ON purchase_requisitions(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_purchase_req_items_req ON purchase_requisition_items(requisition_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar purchase_requisitions', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN procurement_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN procurement_target_days INTEGER DEFAULT 14`); } catch(e){}
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

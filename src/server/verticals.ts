@@ -21,6 +21,7 @@ export type Vertical = {
 export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
+  "compras",
 ] as const;
 
 export const VERTICALS: Vertical[] = [
@@ -57,7 +58,7 @@ export const VERTICALS: Vertical[] = [
   {
     key: "hospitalidade", label: "Hotéis / Restaurantes", icon: "🏨",
     descricao: "Hospedagem e restaurantes/pensão: reservas, cardápio e atendimento.",
-    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes"],
+    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras"],
     saleMode: "unit",
   },
   {

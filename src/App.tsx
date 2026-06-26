@@ -7,6 +7,7 @@ import { DashboardPanel } from '@/src/features/DashboardPanel';
 import { ReportsPanel } from '@/src/features/ReportsPanel';
 import { ReservasView } from '@/src/features/ReservasView';
 import { AssinaturasView } from '@/src/features/AssinaturasView';
+import { ProcurementView } from '@/src/features/ProcurementView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -45,7 +46,7 @@ export default function App() {
     const map: Record<string, string> = {
       agenda: 'agenda', catalog: 'catalogo', vendas: 'vendas', storefront: 'loja',
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
-      reservas: 'reservas', assinaturas: 'assinaturas',
+      reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
     };
     const mod = map[viewMode];
     if (mod && !isModuleEnabled(mod)) setViewMode('kanban');
@@ -176,6 +177,7 @@ export default function App() {
              {viewMode === 'reports' && 'Relatórios'}
              {viewMode === 'reservas' && 'Reservas'}
              {viewMode === 'assinaturas' && 'Assinaturas'}
+             {viewMode === 'compras' && 'Compras'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -252,6 +254,7 @@ export default function App() {
           {viewMode === 'reports' && <ReportsPanel />}
           {viewMode === 'reservas' && <ReservasView />}
           {viewMode === 'assinaturas' && <AssinaturasView />}
+          {viewMode === 'compras' && <ProcurementView />}
         </main>
       </div>
     </div>

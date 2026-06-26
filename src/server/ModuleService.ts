@@ -24,6 +24,7 @@ export class ModuleService {
     integrations: "integracoes",
     reservations: "reservas",
     subscriptions: "assinaturas",
+    procurement: "compras",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

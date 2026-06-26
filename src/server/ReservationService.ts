@@ -84,6 +84,7 @@ export class ReservationService {
     resourceId: string; contactId?: string; ticketId?: string;
     startAt: string; endAt: string; units?: number; guests?: number;
     notes?: string; createdBy?: string; depositAmount?: number;
+    adults?: number; children?: number; pets?: number; specialRequests?: string; budget?: number;
   }): { id: string } {
     const units = Math.max(1, Number(p.units || 1));
     const tx = db.transaction(() => {
@@ -102,15 +103,21 @@ export class ReservationService {
         const pct = Math.min(100, Math.max(0, Number(o?.reservation_deposit_percent || 0)));
         if (pct > 0) deposit = Math.round(total * pct) / 100;
       }
+      // Hospedagem: se não vier "guests", deriva de adultos+crianças.
+      const adults = p.adults != null ? Math.max(0, Number(p.adults)) : null;
+      const children = p.children != null ? Math.max(0, Number(p.children)) : null;
+      const guests = p.guests ?? ((adults != null || children != null) ? (adults || 0) + (children || 0) : null);
       const id = uuidv4();
       db.prepare(
         `INSERT INTO reservations
            (id, organization_id, resource_id, contact_id, ticket_id, start_at, end_at,
-            units, guests, status, total_amount, deposit_amount, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+            units, guests, adults, children, pets, special_requests, budget,
+            status, total_amount, deposit_amount, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
       ).run(
         id, orgId, p.resourceId, p.contactId || null, p.ticketId || null, p.startAt, p.endAt,
-        units, p.guests ?? null, total, deposit, p.createdBy || "owner"
+        units, guests, adults, children, p.pets ? 1 : 0, p.specialRequests || null, p.budget ?? null,
+        total, deposit, p.createdBy || "owner"
       );
       return id;
     });

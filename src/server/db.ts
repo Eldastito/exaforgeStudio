@@ -882,6 +882,12 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar reservations', e); }
   // % de sinal cobrado ao reservar (0 = sem sinal; cobra o total ao confirmar).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reservation_deposit_percent INTEGER DEFAULT 0`); } catch(e){}
+  // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
+  try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE reservations ADD COLUMN pets INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE reservations ADD COLUMN special_requests TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE reservations ADD COLUMN budget REAL`); } catch(e){}
   // Assinaturas / cobrança recorrente (mensalidade, plano, clube).
   try {
     db.exec(`

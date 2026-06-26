@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { chat } from "./llm.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { NotificationService } from "./NotificationService.js";
+import { SupplyNetworkService } from "./SupplyNetworkService.js";
 
 /**
  * Cotação com fornecedores conhecidos (Fase 2 do Supply).
@@ -63,21 +64,25 @@ export class SupplierQuoteService {
     ].join("\n");
   }
 
-  /** Dispara as cotações para os fornecedores elegíveis. Retorna nº enviadas. */
-  static async sendQuotes(orgId: string, reqId: string, io?: any): Promise<{ sent: number }> {
+  /**
+   * Dispara as cotações para fornecedores elegíveis. Cobre os DOIS canais:
+   * (1) fornecedores LOCAIS (contato com is_supplier=1) — envia mensagem no
+   *     WhatsApp; a resposta livre é parseada pelo LLM (webhookProcessor).
+   * (2) fornecedores DA REDE ZappFlow — cria a cotação na própria base com
+   *     network_org_id; o fornecedor responde direto na UI "Pedidos da Rede".
+   */
+  static async sendQuotes(orgId: string, reqId: string, io?: any): Promise<{ sent: number; network: number }> {
     const items = db.prepare(`
       SELECT ri.product_service_id, ri.variant_id, ri.suggested_qty,
-             p.name AS product_name, pv.name AS variant_name
+             p.name AS product_name, pv.name AS variant_name, p.category AS category
       FROM purchase_requisition_items ri
       JOIN products_services p ON p.id = ri.product_service_id
       LEFT JOIN product_variants pv ON pv.id = ri.variant_id
       WHERE ri.requisition_id = ?
     `).all(reqId) as any[];
-    if (items.length === 0) return { sent: 0 };
+    if (items.length === 0) return { sent: 0, network: 0 };
 
     const suppliers = this.eligibleSuppliers(orgId, reqId);
-    if (suppliers.length === 0) return { sent: 0 };
-
     const o = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
 
@@ -95,7 +100,34 @@ export class SupplierQuoteService {
         if (io) io.to(`org:${orgId}`).emit("supplier_quote_sent", { quoteId, supplierId: s.id });
       } catch (e) { console.error("[Supply] Falha ao enviar cotação para", s.name, e); }
     }
-    return { sent };
+
+    // (2) FORNECEDORES DA REDE: cria a cotação na própria base. A org fornecedora
+    // verá em "Pedidos da Rede" e preenche preço/disponibilidade direto na UI.
+    let network = 0;
+    try {
+      const cats = Array.from(new Set(items.map(i => String(i.category || "").toLowerCase().trim()).filter(Boolean)));
+      const networkSuppliers = SupplyNetworkService.listSuppliers(orgId, { categories: cats });
+      for (const ns of networkSuppliers) {
+        try {
+          const quoteId = uuidv4();
+          db.prepare(`INSERT INTO purchase_quotes (id, organization_id, requisition_id, supplier_contact_id, network_org_id, status) VALUES (?, ?, ?, NULL, ?, 'sent')`)
+            .run(quoteId, orgId, reqId, ns.orgId);
+          // Pré-cria os itens vazios (preço null) para o fornecedor preencher.
+          const ins = db.prepare(`INSERT INTO purchase_quote_items (id, quote_id, organization_id, product_service_id, product_name, unit_price, available_qty, line_total) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL)`);
+          for (const it of items) {
+            const display = it.variant_name ? `${it.product_name} (${it.variant_name})` : it.product_name;
+            ins.run(uuidv4(), quoteId, orgId, it.product_service_id, display);
+          }
+          network++;
+          if (io) {
+            io.to(`org:${orgId}`).emit("supplier_quote_sent", { quoteId, networkOrgId: ns.orgId });
+            io.to(`org:${ns.orgId}`).emit("network_quote_received", { quoteId, fromOrgId: orgId });
+          }
+        } catch (e) { console.error("[Supply] Falha ao criar cotação de rede para", ns.name, e); }
+      }
+    } catch (e) { console.error("[Supply] Falha ao listar fornecedores da rede", e); }
+
+    return { sent, network };
   }
 
   /**
@@ -159,10 +191,15 @@ DEVOLVA APENAS UM JSON neste formato (em reais e dias; use null se o fornecedor 
 
   /** Lista as cotações de uma requisição com seus itens. */
   static listByRequisition(orgId: string, reqId: string): any[] {
+    // Une cotações de contatos locais E de orgs da rede ZappFlow. supplier_name vem
+    // do contato (local) OU do business_name da org fornecedora (rede).
     const quotes = db.prepare(`
-      SELECT q.*, c.name AS supplier_name
+      SELECT q.*,
+             COALESCE(c.name, s.business_name, 'Fornecedor da rede') AS supplier_name,
+             CASE WHEN q.network_org_id IS NOT NULL THEN 1 ELSE 0 END AS from_network
       FROM purchase_quotes q
-      JOIN contacts c ON c.id = q.supplier_contact_id
+      LEFT JOIN contacts c ON c.id = q.supplier_contact_id
+      LEFT JOIN organization_settings s ON s.organization_id = q.network_org_id
       WHERE q.organization_id = ? AND q.requisition_id = ?
       ORDER BY q.total_amount ASC NULLS LAST, q.sent_at ASC
     `).all(orgId, reqId) as any[];
@@ -170,6 +207,66 @@ DEVOLVA APENAS UM JSON neste formato (em reais e dias; use null se o fornecedor 
       q.items = db.prepare(`SELECT * FROM purchase_quote_items WHERE quote_id = ?`).all(q.id);
     }
     return quotes;
+  }
+
+  /**
+   * Inbox de cotações recebidas pela org como FORNECEDORA da rede.
+   * Não revela o nome do comprador completo nem a requisição.
+   */
+  static incomingForNetwork(orgId: string): any[] {
+    const quotes = db.prepare(`
+      SELECT q.id, q.status, q.requisition_id, q.organization_id AS buyer_org_id, q.sent_at,
+             q.delivery_days, q.total_amount, q.notes, q.answered_at,
+             COALESCE(s.business_name, 'Comprador') AS buyer_name,
+             s.address_city AS buyer_city
+      FROM purchase_quotes q
+      LEFT JOIN organization_settings s ON s.organization_id = q.organization_id
+      WHERE q.network_org_id = ?
+      ORDER BY q.sent_at DESC
+    `).all(orgId) as any[];
+    for (const q of quotes) {
+      q.items = db.prepare(`SELECT * FROM purchase_quote_items WHERE quote_id = ?`).all(q.id);
+    }
+    return quotes;
+  }
+
+  /**
+   * Fornecedor da rede preenche/atualiza sua cotação (preço por item +
+   * disponibilidade + prazo + observação) e marca como 'answered'.
+   *
+   * Só permite atualizar quando network_org_id == orgId chamadora.
+   */
+  static submitNetworkAnswer(networkOrgId: string, quoteId: string, payload: {
+    deliveryDays?: number | null; notes?: string | null;
+    items: { id: string; unitPrice?: number | null; availableQty?: number | null }[];
+  }): boolean {
+    const q = db.prepare(`SELECT * FROM purchase_quotes WHERE id = ? AND network_org_id = ?`).get(quoteId, networkOrgId) as any;
+    if (!q) return false;
+    const tx = db.transaction(() => {
+      let total = 0;
+      const upd = db.prepare(`UPDATE purchase_quote_items SET unit_price = ?, available_qty = ?, line_total = ? WHERE id = ? AND quote_id = ?`);
+      const itemsCur = db.prepare(`SELECT id, product_service_id FROM purchase_quote_items WHERE quote_id = ?`).all(q.id) as any[];
+      const ridItems = db.prepare(`SELECT product_service_id, suggested_qty FROM purchase_requisition_items WHERE requisition_id = ?`).all(q.requisition_id) as any[];
+      const wantedByPid = new Map(ridItems.map(r => [String(r.product_service_id), r.suggested_qty as number]));
+      const itemPidById = new Map(itemsCur.map(i => [String(i.id), String(i.product_service_id)]));
+      for (const it of payload.items || []) {
+        const pid = itemPidById.get(String(it.id));
+        if (!pid) continue;
+        const unit = it.unitPrice != null && !isNaN(Number(it.unitPrice)) ? Math.max(0, Number(it.unitPrice)) : null;
+        const avail = it.availableQty != null && !isNaN(Number(it.availableQty)) ? Math.max(0, parseInt(String(it.availableQty), 10) || 0) : null;
+        const wanted = Number(wantedByPid.get(pid) || 0);
+        const qty = avail != null ? Math.min(wanted, avail) : wanted;
+        const line = unit != null ? Math.round(unit * qty * 100) / 100 : null;
+        upd.run(unit, avail, line, it.id, q.id);
+        if (line != null) total += line;
+      }
+      db.prepare(`UPDATE purchase_quotes SET status = 'answered', delivery_days = ?, total_amount = ?, notes = COALESCE(?, notes), answered_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(payload.deliveryDays ?? null, Math.round(total * 100) / 100, payload.notes ?? null, q.id);
+    });
+    tx();
+    // Avisa o comprador em tempo real.
+    try { (global as any).io?.to(`org:${q.organization_id}`).emit("supplier_quote_answered", { quoteId, requisitionId: q.requisition_id }); } catch (e) { /* noop */ }
+    return true;
   }
 
   /** Confirma o vencedor (marca esta como aceita e as demais como rejeitadas). */

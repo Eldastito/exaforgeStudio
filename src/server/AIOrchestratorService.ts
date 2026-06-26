@@ -30,7 +30,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -394,6 +394,12 @@ export class AIOrchestratorService {
       referralCodeRequest: resultJSON.referral_code_request === true,
       applyReferralCode: (typeof resultJSON.apply_referral_code === "string" && resultJSON.apply_referral_code.trim())
         ? resultJSON.apply_referral_code.trim().slice(0, 20).toUpperCase() : undefined,
+      supplyEmergency: (resultJSON.supply_emergency && typeof resultJSON.supply_emergency === "object")
+        ? {
+            need: this.clampStr(resultJSON.supply_emergency.need, 200) || "",
+            category: this.clampStr(resultJSON.supply_emergency.category, 80) || "",
+          }
+        : undefined,
     };
   }
 
@@ -1014,7 +1020,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "reservation_request": null, // { resource, start, end, units, guests, adults, children, pets (true/false), special_requests, budget } SÓ quando o cliente quiser reservar um recurso por período (senão null). Em HOTEL, pergunte e preencha adults/children/pets/special_requests quando souber — NÃO invente, deixe vazio se o cliente não disser.
   "send_subscription_pix": false, // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
   "referral_code_request": false, // true SÓ quando o cliente quiser INDICAR alguém / pedir o próprio código de indicação (e o programa estiver ativo)
-  "apply_referral_code": "" // o código de indicação que o cliente informou para ganhar desconto (senão "")
+  "apply_referral_code": "", // o código de indicação que o cliente informou para ganhar desconto (senão "")
+  "supply_emergency": null // { need, category } SÓ quando QUEM ATENDE o cliente (gestor/atendente) indicar que ALGO FALTOU URGENTE no estabelecimento ("acabou o gás", "preciso de toalha agora", "faltou açúcar"). NÃO use quando é o CLIENTE pedindo um produto da loja. Use null quando não houver emergência operacional.
 }`;
   }
 

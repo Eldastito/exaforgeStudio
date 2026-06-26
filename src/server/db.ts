@@ -911,6 +911,28 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_quote_items_q ON purchase_quote_items(quote_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar purchase_quotes', e); }
+  // Supply (Fase 3) — Rede ZappFlow: a própria org pode se oferecer como
+  // fornecedora; cotação cross-org via API (sem WhatsApp), com geo (cidade + raio).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN is_network_supplier INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_categories TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN address_city TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN address_state TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN address_lat REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN address_lng REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_delivery_radius_km INTEGER DEFAULT 50`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_min_order_amount REAL DEFAULT 0`); } catch(e){}
+  // Cotação pode ser endereçada a uma org da rede (em vez de um contato local).
+  try { db.exec(`ALTER TABLE purchase_quotes ADD COLUMN network_org_id TEXT`); } catch(e){}
+  // Cache de geocoding (cidade/estado → lat/lng) para não martelar Nominatim.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS geocode_cache (
+        key TEXT PRIMARY KEY,
+        lat REAL, lng REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ /* noop */ }
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

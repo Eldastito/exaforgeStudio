@@ -933,6 +933,59 @@ const initDb = () => {
       );
     `);
   } catch(e){ /* noop */ }
+  // Hotelaria — Orçamentos enviados ao cliente (rastreio sent/accepted/declined/expired).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS quotes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        ticket_id TEXT,
+        status TEXT DEFAULT 'sent',     -- sent | viewed | accepted | declined | expired
+        total_amount REAL DEFAULT 0,
+        items_snapshot TEXT,            -- JSON com itens + preços do momento
+        notes TEXT,
+        valid_until DATETIME,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        accepted_at DATETIME,
+        declined_at DATETIME,
+        last_followup_at DATETIME,
+        followup_count INTEGER DEFAULT 0,
+        created_by TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_quotes_contact ON quotes(organization_id, contact_id, status);
+      CREATE INDEX IF NOT EXISTS idx_quotes_ticket ON quotes(ticket_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar quotes', e); }
+  // Hotelaria — Pipeline de Eventos & Grupos (consultas de convenção, casamento,
+  // day use, corporativo). Diferente de reserva pontual: tem qualificação consultiva.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS event_inquiries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        ticket_id TEXT,
+        event_type TEXT,                -- casamento | convencao | day_use | corporativo | aniversario | outro
+        headcount INTEGER,
+        event_date DATETIME,
+        halls TEXT,                     -- salas/espaços pedidos
+        budget REAL,
+        special_requests TEXT,
+        status TEXT DEFAULT 'novo',     -- novo | qualificado | proposta | fechado | perdido
+        notes TEXT,
+        won_amount REAL,
+        loss_reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_event_inquiries_org ON event_inquiries(organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar event_inquiries', e); }
+  // Hotelaria — settings: validade do orçamento, intervalos de follow-up.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quote_validity_hours INTEGER DEFAULT 72`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quote_followup_hours INTEGER DEFAULT 24`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quote_followup_max INTEGER DEFAULT 2`); } catch(e){}
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

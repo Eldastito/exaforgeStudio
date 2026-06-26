@@ -92,6 +92,21 @@ após o pagamento**, detrator (nota 1-3) → **registra + pede desculpas automá
 
 > Todas as features das fases 2/3 são **opt-in**; migrações aditivas/idempotentes.
 
+## Piloto Hoteleiro — entregue (3 gaps do diagnóstico inicial)
+
+1. **Orçamento como objeto rastreável** — tabela `quotes` com status (sent/viewed/accepted/declined/expired) + snapshot dos itens + validade. `QuoteService.buildAndSave` substitui o antigo `buildQuote` do orquestrador, persistindo. `QuoteService.passFollowupAndExpire` no Scheduler envia follow-up automático (até N tentativas) e expira na validade. Aceite/recusa automáticos quando o cliente confirma `new_order` ou `cancel_order`.
+
+2. **Pipeline de Eventos & Grupos** — tabela `event_inquiries` + novo intent `event_inquiry` no orquestrador. A IA detecta consulta de evento (casamento, convenção, day use, corporativo, aniversário) e captura nº de pessoas/data/salas/orçamento. Tela `EventsView` em pipeline (novo/qualificado/proposta/fechado/perdido).
+
+3. **Painel hoteleiro — as 5 métricas do piloto** no `DashboardPanel`:
+   - 1ª resposta (segundos/minutos)
+   - % de leads qualificados
+   - Orçamentos enviados / aceitos / taxa de aceite
+   - Conversas abandonadas cutucadas / recuperadas / taxa de recuperação
+   - Conversões (reservas + eventos ganhos)
+
+Módulos opcionais novos: `orcamentos`, `eventos` (ambos ligados por padrão na vertical Hospitalidade).
+
 ## Possíveis evoluções futuras (não priorizadas)
 
 - Cupons manuais/promocionais (além de indicação) e validade/expiração de cupom.

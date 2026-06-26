@@ -364,6 +364,8 @@ const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
   { key: 'reservas', label: 'Reservas', desc: 'Reservas por período com controle de disponibilidade (quartos, mesas, aluguéis).' },
   { key: 'assinaturas', label: 'Assinaturas', desc: 'Cobrança recorrente (mensalidades, planos, clubes).' },
   { key: 'compras', label: 'Compras', desc: 'Reposição inteligente: a IA detecta estoque crítico e gera lista de compra para aprovação.' },
+  { key: 'orcamentos', label: 'Orçamentos', desc: 'Orçamentos como objeto rastreável: enviado/aceito/recusado + follow-up automático até a validade.' },
+  { key: 'eventos', label: 'Eventos & Grupos', desc: 'Pipeline de consultas consultivas (casamento, convenção, day use, corporativo). A IA detecta na conversa e cria a consulta.' },
   { key: 'catalogo', label: 'Catálogo', desc: 'Produtos e serviços.' },
   { key: 'vendas', label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
   { key: 'loja', label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },

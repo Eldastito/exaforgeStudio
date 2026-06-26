@@ -13,6 +13,7 @@ import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { ReferralService } from "./ReferralService.js";
+import { QuoteService } from "./QuoteService.js";
 
 export class AIOrchestratorService {
   /**
@@ -30,7 +31,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string } }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string }, eventInquiry?: { eventType: string; headcount?: number; eventDate?: string; halls?: string; budget?: number; specialRequests?: string } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -362,8 +363,15 @@ export class AIOrchestratorService {
     // estoque, faltantes, total) e ANEXAMOS à resposta. Não cria pedido — o
     // cliente confirma depois (vira new_order). É read-only.
     if (!newOrder && resultJSON.quote_request && Array.isArray(resultJSON.quote_request.items)) {
-      const quote = this.buildQuote(params.organizationId, resultJSON.quote_request.items);
-      if (quote) reply = `${reply}\n\n${quote}`;
+      let ticketId: string | undefined;
+      try {
+        const t = db.prepare(`SELECT id FROM tickets WHERE contact_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1`).get(params.contactId) as any;
+        ticketId = t?.id;
+      } catch (e) { /* noop */ }
+      const q = QuoteService.buildAndSave(params.organizationId, resultJSON.quote_request.items, {
+        contactId: params.contactId, ticketId, createdBy: 'ai',
+      });
+      if (q?.text) reply = `${reply}\n\n${q.text}`;
     }
 
     // VITRINE: a IA pede para mostrar os produtos numa landing page (loja virtual)
@@ -398,6 +406,16 @@ export class AIOrchestratorService {
         ? {
             need: this.clampStr(resultJSON.supply_emergency.need, 200) || "",
             category: this.clampStr(resultJSON.supply_emergency.category, 80) || "",
+          }
+        : undefined,
+      eventInquiry: (resultJSON.event_inquiry && typeof resultJSON.event_inquiry === "object")
+        ? {
+            eventType: this.clampStr(resultJSON.event_inquiry.event_type, 40) || "outro",
+            headcount: resultJSON.event_inquiry.headcount != null ? Math.max(0, parseInt(String(resultJSON.event_inquiry.headcount), 10) || 0) : undefined,
+            eventDate: this.clampStr(resultJSON.event_inquiry.event_date, 40) || undefined,
+            halls: this.clampStr(resultJSON.event_inquiry.halls, 200) || undefined,
+            budget: resultJSON.event_inquiry.budget != null && !isNaN(Number(resultJSON.event_inquiry.budget)) ? Math.max(0, Number(resultJSON.event_inquiry.budget)) : undefined,
+            specialRequests: this.clampStr(resultJSON.event_inquiry.special_requests, 500) || undefined,
           }
         : undefined,
     };
@@ -1021,7 +1039,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "send_subscription_pix": false, // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
   "referral_code_request": false, // true SÓ quando o cliente quiser INDICAR alguém / pedir o próprio código de indicação (e o programa estiver ativo)
   "apply_referral_code": "", // o código de indicação que o cliente informou para ganhar desconto (senão "")
-  "supply_emergency": null // { need, category } SÓ quando QUEM ATENDE o cliente (gestor/atendente) indicar que ALGO FALTOU URGENTE no estabelecimento ("acabou o gás", "preciso de toalha agora", "faltou açúcar"). NÃO use quando é o CLIENTE pedindo um produto da loja. Use null quando não houver emergência operacional.
+  "supply_emergency": null, // { need, category } SÓ quando QUEM ATENDE o cliente (gestor/atendente) indicar que ALGO FALTOU URGENTE no estabelecimento ("acabou o gás", "preciso de toalha agora", "faltou açúcar"). NÃO use quando é o CLIENTE pedindo um produto da loja. Use null quando não houver emergência operacional.
+  "event_inquiry": null // EM HOTELARIA: { event_type: "casamento|convencao|day_use|corporativo|aniversario|outro", headcount: 80, event_date: "YYYY-MM-DD ou descrição", halls: "salão principal", budget: 15000, special_requests: "..." } SÓ quando o cliente pedir um EVENTO/GRUPO (convenção, casamento, day use, festa de empresa, viagem de incentivo). Pegue o que ele disser; deixe vazio o que ele não disser. Não use para reserva de quarto comum.
 }`;
   }
 

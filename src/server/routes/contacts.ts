@@ -12,7 +12,8 @@ router.get("/", (req: AuthRequest, res): any => {
   try {
     const { temperature, tag, inactiveDays, minScore, sort } = req.query as any;
     let sql = `SELECT id, name, identifier, profile_pic_url, lead_temperature, lead_score, purchase_count,
-                      total_spent, avg_ticket, last_purchase_at, last_contact_at, tags, notes, created_at
+                      total_spent, avg_ticket, last_purchase_at, last_contact_at, tags, notes, created_at,
+                      COALESCE(is_supplier,0) AS is_supplier, supplier_categories
                FROM contacts WHERE organization_id = ?`;
     const params: any[] = [orgId];
     if (temperature) { sql += ` AND lead_temperature = ?`; params.push(temperature); }
@@ -66,12 +67,17 @@ router.patch("/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { tags, notes, name } = req.body || {};
+    const { tags, notes, name, isSupplier, supplierCategories } = req.body || {};
     const updates: string[] = [];
     const vals: any[] = [];
     if (tags !== undefined) { updates.push("tags = ?"); vals.push(typeof tags === 'string' ? tags : (Array.isArray(tags) ? tags.join(',') : '')); }
     if (notes !== undefined) { updates.push("notes = ?"); vals.push(notes); }
     if (name !== undefined) { updates.push("name = ?"); vals.push(name); }
+    if (isSupplier !== undefined) { updates.push("is_supplier = ?"); vals.push(isSupplier ? 1 : 0); }
+    if (supplierCategories !== undefined) {
+      const csv = Array.isArray(supplierCategories) ? supplierCategories.join(',') : String(supplierCategories || '');
+      updates.push("supplier_categories = ?"); vals.push(csv);
+    }
     if (!updates.length) return res.json({ success: true });
     db.prepare(`UPDATE contacts SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
     res.json({ success: true });

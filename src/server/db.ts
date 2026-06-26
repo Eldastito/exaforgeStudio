@@ -878,6 +878,39 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar purchase_requisitions', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN procurement_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN procurement_target_days INTEGER DEFAULT 14`); } catch(e){}
+  // Supply (Fase 2) — fornecedores e cotações com fornecedores conhecidos.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN is_supplier INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN supplier_categories TEXT`); } catch(e){} // CSV de categorias atendidas
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN category TEXT`); } catch(e){}    // categoria do produto (casa com a do fornecedor)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS purchase_quotes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        requisition_id TEXT NOT NULL,
+        supplier_contact_id TEXT NOT NULL,
+        status TEXT DEFAULT 'sent',     -- sent | answered | accepted | rejected
+        delivery_days INTEGER,
+        total_amount REAL,
+        notes TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        answered_at DATETIME,
+        accepted_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS purchase_quote_items (
+        id TEXT PRIMARY KEY,
+        quote_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        product_name TEXT,
+        unit_price REAL,
+        available_qty INTEGER,
+        line_total REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_quotes_req ON purchase_quotes(organization_id, requisition_id);
+      CREATE INDEX IF NOT EXISTS idx_quote_items_q ON purchase_quote_items(quote_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar purchase_quotes', e); }
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

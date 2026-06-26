@@ -10,6 +10,7 @@ type Contact = {
   id: string; name?: string; identifier: string; profile_pic_url?: string;
   lead_temperature?: string; lead_score?: number; purchase_count?: number; total_spent?: number;
   avg_ticket?: number; last_purchase_at?: string; last_contact_at?: string; tags?: string;
+  is_supplier?: number; supplier_categories?: string;
 };
 
 const scoreBand = (s?: number): { label: string; cls: string; bar: string } => {
@@ -206,6 +207,38 @@ export function ContactsView() {
                   ))}
                 </div>
               )}
+              {/* Toggle "Fornecedor" para Supply: marca o contato como fornecedor
+                  para receber cotações automáticas da IA. */}
+              <div className="mt-3 flex items-center justify-between gap-2 pt-3 border-t border-zinc-800/70">
+                <div className="flex-1">
+                  <label className="text-[11px] flex items-center gap-2 cursor-pointer text-zinc-300">
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-indigo-500"
+                      checked={!!c.is_supplier}
+                      onChange={async (e) => {
+                        const next = e.target.checked;
+                        await apiFetch(`/api/contacts/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isSupplier: next }) });
+                        load();
+                      }}
+                    />
+                    🚚 Fornecedor
+                  </label>
+                  {c.is_supplier ? (
+                    <input
+                      type="text"
+                      defaultValue={c.supplier_categories || ''}
+                      placeholder="categorias (ex.: hortifruti, bebidas)"
+                      className="mt-1 w-full text-[10px] bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
+                      onBlur={async (e) => {
+                        if (e.target.value === (c.supplier_categories || '')) return;
+                        await apiFetch(`/api/contacts/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ supplierCategories: e.target.value }) });
+                        load();
+                      }}
+                    />
+                  ) : null}
+                </div>
+              </div>
             </div>
           );
         })}

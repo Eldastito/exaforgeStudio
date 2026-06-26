@@ -101,12 +101,20 @@ ALTER TABLE organization_settings ADD COLUMN procurement_target_days INTEGER DEF
   um PO e dispara a Fase 2).
 - ➡️ Valor imediato pro hotel, **zero dependência de fornecedores na plataforma**.
 
-**Fase 2 — Cotação com fornecedores conhecidos (próximo PR).**
-- Cadastro de fornecedores como **contatos com tag `supplier`** (sem inventar
-  schema novo); número de WhatsApp + categorias atendidas.
-- ProcurementAgent dispara a lista da requisição aos fornecedores e parseia as
-  respostas (preço, disponibilidade, prazo). Monta o comparativo e gera o
-  **relatório de compra** (com 1 clique p/ confirmar com o vencedor).
+**Fase 2 — Cotação com fornecedores conhecidos (ENTREGUE):**
+- Contato vira fornecedor com `contacts.is_supplier=1` + `supplier_categories`
+  (CSV). Produto ganha `category` para casar com a do fornecedor.
+- Ao APROVAR a requisição, `SupplierQuoteService.sendQuotes` dispara a lista via
+  WhatsApp aos fornecedores elegíveis (filtro por categoria; sem categoria =
+  cota com todos). Cria `purchase_quotes` (1 por fornecedor, status `sent`).
+- `webhookProcessor` detecta resposta de fornecedor com cotação aberta e chama
+  `parseSupplierReply` (LLM em modo JSON) para extrair preço por item,
+  disponibilidade e prazo. Grava em `purchase_quote_items` e marca como
+  `answered`. A IA NÃO conversa com o fornecedor sobre outras coisas: apenas
+  agradece e segue.
+- Tela "Compras" mostra o **comparativo** com destaque automático do **melhor
+  preço** e botão "Confirmar com fornecedor X" que aceita a vencedora e marca
+  as demais como rejeitadas (requisição vira `ordered`).
 
 **Fase 3 — Rede ZappFlow (efeito de rede).**
 - Fornecedores são orgs no ZappFlow (catálogo + estoque vivo) com **geo + raio

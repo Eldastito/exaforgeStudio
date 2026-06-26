@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck } from 'lucide-react';
+import { Layers, MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { useAuth } from '@/src/contexts/AuthContext';
 
@@ -37,6 +37,8 @@ export function Sidebar() {
              {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}
              {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
              {mod('compras') && <NavItem icon={<PackageCheck />} label="Compras" active={viewMode === 'compras'} onClick={() => setViewMode('compras')} />}
+             {mod('orcamentos') && <NavItem icon={<FileText />} label="Orçamentos" active={viewMode === 'orcamentos'} onClick={() => setViewMode('orcamentos')} />}
+             {mod('eventos') && <NavItem icon={<CalendarRange />} label="Eventos & Grupos" active={viewMode === 'eventos'} onClick={() => setViewMode('eventos')} />}
              {mod('loja') && <NavItem icon={<Store />} label="Loja Virtual" active={viewMode === 'storefront'} onClick={() => setViewMode('storefront')} />}
              {mod('campanhas') && <NavItem icon={<Megaphone />} label="Campanhas" active={viewMode === 'campanhas'} onClick={() => setViewMode('campanhas')} />}
              {mod('cadencias') && <NavItem icon={<GitMerge />} label="Cadências" active={viewMode === 'cadencias'} onClick={() => setViewMode('cadencias')} />}

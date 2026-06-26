@@ -25,6 +25,8 @@ export class ModuleService {
     reservations: "reservas",
     subscriptions: "assinaturas",
     procurement: "compras",
+    quotes: "orcamentos",
+    events: "eventos",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

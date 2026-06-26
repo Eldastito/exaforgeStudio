@@ -240,6 +240,56 @@ export class AnalyticsService {
         };
       } catch (e) { /* tabela pode não existir ainda */ }
 
+      // ===== HOTELARIA — 5 métricas do piloto =====
+      let hospitality = {
+        firstResponseSeconds: averageFirstResponseTime,
+        qualifiedRate: 0,
+        quotesSent: 0, quotesAccepted: 0, quotesAcceptRate: 0,
+        abandonedNudged: 0, abandonedRecovered: 0, abandonedRecoveryRate: 0,
+        bookingsCreated: 0, eventsCreated: 0, eventsWon: 0,
+      };
+      try {
+        // % de leads qualificados — tickets que passaram pelo estágio 'qualificado'.
+        const qual = db.prepare(`
+          SELECT COUNT(DISTINCT ticket_id) AS n FROM ticket_stage_logs
+          WHERE organization_id = ? AND to_stage = 'qualificado' ${dateFilter}
+        `).get(orgId) as any;
+        hospitality.qualifiedRate = totalTickets > 0 ? Math.round(((qual?.n || 0) / totalTickets) * 100) : 0;
+
+        // Orçamentos — enviados / aceitos no período.
+        const q = db.prepare(`
+          SELECT COUNT(*) AS sent, SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted
+          FROM quotes WHERE organization_id = ? ${dateFilter.replace(/created_at/g, 'sent_at')}
+        `).get(orgId) as any;
+        hospitality.quotesSent = q?.sent || 0;
+        hospitality.quotesAccepted = q?.accepted || 0;
+        hospitality.quotesAcceptRate = q?.sent > 0 ? Math.round((q.accepted / q.sent) * 100) : 0;
+
+        // Conversas abandonadas — cutucadas e quantas voltaram a responder.
+        const ab = db.prepare(`
+          SELECT COUNT(*) AS nudged,
+                 SUM(CASE WHEN EXISTS (
+                   SELECT 1 FROM messages m WHERE m.ticket_id = t.id AND m.sender_type = 'contact' AND m.created_at > t.abandoned_nudged_at
+                 ) THEN 1 ELSE 0 END) AS recovered
+          FROM tickets t
+          WHERE t.organization_id = ? AND t.abandoned_nudged_at IS NOT NULL
+            ${dateFilter.replace(/created_at/g, 't.abandoned_nudged_at')}
+        `).get(orgId) as any;
+        hospitality.abandonedNudged = ab?.nudged || 0;
+        hospitality.abandonedRecovered = ab?.recovered || 0;
+        hospitality.abandonedRecoveryRate = ab?.nudged > 0 ? Math.round((ab.recovered / ab.nudged) * 100) : 0;
+
+        // Reservas + Eventos criados / ganhos.
+        const r = db.prepare(`SELECT COUNT(*) AS n FROM reservations WHERE organization_id = ? AND status NOT IN ('cancelled') ${dateFilter}`).get(orgId) as any;
+        hospitality.bookingsCreated = r?.n || 0;
+        const ev = db.prepare(`
+          SELECT COUNT(*) AS n, SUM(CASE WHEN status = 'fechado' THEN 1 ELSE 0 END) AS won
+          FROM event_inquiries WHERE organization_id = ? ${dateFilter}
+        `).get(orgId) as any;
+        hospitality.eventsCreated = ev?.n || 0;
+        hospitality.eventsWon = ev?.won || 0;
+      } catch (e) { /* tabelas podem não existir ainda */ }
+
       return {
         totalTickets,
         newLeadsCount,
@@ -261,6 +311,7 @@ export class AnalyticsService {
         stageVelocity,
         avgTimeToSaleHours,
         csat,
+        hospitality,
       };
     } catch (e) {
       console.error(e);

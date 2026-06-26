@@ -7,6 +7,7 @@ import { SubscriptionService } from "./SubscriptionService.js";
 import { PaymentService } from "./PaymentService.js";
 import { OrdersService } from "./OrdersService.js";
 import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
+import { QuoteService } from "./QuoteService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
@@ -44,6 +45,7 @@ export class Scheduler {
     await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
     await this.orderExpiryPass().catch(e => console.error('[Scheduler] expiração de pedidos falhou', e));
     await PurchaseRequisitionService.pass().catch(e => console.error('[Scheduler] reposição falhou', e));
+    await QuoteService.passFollowupAndExpire(this.io).catch(e => console.error('[Scheduler] follow-up de orçamento falhou', e));
     await this.abandonedCartPass().catch(e => console.error('[Scheduler] carrinho abandonado falhou', e));
     await this.npsPass().catch(e => console.error('[Scheduler] pesquisa de satisfação falhou', e));
     this.trialPass();

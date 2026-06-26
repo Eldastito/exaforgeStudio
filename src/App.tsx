@@ -8,6 +8,8 @@ import { ReportsPanel } from '@/src/features/ReportsPanel';
 import { ReservasView } from '@/src/features/ReservasView';
 import { AssinaturasView } from '@/src/features/AssinaturasView';
 import { ProcurementView } from '@/src/features/ProcurementView';
+import { QuotesView } from '@/src/features/QuotesView';
+import { EventsView } from '@/src/features/EventsView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -47,6 +49,7 @@ export default function App() {
       agenda: 'agenda', catalog: 'catalogo', vendas: 'vendas', storefront: 'loja',
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
+      orcamentos: 'orcamentos', eventos: 'eventos',
     };
     const mod = map[viewMode];
     if (mod && !isModuleEnabled(mod)) setViewMode('kanban');
@@ -178,6 +181,8 @@ export default function App() {
              {viewMode === 'reservas' && 'Reservas'}
              {viewMode === 'assinaturas' && 'Assinaturas'}
              {viewMode === 'compras' && 'Compras'}
+             {viewMode === 'orcamentos' && 'Orçamentos'}
+             {viewMode === 'eventos' && 'Eventos & Grupos'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -255,6 +260,8 @@ export default function App() {
           {viewMode === 'reservas' && <ReservasView />}
           {viewMode === 'assinaturas' && <AssinaturasView />}
           {viewMode === 'compras' && <ProcurementView />}
+          {viewMode === 'orcamentos' && <QuotesView />}
+          {viewMode === 'eventos' && <EventsView />}
         </main>
       </div>
     </div>

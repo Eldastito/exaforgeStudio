@@ -50,6 +50,12 @@ type Metrics = {
   stageVelocity?: { stage: string; avgHours: number; n: number }[];
   avgTimeToSaleHours?: number;
   csat?: { responses: number; avgScore: number; detractors: number; satisfactionPct: number };
+  hospitality?: {
+    firstResponseSeconds: number; qualifiedRate: number;
+    quotesSent: number; quotesAccepted: number; quotesAcceptRate: number;
+    abandonedNudged: number; abandonedRecovered: number; abandonedRecoveryRate: number;
+    bookingsCreated: number; eventsCreated: number; eventsWon: number;
+  };
 };
 
 type TooltipLike = { active?: boolean; payload?: any[]; label?: string | number };
@@ -580,6 +586,20 @@ export function DashboardPanel() {
               </Panel>
             )}
 
+            {/* PILOTO HOTELEIRO — as 5 métricas que vendem o caso. Mostra só se há
+                sinal de hotelaria (alguma reserva criada ou orçamento enviado). */}
+            {m?.hospitality && ((m.hospitality.bookingsCreated || 0) + (m.hospitality.quotesSent || 0) + (m.hospitality.eventsCreated || 0)) > 0 && (
+              <Panel index={9} title="Piloto Hoteleiro" subtitle="As 5 métricas que vendem o caso de 60 dias" icon={<Activity className="h-4 w-4" />}>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                  <HospKPI label="1ª resposta" value={m.hospitality.firstResponseSeconds < 60 ? `${m.hospitality.firstResponseSeconds}s` : `${Math.round(m.hospitality.firstResponseSeconds/60)}min`} sub="tempo médio" cls="text-indigo-300" />
+                  <HospKPI label="Qualificados" value={`${m.hospitality.qualifiedRate}%`} sub="dos leads" cls="text-amber-300" />
+                  <HospKPI label="Orçamentos" value={`${m.hospitality.quotesAccepted}/${m.hospitality.quotesSent}`} sub={`${m.hospitality.quotesAcceptRate}% aceite`} cls="text-emerald-300" />
+                  <HospKPI label="Recuperadas" value={`${m.hospitality.abandonedRecovered}/${m.hospitality.abandonedNudged}`} sub={`${m.hospitality.abandonedRecoveryRate}% voltou`} cls="text-violet-300" />
+                  <HospKPI label="Conversões" value={`${m.hospitality.bookingsCreated + m.hospitality.eventsWon}`} sub={`${m.hospitality.bookingsCreated} reservas · ${m.hospitality.eventsWon} eventos`} cls="text-rose-300" />
+                </div>
+              </Panel>
+            )}
+
             {/* ORIGEM + IA + SLA */}
             <div className="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-3">
               <Panel index={6} title="Origem dos Contatos" subtitle={`${totalContacts} atendimentos`} icon={<Users className="h-4 w-4" />}>
@@ -747,5 +767,15 @@ function Panel({ index, title, subtitle, icon, className = '', children }: {
       </div>
       {children}
     </motion.div>
+  );
+}
+
+function HospKPI({ label, value, sub, cls }: { label: string; value: any; sub?: string; cls: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+      <p className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className={`text-xl font-bold ${cls}`}>{value}</p>
+      {sub && <p className="text-[10px] text-zinc-500 mt-0.5">{sub}</p>}
+    </div>
   );
 }

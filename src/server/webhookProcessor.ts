@@ -16,6 +16,8 @@ import { ReportPdfService } from "./ReportPdfService.js";
 import { HandoffSummaryService } from "./HandoffSummaryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
 import { SupplierQuoteService } from "./SupplierQuoteService.js";
+import { QuoteService } from "./QuoteService.js";
+import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
@@ -406,6 +408,33 @@ export async function processIncomingMessage(
          } catch (e) { /* noop */ }
        }
 
+       // EVENTOS & GRUPOS (Hotelaria): a IA detectou pedido de evento na conversa.
+       // Cria uma consulta no pipeline se ainda não houver aberta para o contato.
+       if (aiResult.eventInquiry) {
+         try {
+           const existing = EventInquiryService.openForContact(orgId, contact.id);
+           const ev = aiResult.eventInquiry;
+           if (existing) {
+             // Atualiza o que veio novo.
+             const patch: any = {};
+             if (ev.eventType && ev.eventType !== 'outro') patch.event_type = ev.eventType;
+             if (ev.headcount != null) patch.headcount = ev.headcount;
+             if (ev.eventDate) patch.event_date = ev.eventDate;
+             if (ev.halls) patch.halls = ev.halls;
+             if (ev.budget != null) patch.budget = ev.budget;
+             if (ev.specialRequests) patch.special_requests = ev.specialRequests;
+             if (Object.keys(patch).length) EventInquiryService.update(orgId, existing.id, patch);
+           } else {
+             EventInquiryService.create(orgId, {
+               contactId: contact.id, ticketId: ticket.id,
+               eventType: ev.eventType, headcount: ev.headcount, eventDate: ev.eventDate,
+               halls: ev.halls, budget: ev.budget, specialRequests: ev.specialRequests,
+             });
+             try { NotificationService.handoff(orgId, contact.name); } catch (e) { /* avisa o time comercial */ }
+           }
+         } catch (e) { console.error('[Eventos] Falha ao registrar consulta', e); }
+       }
+
        // EMERGÊNCIA DE SUPRIMENTOS: a IA detectou que ALGO faltou de urgência
        // (gestor/atendente). Sugere buscar na rede ZappFlow já filtrando.
        if (aiResult.supplyEmergency && (aiResult.supplyEmergency.need || aiResult.supplyEmergency.category)) {
@@ -442,6 +471,11 @@ export async function processIncomingMessage(
              if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
              try { NotificationService.orderCreated(orgId, contact.name, order.total); } catch (e) { /* noop */ }
              console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
+             // Orçamento aberto vira ACEITO (cliente confirmou e virou pedido).
+             try {
+               const openQuote = QuoteService.openForContact(orgId, contact.id);
+               if (openQuote?.id) QuoteService.markAccepted(orgId, openQuote.id);
+             } catch (e) { /* noop */ }
              // FUNIL: pedido com pagamento pendente leva o ticket para 'aguardando_pagamento'
              // (e dispara a cadência de recuperação de pagamento, se configurada).
              // Se já nasceu pago (autoClose), vai direto para 'pos_venda'.
@@ -473,6 +507,11 @@ export async function processIncomingMessage(
        // CANCELAMENTO confirmado pelo cliente: cancela o pedido ativo (devolve o estoque)
        // e também cancela os agendamentos/entregas abertos do ticket.
        if (aiResult.cancelOrder) {
+         try {
+           // Orçamento aberto vira RECUSADO (cliente disse que não quer).
+           const openQuote = QuoteService.openForContact(orgId, contact.id);
+           if (openQuote?.id) QuoteService.markDeclined(orgId, openQuote.id, 'cliente cancelou na conversa');
+         } catch (e) { /* noop */ }
          try {
            const cancelable = OrdersService.latestCancelableOrder(orgId, contact.id);
            if (cancelable) {

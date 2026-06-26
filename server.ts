@@ -25,6 +25,7 @@ import contactsRoutes from "./src/server/routes/contacts.js";
 import campaignsRoutes from "./src/server/routes/campaigns.js";
 import paymentsRoutes from "./src/server/routes/payments.js";
 import cadencesRoutes from "./src/server/routes/cadences.js";
+import procurementRoutes from "./src/server/routes/procurement.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
@@ -341,6 +342,7 @@ async function startServer() {
   protectedApi.use("/areas", areasRoutes);
   protectedApi.use("/ai", aiRoutes);
   protectedApi.use("/cadences", cadencesRoutes);
+  protectedApi.use("/procurement", procurementRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);

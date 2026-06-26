@@ -30,7 +30,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -696,7 +696,7 @@ export class AIOrchestratorService {
   }
 
   /** Valida um pedido de reserva sugerido pela IA. */
-  private static sanitizeReservation(r: any): { resource: string; start: string; end: string; units: number; guests?: number } | undefined {
+  private static sanitizeReservation(r: any): { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number } | undefined {
     if (!r || typeof r !== "object") return undefined;
     const resource = this.clampStr(r.resource, 120);
     if (!resource) return undefined;
@@ -709,7 +709,14 @@ export class AIOrchestratorService {
     if (!start || !end || new Date(end) <= new Date(start)) return undefined;
     const units = Math.max(1, Math.min(99, parseInt(String(r.units || 1), 10) || 1));
     const guests = r.guests != null ? Math.max(1, Math.min(999, parseInt(String(r.guests), 10) || 1)) : undefined;
-    return { resource, start, end, units, guests };
+    // Hotelaria: captura estruturada (adultos/crianças/pet/pedidos especiais/orçamento).
+    const intOrU = (v: any, max: number) => v != null ? Math.max(0, Math.min(max, parseInt(String(v), 10) || 0)) : undefined;
+    const adults = intOrU(r.adults, 99);
+    const children = intOrU(r.children, 99);
+    const pets = typeof r.pets === "boolean" ? r.pets : (intOrU(r.pets, 99) ? true : undefined);
+    const specialRequests = this.clampStr(r.special_requests, 500) || undefined;
+    const budget = (r.budget != null && !isNaN(Number(r.budget))) ? Math.max(0, Number(r.budget)) : undefined;
+    return { resource, start, end, units, guests, adults, children, pets, specialRequests, budget };
   }
 
   /** Valida/limita uma entrega sugerida pela IA. */
@@ -1004,7 +1011,7 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
   "send_storefront": false,
   "customer_email": "", // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
   "route_to_area": "", // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
-  "reservation_request": null, // { resource, start, end, units, guests } SÓ quando o cliente quiser reservar um recurso por período (senão null)
+  "reservation_request": null, // { resource, start, end, units, guests, adults, children, pets (true/false), special_requests, budget } SÓ quando o cliente quiser reservar um recurso por período (senão null). Em HOTEL, pergunte e preencha adults/children/pets/special_requests quando souber — NÃO invente, deixe vazio se o cliente não disser.
   "send_subscription_pix": false, // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
   "referral_code_request": false, // true SÓ quando o cliente quiser INDICAR alguém / pedir o próprio código de indicação (e o programa estiver ativo)
   "apply_referral_code": "" // o código de indicação que o cliente informou para ganhar desconto (senão "")

@@ -57,6 +57,7 @@ router.post("/", (req: AuthRequest, res): any => {
       resourceId: String(b.resourceId), contactId: b.contactId || undefined, ticketId: b.ticketId || undefined,
       startAt: String(b.startAt), endAt: String(b.endAt),
       units: b.units, guests: b.guests, notes: b.notes, createdBy: "owner", depositAmount: b.depositAmount,
+      adults: b.adults, children: b.children, pets: b.pets, specialRequests: b.specialRequests, budget: b.budget,
     });
     res.json({ success: true, id: r.id });
   } catch (e: any) {

@@ -14,6 +14,8 @@ type Resource = { id: string; name: string; price: number; capacity: number; res
 type Reservation = {
   id: string; resource_name: string; reservation_unit: string; contact_name: string | null;
   start_at: string; end_at: string; units: number; status: string; total_amount: number;
+  guests?: number | null; adults?: number | null; children?: number | null;
+  pets?: number | null; special_requests?: string | null; budget?: number | null;
 };
 
 const UNIT_LABEL: Record<string, string> = { night: 'diária', day: 'dia', hour: 'hora', slot: 'turno' };
@@ -104,6 +106,16 @@ export function ReservasView() {
                 <p className="text-xs text-zinc-500 font-mono mt-1">
                   {format(new Date(r.start_at), 'Pp', { locale: ptBR })} → {format(new Date(r.end_at), 'Pp', { locale: ptBR })}
                 </p>
+                {/* Hotelaria: detalhes estruturados da hospedagem. */}
+                {(() => {
+                  const parts: string[] = [];
+                  if (r.adults != null || r.children != null) parts.push(`👤 ${r.adults ?? 0} adulto(s)${(r.children ?? 0) > 0 ? ` · 🧒 ${r.children} criança(s)` : ''}`);
+                  else if (r.guests != null) parts.push(`👤 ${r.guests} hóspede(s)`);
+                  if (r.pets) parts.push('🐾 pet');
+                  if (r.budget != null) parts.push(`💰 orçamento ${brl(r.budget)}`);
+                  return parts.length ? <p className="text-xs text-zinc-400 mt-1">{parts.join(' · ')}</p> : null;
+                })()}
+                {r.special_requests && <p className="text-xs text-indigo-300/80 mt-1">📝 {r.special_requests}</p>}
               </div>
               <div className="flex flex-col items-end gap-2">
                 <span className={`text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded ${

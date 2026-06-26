@@ -488,6 +488,8 @@ export async function processIncomingMessage(
                const r = ReservationService.create(orgId, {
                  resourceId: resource.id, contactId: contact.id, ticketId: ticket.id,
                  startAt: nr.start, endAt: nr.end, units: nr.units, guests: nr.guests, createdBy: 'ai',
+                 adults: nr.adults, children: nr.children, pets: nr.pets ? 1 : 0,
+                 specialRequests: nr.specialRequests, budget: nr.budget,
                });
                if (io) io.to(`org:${orgId}`).emit("reservation_created", { id: r.id, contactId: contact.id });
                console.log(`[Reservas] Reserva criada pela IA: ${r.id} (${resource.name}).`);

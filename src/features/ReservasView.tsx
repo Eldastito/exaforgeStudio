@@ -198,7 +198,7 @@ function ResourceModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 function ReservationModal({ resources, contacts, onClose, onSaved }: {
   resources: Resource[]; contacts: any[]; onClose: () => void; onSaved: () => void;
 }) {
-  const [form, setForm] = useState({ resourceId: resources[0]?.id || '', contactId: '', start: '', end: '', units: '1' });
+  const [form, setForm] = useState({ resourceId: resources[0]?.id || '', contactId: '', start: '', end: '', units: '1', adults: '', children: '', pets: false, specialRequests: '', budget: '' });
   const [avail, setAvail] = useState<{ bookable: boolean; livres: number; capacity: number } | null>(null);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -228,6 +228,11 @@ function ReservationModal({ resources, contacts, onClose, onSaved }: {
           resourceId: form.resourceId, contactId: form.contactId || undefined,
           startAt: new Date(form.start).toISOString(), endAt: new Date(form.end).toISOString(),
           units: Number(form.units) || 1,
+          adults: form.adults ? Number(form.adults) : undefined,
+          children: form.children ? Number(form.children) : undefined,
+          pets: form.pets ? 1 : 0,
+          specialRequests: form.specialRequests || undefined,
+          budget: form.budget ? Number(form.budget) : undefined,
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -257,6 +262,20 @@ function ReservationModal({ resources, contacts, onClose, onSaved }: {
           <Field label="Fim (check-out)"><input type="datetime-local" className={INP} value={form.end} onChange={e => setForm({ ...form, end: e.target.value })} /></Field>
         </div>
         <Field label="Unidades (quantos quartos/mesas)"><input type="number" min="1" className={INP} value={form.units} onChange={e => setForm({ ...form, units: e.target.value })} /></Field>
+
+        {/* Hotelaria: captura estruturada da hospedagem. Todos opcionais. */}
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Adultos"><input type="number" min="0" className={INP} value={form.adults} onChange={e => setForm({ ...form, adults: e.target.value })} /></Field>
+          <Field label="Crianças"><input type="number" min="0" className={INP} value={form.children} onChange={e => setForm({ ...form, children: e.target.value })} /></Field>
+          <Field label="Orçamento (R$)"><input type="number" min="0" step="0.01" className={INP} value={form.budget} onChange={e => setForm({ ...form, budget: e.target.value })} /></Field>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={form.pets} onChange={e => setForm({ ...form, pets: e.target.checked })} className="w-4 h-4 accent-emerald-600" />
+          Hóspede leva pet 🐾
+        </label>
+        <Field label="Pedidos especiais (opcional)">
+          <textarea className={INP + ' h-16 resize-none'} placeholder="Ex.: cama extra, alergia, andar alto, acessibilidade…" value={form.specialRequests} onChange={e => setForm({ ...form, specialRequests: e.target.value })} />
+        </Field>
 
         {checking ? (
           <p className="text-xs text-zinc-500 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Checando disponibilidade…</p>

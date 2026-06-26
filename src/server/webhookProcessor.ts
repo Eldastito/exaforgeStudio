@@ -15,6 +15,7 @@ import { SubscriptionService } from "./SubscriptionService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
 import { HandoffSummaryService } from "./HandoffSummaryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
+import { ReferralService } from "./ReferralService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -358,6 +359,30 @@ export async function processIncomingMessage(
        // Resposta final que será enviada (pode receber as instruções de pagamento).
        let finalReply = aiResult.reply;
 
+       // INDICAÇÃO: cliente informou um código recebido → valida e cria o cupom
+       // de boas-vindas (desconto na 1ª compra). Anexa a confirmação à resposta.
+       if (aiResult.applyReferralCode) {
+         try {
+           const applied = ReferralService.applyCode(orgId, aiResult.applyReferralCode, contact.id);
+           if (applied) {
+             finalReply = `${finalReply}\n\n🎉 Código de indicação aplicado! Você ganhou *${applied.welcomePercent}% de desconto* na sua primeira compra. Já entra automaticamente quando você fechar o pedido.`;
+           } else {
+             finalReply = `${finalReply}\n\n(Não consegui aplicar esse código de indicação — ele pode ser inválido, já ter sido usado, ou ser para clientes novos.)`;
+           }
+         } catch (e) { /* noop */ }
+       }
+
+       // INDICAÇÃO: cliente quer indicar / pediu o próprio código → gera e envia.
+       if (aiResult.referralCodeRequest) {
+         try {
+           const cfg = ReferralService.config(orgId);
+           if (cfg.enabled) {
+             const code = ReferralService.getOrCreateCode(orgId, contact.id);
+             finalReply = `${finalReply}\n\n🤝 Seu código de indicação é *${code}*. Compartilhe com seus amigos: quando alguém comprar usando ele, seu amigo ganha *${cfg.welcomePercent}%* na 1ª compra e você ganha *${cfg.rewardPercent}%* de desconto na próxima! 🎁`;
+           }
+         } catch (e) { /* noop */ }
+       }
+
        if (aiResult.newOrder && Array.isArray(aiResult.newOrder.items) && aiResult.newOrder.items.length) {
          try {
            // Trava anti-duplicidade: evita reservar o mesmo pedido várias vezes
@@ -365,13 +390,21 @@ export async function processIncomingMessage(
            if (OrdersService.hasRecentDuplicate(orgId, ticket.id, aiResult.newOrder.items)) {
              console.log(`[Vendas] Pedido duplicado ignorado para o ticket ${ticket.id}.`);
            } else {
+             // INDICAÇÃO: aplica automaticamente um cupom ATIVO do cliente (desconto).
+             const coupon = ReferralService.activeCoupon(orgId, contact.id);
              const order = OrdersService.createOrder(orgId, {
                contactId: contact.id,
                ticketId: ticket.id,
                items: aiResult.newOrder.items,
                createdBy: 'ai',
                autoClose: aiResult.newOrder.autoClose,
+               discountPercent: coupon?.discount_percent || 0,
+               couponId: coupon?.id || undefined,
              });
+             if (coupon && (order.discount || 0) > 0) {
+               ReferralService.redeem(orgId, coupon.id, order.id);
+               finalReply = `${finalReply}\n\n🎁 Apliquei seu desconto de *${coupon.discount_percent}%* (indicação): você economizou R$ ${Number(order.discount).toFixed(2)}!`;
+             }
              if (io) io.to(`org:${orgId}`).emit("order_created", { orderId: order.id, status: order.status, total: order.total, contactId: contact.id });
              try { NotificationService.orderCreated(orgId, contact.name, order.total); } catch (e) { /* noop */ }
              console.log(`[Vendas] Pedido criado pela IA: ${order.id} (status ${order.status}, total ${order.total})`);
@@ -455,6 +488,8 @@ export async function processIncomingMessage(
                const r = ReservationService.create(orgId, {
                  resourceId: resource.id, contactId: contact.id, ticketId: ticket.id,
                  startAt: nr.start, endAt: nr.end, units: nr.units, guests: nr.guests, createdBy: 'ai',
+                 adults: nr.adults, children: nr.children, pets: nr.pets ? 1 : 0,
+                 specialRequests: nr.specialRequests, budget: nr.budget,
                });
                if (io) io.to(`org:${orgId}`).emit("reservation_created", { id: r.id, contactId: contact.id });
                console.log(`[Reservas] Reserva criada pela IA: ${r.id} (${resource.name}).`);

@@ -2,8 +2,19 @@ import { Router } from "express";
 import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { PurchaseRequisitionService } from "../PurchaseRequisitionService.js";
+import { SupplierQuoteService } from "../SupplierQuoteService.js";
 
 const router = Router();
+
+// GET /api/procurement/suppliers — lista os fornecedores cadastrados.
+router.get("/suppliers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const rows = db.prepare(`SELECT id, name, identifier, supplier_categories FROM contacts WHERE organization_id = ? AND COALESCE(is_supplier,0) = 1 ORDER BY name ASC`).all(orgId);
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
 
 // GET /api/procurement/settings — opt-in + alvo de cobertura em dias.
 router.get("/settings", (req: AuthRequest, res): any => {
@@ -50,12 +61,38 @@ router.get("/requisition", (req: AuthRequest, res): any => {
 });
 
 // POST /api/procurement/requisition/:id/approve
-router.post("/requisition/:id/approve", (req: AuthRequest, res): any => {
+// Aprovar envia automaticamente a cotação aos fornecedores cadastrados.
+router.post("/requisition/:id/approve", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const ok = PurchaseRequisitionService.approve(orgId, req.params.id, userId);
+    if (!ok) return res.json({ success: false });
+    let sent = 0;
+    try {
+      const r = await SupplierQuoteService.sendQuotes(orgId, req.params.id, (global as any).io);
+      sent = r.sent;
+    } catch (e) { console.error('[Supply] Falha ao disparar cotações', e); }
+    res.json({ success: true, quotesSent: sent });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/requisition/:id/quotes — comparativo de cotações.
+router.get("/requisition/:id/quotes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(SupplierQuoteService.listByRequisition(orgId, req.params.id));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/procurement/quote/:id/accept — escolhe o fornecedor vencedor.
+router.post("/quote/:id/accept", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const ok = SupplierQuoteService.accept(orgId, req.params.id);
     res.json({ success: ok });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

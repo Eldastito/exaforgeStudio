@@ -15,6 +15,7 @@ import { SubscriptionService } from "./SubscriptionService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
 import { HandoffSummaryService } from "./HandoffSummaryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
+import { SupplierQuoteService } from "./SupplierQuoteService.js";
 import { ReferralService } from "./ReferralService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
@@ -165,6 +166,28 @@ export async function processIncomingMessage(
     };
     io.to(`org:${orgId}`).emit("new_message", msgPayload);
   }
+
+  // 4.4 COTAÇÃO DE FORNECEDOR: se este contato é fornecedor e tem cotação aberta,
+  // tenta parsear a resposta (preços/disponibilidade/prazo) e encerra a mensagem
+  // — sem rodar a IA padrão para este texto.
+  try {
+    const supplierFlag = db.prepare('SELECT is_supplier FROM contacts WHERE id = ?').get(contact.id) as any;
+    if (supplierFlag?.is_supplier) {
+      const pendingQuote = SupplierQuoteService.pendingForSupplier(orgId, contact.id);
+      if (pendingQuote) {
+        const ok = await SupplierQuoteService.parseSupplierReply(orgId, pendingQuote, payload.text);
+        if (ok) {
+          // Confirmação curta para o fornecedor (sem prometer nada).
+          const ackId = uuidv4();
+          const ack = "Recebido, obrigado! 🙏 Já está com o nosso time de compras para avaliar.";
+          db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`).run(ackId, orgId, ticket.id, ack);
+          if (io) io.to(`org:${orgId}`).emit("new_message", { id: ackId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: ack, sender: "bot", timestamp: new Date().toISOString() });
+          await MessageProviderService.sendMessage(channel.id, payload.senderId, ack);
+          return;
+        }
+      }
+    }
+  } catch (e) { console.error('[Supply] Falha ao processar resposta de fornecedor', e); }
 
   // 4.5 PESQUISA DE SATISFAÇÃO: se há uma pesquisa aberta e o cliente respondeu
   // com uma nota (1-5), registra, responde automaticamente (pede desculpas se

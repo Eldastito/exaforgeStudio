@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -56,6 +56,9 @@ export function SettingsView() {
       <div className="w-64 border-r border-zinc-800 bg-zinc-900/30 p-4 overflow-y-auto">
         <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4 px-3">Configurações</h3>
         <nav className="space-y-1">
+          <button onClick={() => setActiveTab('quickstart')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'quickstart' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Rocket className="w-4 h-4" /> Quick-Start
+          </button>
           <button onClick={() => setActiveTab('empresa')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'empresa' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Briefcase className="w-4 h-4" /> Empresa
           </button>
@@ -190,6 +193,7 @@ export function SettingsView() {
           {activeTab === 'cobranca' && <BillingPanel />}
 
           {activeTab === 'modulos' && <ModulesPanel />}
+          {activeTab === 'quickstart' && <QuickStartPanel />}
 
           {activeTab === 'usuarios' && (
              <UsersSettingsView />
@@ -454,5 +458,111 @@ function ModulesPanel() {
         </div>
       )}
     </>
+  );
+}
+
+
+// ============================================================================
+// QuickStartPanel — aplica um pacote completo de áreas + cadências + automações
+// + FAQ inicial em segundos, por vertical. Pitch da venda: "abre, clica, sai
+// vendendo". Idempotente (não duplica o que já existe).
+// ============================================================================
+function QuickStartPanel() {
+  const [packs, setPacks] = useState<any[]>([]);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [report, setReport] = useState<any>(null);
+  const [skipFaq, setSkipFaq] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/quickstart/packs').then(r => r.json()).then(d => setPacks(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+
+  const apply = async (vertical: string, label: string) => {
+    if (!confirm(`Aplicar o setup pronto de ${label}?\n\nO sistema vai criar áreas, cadências, automações e a base de conhecimento inicial.\n\nIdempotente: o que já existe não é alterado.`)) return;
+    setApplying(vertical);
+    setReport(null);
+    try {
+      const res = await apiFetch('/api/quickstart/apply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vertical, skipFaq }),
+      });
+      const d = await res.json();
+      if (d?.success) setReport({ ...d.report, vertical, label });
+      else alert(d?.error || 'Falha ao aplicar.');
+    } catch (e: any) { alert(e.message || 'Falha ao aplicar.'); }
+    finally { setApplying(null); }
+  };
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <Rocket className="w-6 h-6 text-indigo-400" /> Quick-Start
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">
+          Aplique um <b>setup pronto</b> da sua vertical em segundos: áreas de atendimento com personas
+          consultivas, cadências de follow-up, automações de recuperação e uma base inicial de FAQ.
+          <span className="text-emerald-400"> Idempotente</span> — não duplica o que já existe.
+        </p>
+      </div>
+
+      <label className="flex items-center gap-2 mb-4 text-xs text-zinc-400">
+        <input type="checkbox" checked={skipFaq} onChange={e => setSkipFaq(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+        Não criar a FAQ inicial (usar se você já tem sua própria base de conhecimento).
+      </label>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {packs.map((p) => (
+          <div key={p.vertical} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 flex flex-col">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="w-4 h-4 text-indigo-400" />
+              <p className="text-sm font-semibold text-zinc-100">{p.label}</p>
+            </div>
+            <p className="text-xs text-zinc-400 mb-3">Inclui:</p>
+            <ul className="text-xs text-zinc-300 space-y-1 mb-4 flex-1">
+              <li>✅ {p.summary.areas} áreas com persona da IA</li>
+              <li>✅ {p.summary.cadences} cadências de follow-up</li>
+              <li>✅ {p.summary.automations} automações pré-ativadas</li>
+              <li>✅ {p.summary.faq} FAQ inicial no RAG</li>
+            </ul>
+            <Button
+              disabled={applying != null}
+              onClick={() => apply(p.vertical, p.label)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {applying === p.vertical ? 'Aplicando…' : `Aplicar ${p.label}`}
+            </Button>
+          </div>
+        ))}
+        {packs.length === 0 && <p className="text-sm text-zinc-500">Carregando…</p>}
+      </div>
+
+      {report && (
+        <div className="mt-6 rounded-xl border border-emerald-700/40 bg-emerald-500/5 p-4">
+          <p className="text-sm font-medium text-emerald-300 flex items-center gap-2">
+            <Check className="w-4 h-4" /> Setup de {report.label} aplicado!
+          </p>
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <ReportLine label="Áreas" created={report.areas.created} skipped={report.areas.skipped} />
+            <ReportLine label="Cadências" created={report.cadences.created} skipped={report.cadences.skipped} />
+            <ReportLine label="Automações" created={report.automations.applied} skipped={0} />
+            <ReportLine label="FAQ" created={report.faq.created} skipped={report.faq.skipped} />
+          </div>
+          <p className="text-[11px] text-zinc-400 mt-3">
+            👉 Agora vá em <b>Atendimento</b> para ver as áreas, em <b>Cadências</b> para refinar mensagens e em <b>Canais</b> para revisar a FAQ. As automações estão visíveis em <b>Campanhas › Recuperação de vendas</b>.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ReportLine({ label, created, skipped }: { label: string; created: number; skipped: number }) {
+  return (
+    <div className="rounded bg-zinc-900/60 border border-zinc-800 p-2">
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className="text-sm text-zinc-200">{created} criado(s)</p>
+      {skipped > 0 && <p className="text-[10px] text-zinc-500">{skipped} já existia(m)</p>}
+    </div>
   );
 }

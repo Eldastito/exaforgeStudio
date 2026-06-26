@@ -3,6 +3,7 @@ import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { PurchaseRequisitionService } from "../PurchaseRequisitionService.js";
 import { SupplierQuoteService } from "../SupplierQuoteService.js";
+import { SupplyNetworkService } from "../SupplyNetworkService.js";
 
 const router = Router();
 
@@ -93,6 +94,59 @@ router.post("/quote/:id/accept", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const ok = SupplierQuoteService.accept(orgId, req.params.id);
+    res.json({ success: ok });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================================
+// REDE ZAPPFLOW (Fase 3) — perfil de fornecedora + busca + inbox.
+// ============================================================================
+
+// GET /api/procurement/network/profile — perfil da org como fornecedora.
+router.get("/network/profile", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SupplyNetworkService.profile(orgId)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/procurement/network/profile — liga/desliga + geocoda quando muda cidade.
+router.put("/network/profile", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    await SupplyNetworkService.saveProfile(orgId, req.body || {});
+    res.json({ success: true, profile: SupplyNetworkService.profile(orgId) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/network/suppliers — busca livre na rede (emergência).
+// Query: category (csv), maxKm, q (texto).
+router.get("/network/suppliers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const categories = String((req.query as any).category || "").split(",").map(s => s.trim()).filter(Boolean);
+    const maxKm = (req.query as any).maxKm ? parseInt(String((req.query as any).maxKm), 10) : undefined;
+    const query = String((req.query as any).q || "");
+    res.json(SupplyNetworkService.listSuppliers(orgId, { categories, maxDistanceKm: maxKm, query }));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/network/incoming — cotações recebidas pela org como fornecedora.
+router.get("/network/incoming", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SupplierQuoteService.incomingForNetwork(orgId)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/procurement/network/quote/:id/answer — fornecedor preenche e envia.
+router.post("/network/quote/:id/answer", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const ok = SupplierQuoteService.submitNetworkAnswer(orgId, req.params.id, req.body || { items: [] });
     res.json({ success: ok });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

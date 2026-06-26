@@ -406,6 +406,17 @@ export async function processIncomingMessage(
          } catch (e) { /* noop */ }
        }
 
+       // EMERGÊNCIA DE SUPRIMENTOS: a IA detectou que ALGO faltou de urgência
+       // (gestor/atendente). Sugere buscar na rede ZappFlow já filtrando.
+       if (aiResult.supplyEmergency && (aiResult.supplyEmergency.need || aiResult.supplyEmergency.category)) {
+         try {
+           const cat = aiResult.supplyEmergency.category;
+           const need = aiResult.supplyEmergency.need;
+           const suggestion = `🚨 *Emergência* detectada: ${need || cat}.\nQuer que eu busque agora na rede ZappFlow quem tem isso perto, em estoque? Abre em *Compras › Buscar na rede${cat ? ` › ${cat}` : ''}*.`;
+           finalReply = `${finalReply}\n\n${suggestion}`;
+         } catch (e) { /* noop */ }
+       }
+
        if (aiResult.newOrder && Array.isArray(aiResult.newOrder.items) && aiResult.newOrder.items.length) {
          try {
            // Trava anti-duplicidade: evita reservar o mesmo pedido várias vezes

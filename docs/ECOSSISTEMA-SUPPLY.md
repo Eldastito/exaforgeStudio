@@ -116,11 +116,25 @@ ALTER TABLE organization_settings ADD COLUMN procurement_target_days INTEGER DEF
   preço** e botão "Confirmar com fornecedor X" que aceita a vencedora e marca
   as demais como rejeitadas (requisição vira `ordered`).
 
-**Fase 3 — Rede ZappFlow (efeito de rede).**
-- Fornecedores são orgs no ZappFlow (catálogo + estoque vivo) com **geo + raio
-  de entrega**.
-- Matching automático "quem tem X, perto, em estoque, melhor preço/prazo".
-- Pedido de Compra (PO) + entrega agendada + **busca de emergência**.
+**Fase 3 — Rede ZappFlow (ENTREGUE):**
+- A própria **org** pode se oferecer como fornecedora na rede (opt-in com lista
+  pública: nome, categorias e cidade visíveis; preço/estoque só ao receber
+  cotação). Settings: `is_network_supplier`, `network_categories`,
+  `address_city/state/lat/lng`, `network_delivery_radius_km`,
+  `network_min_order_amount`.
+- **Geo**: Haversine + geocoding via Nominatim (OSM, gratuito) com cache em
+  `geocode_cache` para não martelar a API.
+- Cotação cross-org SEM WhatsApp/LLM: ao aprovar a requisição, além de
+  fornecedores locais, o sistema cria `purchase_quotes` com `network_org_id`
+  para cada org da rede que casa categoria. A org fornecedora vê em
+  **"Pedidos recebidos"** e preenche preço/disponibilidade/prazo direto na UI.
+  Resposta volta ao comparativo do comprador em tempo real (socket).
+- **Busca de emergência**:
+  - **UI**: aba "Buscar na rede" com filtros (categoria, distância, texto).
+  - **IA proativa**: novo intent `supply_emergency` no orquestrador detecta
+    falta urgente ("acabou o gás", "preciso de toalha agora") e oferece a
+    busca já filtrada.
+- Receita: **grátis no piloto** (sem comissão); monetização pela assinatura SaaS.
 
 ## Princípios
 

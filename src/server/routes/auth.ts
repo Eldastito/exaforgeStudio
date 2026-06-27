@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET } from "../config/secret.js";
+import { TOTPService } from "../TOTPService.js";
+import { EncryptionService } from "../EncryptionService.js";
 
 const router = Router();
 
@@ -118,7 +120,7 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
 });
 
 router.post("/login", async (req: Request, res: Response): Promise<any> => {
-  const { email, password } = req.body;
+  const { email, password, mfaToken } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ error: "Missing email or password" });
@@ -152,6 +154,35 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
       registerFailedLogin(attemptKey);
       logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    // 2FA: se o usuário tem MFA ativo, exige o código (do app ou um backup code)
+    // ANTES de emitir o token. Mantém o contador de tentativas para o 2º fator.
+    if (user.mfa_enabled) {
+      const provided = String(mfaToken || "").replace(/\s/g, "");
+      if (!provided) {
+        return res.status(401).json({ mfaRequired: true, error: "Código de verificação (2FA) necessário." });
+      }
+      const secret = EncryptionService.decrypt(user.mfa_secret);
+      let ok = !!secret && TOTPService.verify(secret, provided);
+      // Tenta um código de backup (consumido ao usar).
+      if (!ok && user.mfa_backup_codes) {
+        try {
+          const codes: string[] = JSON.parse(EncryptionService.decrypt(user.mfa_backup_codes) || "[]");
+          const idx = codes.indexOf(provided);
+          if (idx >= 0) {
+            codes.splice(idx, 1);
+            db.prepare("UPDATE users SET mfa_backup_codes = ? WHERE id = ?").run(EncryptionService.encrypt(JSON.stringify(codes)), user.id);
+            ok = true;
+            logAuthEvent(user.organization_id, user.id, user.id, 'MFA_BACKUP_CODE_USED', { email });
+          }
+        } catch (e) { /* noop */ }
+      }
+      if (!ok) {
+        registerFailedLogin(attemptKey);
+        logAuthEvent(user.organization_id, user.id, user.id, 'MFA_FAILED', { email });
+        return res.status(401).json({ mfaRequired: true, error: "Código 2FA inválido." });
+      }
     }
 
     // Login OK: zera o contador de tentativas

@@ -29,6 +29,7 @@ import procurementRoutes from "./src/server/routes/procurement.js";
 import quotesRoutes from "./src/server/routes/quotes.js";
 import eventsRoutes from "./src/server/routes/events.js";
 import quickstartRoutes from "./src/server/routes/quickstart.js";
+import mfaRoutes from "./src/server/routes/mfa.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
@@ -350,6 +351,7 @@ async function startServer() {
   protectedApi.use("/quotes", quotesRoutes);
   protectedApi.use("/events", eventsRoutes);
   protectedApi.use("/quickstart", quickstartRoutes);
+  protectedApi.use("/mfa", mfaRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);

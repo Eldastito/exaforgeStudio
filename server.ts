@@ -42,6 +42,7 @@ import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
+import { EncryptionService } from "./src/server/EncryptionService.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
@@ -983,6 +984,10 @@ async function startServer() {
 
   // Torna o io acessível globalmente (para uso no webhook)
   (global as any).io = io;
+
+  // Cifra segredos em repouso (token do gateway de pagamento, tokens Google) que
+  // ainda estejam em texto. Idempotente — pula o que já está cifrado.
+  try { EncryptionService.backfillExistingSecrets(); } catch (e) { console.error('[Encryption] Falha no backfill', e); }
 
   // Agendador interno (reativação automática semanal, opt-in por organização).
   Scheduler.start(io);

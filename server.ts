@@ -29,6 +29,8 @@ import procurementRoutes from "./src/server/routes/procurement.js";
 import quotesRoutes from "./src/server/routes/quotes.js";
 import eventsRoutes from "./src/server/routes/events.js";
 import quickstartRoutes from "./src/server/routes/quickstart.js";
+import connectorRoutes from "./src/server/routes/connector.js";
+import connectorPublicRoutes from "./src/server/routes/connectorPublic.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
@@ -165,7 +167,7 @@ async function startServer() {
      if (process.env.ENABLE_RATE_LIMIT === 'true' || process.env.NODE_ENV === 'production') {
         // Não limita webhooks (serviços externos) nem assets/SPA.
         const p = req.path || '';
-        if (p.startsWith('/api/webhooks') || p.startsWith('/media') || p.startsWith('/assets') || !p.startsWith('/api')) {
+        if (p.startsWith('/api/webhooks') || p.startsWith('/api/connector-in') || p.startsWith('/media') || p.startsWith('/assets') || !p.startsWith('/api')) {
            return next();
         }
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
@@ -308,6 +310,10 @@ async function startServer() {
   // autenticado para que /api/public/* nunca exija JWT.
   app.use("/api/public", storefrontPublicRoutes);
 
+  // Conector AGNÓSTICO de PMS/OTA/ERP — autenticado por TOKEN (não JWT). Fica
+  // antes do catch-all autenticado para sistemas externos empurrarem dados.
+  app.use("/api/connector-in", connectorPublicRoutes);
+
   // Apply Auth Middleware to all subsequent protected API routes
   const protectedApi = express.Router();
   protectedApi.use(requireAuth);
@@ -349,6 +355,7 @@ async function startServer() {
   protectedApi.use("/quotes", quotesRoutes);
   protectedApi.use("/events", eventsRoutes);
   protectedApi.use("/quickstart", quickstartRoutes);
+  protectedApi.use("/connector", connectorRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);

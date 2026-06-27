@@ -22,6 +22,8 @@ export function LoginView() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
 
   // Link de convite: ?invite=TOKEN&email=... abre o cadastro já preenchido.
   // (o app não envia e-mail, então o owner compartilha esse link manualmente)
@@ -80,11 +82,17 @@ export function LoginView() {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ email, password, mfaToken: mfaCode || undefined })
         });
         const data = await res.json();
+        if (data.mfaRequired) {
+          // 1º fator OK; pede o código do app autenticador (ou backup).
+          setMfaRequired(true);
+          if (mfaCode) setError(data.error || 'Código 2FA inválido.');
+          return;
+        }
         if (!res.ok) throw new Error(data.error || 'Erro no login');
-        
+
         login(data.token, data.user);
       } else if (view === 'forgot') {
         const res = await fetch('/api/auth/forgot-password', {
@@ -231,7 +239,7 @@ export function LoginView() {
                />
              </div>
              
-             {view !== 'forgot' && (
+             {view !== 'forgot' && !mfaRequired && (
                <div>
                  <label className="block text-sm font-medium text-zinc-300 mb-1">
                    {view === 'reset' ? 'Nova Senha' : 'Senha'}
@@ -255,11 +263,24 @@ export function LoginView() {
                </div>
              )}
 
+             {view === 'login' && mfaRequired && (
+               <div>
+                 <label className="block text-sm font-medium text-zinc-300 mb-1">Código de verificação (2FA)</label>
+                 <input
+                   type="text" inputMode="numeric" autoComplete="one-time-code" required value={mfaCode}
+                   onChange={e => setMfaCode(e.target.value)}
+                   className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-center text-lg tracking-widest text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                   placeholder="000000" autoFocus
+                 />
+                 <p className="text-xs text-zinc-500 mt-1">Abra seu app autenticador (ou use um código de backup).</p>
+               </div>
+             )}
+
              <Button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white mt-6">
-                {loading ? 'Processando...' : 
-                  view === 'register' ? 'Criar Conta' : 
-                  view === 'login' ? 'Entrar' : 
-                  view === 'forgot' ? 'Enviar' : 
+                {loading ? 'Processando...' :
+                  view === 'register' ? 'Criar Conta' :
+                  view === 'login' ? (mfaRequired ? 'Verificar' : 'Entrar') :
+                  view === 'forgot' ? 'Enviar' :
                   'Redefinir'}
              </Button>
           </form>

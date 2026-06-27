@@ -368,6 +368,11 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE users ADD COLUMN global_status TEXT DEFAULT 'active'`); } catch(e){}
   try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`); } catch(e){}
+  // MFA / 2FA (TOTP) — opt-in por usuário. Segredos cifrados em repouso.
+  try { db.exec(`ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE users ADD COLUMN mfa_secret TEXT`); } catch(e){}           // segredo ativo (cifrado)
+  try { db.exec(`ALTER TABLE users ADD COLUMN mfa_pending_secret TEXT`); } catch(e){}   // durante o setup, antes de confirmar
+  try { db.exec(`ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT`); } catch(e){}     // JSON cifrado de códigos de backup
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN onboarding_status TEXT DEFAULT 'pending'`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN segment TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN size_range TEXT`); } catch(e){}

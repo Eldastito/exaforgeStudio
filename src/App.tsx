@@ -24,13 +24,14 @@ import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
 import { GlobalSearch } from '@/src/features/GlobalSearch';
+import { ErrorBoundary } from '@/src/features/ErrorBoundary';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useStore } from '@/src/store/useStore';
 import { Bell, X, Menu } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, isModuleEnabled, setViewMode } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, isModuleEnabled, setViewMode, enabledModules } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -52,8 +53,10 @@ export default function App() {
       orcamentos: 'orcamentos', eventos: 'eventos',
     };
     const mod = map[viewMode];
-    if (mod && !isModuleEnabled(mod)) setViewMode('kanban');
-  }, [viewMode, isModuleEnabled, setViewMode]);
+    // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
+    // para não ricochetear para o Atendimento durante o carregamento inicial.
+    if (enabledModules !== null && mod && !isModuleEnabled(mod)) setViewMode('kanban');
+  }, [viewMode, isModuleEnabled, setViewMode, enabledModules]);
 
   useEffect(() => {
     if (!token) return;
@@ -229,8 +232,10 @@ export default function App() {
            </div>
         )}
 
-        {/* Main Content Area */}
+        {/* Main Content Area — protegido por ErrorBoundary: se uma view quebrar,
+            mostra o erro nela em vez de derrubar o app inteiro (tela branca). */}
         <main className="flex-1 flex overflow-hidden">
+          <ErrorBoundary resetKey={viewMode}>
           {viewMode === 'kanban' && (
             <>
               {/* Mobile: empilha — mostra o Kanban OU o Chat (quando um card está aberto).
@@ -262,6 +267,7 @@ export default function App() {
           {viewMode === 'compras' && <ProcurementView />}
           {viewMode === 'orcamentos' && <QuotesView />}
           {viewMode === 'eventos' && <EventsView />}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

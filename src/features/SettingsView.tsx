@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -70,6 +70,12 @@ export function SettingsView() {
           </button>
           <button onClick={() => setActiveTab('modulos')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'modulos' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <LayoutGrid className="w-4 h-4" /> Módulos
+          </button>
+          <button onClick={() => setActiveTab('seguranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'seguranca' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <ShieldCheck className="w-4 h-4" /> Segurança (2FA)
+          </button>
+          <button onClick={() => setActiveTab('privacidade')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'privacidade' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Lock className="w-4 h-4" /> Privacidade (LGPD)
           </button>
         </nav>
       </div>
@@ -194,6 +200,8 @@ export function SettingsView() {
 
           {activeTab === 'modulos' && <ModulesPanel />}
           {activeTab === 'quickstart' && <QuickStartPanel />}
+          {activeTab === 'seguranca' && <SecurityPanel />}
+          {activeTab === 'privacidade' && <LgpdPanel />}
 
           {activeTab === 'usuarios' && (
              <UsersSettingsView />
@@ -564,5 +572,172 @@ function ReportLine({ label, created, skipped }: { label: string; created: numbe
       <p className="text-sm text-zinc-200">{created} criado(s)</p>
       {skipped > 0 && <p className="text-[10px] text-zinc-500">{skipped} já existia(m)</p>}
     </div>
+  );
+}
+
+// ============================================================================
+// SecurityPanel — 2FA (TOTP) self-service por usuário: ativar/desativar.
+// ============================================================================
+function SecurityPanel() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [step, setStep] = useState<'idle' | 'setup'>('idle');
+  const [qr, setQr] = useState('');
+  const [secret, setSecret] = useState('');
+  const [code, setCode] = useState('');
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const loadStatus = () => apiFetch('/api/mfa/status').then(r => r.json()).then(d => setEnabled(!!d.enabled)).catch(() => setEnabled(false));
+  useEffect(() => { loadStatus(); }, []);
+
+  const startSetup = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const r = await apiFetch('/api/mfa/setup', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao iniciar.');
+      setQr(d.qr); setSecret(d.secret); setStep('setup'); setBackupCodes(null);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const confirm = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const r = await apiFetch('/api/mfa/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: code }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Código inválido.');
+      setBackupCodes(d.backupCodes || []); setStep('idle'); setCode(''); loadStatus();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const disable = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const r = await apiFetch('/api/mfa/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao desativar.');
+      setPassword(''); loadStatus();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <ShieldCheck className="w-6 h-6 text-indigo-400" /> Verificação em duas etapas (2FA)
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">Adicione uma camada extra de segurança ao seu login com um app autenticador (Google Authenticator, Authy, 1Password).</p>
+      </div>
+
+      {err && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{err}</div>}
+
+      {backupCodes && (
+        <div className="mb-6 rounded-xl border border-amber-600/40 bg-amber-500/5 p-4">
+          <p className="text-sm font-medium text-amber-300">Guarde seus códigos de backup</p>
+          <p className="text-xs text-zinc-400 mt-1 mb-3">Cada código funciona uma vez se você perder o acesso ao app. Guarde em local seguro — não serão mostrados de novo.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {backupCodes.map(c => <span key={c} className="font-mono text-sm text-center bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200">{c}</span>)}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+        {enabled === null && <p className="text-sm text-zinc-500">Carregando…</p>}
+
+        {enabled === true && (
+          <div>
+            <p className="text-sm text-emerald-400 flex items-center gap-2 mb-4"><Check className="w-4 h-4" /> 2FA está <b>ativo</b> na sua conta.</p>
+            <p className="text-sm text-zinc-400 mb-2">Para desativar, confirme sua senha:</p>
+            <div className="flex gap-2 max-w-sm">
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Sua senha" className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100" />
+              <Button onClick={disable} disabled={busy || !password} className="bg-red-600 hover:bg-red-700 text-white">Desativar</Button>
+            </div>
+          </div>
+        )}
+
+        {enabled === false && step === 'idle' && (
+          <div>
+            <p className="text-sm text-zinc-400 mb-4">Sua conta está protegida apenas por senha. Ative o 2FA para exigir um código a cada login.</p>
+            <Button onClick={startSetup} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white">{busy ? 'Aguarde…' : 'Ativar 2FA'}</Button>
+          </div>
+        )}
+
+        {enabled === false && step === 'setup' && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300">1. Escaneie o QR code no seu app autenticador:</p>
+            {qr && <img src={qr} alt="QR Code 2FA" className="w-44 h-44 rounded-lg border border-zinc-800 bg-white p-2" />}
+            <p className="text-xs text-zinc-500">Ou digite manualmente a chave: <span className="font-mono text-zinc-300 break-all">{secret}</span></p>
+            <p className="text-sm text-zinc-300">2. Digite o código de 6 dígitos gerado:</p>
+            <div className="flex gap-2 max-w-xs">
+              <input type="text" inputMode="numeric" value={code} onChange={e => setCode(e.target.value)} placeholder="000000" className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-center text-lg tracking-widest text-zinc-100" />
+              <Button onClick={confirm} disabled={busy || code.length < 6} className="bg-emerald-600 hover:bg-emerald-700 text-white">Confirmar</Button>
+            </div>
+            <button onClick={() => { setStep('idle'); setErr(''); }} className="text-xs text-zinc-500 hover:text-zinc-300">Cancelar</button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// LgpdPanel — política de retenção de dados (opt-in) + atalho aos direitos do titular.
+// ============================================================================
+function LgpdPanel() {
+  const [settings, setSettings] = useState<{ enabled: boolean; days: number } | null>(null);
+
+  useEffect(() => { apiFetch('/api/lgpd/settings').then(r => r.json()).then(setSettings).catch(() => {}); }, []);
+
+  const save = async (patch: Partial<{ enabled: boolean; days: number }>) => {
+    const next = { enabled: settings?.enabled || false, days: settings?.days || 365, ...patch };
+    setSettings(next);
+    await apiFetch('/api/lgpd/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) }).catch(() => {});
+  };
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <Lock className="w-6 h-6 text-indigo-400" /> Privacidade & LGPD
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">Política de retenção de dados e direitos do titular (acesso, portabilidade e esquecimento).</p>
+      </div>
+
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 space-y-5">
+        {settings && (
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-zinc-100">🗑️ Retenção automática de dados</p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Apaga o conteúdo de mensagens de atendimentos <b>já encerrados</b> com mais de{' '}
+                <input type="number" min={30} value={settings.days}
+                  onChange={e => setSettings({ ...settings, days: parseInt(e.target.value, 10) || 365 })}
+                  onBlur={e => save({ days: parseInt(e.target.value, 10) || 365 })}
+                  className="w-20 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-center text-zinc-200" /> dias.
+                Pedidos e valores são mantidos (sem dado pessoal) para histórico.
+              </p>
+            </div>
+            <button onClick={() => save({ enabled: !settings.enabled })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.enabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+        )}
+
+        <div className="border-t border-zinc-800 pt-4">
+          <p className="text-sm font-medium text-zinc-100">👤 Direitos do titular</p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Em <b>Contatos</b>, cada cliente tem as ações <b>Exportar dados</b> (portabilidade, baixa um JSON) e
+            <b> Esquecer</b> (anonimiza os dados pessoais e apaga o conteúdo das conversas). Use quando o titular solicitar.
+          </p>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-4 text-xs text-zinc-500">
+          <p>🔒 Medidas de segurança ativas: isolamento por organização (multi-tenant), segredos cifrados em repouso (AES-256-GCM), 2FA opcional, senhas com hash bcrypt e HTTPS forçado. Detalhes em <code>docs/LGPD-PRIVACIDADE.md</code>.</p>
+        </div>
+      </div>
+    </>
   );
 }

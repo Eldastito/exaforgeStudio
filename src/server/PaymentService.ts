@@ -7,6 +7,7 @@ import { CadenceService } from "./CadenceService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { ReferralService } from "./ReferralService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { EncryptionService } from "./EncryptionService.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -28,6 +29,7 @@ export class PaymentService {
              reservation_deposit_percent
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any;
+    if (o && o.pay_gateway_token) o.pay_gateway_token = EncryptionService.decrypt(o.pay_gateway_token);
     return o || {};
   }
 
@@ -68,7 +70,7 @@ export class PaymentService {
     }
     // Token/segredo só são gravados quando enviados (não apagam sem querer).
     if (typeof p.gatewayToken === 'string' && p.gatewayToken) {
-      db.prepare(`UPDATE organization_settings SET pay_gateway_token = ? WHERE organization_id = ?`).run(p.gatewayToken, orgId);
+      db.prepare(`UPDATE organization_settings SET pay_gateway_token = ? WHERE organization_id = ?`).run(EncryptionService.encrypt(p.gatewayToken), orgId);
     }
     // Sinal de reservas (% de 0 a 100).
     if (p.reservationDepositPercent !== undefined) {

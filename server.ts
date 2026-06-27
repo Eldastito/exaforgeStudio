@@ -31,6 +31,8 @@ import eventsRoutes from "./src/server/routes/events.js";
 import quickstartRoutes from "./src/server/routes/quickstart.js";
 import connectorRoutes from "./src/server/routes/connector.js";
 import connectorPublicRoutes from "./src/server/routes/connectorPublic.js";
+import mfaRoutes from "./src/server/routes/mfa.js";
+import lgpdRoutes from "./src/server/routes/lgpd.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
@@ -44,6 +46,7 @@ import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
+import { EncryptionService } from "./src/server/EncryptionService.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
@@ -356,6 +359,8 @@ async function startServer() {
   protectedApi.use("/events", eventsRoutes);
   protectedApi.use("/quickstart", quickstartRoutes);
   protectedApi.use("/connector", connectorRoutes);
+  protectedApi.use("/mfa", mfaRoutes);
+  protectedApi.use("/lgpd", lgpdRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);
@@ -994,6 +999,9 @@ async function startServer() {
   // Backfill: torna explícitos os módulos de orgs que estavam sem config (evita
   // o antigo padrão "mostra tudo"). Idempotente — roda barato a cada boot.
   try { ModuleService.backfillNullModules(); } catch (e) { console.error('[Modules] Falha no backfill', e); }
+  // Cifra segredos em repouso (token do gateway de pagamento, tokens Google) que
+  // ainda estejam em texto. Idempotente — pula o que já está cifrado.
+  try { EncryptionService.backfillExistingSecrets(); } catch (e) { console.error('[Encryption] Falha no backfill', e); }
 
   // Agendador interno (reativação automática semanal, opt-in por organização).
   Scheduler.start(io);

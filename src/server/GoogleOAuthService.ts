@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
 import { JWT_SECRET } from "./config/secret.js";
+import { EncryptionService } from "./EncryptionService.js";
 
 // Integração Google (server-side, com acesso offline). Diferente do login do
 // Firebase (que vive só no navegador), aqui guardamos um refresh_token por
@@ -92,12 +93,12 @@ export class GoogleOAuthService {
       // Upsert (uma conexão Google por org). Preserva o refresh_token se o Google
       // não reenviar (raro, porque usamos prompt=consent).
       const existing = db.prepare("SELECT refresh_token FROM oauth_connections WHERE organization_id = ? AND provider = 'google'").get(orgId) as any;
-      const refresh = tok.refresh_token || existing?.refresh_token || null;
+      const refresh = tok.refresh_token || EncryptionService.decrypt(existing?.refresh_token) || null;
       db.prepare("DELETE FROM oauth_connections WHERE organization_id = ? AND provider = 'google'").run(orgId);
       db.prepare(
         `INSERT INTO oauth_connections (id, organization_id, provider, access_token, refresh_token, scopes, expires_at, account_email, account_name)
          VALUES (?, ?, 'google', ?, ?, ?, ?, ?, ?)`
-      ).run(uuidv4(), orgId, tok.access_token, refresh, SCOPES, expiresAt, email, name);
+      ).run(uuidv4(), orgId, EncryptionService.encrypt(tok.access_token), EncryptionService.encrypt(refresh), SCOPES, expiresAt, email, name);
       return orgId;
     } catch (e) {
       console.error("[Google OAuth] callback erro:", e);
@@ -106,7 +107,12 @@ export class GoogleOAuthService {
   }
 
   static getConnection(orgId: string): any {
-    return db.prepare("SELECT * FROM oauth_connections WHERE organization_id = ? AND provider = 'google'").get(orgId) as any || null;
+    const c = db.prepare("SELECT * FROM oauth_connections WHERE organization_id = ? AND provider = 'google'").get(orgId) as any || null;
+    if (c) {
+      if (c.access_token) c.access_token = EncryptionService.decrypt(c.access_token);
+      if (c.refresh_token) c.refresh_token = EncryptionService.decrypt(c.refresh_token);
+    }
+    return c;
   }
 
   static status(orgId: string) {
@@ -142,7 +148,7 @@ export class GoogleOAuthService {
       const tok: any = await res.json().catch(() => ({}));
       if (!res.ok || !tok.access_token) { console.error("[Google OAuth] refresh falhou:", tok); return null; }
       const expiresAt = new Date(Date.now() + (Number(tok.expires_in || 3600) * 1000)).toISOString();
-      db.prepare("UPDATE oauth_connections SET access_token = ?, expires_at = ? WHERE id = ?").run(tok.access_token, expiresAt, c.id);
+      db.prepare("UPDATE oauth_connections SET access_token = ?, expires_at = ? WHERE id = ?").run(EncryptionService.encrypt(tok.access_token), expiresAt, c.id);
       return tok.access_token;
     } catch (e) {
       console.error("[Google OAuth] refresh erro:", e);

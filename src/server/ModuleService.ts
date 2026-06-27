@@ -42,8 +42,36 @@ export class ModuleService {
   static isEnabled(orgId: string, moduleKey: string): boolean {
     if (this.CORE.includes(moduleKey)) return true;
     const em = this.enabledModules(orgId);
-    if (em == null) return true; // sem configuração explícita ⇒ liberado
+    // Sem configuração explícita ⇒ só o NÚCLEO (módulos opcionais ficam ocultos
+    // até a org escolher a vertical no onboarding / Quick-Start). O backfill
+    // (backfillNullModules) torna explícito o que as orgs existentes já tinham,
+    // então esse caso só ocorre na janela curta antes do onboarding.
+    if (em == null) return false;
     return em.includes(moduleKey);
+  }
+
+  /**
+   * Backfill idempotente: torna EXPLÍCITO o conjunto de módulos das orgs que
+   * estavam com enabled_modules nulo. Org COM vertical recebe o preset da
+   * vertical; org SEM vertical recebe o preset "outro" (todos) — preservando o
+   * que ela já enxergava (sem surpresa), porém agora explícito e refinável.
+   */
+  static backfillNullModules(): { updated: number } {
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(
+        "SELECT organization_id, vertical FROM organization_settings WHERE enabled_modules IS NULL OR enabled_modules = ''"
+      ).all() as any[];
+    } catch (e) { return { updated: 0 }; }
+    let updated = 0;
+    const upd = db.prepare("UPDATE organization_settings SET enabled_modules = ? WHERE organization_id = ?");
+    for (const r of rows) {
+      const v = getVertical(r.vertical) || getVertical("outro");
+      if (!v) continue;
+      try { upd.run(JSON.stringify(this.sanitize(v.modules)), r.organization_id); updated++; } catch (e) { /* noop */ }
+    }
+    if (updated) console.log(`[Modules] Backfill: ${updated} organização(ões) com módulos explícitos.`);
+    return { updated };
   }
 
   /** Sanitiza uma lista de módulos para apenas os opcionais conhecidos. */

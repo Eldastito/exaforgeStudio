@@ -991,6 +991,10 @@ async function startServer() {
   // Torna o io acessível globalmente (para uso no webhook)
   (global as any).io = io;
 
+  // Backfill: torna explícitos os módulos de orgs que estavam sem config (evita
+  // o antigo padrão "mostra tudo"). Idempotente — roda barato a cada boot.
+  try { ModuleService.backfillNullModules(); } catch (e) { console.error('[Modules] Falha no backfill', e); }
+
   // Agendador interno (reativação automática semanal, opt-in por organização).
   Scheduler.start(io);
   // Notificações in-app em tempo real (emite via Socket.io).

@@ -239,6 +239,31 @@ export function ContactsView() {
                   ) : null}
                 </div>
               </div>
+              {/* LGPD: direitos do titular. */}
+              <div className="mt-2 flex items-center gap-3 pt-2 border-t border-zinc-800/70 text-[11px]">
+                <button
+                  className="text-indigo-300 hover:underline"
+                  onClick={async () => {
+                    try {
+                      const res = await apiFetch(`/api/lgpd/contact/${c.id}/export`);
+                      if (!res.ok) return;
+                      const blob = await res.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = `dados-${c.name || c.id}.json`; a.click();
+                      URL.revokeObjectURL(url);
+                    } catch {}
+                  }}
+                >Exportar dados</button>
+                <button
+                  className="text-rose-400 hover:underline"
+                  onClick={async () => {
+                    if (!confirm('Esquecer este contato? Os dados pessoais serão anonimizados e o conteúdo das conversas apagado. Ação irreversível (LGPD).')) return;
+                    await apiFetch(`/api/lgpd/contact/${c.id}/forget`, { method: 'POST' });
+                    load();
+                  }}
+                >Esquecer (LGPD)</button>
+              </div>
             </div>
           );
         })}

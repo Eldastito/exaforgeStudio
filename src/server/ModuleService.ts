@@ -27,6 +27,7 @@ export class ModuleService {
     procurement: "compras",
     quotes: "orcamentos",
     events: "eventos",
+    executive: "diretor",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

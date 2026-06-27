@@ -10,6 +10,7 @@ import { AssinaturasView } from '@/src/features/AssinaturasView';
 import { ProcurementView } from '@/src/features/ProcurementView';
 import { QuotesView } from '@/src/features/QuotesView';
 import { EventsView } from '@/src/features/EventsView';
+import { ExecutiveView } from '@/src/features/ExecutiveView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -50,7 +51,7 @@ export default function App() {
       agenda: 'agenda', catalog: 'catalogo', vendas: 'vendas', storefront: 'loja',
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
-      orcamentos: 'orcamentos', eventos: 'eventos',
+      orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
@@ -186,6 +187,7 @@ export default function App() {
              {viewMode === 'compras' && 'Compras'}
              {viewMode === 'orcamentos' && 'Orçamentos'}
              {viewMode === 'eventos' && 'Eventos & Grupos'}
+             {viewMode === 'diretor' && 'Diretor Executivo IA'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -267,6 +269,7 @@ export default function App() {
           {viewMode === 'compras' && <ProcurementView />}
           {viewMode === 'orcamentos' && <QuotesView />}
           {viewMode === 'eventos' && <EventsView />}
+          {viewMode === 'diretor' && <ExecutiveView />}
           </ErrorBoundary>
         </main>
       </div>

@@ -378,6 +378,7 @@ const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
   { key: 'compras', label: 'Compras', desc: 'Reposição inteligente: a IA detecta estoque crítico e gera lista de compra para aprovação.' },
   { key: 'orcamentos', label: 'Orçamentos', desc: 'Orçamentos como objeto rastreável: enviado/aceito/recusado + follow-up automático até a validade.' },
   { key: 'eventos', label: 'Eventos & Grupos', desc: 'Pipeline de consultas consultivas (casamento, convenção, day use, corporativo). A IA detecta na conversa e cria a consulta.' },
+  { key: 'diretor', label: 'Diretor Executivo IA', desc: 'Conselheiro de gestão: pergunte em linguagem natural ("onde estou perdendo dinheiro?") e receba resposta com dados reais + briefing diário.' },
   { key: 'catalogo', label: 'Catálogo', desc: 'Produtos e serviços.' },
   { key: 'vendas', label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
   { key: 'loja', label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },

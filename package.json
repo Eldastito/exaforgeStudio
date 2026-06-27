@@ -9,7 +9,8 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:isolation": "tsx scripts/test-tenant-isolation.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

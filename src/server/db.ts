@@ -986,6 +986,26 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quote_validity_hours INTEGER DEFAULT 72`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quote_followup_hours INTEGER DEFAULT 24`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quote_followup_max INTEGER DEFAULT 2`); } catch(e){}
+  // Conector genérico (Fase A — integração agnóstica de PMS/OTA/ERP). Token de
+  // entrada para sistemas externos empurrarem disponibilidade/preço por data.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN integration_token TEXT`); } catch(e){}
+  // Override de disponibilidade/preço por recurso e data (fonte externa). Quando
+  // existe, a reserva respeita estes números (teto de unidades + preço da diária).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS resource_availability (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        date TEXT NOT NULL,               -- YYYY-MM-DD
+        available_units INTEGER,          -- unidades vendáveis no dia (teto)
+        price_override REAL,              -- preço da diária no dia (opcional)
+        source TEXT,                      -- 'csv' | 'webhook' | nome do PMS
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_resavail_unique ON resource_availability(organization_id, resource_id, date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar resource_availability', e); }
   // Verticais & gating de módulos: a vertical escolhida e a lista de módulos
   // opcionais habilitados (JSON). enabled_modules NULL = todos ligados (legado).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vertical TEXT`); } catch(e){}

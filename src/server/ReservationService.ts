@@ -70,10 +70,132 @@ export class ReservationService {
           AND status IN ('pending','confirmed')
           AND start_at < ? AND end_at > ?`
     ).get(orgId, resourceId, endAt, startAt) as any;
-    const capacity = Number(r.capacity || 1);
+    let capacity = Number(r.capacity || 1);
+    // Conector externo (PMS/OTA): se há override de disponibilidade nas datas do
+    // período, o TETO de unidades vendáveis passa a ser o menor valor informado.
+    try {
+      const days = this.daysInRange(startAt, endAt);
+      if (days.length) {
+        const ph = days.map(() => '?').join(',');
+        const ov = db.prepare(
+          `SELECT date, available_units FROM resource_availability
+            WHERE organization_id = ? AND resource_id = ? AND available_units IS NOT NULL AND date IN (${ph})`
+        ).all(orgId, resourceId, ...days) as any[];
+        if (ov.length) {
+          const map = new Map(ov.map(o => [o.date, Number(o.available_units)]));
+          let minCap = capacity;
+          for (const d of days) minCap = Math.min(minCap, map.has(d) ? (map.get(d) as number) : capacity);
+          capacity = Math.max(0, minCap);
+        }
+      }
+    } catch (e) { /* sem override: mantém capacidade interna */ }
     const ocupadas = Number(row?.ocupadas || 0);
     const livres = Math.max(0, capacity - ocupadas);
     return { ok: true, capacity, ocupadas, livres, bookable: livres >= units };
+  }
+
+  /** Dias (YYYY-MM-DD, fuso America/Sao_Paulo) cobertos por uma estadia. Para
+   *  diárias, vai do check-in até a véspera do check-out; day-use = só o dia. */
+  static daysInRange(startAt: string, endAt: string): string[] {
+    const s = new Date(startAt).getTime();
+    const e = new Date(endAt).getTime();
+    if (!(e > s)) return [];
+    const local = (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // YYYY-MM-DD
+    const sd = local(s), ed = local(e);
+    if (sd === ed) return [sd];
+    const out: string[] = [];
+    // Âncora ao meio-dia UTC para imunizar contra horário de verão ao incrementar.
+    let cur = new Date(`${sd}T12:00:00Z`);
+    const stop = new Date(`${ed}T12:00:00Z`);
+    while (cur.getTime() < stop.getTime()) {
+      out.push(cur.toISOString().slice(0, 10));
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return out.length ? out : [sd];
+  }
+
+  /** Total da reserva considerando preços por data (override do conector) quando
+   *  existirem; senão usa o preço-base do recurso × períodos. */
+  static ratedTotal(orgId: string, resource: any, startAt: string, endAt: string, units: number): number {
+    const unit = (resource.reservation_unit || "night") as ReservationUnit;
+    const base = Number(resource.price || 0);
+    if (unit === "night" || unit === "day") {
+      const days = this.daysInRange(startAt, endAt);
+      if (!days.length) return 0;
+      const ph = days.map(() => '?').join(',');
+      let pmap = new Map<string, number>();
+      try {
+        const rows = db.prepare(
+          `SELECT date, price_override FROM resource_availability
+            WHERE organization_id = ? AND resource_id = ? AND price_override IS NOT NULL AND date IN (${ph})`
+        ).all(orgId, resource.id, ...days) as any[];
+        pmap = new Map(rows.map(r => [r.date, Number(r.price_override)]));
+      } catch (e) { /* sem override de preço */ }
+      let sum = 0;
+      for (const d of days) sum += pmap.has(d) ? (pmap.get(d) as number) : base;
+      return Math.round(sum * units * 100) / 100;
+    }
+    const periods = this.periods(startAt, endAt, unit);
+    return Math.round(base * periods * units * 100) / 100;
+  }
+
+  /**
+   * Importa/atualiza recursos reserváveis em lote (planilha). Casa por NOME
+   * (case-insensitive). Cria o que não existe, atualiza preço/capacidade/unidade
+   * do que já existe. Idempotente.
+   */
+  static importResources(orgId: string, rows: { name: string; price?: number; capacity?: number; unit?: string }[]): { created: number; updated: number; skipped: number } {
+    const report = { created: 0, updated: 0, skipped: 0 };
+    const valid = (u: any) => ["night", "hour", "slot", "day"].includes(String(u)) ? String(u) : "night";
+    for (const r of rows || []) {
+      const name = String(r?.name || "").trim();
+      if (!name) { report.skipped++; continue; }
+      const existing = db.prepare(
+        `SELECT id FROM products_services WHERE organization_id = ? AND type = 'reservation' AND lower(name) = lower(?)`
+      ).get(orgId, name) as any;
+      const price = Number(r.price);
+      const cap = Number(r.capacity);
+      if (existing) {
+        db.prepare(
+          `UPDATE products_services SET price = ?, capacity = ?, reservation_unit = ?, active = 1 WHERE id = ?`
+        ).run(isFinite(price) ? price : 0, isFinite(cap) && cap > 0 ? cap : 1, valid(r.unit), existing.id);
+        report.updated++;
+      } else {
+        this.createResource(orgId, { name, price: isFinite(price) ? price : 0, capacity: isFinite(cap) ? cap : 1, reservationUnit: valid(r.unit) });
+        report.created++;
+      }
+    }
+    return report;
+  }
+
+  /** Aplica override de disponibilidade/preço por data (vindo do conector). */
+  static setAvailability(orgId: string, rows: { resource: string; date: string; available?: number | null; price?: number | null }[], source = 'webhook'): { applied: number; unknownResources: string[] } {
+    const unknown = new Set<string>();
+    let applied = 0;
+    const ins = db.prepare(`
+      INSERT INTO resource_availability (id, organization_id, resource_id, date, available_units, price_override, source, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(organization_id, resource_id, date) DO UPDATE SET
+        available_units = COALESCE(excluded.available_units, resource_availability.available_units),
+        price_override = COALESCE(excluded.price_override, resource_availability.price_override),
+        source = excluded.source, updated_at = CURRENT_TIMESTAMP
+    `);
+    for (const r of rows || []) {
+      const date = String(r?.date || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      // Resolve o recurso por id OU por nome.
+      let res = this.getResource(orgId, String(r.resource || ""));
+      if (!res) {
+        res = db.prepare(`SELECT id FROM products_services WHERE organization_id = ? AND type = 'reservation' AND lower(name) = lower(?)`).get(orgId, String(r.resource || "")) as any;
+      }
+      if (!res) { unknown.add(String(r.resource || "")); continue; }
+      const avail = r.available != null && isFinite(Number(r.available)) ? Math.max(0, parseInt(String(r.available), 10)) : null;
+      const price = r.price != null && isFinite(Number(r.price)) ? Math.max(0, Number(r.price)) : null;
+      if (avail == null && price == null) continue;
+      ins.run(uuidv4(), orgId, res.id, date, avail, price, source);
+      applied++;
+    }
+    return { applied, unknownResources: [...unknown] };
   }
 
   /**
@@ -94,8 +216,8 @@ export class ReservationService {
       if (!av.ok) throw new Error(av.reason || "invalid_period");
       if (!av.bookable) throw new Error("no_availability");
 
-      const periods = this.periods(p.startAt, p.endAt, (r.reservation_unit || "night") as ReservationUnit);
-      const total = Number(r.price || 0) * periods * units;
+      // Total respeitando preços por data do conector externo (PMS/OTA), quando houver.
+      const total = this.ratedTotal(orgId, r, p.startAt, p.endAt, units);
       // Sinal: % configurado pela org (0 = sem sinal). depositAmount explícito tem prioridade.
       let deposit = Number(p.depositAmount || 0);
       if (!deposit) {

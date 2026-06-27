@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarCheck, Plus, X, Check, Ban, BedDouble, RefreshCw } from 'lucide-react';
+import { CalendarCheck, Plus, X, Check, Ban, BedDouble, RefreshCw, Upload, Plug, Copy } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -31,6 +31,7 @@ export function ReservasView() {
   const [loading, setLoading] = useState(true);
   const [showRes, setShowRes] = useState(false);
   const [showResource, setShowResource] = useState(false);
+  const [showConnector, setShowConnector] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -61,6 +62,9 @@ export function ReservasView() {
           <p className="text-zinc-400 text-sm mt-1">Reserve quartos, mesas, equipamentos ou espaços por período, com controle de disponibilidade.</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowConnector(true)}>
+            <Plug className="w-4 h-4 mr-2" /> Importar / PMS
+          </Button>
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowResource(true)}>
             <BedDouble className="w-4 h-4 mr-2" /> Recurso reservável
           </Button>
@@ -139,7 +143,110 @@ export function ReservasView() {
 
       {showResource && <ResourceModal onClose={() => setShowResource(false)} onSaved={() => { setShowResource(false); load(); }} />}
       {showRes && <ReservationModal resources={resources} contacts={Object.values(contacts)} onClose={() => setShowRes(false)} onSaved={() => { setShowRes(false); load(); }} />}
+      {showConnector && <ConnectorModal onClose={() => setShowConnector(false)} onImported={() => { load(); }} />}
     </div>
+  );
+}
+
+// Importação de recursos por planilha (CSV) + token de integração agnóstica de
+// PMS/OTA/ERP. O front parseia o CSV (sem dependência) e envia linhas em JSON.
+function ConnectorModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [csv, setCsv] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [token, setToken] = useState<string>('');
+  const [inboundPath, setInboundPath] = useState<string>('/api/connector-in');
+
+  useEffect(() => {
+    apiFetch('/api/connector/token').then(r => r.json()).then(d => { setToken(d.token || ''); if (d.inboundPath) setInboundPath(d.inboundPath); }).catch(() => {});
+  }, []);
+
+  const parseCsv = (text: string): { name: string; price?: number; capacity?: number; unit?: string }[] => {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+    // Cabeçalho opcional: detecta se a 1ª linha contém "nome"/"name".
+    const first = lines[0].toLowerCase();
+    const hasHeader = /nome|name/.test(first);
+    const rows = (hasHeader ? lines.slice(1) : lines).map(l => {
+      const cols = l.split(/[;,]/).map(c => c.trim());
+      return { name: cols[0], price: cols[1] ? Number(cols[1].replace(',', '.')) : undefined, capacity: cols[2] ? parseInt(cols[2], 10) : undefined, unit: cols[3] || undefined };
+    });
+    return rows.filter(r => r.name);
+  };
+
+  const doImport = async () => {
+    const rows = parseCsv(csv);
+    if (rows.length === 0) { toast.error('Nada para importar. Confira o formato.'); return; }
+    setImporting(true);
+    try {
+      const res = await apiFetch('/api/connector/resources/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows }) });
+      const d = await res.json();
+      if (d?.success) { setResult(d.report); onImported(); }
+      else toast.error(d?.error || 'Falha ao importar.');
+    } catch { toast.error('Falha ao importar.'); }
+    finally { setImporting(false); }
+  };
+
+  const rotate = async () => {
+    if (!confirm('Gerar um token novo? O token atual vai parar de funcionar.')) return;
+    const res = await apiFetch('/api/connector/token/rotate', { method: 'POST' });
+    const d = await res.json();
+    if (d?.token) setToken(d.token);
+  };
+
+  const inboundUrl = `${window.location.origin}${inboundPath}/availability`;
+  const copy = (s: string) => { navigator.clipboard?.writeText(s); toast.success('Copiado!'); };
+
+  return (
+    <Modal title="Importar recursos / Integração PMS" onClose={onClose}>
+      <div className="space-y-5">
+        {/* Importação por planilha */}
+        <div>
+          <p className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Upload className="w-4 h-4 text-emerald-400" /> Importar quartos/tarifas por planilha</p>
+          <p className="text-xs text-zinc-500 mt-1 mb-2">Cole linhas no formato <code className="text-zinc-300">nome; preço; capacidade; unidade</code> (unidade: night/day/hour/slot). Cabeçalho é opcional.</p>
+          <textarea className={INP + ' h-28 font-mono text-xs'} placeholder={'Quarto Standard; 350; 10; night\nSuíte Master; 720; 3; night'} value={csv} onChange={e => setCsv(e.target.value)} />
+          <input type="file" accept=".csv,text/csv,text/plain" className="mt-2 text-xs text-zinc-400"
+            onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} />
+          <div className="mt-3 flex justify-end">
+            <Button onClick={doImport} disabled={importing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {importing ? 'Importando…' : 'Importar'}
+            </Button>
+          </div>
+          {result && (
+            <p className="mt-2 text-xs text-emerald-400">✅ {result.created} criado(s), {result.updated} atualizado(s), {result.skipped} ignorado(s).</p>
+          )}
+        </div>
+
+        <div className="border-t border-zinc-800" />
+
+        {/* Token de integração (entrada agnóstica de PMS/OTA) */}
+        <div>
+          <p className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Plug className="w-4 h-4 text-indigo-400" /> Integração com PMS / motor de reservas</p>
+          <p className="text-xs text-zinc-500 mt-1 mb-2">Seu PMS (ou um middleware) envia disponibilidade e preço por data para a URL abaixo, autenticando com o token. Quando há dados externos, a reserva respeita a disponibilidade e o preço informados.</p>
+          <label className="text-[11px] text-zinc-400">URL de entrada</label>
+          <div className="flex gap-2 mt-1">
+            <input readOnly value={inboundUrl} className={INP + ' text-xs'} />
+            <Button variant="outline" className="border-zinc-700" onClick={() => copy(inboundUrl)}><Copy className="w-3.5 h-3.5" /></Button>
+          </div>
+          <label className="text-[11px] text-zinc-400 mt-3 block">Token (header <code>x-connector-token</code>)</label>
+          <div className="flex gap-2 mt-1">
+            <input readOnly value={token} className={INP + ' text-xs font-mono'} />
+            <Button variant="outline" className="border-zinc-700" onClick={() => copy(token)}><Copy className="w-3.5 h-3.5" /></Button>
+          </div>
+          <button onClick={rotate} className="mt-2 text-[11px] text-rose-400 hover:underline">Gerar token novo (invalida o atual)</button>
+          <details className="mt-3">
+            <summary className="text-[11px] text-zinc-400 cursor-pointer">Ver exemplo de payload</summary>
+            <pre className="mt-2 text-[10px] bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-400 overflow-auto">{`POST ${inboundPath}/availability
+x-connector-token: <seu token>
+
+{ "rows": [
+  { "resource": "Quarto Standard", "date": "2026-07-01", "available": 4, "price": 380 },
+  { "resource": "Suíte Master", "date": "2026-07-01", "available": 1, "price": 790 }
+]}`}</pre>
+          </details>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

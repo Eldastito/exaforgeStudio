@@ -368,6 +368,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE users ADD COLUMN global_status TEXT DEFAULT 'active'`); } catch(e){}
   try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`); } catch(e){}
+  // LGPD — retenção de dados (opt-in): expurga conteúdo de mensagens antigas de
+  // tickets já encerrados após N dias. 0/desligado = nunca expurga (legado).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retention_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retention_days INTEGER DEFAULT 365`); } catch(e){}
+  // Marca de anonimização (direito ao esquecimento) no contato.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN anonymized_at DATETIME`); } catch(e){}
   // MFA / 2FA (TOTP) — opt-in por usuário. Segredos cifrados em repouso.
   try { db.exec(`ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE users ADD COLUMN mfa_secret TEXT`); } catch(e){}           // segredo ativo (cifrado)

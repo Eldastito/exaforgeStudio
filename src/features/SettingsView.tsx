@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -73,6 +73,9 @@ export function SettingsView() {
           </button>
           <button onClick={() => setActiveTab('seguranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'seguranca' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <ShieldCheck className="w-4 h-4" /> Segurança (2FA)
+          </button>
+          <button onClick={() => setActiveTab('privacidade')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'privacidade' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Lock className="w-4 h-4" /> Privacidade (LGPD)
           </button>
         </nav>
       </div>
@@ -198,6 +201,7 @@ export function SettingsView() {
           {activeTab === 'modulos' && <ModulesPanel />}
           {activeTab === 'quickstart' && <QuickStartPanel />}
           {activeTab === 'seguranca' && <SecurityPanel />}
+          {activeTab === 'privacidade' && <LgpdPanel />}
 
           {activeTab === 'usuarios' && (
              <UsersSettingsView />
@@ -673,6 +677,66 @@ function SecurityPanel() {
             <button onClick={() => { setStep('idle'); setErr(''); }} className="text-xs text-zinc-500 hover:text-zinc-300">Cancelar</button>
           </div>
         )}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// LgpdPanel — política de retenção de dados (opt-in) + atalho aos direitos do titular.
+// ============================================================================
+function LgpdPanel() {
+  const [settings, setSettings] = useState<{ enabled: boolean; days: number } | null>(null);
+
+  useEffect(() => { apiFetch('/api/lgpd/settings').then(r => r.json()).then(setSettings).catch(() => {}); }, []);
+
+  const save = async (patch: Partial<{ enabled: boolean; days: number }>) => {
+    const next = { enabled: settings?.enabled || false, days: settings?.days || 365, ...patch };
+    setSettings(next);
+    await apiFetch('/api/lgpd/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) }).catch(() => {});
+  };
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <Lock className="w-6 h-6 text-indigo-400" /> Privacidade & LGPD
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">Política de retenção de dados e direitos do titular (acesso, portabilidade e esquecimento).</p>
+      </div>
+
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 space-y-5">
+        {settings && (
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-zinc-100">🗑️ Retenção automática de dados</p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Apaga o conteúdo de mensagens de atendimentos <b>já encerrados</b> com mais de{' '}
+                <input type="number" min={30} value={settings.days}
+                  onChange={e => setSettings({ ...settings, days: parseInt(e.target.value, 10) || 365 })}
+                  onBlur={e => save({ days: parseInt(e.target.value, 10) || 365 })}
+                  className="w-20 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-center text-zinc-200" /> dias.
+                Pedidos e valores são mantidos (sem dado pessoal) para histórico.
+              </p>
+            </div>
+            <button onClick={() => save({ enabled: !settings.enabled })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.enabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+        )}
+
+        <div className="border-t border-zinc-800 pt-4">
+          <p className="text-sm font-medium text-zinc-100">👤 Direitos do titular</p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Em <b>Contatos</b>, cada cliente tem as ações <b>Exportar dados</b> (portabilidade, baixa um JSON) e
+            <b> Esquecer</b> (anonimiza os dados pessoais e apaga o conteúdo das conversas). Use quando o titular solicitar.
+          </p>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-4 text-xs text-zinc-500">
+          <p>🔒 Medidas de segurança ativas: isolamento por organização (multi-tenant), segredos cifrados em repouso (AES-256-GCM), 2FA opcional, senhas com hash bcrypt e HTTPS forçado. Detalhes em <code>docs/LGPD-PRIVACIDADE.md</code>.</p>
+        </div>
       </div>
     </>
   );

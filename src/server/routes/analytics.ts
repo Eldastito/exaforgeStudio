@@ -88,8 +88,10 @@ router.post("/settings/onboarding", (req, res) => {
       SET business_name = ?, address = ?, phone = ?, logo_url = ?, onboarding_status = 'completed', updated_at = CURRENT_TIMESTAMP
       WHERE organization_id = ?
     `).run(business_name, address, phone, logo_url, orgId);
-    // Aplica o preset da vertical escolhida (módulos habilitados).
-    if (vertical) { try { ModuleService.applyVertical(orgId, String(vertical)); } catch (e) { /* noop */ } }
+    // Aplica o preset da vertical escolhida (módulos habilitados). Se nenhuma
+    // vertical vier, cai em "outro" para que enabled_modules NUNCA fique nulo
+    // após o onboarding (evita o padrão antigo de "mostrar tudo").
+    try { ModuleService.applyVertical(orgId, String(vertical || 'outro')); } catch (e) { /* noop */ }
 
     res.json({ success: true });
   } catch (error: any) {

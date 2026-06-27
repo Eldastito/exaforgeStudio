@@ -243,7 +243,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
   isModuleEnabled: (moduleKey) => {
     const em = get().enabledModules;
-    if (em == null) return true; // sem config explícita ⇒ liberado
+    // Sem config explícita ⇒ só o núcleo (os itens core da sidebar não passam
+    // por aqui). Evita o "todo mundo vê tudo" enquanto a vertical não é definida.
+    if (em == null) return false;
     return em.includes(moduleKey);
   },
   setEvolutionConfig: (config) => set({ evolutionConfig: config }),

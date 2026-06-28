@@ -7,6 +7,7 @@ import { JWT_SECRET } from "../config/secret.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 import { ModuleService } from "../ModuleService.js";
+import { PlanService } from "../PlanService.js";
 
 const router = Router();
 
@@ -79,7 +80,7 @@ router.get("/org-invite/:token", (req: Request, res: Response): any => {
 });
 
 router.post("/register", async (req: Request, res: Response): Promise<any> => {
-  const { name, email, phone, password, organizationName, segment, sizeRange, inviteToken, orgInviteToken } = req.body;
+  const { name, email, phone, password, organizationName, segment, sizeRange, inviteToken, orgInviteToken, planId } = req.body;
   
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -149,6 +150,11 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
          INSERT INTO organization_settings (id, organization_id, business_name, phone, segment, size_range, status, onboarding_status)
          VALUES (?, ?, ?, ?, ?, ?, 'active', 'pending')
        `).run(uuidv4(), orgId, organizationName, phone || null, segment || null, sizeRange || null);
+
+       // Self-service: se escolheu um plano no cadastro, inicia o teste grátis.
+       if (planId) {
+         try { PlanService.selectPlan(orgId, String(planId)); } catch (e) { /* noop */ }
+       }
     }
 
     const userId = uuidv4();

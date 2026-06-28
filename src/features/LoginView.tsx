@@ -5,7 +5,7 @@ import { Eye, EyeOff } from 'lucide-react';
 
 export function LoginView() {
   const { login } = useAuth();
-  const [view, setView] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
+  const [view, setView] = useState<'login' | 'register' | 'forgot' | 'reset' | 'plans'>('login');
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,6 +20,9 @@ export function LoginView() {
   // Convite de NOVA EMPRESA (cortesia): cria a empresa do convidado já com acesso definido.
   const [orgInviteToken, setOrgInviteToken] = useState('');
   const [orgInviteInfo, setOrgInviteInfo] = useState<{ businessName: string; recipientName: string; planName: string; modules: string[] } | null>(null);
+  // Self-service: escolha de plano no cadastro (inicia teste grátis).
+  const [plans, setPlans] = useState<any[]>([]);
+  const [planId, setPlanId] = useState('');
   
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -61,9 +64,20 @@ export function LoginView() {
         if (inviteEmail) setEmail(inviteEmail);
         // Limpa a URL para não deixar o código exposto no histórico/barra.
         window.history.replaceState({}, document.title, window.location.pathname);
+      } else {
+        const plan = params.get('plan');
+        if (plan) { setPlanId(plan); setView('register'); window.history.replaceState({}, document.title, window.location.pathname); }
       }
     } catch { /* noop */ }
   }, []);
+
+  // Carrega os planos para a tela de "Ver planos" e a nota no cadastro.
+  useEffect(() => {
+    fetch('/api/plans').then(r => r.json()).then(d => setPlans(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+
+  const brl = (v?: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR')}`;
+  const selectedPlan = plans.find(p => p.id === planId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,6 +97,7 @@ export function LoginView() {
           payload.organizationName = organizationName;
           payload.segment = segment;
           payload.sizeRange = sizeRange;
+          if (planId) payload.planId = planId;
         }
         
         const res = await fetch('/api/auth/register', {
@@ -159,6 +174,7 @@ export function LoginView() {
                {view === 'login' && 'Faça login na sua conta'}
                {view === 'forgot' && 'Recuperar Senha'}
                {view === 'reset' && 'Redefinir Senha'}
+               {view === 'plans' && 'Escolha seu plano e comece o teste grátis'}
             </p>
           </div>
 
@@ -174,9 +190,42 @@ export function LoginView() {
              </div>
           )}
 
+          {view === 'plans' && (
+            <div className="space-y-3">
+              {plans.length === 0 && <p className="text-sm text-zinc-500 text-center">Carregando planos…</p>}
+              {plans.filter(p => p.id !== 'cortesia').map(p => {
+                const f = p.features || {};
+                return (
+                  <button key={p.id} type="button"
+                    onClick={() => { setPlanId(p.id); setView('register'); }}
+                    className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-950 p-4 hover:border-indigo-500/60 transition-colors">
+                    <div className="flex items-baseline justify-between">
+                      <span className="font-semibold text-zinc-100">{p.name}</span>
+                      <span className="text-zinc-100 font-bold">{brl(p.price)}<span className="text-xs font-normal text-zinc-500">/mês</span></span>
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                      {f.ai_monthly_limit ? <span>{Number(f.ai_monthly_limit).toLocaleString('pt-BR')} respostas IA/mês</span> : null}
+                      {f.contacts_limit ? <span>{Number(f.contacts_limit).toLocaleString('pt-BR')} contatos</span> : null}
+                      {f.users_limit ? <span>{f.users_limit} usuários</span> : null}
+                      {f.trial_days ? <span className="text-emerald-400">{f.trial_days} dias grátis</span> : null}
+                    </div>
+                  </button>
+                );
+              })}
+              <p className="text-xs text-zinc-500 text-center pt-1">Sem cartão para começar — você só decide na hora de assinar.</p>
+            </div>
+          )}
+
+          {view !== 'plans' && (
           <form onSubmit={handleSubmit} className="space-y-4">
              {view === 'register' && (
                 <>
+                  {!orgInviteToken && !hasInvite && selectedPlan && (
+                    <div className="mb-4 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-sm text-indigo-300 flex items-center justify-between gap-2">
+                      <span>Plano <b className="text-indigo-200">{selectedPlan.name}</b>{selectedPlan.features?.trial_days ? ` · ${selectedPlan.features.trial_days} dias grátis` : ''}</span>
+                      <button type="button" onClick={() => setView('plans')} className="text-xs text-indigo-400 hover:text-indigo-300 underline shrink-0">trocar</button>
+                    </div>
+                  )}
                   {orgInviteToken && orgInviteInfo ? (
                     <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">
                       🎉 Você foi convidado para criar a empresa <b className="text-emerald-200">{orgInviteInfo.businessName || 'sua empresa'}</b> no ZapFlow.
@@ -327,12 +376,16 @@ export function LoginView() {
                   'Redefinir'}
              </Button>
           </form>
+          )}
 
           <div className="mt-6 flex flex-col items-center gap-3">
              {view === 'login' && (
                <>
                  <button onClick={() => setView('forgot')} className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
                    Esqueci minha senha
+                 </button>
+                 <button onClick={() => setView('plans')} className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors font-medium">
+                   Ver planos e começar grátis
                  </button>
                  <button onClick={() => setView('register')} className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
                    Não tem conta? Registre-se agora
@@ -342,6 +395,11 @@ export function LoginView() {
              {view === 'register' && (
                  <button onClick={() => setView('login')} className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
                    Já tem uma conta? Faça login
+                 </button>
+             )}
+             {view === 'plans' && (
+                 <button onClick={() => setView('login')} className="text-sm text-zinc-400 hover:text-zinc-300 transition-colors">
+                   Voltar para o login
                  </button>
              )}
              {(view === 'forgot' || view === 'reset') && (

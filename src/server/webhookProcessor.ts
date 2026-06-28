@@ -255,8 +255,12 @@ export async function processIncomingMessage(
                .run(matched.id, matched.assigned_user_id || null, ticket.id);
              ticket.area_id = matched.id;
              if (io) io.to(`org:${orgId}`).emit("ticket_updated", { ticketId: ticket.id, contactId: contact.id, areaId: matched.id, assignedTo: matched.assigned_user_id || null });
-             areaPersona = AttendanceAreaService.personaText(matched);
-             // Segue para a IA responder já como a área escolhida.
+             // A ÁREA ASSUME NA HORA: saudação cordial (sensível ao horário) e se
+             // coloca à disposição. Não rodamos a IA no token de seleção ("1"),
+             // que gerava o "vou te encaminhar" e travava a conversa. A PRÓXIMA
+             // mensagem do cliente já é respondida pela IA desta área.
+             await sendBotReply(AttendanceAreaService.welcomeMessage(matched, contact.name));
+             return;
            } else {
              // Ainda não escolheu: manda as boas-vindas + menu e aguarda.
              await sendBotReply(AttendanceAreaService.buildMenu(orgId, contact.name));

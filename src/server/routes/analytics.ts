@@ -58,6 +58,17 @@ router.get("/revenue-intelligence", (req, res) => {
   }
 });
 
+// Status da auditoria-trial de 14 dias (GTM): not_started/active/completed,
+// dia X de 14, dias restantes e %. Início = conexão do 1º canal.
+router.get("/revenue-intelligence/trial", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    res.json(RevenueIntelligenceService.getTrialStatus(orgId));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Configuração por organização: probabilidades, janelas, pesos do IQR e
 // ticket médio override. Tudo opt-in/editável — o cliente nunca vê um número
 // "duro" sem ter a chance de calibrar a fórmula.

@@ -64,6 +64,49 @@ function periodFilter(period: Period, col = "created_at"): string {
  * "potencial em risco" no front, com a premissa visível.
  */
 export class RevenueIntelligenceService {
+  /**
+   * Status da auditoria-trial de 14 dias (GTM). O relógio começa quando a empresa
+   * conecta o 1º canal — alinhado com "conecta → mede ao vivo". Calculado a partir
+   * do canal conectado mais antigo (sem coluna extra, sem hooks de escrita —
+   * idempotente). Antes de qualquer canal, o trial é "not_started".
+   */
+  static getTrialStatus(orgId: string) {
+    const TOTAL = 14;
+    let startedAt: string | null = null;
+    try {
+      const row = db.prepare(
+        `SELECT MIN(created_at) AS started FROM channels
+         WHERE organization_id = ? AND status NOT IN ('disabled','disconnected')`
+      ).get(orgId) as any;
+      startedAt = row?.started || null;
+    } catch (e) { /* noop */ }
+
+    if (!startedAt) {
+      return { status: 'not_started' as const, totalDays: TOTAL, day: 0, elapsed: 0, daysRemaining: TOTAL, pct: 0, startedAt: null };
+    }
+
+    let elapsed = 0;
+    try {
+      const r = db.prepare(`SELECT (julianday('now') - julianday(?)) AS d`).get(startedAt) as any;
+      elapsed = Math.max(0, Math.floor(Number(r?.d ?? 0)));
+    } catch (e) { /* noop */ }
+
+    const completed = elapsed >= TOTAL;
+    const day = Math.min(TOTAL, elapsed + 1);           // dia 1 já no primeiro dia
+    const daysRemaining = Math.max(0, TOTAL - elapsed);
+    const pct = Math.min(100, Math.round((Math.min(elapsed, TOTAL) / TOTAL) * 100));
+
+    return {
+      status: (completed ? 'completed' : 'active') as 'completed' | 'active',
+      totalDays: TOTAL,
+      day,
+      elapsed,
+      daysRemaining,
+      pct,
+      startedAt,
+    };
+  }
+
   static getConfig(orgId: string): RicConfig {
     const row = db.prepare(
       `SELECT * FROM revenue_intelligence_config WHERE organization_id = ?`

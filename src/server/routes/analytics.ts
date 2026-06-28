@@ -4,6 +4,7 @@ import { ReportsService } from "../ReportsService.js";
 import { ModuleService } from "../ModuleService.js";
 import { RevenueIntelligenceService } from "../RevenueIntelligenceService.js";
 import { RevenueAuditService } from "../RevenueAuditService.js";
+import { RevenueSimulatorService } from "../RevenueSimulatorService.js";
 import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
@@ -85,6 +86,23 @@ router.get("/revenue-intelligence/audit", (req, res) => {
   const period = (req.query.period as any) || "month";
   try {
     res.json(RevenueAuditService.build(orgId, period));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Simulador leve do RIC — 2 alavancas (tempo de resposta, follow-up) com
+// guardrail de credibilidade: usa curva histórica do tenant quando há amostra;
+// senão, cai em premissas DEFAULT editáveis. Body:
+//   { lever: "response_time" | "followup", params: {...}, assumptions?: {...} }
+router.post("/revenue-intelligence/simulate", (req, res) => {
+  const orgId = getOrgId(req);
+  const { lever, params, assumptions } = req.body || {};
+  try {
+    if (lever !== "response_time" && lever !== "followup") {
+      return res.status(400).json({ error: "lever inválido. Use 'response_time' ou 'followup'." });
+    }
+    res.json(RevenueSimulatorService.simulate(orgId, lever, params || {}, assumptions || {}));
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

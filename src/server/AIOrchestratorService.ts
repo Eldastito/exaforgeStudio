@@ -13,6 +13,7 @@ import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { ReferralService } from "./ReferralService.js";
+import { AppointmentService } from "./AppointmentService.js";
 import { QuoteService } from "./QuoteService.js";
 
 export class AIOrchestratorService {
@@ -180,6 +181,12 @@ export class AIOrchestratorService {
     let agendaText = "";
     if (!isOrchestratorCommand) {
       try { agendaText = await GoogleOAuthService.getBusyText(params.organizationId); } catch (e) { /* noop */ }
+      // Agenda INTERNA (aba Agenda): horários já marcados + próximos livres, para
+      // a IA oferecer só horários vagos e nunca marcar em cima de outro cliente.
+      try {
+        const internal = AppointmentService.agendaText(params.organizationId);
+        if (internal) agendaText = agendaText ? `${agendaText}\n\n${internal}` : internal;
+      } catch (e) { /* noop */ }
     }
 
     // Captura de e-mail: só pedimos o e-mail ao cliente quando o dono ligou as
@@ -964,7 +971,7 @@ REGRAS OBRIGATÓRIAS:
 2. Responda SEMPRE de forma útil, cordial e objetiva, mesmo sem contexto/documentos. Só marque "needs_human": true quando o cliente PEDIR explicitamente falar com um humano/atendente, ou em caso de reclamação séria. Nos demais casos, mantenha "needs_human": false e continue a conversa.
 3. Não fale sobre sistemas internos ou tokens.
 4. Mova o lead no kanban se notar intenção de compra ("MOVE_TICKET" para etapa "proposta").
-5. Se o cliente concordar com um horário de agendamento, use "new_appointment" e gere "scheduled_start" em ISO 8601 COM o fuso -03:00, calculado a partir da DATA ATUAL acima (ex.: amanhã às 10h = ${nowToday}T10:00:00-03:00, mas ajuste o dia conforme o pedido).
+5. AGENDAMENTO: SEMPRE consulte o bloco AGENDA INTERNA abaixo antes de propor horário. Ofereça SOMENTE horários da lista de LIVRES, começando pelo mais cedo do dia; quando o dia encher, ofereça o próximo dia. NUNCA proponha ou confirme um horário que já esteja ocupado, e NUNCA marque dois clientes no mesmo dia e horário. Só preencha "new_appointment" quando o cliente CONFIRMAR um horário LIVRE; gere "scheduled_start" em ISO 8601 COM o fuso -03:00, calculado a partir da DATA ATUAL acima (ex.: amanhã às 10h = ${nowToday}T10:00:00-03:00, mas ajuste o dia conforme o pedido). Se o cliente pedir um horário que não está livre, NÃO preencha "new_appointment": ofereça os livres mais próximos na "reply".
 6. Se confirmar o envio ou retirada de um produto físico, pode usar "new_delivery".
 7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
 8. NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi confirmado/registrado, NÃO preencha "new_order" de novo. Apenas dê seguimento (confirmar agendamento, tirar dúvidas, etc.).

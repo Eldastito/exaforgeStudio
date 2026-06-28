@@ -8,6 +8,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { AttendanceAreaService } from "./AttendanceAreaService.js";
+import { AppointmentService } from "./AppointmentService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
@@ -364,16 +365,37 @@ export async function processIncomingMessage(
           try { db.prepare('UPDATE contacts SET email = ? WHERE id = ?').run(aiResult.customerEmail, contact.id); } catch (e) { /* noop */ }
        }
 
+       // AGENDA: trava anti-duplicidade e anti-conflito. Nunca dois clientes no
+       // mesmo dia+horário; nunca duplica o mesmo agendamento. Se o horário
+       // pedido estiver ocupado, NÃO marca e oferece os próximos livres.
+       let appointmentNote = "";
        if (aiResult.newAppointment) {
-          const apptId = uuidv4();
-          db.prepare(`
-             INSERT INTO appointments (id, organization_id, ticket_id, contact_id, title, scheduled_start)
-             VALUES (?, ?, ?, ?, ?, ?)
-          `).run(apptId, orgId, ticket.id, contact.id, aiResult.newAppointment.title, aiResult.newAppointment.scheduled_start);
-          // Sincroniza com o Google Calendar (best-effort).
-          GoogleOAuthService.syncAppointment(orgId, apptId).catch(() => {});
-          // Confirmação por e-mail ao cliente (best-effort; respeita o toggle do dono).
-          GoogleAutomationService.confirmAppointment(orgId, apptId).catch(() => {});
+          const startMs = AppointmentService.ms(aiResult.newAppointment.scheduled_start);
+          if (startMs == null) {
+             console.warn('[Agenda] scheduled_start inválido, ignorado:', aiResult.newAppointment.scheduled_start);
+          } else if (AppointmentService.duplicateForContact(orgId, contact.id, startMs)) {
+             console.log('[Agenda] Agendamento duplicado para o mesmo cliente/horário — ignorado.');
+          } else if (!AppointmentService.isFree(orgId, startMs)) {
+             // Horário ocupado: não marca e sugere os próximos livres.
+             const free = AppointmentService.nextFreeSlots(orgId, 3, Date.now());
+             const opts = free.map(ms => AppointmentService.label(ms)).join(' · ');
+             appointmentNote = opts
+               ? `⚠️ Esse horário já está reservado. Tenho estes horários livres: ${opts}. Qual fica melhor para você?`
+               : `⚠️ Esse horário já está reservado e não encontrei outro livre por perto — vou confirmar com a equipe e já te retorno.`;
+             console.log(`[Agenda] Horário ocupado (${aiResult.newAppointment.scheduled_start}); oferecendo alternativas.`);
+          } else {
+             const apptId = uuidv4();
+             const slotMs = AppointmentService.config(orgId).slotMin * 60000;
+             const endIso = new Date(startMs + slotMs).toISOString();
+             db.prepare(`
+                INSERT INTO appointments (id, organization_id, ticket_id, contact_id, title, scheduled_start, scheduled_end)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+             `).run(apptId, orgId, ticket.id, contact.id, aiResult.newAppointment.title, aiResult.newAppointment.scheduled_start, endIso);
+             // Sincroniza com o Google Calendar (best-effort).
+             GoogleOAuthService.syncAppointment(orgId, apptId).catch(() => {});
+             // Confirmação por e-mail ao cliente (best-effort; respeita o toggle do dono).
+             GoogleAutomationService.confirmAppointment(orgId, apptId).catch(() => {});
+          }
        }
        
        if (aiResult.newDelivery) {
@@ -387,6 +409,10 @@ export async function processIncomingMessage(
        // novo (atômico) e reserva/baixa conforme o interruptor de autonomia.
        // Resposta final que será enviada (pode receber as instruções de pagamento).
        let finalReply = aiResult.reply;
+
+       // Se o horário pedido estava ocupado, troca a confirmação otimista da IA
+       // por uma oferta honesta de horários livres (a IA não marcou nada).
+       if (appointmentNote) finalReply = `${finalReply}\n\n${appointmentNote}`;
 
        // INDICAÇÃO: cliente informou um código recebido → valida e cria o cupom
        // de boas-vindas (desconto na 1ª compra). Anexa a confirmação à resposta.

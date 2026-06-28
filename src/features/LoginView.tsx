@@ -17,6 +17,9 @@ export function LoginView() {
   const [token, setToken] = useState('');
   const [inviteToken, setInviteToken] = useState('');
   const [hasInvite, setHasInvite] = useState(false);
+  // Convite de NOVA EMPRESA (cortesia): cria a empresa do convidado já com acesso definido.
+  const [orgInviteToken, setOrgInviteToken] = useState('');
+  const [orgInviteInfo, setOrgInviteInfo] = useState<{ businessName: string; recipientName: string; planName: string; modules: string[] } | null>(null);
   
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -32,7 +35,26 @@ export function LoginView() {
       const params = new URLSearchParams(window.location.search);
       const invite = params.get('invite') || params.get('token');
       const inviteEmail = params.get('email');
-      if (invite) {
+      const orgInvite = params.get('orgInvite');
+      if (orgInvite) {
+        // Convite de nova empresa: busca os dados e abre o cadastro de empresa.
+        setView('register');
+        setOrgInviteToken(orgInvite);
+        fetch(`/api/auth/org-invite/${encodeURIComponent(orgInvite)}`)
+          .then(r => r.json())
+          .then(info => {
+            if (info?.valid) {
+              setOrgInviteInfo(info);
+              if (info.businessName) setOrganizationName(info.businessName);
+              if (info.recipientName) setName(info.recipientName);
+            } else {
+              setOrgInviteToken('');
+              setError('Este convite é inválido ou expirou. Peça um novo link.');
+            }
+          })
+          .catch(() => {});
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (invite) {
         setView('register');
         setHasInvite(true);
         setInviteToken(invite);
@@ -52,7 +74,10 @@ export function LoginView() {
     try {
       if (view === 'register') {
         const payload: any = { name, email, password, phone };
-        if (hasInvite) {
+        if (orgInviteToken) {
+          payload.orgInviteToken = orgInviteToken;
+          payload.organizationName = organizationName;
+        } else if (hasInvite) {
           payload.inviteToken = inviteToken;
         } else {
           payload.organizationName = organizationName;
@@ -152,21 +177,39 @@ export function LoginView() {
           <form onSubmit={handleSubmit} className="space-y-4">
              {view === 'register' && (
                 <>
-                  <div className="flex items-center gap-2 mb-4">
-                     <input type="checkbox" id="hasInvite" checked={hasInvite} onChange={e => setHasInvite(e.target.checked)} className="rounded border-zinc-800 bg-zinc-950 text-indigo-600 focus:ring-indigo-500" />
-                     <label htmlFor="hasInvite" className="text-sm text-zinc-300 cursor-pointer">Recebi um código de convite</label>
-                  </div>
+                  {orgInviteToken && orgInviteInfo ? (
+                    <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">
+                      🎉 Você foi convidado para criar a empresa <b className="text-emerald-200">{orgInviteInfo.businessName || 'sua empresa'}</b> no ZapFlow.
+                      <div className="text-xs text-emerald-400/80 mt-1">
+                        Plano: <b>{orgInviteInfo.planName}</b>{orgInviteInfo.modules?.length ? ` · ${orgInviteInfo.modules.length} módulo(s) liberado(s)` : ' · acesso completo'}. É só criar seu acesso abaixo.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 mb-4">
+                       <input type="checkbox" id="hasInvite" checked={hasInvite} onChange={e => setHasInvite(e.target.checked)} className="rounded border-zinc-800 bg-zinc-950 text-indigo-600 focus:ring-indigo-500" />
+                       <label htmlFor="hasInvite" className="text-sm text-zinc-300 cursor-pointer">Recebi um código de convite</label>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm font-medium text-zinc-300 mb-1">Nome Completo</label>
-                    <input 
+                    <input
                       type="text" required value={name} onChange={e => setName(e.target.value)}
                       className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
                       placeholder="Jane Doe"
                     />
                   </div>
-                  
-                  {hasInvite ? (
+
+                  {orgInviteToken ? (
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-300 mb-1">Nome da Empresa</label>
+                      <input
+                        type="text" required value={organizationName} onChange={e => setOrganizationName(e.target.value)}
+                        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                        placeholder="Minha Empresa Ltda"
+                      />
+                    </div>
+                  ) : hasInvite ? (
                     <div>
                       <label className="block text-sm font-medium text-zinc-300 mb-1">Código do Convite</label>
                       <input 

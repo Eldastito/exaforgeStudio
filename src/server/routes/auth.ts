@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET } from "../config/secret.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
+import { ModuleService } from "../ModuleService.js";
 
 const router = Router();
 
@@ -55,8 +56,30 @@ const logAuthEvent = (orgId: string | null, actorId: string | null, targetId: st
   }
 };
 
+// GET /api/auth/org-invite/:token — dados públicos de um convite de NOVA EMPRESA
+// (cortesia), para a tela de cadastro mostrar o que está incluído.
+router.get("/org-invite/:token", (req: Request, res: Response): any => {
+  try {
+    const inv = db.prepare(`SELECT * FROM org_invitations WHERE token = ?`).get(req.params.token) as any;
+    if (!inv || inv.status !== 'pending') return res.json({ valid: false });
+    if (inv.expires_at && new Date(inv.expires_at) < new Date()) return res.json({ valid: false });
+    let modules: string[] = [];
+    try { modules = inv.enabled_modules ? JSON.parse(inv.enabled_modules) : []; } catch {}
+    const plan = db.prepare(`SELECT name FROM plans WHERE id = ?`).get(inv.plan_id) as any;
+    res.json({
+      valid: true,
+      businessName: inv.business_name || "",
+      recipientName: inv.recipient_name || "",
+      planName: plan?.name || "Cortesia",
+      modules,
+    });
+  } catch (e: any) {
+    res.json({ valid: false });
+  }
+});
+
 router.post("/register", async (req: Request, res: Response): Promise<any> => {
-  const { name, email, phone, password, organizationName, segment, sizeRange, inviteToken } = req.body;
+  const { name, email, phone, password, organizationName, segment, sizeRange, inviteToken, orgInviteToken } = req.body;
   
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -93,6 +116,30 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
        role = invite.role;
 
        db.prepare('UPDATE user_invitations SET status = ?, accepted_at = CURRENT_TIMESTAMP WHERE id = ?').run('accepted', invite.id);
+    } else if (orgInviteToken) {
+       // Convite de NOVA EMPRESA (cortesia): cria uma org NOVA, já com o plano e
+       // os módulos definidos pelo super admin. O usuário vira owner.
+       const inv = db.prepare("SELECT * FROM org_invitations WHERE token = ? AND status = 'pending'").get(orgInviteToken) as any;
+       if (!inv) return res.status(400).json({ error: "Convite inválido ou já utilizado" });
+       if (inv.expires_at && new Date(inv.expires_at) < new Date()) return res.status(400).json({ error: "Convite expirado" });
+
+       orgId = "org_" + uuidv4().substring(0, 8);
+       const bizName = inv.business_name || organizationName || (name ? `Empresa de ${name}` : "Minha Empresa");
+       db.prepare(`
+         INSERT INTO organization_settings (id, organization_id, business_name, phone, status, onboarding_status, plan_id, billing_status)
+         VALUES (?, ?, ?, ?, 'active', 'completed', ?, ?)
+       `).run(uuidv4(), orgId, bizName, phone || null, inv.plan_id || 'cortesia', inv.billing_status || 'active');
+
+       // Módulos: lista explícita do convite ou preset da vertical; senão, libera tudo.
+       try {
+         let mods: any = null;
+         if (inv.enabled_modules) { try { mods = JSON.parse(inv.enabled_modules); } catch {} }
+         if (Array.isArray(mods) && mods.length) ModuleService.setModules(orgId, mods);
+         else ModuleService.applyVertical(orgId, inv.vertical || 'outro');
+       } catch (e) { /* noop */ }
+
+       role = 'owner';
+       db.prepare("UPDATE org_invitations SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP, created_org_id = ? WHERE id = ?").run(orgId, inv.id);
     } else {
        if (!organizationName) {
           return res.status(400).json({ error: "Nome da empresa é obrigatório para nova conta" });

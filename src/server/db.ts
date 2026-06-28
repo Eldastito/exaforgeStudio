@@ -642,6 +642,38 @@ const initDb = () => {
     }
   } catch (e) { console.error('[DB] Falha ao popular planos', e); }
 
+  // Plano "Cortesia": conta gratuita criada pelo super admin (acesso liberado,
+  // sem cobrança). IA ilimitada (ai_monthly_limit=0 ⇒ sem trava) e limites altos.
+  try {
+    db.prepare(`INSERT OR IGNORE INTO plans (id, name, price, features) VALUES (?, ?, ?, ?)`)
+      .run('cortesia', 'Cortesia', 0, JSON.stringify({ ai_monthly_limit: 0, contacts_limit: 0, channels_limit: 0, users_limit: 0, trial_days: 0 }));
+  } catch (e) { /* noop */ }
+
+  // Convites de NOVA EMPRESA (cortesia): diferente de user_invitations (que adiciona
+  // alguém à MESMA org). Aqui o token cria uma empresa NOVA com plano+módulos já
+  // definidos pelo super admin. O link é entregue pelo WhatsApp.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_invitations (
+        id TEXT PRIMARY KEY,
+        token TEXT NOT NULL,
+        business_name TEXT,
+        recipient_name TEXT,
+        recipient_phone TEXT,
+        plan_id TEXT,
+        enabled_modules TEXT,
+        vertical TEXT,
+        billing_status TEXT DEFAULT 'active',
+        status TEXT DEFAULT 'pending',
+        created_by TEXT,
+        created_org_id TEXT,
+        accepted_at DATETIME,
+        expires_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar org_invitations', e); }
+
   // ===== Follow-up Sequencial (Cadências) =====
   // Cadência = sequência de mensagens automáticas quando o contato não responde.
   try {

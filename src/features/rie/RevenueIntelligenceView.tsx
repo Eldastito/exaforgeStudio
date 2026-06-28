@@ -14,6 +14,7 @@ import { ConfigDrawer } from './components/ConfigDrawer';
 import { ExportAuditButton } from './components/ExportAuditButton';
 import { DriverDrilldown } from './components/DriverDrilldown';
 import { TrendChart } from './components/TrendChart';
+import { TrialBanner } from './components/TrialBanner';
 import { brl, pct, TICKET_SOURCE_LABEL } from './lib/format';
 
 type DriverKey = 'atendimento' | 'comercial' | 'operacional';
@@ -133,6 +134,9 @@ export function RevenueIntelligenceView() {
             <ExportAuditButton period={period} />
           </div>
         </div>
+
+        {/* ===== Auditoria-trial de 14 dias (GTM) ===== */}
+        <TrialBanner period={period} />
 
         {/* ===== Erro ===== */}
         {error && (

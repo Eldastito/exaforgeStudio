@@ -70,4 +70,20 @@
   .ric-ai-glow {
     box-shadow: 0 0 0 1px rgba(41, 211, 255, 0.25), 0 8px 30px -10px rgba(41, 211, 255, 0.25);
   }
+
+  /* Microanimação de recuperação: pulso verde quando o RRI sobe. */
+  @keyframes ric-pulse-green {
+    0%   { box-shadow: 0 0 0 0 rgba(54, 227, 154, 0.0); }
+    20%  { box-shadow: 0 0 0 3px rgba(54, 227, 154, 0.5); }
+    100% { box-shadow: 0 0 0 0 rgba(54, 227, 154, 0.0); }
+  }
+  .ric-pulse { animation: ric-pulse-green 1.3s ease-out; }
+
+  /* "+R$ X ✓ Recuperado" que sobe e dissolve. */
+  @keyframes ric-floatup {
+    0%   { opacity: 0; transform: translateY(8px); }
+    15%  { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-16px); }
+  }
+  .ric-floatup { animation: ric-floatup 1.6s ease-out forwards; }
 }

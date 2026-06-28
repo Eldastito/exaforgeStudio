@@ -7,20 +7,25 @@ interface Props {
   weight?: number;       // peso no IQR (%)
   items: { label: string; value: string }[];
   weakest?: boolean;     // destaca o driver mais fraco
+  onClick?: () => void;  // abre o drilldown
 }
 
 /**
  * Card de um driver do IQR (Atendimento / Comercial / Operacional). Mostra o
  * score, uma barra proporcional e os itens do breakdown que mais explicam o
- * número — composição transparente, conforme o PRD.
+ * número — composição transparente, conforme o PRD. Clicável → drilldown.
  */
-export function DriverCard({ label, score, weight, items, weakest }: Props) {
+export function DriverCard({ label, score, weight, items, weakest, onClick }: Props) {
   const n = useCountUp(score);
   const color = scoreColor(score);
 
   return (
     <div
-      className="rounded-xl border border-ric-border bg-ric-bg/40 p-3"
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      className={`rounded-xl border border-ric-border bg-ric-bg/40 p-3 ${onClick ? 'cursor-pointer transition-colors hover:bg-ric-bg/70' : ''}`}
       style={{ borderLeft: `3px solid ${color}` }}
     >
       <div className="flex items-center justify-between">

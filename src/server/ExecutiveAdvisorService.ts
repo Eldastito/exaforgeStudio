@@ -1,5 +1,6 @@
 import { chat } from "./llm.js";
 import { BusinessContextService } from "./BusinessContextService.js";
+import { RevenueAuditService } from "./RevenueAuditService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -36,6 +37,42 @@ Sua resposta (com números do panorama + ações priorizadas):`;
     } catch (e) {
       console.error("[DiretorIA] Falha ao responder:", e);
       return "Não consegui analisar agora. Tente novamente em instantes.";
+    }
+  }
+
+  /**
+   * Plano de Ação 30/60/90 da auditoria do RIC. Recebe o relatório montado pelo
+   * RevenueAuditService e narra ações priorizadas em 3 horizontes:
+   * - 30d (quick wins): liga/ajusta o que já existe no ZappFlow.
+   * - 60d (estrutural): processo + cadências + ofertas direcionadas.
+   * - 90d (estratégico): mudança de modelo (precificação, mix, segmentação).
+   * Retorna texto estruturado — sem inventar número, citando o que o relatório
+   * mostrou.
+   */
+  static async auditPlan(orgId: string): Promise<string> {
+    const report = RevenueAuditService.build(orgId, "month");
+    const summary = report.sections.map(s => `• ${s.title}: ${s.headline}`).join("\n");
+    const prompt = `${this.GUARDRAILS}
+
+RELATÓRIO DE AUDITORIA (Revenue Intelligence — 30 dias):
+IQR ${report.headline.iqr}/100. Driver mais fraco: ${report.headline.weakestDriver}.
+Potencial em risco: R$ ${report.headline.estimatedLoss.toFixed(2)} (recuperável R$ ${report.headline.recoverable.toFixed(2)}).
+Receita já recuperada pelos fluxos do ZappFlow: R$ ${report.headline.recovered.toFixed(2)}.
+
+DESTAQUES POR SEÇÃO:
+${summary}
+
+Gere o PLANO DE AÇÃO 30 / 60 / 90 dias EM 3 BLOCOS, cada um com:
+- 30 DIAS — Quick wins. Ações que ligam ou afinam o que já existe (cadências, lembrete de PIX, recuperação de carrinho, follow-up de orçamento). MÁX 5 ações.
+- 60 DIAS — Estruturais. Mudanças de processo (ofertas direcionadas a segmentos, ajuste de SLA, reativação de inativos). MÁX 4 ações.
+- 90 DIAS — Estratégicas. Mexem no modelo (precificação, mix de produto, segmentação fina, integrações). MÁX 3 ações.
+
+Para cada ação, escreva 1 linha começando com um verbo de comando e, quando fizer sentido, cite o número da auditoria que justifica (ex.: "porque IQR de Comercial está em 66, com X orçamentos parados"). NÃO invente números — use só os que aparecem acima.`;
+    try {
+      return (await chat(prompt, { temperature: 0.3 })).trim();
+    } catch (e) {
+      console.error("[DiretorIA] Falha no plano 30/60/90:", e);
+      return "Não consegui gerar o plano agora. Tente novamente em instantes.";
     }
   }
 

@@ -161,7 +161,7 @@ function PlanModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
       <div className="space-y-3">
         <Field label="Nome (ex.: Mensalidade, Plano Black)"><input className={INP} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
         <Field label="Descrição (opcional)"><input className={INP} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Valor"><input type="number" min="0" step="0.01" className={INP} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></Field>
           <Field label="Ciclo"><select className={INP} value={form.interval} onChange={e => setForm({ ...form, interval: e.target.value })}>
             <option value="monthly">Mensal</option><option value="weekly">Semanal</option><option value="yearly">Anual</option>
@@ -213,7 +213,7 @@ function SubModal({ plans, contacts, onClose, onSaved }: { plans: any[]; contact
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[440px] max-h-[90vh] overflow-auto">
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[440px] max-h-[90vh] overflow-auto">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-zinc-100">{title}</h3>
           <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>

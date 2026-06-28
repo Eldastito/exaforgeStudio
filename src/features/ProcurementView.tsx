@@ -255,7 +255,7 @@ export function ProcurementView() {
           {items.length > 0 && (
             <div className="divide-y divide-zinc-800">
               {items.map(it => (
-                <div key={it.id} className="p-4 grid grid-cols-12 gap-3 items-center">
+                <div key={it.id} className="p-4 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
                   <div className="col-span-5">
                     <p className="text-sm text-zinc-100">
                       {it.product_name}{it.variant_name ? <span className="text-zinc-400"> ({it.variant_name})</span> : null}
@@ -490,7 +490,7 @@ const IncomingQuoteCard: React.FC<{ quote: IncomingQuote; onAnswer: (id: string,
 
       <div className="divide-y divide-zinc-800">
         {items.map((it, idx) => (
-          <div key={it.id} className="py-2 grid grid-cols-12 gap-2 items-center">
+          <div key={it.id} className="py-2 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
             <div className="col-span-6 text-sm text-zinc-200">{it.product_name}</div>
             <input type="number" min={0} step="0.01" placeholder="Preço unit. (R$)"
               className="col-span-3 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100"

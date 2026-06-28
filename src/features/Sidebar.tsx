@@ -31,7 +31,7 @@ export function Sidebar() {
           <p className="px-2 text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Workspace</p>
           <nav className="space-y-1">
              <NavItem icon={<MessageSquare />} label="Atendimento" active={viewMode === 'kanban'} onClick={() => setViewMode('kanban')} />
-             {mod('diretor') && <NavItem icon={<Gauge />} label="Revenue Intelligence" active={viewMode === 'rie'} onClick={() => setViewMode('rie')} />}
+             <NavItem icon={<Gauge />} label="Revenue Intelligence" active={viewMode === 'rie'} onClick={() => setViewMode('rie')} />
              {mod('diretor') && <NavItem icon={<BrainCircuit />} label="Diretor IA" active={viewMode === 'diretor'} onClick={() => setViewMode('diretor')} />}
              {mod('agenda') && <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />}
              {mod('reservas') && <NavItem icon={<CalendarCheck />} label="Reservas" active={viewMode === 'reservas'} onClick={() => setViewMode('reservas')} />}

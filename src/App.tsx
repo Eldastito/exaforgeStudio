@@ -52,7 +52,7 @@ export default function App() {
       agenda: 'agenda', catalog: 'catalogo', vendas: 'vendas', storefront: 'loja',
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
-      orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor', rie: 'diretor',
+      orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),

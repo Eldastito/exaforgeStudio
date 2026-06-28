@@ -44,7 +44,7 @@ export function InstagramConnectModal({ onClose, onConnected }: { onClose: () =>
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[560px] max-h-[90vh] overflow-auto">
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[560px] max-h-[90vh] overflow-auto">
         <div className="flex justify-between items-center mb-1">
           <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Instagram className="w-5 h-5 text-pink-400" /> Conectar Instagram Direct</h3>
           <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>
@@ -88,7 +88,7 @@ export function InstagramConnectModal({ onClose, onConnected }: { onClose: () =>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 mb-4">
           <p className="text-xs text-zinc-400 mb-1">URL do Webhook (cole no painel da Meta):</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 truncate">{webhookUrl}</code>
+            <code className="flex-1 min-w-0 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 break-all">{webhookUrl}</code>
             <button onClick={copyWebhook} className="text-zinc-400 hover:text-indigo-300 p-1.5 border border-zinc-800 rounded">{copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}</button>
           </div>
           <p className="text-[10px] text-zinc-500 mt-1">Token de verificação do webhook: use o valor da env <code>META_VERIFY_TOKEN</code> do seu deploy.</p>

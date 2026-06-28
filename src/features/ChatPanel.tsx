@@ -262,7 +262,7 @@ export function ChatPanel() {
       {/* Close Modal */}
       {showCloseModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[320px]">
+           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[360px] max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-semibold text-zinc-100 mb-4">Finalizar Atendimento</h3>
               <div className="space-y-4">
                  <div>

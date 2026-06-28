@@ -296,7 +296,7 @@ export function IntegrationsView() {
               <strong className="text-zinc-200">Passo a passo:</strong> 1) copie a URL abaixo; 2) cole no campo de webhook da sua <strong>Evolution</strong> (substituindo a URL atual); 3) volte aqui e ative o interruptor.
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 truncate">{waWebhook.url}</code>
+              <code className="flex-1 min-w-0 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 break-all">{waWebhook.url}</code>
               <button onClick={copyWaUrl} className="shrink-0 inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10">
                 {waCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {waCopied ? 'Copiado' : 'Copiar'}
               </button>
@@ -435,7 +435,7 @@ export function IntegrationsView() {
                  <div key={wh.id} className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 flex justify-between items-center group">
                     <div>
                        <p className="text-sm font-medium text-zinc-200">{wh.name}</p>
-                       <p className="text-xs text-zinc-500 truncate max-w-[200px]">{wh.url}</p>
+                       <p className="text-xs text-zinc-500 break-all">{wh.url}</p>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => handleTestWebhook(wh.id)} className="opacity-0 group-hover:opacity-100">
                        <Play className="w-4 h-4 text-indigo-400" />
@@ -516,7 +516,7 @@ export function IntegrationsView() {
 
       {showWebhookModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[400px]">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[400px] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold text-zinc-100">Novo Webhook</h3>
               <button className="text-zinc-400 hover:text-white" onClick={() => setShowWebhookModal(false)}><X className="w-5 h-5"/></button>

@@ -247,9 +247,15 @@ Sua resposta OBRIGATORIAMENTE DEVE SER UM OBJETO JSON VÁLIDO com a seguinte est
   try {
     const cleanedJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleanedJson);
+    // Valida o estágio retornado pela IA contra a lista permitida — a IA interpreta,
+    // mas não pode gravar um estágio inválido na coluna de funil do contato.
+    const ALLOWED_STAGES = ["novo_lead", "em_atendimento", "proposta", "fechado"];
+    const newStage = ALLOWED_STAGES.includes(parsed.newStage)
+      ? parsed.newStage
+      : "em_atendimento";
     return {
       text: parsed.text || "Desculpe, ocorreu um erro.",
-      newStage: parsed.newStage,
+      newStage,
     };
   } catch (e) {
     console.error("Erro ao fazer parse do JSON RAG:", e);

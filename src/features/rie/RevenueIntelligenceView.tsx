@@ -12,7 +12,11 @@ import { LossSourcesBars } from './components/LossSourcesBars';
 import { SimulatorWidget } from './components/SimulatorWidget';
 import { ConfigDrawer } from './components/ConfigDrawer';
 import { ExportAuditButton } from './components/ExportAuditButton';
+import { DriverDrilldown } from './components/DriverDrilldown';
+import { TrendChart } from './components/TrendChart';
 import { brl, pct, TICKET_SOURCE_LABEL } from './lib/format';
+
+type DriverKey = 'atendimento' | 'comercial' | 'operacional';
 
 /**
  * Revenue Intelligence Center — Home (PR 2/5 do front).
@@ -67,6 +71,7 @@ export function RevenueIntelligenceView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [drillDriver, setDrillDriver] = useState<DriverKey | null>(null);
   const topActionsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (p: RicPeriod) => {
@@ -163,7 +168,7 @@ export function RevenueIntelligenceView() {
                 sublabel={m.ticket.source === 'fallback' ? 'Defina o ticket médio para estimar' : undefined}
               />
               <MoneyKpiCard label="Receita recuperável" value={m.recoverable} tone="recoverable" sublabel="alta chance de recuperação (IRR)" />
-              <MoneyKpiCard label="Receita recuperada" value={m.recovered} tone="recovered" sublabel={`pelos fluxos do ZappFlow (janela ${snapshot.attributionWindowDays}d)`} />
+              <MoneyKpiCard label="Receita recuperada" value={m.recovered} tone="recovered" pulseOnIncrease sublabel={`pelos fluxos do ZappFlow (janela ${snapshot.attributionWindowDays}d)`} />
               <MoneyKpiCard label="Ticket-base" value={m.ticket.value} tone="info" decimals={2} sublabel={ticketSrc} />
             </>
           )}
@@ -192,9 +197,9 @@ export function RevenueIntelligenceView() {
                 <div className="flex items-center justify-center sm:col-span-1">
                   <IqrGauge score={snapshot.iqr.score} narrative={snapshot.iqr.narrative} />
                 </div>
-                <DriverCard label="Atendimento" score={snapshot.drivers.atendimento.score} weight={snapshot.iqr.weights.atendimento} items={driverItems(snapshot, 'atendimento')} weakest={snapshot.iqr.weakestDriver === 'atendimento'} />
-                <DriverCard label="Comercial" score={snapshot.drivers.comercial.score} weight={snapshot.iqr.weights.comercial} items={driverItems(snapshot, 'comercial')} weakest={snapshot.iqr.weakestDriver === 'comercial'} />
-                <DriverCard label="Operacional" score={snapshot.drivers.operacional.score} weight={snapshot.iqr.weights.operacional} items={driverItems(snapshot, 'operacional')} weakest={snapshot.iqr.weakestDriver === 'operacional'} />
+                <DriverCard label="Atendimento" score={snapshot.drivers.atendimento.score} weight={snapshot.iqr.weights.atendimento} items={driverItems(snapshot, 'atendimento')} weakest={snapshot.iqr.weakestDriver === 'atendimento'} onClick={() => setDrillDriver('atendimento')} />
+                <DriverCard label="Comercial" score={snapshot.drivers.comercial.score} weight={snapshot.iqr.weights.comercial} items={driverItems(snapshot, 'comercial')} weakest={snapshot.iqr.weakestDriver === 'comercial'} onClick={() => setDrillDriver('comercial')} />
+                <DriverCard label="Operacional" score={snapshot.drivers.operacional.score} weight={snapshot.iqr.weights.operacional} items={driverItems(snapshot, 'operacional')} weakest={snapshot.iqr.weakestDriver === 'operacional'} onClick={() => setDrillDriver('operacional')} />
               </div>
             )}
           </Card>
@@ -246,8 +251,8 @@ export function RevenueIntelligenceView() {
         {/* ===== Tendência (8) | Simulador (4) — PR 4/5 ===== */}
         <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">
           <Card className="lg:col-span-8">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tendência — desde a conexão</p>
-            <Skeleton className="mt-4 h-40 w-full bg-slate-700/25" />
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Em risco × recuperada · por janela</p>
+            <TrendChart />
           </Card>
 
           <Card className="lg:col-span-4">
@@ -258,6 +263,7 @@ export function RevenueIntelligenceView() {
       </div>
 
       <ConfigDrawer open={configOpen} onClose={() => setConfigOpen(false)} onSaved={() => load(period)} />
+      {snapshot && <DriverDrilldown snapshot={snapshot} driver={drillDriver} onClose={() => setDrillDriver(null)} />}
     </div>
   );
 }

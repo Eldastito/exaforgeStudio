@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Info } from 'lucide-react';
 import { useCountUp } from '../hooks/useCountUp';
 import { brl, RIC_TONE } from '../lib/format';
@@ -12,19 +13,48 @@ interface Props {
   sublabel?: string;
   chip?: string;        // ex.: "potencial em risco"
   info?: string;        // tooltip com a premissa/fórmula
+  pulseOnIncrease?: boolean; // pulso verde + "+R$" quando o valor sobe (RRI)
 }
 
 /**
  * Card de um número de dinheiro da faixa-herói do RIC. Count-up no mount/refresh,
  * faixa de cor semântica e — quando aplicável — chip "potencial em risco" + tooltip
  * com a premissa (honestidade: o número nunca aparece sem o "como foi calculado").
+ * Com pulseOnIncrease, pulsa verde e exibe "+R$ X" quando o valor sobe (sensação
+ * de "recuperação ao vivo").
  */
-export function MoneyKpiCard({ label, value, tone, decimals = 0, sublabel, chip, info }: Props) {
+export function MoneyKpiCard({ label, value, tone, decimals = 0, sublabel, chip, info, pulseOnIncrease }: Props) {
   const n = useCountUp(value);
   const color = RIC_TONE[tone];
 
+  // Pulso + delta flutuante quando o valor aumenta (somente se pulseOnIncrease).
+  const prev = useRef(value);
+  const [pulse, setPulse] = useState(false);
+  const [delta, setDelta] = useState(0);
+  useEffect(() => {
+    if (!pulseOnIncrease) { prev.current = value; return; }
+    if (value > prev.current) {
+      const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      const diff = value - prev.current;
+      prev.current = value;
+      if (!reduce) {
+        setDelta(diff);
+        setPulse(true);
+        const t = setTimeout(() => setPulse(false), 1400);
+        return () => clearTimeout(t);
+      }
+    } else {
+      prev.current = value;
+    }
+  }, [value, pulseOnIncrease]);
+
   return (
-    <div className="group rounded-ric-card border border-ric-border bg-ric-surface p-5 transition-colors hover:bg-ric-surface-2">
+    <div className={`group relative rounded-ric-card border border-ric-border bg-ric-surface p-5 transition-colors hover:bg-ric-surface-2 ${pulse ? 'ric-pulse' : ''}`}>
+      {pulse && delta > 0 && (
+        <span className="ric-floatup pointer-events-none absolute right-4 top-10 text-sm font-bold" style={{ color: RIC_TONE.recovered }}>
+          +{brl(delta, decimals)} ✓
+        </span>
+      )}
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
         {info && (

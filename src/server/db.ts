@@ -1117,6 +1117,15 @@ const initDb = () => {
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.
   try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_label TEXT`); } catch(e){}
 
+  // Agenda — disponibilidade/regra de marcação (defaults: Seg–Sex 08–18, slots
+  // de 60min, 1 atendimento por horário). A IA só oferece horários livres e o
+  // servidor nunca permite dois clientes no mesmo dia+horário.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN agenda_open_hour INTEGER DEFAULT 8`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN agenda_close_hour INTEGER DEFAULT 18`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN agenda_slot_minutes INTEGER DEFAULT 60`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN agenda_days TEXT DEFAULT '1,2,3,4,5'`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN agenda_capacity INTEGER DEFAULT 1`); } catch(e){}
+
   // ===== Revenue Intelligence Center (RIC) =====
   // Configuração por organização da engine de Perda Estimada e dos pesos do IQR.
   // Defaults conservadores: melhor subestimar do que inflar — número inflado mata

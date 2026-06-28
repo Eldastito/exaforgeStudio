@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
-import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign } from 'lucide-react';
+import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
 export function AdminMasterView() {
@@ -128,6 +128,8 @@ export function AdminMasterView() {
             sub="Pedidos faturados de todas as empresas" />
         </div>
       )}
+
+      <CreateCortesiaPanel />
 
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -308,6 +310,167 @@ export function AdminMasterView() {
       </div>
 
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+// Lista de módulos opcionais (espelho do backend) para liberar na conta cortesia.
+const OPTIONAL_MODULES: { key: string; label: string }[] = [
+  { key: 'agenda', label: 'Agenda' }, { key: 'catalogo', label: 'Catálogo' }, { key: 'vendas', label: 'Vendas' },
+  { key: 'loja', label: 'Loja Virtual' }, { key: 'pagamentos', label: 'Pagamentos' }, { key: 'campanhas', label: 'Campanhas' },
+  { key: 'cadencias', label: 'Cadências' }, { key: 'areas', label: 'Áreas de Atend.' }, { key: 'integracoes', label: 'Integrações' },
+  { key: 'reservas', label: 'Reservas' }, { key: 'assinaturas', label: 'Assinaturas' }, { key: 'compras', label: 'Compras' },
+  { key: 'orcamentos', label: 'Orçamentos' }, { key: 'eventos', label: 'Eventos' }, { key: 'diretor', label: 'Diretor IA' },
+];
+
+function CreateCortesiaPanel() {
+  const [businessName, setBusinessName] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [planId, setPlanId] = useState('cortesia');
+  const [plans, setPlans] = useState<any[]>([]);
+  const [modules, setModules] = useState<string[]>(OPTIONAL_MODULES.map(m => m.key)); // tudo liberado por padrão
+  const [sendWhatsapp, setSendWhatsapp] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ link: string; whatsappSent: boolean; whatsappError?: string } | null>(null);
+  const [invites, setInvites] = useState<any[]>([]);
+
+  const loadInvites = () => fetch('/api/admin/org-invites').then(r => r.json()).then(d => setInvites(Array.isArray(d) ? d : [])).catch(() => {});
+  useEffect(() => {
+    fetch('/api/plans').then(r => r.json()).then(d => setPlans(Array.isArray(d) ? d : [])).catch(() => {});
+    loadInvites();
+  }, []);
+
+  const toggleModule = (k: string) => setModules(m => m.includes(k) ? m.filter(x => x !== k) : [...m, k]);
+
+  const create = async () => {
+    if (!businessName.trim()) { toast.error('Informe o nome da empresa.'); return; }
+    if (sendWhatsapp && !recipientPhone.trim()) { toast.error('Informe o WhatsApp para enviar o link.'); return; }
+    setBusy(true); setResult(null);
+    try {
+      const res = await fetch('/api/admin/org-invites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessName, recipientName, recipientPhone, planId, modules, sendWhatsapp }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao criar convite.');
+      setResult({ link: data.link, whatsappSent: data.whatsappSent, whatsappError: data.whatsappError });
+      if (data.whatsappSent) toast.success('Convite criado e enviado pelo WhatsApp!');
+      else toast.success('Convite criado. Copie o link e compartilhe.');
+      setBusinessName(''); setRecipientName(''); setRecipientPhone('');
+      loadInvites();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+
+  const revoke = async (id: string) => {
+    if (!(await confirmDialog('Revogar este convite? O link deixa de funcionar.', { danger: true, confirmText: 'Revogar' }))) return;
+    await fetch(`/api/admin/org-invites/${id}`, { method: 'DELETE' }).catch(() => {});
+    loadInvites();
+  };
+
+  const copy = (txt: string) => { try { navigator.clipboard.writeText(txt); toast.success('Link copiado!'); } catch {} };
+
+  return (
+    <div className="mb-8 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1">
+        <Gift className="w-5 h-5 text-emerald-400" /> Criar conta (Cortesia)
+      </h3>
+      <p className="text-sm text-zinc-400 mb-5">Gera uma empresa nova com acesso definido e envia o link de ativação pelo WhatsApp.</p>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className="text-xs text-zinc-400 mb-1 block">Nome da empresa *</label>
+          <input value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Ex.: Padaria do João"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-400 mb-1 block">Nome do responsável</label>
+          <input value={recipientName} onChange={e => setRecipientName(e.target.value)} placeholder="Ex.: João"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-400 mb-1 block">WhatsApp (DDI+DDD+número)</label>
+          <input value={recipientPhone} onChange={e => setRecipientPhone(e.target.value)} placeholder="5521999998888"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" />
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <label className="text-xs text-zinc-400 mb-1 block">Plano</label>
+        <select value={planId} onChange={e => setPlanId(e.target.value)}
+          className="w-full md:w-72 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500">
+          <option value="cortesia">Cortesia (grátis, acesso liberado)</option>
+          {plans.filter(p => p.id !== 'cortesia').map(p => (
+            <option key={p.id} value={p.id}>{p.name} — R$ {Number(p.price || 0).toFixed(0)}/mês</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mt-4">
+        <span className="text-xs text-zinc-400">Módulos liberados</span>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {OPTIONAL_MODULES.map(m => {
+            const on = modules.includes(m.key);
+            return (
+              <button key={m.key} type="button" onClick={() => toggleModule(m.key)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${on ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <label className="text-sm text-zinc-300 flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={sendWhatsapp} onChange={e => setSendWhatsapp(e.target.checked)} className="accent-emerald-500" />
+          Enviar o link pelo WhatsApp
+        </label>
+        <Button onClick={create} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+          {sendWhatsapp ? <Send className="w-4 h-4 mr-2" /> : <UserPlus className="w-4 h-4 mr-2" />}
+          {busy ? 'Gerando...' : (sendWhatsapp ? 'Gerar e enviar' : 'Gerar convite')}
+        </Button>
+      </div>
+
+      {result && (
+        <div className="mt-4 p-3 rounded-lg bg-zinc-950 border border-zinc-800">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-zinc-400">Link de ativação:</span>
+            <code className="text-xs text-indigo-300 break-all flex-1 min-w-0">{result.link}</code>
+            <button onClick={() => copy(result.link)} className="text-zinc-400 hover:text-indigo-300 shrink-0" title="Copiar"><Copy className="w-4 h-4" /></button>
+          </div>
+          <p className={`text-xs mt-2 ${result.whatsappSent ? 'text-emerald-400' : 'text-amber-400'}`}>
+            {result.whatsappSent ? '✓ Enviado pelo WhatsApp.' : (result.whatsappError ? `WhatsApp não enviado: ${result.whatsappError} Copie o link e envie manualmente.` : 'Copie o link e envie manualmente.')}
+          </p>
+        </div>
+      )}
+
+      {invites.length > 0 && (
+        <div className="mt-6">
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Convites recentes</p>
+          <div className="space-y-1.5">
+            {invites.map(inv => (
+              <div key={inv.id} className="flex items-center justify-between gap-3 text-sm bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                <div className="min-w-0">
+                  <span className="text-zinc-200">{inv.business_name || 'Sem nome'}</span>
+                  {inv.recipient_phone && <span className="text-zinc-500 text-xs ml-2">{inv.recipient_phone}</span>}
+                  {inv.created_org_name && <span className="text-emerald-400 text-xs ml-2">→ {inv.created_org_name}</span>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                    inv.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                    inv.status === 'revoked' ? 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' :
+                    'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                  }`}>{inv.status}</span>
+                  {inv.status === 'pending' && (
+                    <button onClick={() => revoke(inv.id)} className="text-zinc-500 hover:text-rose-400" title="Revogar"><Trash2 className="w-4 h-4" /></button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

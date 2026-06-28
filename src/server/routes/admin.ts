@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { MessageProviderService } from "../MessageProviderService.js";
 
 const router = Router();
 
@@ -115,6 +116,84 @@ router.delete("/organizations/:id", (req: AuthRequest, res) => {
     
     logAuthEvent(req.organizationId, adminId, orgId, 'ADMIN_SOFT_DELETE', {});
       
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// Convites de NOVA EMPRESA (Cortesia) — o super admin cria uma conta gratuita
+// com plano + módulos definidos e envia o link de ativação pelo WhatsApp.
+// ============================================================================
+
+// POST /api/admin/org-invites — gera o convite e (opcional) envia pelo WhatsApp.
+router.post("/org-invites", async (req: AuthRequest, res): Promise<any> => {
+  const adminId = req.user?.userId;
+  try {
+    const { businessName, recipientName, recipientPhone, planId, modules, vertical, billingStatus, sendWhatsapp } = req.body || {};
+    const phone = String(recipientPhone || "").replace(/\D/g, "");
+    const token = uuidv4() + uuidv4();
+    const id = uuidv4();
+    const modulesJson = Array.isArray(modules) ? JSON.stringify(modules) : null;
+
+    db.prepare(`
+      INSERT INTO org_invitations (id, token, business_name, recipient_name, recipient_phone, plan_id, enabled_modules, vertical, billing_status, status, created_by, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, datetime('now', '+30 days'))
+    `).run(id, token, businessName || null, recipientName || null, phone || null,
+           planId || 'cortesia', modulesJson, vertical || null, billingStatus || 'active', adminId || null);
+
+    const base = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, "");
+    const link = `${base}/?orgInvite=${token}`;
+
+    // Entrega pelo WhatsApp usando um canal conectado da org do super admin.
+    let whatsappSent = false;
+    let whatsappError: string | null = null;
+    if (sendWhatsapp && phone) {
+      try {
+        const ch = db.prepare(
+          `SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`
+        ).get(req.organizationId) as any;
+        if (!ch) { whatsappError = "Nenhum canal conectado para enviar."; }
+        else {
+          const nome = (recipientName || "").trim().split(/\s+/)[0] || "";
+          const msg = `Olá ${nome}! 🎉 Sua conta no ZapFlow.ai (${businessName || 'sua empresa'}) está liberada.\n\n` +
+            `Crie seu acesso por aqui (válido por 30 dias):\n${link}\n\n` +
+            `Qualquer dúvida, é só chamar. 🚀`;
+          await MessageProviderService.sendMessage(ch.id, phone, msg);
+          whatsappSent = true;
+        }
+      } catch (e: any) { whatsappError = e?.message || "Falha ao enviar pelo WhatsApp."; }
+    }
+
+    logAuthEvent(req.organizationId, adminId, id, 'ADMIN_ORG_INVITE_CREATED', { businessName, planId: planId || 'cortesia', whatsappSent });
+    res.json({ success: true, id, token, link, whatsappSent, whatsappError });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/admin/org-invites — lista os convites de nova empresa.
+router.get("/org-invites", (req: AuthRequest, res) => {
+  try {
+    const invites = db.prepare(`
+      SELECT oi.id, oi.business_name, oi.recipient_name, oi.recipient_phone, oi.plan_id, oi.enabled_modules,
+             oi.status, oi.created_org_id, oi.accepted_at, oi.expires_at, oi.created_at,
+             (SELECT business_name FROM organization_settings os WHERE os.organization_id = oi.created_org_id) AS created_org_name
+      FROM org_invitations oi
+      ORDER BY oi.created_at DESC LIMIT 50
+    `).all();
+    res.json(invites);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/admin/org-invites/:id — revoga um convite pendente.
+router.delete("/org-invites/:id", (req: AuthRequest, res) => {
+  try {
+    db.prepare(`UPDATE org_invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'`).run(req.params.id);
+    logAuthEvent(req.organizationId, req.user?.userId, req.params.id, 'ADMIN_ORG_INVITE_REVOKED', {});
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

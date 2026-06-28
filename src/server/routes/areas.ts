@@ -29,7 +29,7 @@ router.post("/ai/persona", async (req: AuthRequest, res): Promise<any> => {
     const prompt = `${brand}Crie a persona/instruções de IA para a área de atendimento "${name}"${description ? ` (descrição: ${description})` : ""}.
 Inclua: quem a IA representa e o tom de voz; o que essa área atende; como acolher e conduzir (tirar dúvidas, oferecer agendamento/orçamento quando fizer sentido); e quando encaminhar para um humano. Seja conciso (até ~120 palavras).`;
     const raw = await chat(prompt, { temperature: 0.7, system });
-    const persona = String(raw || "").trim().slice(0, 2000);
+    const persona = String(raw || "").trim().slice(0, 8000);
     if (!persona) return res.status(502).json({ error: "A IA não retornou um texto válido. Tente novamente." });
     res.json({ persona });
   } catch (e: any) {
@@ -58,7 +58,7 @@ router.post("/", (req: AuthRequest, res): any => {
   const id = uuidv4();
   db.prepare(
     "INSERT INTO service_areas (id, organization_id, name, description, persona, assigned_user_id, position, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)"
-  ).run(id, orgId, name, String(req.body?.description || "").slice(0, 200), String(req.body?.persona || "").slice(0, 2000), req.body?.assigned_user_id || null, pos);
+  ).run(id, orgId, name, String(req.body?.description || "").slice(0, 600), String(req.body?.persona || "").slice(0, 8000), req.body?.assigned_user_id || null, pos);
   res.json(view(db.prepare("SELECT * FROM service_areas WHERE id = ?").get(id)));
 });
 
@@ -71,8 +71,8 @@ router.put("/:id", (req: AuthRequest, res): any => {
   const b = req.body || {};
   const sets: string[] = []; const vals: any[] = [];
   if (b.name !== undefined) { sets.push("name = ?"); vals.push(String(b.name).trim().slice(0, 60)); }
-  if (b.description !== undefined) { sets.push("description = ?"); vals.push(String(b.description).slice(0, 200)); }
-  if (b.persona !== undefined) { sets.push("persona = ?"); vals.push(String(b.persona).slice(0, 2000)); }
+  if (b.description !== undefined) { sets.push("description = ?"); vals.push(String(b.description).slice(0, 600)); }
+  if (b.persona !== undefined) { sets.push("persona = ?"); vals.push(String(b.persona).slice(0, 8000)); }
   if (b.assigned_user_id !== undefined) { sets.push("assigned_user_id = ?"); vals.push(b.assigned_user_id || null); }
   if (b.active !== undefined) { sets.push("active = ?"); vals.push(b.active ? 1 : 0); }
   if (sets.length) db.prepare(`UPDATE service_areas SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);

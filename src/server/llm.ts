@@ -93,3 +93,21 @@ export async function describeImage(
   });
   return res.choices[0]?.message?.content || "";
 }
+
+/**
+ * "Olhos" do atendimento: analisa uma imagem recebida, CLASSIFICA (documento vs
+ * foto comum) e, quando for documento (comprovante de PIX, nota fiscal, recibo,
+ * receita, boleto…), extrai os dados-chave. Retorna um texto pronto para a IA
+ * de atendimento reagir. Em fotos comuns, sinaliza para a IA PERGUNTAR o que o
+ * cliente quer identificar.
+ */
+export async function analyzeImageForChat(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const prompt = `Você é os "olhos" de um atendente por WhatsApp. Analise a imagem e responda em português de UMA destas formas:
+
+1) Se for um DOCUMENTO com texto relevante (comprovante de PIX/pagamento, nota fiscal, recibo, receita/prescrição, boleto, RG/CPF, cardápio, etc.):
+   Comece com "TIPO: <tipo do documento>" e depois liste os DADOS-CHAVE que conseguir ler (ex.: valor, data/hora, nome do pagador/destinatário, nº/ID da transação, itens, total). Seja fiel ao que está escrito; NÃO invente. Se algo estiver ilegível, escreva "ilegível".
+
+2) Se for uma FOTO comum (pessoa, animal, objeto, lugar) SEM texto relevante:
+   Responda exatamente neste formato: "TIPO: foto — <descrição bem curta do que aparece>. PERGUNTAR: o cliente enviou uma foto; pergunte com simpatia o que ele gostaria que você identificasse ou em que pode ajudar."`;
+  return describeImage(base64, mimetype, prompt);
+}

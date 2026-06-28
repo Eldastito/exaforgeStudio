@@ -79,7 +79,7 @@ export function AreasView() {
               {areas.map((a, i) => (
                 <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3 gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-zinc-100 truncate">
+                    <p className="text-sm font-medium text-zinc-100 line-clamp-2 break-words">
                       <span className="text-zinc-500 mr-1">{i + 1}.</span>{a.name}
                     </p>
                     <p className="text-[11px] text-zinc-500 truncate">

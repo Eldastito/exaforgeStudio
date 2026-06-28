@@ -140,7 +140,7 @@ export function AgendaView() {
             <div key={a.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 flex align-middle justify-between">
               <div>
                  <h3 className="font-semibold text-zinc-100">{a.title}</h3>
-                 <p className="text-sm text-zinc-400 max-w-xl truncate">{a.description}</p>
+                 <p className="text-sm text-zinc-400 max-w-xl line-clamp-2 break-words">{a.description}</p>
                  <div className="flex gap-4 mt-2 text-xs text-zinc-500 font-mono">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />

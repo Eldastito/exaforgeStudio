@@ -170,7 +170,7 @@ export function ContactsView() {
                 <Avatar name={c.name} src={c.profile_pic_url} size={44} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-semibold text-zinc-100 truncate">{c.name || 'Sem nome'}</h3>
+                    <h3 className="font-semibold text-zinc-100 line-clamp-2 break-words">{c.name || 'Sem nome'}</h3>
                     <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border ${t.cls}`}>
                       <t.Icon className="w-3 h-3" /> {t.label}
                     </span>

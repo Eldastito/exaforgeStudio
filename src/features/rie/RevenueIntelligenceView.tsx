@@ -1,11 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Gauge, FileDown, Sparkles, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Gauge, FileDown, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { apiFetch } from '@/src/lib/api';
 import type { RicPeriod, RicSnapshot } from './types';
 import { MoneyKpiCard } from './components/MoneyKpiCard';
 import { IqrGauge } from './components/IqrGauge';
 import { DriverCard } from './components/DriverCard';
+import { DirectorPanel } from './components/DirectorPanel';
+import { TopActionsList } from './components/TopActionsList';
+import { LossSourcesBars } from './components/LossSourcesBars';
 import { brl, pct, TICKET_SOURCE_LABEL } from './lib/format';
 
 /**
@@ -60,6 +63,7 @@ export function RevenueIntelligenceView() {
   const [snapshot, setSnapshot] = useState<RicSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const topActionsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (p: RicPeriod) => {
     setLoading(true);
@@ -190,44 +194,47 @@ export function RevenueIntelligenceView() {
             )}
           </Card>
 
-          {/* Diretor IA — painel fixo, glow ciano (binding no PR 3) */}
-          <div className="rounded-ric-hero border border-ric-ai/30 bg-ric-surface-2 p-5 ric-ai-glow lg:col-span-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-ric-ai" />
-              <p className="text-sm font-semibold text-ric-ai">Diretor Executivo IA</p>
-            </div>
-            <Skeleton className="mt-4 h-3 w-full bg-slate-700/30" />
-            <Skeleton className="mt-2 h-3 w-5/6 bg-slate-700/30" />
-            <Skeleton className="mt-2 h-3 w-4/6 bg-slate-700/30" />
-            <Skeleton className="mt-5 h-9 w-40 rounded-lg bg-slate-700/40" />
-          </div>
+          {/* Diretor IA — painel fixo, glow ciano */}
+          <DirectorPanel
+            onRecover={() => topActionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          />
         </div>
 
-        {/* ===== Top 5 ações (8) | Fontes da perda (4) — PR 3 ===== */}
+        {/* ===== Top 5 ações (8) | Fontes da perda (4) ===== */}
         <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">
-          <Card className="lg:col-span-8">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Top 5 ações prioritárias</p>
-            <div className="mt-4 space-y-3">
-              {[0, 1, 2, 3, 4].map(i => (
-                <div key={i} className="flex items-center gap-3">
-                  <Skeleton className="h-7 w-7 rounded-full bg-slate-700/40" />
-                  <Skeleton className="h-4 flex-1 bg-slate-700/30" />
-                  <Skeleton className="h-4 w-20 bg-slate-700/30" />
+          <div ref={topActionsRef} className="lg:col-span-8">
+            <Card>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Top 5 ações prioritárias</p>
+              {loading || !snapshot ? (
+                <div className="mt-4 space-y-3">
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <div key={i} className="flex items-center gap-3">
+                      <Skeleton className="h-7 w-7 rounded-full bg-slate-700/40" />
+                      <Skeleton className="h-4 flex-1 bg-slate-700/30" />
+                      <Skeleton className="h-4 w-20 bg-slate-700/30" />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </Card>
+              ) : (
+                <TopActionsList snapshot={snapshot} />
+              )}
+            </Card>
+          </div>
 
           <Card className="lg:col-span-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Fontes da perda</p>
-            <div className="mt-4 space-y-4">
-              {[0, 1, 2, 3].map(i => (
-                <div key={i}>
-                  <Skeleton className="h-3 w-32 bg-slate-700/30" />
-                  <Skeleton className="mt-2 h-2 w-full bg-slate-700/20" />
-                </div>
-              ))}
-            </div>
+            {loading || !snapshot ? (
+              <div className="mt-4 space-y-4">
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i}>
+                    <Skeleton className="h-3 w-32 bg-slate-700/30" />
+                    <Skeleton className="mt-2 h-2 w-full bg-slate-700/20" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <LossSourcesBars snapshot={snapshot} />
+            )}
           </Card>
         </div>
 

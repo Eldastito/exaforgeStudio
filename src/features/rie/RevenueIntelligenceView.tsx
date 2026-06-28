@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Gauge, FileDown, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Gauge, RefreshCw, AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { apiFetch } from '@/src/lib/api';
 import type { RicPeriod, RicSnapshot } from './types';
@@ -9,6 +9,9 @@ import { DriverCard } from './components/DriverCard';
 import { DirectorPanel } from './components/DirectorPanel';
 import { TopActionsList } from './components/TopActionsList';
 import { LossSourcesBars } from './components/LossSourcesBars';
+import { SimulatorWidget } from './components/SimulatorWidget';
+import { ConfigDrawer } from './components/ConfigDrawer';
+import { ExportAuditButton } from './components/ExportAuditButton';
 import { brl, pct, TICKET_SOURCE_LABEL } from './lib/format';
 
 /**
@@ -63,6 +66,7 @@ export function RevenueIntelligenceView() {
   const [snapshot, setSnapshot] = useState<RicSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const topActionsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (p: RicPeriod) => {
@@ -115,12 +119,13 @@ export function RevenueIntelligenceView() {
               ))}
             </div>
             <button
-              disabled
-              title="Disponível em breve"
-              className="flex items-center gap-2 rounded-ric-card border border-ric-border bg-ric-surface px-3 py-2 text-xs font-semibold text-slate-400 opacity-60"
+              onClick={() => setConfigOpen(true)}
+              title="Calibrar a fórmula"
+              className="flex items-center gap-2 rounded-ric-card border border-ric-border bg-ric-surface px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-ric-surface-2"
             >
-              <FileDown className="h-4 w-4" /> Exportar PDF
+              <SlidersHorizontal className="h-4 w-4" /> Calibrar
             </button>
+            <ExportAuditButton period={period} />
           </div>
         </div>
 
@@ -247,12 +252,12 @@ export function RevenueIntelligenceView() {
 
           <Card className="lg:col-span-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Simulador rápido</p>
-            <Skeleton className="mt-4 h-3 w-40 bg-slate-700/30" />
-            <Skeleton className="mt-4 h-2 w-full bg-slate-700/20" />
-            <Skeleton className="mt-6 h-8 w-28 bg-slate-700/40" />
+            <SimulatorWidget />
           </Card>
         </div>
       </div>
+
+      <ConfigDrawer open={configOpen} onClose={() => setConfigOpen(false)} onSaved={() => load(period)} />
     </div>
   );
 }

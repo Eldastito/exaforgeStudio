@@ -3,6 +3,8 @@ import { AnalyticsService } from "../AnalyticsService.js";
 import { ReportsService } from "../ReportsService.js";
 import { ModuleService } from "../ModuleService.js";
 import { RevenueIntelligenceService } from "../RevenueIntelligenceService.js";
+import { RevenueAuditService } from "../RevenueAuditService.js";
+import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from 'pdfkit';
@@ -73,6 +75,220 @@ router.post("/revenue-intelligence/config", (req, res) => {
     const saved = RevenueIntelligenceService.saveConfig(orgId, req.body || {});
     res.json({ success: true, config: saved });
   } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Auditoria estruturada (10 seções) — fonte JSON do relatório.
+router.get("/revenue-intelligence/audit", (req, res) => {
+  const orgId = getOrgId(req);
+  const period = (req.query.period as any) || "month";
+  try {
+    res.json(RevenueAuditService.build(orgId, period));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Plano 30/60/90 — narrativa do Diretor IA sobre a auditoria. Cobra LLM,
+// então não vai junto com o GET /audit para não estourar custo a cada refresh.
+router.get("/revenue-intelligence/plan", async (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const text = await ExecutiveAdvisorService.auditPlan(orgId);
+    res.json({ plan: text, generatedAt: new Date().toISOString() });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PDF da auditoria — entregável central do GTM trial-14d. Layout premium no
+// mesmo padrão do /reports/pdf existente: faixa gradiente, cards, seções com
+// "headline" curto + métricas chave + notas. Plano 30/60/90 opcional no fim.
+router.post("/revenue-intelligence/audit-pdf", async (req, res) => {
+  const orgId = getOrgId(req);
+  const period = (req.body?.period as any) || "month";
+  const includePlan = req.body?.includePlan !== false; // default: incluir
+
+  try {
+    const report = RevenueAuditService.build(orgId, period);
+    const plan = includePlan ? await ExecutiveAdvisorService.auditPlan(orgId).catch(() => "") : "";
+
+    // Paleta (igual ao /reports/pdf, para identidade visual consistente).
+    const C = {
+      ink: '#0f172a', body: '#334155', muted: '#64748b', faint: '#94a3b8',
+      line: '#e2e8f0', card: '#ffffff', soft: '#f8fafc',
+      indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
+      amber: '#f59e0b', rose: '#f43f5e', sky: '#0ea5e9',
+    };
+    const TONE: Record<string, string> = {
+      good: C.emerald, warn: C.amber, bad: C.rose, info: C.indigo,
+    };
+
+    const M = 48;
+    const doc = new PDFDocument({ margin: 0, size: 'A4', autoFirstPage: true });
+    const W = doc.page.width;
+    const H = doc.page.height;
+    const CW = W - M * 2;
+    const businessName = report.meta.businessName;
+    const initial = (businessName.trim()[0] || 'E').toUpperCase();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=auditoria-receita-${period}-${Date.now()}.pdf`);
+    doc.pipe(res);
+
+    // ---------- HEADER (faixa gradiente) ----------
+    const drawHeader = () => {
+      const headH = 132;
+      const grad = doc.linearGradient(0, 0, W, headH);
+      grad.stop(0, '#4f46e5').stop(0.55, '#6d28d9').stop(1, '#7c3aed');
+      doc.rect(0, 0, W, headH).fill(grad);
+
+      doc.roundedRect(M, 34, 44, 44, 10).fillOpacity(0.18).fill('#ffffff').fillOpacity(1);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(22).text(initial, M, 46, { width: 44, align: 'center' });
+
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(20).text(businessName, M + 60, 38, { width: CW - 220 });
+      doc.fillColor('#e9d5ff').font('Helvetica').fontSize(10).text('Auditoria de Receita · Revenue Intelligence Center', M + 60, 64, { width: CW - 220 });
+
+      const boxW = 170, boxX = W - M - boxW;
+      doc.roundedRect(boxX, 38, boxW, 56, 8).fillOpacity(0.14).fill('#ffffff').fillOpacity(1);
+      doc.fillColor('#ede9fe').font('Helvetica').fontSize(8).text('PERÍODO', boxX + 12, 48);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12).text(report.meta.periodLabel, boxX + 12, 59, { width: boxW - 24 });
+      doc.fillColor('#ddd6fe').font('Helvetica').fontSize(7.5).text(
+        'Gerado em ' + new Date(report.meta.generatedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+        boxX + 12, 78, { width: boxW - 24 }
+      );
+      return headH;
+    };
+
+    const drawFooter = () => {
+      const footY = H - 38;
+      doc.moveTo(M, footY).lineTo(W - M, footY).strokeColor(C.line).stroke();
+      doc.fillColor(C.faint).font('Helvetica').fontSize(7.5).text(
+        `${businessName} · Auditoria gerada automaticamente pelo Revenue Intelligence Center`,
+        M, footY + 8, { width: CW / 2 }
+      );
+      doc.fillColor(C.faint).font('Helvetica').fontSize(7.5).text(
+        'ZappFlow.ai — onde está o dinheiro que sua empresa está deixando na mesa.',
+        M + CW / 2, footY + 8, { width: CW / 2, align: 'right' }
+      );
+    };
+
+    let y = drawHeader() + 28;
+
+    // Garante espaço; quebra página se necessário.
+    const ensureSpace = (need: number) => {
+      if (y + need > H - 70) {
+        drawFooter();
+        doc.addPage();
+        y = drawHeader() + 28;
+      }
+    };
+
+    const sectionTitle = (label: string, accent: string) => {
+      ensureSpace(40);
+      doc.roundedRect(M, y + 1, 4, 14, 2).fill(accent);
+      doc.fillColor(C.ink).font('Helvetica-Bold').fontSize(13).text(label, M + 14, y);
+      y += 24;
+    };
+
+    // ---------- HERO (IQR + R$) ----------
+    sectionTitle('Painel Mestre', C.indigo);
+    const heroH = 110;
+    ensureSpace(heroH + 20);
+    doc.roundedRect(M, y, CW, heroH, 12).fillAndStroke(C.soft, C.line);
+
+    // Bloco esquerdo: IQR grande
+    doc.fillColor(C.muted).font('Helvetica-Bold').fontSize(8).text('IQR — ÍNDICE DE QUALIDADE DA RECEITA', M + 22, y + 20);
+    const iqrColor = report.headline.iqr >= 80 ? C.emerald : report.headline.iqr >= 60 ? C.amber : C.rose;
+    doc.fillColor(iqrColor).font('Helvetica-Bold').fontSize(40).text(`${report.headline.iqr}`, M + 22, y + 32);
+    doc.fillColor(C.faint).font('Helvetica').fontSize(9).text(`/100 · driver mais fraco: ${report.headline.weakestDriver}`, M + 22, y + 78);
+
+    // Divisor + 3 colunas de dinheiro (Potencial / IRR / RRI) à direita.
+    const brl = (v: number) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const rx = M + CW * 0.45;
+    doc.moveTo(rx - 14, y + 14).lineTo(rx - 14, y + heroH - 14).strokeColor(C.line).stroke();
+    const colW = (M + CW - rx) / 3;
+    const cols: { label: string; val: string; color: string }[] = [
+      { label: 'POTENCIAL EM RISCO', val: brl(report.headline.estimatedLoss), color: C.rose },
+      { label: 'RECUPERÁVEL (IRR)', val: brl(report.headline.recoverable), color: C.amber },
+      { label: 'RECUPERADO (RRI)', val: brl(report.headline.recovered), color: C.emerald },
+    ];
+    cols.forEach((c, i) => {
+      const x = rx + colW * i;
+      doc.fillColor(C.muted).font('Helvetica-Bold').fontSize(7.5).text(c.label, x, y + 22, { width: colW - 6 });
+      doc.fillColor(c.color).font('Helvetica-Bold').fontSize(15).text(c.val, x, y + 38, { width: colW - 6 });
+    });
+    doc.fillColor(C.faint).font('Helvetica').fontSize(7.5).text(
+      `Premissa de ticket: ${brl(report.headline.ticket.value)} (${report.headline.ticket.source})`,
+      rx, y + heroH - 22, { width: CW - (rx - M) - 12 }
+    );
+
+    y += heroH + 22;
+
+    // ---------- 10 SEÇÕES ----------
+    const ACCENTS = [C.indigo, C.violet, C.sky, C.amber, C.rose, C.amber, C.emerald, C.rose, C.sky, C.violet];
+
+    report.sections.forEach((s, i) => {
+      sectionTitle(`${i + 1}. ${s.title}`, ACCENTS[i] || C.indigo);
+
+      // Headline curto (1 linha) em destaque
+      ensureSpace(40);
+      doc.fillColor(C.body).font('Helvetica-Bold').fontSize(10).text(s.headline, M, y, { width: CW });
+      y += doc.heightOfString(s.headline, { width: CW, lineGap: 1 }) + 10;
+
+      // Tabela de métricas (2 colunas alternadas)
+      if (s.metrics?.length) {
+        s.metrics.forEach((mt, j) => {
+          ensureSpace(28);
+          if (j % 2 === 0) doc.roundedRect(M, y, CW, 24, 4).fill(C.soft);
+          doc.fillColor(C.body).font('Helvetica').fontSize(9.5).text(mt.label, M + 14, y + 7, { width: CW * 0.65 });
+          const valColor = mt.tone ? TONE[mt.tone] : C.ink;
+          doc.fillColor(valColor).font('Helvetica-Bold').fontSize(10).text(mt.value, M, y + 7, { width: CW - 14, align: 'right' });
+          y += 24;
+        });
+      }
+
+      // Linhas adicionais (ex.: velocidade por estágio)
+      if (s.rows?.length) {
+        y += 6;
+        s.rows.forEach(r => {
+          ensureSpace(18);
+          doc.fillColor(C.muted).font('Helvetica').fontSize(8.5).text(`• ${r.label}: ${r.value}`, M + 4, y, { width: CW - 8 });
+          y += 14;
+        });
+      }
+
+      // Notas (porquês)
+      if (s.notes?.length) {
+        y += 6;
+        s.notes.forEach(n => {
+          ensureSpace(20);
+          doc.fillColor(C.faint).font('Helvetica-Oblique').fontSize(8.5).text(n, M, y, { width: CW });
+          y += doc.heightOfString(n, { width: CW, lineGap: 1 }) + 4;
+        });
+      }
+
+      y += 14;
+    });
+
+    // ---------- PLANO 30 / 60 / 90 ----------
+    if (plan && plan.trim()) {
+      ensureSpace(80);
+      sectionTitle('Plano de Ação 30 / 60 / 90 — gerado pelo Diretor Executivo IA', C.emerald);
+      ensureSpace(40);
+      doc.fillColor(C.body).font('Helvetica').fontSize(10).text(plan, M, y, { width: CW, lineGap: 2 });
+      y += doc.heightOfString(plan, { width: CW, lineGap: 2 }) + 8;
+      doc.fillColor(C.faint).font('Helvetica-Oblique').fontSize(8).text(
+        'Plano gerado a partir dos números da auditoria acima — sem inventar dado. Use como ponto de partida; ajuste com o time.',
+        M, y, { width: CW }
+      );
+    }
+
+    drawFooter();
+    doc.end();
+  } catch (error: any) {
+    console.error('[RIC PDF] erro', error);
     res.status(500).json({ error: error.message });
   }
 });

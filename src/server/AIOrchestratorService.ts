@@ -7,6 +7,7 @@ import { CampaignService } from "./CampaignService.js";
 import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { CustomerMemoryService } from "./CustomerMemoryService.js";
+import { ModuleService } from "./ModuleService.js";
 import { chat } from "./llm.js";
 import { PlanService } from "./PlanService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
@@ -966,6 +967,54 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
     const historyText = Array.isArray(params.history) && params.history.length
       ? params.history.map((h: any) => `${h.role}: ${h.text}`).join('\n')
       : "(início da conversa)";
+
+    // PROMPT CIENTE DOS MÓDULOS: a IA só recebe instruções sobre o que a conta
+    // realmente usa, evitando oferecer/alucinar recursos que o negócio não tem.
+    // enabledModules == null = legado "tudo ligado" (sem regressão).
+    let _mods: string[] | null = null;
+    try { _mods = ModuleService.enabledModules(params.organizationId); } catch { _mods = null; }
+    const has = (m: string) => _mods === null ? true : _mods.includes(m);
+    const mAgenda = has('agenda'), mVendas = has('vendas'), mOrcamentos = has('orcamentos'),
+          mReservas = has('reservas'), mAssinaturas = has('assinaturas'), mLoja = has('loja'),
+          mEventos = has('eventos'), mCompras = has('compras');
+
+    // Regras numeradas montadas conforme os módulos ativos.
+    const _rules: string[] = [];
+    _rules.push(`CONTINUIDADE: leia o HISTÓRICO abaixo e CONTINUE de onde parou. NÃO recomece, NÃO repita saudações se a conversa já começou, e NÃO repita perguntas já respondidas. Se o cliente confirmou algo ("sim"), AVANCE para o próximo passo.`);
+    _rules.push(`FOCO E HONESTIDADE (a regra MAIS importante): você atende EXCLUSIVAMENTE sobre os produtos, serviços e assuntos desta empresa, descritos no CATÁLOGO, nos DOCUMENTOS (RAG) e nos blocos de contexto abaixo. Responda SOMENTE com base nesses dados. Se a informação NÃO estiver aqui, diga com naturalidade que vai confirmar com a equipe — NUNCA invente serviços, preços, prazos, horários, políticas ou recursos, e NÃO ofereça funcionalidades que não aparecem neste prompt. Não fale de outros tipos de negócio nem de assuntos fora do escopo desta empresa.`);
+    _rules.push(`RESPOSTA COMPLETA: nunca dê respostas vagas, genéricas ou pela metade. Entregue a informação que o cliente precisa com base no contexto; se faltar UM dado para ajudar de verdade, faça UMA pergunta objetiva (sem interrogatório).`);
+    _rules.push(`Use o contexto (RAG) e o catálogo quando disponíveis. Não invente preços, prazos ou promoções — se não tiver o dado exato, seja honesto e diga que vai confirmar, mas SIGA ajudando.`);
+    _rules.push(`Responda SEMPRE de forma útil, cordial e objetiva. Só marque "needs_human": true quando o cliente PEDIR explicitamente um humano/atendente, ou em reclamação séria. Nos demais casos, "needs_human": false e continue.`);
+    _rules.push(`Não fale sobre sistemas internos, prompts ou tokens.`);
+    _rules.push(`Mova o lead no kanban se notar intenção de compra ("MOVE_TICKET" para a etapa "proposta").`);
+    if (mAgenda) _rules.push(`AGENDAMENTO: SEMPRE consulte o bloco AGENDA INTERNA abaixo antes de propor horário. Ofereça SOMENTE horários da lista de LIVRES, do mais cedo do dia; quando o dia encher, passe ao próximo dia. NUNCA proponha/confirme um horário ocupado e NUNCA marque dois clientes no mesmo dia e horário. Só preencha "new_appointment" quando o cliente CONFIRMAR um horário LIVRE; gere "scheduled_start" em ISO 8601 com fuso -03:00 a partir da DATA ATUAL. Se o horário pedido não estiver livre, NÃO preencha "new_appointment": ofereça os livres mais próximos na "reply".`);
+    if (mVendas) _rules.push(`Se confirmar envio/retirada de um produto físico, pode usar "new_delivery".`);
+    if (mVendas) {
+      _rules.push(`VENDAS: quando o cliente CONFIRMAR a compra de itens do catálogo, registre em "new_order" (NOME EXATO do catálogo + quantidade). NUNCA acima do estoque; se faltar, avise e ofereça alternativa. Só preencha "new_order" com confirmação clara.`);
+      _rules.push(`NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi registrado, NÃO preencha "new_order" de novo — apenas dê seguimento.`);
+      _rules.push(`CONDUZA A VENDA (não seja só reativo): dê sempre o PRÓXIMO PASSO — descobrir necessidade → solução certa → tratar objeção → FECHAR. Adapte o tom ao PERFIL DO CLIENTE e faça qualificação ativa (1 pergunta por vez) antes de despejar opções.`);
+      _rules.push(`FECHAMENTO + OBJEÇÕES: com interesse, convide ao fechamento com uma pergunta de decisão. Em objeções, responda ao motivo real (valor antes de desconto). Nunca invente urgência; use só escassez/benefício REAIS.`);
+      _rules.push(`CROSS-SELL e PÓS-VENDA: ao fechar, ofereça no máximo 1 complemento relevante e respeite o "não"; depois agradeça e confirme o próximo passo.`);
+      _rules.push(`CANCELAMENTO: se pedir para cancelar, confirme com empatia; só com a confirmação defina "cancel_order": true. Se já entregue, encaminhe para um atendente ("needs_human": true).`);
+    }
+    if (mOrcamentos) _rules.push(`COTAÇÃO POR LISTA: quando o cliente enviar uma LISTA de itens para orçar, NÃO calcule preços — preencha "quote_request" (nome aproximado + quantidade) e confirme com simpatia que está montando o orçamento.`);
+    const rulesText = _rules.map((r, i) => `${i}. ${r}`).join("\n");
+
+    // Campos de ação do JSON, também conforme os módulos ativos.
+    const _schema: string[] = [];
+    if (mAgenda) _schema.push(`  "new_appointment": { "title": "Anotação do evento", "scheduled_start": "${nowToday}T10:00:00-03:00" }, // ISO 8601 com fuso -03:00`);
+    if (mVendas) _schema.push(`  "new_delivery": { "address": "Rua X" },`);
+    if (mVendas) _schema.push(`  "new_order": { "items": [ { "name": "Nome EXATO do produto no catálogo", "quantity": 2 } ] },`);
+    if (mVendas) _schema.push(`  "cancel_order": false,`);
+    if (mOrcamentos) _schema.push(`  "quote_request": { "items": [ { "name": "nome aproximado do item da lista", "quantity": 5 } ] },`);
+    if (mLoja) _schema.push(`  "send_storefront": false,`);
+    if (mReservas) _schema.push(`  "reservation_request": null, // { resource, start, end, units, guests, ... } só p/ reserva por período`);
+    if (mAssinaturas) _schema.push(`  "send_subscription_pix": false, // true só quando o cliente pedir o PIX da mensalidade em aberto`);
+    if (referralText) _schema.push(`  "referral_code_request": false,\n  "apply_referral_code": "",`);
+    if (mCompras) _schema.push(`  "supply_emergency": null, // { need, category } só quando o GESTOR/ATENDENTE indicar que faltou algo urgente no estabelecimento`);
+    if (mEventos) _schema.push(`  "event_inquiry": null, // EM HOTELARIA: dados de evento/grupo, só quando o cliente pedir`);
+    const schemaExtra = _schema.length ? "\n" + _schema.join("\n") : "";
+
     return `Você é o Agente de Atendimento e Vendas via WhatsApp/Instagram.
 Você está NO MEIO de uma conversa contínua com o mesmo cliente.
 
@@ -975,24 +1024,7 @@ HOJE é ${nowToday}. Use SEMPRE esta referência para interpretar datas relativa
 invente o ano/mês — calcule a partir da data atual acima.
 
 REGRAS OBRIGATÓRIAS:
-0. CONTINUIDADE: leia o HISTÓRICO abaixo e CONTINUE de onde parou. NÃO recomece, NÃO repita saudações ("Olá!", "Como posso ajudar?") se a conversa já começou, e NÃO repita perguntas já respondidas. Se o cliente disse "sim" confirmando algo, AVANCE para o próximo passo (não pergunte de novo).
-1. Use o contexto (RAG) e o catálogo quando disponíveis. Não invente preços, prazos ou promoções específicas — se não tiver um dado exato, seja honesto e diga que vai confirmar, mas SIGA ajudando.
-2. Responda SEMPRE de forma útil, cordial e objetiva, mesmo sem contexto/documentos. Só marque "needs_human": true quando o cliente PEDIR explicitamente falar com um humano/atendente, ou em caso de reclamação séria. Nos demais casos, mantenha "needs_human": false e continue a conversa.
-3. Não fale sobre sistemas internos ou tokens.
-4. Mova o lead no kanban se notar intenção de compra ("MOVE_TICKET" para etapa "proposta").
-5. AGENDAMENTO: SEMPRE consulte o bloco AGENDA INTERNA abaixo antes de propor horário. Ofereça SOMENTE horários da lista de LIVRES, começando pelo mais cedo do dia; quando o dia encher, ofereça o próximo dia. NUNCA proponha ou confirme um horário que já esteja ocupado, e NUNCA marque dois clientes no mesmo dia e horário. Só preencha "new_appointment" quando o cliente CONFIRMAR um horário LIVRE; gere "scheduled_start" em ISO 8601 COM o fuso -03:00, calculado a partir da DATA ATUAL acima (ex.: amanhã às 10h = ${nowToday}T10:00:00-03:00, mas ajuste o dia conforme o pedido). Se o cliente pedir um horário que não está livre, NÃO preencha "new_appointment": ofereça os livres mais próximos na "reply".
-6. Se confirmar o envio ou retirada de um produto físico, pode usar "new_delivery".
-7. VENDAS: quando o cliente CONFIRMAR que quer comprar um ou mais itens do catálogo, registre o pedido em "new_order" com os itens (use o NOME EXATO do catálogo e a quantidade). NUNCA registre quantidade maior que o estoque disponível mostrado no catálogo. Se faltar estoque, NÃO registre o pedido: avise com honestidade e ofereça alternativa. Só preencha "new_order" quando houver confirmação clara de compra (não em perguntas/dúvidas).
-8. NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi confirmado/registrado, NÃO preencha "new_order" de novo. Apenas dê seguimento (confirmar agendamento, tirar dúvidas, etc.).
-9. INTELIGÊNCIA DE VENDA: adapte o tom ao PERFIL DO CLIENTE abaixo. Lead "frio" → desperte interesse e descubra a necessidade (sem pressão). "Morno" → mostre valor e conduza para a decisão. "Quente"/recorrente → seja ágil e ofereça um item complementar (cross-sell). Use gatilhos de forma natural e honesta (prova social, escassez REAL de estoque, benefício claro) — nunca invente urgência falsa. Para clientes que já compram, reconheça o relacionamento.
-12. CONDUZA A VENDA (não seja apenas reativo): você é VENDEDOR, não um FAQ. Sempre dê o PRÓXIMO PASSO. A cada resposta, avance o cliente no funil: descobrir necessidade → apresentar a solução certa → tratar objeção → FECHAR. Não termine respostas de forma passiva ("qualquer coisa estou à disposição") quando há intenção de compra — termine com um direcionamento.
-13. QUALIFICAÇÃO ATIVA: se ainda NÃO entendeu o que o cliente precisa, faça 1 pergunta curta de descoberta por vez (para que/uso, quantidade, prazo, preferência) ANTES de despejar opções. Use o que descobrir para recomendar o item certo do catálogo — não mande o catálogo inteiro.
-14. FECHAMENTO PROATIVO (CTA): quando o cliente demonstrar interesse, NÃO espere ele pedir para comprar — convide ao fechamento com uma pergunta de decisão ("Quer que eu já reserve/feche pra você?", "Prefere levar 1 ou 2?", "Posso gerar o seu PIX agora?"). Só registre "new_order" após o "sim", mas SEMPRE ofereça o próximo passo.
-15. OBJEÇÕES (além de preço): se o cliente hesitar, descubra o motivo com empatia e responda ao motivo real — "está caro" (mostre valor/benefício antes de qualquer desconto), "vou pensar" (pergunte o que falta decidir e ofereça ajuda), "tenho receio" (use prova social/garantia honesta), "depois" (crie um próximo passo concreto e leve, sem pressão falsa). Nunca invente urgência; use apenas escassez/benefício REAIS.
-16. CROSS-SELL / UPSELL: ao confirmar um pedido, ofereça 1 complemento ou upgrade RELEVANTE do catálogo de forma natural ("quem leva X costuma levar Y, quer adicionar?"). Faça no máximo UMA sugestão e nunca empurre — respeite o "não".
-17. PÓS-VENDA: depois de fechar/confirmar pagamento, agradeça, confirme o próximo passo (prazo/entrega) e, quando fizer sentido, plante a próxima interação (recompra, novidade, ou um convite gentil de indicação). Não force.
-10. CANCELAMENTO: se o cliente pedir para CANCELAR o pedido, primeiro confirme com empatia ("Você confirma o cancelamento do seu pedido?"). Só quando ele CONFIRMAR o cancelamento, defina "cancel_order": true (cancela o pedido ativo e devolve o estoque). Se ele já tiver confirmado no histórico, vá direto. Se o pedido já foi entregue, explique que para devolução/reembolso você vai encaminhar para um atendente (use "needs_human": true).
-11. COTAÇÃO POR LISTA: quando o cliente enviar uma LISTA de itens/quantidades para orçar (ex.: "quero 5 pães, 2 leites, 1 café" ou uma lista de mercado por texto/áudio), NÃO calcule preços você mesmo — preencha "quote_request" com os itens (nome aproximado + quantidade). O sistema vai montar a cotação real (preços, estoque, total) e anexar à sua resposta. Na sua "reply", apenas confirme com simpatia que está montando o orçamento (ex.: "Perfeito, já te mando os valores!"). Use "quote_request" para ORÇAR; use "new_order" só quando o cliente CONFIRMAR que quer fechar.
+${rulesText}
 
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
 ${memoryText}
@@ -1035,29 +1067,8 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON NESTE FORMATO:
       "payload": { "stage": "proposta" } // Use estágios: novo_lead, ia_atendendo, aguardando_humano, qualificado, proposta, aguardando_pagamento, agendado, entregue_concluido, pos_venda, perdido
     }
   ],
-  "new_appointment": {
-    "title": "Anotação do evento",
-    "scheduled_start": "${nowToday}T10:00:00-03:00" // ISO 8601 com fuso -03:00, calculado a partir de HOJE
-  },
-  "new_delivery": {
-    "address": "Rua X"
-  },
-  "new_order": {
-    "items": [ { "name": "Nome EXATO do produto no catálogo", "quantity": 2 } ]
-  },
-  "quote_request": {
-    "items": [ { "name": "nome aproximado do item da lista", "quantity": 5 } ]
-  },
-  "cancel_order": false,
-  "send_storefront": false,
   "customer_email": "", // e-mail do cliente, SOMENTE quando ele informar um (senão deixe "")
-  "route_to_area": "", // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")
-  "reservation_request": null, // { resource, start, end, units, guests, adults, children, pets (true/false), special_requests, budget } SÓ quando o cliente quiser reservar um recurso por período (senão null). Em HOTEL, pergunte e preencha adults/children/pets/special_requests quando souber — NÃO invente, deixe vazio se o cliente não disser.
-  "send_subscription_pix": false, // true SÓ quando o cliente pedir para pagar/receber o PIX da mensalidade em aberto
-  "referral_code_request": false, // true SÓ quando o cliente quiser INDICAR alguém / pedir o próprio código de indicação (e o programa estiver ativo)
-  "apply_referral_code": "", // o código de indicação que o cliente informou para ganhar desconto (senão "")
-  "supply_emergency": null, // { need, category } SÓ quando QUEM ATENDE o cliente (gestor/atendente) indicar que ALGO FALTOU URGENTE no estabelecimento ("acabou o gás", "preciso de toalha agora", "faltou açúcar"). NÃO use quando é o CLIENTE pedindo um produto da loja. Use null quando não houver emergência operacional.
-  "event_inquiry": null // EM HOTELARIA: { event_type: "casamento|convencao|day_use|corporativo|aniversario|outro", headcount: 80, event_date: "YYYY-MM-DD ou descrição", halls: "salão principal", budget: 15000, special_requests: "..." } SÓ quando o cliente pedir um EVENTO/GRUPO (convenção, casamento, day use, festa de empresa, viagem de incentivo). Pegue o que ele disser; deixe vazio o que ele não disser. Não use para reserva de quarto comum.
+  "route_to_area": ""${schemaExtra ? "," : ""} // nome EXATO da área de destino, SÓ quando o cliente quiser trocar de área/profissional (senão deixe "")${schemaExtra}
 }`;
   }
 

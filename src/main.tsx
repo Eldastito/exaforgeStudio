@@ -25,7 +25,12 @@ Object.defineProperty(window, 'fetch', {
   }
 });
 
-createRoot(document.getElementById('root')!).render(
+const rootEl = document.getElementById('root');
+if (!rootEl) {
+  throw new Error("Elemento #root não encontrado no HTML. Verifique o index.html.");
+}
+
+createRoot(rootEl).render(
   <StrictMode>
     {isStorefront ? (
       <Storefront />

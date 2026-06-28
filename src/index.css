@@ -24,6 +24,28 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  /* ===== Revenue Intelligence Center (RIC) — tokens =====
+     Evoluem o dark+indigo do app em direção a uma "cabine de comando", sem
+     virar identidade paralela. Ver docs/PRD-UXUI-REVENUE-INTELLIGENCE-CENTER.md */
+  --color-ric-bg:         #0b1020;  /* fundo da tela RIC (entre o #0f172a atual e o #111633 proposto) */
+  --color-ric-surface:    #111833;  /* card base */
+  --color-ric-surface-2:  #16203f;  /* card elevado / hover */
+  --color-ric-border:     #243152;  /* borda sutil */
+  --color-ric-grid:       #1b2440;  /* linhas de gráfico */
+
+  --color-ric-primary:    #4f46e5;  /* ação primária — já é o primary do app */
+  --color-ric-primary-2:  #6366f1;  /* hover / ring */
+
+  --color-ric-ai:         #29d3ff;  /* acento EXCLUSIVO da IA (Diretor Executivo) */
+
+  --color-ric-recovered:  #36e39a;  /* RRI — receita recuperada */
+  --color-ric-recoverable:#ffb648;  /* IRR — recuperável */
+  --color-ric-risk:       #ff8a4c;  /* potencial em risco */
+  --color-ric-critical:   #ff5b5b;  /* crítico */
+
+  --radius-ric-card: 16px;   /* cards (rounded-2xl) */
+  --radius-ric-hero: 20px;   /* blocos hero / painel IA */
 }
 
 @layer base {
@@ -42,5 +64,10 @@
   .custom-scroll::-webkit-scrollbar-thumb {
     background: #475569;
     border-radius: 10px;
+  }
+
+  /* Glow ciano do painel do Diretor IA (RIC). */
+  .ric-ai-glow {
+    box-shadow: 0 0 0 1px rgba(41, 211, 255, 0.25), 0 8px 30px -10px rgba(41, 211, 255, 0.25);
   }
 }

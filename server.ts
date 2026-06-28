@@ -55,7 +55,7 @@ import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { transcribeAudio, describeImage } from "./src/server/llm.js";
+import { transcribeAudio, describeImage, analyzeImageForChat } from "./src/server/llm.js";
 import { JWT_SECRET } from "./src/server/config/secret.js";
 import fs from "fs";
 
@@ -661,11 +661,11 @@ async function startServer() {
               const mime = msgObj.imageMessage?.mimetype || msgObj.ImageMessage?.mimetype || "image/jpeg";
               const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
               incomingMediaUrl = saveMediaBase64(imgB64, ext) || undefined;
-              // Visão/OCR: a IA entende o conteúdo da imagem.
+              // Visão/OCR: classifica (documento vs foto) e extrai os dados-chave.
               try {
-                const desc = await describeImage(imgB64, mime);
+                const desc = await analyzeImageForChat(imgB64, mime);
                 console.log(`[Vision] Imagem analisada: ${desc.slice(0, 80)}`);
-                incomingMessageText = caption ? `${caption}\n\n[Conteúdo da imagem: ${desc}]` : `[Imagem] ${desc}`;
+                incomingMessageText = caption ? `[Imagem recebida] ${caption}\n${desc}` : `[Imagem recebida]\n${desc}`;
               } catch (e) {
                 console.error("[Vision] Falha ao analisar imagem:", e);
                 incomingMessageText = caption || "📷 [Imagem recebida]";
@@ -675,7 +675,26 @@ async function startServer() {
             }
           }
           else if (msgObj.videoMessage || msgObj.VideoMessage) incomingMessageText = "🎥 [Vídeo recebido]";
-          else if (msgObj.documentMessage || msgObj.DocumentMessage) incomingMessageText = "📄 [Documento recebido]";
+          else if (msgObj.documentMessage || msgObj.DocumentMessage) {
+            // Documento anexado: se for imagem (foto de comprovante/nota/receita
+            // enviada como "arquivo"), a IA também lê via visão. PDF/outros: pede a foto.
+            const docMsg = msgObj.documentMessage || msgObj.DocumentMessage || {};
+            const docMime = docMsg.mimetype || "";
+            const docB64 = msgObj.base64 || data.base64 || "";
+            const docCaption = docMsg.caption || "";
+            if (docB64 && docMime.startsWith("image/")) {
+              try {
+                const desc = await analyzeImageForChat(docB64, docMime);
+                incomingMessageText = docCaption ? `[Imagem recebida] ${docCaption}\n${desc}` : `[Imagem recebida]\n${desc}`;
+              } catch (e) {
+                console.error("[Vision] Falha ao analisar documento-imagem:", e);
+                incomingMessageText = docCaption || "📄 [Documento recebido]";
+              }
+            } else {
+              // PDF e demais formatos: ainda não lemos o conteúdo automaticamente.
+              incomingMessageText = `[Documento recebido${docCaption ? `: ${docCaption}` : ""}] O cliente enviou um arquivo (${docMime || 'documento'}). Se precisar que você leia o conteúdo, peça com simpatia para ele enviar como FOTO/imagem.`;
+            }
+          }
           else if (msgObj.stickerMessage || msgObj.StickerMessage) incomingMessageText = "🔖 [Figurinha]";
           else if (msgObj.locationMessage || msgObj.LocationMessage) incomingMessageText = "📍 [Localização]";
           else if (msgObj.contactMessage || msgObj.ContactMessage) incomingMessageText = "👤 [Contato]";

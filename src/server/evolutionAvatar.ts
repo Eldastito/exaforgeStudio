@@ -1,4 +1,53 @@
 import db from "./db.js";
+import fs from "fs";
+import path from "path";
+import { randomUUID } from "crypto";
+
+// Mesmo diretório de mídia servido em /media pelo server (volume persistente).
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch { /* noop */ }
+
+const EXT_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+  "image/webp": "webp", "image/gif": "gif",
+};
+
+/**
+ * Cacheia a foto de perfil no PRÓPRIO domínio (/media), em vez de guardar a URL
+ * do CDN do WhatsApp (pps.whatsapp.net) — que EXPIRA e bloqueia hotlink, fazendo
+ * a imagem não carregar no navegador. Aceita tanto uma data URL (gateway devolveu
+ * o binário) quanto uma URL http(s) (baixamos no servidor). Retorna o caminho
+ * local "/media/<arquivo>" ou, em último caso, a URL original (best-effort).
+ */
+async function cacheAvatarImage(src: string): Promise<string> {
+  try {
+    let buf: Buffer; let mime: string;
+    if (src.startsWith("data:")) {
+      const m = /^data:([^;]+);base64,(.*)$/s.exec(src);
+      if (!m) return src;
+      mime = m[1]; buf = Buffer.from(m[2], "base64");
+    } else if (/^https?:\/\//.test(src)) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const res = await fetch(src, { signal: controller.signal });
+        if (!res.ok) return src;
+        mime = (res.headers.get("content-type") || "image/jpeg").split(";")[0];
+        if (!mime.startsWith("image/")) return src;
+        buf = Buffer.from(await res.arrayBuffer());
+      } finally { clearTimeout(timer); }
+    } else {
+      return src;
+    }
+    if (!buf.length || buf.length > 2 * 1024 * 1024) return src; // sanidade (≤2MB)
+    const ext = EXT_BY_MIME[mime] || "jpg";
+    const name = `avatar_${randomUUID()}.${ext}`;
+    fs.writeFileSync(path.join(MEDIA_DIR, name), buf);
+    return `/media/${name}`;
+  } catch {
+    return src; // se o cache falhar, mantém a URL original (degrade gracioso)
+  }
+}
 
 // Busca a foto de perfil do WhatsApp (Evolution / gateways compatíveis) de
 // forma BEST-EFFORT, não bloqueante e com timeout rígido.
@@ -116,11 +165,14 @@ export function maybeFetchEvolutionAvatar(opts: {
 
     void (async () => {
       try {
-        const url = await resolveAvatarUrl(senderId, channel.identifier, baseUrl, apiKey);
-        if (!url) return;
+        const resolved = await resolveAvatarUrl(senderId, channel.identifier, baseUrl, apiKey);
+        if (!resolved) return;
+        // Cacheia no próprio domínio (/media) para o navegador sempre carregar —
+        // URLs do CDN do WhatsApp expiram/bloqueiam hotlink.
+        const url = await cacheAvatarImage(resolved);
         db.prepare("UPDATE contacts SET profile_pic_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(url, contact.id);
         if (io) io.to(`org:${channel.organization_id}`).emit("contact_avatar", { contactId: contact.id, avatar: url });
-        console.log(`[Evolution Avatar] ✓ Foto de perfil atualizada para ${senderId}`);
+        console.log(`[Evolution Avatar] ✓ Foto de perfil atualizada para ${senderId} (${url.startsWith('/media') ? 'cache local' : 'url externa'})`);
       } catch (e: any) {
         console.warn(`[Evolution Avatar] Não foi possível obter a foto de ${senderId}: ${e?.message || e}`);
       } finally {

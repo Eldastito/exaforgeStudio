@@ -1,6 +1,22 @@
 import { create } from 'zustand';
 import { apiFetch } from '@/src/lib/api';
 
+/**
+ * Normaliza datetimes vindos do SQLite para ISO-UTC. O SQLite grava
+ * CURRENT_TIMESTAMP como "YYYY-MM-DD HH:MM:SS" em UTC, SEM marcador de fuso.
+ * `new Date("2026-06-28 03:19:26")` é interpretado como horário LOCAL pelo
+ * navegador → desloca pelo fuso (ex.: −3h no Brasil), fazendo a hora parecer
+ * "aleatória". Aqui marcamos explicitamente como UTC (T...Z) para o front
+ * exibir no fuso local correto. Strings que já têm fuso (Z/+hh:mm) passam direto.
+ */
+function toIso(s?: string | null): string {
+  if (!s) return new Date().toISOString();
+  if (typeof s !== 'string') return s as any;
+  const v = s.trim();
+  if (/(z|[+-]\d\d:?\d\d)$/i.test(v)) return v;       // já tem fuso
+  return v.replace(' ', 'T') + 'Z';                    // UTC do SQLite → ISO-UTC
+}
+
 export type Contact = {
   id: string;
   name: string;
@@ -275,7 +291,7 @@ export const useStore = create<AppState>((set, get) => ({
           contactId: r.contact_id,
           stage: (r.stage || 'novo_lead') as Stage,
           priority: (r.priority || 'media'),
-          lastMessageAt: r.last_message_at || r.updated_at || r.created_at || new Date().toISOString(),
+          lastMessageAt: toIso(r.last_message_at || r.updated_at || r.created_at),
           unreadCount: 0,
           aiPaused: r.ai_paused === 1,
           assignedTo: r.assigned_to || undefined,
@@ -283,7 +299,7 @@ export const useStore = create<AppState>((set, get) => ({
           handoffReason: r.handoff_reason || undefined,
         };
         messages[r.id] = r.last_message
-          ? [{ id: `last_${r.id}`, contactId: r.contact_id, text: r.last_message, sender: 'contact', timestamp: r.last_message_at || r.updated_at }]
+          ? [{ id: `last_${r.id}`, contactId: r.contact_id, text: r.last_message, sender: 'contact', timestamp: toIso(r.last_message_at || r.updated_at) }]
           : [];
       }
 
@@ -305,7 +321,7 @@ export const useStore = create<AppState>((set, get) => ({
         contactId: '',
         text: m.content,
         sender: m.sender_type === 'agent' ? 'human' : (m.sender_type as 'contact' | 'bot' | 'human'),
-        timestamp: m.created_at,
+        timestamp: toIso(m.created_at),
         mediaUrl: m.media_url || undefined,
       }));
       set((s) => ({ messages: { ...s.messages, [ticketId]: msgs } }));

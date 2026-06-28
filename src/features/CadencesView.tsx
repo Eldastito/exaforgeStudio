@@ -158,7 +158,7 @@ export function CadencesView() {
                         : <XCircle className="w-5 h-5 text-zinc-500" />}
                     </button>
                     <div className="min-w-0">
-                      <p className="font-semibold text-zinc-100 truncate">{c.name}</p>
+                      <p className="font-semibold text-zinc-100 line-clamp-2 break-words">{c.name}</p>
                       <p className="text-xs text-zinc-400 mt-0.5">
                         Gatilho: <span className="text-indigo-400">{STAGE_LABELS[c.trigger_stage] || c.trigger_stage}</span>
                         {' · '}{c.steps.length} etapa{c.steps.length !== 1 ? 's' : ''}

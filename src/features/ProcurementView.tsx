@@ -147,7 +147,8 @@ export function ProcurementView() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="flex-1 min-w-0 overflow-y-auto">
+      <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
           <PackageCheck className="h-6 w-6 text-indigo-400" /> Compras / Reposição
@@ -158,7 +159,7 @@ export function ProcurementView() {
       </p>
 
       {/* Abas: Reposição (Fase 1+2) · Buscar na rede (emergência) · Pedidos recebidos · Perfil de fornecedor */}
-      <div className="mb-6 flex gap-1 border-b border-zinc-800">
+      <div className="mb-6 flex gap-1 border-b border-zinc-800 overflow-x-auto">
         {[
           { k: 'reposicao', label: 'Reposição', Icon: PackageCheck },
           { k: 'rede', label: 'Buscar na rede', Icon: Search },
@@ -166,7 +167,7 @@ export function ProcurementView() {
           { k: 'perfil', label: 'Ser fornecedor', Icon: Store },
         ].map(t => (
           <button key={t.k} onClick={() => setTab(t.k as Tab)}
-            className={`px-4 py-2 text-sm flex items-center gap-2 border-b-2 -mb-px transition-colors ${tab === t.k ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
+            className={`px-4 py-2 text-sm flex items-center gap-2 border-b-2 -mb-px shrink-0 whitespace-nowrap transition-colors ${tab === t.k ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
             <t.Icon className="w-4 h-4" /> {t.label}
           </button>
         ))}
@@ -447,6 +448,7 @@ export function ProcurementView() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

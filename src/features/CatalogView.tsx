@@ -196,7 +196,7 @@ export function CatalogView() {
       {/* Modal Criar/Editar */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[420px]">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[420px] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold text-zinc-100">{editing ? 'Editar Item' : 'Novo Item'}</h3>
               <button className="text-zinc-400 hover:text-white" onClick={() => { setShowModal(false); setEditing(null); }}><X className="w-5 h-5"/></button>
@@ -268,7 +268,7 @@ export function CatalogView() {
       {/* Modal Importar CSV */}
       {showImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[520px]">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[520px] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-lg font-semibold text-zinc-100">Importar produtos (CSV)</h3>
               <button className="text-zinc-400 hover:text-white" onClick={() => setShowImport(false)}><X className="w-5 h-5"/></button>

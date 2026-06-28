@@ -169,8 +169,8 @@ export function UsersSettingsView() {
       </div>
 
       {/* Users List */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
-        <table className="w-full text-left text-sm">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-x-auto">
+        <table className="w-full text-left text-sm whitespace-nowrap">
           <thead className="bg-zinc-950 border-b border-zinc-800 text-zinc-400">
             <tr>
               <th className="px-4 py-3 font-medium">Usuário</th>
@@ -275,7 +275,8 @@ export function UsersSettingsView() {
             <h4 className="text-sm font-medium text-zinc-300">Convites Pendentes</h4>
             <p className="text-xs text-zinc-500 mt-0.5">O app não envia e-mail. Copie o link e envie para a pessoa (WhatsApp, e-mail, etc.) — ele abre o cadastro com o código já preenchido.</p>
           </div>
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm whitespace-nowrap">
             <tbody className="divide-y divide-zinc-800/50">
               {invites.map(i => (
                 <tr key={i.id} className="hover:bg-zinc-800/20">
@@ -300,6 +301,7 @@ export function UsersSettingsView() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

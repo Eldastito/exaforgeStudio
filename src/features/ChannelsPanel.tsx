@@ -446,7 +446,7 @@ export function ChannelsPanel() {
                 value={forwardWhats}
                 onChange={e => setForwardWhats(e.target.value)}
                 placeholder="5521999998888 (DDI+DDD+número)"
-                className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-emerald-500 w-64"
+                className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-emerald-500 w-full md:w-64"
               />
               <Button onClick={saveForward} className="bg-emerald-600 hover:bg-emerald-700 text-white">Salvar</Button>
             </div>

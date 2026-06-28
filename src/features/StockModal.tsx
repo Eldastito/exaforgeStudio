@@ -51,7 +51,7 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[640px] max-h-[90vh] overflow-auto">
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[640px] max-h-[90vh] overflow-auto">
         <div className="flex justify-between items-center mb-1">
           <h3 className="text-lg font-semibold text-zinc-100">Estoque — {product.name}</h3>
           <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>
@@ -68,7 +68,7 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
             {/* Form de movimentação */}
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
               <p className="text-sm font-medium text-zinc-200">Registrar movimentação</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <select className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={mov.type} onChange={e => setMov({ ...mov, type: e.target.value })}>
                   <option value="entrada">Entrada (recebi mercadoria)</option>
                   <option value="saida">Saída (perda/uso)</option>
@@ -124,7 +124,7 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
           <div className="space-y-4">
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
               <p className="text-sm font-medium text-zinc-200">Nova variação</p>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <input placeholder="Tamanho (P/M/G)" className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={vform.size} onChange={e => setVform({ ...vform, size: e.target.value })} />
                 <input placeholder="Cor" className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={vform.color} onChange={e => setVform({ ...vform, color: e.target.value })} />
                 <input placeholder="Tipo" className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={vform.variant_type} onChange={e => setVform({ ...vform, variant_type: e.target.value })} />

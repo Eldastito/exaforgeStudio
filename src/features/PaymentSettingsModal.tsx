@@ -55,7 +55,7 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[560px] max-h-[90vh] overflow-auto">
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[560px] max-h-[90vh] overflow-auto">
         <div className="flex justify-between items-center mb-1">
           <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><CreditCard className="w-5 h-5 text-emerald-400" /> Recebimento de pagamentos</h3>
           <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>
@@ -88,7 +88,7 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
               <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
                 placeholder="CPF/CNPJ, e-mail, telefone ou aleatória" value={s.pixKey} onChange={e => setS({ ...s, pixKey: e.target.value })} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Nome do beneficiário" value={s.pixName} onChange={e => setS({ ...s, pixName: e.target.value })} />
               <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Cidade" value={s.pixCity} onChange={e => setS({ ...s, pixCity: e.target.value })} />
             </div>
@@ -117,7 +117,7 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
               <p className="text-sm text-zinc-200 flex items-center gap-2 mb-2"><KeyRound className="w-4 h-4 text-indigo-400" /> Webhook de confirmação</p>
               <p className="text-[11px] text-zinc-500 mb-2">Configure esta URL no seu gateway para o pedido ser marcado como pago automaticamente.</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 truncate">
+                <code className="flex-1 min-w-0 text-[11px] text-indigo-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 break-all">
                   {secret ? `${webhookBase}?secret=${secret}` : (s.hasWebhookSecret ? `${webhookBase}?secret=••••••` : webhookBase)}
                 </code>
                 <button onClick={copyWebhook} className="text-zinc-400 hover:text-indigo-300 p-1.5 border border-zinc-800 rounded">

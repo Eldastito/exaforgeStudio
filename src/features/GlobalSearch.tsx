@@ -75,7 +75,7 @@ export function GlobalSearch() {
       )}
 
       {open && q.trim() && (
-        <div className="absolute right-0 mt-2 w-80 max-h-[360px] overflow-y-auto bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50">
+        <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] max-w-80 max-h-[360px] overflow-y-auto bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50">
           {results.length === 0 ? (
             <p className="text-sm text-zinc-500 text-center py-6">Nenhum contato encontrado.</p>
           ) : (

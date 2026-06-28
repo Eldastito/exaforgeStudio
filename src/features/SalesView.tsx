@@ -370,7 +370,7 @@ function PixModal({ data, onClose }: { data: { qrCode: string; qrCodeBase64: str
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[420px] max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[420px] max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><CreditCard className="w-5 h-5 text-sky-400" /> Cobrança PIX</h3>
           <button className="text-zinc-400 hover:text-white" onClick={onClose}>✕</button>
@@ -383,7 +383,7 @@ function PixModal({ data, onClose }: { data: { qrCode: string; qrCodeBase64: str
           <div className="mb-3">
             <label className="text-xs text-zinc-500 mb-1 block">Pix copia e cola</label>
             <div className="flex items-center gap-2">
-              <code className="flex-1 text-[11px] text-zinc-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 truncate">{data.qrCode}</code>
+              <code className="flex-1 min-w-0 text-[11px] text-zinc-300 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 break-all">{data.qrCode}</code>
               <button onClick={copy} className="text-xs px-2.5 py-1.5 rounded-lg border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 whitespace-nowrap">
                 {copied ? 'Copiado!' : 'Copiar'}
               </button>

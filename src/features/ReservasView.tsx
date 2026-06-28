@@ -364,14 +364,14 @@ function ReservationModal({ resources, contacts, onClose, onSaved }: {
             {contacts.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Início (check-in)"><input type="datetime-local" className={INP} value={form.start} onChange={e => setForm({ ...form, start: e.target.value })} /></Field>
           <Field label="Fim (check-out)"><input type="datetime-local" className={INP} value={form.end} onChange={e => setForm({ ...form, end: e.target.value })} /></Field>
         </div>
         <Field label="Unidades (quantos quartos/mesas)"><input type="number" min="1" className={INP} value={form.units} onChange={e => setForm({ ...form, units: e.target.value })} /></Field>
 
         {/* Hotelaria: captura estruturada da hospedagem. Todos opcionais. */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Adultos"><input type="number" min="0" className={INP} value={form.adults} onChange={e => setForm({ ...form, adults: e.target.value })} /></Field>
           <Field label="Crianças"><input type="number" min="0" className={INP} value={form.children} onChange={e => setForm({ ...form, children: e.target.value })} /></Field>
           <Field label="Orçamento (R$)"><input type="number" min="0" step="0.01" className={INP} value={form.budget} onChange={e => setForm({ ...form, budget: e.target.value })} /></Field>
@@ -405,7 +405,7 @@ function ReservationModal({ resources, contacts, onClose, onSaved }: {
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[440px] max-h-[90vh] overflow-auto">
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[440px] max-h-[90vh] overflow-auto">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-zinc-100">{title}</h3>
           <button className="text-zinc-400 hover:text-white" onClick={onClose}><X className="w-5 h-5" /></button>

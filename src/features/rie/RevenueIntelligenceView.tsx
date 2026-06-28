@@ -110,7 +110,7 @@ export function RevenueIntelligenceView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1 rounded-ric-card border border-ric-border bg-ric-surface p-1">
               {PERIODS.map(p => (
                 <button

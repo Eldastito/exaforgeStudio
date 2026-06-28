@@ -33,6 +33,7 @@ import connectorRoutes from "./src/server/routes/connector.js";
 import connectorPublicRoutes from "./src/server/routes/connectorPublic.js";
 import mfaRoutes from "./src/server/routes/mfa.js";
 import lgpdRoutes from "./src/server/routes/lgpd.js";
+import executiveRoutes from "./src/server/routes/executive.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
@@ -361,6 +362,7 @@ async function startServer() {
   protectedApi.use("/connector", connectorRoutes);
   protectedApi.use("/mfa", mfaRoutes);
   protectedApi.use("/lgpd", lgpdRoutes);
+  protectedApi.use("/executive", executiveRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);

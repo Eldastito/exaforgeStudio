@@ -21,44 +21,44 @@ export type Vertical = {
 export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
-  "compras", "orcamentos", "eventos",
+  "compras", "orcamentos", "eventos", "diretor",
 ] as const;
 
 export const VERTICALS: Vertical[] = [
   {
     key: "varejo", label: "Varejo / Comércio", icon: "🛍️",
     descricao: "Lojas que vendem produtos por unidade (roupas, eletrônicos, pet, etc.).",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor"],
     saleMode: "unit",
   },
   {
     key: "food", label: "Alimentação / Delivery", icon: "🍰",
     descricao: "Bolos, marmitas, pizzas, doces e salgados — inclusive venda por fatia.",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "diretor"],
     saleMode: "slice",
   },
   {
     key: "servicos", label: "Prestadores de Serviço", icon: "🛠️",
     descricao: "Serviços com hora marcada e orçamento (oficinas, técnicos, autônomos).",
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas"],
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas", "diretor"],
     saleMode: "unit",
   },
   {
     key: "saude", label: "Saúde / Bem-estar", icon: "💆",
     descricao: "Clínicas, consultórios, estética e terapias — foco em agendamento.",
-    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas"],
+    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "diretor"],
     saleMode: "unit",
   },
   {
     key: "educacao", label: "Escolas / Cursos", icon: "🎓",
     descricao: "Escolas e cursos: secretaria virtual, aulas, turmas e mensalidades.",
-    modules: ["assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes"],
+    modules: ["assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "diretor"],
     saleMode: "unit",
   },
   {
     key: "hospitalidade", label: "Hotéis / Restaurantes", icon: "🏨",
     descricao: "Hospedagem e restaurantes/pensão: reservas, cardápio e atendimento.",
-    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos"],
+    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos", "diretor"],
     saleMode: "unit",
   },
   {

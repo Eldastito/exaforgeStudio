@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -61,6 +61,9 @@ export function SettingsView() {
           </button>
           <button onClick={() => setActiveTab('empresa')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'empresa' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Briefcase className="w-4 h-4" /> Empresa
+          </button>
+          <button onClick={() => setActiveTab('atendimento')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'atendimento' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <BrainCircuit className="w-4 h-4" /> Atendimento (IA)
           </button>
           <button onClick={() => setActiveTab('usuarios')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'usuarios' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Users className="w-4 h-4" /> Usuários e Permissões
@@ -196,6 +199,7 @@ export function SettingsView() {
           </>
           )}
 
+          {activeTab === 'atendimento' && <AiAttendancePanel />}
           {activeTab === 'cobranca' && <BillingPanel />}
 
           {activeTab === 'modulos' && <ModulesPanel />}
@@ -739,6 +743,111 @@ function LgpdPanel() {
           <p>🔒 Medidas de segurança ativas: isolamento por organização (multi-tenant), segredos cifrados em repouso (AES-256-GCM), 2FA opcional, senhas com hash bcrypt e HTTPS forçado. Detalhes em <code>docs/LGPD-PRIVACIDADE.md</code>.</p>
         </div>
       </div>
+    </>
+  );
+}
+
+// ============================================================================
+// AiAttendancePanel — comportamento da IA: memória de relacionamento, saudação
+// de retorno e re-engajamento de conversas paradas (carrinho abandonado).
+// ============================================================================
+type AiAttendance = {
+  memoryEnabled: boolean; greetEnabled: boolean; greetMinDays: number;
+  abandonedEnabled: boolean; abandonedHours: number; abandonedMessage: string;
+};
+function AiAttendancePanel() {
+  const [cfg, setCfg] = useState<AiAttendance | null>(null);
+
+  useEffect(() => { apiFetch('/api/analytics/ai-attendance-settings').then(r => r.json()).then(setCfg).catch(() => {}); }, []);
+
+  const save = async (patch: Partial<AiAttendance>) => {
+    if (!cfg) return;
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    await apiFetch('/api/analytics/ai-attendance-settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+    }).catch(() => {});
+  };
+
+  const Toggle = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
+    <button onClick={onClick}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+    </button>
+  );
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <BrainCircuit className="w-6 h-6 text-indigo-400" /> Atendimento (IA)
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">Como a IA lembra dos seus clientes e reengaja conversas paradas.</p>
+      </div>
+
+      {!cfg ? (
+        <div className="text-sm text-zinc-500">Carregando…</div>
+      ) : (
+        <div className="space-y-6">
+          {/* Memória de relacionamento */}
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /> Memória do cliente</p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                  A IA lembra de conversas anteriores e guarda detalhes que geram conexão (nome do pet, filho, preferências, contexto que o cliente compartilhou) para usar com naturalidade no próximo contato. Você vê e pode apagar essa memória em <b>Contatos</b>.
+                </p>
+              </div>
+              <Toggle on={cfg.memoryEnabled} onClick={() => save({ memoryEnabled: !cfg.memoryEnabled })} />
+            </div>
+          </div>
+
+          {/* Saudação de retorno */}
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100">👋 Saudação de retorno</p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                  Quando um cliente que já falou com a gente volta após{' '}
+                  <input type="number" min={1} max={365} value={cfg.greetMinDays}
+                    onChange={e => setCfg({ ...cfg, greetMinDays: parseInt(e.target.value, 10) || 7 })}
+                    onBlur={e => save({ greetMinDays: parseInt(e.target.value, 10) || 7 })}
+                    className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-center text-zinc-200" /> dias parado,
+                  a IA abre com uma saudação calorosa de retorno ("que bom te ver de novo, faz X dias…") e puxa um detalhe da memória.
+                </p>
+              </div>
+              <Toggle on={cfg.greetEnabled} onClick={() => save({ greetEnabled: !cfg.greetEnabled })} />
+            </div>
+          </div>
+
+          {/* Re-engajamento (carrinho abandonado) */}
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100">🛒 Re-engajamento de conversa parada</p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                  Se um cliente com intenção de compra (em <i>proposta</i> ou <i>qualificado</i>) ficar{' '}
+                  <input type="number" min={1} max={168} value={cfg.abandonedHours}
+                    onChange={e => setCfg({ ...cfg, abandonedHours: parseInt(e.target.value, 10) || 4 })}
+                    onBlur={e => save({ abandonedHours: parseInt(e.target.value, 10) || 4 })}
+                    className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-center text-zinc-200" /> horas sem responder,
+                  a IA manda <b>um</b> lembrete amigável. (Não encerra o atendimento — só cutuca uma vez.)
+                </p>
+              </div>
+              <Toggle on={cfg.abandonedEnabled} onClick={() => save({ abandonedEnabled: !cfg.abandonedEnabled })} />
+            </div>
+            {cfg.abandonedEnabled && (
+              <textarea
+                className="mt-4 w-full h-20 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+                placeholder="Mensagem do lembrete. Use {nome}. Ex.: Oi {nome}! Vi que ficamos no meio de uma conversa 😊 Posso te ajudar a finalizar?"
+                value={cfg.abandonedMessage}
+                onChange={e => setCfg({ ...cfg, abandonedMessage: e.target.value })}
+                onBlur={e => save({ abandonedMessage: e.target.value })}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

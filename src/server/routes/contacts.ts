@@ -2,6 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { CustomerProfileService } from "../CustomerProfileService.js";
+import { CustomerMemoryService } from "../CustomerMemoryService.js";
 
 const router = Router();
 
@@ -13,7 +14,8 @@ router.get("/", (req: AuthRequest, res): any => {
     const { temperature, tag, inactiveDays, minScore, sort } = req.query as any;
     let sql = `SELECT id, name, identifier, profile_pic_url, lead_temperature, lead_score, purchase_count,
                       total_spent, avg_ticket, last_purchase_at, last_contact_at, tags, notes, created_at,
-                      COALESCE(is_supplier,0) AS is_supplier, supplier_categories
+                      COALESCE(is_supplier,0) AS is_supplier, supplier_categories,
+                      memory_facts, memory_summary, memory_updated_at
                FROM contacts WHERE organization_id = ?`;
     const params: any[] = [orgId];
     if (temperature) { sql += ` AND lead_temperature = ?`; params.push(temperature); }
@@ -80,6 +82,19 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     }
     if (!updates.length) return res.json({ success: true });
     db.prepare(`UPDATE contacts SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/contacts/:id/memory — "esquecer memória": apaga só o que a IA
+// lembra deste cliente (fatos + resumo), sem mexer no resto do contato (LGPD).
+router.delete("/:id/memory", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    CustomerMemoryService.clear(orgId, req.params.id);
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

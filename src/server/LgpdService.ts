@@ -73,7 +73,7 @@ export class LgpdService {
     const tx = db.transaction(() => {
       // Identifier precisa ser único por (org, canal); usa um marcador estável.
       const redactedId = `anon_${contactId.slice(0, 8)}`;
-      db.prepare(`UPDATE contacts SET name = 'Contato removido', identifier = ?, email = NULL, profile_pic_url = NULL, marketing_opt_out = 1, anonymized_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
+      db.prepare(`UPDATE contacts SET name = 'Contato removido', identifier = ?, email = NULL, profile_pic_url = NULL, marketing_opt_out = 1, memory_facts = NULL, memory_summary = NULL, memory_updated_at = NULL, anonymized_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
         .run(redactedId, contactId, orgId);
       db.prepare(`UPDATE messages SET content = '[removido a pedido do titular]', media_url = NULL WHERE organization_id = ? AND ticket_id IN (SELECT id FROM tickets WHERE contact_id = ?)`)
         .run(orgId, contactId);

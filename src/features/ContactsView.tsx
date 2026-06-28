@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download } from 'lucide-react';
+import { Users, Phone, Search, Flame, ThermometerSun, Snowflake, ShoppingBag, RefreshCw, Target, Download, BrainCircuit } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { apiFetch } from '@/src/lib/api';
@@ -11,6 +11,7 @@ type Contact = {
   lead_temperature?: string; lead_score?: number; purchase_count?: number; total_spent?: number;
   avg_ticket?: number; last_purchase_at?: string; last_contact_at?: string; tags?: string;
   is_supplier?: number; supplier_categories?: string;
+  memory_facts?: string; memory_summary?: string; memory_updated_at?: string;
 };
 
 const scoreBand = (s?: number): { label: string; cls: string; bar: string } => {
@@ -239,6 +240,32 @@ export function ContactsView() {
                   ) : null}
                 </div>
               </div>
+              {/* Memória de relacionamento: o que a IA aprendeu deste cliente. */}
+              {(c.memory_facts || c.memory_summary) && (
+                <div className="mt-3 pt-3 border-t border-zinc-800/70">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-zinc-300 flex items-center gap-1">
+                      <BrainCircuit className="w-3.5 h-3.5 text-emerald-400" /> O que a IA lembra
+                    </span>
+                    <button
+                      className="text-[10px] text-rose-400 hover:underline shrink-0"
+                      onClick={async () => {
+                        if (!confirm('Esquecer a memória deste cliente? A IA deixa de lembrar dos detalhes pessoais (pet, família, preferências). O resto do contato é mantido.')) return;
+                        await apiFetch(`/api/contacts/${c.id}/memory`, { method: 'DELETE' });
+                        load();
+                      }}
+                    >Esquecer memória</button>
+                  </div>
+                  {c.memory_facts && (
+                    <div className="mt-1.5 max-h-24 overflow-y-auto text-[11px] text-zinc-400 whitespace-pre-line break-words">
+                      {c.memory_facts}
+                    </div>
+                  )}
+                  {c.memory_summary && (
+                    <p className="mt-1.5 text-[10px] text-zinc-500 italic break-words"><span className="text-zinc-600">Última conversa:</span> {c.memory_summary}</p>
+                  )}
+                </div>
+              )}
               {/* LGPD: direitos do titular. */}
               <div className="mt-2 flex items-center gap-3 pt-2 border-t border-zinc-800/70 text-[11px]">
                 <button

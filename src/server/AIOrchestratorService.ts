@@ -6,6 +6,7 @@ import { BusinessContextService } from "./BusinessContextService.js";
 import { CampaignService } from "./CampaignService.js";
 import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
+import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { chat } from "./llm.js";
 import { PlanService } from "./PlanService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
@@ -32,6 +33,7 @@ export class AIOrchestratorService {
     provider?: string;
     areaPersona?: string;
     areaId?: string | null;
+    returningAfterDays?: number | null;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string }, eventInquiry?: { eventType: string; headcount?: number; eventDate?: string; halls?: string; budget?: number; specialRequests?: string } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -139,6 +141,13 @@ export class AIOrchestratorService {
     let profileText = "";
     if (!isOrchestratorCommand && params.contactId) {
       profileText = CustomerProfileService.profileLine(params.organizationId, params.contactId);
+    }
+
+    // Memória de relacionamento: fatos de conversas anteriores (rapport) + se é
+    // um cliente que está voltando após um tempo parado (saudação de retorno).
+    let memoryText = "";
+    if (!isOrchestratorCommand && params.contactId) {
+      memoryText = CustomerMemoryService.memoryText(params.organizationId, params.contactId, params.returningAfterDays ?? null);
     }
 
     // Encaminhamento Instagram -> WhatsApp: se o canal é Instagram e há um número
@@ -264,7 +273,7 @@ export class AIOrchestratorService {
       } catch (e) { /* noop */ }
     }
 
-    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText, subscriptionText, referralText);
+    const prompt = this.buildPrompt(agentToUse, params, contextText, productsText, metricsData, profileText, forwardText, negotiatorText, storefrontText, orderStatusText, params.areaPersona || "", agendaText, emailCaptureText, reservationText, subscriptionText, referralText, memoryText);
 
     // 3. Chamar a IA com Schema JSON (OpenAI, modo JSON)
     const rawResponse = await chat(prompt, {
@@ -913,7 +922,7 @@ export class AIOrchestratorService {
     return { human, today };
   }
 
-  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = "", subscriptionText: string = "", referralText: string = ""): string {
+  private static buildPrompt(agent: string, params: any, contextText: string, productsText: string, metricsData: string = "", profileText: string = "", forwardText: string = "", negotiatorText: string = "", storefrontText: string = "", orderStatusText: string = "", areaPersona: string = "", agendaText: string = "", emailCaptureText: string = "", reservationText: string = "", subscriptionText: string = "", referralText: string = "", memoryText: string = ""): string {
     if (agent === "orchestrator_agent") {
       const { human: nowHuman } = this.currentDateContext();
       return `Você é o Zapp, o ORQUESTRADOR de IA do negócio — um consultor de vendas e operações que conhece toda a jornada do cliente e coordena os agentes especializados (atendimento/CRM, agenda, estoque, vendas e campanhas).
@@ -986,6 +995,7 @@ REGRAS OBRIGATÓRIAS:
 11. COTAÇÃO POR LISTA: quando o cliente enviar uma LISTA de itens/quantidades para orçar (ex.: "quero 5 pães, 2 leites, 1 café" ou uma lista de mercado por texto/áudio), NÃO calcule preços você mesmo — preencha "quote_request" com os itens (nome aproximado + quantidade). O sistema vai montar a cotação real (preços, estoque, total) e anexar à sua resposta. Na sua "reply", apenas confirme com simpatia que está montando o orçamento (ex.: "Perfeito, já te mando os valores!"). Use "quote_request" para ORÇAR; use "new_order" só quando o cliente CONFIRMAR que quer fechar.
 
 ${profileText ? 'CONTEXTO DE CRM — ' + profileText : ''}
+${memoryText}
 ${forwardText}
 ${negotiatorText}
 ${storefrontText}

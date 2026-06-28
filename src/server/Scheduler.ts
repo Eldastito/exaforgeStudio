@@ -9,6 +9,7 @@ import { OrdersService } from "./OrdersService.js";
 import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
 import { QuoteService } from "./QuoteService.js";
 import { LgpdService } from "./LgpdService.js";
+import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
@@ -50,7 +51,70 @@ export class Scheduler {
     try { LgpdService.retentionPass(); } catch (e) { console.error('[Scheduler] retenção LGPD falhou', e); }
     await this.abandonedCartPass().catch(e => console.error('[Scheduler] carrinho abandonado falhou', e));
     await this.npsPass().catch(e => console.error('[Scheduler] pesquisa de satisfação falhou', e));
+    await this.memoryPass().catch(e => console.error('[Scheduler] memória do cliente falhou', e));
     this.trialPass();
+  }
+
+  /**
+   * Memória de relacionamento: quando uma conversa fica ociosa (sem novas
+   * mensagens por ~30 min) e tem conteúdo novo desde a última extração, a IA
+   * resume e guarda os fatos durÁveis do cliente (pet, família, preferências…)
+   * para criar rapport quando ele voltar. Opt-out via ai_memory_enabled = 0.
+   * Roda em lote (limite por org) para controlar custo de IA.
+   */
+  static async memoryPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id FROM organization_settings
+        WHERE COALESCE(ai_memory_enabled, 1) = 1
+      `).all() as any[];
+    } catch (e) { return; }
+
+    for (const org of orgs) {
+      const orgId = org.organization_id;
+      try {
+        // Contatos com conversa ociosa (>30 min) e conteúdo novo desde a última memória.
+        const rows = db.prepare(`
+          SELECT t.contact_id AS contact_id,
+                 MAX(m.created_at) AS last_msg,
+                 c.memory_updated_at AS mem_at,
+                 SUM(CASE WHEN m.sender_type = 'contact' THEN 1 ELSE 0 END) AS contact_msgs
+          FROM messages m
+          JOIN tickets t ON t.id = m.ticket_id
+          JOIN contacts c ON c.id = t.contact_id
+          WHERE m.organization_id = ?
+          GROUP BY t.contact_id
+          HAVING last_msg <= datetime('now', '-30 minutes')
+             AND (mem_at IS NULL OR last_msg > mem_at)
+             AND contact_msgs > 0
+          LIMIT 25
+        `).all(orgId) as any[];
+
+        for (const r of rows) {
+          try {
+            const msgs = db.prepare(`
+              SELECT m.sender_type, m.content
+              FROM messages m
+              JOIN tickets t ON t.id = m.ticket_id
+              WHERE t.contact_id = ?
+              ORDER BY m.created_at DESC LIMIT 20
+            `).all(r.contact_id) as any[];
+            const history = msgs.reverse()
+              .filter(x => x.content)
+              .map(x => ({
+                role: x.sender_type === 'contact' ? 'Cliente' : (x.sender_type === 'agent' ? 'Atendente' : 'Assistente'),
+                text: x.content,
+              }));
+            await CustomerMemoryService.extractAndMerge(orgId, r.contact_id, history);
+          } catch (e) {
+            console.error('[Scheduler] Falha ao extrair memória do contato', r.contact_id, e);
+          }
+        }
+      } catch (e) {
+        console.error('[Scheduler] Falha na memória da org', orgId, e);
+      }
+    }
   }
 
   /**

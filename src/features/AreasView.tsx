@@ -56,6 +56,9 @@ export function AreasView() {
             <p className="text-zinc-400 text-sm mt-1 max-w-2xl">
               Vários profissionais no mesmo WhatsApp. Com 2 ou mais áreas ativas, a IA dá as boas-vindas, mostra um menu e direciona cada conversa para a área certa — respondendo como aquele profissional e atribuindo ao atendente responsável.
             </p>
+            <p className="text-zinc-500 text-xs mt-2 max-w-2xl">
+              💬 Assim que o cliente escolhe a área, ela <span className="text-zinc-300">já assume na hora</span>: envia uma saudação sensível ao horário (bom dia/boa tarde/boa noite), se apresenta e se coloca à disposição — e responde a próxima mensagem como aquela área. A <span className="text-zinc-300">Descrição</span> abaixo é usada nessa saudação, então capriche nela.
+            </p>
           </div>
           <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={openNew}>
             <Plus className="w-4 h-4 mr-2" /> Nova área

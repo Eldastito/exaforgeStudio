@@ -19,6 +19,36 @@ export class AttendanceAreaService {
     return (db.prepare("SELECT * FROM service_areas WHERE id = ? AND organization_id = ?").get(areaId, orgId) as any) || null;
   }
 
+  /**
+   * Saudação sensível ao horário (Bom dia / Boa tarde / Boa noite), no fuso do
+   * negócio (APP_TIMEZONE, padrão America/Sao_Paulo). O servidor roda em UTC, por
+   * isso NÃO usamos a hora local do processo.
+   */
+  static greeting(): string {
+    const tz = process.env.APP_TIMEZONE || "America/Sao_Paulo";
+    let hour = 12;
+    try {
+      hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(new Date()));
+      if (hour === 24) hour = 0;
+    } catch { /* fuso inválido → cai no padrão 12 (boa tarde) */ }
+    if (hour >= 5 && hour < 12) return "Bom dia";
+    if (hour >= 12 && hour < 18) return "Boa tarde";
+    return "Boa noite";
+  }
+
+  /**
+   * Mensagem com que a ÁREA ESCOLHIDA assume a conversa na hora: saudação
+   * sensível ao horário + identificação da área + se coloca à disposição. Evita o
+   * beco-sem-saída de "vou te encaminhar" sem ninguém assumir. A descrição da área
+   * (configurada em "Áreas de Atendimento") entra na saudação como tom/contexto.
+   */
+  static welcomeMessage(area: ServiceArea, contactName?: string): string {
+    const first = (contactName || "").trim().split(/\s+/)[0] || "";
+    const who = first ? `, ${first}` : "";
+    const desc = area.description ? ` ${area.description.trim().replace(/\.?$/, ".")}` : "";
+    return `${this.greeting()}${who}! 👋 Você está falando com *${area.name}*.${desc} Como posso te ajudar hoje? 😊`;
+  }
+
   /** Mensagem de boas-vindas + menu numerado das áreas. */
   static buildMenu(orgId: string, contactName?: string): string {
     const areas = this.activeAreas(orgId);

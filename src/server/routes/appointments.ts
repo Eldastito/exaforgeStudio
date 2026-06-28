@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
+import { AppointmentService } from "../AppointmentService.js";
 
 const router = Router();
 
@@ -59,6 +60,28 @@ router.put("/reminder-settings", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/appointments/agenda-settings — configuração de funcionamento da agenda
+router.get("/agenda-settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(AppointmentService.config(orgId));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/appointments/agenda-settings — edita horário/dias/duração/capacidade
+router.put("/agenda-settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { openHour, closeHour, slotMin, days, capacity } = req.body || {};
+    const saved = AppointmentService.saveConfig(orgId, { openHour, closeHour, slotMin, days, capacity });
+    logAuthEvent(orgId, userId, undefined, 'AGENDA_SETTINGS_CHANGED', saved);
+    res.json(saved);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/", (req: AuthRequest, res) => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
@@ -68,10 +91,19 @@ router.post("/", (req: AuthRequest, res) => {
   const id = uuidv4();
 
   try {
+    // Se o fim não veio, calcula a partir da duração configurada da agenda.
+    let endIso = scheduled_end;
+    if (!endIso && scheduled_start) {
+      const startMs = AppointmentService.ms(scheduled_start);
+      if (startMs != null) {
+        const slotMin = AppointmentService.config(orgId).slotMin;
+        endIso = new Date(startMs + slotMin * 60000).toISOString();
+      }
+    }
     db.prepare(`
       INSERT INTO appointments (id, organization_id, ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, orgId, ticket_id, contact_id, product_service_id, title, description || '', scheduled_start, scheduled_end);
+    `).run(id, orgId, ticket_id, contact_id, product_service_id, title, description || '', scheduled_start, endIso);
     // Guarda o e-mail informado no contato (para a confirmação por e-mail).
     if (customer_email && contact_id) {
       try { db.prepare("UPDATE contacts SET email = ? WHERE id = ? AND organization_id = ?").run(String(customer_email).trim(), contact_id, orgId); } catch (e) { /* noop */ }

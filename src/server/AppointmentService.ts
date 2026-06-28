@@ -44,6 +44,44 @@ export class AppointmentService {
     };
   }
 
+  /**
+   * Persiste a configuração da Agenda (parcial). Sanitiza tudo: horas em 0-24,
+   * fechamento > abertura, slot >= 5 min, dias ISO 1-7 (sem repetição) e
+   * capacidade >= 1. Retorna a configuração efetiva já normalizada.
+   */
+  static saveConfig(orgId: string, patch: Partial<AgendaConfig>): AgendaConfig {
+    const cur = this.config(orgId);
+    const next: AgendaConfig = { ...cur };
+
+    if (patch.openHour != null && Number.isFinite(patch.openHour)) {
+      next.openHour = Math.min(23, Math.max(0, Math.round(patch.openHour)));
+    }
+    if (patch.closeHour != null && Number.isFinite(patch.closeHour)) {
+      next.closeHour = Math.min(24, Math.max(1, Math.round(patch.closeHour)));
+    }
+    // fechamento sempre depois da abertura (pelo menos 1h)
+    if (next.closeHour <= next.openHour) next.closeHour = Math.min(24, next.openHour + 1);
+
+    if (patch.slotMin != null && Number.isFinite(patch.slotMin)) {
+      next.slotMin = Math.min(480, Math.max(5, Math.round(patch.slotMin)));
+    }
+    if (Array.isArray(patch.days)) {
+      const clean = Array.from(new Set(
+        patch.days.map(n => parseInt(String(n), 10)).filter(n => n >= 1 && n <= 7)
+      )).sort((a, b) => a - b);
+      if (clean.length) next.days = clean;
+    }
+    if (patch.capacity != null && Number.isFinite(patch.capacity)) {
+      next.capacity = Math.min(99, Math.max(1, Math.round(patch.capacity)));
+    }
+
+    db.prepare(
+      "UPDATE organization_settings SET agenda_open_hour = ?, agenda_close_hour = ?, agenda_slot_minutes = ?, agenda_days = ?, agenda_capacity = ? WHERE organization_id = ?"
+    ).run(next.openHour, next.closeHour, next.slotMin, next.days.join(","), next.capacity, orgId);
+
+    return next;
+  }
+
   /** Epoch ms de um datetime do banco (aceita ...Z, ...+/-hh:mm ou "YYYY-MM-DD HH:MM:SS" UTC). */
   static ms(s?: string | null): number | null {
     if (!s) return null;

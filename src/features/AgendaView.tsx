@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Plus, X, BellRing, Bell, Pencil, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Plus, X, BellRing, Bell, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -38,6 +38,15 @@ export function AgendaView() {
   };
   const [reminder, setReminder] = useState<{ enabled: boolean; hours: number; message: string } | null>(null);
 
+  type AgendaConfig = { openHour: number; closeHour: number; slotMin: number; days: number[]; capacity: number };
+  const [agenda, setAgenda] = useState<AgendaConfig | null>(null);
+  const [savingAgenda, setSavingAgenda] = useState(false);
+  // ISO de cada dia (1=seg .. 7=dom) na ordem da semana brasileira.
+  const WEEK_DAYS: { iso: number; label: string }[] = [
+    { iso: 1, label: 'Seg' }, { iso: 2, label: 'Ter' }, { iso: 3, label: 'Qua' },
+    { iso: 4, label: 'Qui' }, { iso: 5, label: 'Sex' }, { iso: 6, label: 'Sáb' }, { iso: 7, label: 'Dom' },
+  ];
+
   const loadAppointments = () => {
     apiFetch('/api/appointments')
       .then(r => r.json())
@@ -46,10 +55,12 @@ export function AgendaView() {
   };
 
   const loadReminder = () => apiFetch('/api/appointments/reminder-settings').then(r => r.json()).then(setReminder).catch(() => {});
+  const loadAgenda = () => apiFetch('/api/appointments/agenda-settings').then(r => r.json()).then(setAgenda).catch(() => {});
 
   useEffect(() => {
     loadAppointments();
     loadReminder();
+    loadAgenda();
   }, []);
 
   const saveReminder = async (patch: Partial<{ enabled: boolean; hours: number; message: string }>) => {
@@ -58,6 +69,29 @@ export function AgendaView() {
     await apiFetch('/api/appointments/reminder-settings', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
     }).catch(() => {});
+  };
+
+  // Salva a configuração da agenda e adota o que o servidor devolve (já normalizado).
+  const saveAgenda = async (patch: Partial<AgendaConfig>) => {
+    if (!agenda) return;
+    const next = { ...agenda, ...patch };
+    setAgenda(next);
+    setSavingAgenda(true);
+    try {
+      const r = await apiFetch('/api/appointments/agenda-settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+      });
+      const saved = await r.json();
+      if (saved && typeof saved.openHour === 'number') setAgenda(saved);
+    } catch {} finally { setSavingAgenda(false); }
+  };
+
+  const toggleDay = (iso: number) => {
+    if (!agenda) return;
+    const has = agenda.days.includes(iso);
+    const days = has ? agenda.days.filter(d => d !== iso) : [...agenda.days, iso].sort((a, b) => a - b);
+    if (!days.length) return; // pelo menos um dia
+    saveAgenda({ days });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -125,6 +159,75 @@ export function AgendaView() {
               onBlur={e => saveReminder({ message: e.target.value })}
             />
           )}
+        </div>
+      )}
+
+      {/* Funcionamento da agenda — a IA só oferece horários livres dentro destas regras */}
+      {agenda && (
+        <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Settings2 className="w-4 h-4 text-emerald-400" /> Funcionamento da agenda</p>
+              <p className="text-xs text-zinc-500 mt-0.5 max-w-2xl">
+                A IA usa estas regras para oferecer <span className="text-zinc-300">apenas horários livres</span>, do mais cedo primeiro, e nunca marcar dois clientes no mesmo dia e horário.
+              </p>
+            </div>
+            {savingAgenda && <span className="text-[10px] text-zinc-500 shrink-0">salvando…</span>}
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">Abre às</span>
+              <div className="flex items-center gap-1">
+                <input type="number" min={0} max={23} value={agenda.openHour}
+                  onChange={e => setAgenda({ ...agenda, openHour: parseInt(e.target.value, 10) || 0 })}
+                  onBlur={e => saveAgenda({ openHour: parseInt(e.target.value, 10) || 0 })}
+                  className="w-full min-w-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 text-sm" />
+                <span className="text-xs text-zinc-500">h</span>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">Fecha às</span>
+              <div className="flex items-center gap-1">
+                <input type="number" min={1} max={24} value={agenda.closeHour}
+                  onChange={e => setAgenda({ ...agenda, closeHour: parseInt(e.target.value, 10) || 0 })}
+                  onBlur={e => saveAgenda({ closeHour: parseInt(e.target.value, 10) || 0 })}
+                  className="w-full min-w-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 text-sm" />
+                <span className="text-xs text-zinc-500">h</span>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">Duração</span>
+              <select value={agenda.slotMin} onChange={e => saveAgenda({ slotMin: parseInt(e.target.value, 10) })}
+                className="w-full min-w-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 text-sm">
+                {[15, 20, 30, 45, 60, 90, 120].map(m => (
+                  <option key={m} value={m}>{m >= 60 ? `${m / 60}h${m % 60 ? ` ${m % 60}min` : ''}` : `${m} min`}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">Por horário</span>
+              <input type="number" min={1} max={99} value={agenda.capacity}
+                onChange={e => setAgenda({ ...agenda, capacity: parseInt(e.target.value, 10) || 1 })}
+                onBlur={e => saveAgenda({ capacity: parseInt(e.target.value, 10) || 1 })}
+                className="w-full min-w-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 text-sm" />
+            </label>
+          </div>
+
+          <div className="mt-4">
+            <span className="text-xs text-zinc-400">Dias de atendimento</span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {WEEK_DAYS.map(d => {
+                const on = agenda.days.includes(d.iso);
+                return (
+                  <button key={d.iso} type="button" onClick={() => toggleDay(d.iso)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${on ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                    {d.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

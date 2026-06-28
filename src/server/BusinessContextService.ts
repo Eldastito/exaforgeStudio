@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { AnalyticsService } from "./AnalyticsService.js";
+import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 
 /**
  * Agrega um "raio-x" do negócio para o Orquestrador (Zapp) raciocinar sobre a
@@ -16,6 +17,25 @@ export class BusinessContextService {
     try {
       const m = AnalyticsService.getMetrics(orgId, { period: "month" });
       blocks.push(`MÉTRICAS (30 dias): ${m.totalTickets} atendimentos, ${m.newLeadsCount} novos leads, ${m.salesCount} vendas, ${m.appointmentCount} agendamentos, ${m.handoffCount} repasses p/ humano, ${m.aiResponseCount} respostas da IA. Resolução por IA: ${m.resolutionRateAI}%. Tempo médio 1ª resposta: ${m.averageFirstResponseTime}s.`);
+    } catch (e) { /* noop */ }
+
+    // 1b. Revenue Intelligence (IQR + Perda Estimada + RRI) — números
+    // determinísticos que o Diretor IA pode citar com segurança. Sempre rotulado
+    // como "potencial em risco" para não inflar a narrativa.
+    try {
+      const r = RevenueIntelligenceService.getSnapshot(orgId, "month");
+      const brl = (v: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+      const drv = r.drivers;
+      blocks.push(
+        `REVENUE INTELLIGENCE (30 dias): IQR ${r.iqr.score}/100 (Atendimento ${drv.atendimento.score}, Comercial ${drv.comercial.score}, Operacional ${drv.operacional.score}; mais fraco: ${r.iqr.weakestDriver}). ` +
+        `Potencial em risco: ${brl(r.money.estimatedLoss)} (recuperável ${brl(r.money.recoverable)}). ` +
+        `Receita recuperada por fluxos do ZappFlow (janela ${r.attributionWindowDays}d): ${brl(r.money.recovered)}. ` +
+        `Premissa de ticket: ${brl(r.money.ticket.value)} (${r.money.ticket.source}). Fórmula: ${r.money.formula}.`
+      );
+      const top = r.lossSources.filter(s => s.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 3);
+      if (top.length) {
+        blocks.push(`FONTES DA PERDA: ${top.map(s => `${s.label} (${s.count} × ${(s.prob * 100).toFixed(0)}% = ${brl(s.amount)})`).join('; ')}.`);
+      }
     } catch (e) { /* noop */ }
 
     // 2. Funil (estágios atuais dos tickets abertos).

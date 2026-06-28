@@ -1116,6 +1116,37 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE storefront_collections ADD COLUMN items_json TEXT`); } catch(e){}
   // Itens de pedido guardam a opção escolhida (tamanho/peso) para histórico.
   try { db.exec(`ALTER TABLE order_items ADD COLUMN variant_label TEXT`); } catch(e){}
+
+  // ===== Revenue Intelligence Center (RIC) =====
+  // Configuração por organização da engine de Perda Estimada e dos pesos do IQR.
+  // Defaults conservadores: melhor subestimar do que inflar — número inflado mata
+  // a credibilidade da auditoria com a diretoria.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS revenue_intelligence_config (
+        organization_id TEXT PRIMARY KEY,
+        -- Probabilidades de PERDA por fonte (0.0 a 1.0).
+        prob_lead_slow_response REAL DEFAULT 0.35,   -- lead novo sem resposta rápida
+        prob_quote_no_response REAL DEFAULT 0.50,    -- orçamento enviado sem retorno
+        prob_abandoned REAL DEFAULT 0.60,            -- carrinho/conversa abandonada
+        prob_inactive REAL DEFAULT 0.40,             -- cliente inativo (+60d) com histórico
+        -- Janela (horas) que define cada fonte.
+        slow_response_seconds INTEGER DEFAULT 300,   -- 1ª resposta acima disto = lento
+        quote_stale_hours INTEGER DEFAULT 72,        -- orçamento sem retorno > X horas
+        inactive_days INTEGER DEFAULT 60,            -- cliente inativo > X dias
+        -- Janela de atribuição do RRI (dias).
+        attribution_window_days INTEGER DEFAULT 14,
+        -- Ticket médio fixo (R$) p/ override. NULL = usa AOV histórico do tenant.
+        custom_ticket_amount REAL,
+        -- Pesos do IQR (somam 100). Padrão equilibrado.
+        weight_atendimento INTEGER DEFAULT 40,
+        weight_comercial INTEGER DEFAULT 40,
+        weight_operacional INTEGER DEFAULT 20,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar revenue_intelligence_config', e); }
 };
 
 initDb();

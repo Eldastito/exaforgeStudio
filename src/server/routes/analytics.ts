@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AnalyticsService } from "../AnalyticsService.js";
 import { ReportsService } from "../ReportsService.js";
 import { ModuleService } from "../ModuleService.js";
+import { RevenueIntelligenceService } from "../RevenueIntelligenceService.js";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from 'pdfkit';
@@ -37,6 +38,40 @@ router.get("/profit", (req, res) => {
   const period = (req.query.period as any) || "month";
   try {
     res.json(AnalyticsService.getProfit(orgId, { period }));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== Revenue Intelligence Center (RIC) =====
+// Snapshot completo do IQR + 3 drivers + Perda Estimada + IRR + RRI no período.
+router.get("/revenue-intelligence", (req, res) => {
+  const orgId = getOrgId(req);
+  const period = (req.query.period as any) || "month";
+  try {
+    res.json(RevenueIntelligenceService.getSnapshot(orgId, period));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Configuração por organização: probabilidades, janelas, pesos do IQR e
+// ticket médio override. Tudo opt-in/editável — o cliente nunca vê um número
+// "duro" sem ter a chance de calibrar a fórmula.
+router.get("/revenue-intelligence/config", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    res.json(RevenueIntelligenceService.getConfig(orgId));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post("/revenue-intelligence/config", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const saved = RevenueIntelligenceService.saveConfig(orgId, req.body || {});
+    res.json({ success: true, config: saved });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

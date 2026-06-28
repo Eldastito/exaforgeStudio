@@ -814,6 +814,14 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_hours INTEGER DEFAULT 4`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_message TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE tickets ADD COLUMN abandoned_nudged_at DATETIME`); } catch(e){}
+  // Memória de relacionamento por cliente: a IA lembra de conversas anteriores
+  // (fatos durÁveis p/ rapport) e reconhece quem volta após um tempo parado.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN memory_facts TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN memory_summary TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN memory_updated_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ai_memory_enabled INTEGER DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN returning_greeting_enabled INTEGER DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN returning_greeting_min_days INTEGER DEFAULT 7`); } catch(e){}
   // Fase 3 — Pesquisa de satisfação (CSAT): opt-in + atraso após o pagamento.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_delay_hours INTEGER DEFAULT 24`); } catch(e){}

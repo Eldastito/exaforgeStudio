@@ -358,6 +358,48 @@ router.post("/settings", (req, res) => {
   }
 });
 
+// GET /api/analytics/ai-attendance-settings — comportamento da IA no atendimento
+// (memória de relacionamento, saudação de retorno e re-engajamento/abandono).
+router.get("/ai-attendance-settings", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const o = db.prepare(`
+      SELECT ai_memory_enabled, returning_greeting_enabled, returning_greeting_min_days,
+             abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message
+      FROM organization_settings WHERE organization_id = ?
+    `).get(orgId) as any || {};
+    res.json({
+      memoryEnabled: o.ai_memory_enabled == null ? true : !!o.ai_memory_enabled,
+      greetEnabled: o.returning_greeting_enabled == null ? true : !!o.returning_greeting_enabled,
+      greetMinDays: o.returning_greeting_min_days || 7,
+      abandonedEnabled: !!o.abandoned_cart_enabled,
+      abandonedHours: o.abandoned_cart_hours || 4,
+      abandonedMessage: o.abandoned_cart_message || "",
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/analytics/ai-attendance-settings — salva o comportamento da IA.
+router.put("/ai-attendance-settings", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const { memoryEnabled, greetEnabled, greetMinDays, abandonedEnabled, abandonedHours, abandonedMessage } = req.body || {};
+    const days = Math.min(365, Math.max(1, parseInt(String(greetMinDays), 10) || 7));
+    const hours = Math.min(168, Math.max(1, parseInt(String(abandonedHours), 10) || 4));
+    db.prepare(`
+      UPDATE organization_settings
+      SET ai_memory_enabled = ?, returning_greeting_enabled = ?, returning_greeting_min_days = ?,
+          abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE organization_id = ?
+    `).run(memoryEnabled ? 1 : 0, greetEnabled ? 1 : 0, days, abandonedEnabled ? 1 : 0, hours, abandonedMessage || null, orgId);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post("/settings/onboarding", (req, res) => {
   const orgId = getOrgId(req);
   const { business_name, address, phone, logo_url, vertical } = req.body;

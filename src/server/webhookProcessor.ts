@@ -4,6 +4,7 @@ import { AIOrchestratorService } from "./AIOrchestratorService.js";
 import { OrdersService } from "./OrdersService.js";
 import { PaymentService } from "./PaymentService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
+import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
@@ -114,11 +115,17 @@ export async function processIncomingMessage(
     }
   }
 
+  // Memória de relacionamento: guarda o ÚLTIMO contato ANTERIOR (antes do
+  // touchContact abaixo sobrescrever) para reconhecer quem está voltando.
+  const prevContactAt: string | null = contact.last_contact_at || null;
+
   // 2. Resolve Ticket
   let ticket = db.prepare('SELECT * FROM tickets WHERE contact_id = ? AND status = ? ORDER BY created_at DESC LIMIT 1')
     .get(contact.id, 'open') as any;
 
+  let isNewTicket = false;
   if (!ticket) {
+    isNewTicket = true;
     const ticketId = uuidv4();
     db.prepare(`
       INSERT INTO tickets (id, organization_id, contact_id, status, stage, ai_paused)
@@ -128,6 +135,9 @@ export async function processIncomingMessage(
     // Notifica a equipe: novo lead iniciou conversa.
     try { NotificationService.newLead(orgId, contact.name, channel.provider); } catch (e) { /* noop */ }
   }
+
+  // Cliente que voltou após um tempo parado? (null = não trata como retorno)
+  const returningAfterDays = CustomerMemoryService.returningDays(orgId, prevContactAt, isNewTicket);
 
   // 3. Save incoming message
   const msgId = uuidv4();
@@ -297,6 +307,7 @@ export async function processIncomingMessage(
           provider: channel.provider,
           areaPersona,
           areaId: ticket.area_id || null,
+          returningAfterDays,
        });
 
        // ROTEAMENTO PELA IA: quando a IA sinaliza que o cliente quer outra área
@@ -321,6 +332,7 @@ export async function processIncomingMessage(
               provider: channel.provider,
               areaPersona: AttendanceAreaService.personaText(target),
               areaId: target.id,
+              returningAfterDays,
            });
          } else if (!target) {
            // A IA pediu uma área que não existe: cai no menu para o cliente escolher.

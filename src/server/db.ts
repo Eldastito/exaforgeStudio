@@ -1377,6 +1377,68 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do Prospect AI', e); }
 
+  // Prospect AI (Fase 1) — contas/contatos B2B + registro de fonte (origem +
+  // política). Camada PARALELA ao CRM (contato-cêntrico): promove para o CRM
+  // só ao qualificar, sem mexer no atendimento atual.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_data_sources (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        provider TEXT,            -- csv_import | user_input | licensed_provider | places_live ...
+        source_reference TEXT,    -- nome do arquivo / URL / id
+        terms_profile TEXT,       -- user_provided | licensed | public ...
+        collected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        retention_policy TEXT,
+        confidence REAL DEFAULT 1.0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS prospect_accounts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        campaign_id TEXT,
+        crm_contact_id TEXT,      -- preenchido ao promover para o CRM
+        display_name TEXT,
+        legal_name TEXT,
+        domain TEXT,
+        website_url TEXT,
+        industry TEXT,
+        city TEXT,
+        state TEXT,
+        country TEXT,
+        cnpj TEXT,
+        source_id TEXT,
+        source TEXT,              -- csv_import | user_input ...
+        account_status TEXT DEFAULT 'discovered',  -- discovered|researching|qualified|disqualified|contacted|converted
+        dedupe_key TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_accounts_org ON prospect_accounts (organization_id, account_status);
+      CREATE INDEX IF NOT EXISTS idx_prospect_accounts_dedupe ON prospect_accounts (organization_id, dedupe_key);
+
+      CREATE TABLE IF NOT EXISTS prospect_contacts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        prospect_account_id TEXT,
+        crm_contact_id TEXT,
+        full_name TEXT,
+        role_title TEXT,
+        email TEXT,
+        email_status TEXT DEFAULT 'unknown',  -- unknown|publicly_listed|pattern_generated|provider_verified|invalid|suppressed|opted_out
+        phone TEXT,
+        linkedin_url TEXT,
+        source_id TEXT,
+        confidence REAL DEFAULT 0.5,
+        opt_out_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_contacts_acc ON prospect_contacts (organization_id, prospect_account_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar contas/contatos do Prospect AI', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -1253,6 +1253,45 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar revenue_intelligence_config', e); }
+
+  // RIC — ações de recuperação (loop fechado): cada ação dispara uma campanha
+  // de recuperação (rascunho) para os contatos de uma fonte de perda e, depois,
+  // recebe a atribuição da receita recuperada (pedidos pagos na janela).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ric_recovery_actions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        source_key TEXT,              -- slow_response | stale_quotes | abandoned | inactive
+        label TEXT,
+        contacts_count INTEGER DEFAULT 0,
+        campaign_id TEXT,
+        action_type TEXT DEFAULT 'campaign',
+        status TEXT DEFAULT 'created', -- created | sent | converted | dismissed
+        recovered_orders INTEGER DEFAULT 0,
+        recovered_amount REAL DEFAULT 0,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ric_actions_org ON ric_recovery_actions (organization_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar ric_recovery_actions', e); }
+
+  // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
+  // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
+  // garantimos que NENHUMA org existente perca o acesso — só passa a ser
+  // desligável pelo admin. Orgs sem lista explícita (legado) não são tocadas.
+  try {
+    const orgs = db.prepare("SELECT organization_id, enabled_modules FROM organization_settings WHERE enabled_modules IS NOT NULL AND enabled_modules != ''").all() as any[];
+    const upd = db.prepare("UPDATE organization_settings SET enabled_modules = ? WHERE organization_id = ?");
+    for (const o of orgs) {
+      try {
+        const arr = JSON.parse(o.enabled_modules);
+        if (Array.isArray(arr) && !arr.includes('rie')) { arr.push('rie'); upd.run(JSON.stringify(arr), o.organization_id); }
+      } catch { /* lista inválida: ignora */ }
+    }
+  } catch(e){ /* coluna pode não existir ainda */ }
 };
 
 initDb();

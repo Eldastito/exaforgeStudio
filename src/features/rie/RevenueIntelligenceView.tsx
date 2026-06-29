@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Gauge, RefreshCw, AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { apiFetch } from '@/src/lib/api';
-import type { RicPeriod, RicSnapshot } from './types';
+import { toast } from '@/src/lib/toast';
+import type { RicPeriod, RicSnapshot, RicRecoveryAction } from './types';
 import { MoneyKpiCard } from './components/MoneyKpiCard';
 import { IqrGauge } from './components/IqrGauge';
 import { DriverCard } from './components/DriverCard';
@@ -34,6 +35,13 @@ const PERIODS: { id: RicPeriod; label: string }[] = [
   { id: 'month', label: '30 dias' },
   { id: 'all', label: 'Tudo' },
 ];
+
+const ACTION_STATUS: Record<string, { label: string; cls: string }> = {
+  created: { label: 'Rascunho criado', cls: 'border-slate-500/40 bg-slate-500/10 text-slate-300' },
+  sent: { label: 'Disparada', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
+  converted: { label: 'Recuperou', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+  dismissed: { label: 'Descartada', cls: 'border-zinc-500/40 bg-zinc-500/10 text-zinc-400' },
+};
 
 function Card({ children, className = '' }: { children?: React.ReactNode; className?: string }) {
   return (
@@ -73,6 +81,8 @@ export function RevenueIntelligenceView() {
   const [error, setError] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [drillDriver, setDrillDriver] = useState<DriverKey | null>(null);
+  const [actions, setActions] = useState<RicRecoveryAction[]>([]);
+  const [actingKey, setActingKey] = useState<string | null>(null);
   const topActionsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (p: RicPeriod) => {
@@ -89,7 +99,33 @@ export function RevenueIntelligenceView() {
     }
   }, []);
 
+  const loadActions = useCallback(() => {
+    apiFetch('/api/analytics/revenue-intelligence/actions')
+      .then(r => r.json())
+      .then(d => setActions(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
+  // Cria a ação de recuperação (campanha rascunho) para uma fonte de perda.
+  const act = useCallback(async (sourceKey: string) => {
+    setActingKey(sourceKey);
+    try {
+      const r = await apiFetch('/api/analytics/revenue-intelligence/actions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao criar a ação.');
+      toast.success(`Campanha de recuperação criada (rascunho) com ${d.contacts} contato(s). Revise e envie em Campanhas.`);
+      loadActions();
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível criar a ação.');
+    } finally {
+      setActingKey(null);
+    }
+  }, [loadActions]);
+
   useEffect(() => { load(period); }, [period, load]);
+  useEffect(() => { loadActions(); }, [loadActions]);
 
   const m = snapshot?.money;
   const ticketSrc = m ? (TICKET_SOURCE_LABEL[m.ticket.source] || m.ticket.source) : '';
@@ -172,7 +208,7 @@ export function RevenueIntelligenceView() {
                 sublabel={m.ticket.source === 'fallback' ? 'Defina o ticket médio para estimar' : undefined}
               />
               <MoneyKpiCard label="Receita recuperável" value={m.recoverable} tone="recoverable" sublabel="alta chance de recuperação (IRR)" />
-              <MoneyKpiCard label="Receita recuperada" value={m.recovered} tone="recovered" pulseOnIncrease sublabel={`pelos fluxos do ZappFlow (janela ${snapshot.attributionWindowDays}d)`} />
+              <MoneyKpiCard label="Receita recuperada" value={m.recovered} tone="recovered" pulseOnIncrease sublabel={m.rri != null ? `RRI ${pct(m.rri)} · janela ${snapshot.attributionWindowDays}d` : `pelos fluxos do ZappFlow (janela ${snapshot.attributionWindowDays}d)`} />
               <MoneyKpiCard label="Ticket-base" value={m.ticket.value} tone="info" decimals={2} sublabel={ticketSrc} />
             </>
           )}
@@ -230,7 +266,7 @@ export function RevenueIntelligenceView() {
                   ))}
                 </div>
               ) : (
-                <TopActionsList snapshot={snapshot} />
+                <TopActionsList snapshot={snapshot} onAct={act} actingKey={actingKey} />
               )}
             </Card>
           </div>
@@ -251,6 +287,36 @@ export function RevenueIntelligenceView() {
             )}
           </Card>
         </div>
+
+        {/* ===== Ações de recuperação (loop fechado) ===== */}
+        {actions.length > 0 && (
+          <div className="mt-5">
+            <Card>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Ações de recuperação</p>
+                <span className="text-xs text-slate-500">
+                  Recuperado por ações: <span className="font-bold text-ric-success">{brl(actions.reduce((s, a) => s + (a.recovered_amount || 0), 0))}</span>
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {actions.map(a => {
+                  const badge = ACTION_STATUS[a.status] || ACTION_STATUS.created;
+                  return (
+                    <div key={a.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-ric-border bg-ric-bg/40 px-3 py-2.5">
+                      <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>{badge.label}</span>
+                      <span className="flex-1 text-sm text-slate-200">{a.label}</span>
+                      <span className="text-xs text-slate-500">{a.contacts_count} contato(s)</span>
+                      {a.recovered_amount > 0 && (
+                        <span className="text-sm font-bold tabular-nums text-ric-success">{brl(a.recovered_amount)}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-[11px] text-slate-500">As campanhas são criadas como rascunho — revise e dispare em Campanhas. A receita recuperada é atribuída aos pedidos pagos dos contatos após o disparo.</p>
+            </Card>
+          </div>
+        )}
 
         {/* ===== Tendência (8) | Simulador (4) — PR 4/5 ===== */}
         <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">

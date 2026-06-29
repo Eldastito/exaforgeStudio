@@ -1,4 +1,4 @@
-import { ArrowUpRight, Inbox } from 'lucide-react';
+import { ArrowUpRight, Inbox, Loader2, Send } from 'lucide-react';
 import type { RicSnapshot } from '../types';
 import { brl, RIC_TONE } from '../lib/format';
 
@@ -14,7 +14,11 @@ const ACTION_BY_SOURCE: Record<string, { verb: (n: number) => string; tone: keyo
  * Top 5 ações prioritárias — derivadas client-side das fontes de perda do
  * snapshot (ordenadas por R$ em jogo). Responde "o que priorizar hoje?".
  */
-export function TopActionsList({ snapshot }: { snapshot: RicSnapshot }) {
+export function TopActionsList({ snapshot, onAct, actingKey }: {
+  snapshot: RicSnapshot;
+  onAct?: (sourceKey: string) => void;
+  actingKey?: string | null;
+}) {
   const actions = snapshot.lossSources
     .filter(s => s.amount > 0)
     .sort((a, b) => b.amount - a.amount)
@@ -51,7 +55,19 @@ export function TopActionsList({ snapshot }: { snapshot: RicSnapshot }) {
           <span className="text-sm font-bold tabular-nums" style={{ color: RIC_TONE[a.tone] }}>
             {brl(a.amount)}
           </span>
-          <ArrowUpRight className="h-4 w-4 flex-shrink-0 text-slate-600" />
+          {onAct ? (
+            <button
+              onClick={() => onAct(a.key)}
+              disabled={actingKey === a.key}
+              title="Criar campanha de recuperação (rascunho) para estes contatos"
+              className="flex flex-shrink-0 items-center gap-1 rounded-lg border border-ric-primary/40 bg-ric-primary/10 px-2.5 py-1 text-xs font-semibold text-ric-primary-2 transition-colors hover:bg-ric-primary/20 disabled:opacity-50"
+            >
+              {actingKey === a.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              Recuperar
+            </button>
+          ) : (
+            <ArrowUpRight className="h-4 w-4 flex-shrink-0 text-slate-600" />
+          )}
         </div>
       ))}
     </div>

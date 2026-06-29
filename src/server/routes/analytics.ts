@@ -47,6 +47,19 @@ router.get("/profit", (req, res) => {
 });
 
 // ===== Revenue Intelligence Center (RIC) =====
+// Gate do módulo 'rie' — permite vender/cobrar o RIC à parte. Regra LENIENTE
+// para não quebrar orgs existentes: só bloqueia quando a org tem lista explícita
+// de módulos que NÃO inclui 'rie' (lista nula/legado passa; o backfill em db.ts
+// garante que toda org existente já tenha 'rie').
+router.use("/revenue-intelligence", (req: any, res, next) => {
+  const orgId = getOrgId(req);
+  const em = ModuleService.enabledModules(orgId);
+  if (em !== null && !em.includes("rie")) {
+    return res.status(403).json({ error: "module_disabled", module: "rie" });
+  }
+  next();
+});
+
 // Snapshot completo do IQR + 3 drivers + Perda Estimada + IRR + RRI no período.
 router.get("/revenue-intelligence", (req, res) => {
   const orgId = getOrgId(req);
@@ -126,6 +139,30 @@ router.get("/revenue-intelligence/plan", async (req, res) => {
   try {
     const text = await ExecutiveAdvisorService.auditPlan(orgId);
     res.json({ plan: text, generatedAt: new Date().toISOString() });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Loop fechado de recuperação: cria a AÇÃO (campanha de recuperação em rascunho)
+// para uma fonte de perda. Body: { sourceKey }. Não envia nada — o usuário revisa
+// e dispara em Campanhas (guardrail de aprovação humana).
+router.post("/revenue-intelligence/actions", (req: any, res) => {
+  const orgId = getOrgId(req);
+  const sourceKey = String(req.body?.sourceKey || "");
+  try {
+    const out = RevenueIntelligenceService.createRecoveryAction(orgId, sourceKey, req.user?.id);
+    res.json({ success: true, ...out });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Ações de recuperação + desfecho (receita recuperada atribuída por ação).
+router.get("/revenue-intelligence/actions", (req: any, res) => {
+  const orgId = getOrgId(req);
+  try {
+    res.json(RevenueIntelligenceService.listRecoveryActions(orgId));
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

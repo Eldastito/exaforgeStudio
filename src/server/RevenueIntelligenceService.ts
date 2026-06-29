@@ -1,5 +1,7 @@
 import db from "./db.js";
+import { randomUUID } from "node:crypto";
 import { AnalyticsService } from "./AnalyticsService.js";
+import { CampaignService } from "./CampaignService.js";
 
 type Period = "today" | "week" | "month" | "all";
 
@@ -417,31 +419,30 @@ export class RevenueIntelligenceService {
     const dateFilter = periodFilter(period, "o.created_at");
     const window = cfg.attribution_window_days;
 
-    // 1) Carrinho abandonado: tickets que receberam o nudge e geraram pedido
-    //    PAGO dentro da janela após o nudge.
-    let abandonedAmt = 0, abandonedOrders = 0;
+    // Coleta (pedido, valor) por fonte e DEPOIS atribui cada pedido a UMA única
+    // fonte (por prioridade) — evita contar o mesmo pedido em mais de um fluxo
+    // (abandono + PIX + cadência), que inflava a Receita Recuperada.
+    const rows: { key: string; orderId: string; amount: number }[] = [];
+
+    // 1) Carrinho/conversa abandonada: nudge → pedido pago na janela.
     try {
       const r = db.prepare(`
-        SELECT COUNT(DISTINCT o.id) AS n, COALESCE(SUM(o.total_amount), 0) AS amt
-        FROM orders o
-        JOIN tickets t ON t.id = o.ticket_id
+        SELECT DISTINCT o.id AS id, o.total_amount AS amt
+        FROM orders o JOIN tickets t ON t.id = o.ticket_id
         WHERE o.organization_id = ?
           AND o.status IN ('pago','em_preparo','entregue','concluido')
           AND t.abandoned_nudged_at IS NOT NULL
           AND o.created_at >= t.abandoned_nudged_at
           AND o.created_at <= datetime(t.abandoned_nudged_at, ?)
           ${dateFilter}
-      `).get(orgId, `+${window} days`) as any;
-      abandonedOrders = Number(r?.n || 0);
-      abandonedAmt = money(Number(r?.amt || 0));
+      `).all(orgId, `+${window} days`) as any[];
+      for (const x of r) rows.push({ key: "abandoned_cart", orderId: String(x.id), amount: Number(x.amt || 0) });
     } catch (e) { /* noop */ }
 
-    // 2) Lembrete de PIX: pedidos que receberam reminder_count > 0 e foram pagos.
-    //    Atribuído pelo pagamento APÓS o último lembrete.
-    let pixAmt = 0, pixOrders = 0;
+    // 2) Lembrete de PIX: pedidos com reminder_count > 0 pagos após o lembrete.
     try {
       const r = db.prepare(`
-        SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount), 0) AS amt
+        SELECT o.id AS id, o.total_amount AS amt
         FROM orders o
         WHERE o.organization_id = ?
           AND o.status IN ('pago','em_preparo','entregue','concluido')
@@ -449,34 +450,41 @@ export class RevenueIntelligenceService {
           AND o.paid_at IS NOT NULL
           AND (o.pix_last_reminder_at IS NULL OR o.paid_at >= o.pix_last_reminder_at)
           ${dateFilter}
-      `).get(orgId) as any;
-      pixOrders = Number(r?.n || 0);
-      pixAmt = money(Number(r?.amt || 0));
+      `).all(orgId) as any[];
+      for (const x of r) rows.push({ key: "pix_reminder", orderId: String(x.id), amount: Number(x.amt || 0) });
     } catch (e) { /* noop */ }
 
-    // 3) Cadências/Follow-up: pedidos PAGOS para contatos que tiveram cadência
-    //    ativa dentro da janela antes da venda.
-    let cadenceAmt = 0, cadenceOrders = 0;
+    // 3) Cadências/Follow-up: pedido pago de contato com cadência na janela.
     try {
       const r = db.prepare(`
-        SELECT COUNT(DISTINCT o.id) AS n, COALESCE(SUM(o.total_amount), 0) AS amt
-        FROM orders o
-        JOIN contact_cadences cc ON cc.contact_id = o.contact_id
-          AND cc.organization_id = o.organization_id
+        SELECT DISTINCT o.id AS id, o.total_amount AS amt
+        FROM orders o JOIN contact_cadences cc ON cc.contact_id = o.contact_id AND cc.organization_id = o.organization_id
         WHERE o.organization_id = ?
           AND o.status IN ('pago','em_preparo','entregue','concluido')
           AND o.created_at >= cc.started_at
           AND o.created_at <= datetime(cc.started_at, ?)
           ${dateFilter}
-      `).get(orgId, `+${window} days`) as any;
-      cadenceOrders = Number(r?.n || 0);
-      cadenceAmt = money(Number(r?.amt || 0));
+      `).all(orgId, `+${window} days`) as any[];
+      for (const x of r) rows.push({ key: "cadence", orderId: String(x.id), amount: Number(x.amt || 0) });
     } catch (e) { /* noop */ }
 
+    // Atribuição única por pedido (prioridade: abandono > PIX > cadência).
+    const PRIORITY = ["abandoned_cart", "pix_reminder", "cadence"];
+    const byOrder = new Map<string, { key: string; amount: number }>();
+    for (const key of PRIORITY) {
+      for (const row of rows) {
+        if (row.key === key && !byOrder.has(row.orderId)) byOrder.set(row.orderId, { key, amount: row.amount });
+      }
+    }
+    const agg: Record<string, { orders: number; amount: number }> = {
+      abandoned_cart: { orders: 0, amount: 0 }, pix_reminder: { orders: 0, amount: 0 }, cadence: { orders: 0, amount: 0 },
+    };
+    for (const v of byOrder.values()) { agg[v.key].orders++; agg[v.key].amount += v.amount; }
+
     const sources = [
-      { key: "abandoned_cart", label: "Carrinho/conversa abandonada", orders: abandonedOrders, amount: abandonedAmt },
-      { key: "pix_reminder", label: "Lembrete progressivo de PIX", orders: pixOrders, amount: pixAmt },
-      { key: "cadence", label: "Cadência / follow-up", orders: cadenceOrders, amount: cadenceAmt },
+      { key: "abandoned_cart", label: "Carrinho/conversa abandonada", orders: agg.abandoned_cart.orders, amount: money(agg.abandoned_cart.amount) },
+      { key: "pix_reminder", label: "Lembrete progressivo de PIX", orders: agg.pix_reminder.orders, amount: money(agg.pix_reminder.amount) },
+      { key: "cadence", label: "Cadência / follow-up", orders: agg.cadence.orders, amount: money(agg.cadence.amount) },
     ];
     const total = money(sources.reduce((sum, s) => sum + s.amount, 0));
 
@@ -484,7 +492,7 @@ export class RevenueIntelligenceService {
       total,
       sources,
       attributionWindowDays: window,
-      note: "Atribuição por janela: pedido pago após uma ação do ZappFlow no período.",
+      note: "Atribuição por janela: pedido pago após uma ação do ZappFlow no período (cada pedido conta uma vez).",
     };
   }
 
@@ -510,6 +518,9 @@ export class RevenueIntelligenceService {
 
     const loss = this.estimatedLoss(orgId, period, metrics, cfg);
     const recovered = this.recoveredRevenue(orgId, period, cfg);
+    // RRI (Revenue Recovery Index) = recuperada ÷ recuperável × 100. Mede a
+    // EFICÁCIA da recuperação. null quando não há base recuperável (evita /0).
+    const rri = loss.recoverable > 0 ? round1((recovered.total / loss.recoverable) * 100) : null;
 
     // "Porquê" do IQR — pega o driver mais fraco como narrativa principal.
     const drivers = [
@@ -539,7 +550,8 @@ export class RevenueIntelligenceService {
       money: {
         estimatedLoss: loss.total,        // perda total (potencial em risco)
         recoverable: loss.recoverable,    // IRR — parte recuperável
-        recovered: recovered.total,       // RRI — efetivamente recuperado
+        recovered: recovered.total,       // receita efetivamente recuperada
+        rri,                              // índice de recuperação (% recuperada/recuperável)
         ticket: loss.ticket,
         formula: loss.formula,
       },
@@ -548,5 +560,104 @@ export class RevenueIntelligenceService {
       attributionWindowDays: recovered.attributionWindowDays,
       config: cfg,
     };
+  }
+
+  /**
+   * Resolve os CONTATOS por trás de uma fonte de perda (para a ação de
+   * recuperação) + uma mensagem padrão adequada à fonte. Mesma lógica das
+   * queries da Perda Estimada, agora retornando ids em vez de contagem.
+   */
+  static lossContacts(orgId: string, sourceKey: string, cfg?: RicConfig): { contactIds: string[]; label: string; defaultMessage: string } {
+    const c = cfg || this.getConfig(orgId);
+    let ids: string[] = [], label = "", defaultMessage = "";
+    if (sourceKey === "slow_response") {
+      label = "Leads com 1ª resposta lenta";
+      defaultMessage = "Oi {nome}! Vi que você falou com a gente e talvez não tenha tido o retorno tão rápido quanto merece 😊 Posso te ajudar agora?";
+      try {
+        const r = db.prepare(`
+          SELECT DISTINCT tk.contact_id AS cid FROM tickets tk
+          JOIN (SELECT ticket_id, MIN(created_at) t FROM messages WHERE sender_type='contact' GROUP BY ticket_id) fc ON fc.ticket_id=tk.id
+          JOIN (SELECT ticket_id, MIN(created_at) t FROM messages WHERE sender_type IN ('bot','agent') GROUP BY ticket_id) fb ON fb.ticket_id=tk.id
+          WHERE tk.organization_id=? AND (julianday(fb.t)-julianday(fc.t))*86400.0 >= ?
+        `).all(orgId, c.slow_response_seconds) as any[];
+        ids = r.map(x => String(x.cid)).filter(Boolean);
+      } catch (e) { /* noop */ }
+    } else if (sourceKey === "stale_quotes") {
+      label = "Orçamentos sem retorno";
+      defaultMessage = "Olá {nome}! Passando para saber se ficou alguma dúvida sobre o orçamento que enviamos. Posso ajudar a fechar? 🙂";
+      try {
+        const r = db.prepare(`SELECT DISTINCT contact_id AS cid FROM quotes WHERE organization_id=? AND status='sent' AND sent_at <= datetime('now', ?) AND contact_id IS NOT NULL`).all(orgId, `-${c.quote_stale_hours} hours`) as any[];
+        ids = r.map(x => String(x.cid)).filter(Boolean);
+      } catch (e) { /* noop */ }
+    } else if (sourceKey === "abandoned") {
+      label = "Conversas abandonadas";
+      defaultMessage = "Oi {nome}! Ficamos no meio de uma conversa por aqui 😊 Ainda quer seguir? Posso te ajudar a finalizar agora.";
+      try {
+        const r = db.prepare(`SELECT DISTINCT contact_id AS cid FROM tickets WHERE organization_id=? AND abandoned_nudged_at IS NOT NULL AND contact_id IS NOT NULL`).all(orgId) as any[];
+        ids = r.map(x => String(x.cid)).filter(Boolean);
+      } catch (e) { /* noop */ }
+    } else if (sourceKey === "inactive") {
+      label = "Clientes inativos com histórico";
+      defaultMessage = "Olá {nome}! Sentimos sua falta por aqui 😊 Preparamos novidades que podem te interessar. Posso te mostrar?";
+      try {
+        const r = db.prepare(`SELECT id AS cid FROM contacts WHERE organization_id=? AND purchase_count > 0 AND (last_purchase_at IS NULL OR last_purchase_at < datetime('now', ?)) AND COALESCE(marketing_opt_out,0)=0`).all(orgId, `-${c.inactive_days} days`) as any[];
+        ids = r.map(x => String(x.cid)).filter(Boolean);
+      } catch (e) { /* noop */ }
+    } else {
+      throw new Error("Fonte de recuperação inválida.");
+    }
+    return { contactIds: ids, label, defaultMessage };
+  }
+
+  /**
+   * Cria a AÇÃO DE RECUPERAÇÃO de uma fonte de perda: monta uma campanha de
+   * recuperação (rascunho) para aqueles contatos e registra a ação. Não envia
+   * nada — fica em rascunho para o usuário revisar e disparar (guardrail).
+   */
+  static createRecoveryAction(orgId: string, sourceKey: string, userId?: string): { id: string; campaignId: string; contacts: number; label: string } {
+    const cfg = this.getConfig(orgId);
+    const { contactIds, label, defaultMessage } = this.lossContacts(orgId, sourceKey, cfg);
+    if (!contactIds.length) throw new Error("Não há contatos elegíveis para esta ação no momento.");
+    const camp = CampaignService.createCampaignForContacts(orgId, {
+      name: `Recuperação · ${label}`, message: defaultMessage, contactIds, createdBy: userId || "ric",
+    });
+    if (!camp.id || !camp.total) throw new Error("Nenhum contato com WhatsApp válido (ou todos em opt-out).");
+    const id = randomUUID();
+    db.prepare(`INSERT INTO ric_recovery_actions (id, organization_id, source_key, label, contacts_count, campaign_id, action_type, status, created_by) VALUES (?, ?, ?, ?, ?, ?, 'campaign', 'created', ?)`)
+      .run(id, orgId, sourceKey, label, camp.total, camp.id, userId || null);
+    return { id, campaignId: camp.id, contacts: camp.total, label };
+  }
+
+  /**
+   * Lista as ações de recuperação e ATUALIZA o desfecho de cada uma de forma
+   * idempotente: receita recuperada = pedidos pagos dos contatos da campanha,
+   * após o disparo, dentro da janela de atribuição.
+   */
+  static listRecoveryActions(orgId: string, limit = 30): any[] {
+    const actions = db.prepare(`SELECT * FROM ric_recovery_actions WHERE organization_id=? ORDER BY created_at DESC LIMIT ?`).all(orgId, limit) as any[];
+    const cfg = this.getConfig(orgId);
+    for (const a of actions) {
+      if (a.status === "dismissed") continue;
+      try {
+        const camp = db.prepare(`SELECT status, started_at FROM campaigns WHERE id=? AND organization_id=?`).get(a.campaign_id, orgId) as any;
+        if (!camp || !camp.started_at) continue; // ainda em rascunho (não disparada)
+        const r = db.prepare(`
+          SELECT COUNT(DISTINCT o.id) AS n, COALESCE(SUM(o.total_amount),0) AS amt
+          FROM orders o
+          JOIN campaign_recipients cr ON cr.contact_id = o.contact_id AND cr.campaign_id = ?
+          WHERE o.organization_id = ?
+            AND o.status IN ('pago','em_preparo','entregue','concluido')
+            AND o.created_at >= ?
+            AND o.created_at <= datetime(?, ?)
+        `).get(a.campaign_id, orgId, camp.started_at, camp.started_at, `+${cfg.attribution_window_days} days`) as any;
+        const orders = Number(r?.n || 0), amount = money(Number(r?.amt || 0));
+        const status = orders > 0 ? "converted" : "sent";
+        if (orders !== a.recovered_orders || amount !== a.recovered_amount || status !== a.status) {
+          db.prepare(`UPDATE ric_recovery_actions SET recovered_orders=?, recovered_amount=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(orders, amount, status, a.id);
+          a.recovered_orders = orders; a.recovered_amount = amount; a.status = status;
+        }
+      } catch (e) { /* noop */ }
+    }
+    return actions;
   }
 }

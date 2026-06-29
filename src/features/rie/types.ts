@@ -22,6 +22,18 @@ export interface RicRecoveredSource {
   amount: number;
 }
 
+export interface RicRecoveryAction {
+  id: string;
+  source_key: string;
+  label: string;
+  contacts_count: number;
+  campaign_id: string;
+  status: 'created' | 'sent' | 'converted' | 'dismissed';
+  recovered_orders: number;
+  recovered_amount: number;
+  created_at: string;
+}
+
 export interface RicSnapshot {
   period: RicPeriod;
   iqr: {
@@ -39,6 +51,7 @@ export interface RicSnapshot {
     estimatedLoss: number;
     recoverable: number;
     recovered: number;
+    rri?: number | null;
     ticket: { value: number; source: 'custom' | 'history' | 'fallback' };
     formula: string;
   };

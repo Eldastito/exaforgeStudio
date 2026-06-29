@@ -57,6 +57,35 @@ export class CampaignService {
     return { id, total: recipients.length };
   }
 
+  /**
+   * Cria a campanha (status draft) para uma LISTA EXPLÍCITA de contatos.
+   * Usada pelo loop de recuperação do RIC (ação → campanha de recuperação).
+   * Respeita opt-out e exige identifier válido. Não envia nada — fica em draft
+   * para o usuário revisar e disparar (guardrail de aprovação humana).
+   */
+  static createCampaignForContacts(orgId: string, params: {
+    name: string; message: string; contactIds: string[]; createdBy?: string;
+  }): { id: string | null; total: number } {
+    const ids = Array.from(new Set((params.contactIds || []).map(String))).slice(0, 500);
+    if (!ids.length) return { id: null, total: 0 };
+    const ph = ids.map(() => "?").join(",");
+    const recipients = (db.prepare(
+      `SELECT id, name, identifier FROM contacts WHERE organization_id = ? AND id IN (${ph}) AND COALESCE(marketing_opt_out,0) = 0`
+    ).all(orgId, ...ids) as any[]).filter(c => c.identifier);
+    if (!recipients.length) return { id: null, total: 0 };
+    const id = uuidv4();
+    const tx = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO campaigns (id, organization_id, name, message, segment, status, channel_id, total_targets, created_by)
+        VALUES (?, ?, ?, ?, ?, 'draft', NULL, ?, ?)
+      `).run(id, orgId, params.name, params.message, JSON.stringify({ source: "ric" }), recipients.length, params.createdBy || null);
+      const ins = db.prepare(`INSERT INTO campaign_recipients (id, campaign_id, organization_id, contact_id, identifier) VALUES (?, ?, ?, ?, ?)`);
+      for (const r of recipients) ins.run(uuidv4(), id, orgId, r.id, r.identifier);
+    });
+    tx();
+    return { id, total: recipients.length };
+  }
+
   /** Resolve o canal de envio (o passado, ou o primeiro Evolution/WhatsApp conectado). */
   private static resolveChannel(orgId: string, channelId?: string): any {
     if (channelId) return db.prepare('SELECT * FROM channels WHERE id = ? AND organization_id = ?').get(channelId, orgId);

@@ -113,13 +113,16 @@ export function AdminMasterView() {
 
       {/* SaaS Overview */}
       {overview && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <OverviewCard icon={<Building2 className="w-5 h-5 text-indigo-400" />} label="Empresas ativas"
             value={`${num(overview.activeOrgs)}/${num(overview.totalOrgs)}`}
             sub={`${num(overview.blockedOrgs)} bloqueada(s) · ${num(overview.pastDueOrgs)} inadimplente(s)`} />
           <OverviewCard icon={<Bot className="w-5 h-5 text-emerald-400" />} label="Respostas de IA (30d)"
             value={num(overview.aiLast30d)}
             sub={`${num(overview.aiLast24h)} nas últimas 24h · ${num(overview.aiTotal)} no total`} />
+          <OverviewCard icon={<DollarSign className="w-5 h-5 text-rose-400" />} label="Custo de IA (30d)"
+            value={brl(overview.aiCost30d)}
+            sub={`${num(overview.aiTokens30d)} tokens · ${brl(overview.aiCostTotal)} no total`} />
           <OverviewCard icon={<UsersIcon className="w-5 h-5 text-sky-400" />} label="Contatos na base"
             value={num(overview.totalContacts)}
             sub={`${num(overview.totalUsers)} usuário(s) no SaaS`} />
@@ -138,6 +141,7 @@ export function AdminMasterView() {
               <tr>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Empresa (Org ID)</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Uso de IA (30d)</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Custo IA (30d)</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Base / Receita</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Atividade</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Status</th>
@@ -157,6 +161,10 @@ export function AdminMasterView() {
                       <Bot className="w-3.5 h-3.5 text-emerald-400" /> {num(org.ai_30d)}
                     </div>
                     <div className="text-xs text-zinc-500 mt-0.5">{num(org.ai_total)} no total</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-rose-300 font-semibold">{brl(org.ai_cost_30d)}</div>
+                    <div className="text-xs text-zinc-500 mt-0.5">{num(org.ai_tokens_30d)} tokens</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-zinc-200">{num(org.contact_count)} contato(s)</div>
@@ -227,7 +235,7 @@ export function AdminMasterView() {
               ))}
               {organizations.length === 0 && (
                  <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-zinc-500">
+                    <td colSpan={8} className="px-6 py-8 text-center text-zinc-500">
                        Nenhuma organização encontrada.
                     </td>
                  </tr>

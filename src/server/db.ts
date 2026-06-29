@@ -128,6 +128,22 @@ const initDb = () => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Consumo de IA por empresa: tokens e custo (em USD e R$) de cada chamada de
+    -- LLM (chat/embeddings/visão/áudio), para medir quanto cada conta gasta.
+    CREATE TABLE IF NOT EXISTS ai_usage_log (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT,
+      model TEXT,
+      kind TEXT,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      total_tokens INTEGER DEFAULT 0,
+      cost_usd REAL DEFAULT 0,
+      cost_brl REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_org_date ON ai_usage_log (organization_id, created_at);
+
     CREATE TABLE IF NOT EXISTS authorized_managers (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,

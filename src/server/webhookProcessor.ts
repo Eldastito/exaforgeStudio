@@ -5,6 +5,7 @@ import { OrdersService } from "./OrdersService.js";
 import { PaymentService } from "./PaymentService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { CustomerMemoryService } from "./CustomerMemoryService.js";
+import { setUsageOrg } from "./usageContext.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
@@ -95,6 +96,8 @@ export async function processIncomingMessage(
   }
 
   const orgId = channel.organization_id;
+  // Atribui o consumo de IA deste atendimento à empresa dona do canal.
+  setUsageOrg(orgId);
 
   // 1. Resolve Contact
   let contact = db.prepare('SELECT * FROM contacts WHERE organization_id = ? AND channel_id = ? AND identifier = ?')

@@ -1,4 +1,7 @@
 import OpenAI, { toFile } from "openai";
+import { randomUUID } from "node:crypto";
+import db from "./db.js";
+import { currentOrgId } from "./usageContext.js";
 
 /**
  * Camada única de IA (OpenAI) usada por todos os agentes:
@@ -31,6 +34,40 @@ export function isAIConfigured(): boolean {
   return !!process.env.OPENAI_API_KEY;
 }
 
+// --- Medição de consumo de IA (tokens + custo) por empresa ---
+// Preço em USD por 1 milhão de tokens (entrada/saída). Ajustável por env.
+const USD_BRL = Number(process.env.OPENAI_USD_BRL || 5.4);
+const PRICES: Record<string, { in: number; out: number }> = {
+  "gpt-4o": { in: 2.5, out: 10 },
+  "gpt-4o-mini": { in: 0.15, out: 0.6 },
+  "gpt-4.1": { in: 2, out: 8 },
+  "gpt-4.1-mini": { in: 0.4, out: 1.6 },
+  "text-embedding-3-small": { in: 0.02, out: 0 },
+  "text-embedding-3-large": { in: 0.13, out: 0 },
+};
+function priceFor(model: string): { in: number; out: number } {
+  return PRICES[model] || PRICES[(model || "").split(":")[0]] || { in: 2.5, out: 10 };
+}
+// Custo fixo aproximado por transcrição de áudio (Whisper é cobrado por minuto;
+// sem a duração exata, usamos uma estimativa configurável).
+const WHISPER_COST_USD = Number(process.env.OPENAI_WHISPER_COST_USD || 0.006);
+
+/** Registra o consumo de uma chamada de IA na empresa do contexto atual. */
+function recordUsage(model: string, kind: string, inputTokens: number, outputTokens: number, costUsdOverride?: number): void {
+  try {
+    const orgId = currentOrgId();
+    if (!orgId) return; // sem org no contexto: não atribui (ex.: jobs internos)
+    const p = priceFor(model);
+    const costUsd = costUsdOverride != null
+      ? costUsdOverride
+      : (inputTokens / 1e6) * p.in + (outputTokens / 1e6) * p.out;
+    db.prepare(
+      `INSERT INTO ai_usage_log (id, organization_id, model, kind, input_tokens, output_tokens, total_tokens, cost_usd, cost_brl)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(randomUUID(), orgId, model, kind, inputTokens, outputTokens, inputTokens + outputTokens, costUsd, costUsd * USD_BRL);
+  } catch { /* medição nunca pode quebrar o atendimento */ }
+}
+
 /** Chat completion. Use json:true para forçar resposta em JSON. */
 export async function chat(
   prompt: string,
@@ -46,6 +83,7 @@ export async function chat(
     temperature: opts.temperature ?? 0.4,
     ...(opts.json ? { response_format: { type: "json_object" } } : {}),
   });
+  recordUsage(CHAT_MODEL, "chat", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
   return res.choices[0]?.message?.content || "";
 }
 
@@ -53,6 +91,7 @@ export async function chat(
 export async function embed(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   const res = await getClient().embeddings.create({ model: EMBED_MODEL, input: texts });
+  recordUsage(EMBED_MODEL, "embed", res.usage?.prompt_tokens || 0, 0);
   return res.data.map((d) => d.embedding as number[]);
 }
 
@@ -68,6 +107,7 @@ export async function transcribeAudio(
     model: TRANSCRIBE_MODEL,
     language: process.env.OPENAI_TRANSCRIBE_LANG || "pt", // melhora a precisão em PT-BR
   });
+  recordUsage(TRANSCRIBE_MODEL, "audio", 0, 0, WHISPER_COST_USD);
   return res.text || "";
 }
 
@@ -91,6 +131,7 @@ export async function describeImage(
     temperature: 0.2,
     max_tokens: 500,
   });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
   return res.choices[0]?.message?.content || "";
 }
 

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { ProspectService } from "../ProspectService.js";
+import { ProspectDiscoveryService } from "../ProspectDiscoveryService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -167,6 +168,27 @@ router.get("/attribution", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(ProspectService.attributionSummary(orgId));
+});
+
+// ── Descoberta automática por região (OpenStreetMap, fontes públicas) ────
+router.patch("/campaigns/:id/discovery", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectDiscoveryService.updateConfig(orgId, req.params.id, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/campaigns/:id/discovery/run", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectDiscoveryService.runForCampaign(orgId, req.params.id, "manual")); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/discovery/runs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectDiscoveryService.listRuns(orgId, req.query.campaignId as string));
 });
 
 router.post("/accounts/:id/copilot", async (req: AuthRequest, res): Promise<any> => {

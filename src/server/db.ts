@@ -1517,6 +1517,38 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN won_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN lost_reason TEXT`); } catch(e){}
 
+  // Prospect AI (Fase 2) — DESCOBERTA AUTOMÁTICA por região (fontes públicas:
+  // OpenStreetMap/Overpass + geocodificação Nominatim). Configurada por campanha:
+  // ponto de referência (endereço/CEP → lat/lon) + raio. Varredura noturna.
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_address TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_lat REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_lon REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_radius_km REAL DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_categories TEXT`); } catch(e){} // CSV de categorias OSM (vazio = amplo)
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_last_run DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN external_ref TEXT`); } catch(e){} // ex.: osm:node/123 (dedup da descoberta)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_discovery_runs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        campaign_id TEXT,
+        area TEXT,                 -- descrição da área (endereço + raio)
+        status TEXT DEFAULT 'running',  -- running | done | error
+        found_count INTEGER DEFAULT 0,
+        created_count INTEGER DEFAULT 0,
+        skipped_count INTEGER DEFAULT 0,
+        summary TEXT,              -- resumo (IA) do que foi encontrado
+        error TEXT,
+        trigger TEXT DEFAULT 'scheduler',  -- scheduler | manual
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        finished_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_discovery_runs_org ON prospect_discovery_runs (organization_id, campaign_id, started_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar discovery runs do Prospect AI', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

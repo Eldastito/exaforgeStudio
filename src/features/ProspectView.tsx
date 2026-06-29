@@ -1,11 +1,43 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X } from 'lucide-react';
+import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 type Icp = { id: string; name: string; vertical?: string; criteria?: any; created_at: string };
 type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string };
+type Account = { id: string; display_name: string; domain?: string; website_url?: string; industry?: string; city?: string; state?: string; account_status: string; contacts_count?: number; contacts?: any[] };
+
+// Parser CSV mínimo (campos com aspas, vírgulas e quebras de linha).
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = []; let row: string[] = []; let field = ''; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { row.push(field); field = ''; }
+    else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (ch !== '\r') field += ch;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+const TARGET_FIELDS: { key: string; label: string; guess: RegExp }[] = [
+  { key: 'company', label: 'Empresa *', guess: /empresa|company|raz[aã]o|fantasia|neg[oó]cio/i },
+  { key: 'website', label: 'Site', guess: /site|website|url|web/i },
+  { key: 'domain', label: 'Domínio', guess: /dom[ií]nio|domain/i },
+  { key: 'cnpj', label: 'CNPJ', guess: /cnpj/i },
+  { key: 'industry', label: 'Segmento', guess: /segmento|setor|industry|categoria|ramo/i },
+  { key: 'city', label: 'Cidade', guess: /cidade|city|munic/i },
+  { key: 'state', label: 'UF', guess: /estado|uf|state/i },
+  { key: 'contactName', label: 'Contato (nome)', guess: /contato|respons|nome|name/i },
+  { key: 'role', label: 'Cargo', guess: /cargo|fun[cç][aã]o|role|title/i },
+  { key: 'email', label: 'E-mail', guess: /e-?mail/i },
+  { key: 'phone', label: 'Telefone', guess: /telefone|phone|whats|celular|fone|tel/i },
+];
 
 const OBJECTIVES: { id: string; label: string }[] = [
   { id: 'reuniao', label: 'Agendar reunião' },
@@ -19,21 +51,30 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   paused: { label: 'Pausada', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
   completed: { label: 'Concluída', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
 };
+const ACCOUNT_STATUS: Record<string, string> = {
+  discovered: 'Descoberta', researching: 'Pesquisando', qualified: 'Qualificada',
+  disqualified: 'Desqualificada', contacted: 'Contatada', converted: 'Convertida',
+};
 
 export function ProspectView() {
   const [icps, setIcps] = useState<Icp[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [newIcp, setNewIcp] = useState(false);
   const [newCamp, setNewCamp] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
+  const loadAccounts = useCallback(() => apiFetch('/api/prospect/accounts').then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
       apiFetch('/api/prospect/icps').then(r => r.json()).then(d => setIcps(Array.isArray(d) ? d : [])).catch(() => {}),
       apiFetch('/api/prospect/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {}),
+      loadAccounts(),
     ]).finally(() => setLoading(false));
-  }, []);
+  }, [loadAccounts]);
   useEffect(() => { load(); }, [load]);
 
   const archiveIcp = async (id: string) => {
@@ -108,14 +149,210 @@ export function ProspectView() {
         </div>
       </div>
 
+      {/* Contas */}
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Building2 className="w-4 h-4 text-cyan-400" /> Contas ({accounts.length})</h3>
+          <Button onClick={() => setImporting(true)} className="bg-cyan-600 hover:bg-cyan-700 text-white h-8 px-2.5 text-xs"><Upload className="w-3.5 h-3.5 mr-1" /> Importar CSV</Button>
+        </div>
+        {loading ? <Spinner /> : accounts.length === 0 ? (
+          <Empty text="Nenhuma conta ainda. Importe uma planilha (CSV) com suas empresas/contatos — a origem fica registrada e os duplicados são mesclados." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="text-zinc-500 text-xs border-b border-zinc-800">
+                <tr><th className="py-2 pr-3 font-medium">Empresa</th><th className="py-2 pr-3 font-medium">Domínio</th><th className="py-2 pr-3 font-medium">Local</th><th className="py-2 pr-3 font-medium">Contatos</th><th className="py-2 font-medium">Status</th></tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/50">
+                {accounts.map(a => (
+                  <tr key={a.id} onClick={() => setDetailId(a.id)} className="cursor-pointer hover:bg-zinc-800/20">
+                    <td className="py-2 pr-3 text-zinc-200">{a.display_name}</td>
+                    <td className="py-2 pr-3 text-zinc-500">{a.domain || '—'}</td>
+                    <td className="py-2 pr-3 text-zinc-500">{[a.city, a.state].filter(Boolean).join('/') || '—'}</td>
+                    <td className="py-2 pr-3 text-zinc-400">{a.contacts_count ?? 0}</td>
+                    <td className="py-2"><span className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-300">{ACCOUNT_STATUS[a.account_status] || a.account_status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {newIcp && <IcpModal onClose={() => setNewIcp(false)} onSaved={() => { setNewIcp(false); load(); }} />}
       {newCamp && <CampaignModal icps={icps} onClose={() => setNewCamp(false)} onSaved={() => { setNewCamp(false); load(); }} />}
+      {importing && <ImportModal campaigns={campaigns} onClose={() => setImporting(false)} onDone={() => { setImporting(false); loadAccounts(); }} />}
+      {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={loadAccounts} />}
     </div>
   );
 }
 
 const Spinner = () => <div className="flex items-center gap-2 text-zinc-500 text-sm py-6"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
 const Empty = ({ text }: { text: string }) => <p className="text-[12px] text-zinc-600 py-6 text-center">{text}</p>;
+
+function ImportModal({ campaigns, onClose, onDone }: { campaigns: Campaign[]; onClose: () => void; onDone: () => void }) {
+  const [fileName, setFileName] = useState('');
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [mapping, setMapping] = useState<Record<string, number>>({});
+  const [campaignId, setCampaignId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const onFile = async (f: File | null) => {
+    if (!f) return;
+    setFileName(f.name);
+    const text = await f.text();
+    const parsed = parseCSV(text);
+    if (!parsed.length) { toast.error('CSV vazio ou ilegível.'); return; }
+    const hdr = parsed[0].map(h => h.trim());
+    setHeaders(hdr); setRows(parsed.slice(1));
+    // Auto-mapeia por palavra-chave no cabeçalho.
+    const guess: Record<string, number> = {};
+    for (const tf of TARGET_FIELDS) {
+      const idx = hdr.findIndex(h => tf.guess.test(h));
+      if (idx >= 0) guess[tf.key] = idx;
+    }
+    setMapping(guess);
+  };
+
+  const buildRecords = () => rows.map(r => {
+    const rec: any = {};
+    for (const tf of TARGET_FIELDS) { const i = mapping[tf.key]; if (i !== undefined && i >= 0) rec[tf.key] = (r[i] || '').trim(); }
+    return rec;
+  }).filter(rec => (rec.company || '').trim() || (rec.domain || rec.website || rec.email || '').trim());
+
+  const doImport = async () => {
+    if (mapping.company === undefined) { toast.error('Mapeie ao menos a coluna "Empresa".'); return; }
+    const records = buildRecords();
+    if (!records.length) { toast.error('Nenhuma linha válida para importar.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/prospect/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records, sourceRef: fileName, campaignId: campaignId || null }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao importar.');
+      setResult(d);
+      toast.success(`Importado: ${d.accountsCreated} contas, ${d.contactsCreated} contatos.`);
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[560px] p-6 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Upload className="w-5 h-5 text-cyan-400" /> Importar contas (CSV)</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
+        </div>
+
+        {result ? (
+          <div className="text-sm text-zinc-300 space-y-2">
+            <p className="text-emerald-400 font-medium">Importação concluída ✅</p>
+            <ul className="text-xs text-zinc-400 space-y-1">
+              <li>• Contas criadas: <b className="text-zinc-200">{result.accountsCreated}</b></li>
+              <li>• Contas já existentes (mescladas): <b className="text-zinc-200">{result.accountsMerged}</b></li>
+              <li>• Contatos criados: <b className="text-zinc-200">{result.contactsCreated}</b></li>
+              <li>• Contatos duplicados (ignorados): <b className="text-zinc-200">{result.contactsSkipped}</b></li>
+              <li>• Linhas processadas: {result.total}</li>
+            </ul>
+            <div className="flex justify-end pt-2"><Button onClick={onDone} className="bg-cyan-600 hover:bg-cyan-700 text-white">Concluir</Button></div>
+          </div>
+        ) : !headers.length ? (
+          <>
+            <label className="flex items-center justify-center gap-2 w-full cursor-pointer rounded-lg border border-dashed border-zinc-700 bg-zinc-950 py-8 text-sm text-zinc-400 hover:border-cyan-500/50 hover:text-zinc-200 transition-colors">
+              <Upload className="w-4 h-4" /> Selecionar arquivo .csv
+              <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => onFile(e.target.files?.[0] || null)} />
+            </label>
+            <p className="mt-3 text-[11px] text-zinc-600">Use uma planilha com suas empresas/contatos (1 linha por contato). A origem é registrada e os duplicados são mesclados por domínio/e-mail. Sem scraping.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-zinc-500 mb-3">{fileName} · {rows.length} linha(s). Confira o mapeamento das colunas:</p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {TARGET_FIELDS.map(tf => (
+                <div key={tf.key}>
+                  <label className="text-[11px] text-zinc-400 mb-0.5 block">{tf.label}</label>
+                  <select value={mapping[tf.key] ?? -1} onChange={e => setMapping(m => ({ ...m, [tf.key]: parseInt(e.target.value, 10) }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 outline-none focus:border-cyan-500">
+                    <option value={-1}>— ignorar —</option>
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `coluna ${i + 1}`}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <label className="text-[11px] text-zinc-400 mb-0.5 block">Vincular à campanha (opcional)</label>
+            <select value={campaignId} onChange={e => setCampaignId(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-cyan-500 mb-4">
+              <option value="">Nenhuma</option>
+              {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => { setHeaders([]); setRows([]); setFileName(''); }} disabled={busy}>Trocar arquivo</Button>
+              <Button onClick={doImport} disabled={busy} className="bg-cyan-600 hover:bg-cyan-700 text-white">
+                {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}Importar {buildRecords().length} linha(s)
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+  const [acc, setAcc] = useState<Account | null>(null);
+  useEffect(() => { apiFetch(`/api/prospect/accounts/${id}`).then(r => r.json()).then(d => { if (d && d.id) setAcc(d); }).catch(() => {}); }, [id]);
+
+  const setStatus = async (status: string) => {
+    try {
+      const r = await apiFetch(`/api/prospect/accounts/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      if (!r.ok) throw new Error();
+      setAcc(a => a ? { ...a, account_status: status } : a); onChanged();
+    } catch { toast.error('Não foi possível atualizar o status.'); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
+      <div className="h-full w-full max-w-[440px] bg-zinc-900 border-l border-zinc-800 overflow-auto p-5" onClick={e => e.stopPropagation()}>
+        {!acc ? <Spinner /> : (
+          <>
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-zinc-100 truncate">{acc.display_name}</h3>
+                {acc.domain && <a href={`https://${acc.domain}`} target="_blank" rel="noreferrer" className="text-xs text-cyan-400 hover:text-cyan-300">{acc.domain}</a>}
+              </div>
+              <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400 mb-4">
+              {acc.industry && <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2"><span className="text-zinc-500 block">Segmento</span>{acc.industry}</div>}
+              {(acc.city || acc.state) && <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2"><span className="text-zinc-500 block">Local</span>{[acc.city, acc.state].filter(Boolean).join('/')}</div>}
+            </div>
+
+            <label className="text-[11px] text-zinc-500 mb-1 block">Status da conta</label>
+            <select value={acc.account_status} onChange={e => setStatus(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-cyan-500 mb-4">
+              {Object.entries(ACCOUNT_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Contatos ({acc.contacts?.length || 0})</p>
+            <div className="space-y-2">
+              {(acc.contacts || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhum contato.</p>}
+              {(acc.contacts || []).map((c: any) => (
+                <div key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
+                  <p className="text-sm text-zinc-200">{c.full_name || '(sem nome)'}{c.role_title ? <span className="text-zinc-500"> · {c.role_title}</span> : ''}</p>
+                  {c.email && <p className="text-[11px] text-zinc-400 inline-flex items-center gap-1 mt-0.5"><Mail className="w-3 h-3" /> {c.email}</p>}
+                  {c.phone && <p className="text-[11px] text-zinc-400 inline-flex items-center gap-1 mt-0.5 ml-3"><Phone className="w-3 h-3" /> {c.phone}</p>}
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-[10px] text-zinc-600">Próximas etapas: evidências, hipótese de dor, score e abordagem aprovável.</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function IcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState('');

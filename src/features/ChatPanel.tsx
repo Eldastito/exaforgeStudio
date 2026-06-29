@@ -5,6 +5,7 @@ import { Send, Sparkles, Paperclip, Mic, BrainCircuit, X, MessageCircle, Hand, B
 import { Avatar } from '@/src/components/ui/Avatar';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { toast } from '@/src/lib/toast';
 
 export function ChatPanel() {
   const { activeTicketId, tickets, contacts, messages, sendMessage, takeOverTicket, returnToAI, closeTicket, loadMessages, setActiveTicket } = useStore();
@@ -15,6 +16,8 @@ export function ChatPanel() {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [closeReason, setCloseReason] = useState('');
   const [closeStatus, setCloseStatus] = useState<'entregue_concluido' | 'perdido'>('entregue_concluido');
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeTicket = activeTicketId ? tickets[activeTicketId] : null;
@@ -73,6 +76,29 @@ export function ChatPanel() {
       console.error(e);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // Curadoria: "ensina" uma boa resposta à IA, enviando-a (com a pergunta
+  // anterior do cliente) para a base de conhecimento (RAG) da empresa.
+  const promoteToRag = async (msg: any, idx: number) => {
+    let question = '';
+    for (let i = idx - 1; i >= 0; i--) {
+      if (activeMessages[i].sender === 'contact' && activeMessages[i].text) { question = activeMessages[i].text; break; }
+    }
+    setPromotingId(msg.id);
+    try {
+      const res = await fetch('/api/rag/promote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer: msg.text, contactName: activeContact?.name }),
+      });
+      if (!res.ok) throw new Error();
+      setPromotedIds(prev => new Set(prev).add(msg.id));
+      toast.success('Resposta adicionada ao conhecimento da IA ✨');
+    } catch {
+      toast.error('Não foi possível adicionar ao conhecimento.');
+    } finally {
+      setPromotingId(null);
     }
   };
 
@@ -149,11 +175,11 @@ export function ChatPanel() {
             Nenhuma mensagem ainda.
           </div>
         ) : (
-          activeMessages.map((msg) => {
+          activeMessages.map((msg, idx) => {
             const isContact = msg.sender === 'contact';
             const isBot = msg.sender === 'bot';
             return (
-              <div key={msg.id} className={`flex flex-col ${isContact ? 'items-start' : 'items-end'}`}>
+              <div key={msg.id} className={`group flex flex-col ${isContact ? 'items-start' : 'items-end'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-[10px] text-zinc-500">
                     {format(new Date(msg.timestamp), "HH:mm")}
@@ -174,6 +200,18 @@ export function ChatPanel() {
                   )}
                   {msg.text && <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
                 </div>
+                {/* Curadoria: ensina esta resposta à IA (vai para o RAG da empresa). */}
+                {!isContact && msg.text && (
+                  <button
+                    onClick={() => promoteToRag(msg, idx)}
+                    disabled={promotingId === msg.id || promotedIds.has(msg.id)}
+                    title="Adicionar esta resposta ao conhecimento da IA"
+                    className={`mt-1 inline-flex items-center gap-1 text-[10px] transition-opacity ${promotedIds.has(msg.id) ? 'text-emerald-400' : 'text-zinc-500 hover:text-emerald-400 opacity-0 group-hover:opacity-100'} disabled:cursor-default`}
+                  >
+                    <BrainCircuit className="w-3 h-3" />
+                    {promotedIds.has(msg.id) ? 'No conhecimento da IA ✓' : promotingId === msg.id ? 'Adicionando…' : 'Ensinar à IA'}
+                  </button>
+                )}
               </div>
             );
           })

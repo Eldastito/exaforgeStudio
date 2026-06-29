@@ -89,6 +89,32 @@ router.post("/documents", async (req: AuthRequest, res): Promise<any> => {
   }
 });
 
+// Promove uma resposta do atendimento para a base de conhecimento (curadoria
+// manual). O atendente aprova uma boa resposta da IA e ela vira "fonte de
+// verdade" para conversas futuras — sem o risco de auto-ingestão (loop de
+// alucinação).
+router.post("/promote", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const { question, answer, contactName } = req.body || {};
+  const ans = String(answer || "").trim();
+  if (!ans) return res.status(400).json({ error: "Resposta vazia." });
+
+  try {
+    const q = String(question || "").trim();
+    const content = q ? `Pergunta do cliente: ${q}\nResposta aprovada: ${ans}` : `Resposta aprovada: ${ans}`;
+    const stamp = new Date().toLocaleDateString("pt-BR");
+    const name = `Atendimento curado — ${contactName ? String(contactName).slice(0, 40) + " · " : ""}${stamp}`;
+    const result = await processDocument(Buffer.from(content, "utf-8"), name, orgId, "global", null);
+    logAuthEvent(orgId, userId, result.documentId, 'RAG_ANSWER_PROMOTED', { name, chunks: result.chunksProcessed });
+    res.json({ success: true, ...result });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Remove um documento e seus chunks
 router.delete("/documents/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

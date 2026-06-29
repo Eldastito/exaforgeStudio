@@ -48,9 +48,12 @@ export function StudioView() {
   const [creations, setCreations] = useState<Creation[]>([]);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
 
-  const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(setBrand).catch(() => {});
+  const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(d => setBrand(d && Array.isArray(d.palette) ? d : null)).catch(() => {});
   const loadCreations = () => apiFetch('/api/studio/creations').then(r => r.json()).then((d) => setCreations(Array.isArray(d) ? d : [])).catch(() => {});
-  const loadLimits = () => apiFetch('/api/studio/limits').then(r => r.json()).then(setLimits).catch(() => {});
+  // Só adota os limites quando vierem no formato esperado (evita crash se a rota
+  // retornar um erro, ex.: módulo do Estúdio ainda não habilitado).
+  const loadLimits = () => apiFetch('/api/studio/limits').then(r => r.json())
+    .then(d => setLimits(d && d.images && d.videos ? d : null)).catch(() => {});
   useEffect(() => { loadBrand(); loadCreations(); loadLimits(); }, []);
 
   const onPickRefs = async (files: FileList | null) => {
@@ -155,7 +158,7 @@ export function StudioView() {
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
           <div className="flex items-center justify-between gap-2 mb-1">
             <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><ImageIcon className="w-4 h-4 text-fuchsia-400" /> Gerar arte</h3>
-            {limits && (
+            {limits?.images && (
               <span className="text-[11px] text-zinc-500">Imagens este mês: <span className="text-zinc-300 font-medium">{limits.images.used}/{limits.images.limit}</span></span>
             )}
           </div>

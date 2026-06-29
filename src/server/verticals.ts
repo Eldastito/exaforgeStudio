@@ -21,7 +21,7 @@ export type Vertical = {
 export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
-  "compras", "orcamentos", "eventos", "diretor",
+  "compras", "orcamentos", "eventos", "diretor", "estudio",
 ] as const;
 
 export const VERTICALS: Vertical[] = [

@@ -384,6 +384,7 @@ const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
   { key: 'eventos', label: 'Eventos & Grupos', desc: 'Pipeline de consultas consultivas (casamento, convenção, day use, corporativo). A IA detecta na conversa e cria a consulta.' },
   { key: 'diretor', label: 'Diretor Executivo IA', desc: 'Conselheiro de gestão: pergunte em linguagem natural ("onde estou perdendo dinheiro?") e receba resposta com dados reais + briefing diário.' },
   { key: 'catalogo', label: 'Catálogo', desc: 'Produtos e serviços.' },
+  { key: 'estudio', label: 'Estúdio de Criação', desc: 'IA gera imagens (e em breve vídeos) de campanha com a identidade da marca.' },
   { key: 'vendas', label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
   { key: 'loja', label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },
   { key: 'pagamentos', label: 'Pagamentos', desc: 'Recebimento por PIX / gateway.' },

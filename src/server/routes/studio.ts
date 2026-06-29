@@ -47,4 +47,11 @@ router.get("/creations", (req: AuthRequest, res): any => {
   res.json(StudioService.listCreations(orgId));
 });
 
+// GET /api/studio/limits — uso vs limite do plano (imagens/vídeos no mês)
+router.get("/limits", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(StudioService.limits(orgId));
+});
+
 export default router;

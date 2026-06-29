@@ -14,6 +14,8 @@ export type PlanFeatures = {
   channels_limit?: number;
   users_limit?: number;
   trial_days?: number;
+  studio_images_monthly?: number; // limite de imagens do Estúdio por mês
+  studio_videos_monthly?: number; // limite de vídeos do Estúdio por mês
 };
 
 export type Plan = {
@@ -150,6 +152,38 @@ export class PlanService {
       }
     }
     return { allowed: true };
+  }
+
+  /** Consumo do Estúdio (imagens/vídeos) no mês corrente. */
+  static studioUsage(orgId: string): { images: number; videos: number } {
+    const row = (kind: string) => {
+      try {
+        return (db.prepare(
+          `SELECT COUNT(*) as c FROM studio_creations WHERE organization_id = ? AND kind = ? AND created_at >= datetime('now','start of month')`
+        ).get(orgId, kind) as any)?.c || 0;
+      } catch { return 0; }
+    };
+    return { images: row("image"), videos: row("video") };
+  }
+
+  /**
+   * O Estúdio pode gerar mais um item (imagem/vídeo) este mês? Respeita o
+   * bloqueio de billing e o limite mensal do plano. Limite não definido cai num
+   * padrão por env (para não travar durante a configuração dos planos).
+   */
+  static studioAllowed(orgId: string, kind: "image" | "video"): { allowed: boolean; reason?: string; limit: number; used: number } {
+    const org = db.prepare(`SELECT billing_status, status, plan_id FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    const used = this.studioUsage(orgId)[kind === "image" ? "images" : "videos"];
+    if (org && (org.status === 'blocked' || org.status === 'cancelled')) return { allowed: false, reason: 'org_blocked', limit: 0, used };
+    if (org && ['blocked', 'cancelled', 'suspended'].includes(org.billing_status)) return { allowed: false, reason: 'billing_blocked', limit: 0, used };
+
+    const features = org?.plan_id ? this.parseFeatures((db.prepare(`SELECT features FROM plans WHERE id = ?`).get(org.plan_id) as any)?.features) : {};
+    const configured = kind === "image" ? features.studio_images_monthly : features.studio_videos_monthly;
+    const fallback = Number((kind === "image" ? process.env.STUDIO_DEFAULT_IMAGES : process.env.STUDIO_DEFAULT_VIDEOS) || (kind === "image" ? 100 : 10));
+    const limit = (configured == null) ? fallback : Number(configured);
+    if (limit <= 0) return { allowed: false, reason: 'plan_no_studio', limit: 0, used };
+    if (used >= limit) return { allowed: false, reason: 'monthly_limit', limit, used };
+    return { allowed: true, limit, used };
   }
 
   private static parseFeatures(raw: any): PlanFeatures {

@@ -28,6 +28,7 @@ export class ModuleService {
     quotes: "orcamentos",
     events: "eventos",
     executive: "diretor",
+    studio: "estudio",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

@@ -22,6 +22,7 @@ import { SupplierQuoteService } from "./SupplierQuoteService.js";
 import { QuoteService } from "./QuoteService.js";
 import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
+import { CoordenadorService } from "./CoordenadorService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -98,6 +99,19 @@ export async function processIncomingMessage(
   const orgId = channel.organization_id;
   // Atribui o consumo de IA deste atendimento à empresa dona do canal.
   setUsageOrg(orgId);
+
+  // ===== Desvio do COORDENADOR IA (canal INTERNO da equipe) =====
+  // Se este canal é o número interno (kind='internal'), a mensagem vem de um
+  // COLABORADOR — não de um cliente. Roteamos para o Coordenador IA e saímos:
+  // NÃO cria contato/ticket nem aciona o fluxo de atendimento ao cliente.
+  if (channel.kind === 'internal') {
+    try {
+      await CoordenadorService.handleInbound(orgId, channel.id, payload.senderId, payload.text || '');
+    } catch (e) {
+      console.error('[Coordenador] Falha ao processar mensagem interna:', e);
+    }
+    return;
+  }
 
   // 1. Resolve Contact
   let contact = db.prepare('SELECT * FROM contacts WHERE organization_id = ? AND channel_id = ? AND identifier = ?')

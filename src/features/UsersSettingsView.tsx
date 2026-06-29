@@ -139,6 +139,18 @@ export function UsersSettingsView() {
     }
   };
 
+  // WhatsApp do colaborador — usado pelo Coordenador IA para reconhecê-lo.
+  const savePhone = async (id: string, phone: string, current: string) => {
+    if ((phone || '').replace(/\D/g, '') === (current || '').replace(/\D/g, '')) return;
+    try {
+      const res = await apiFetch(`/api/users/${id}/phone`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
+      });
+      if (res.ok) { toast.success('WhatsApp atualizado.'); fetchData(); }
+      else toast.error('Não foi possível salvar o telefone.');
+    } catch { toast.error('Não foi possível salvar o telefone.'); }
+  };
+
   if (user?.role !== 'owner' && user?.role !== 'admin') {
     return <div className="text-zinc-500 text-center py-12">Você não tem permissão para ver esta página.</div>;
   }
@@ -175,6 +187,7 @@ export function UsersSettingsView() {
             <tr>
               <th className="px-4 py-3 font-medium">Usuário</th>
               <th className="px-4 py-3 font-medium">Perfil</th>
+              <th className="px-4 py-3 font-medium">WhatsApp (Coordenador IA)</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Último Acesso</th>
               <th className="px-4 py-3 font-medium">Ações</th>
@@ -188,6 +201,14 @@ export function UsersSettingsView() {
                   <div className="text-xs text-zinc-500">{u.email}</div>
                 </td>
                 <td className="px-4 py-3 capitalize text-zinc-300">{u.role}</td>
+                <td className="px-4 py-3">
+                  <input
+                    type="text" defaultValue={u.phone || ''} placeholder="5521999998888"
+                    onBlur={e => savePhone(u.id, e.target.value, u.phone || '')}
+                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    className="w-40 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 font-mono outline-none focus:border-indigo-500"
+                  />
+                </td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${u.global_status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-500'}`}>
                     {u.global_status}

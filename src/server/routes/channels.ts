@@ -21,7 +21,7 @@ router.get("/", (req: AuthRequest, res) => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
 
-  const channels = db.prepare('SELECT id, organization_id, provider, name, identifier, status, ai_enabled, human_handoff_enabled, created_at, updated_at FROM channels WHERE organization_id = ?').all(orgId);
+  const channels = db.prepare("SELECT id, organization_id, provider, name, identifier, status, ai_enabled, human_handoff_enabled, COALESCE(kind,'client') AS kind, created_at, updated_at FROM channels WHERE organization_id = ?").all(orgId);
   res.json(channels);
 });
 
@@ -75,15 +75,17 @@ router.put("/:id", (req: AuthRequest, res) => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { name, identifier, status, ai_enabled, webhook_secret, token_encrypted, metadata_json } = req.body;
-  
+  const { name, identifier, status, ai_enabled, kind, webhook_secret, token_encrypted, metadata_json } = req.body;
+
   const updates = [];
   const params: any[] = [];
-  
+
   if (name !== undefined) { updates.push("name = ?"); params.push(name); }
   if (identifier !== undefined) { updates.push("identifier = ?"); params.push(identifier); }
   if (status !== undefined) { updates.push("status = ?"); params.push(status); }
   if (ai_enabled !== undefined) { updates.push("ai_enabled = ?"); params.push(ai_enabled ? 1 : 0); }
+  // Marca o canal como interno (Coordenador IA) ou de cliente.
+  if (kind !== undefined) { updates.push("kind = ?"); params.push(kind === 'internal' ? 'internal' : 'client'); }
   if (webhook_secret !== undefined) { updates.push("webhook_secret = ?"); params.push(webhook_secret); }
   if (token_encrypted !== undefined) { updates.push("token_encrypted = ?"); params.push(token_encrypted); }
   if (metadata_json !== undefined) { updates.push("metadata_json = ?"); params.push(JSON.stringify(metadata_json)); }

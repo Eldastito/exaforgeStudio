@@ -17,6 +17,7 @@ import authRoutes from "./src/server/routes/auth.js";
 import usersRoutes from "./src/server/routes/users.js";
 import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
+import studioRoutes from "./src/server/routes/studio.js";
 import managersRoutes from "./src/server/routes/managers.js";
 import areasRoutes from "./src/server/routes/areas.js";
 import aiRoutes from "./src/server/routes/ai.js";
@@ -350,6 +351,7 @@ async function startServer() {
   protectedApi.use("/integrations", integrationsRoutes);
   protectedApi.use("/integrations", instagramOAuthRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
+  protectedApi.use("/studio", studioRoutes);
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
   protectedApi.use("/notifications", notificationsRoutes);

@@ -62,7 +62,7 @@ export type Ticket = {
   handoffSummary?: string;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio';
 
 export type EvolutionConfig = {
   baseUrl: string;

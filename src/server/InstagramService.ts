@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { chat, describeImage } from "./llm.js";
 import { StudioService, type BrandProfile } from "./StudioService.js";
+import { ModuleService } from "./ModuleService.js";
 
 const GRAPH = "https://graph.instagram.com/v21.0";
 const APP_URL = (process.env.APP_URL || "https://zapflowia.tesseractauto.com.br").replace(/\/$/, "");
@@ -167,5 +168,41 @@ ${topCaptions.map((c, i) => `(${i + 1}) ${c}`).join("\n") || "(sem legendas)"}`;
     }
     const pub = await this.igPost(`${ch.igId}/media_publish`, { creation_id: String(creation.id) }, ch.token);
     return { mediaId: String(pub.id) };
+  }
+
+  /**
+   * Passe do agendador: publica os posts agendados cuja hora chegou. Roda em
+   * lote, isolado por organização, e marca cada post como 'published' ou
+   * 'failed'. Pula orgs sem o módulo do Estúdio ou sem Instagram conectado.
+   */
+  static async publishScheduledPass(): Promise<void> {
+    let due: any[] = [];
+    try {
+      due = db.prepare(
+        `SELECT s.id, s.organization_id, s.creation_id, s.caption, c.media_url, c.kind
+         FROM scheduled_posts s
+         JOIN studio_creations c ON c.id = s.creation_id
+         WHERE s.status = 'scheduled'
+           AND s.scheduled_at <= datetime('now')
+           AND c.media_url IS NOT NULL
+         ORDER BY s.scheduled_at ASC
+         LIMIT 50`
+      ).all() as any[];
+    } catch { return; }
+
+    for (const p of due) {
+      const orgId = p.organization_id;
+      try {
+        // Respeita o gating do módulo e a conexão do Instagram.
+        if (!ModuleService.isEnabled(orgId, "estudio") || !this.isConnected(orgId)) continue;
+        const out = await this.publish(orgId, p.media_url, String(p.caption || ""), p.kind === "video");
+        db.prepare("UPDATE scheduled_posts SET status = 'published', ig_media_id = ?, published_at = CURRENT_TIMESTAMP WHERE id = ?").run(out.mediaId, p.id);
+        try { StudioService.markPosted(orgId, String(p.creation_id), out.mediaId); } catch { /* noop */ }
+        console.log(`[Scheduler] Post agendado publicado no Instagram (org ${orgId}, post ${p.id}).`);
+      } catch (e: any) {
+        db.prepare("UPDATE scheduled_posts SET status = 'failed', error = ? WHERE id = ?").run(String(e?.message || "Falha ao publicar").slice(0, 300), p.id);
+        console.error(`[Scheduler] Falha ao publicar post agendado ${p.id}:`, e?.message || e);
+      }
+    }
   }
 }

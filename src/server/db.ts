@@ -163,6 +163,23 @@ const initDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_studio_creations_org ON studio_creations (organization_id, created_at);
 
+    -- Estúdio: agendamento de posts no Instagram por objetivo de campanha.
+    CREATE TABLE IF NOT EXISTS scheduled_posts (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT,
+      creation_id TEXT,
+      objective TEXT,
+      caption TEXT,
+      scheduled_at DATETIME,
+      status TEXT DEFAULT 'scheduled',   -- scheduled | published | failed | canceled
+      ig_media_id TEXT,
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      published_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_scheduled_posts_due ON scheduled_posts (status, scheduled_at);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_posts_org ON scheduled_posts (organization_id, scheduled_at);
+
     CREATE TABLE IF NOT EXISTS authorized_managers (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,

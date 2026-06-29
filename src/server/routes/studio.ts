@@ -96,6 +96,32 @@ router.post("/instagram/analyze", async (req: AuthRequest, res): Promise<any> =>
   }
 });
 
+// POST /api/studio/instagram/caption { prompt } — sugere uma legenda com IA
+router.post("/instagram/caption", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const caption = await StudioService.suggestCaption(orgId, String(req.body?.prompt || "").trim());
+    res.json({ caption });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/studio/instagram/publish { creationId, caption } — publica no Instagram
+router.post("/instagram/publish", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { creationId, caption } = req.body || {};
+  const creation = creationId ? StudioService.getCreation(orgId, String(creationId)) : null;
+  if (!creation || !creation.media_url) return res.status(400).json({ error: "Criação não encontrada." });
+  try {
+    const out = await InstagramService.publish(orgId, creation.media_url, String(caption || ""), creation.kind === "video");
+    StudioService.markPosted(orgId, String(creationId), out.mediaId);
+    res.json({ success: true, ...out });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao publicar no Instagram." });
+  }
+});
+
 // GET /api/studio/limits — uso vs limite do plano (imagens/vídeos no mês)
 router.get("/limits", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

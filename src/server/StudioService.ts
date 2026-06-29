@@ -183,6 +183,24 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
     }
   }
 
+  static getCreation(orgId: string, id: string): { media_url: string; kind: string } | null {
+    const r = db.prepare("SELECT media_url, kind FROM studio_creations WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    return r ? { media_url: r.media_url, kind: r.kind } : null;
+  }
+
+  static markPosted(orgId: string, id: string, igMediaId: string): void {
+    try { db.prepare("UPDATE studio_creations SET ig_media_id = ?, ig_posted_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(igMediaId, id, orgId); } catch { /* noop */ }
+  }
+
+  /** Sugere uma legenda de Instagram com o tom da marca + CTA + hashtags. */
+  static async suggestCaption(orgId: string, prompt: string): Promise<string> {
+    const brand = this.getBrand(orgId);
+    const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const tone = brand?.tone ? `Tom da marca: ${brand.tone}.` : "";
+    const p = `Escreva uma legenda curta e envolvente para um post de Instagram da empresa "${biz?.business_name || "a empresa"}" sobre: ${prompt}. ${tone} Inclua 1 chamada para ação e de 3 a 5 hashtags relevantes. Responda SOMENTE com a legenda.`;
+    try { return (await chat(p, { temperature: 0.7 })).trim(); } catch { return ""; }
+  }
+
   static listCreations(orgId: string, limit = 30): any[] {
     return db.prepare(
       "SELECT id, kind, prompt, media_url, COALESCE(status,'done') AS status, created_at FROM studio_creations WHERE organization_id = ? AND (media_url IS NOT NULL OR COALESCE(status,'done') = 'processing') ORDER BY created_at DESC LIMIT ?"

@@ -44,6 +44,15 @@ export function StudioView() {
   const [format, setFormat] = useState<'post' | 'story' | 'banner'>('post');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [resultId, setResultId] = useState<string | null>(null);
+
+  // Publicar no Instagram
+  const [pubId, setPubId] = useState<string | null>(null);
+  const [pubPrompt, setPubPrompt] = useState('');
+  const [pubCaption, setPubCaption] = useState('');
+  const [pubBusy, setPubBusy] = useState(false);
+  const [pubCapBusy, setPubCapBusy] = useState(false);
+  const [postedIds, setPostedIds] = useState<Set<string>>(new Set());
 
   const [creations, setCreations] = useState<Creation[]>([]);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
@@ -118,6 +127,7 @@ export function StudioView() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Falha ao gerar.');
       setResult(data.mediaUrl);
+      setResultId(data.id || null);
       loadCreations();
       loadLimits();
       toast.success('Arte criada! 🎨');
@@ -150,6 +160,28 @@ export function StudioView() {
     } catch (e: any) { setVStatus('error'); toast.error(e.message); }
   };
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const openPublish = (id: string, prompt: string) => { setPubId(id); setPubPrompt(prompt || ''); setPubCaption(prompt || ''); };
+  const suggestCaption = async () => {
+    setPubCapBusy(true);
+    try {
+      const r = await apiFetch('/api/studio/instagram/caption', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: pubPrompt }) });
+      const d = await r.json();
+      if (d.caption) setPubCaption(d.caption);
+    } catch { } finally { setPubCapBusy(false); }
+  };
+  const doPublish = async () => {
+    if (!pubId) return;
+    setPubBusy(true);
+    try {
+      const r = await apiFetch('/api/studio/instagram/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creationId: pubId, caption: pubCaption }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao publicar.');
+      setPostedIds(p => new Set(p).add(pubId));
+      toast.success('Publicado no Instagram! 🚀');
+      setPubId(null);
+    } catch (e: any) { toast.error(e.message); } finally { setPubBusy(false); }
+  };
 
   const hasBrand = !!(brand && (brand.palette?.length || brand.style || brand.tone));
 
@@ -252,9 +284,16 @@ export function StudioView() {
           {result && (
             <div className="mt-4">
               <img src={result} alt="arte gerada" className="w-full max-w-sm rounded-lg border border-zinc-800" />
-              <a href={result} download className="mt-2 inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300">
-                <Download className="w-3.5 h-3.5" /> Baixar
-              </a>
+              <div className="mt-2 flex items-center gap-3">
+                <a href={result} download className="inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300">
+                  <Download className="w-3.5 h-3.5" /> Baixar
+                </a>
+                {ig.connected && resultId && (
+                  <button onClick={() => openPublish(resultId, briefing)} className="inline-flex items-center gap-1 text-xs text-pink-400 hover:text-pink-300">
+                    <Instagram className="w-3.5 h-3.5" /> Publicar no Instagram
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -304,14 +343,47 @@ export function StudioView() {
                 );
               }
               return (
-                <a key={c.id} href={c.media_url} target="_blank" rel="noreferrer" className="group block">
-                  {isVideo
-                    ? <video src={c.media_url} muted className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />
-                    : <img src={c.media_url} alt={c.prompt} className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />}
+                <div key={c.id} className="group block">
+                  <a href={c.media_url} target="_blank" rel="noreferrer">
+                    {isVideo
+                      ? <video src={c.media_url} muted className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />
+                      : <img src={c.media_url} alt={c.prompt} className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />}
+                  </a>
                   <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
-                </a>
+                  {ig.connected && (
+                    postedIds.has(c.id)
+                      ? <span className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-emerald-400"><Instagram className="w-3 h-3" /> publicado</span>
+                      : <button onClick={() => openPublish(c.id, c.prompt)} className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-pink-400 hover:text-pink-300"><Instagram className="w-3 h-3" /> Publicar no IG</button>
+                  )}
+                </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: publicar no Instagram */}
+      {pubId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6">
+            <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-3"><Instagram className="w-5 h-5 text-pink-400" /> Publicar no Instagram</h3>
+            <label className="text-xs text-zinc-400 mb-1 flex items-center justify-between">
+              <span>Legenda</span>
+              <button onClick={suggestCaption} disabled={pubCapBusy} className="text-[11px] text-fuchsia-400 hover:text-fuchsia-300 inline-flex items-center gap-1">
+                {pubCapBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} Gerar com IA
+              </button>
+            </label>
+            <textarea value={pubCaption} onChange={e => setPubCaption(e.target.value)}
+              className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 resize-none focus:border-pink-500 outline-none"
+              placeholder="Escreva a legenda do post (ou gere com IA)…" />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setPubId(null)} disabled={pubBusy}>Cancelar</Button>
+              <Button onClick={doPublish} disabled={pubBusy} className="bg-pink-600 hover:bg-pink-700 text-white">
+                {pubBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Instagram className="w-4 h-4 mr-2" />}
+                {pubBusy ? 'Publicando…' : 'Publicar'}
+              </Button>
+            </div>
+            <p className="mt-2 text-[10px] text-zinc-600">Requer a permissão de publicação aprovada pela Meta (App Review).</p>
           </div>
         </div>
       )}

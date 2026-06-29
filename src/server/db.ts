@@ -144,6 +144,25 @@ const initDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_ai_usage_org_date ON ai_usage_log (organization_id, created_at);
 
+    -- Estúdio de Criação: identidade visual da marca (1 por empresa) + criações.
+    CREATE TABLE IF NOT EXISTS brand_profiles (
+      organization_id TEXT PRIMARY KEY,
+      palette TEXT,
+      tone TEXT,
+      style TEXT,
+      summary TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS studio_creations (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT,
+      kind TEXT,
+      prompt TEXT,
+      media_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_studio_creations_org ON studio_creations (organization_id, created_at);
+
     CREATE TABLE IF NOT EXISTS authorized_managers (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,

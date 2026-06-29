@@ -95,6 +95,19 @@ export async function embed(texts: string[]): Promise<number[][]> {
   return res.data.map((d) => d.embedding as number[]);
 }
 
+/** Gera uma imagem (base64) a partir de um prompt — Estúdio de Criação. */
+export async function generateImageB64(
+  prompt: string,
+  size: "1024x1024" | "1024x1536" | "1536x1024" = "1024x1024"
+): Promise<string> {
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const res = await getClient().images.generate({ model, prompt, size, n: 1 });
+  const b64 = (res as any).data?.[0]?.b64_json || "";
+  // Imagens são cobradas por imagem (não por token); custo configurável por env.
+  recordUsage(model, "image", 0, 0, Number(process.env.OPENAI_IMAGE_COST_USD || 0.04));
+  return b64;
+}
+
 /** Transcreve um áudio (Buffer) para texto via Whisper. */
 export async function transcribeAudio(
   buffer: Buffer,

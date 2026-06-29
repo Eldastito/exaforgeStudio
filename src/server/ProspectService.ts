@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "node:crypto";
 import { chat } from "./llm.js";
+import { expectedSegments, norm as normCat } from "./prospectCategories.js";
 
 /**
  * Prospect AI — Inteligência de Prospecção B2B (Fase 0: fundação).
@@ -295,8 +296,17 @@ Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommend
     // Confiança do dado: completude do cadastro da empresa.
     const fields = [acc.domain, acc.website_url, acc.industry, acc.city, acc.cnpj].filter(Boolean).length;
     const dataConfidence = clamp(40 + fields * 12);
-    // Aderência: empresa "real" (com domínio) + setor/cidade preenchidos.
-    const accountFit = clamp(45 + (acc.domain ? 25 : 0) + (acc.industry ? 15 : 0) + (acc.city ? 15 : 0));
+    // Aderência: empresa "real" (com domínio) + setor/cidade preenchidos…
+    let accountFit = clamp(45 + (acc.domain ? 25 : 0) + (acc.industry ? 15 : 0) + (acc.city ? 15 : 0));
+    // …ajustada pelo ENCAIXE com o ICP: se o ICP define um segmento e o setor da
+    // conta não bate, derruba a aderência (e dá um leve reforço quando bate).
+    const expected = this.icpExpectedSegments(orgId, acc.campaign_id);
+    let icpMatch: boolean | null = null;
+    if (expected.size) {
+      const seg = normCat(acc.industry).replace(/\s+/g, "_");
+      icpMatch = !!seg && [...expected].some(e => seg === e || seg.includes(e) || e.includes(seg));
+      accountFit = clamp(icpMatch ? accountFit + 10 : accountFit * 0.5);
+    }
     // Contatabilidade: e-mail + telefone + nome.
     const hasEmail = contacts.some(c => (c.email || "").includes("@") && c.email_status !== "invalid" && c.email_status !== "suppressed");
     const hasPhone = contacts.some(c => c.phone);
@@ -310,10 +320,22 @@ Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommend
     // Prioridade (pesos do PRD).
     const priority = clamp(accountFit * 0.35 + painEvidence * 0.20 + reachability * 0.15 + dataConfidence * 0.15 + compliance * 0.15);
 
-    const explanation = { fields, hasEmail, hasPhone, hasName, signals: signals.length, approvedHyp: Number(approvedHyp?.n || 0), optedOut };
+    const explanation = { fields, hasEmail, hasPhone, hasName, signals: signals.length, approvedHyp: Number(approvedHyp?.n || 0), optedOut, icpMatch };
     db.prepare("INSERT INTO prospect_score_snapshots (id, organization_id, prospect_account_id, account_fit, pain_evidence, reachability, data_confidence, compliance, priority, explanation_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(randomUUID(), orgId, accountId, accountFit, painEvidence, reachability, dataConfidence, compliance, priority, JSON.stringify(explanation));
     return { account_fit: accountFit, pain_evidence: painEvidence, reachability, data_confidence: dataConfidence, compliance, priority, explanation };
+  }
+
+  /** Segmentos esperados pelo ICP da campanha (vazio = sem segmento definido). */
+  private static icpExpectedSegments(orgId: string, campaignId?: string): Set<string> {
+    if (!campaignId) return new Set();
+    const camp = db.prepare("SELECT icp_id FROM prospect_campaigns WHERE id = ? AND organization_id = ?").get(campaignId, orgId) as any;
+    if (!camp?.icp_id) return new Set();
+    const icp = db.prepare("SELECT name, vertical, criteria_json FROM prospect_icp_profiles WHERE id = ? AND organization_id = ?").get(camp.icp_id, orgId) as any;
+    if (!icp) return new Set();
+    let crit: any = {}; try { crit = JSON.parse(icp.criteria_json || "{}"); } catch { /* ignora */ }
+    const terms = [icp.vertical, icp.name, crit?.segmento, crit?.sinais].filter(Boolean).join(", ");
+    return expectedSegments(terms);
   }
 
   static updateAccountStatus(orgId: string, id: string, status: string): boolean {

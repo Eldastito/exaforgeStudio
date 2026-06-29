@@ -533,6 +533,8 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   };
 
   const sc = acc?.score;
+  let icpMatch: boolean | null = null;
+  try { if (sc?.explanation_json) icpMatch = JSON.parse(sc.explanation_json).icpMatch ?? null; } catch { /* ignore */ }
   const ScoreBar = ({ label, v }: { label: string; v: number }) => (
     <div><div className="flex justify-between text-[10px] text-zinc-500"><span>{label}</span><span className="text-zinc-300">{Math.round(v || 0)}</span></div>
       <div className="h-1.5 rounded-full bg-zinc-800 mt-0.5"><div className="h-1.5 rounded-full bg-cyan-500" style={{ width: `${Math.max(0, Math.min(100, v || 0))}%` }} /></div></div>
@@ -615,7 +617,7 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
             {/* Score */}
             <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1"><Gauge className="w-3.5 h-3.5 text-cyan-400" /> Score{sc ? <span className="ml-1 text-cyan-300">· Prioridade {Math.round(sc.priority)}</span> : ''}</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1 flex-wrap"><Gauge className="w-3.5 h-3.5 text-cyan-400" /> Score{sc ? <span className="ml-1 text-cyan-300">· Prioridade {Math.round(sc.priority)}</span> : ''}{icpMatch === false ? <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 normal-case">fora do perfil</span> : icpMatch === true ? <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 normal-case">no perfil</span> : null}</span>
                 <button onClick={recompute} disabled={scoreBusy} className="text-[11px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1">{scoreBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Gauge className="w-3 h-3" />} {sc ? 'Recalcular' : 'Calcular'}</button>
               </div>
               {sc ? (

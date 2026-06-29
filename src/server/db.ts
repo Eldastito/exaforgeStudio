@@ -1510,6 +1510,13 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar outreach do Prospect AI', e); }
 
+  // Prospect AI (Fase 1, item 4) — atribuição de receita originada pela
+  // prospecção. Valor REAL informado pelo SDR ao fechar a conta (não mexe na
+  // estimativa do RIC). 'won_*' = ganho; 'lost_reason' = motivo da perda.
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN won_value REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN won_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN lost_reason TEXT`); } catch(e){}
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -98,6 +98,17 @@ export class BusinessContextService {
       if (camps.length) blocks.push(`CAMPANHAS: ${camps.map(c => `${c.name} [${c.status}] ${c.sent_count}/${c.total_targets}`).join('; ')}.`);
     } catch (e) { /* noop */ }
 
+    // 8.1 Prospecção (Prospect AI) — receita REAL originada e pipeline aberto.
+    // Permite ao Diretor IA enxergar a contribuição da prospecção ativa (B2B)
+    // ao lado da receita inbound. Silencioso quando o módulo não é usado.
+    try {
+      const w = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(won_value),0) t FROM prospect_accounts WHERE organization_id = ? AND account_status = 'converted'`).get(orgId) as any;
+      const pipe = db.prepare(`SELECT COUNT(*) n FROM prospect_accounts WHERE organization_id = ? AND account_status IN ('discovered','researching','qualified','contacted')`).get(orgId) as any;
+      if (Number(w?.n || 0) > 0 || Number(pipe?.n || 0) > 0) {
+        blocks.push(`PROSPECÇÃO (B2B ativa): receita originada R$ ${Number(w?.t || 0).toFixed(2)} em ${Number(w?.n || 0)} conta(s) ganha(s); ${Number(pipe?.n || 0)} em pipeline.`);
+      }
+    } catch (e) { /* noop */ }
+
     // 9. Agenda próxima (próximos agendamentos/entregas).
     try {
       const appts = db.prepare(`SELECT count(*) c FROM appointments WHERE organization_id = ? AND status NOT IN ('cancelled','completed') AND scheduled_start >= datetime('now')`).get(orgId) as any;

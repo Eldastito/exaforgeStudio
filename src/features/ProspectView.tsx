@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge } from 'lucide-react';
+import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -55,6 +55,19 @@ const ACCOUNT_STATUS: Record<string, string> = {
   discovered: 'Descoberta', researching: 'Pesquisando', qualified: 'Qualificada',
   disqualified: 'Desqualificada', contacted: 'Contatada', converted: 'Convertida',
 };
+const OUT_CHANNELS: { id: string; label: string }[] = [
+  { id: 'email', label: 'E-mail' },
+  { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'call', label: 'Ligação (roteiro)' },
+  { id: 'linkedin_manual', label: 'LinkedIn (manual)' },
+];
+const OUT_STATUS: Record<string, { label: string; cls: string }> = {
+  draft: { label: 'Rascunho', cls: 'text-slate-300 bg-slate-500/10 border-slate-500/30' },
+  pending_approval: { label: 'Em aprovação', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  approved: { label: 'Aprovada', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  sent: { label: 'Enviada', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  rejected: { label: 'Descartada', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+};
 
 export function ProspectView() {
   const [icps, setIcps] = useState<Icp[]>([]);
@@ -65,17 +78,29 @@ export function ProspectView() {
   const [newCamp, setNewCamp] = useState(false);
   const [importing, setImporting] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [queue, setQueue] = useState<any[]>([]);
 
   const loadAccounts = useCallback(() => apiFetch('/api/prospect/accounts').then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])).catch(() => {}), []);
+  const loadQueue = useCallback(() => apiFetch('/api/prospect/approval-queue').then(r => r.json()).then(d => setQueue(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
       apiFetch('/api/prospect/icps').then(r => r.json()).then(d => setIcps(Array.isArray(d) ? d : [])).catch(() => {}),
       apiFetch('/api/prospect/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {}),
       loadAccounts(),
+      loadQueue(),
     ]).finally(() => setLoading(false));
-  }, [loadAccounts]);
+  }, [loadAccounts, loadQueue]);
   useEffect(() => { load(); }, [load]);
+
+  const queueAction = async (oid: string, status: string) => {
+    try {
+      const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha');
+      toast.success(status === 'approved' ? 'Abordagem aprovada. ✅' : status === 'sent' ? 'Marcada como enviada. 📨' : 'Voltou para rascunho.');
+      loadQueue(); loadAccounts();
+    } catch (e: any) { toast.error(e.message); }
+  };
 
   const archiveIcp = async (id: string) => {
     try { const r = await apiFetch(`/api/prospect/icps/${id}`, { method: 'DELETE' }); if (!r.ok) throw new Error(); toast.success('ICP arquivado.'); load(); }
@@ -90,7 +115,7 @@ export function ProspectView() {
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Encontre contas com aderência, organize evidências e prospecte com método — sem spam.</p>
         <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-1.5 text-xs text-cyan-200">
-          <Crosshair className="w-3.5 h-3.5" /> Fase 0 — defina o <b>ICP</b> (perfil de cliente ideal) e crie campanhas em <b>rascunho</b>. Descoberta, evidências e abordagem chegam nas próximas etapas.
+          <Crosshair className="w-3.5 h-3.5" /> Defina o <b>ICP</b>, importe contas, registre <b>evidências</b>, gere hipóteses e <b>abordagens</b> com IA — tudo revisado por um humano antes de sair. Sem scraping, sem spam.
         </div>
       </div>
 
@@ -179,10 +204,44 @@ export function ProspectView() {
         )}
       </div>
 
+      {/* Fila de aprovação */}
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Inbox className="w-4 h-4 text-cyan-400" /> Fila de aprovação ({queue.length})</h3>
+          <span className="text-[11px] text-zinc-600">Toda abordagem é revisada por um humano antes de sair.</span>
+        </div>
+        {loading ? <Spinner /> : queue.length === 0 ? (
+          <Empty text="Nenhuma abordagem aguardando aprovação. Gere um rascunho dentro de uma conta e envie para aprovação." />
+        ) : (
+          <div className="space-y-2">
+            {queue.map(o => (
+              <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-300">{OUT_CHANNELS.find(c => c.id === o.channel)?.label || o.channel}</span>
+                      <button onClick={() => setDetailId(o.prospect_account_id)} className="text-sm font-medium text-zinc-100 hover:text-cyan-300 truncate">{o.account_name}</button>
+                      {o.contact_name && <span className="text-[11px] text-zinc-500">→ {o.contact_name}</span>}
+                    </div>
+                    {o.subject && <p className="text-xs text-zinc-300 mt-1 truncate"><span className="text-zinc-500">Assunto:</span> {o.subject}</p>}
+                    <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2 whitespace-pre-wrap">{o.body}</p>
+                  </div>
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <button onClick={() => queueAction(o.id, 'approved')} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center gap-1"><Check className="w-3 h-3" /> Aprovar</button>
+                    <button onClick={() => queueAction(o.id, 'draft')} className="text-[11px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300">Editar</button>
+                    <button onClick={() => queueAction(o.id, 'rejected')} className="text-[11px] px-2 py-1 rounded-lg text-zinc-500 hover:text-red-400">Descartar</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {newIcp && <IcpModal onClose={() => setNewIcp(false)} onSaved={() => { setNewIcp(false); load(); }} />}
       {newCamp && <CampaignModal icps={icps} onClose={() => setNewCamp(false)} onSaved={() => { setNewCamp(false); load(); }} />}
       {importing && <ImportModal campaigns={campaigns} onClose={() => setImporting(false)} onDone={() => { setImporting(false); loadAccounts(); }} />}
-      {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={loadAccounts} />}
+      {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={() => { loadAccounts(); loadQueue(); }} />}
     </div>
   );
 }
@@ -317,6 +376,9 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [sigRef, setSigRef] = useState('');
   const [genBusy, setGenBusy] = useState(false);
   const [scoreBusy, setScoreBusy] = useState(false);
+  const [outChannel, setOutChannel] = useState('email');
+  const [outContact, setOutContact] = useState('');
+  const [outBusy, setOutBusy] = useState(false);
 
   const refresh = () => apiFetch(`/api/prospect/accounts/${id}`).then(r => r.json()).then(d => { if (d && d.id) setAcc(d); }).catch(() => {});
   useEffect(() => { refresh(); }, [id]);
@@ -354,6 +416,22 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
     setScoreBusy(true);
     try { const r = await apiFetch(`/api/prospect/accounts/${id}/score`, { method: 'POST' }); if (!r.ok) throw new Error(); await refresh(); toast.success('Score recalculado.'); }
     catch { toast.error('Falha ao calcular o score.'); } finally { setScoreBusy(false); }
+  };
+  const compose = async () => {
+    setOutBusy(true);
+    try {
+      const r = await apiFetch(`/api/prospect/accounts/${id}/outreach`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: outChannel, contactId: outContact || null }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d);
+      toast.success('Rascunho gerado. Revise e envie para aprovação. ✍️');
+    } catch (e: any) { toast.error(e.message); } finally { setOutBusy(false); }
+  };
+  const saveOutreach = async (oid: string, patch: { subject?: string; body?: string }) => {
+    try { const r = await apiFetch(`/api/prospect/outreach/${oid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d); toast.success('Abordagem salva.'); }
+    catch (e: any) { toast.error(e.message); }
+  };
+  const outStatus = async (oid: string, status: string) => {
+    try { const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d); }
+    catch (e: any) { toast.error(e.message); }
   };
 
   const sc = acc?.score;
@@ -450,7 +528,7 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
 
             {/* Contatos */}
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Contatos ({acc.contacts?.length || 0})</p>
-            <div className="space-y-2">
+            <div className="space-y-2 mb-4">
               {(acc.contacts || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhum contato.</p>}
               {(acc.contacts || []).map((c: any) => (
                 <div key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
@@ -460,10 +538,84 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                 </div>
               ))}
             </div>
-            <p className="mt-4 text-[10px] text-zinc-600">Próxima etapa: composer de abordagem (e-mail) + fila de aprovação.</p>
+
+            {/* Abordagem (composer IA + aprovação) */}
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1"><PenLine className="w-3.5 h-3.5 text-cyan-400" /> Abordagem ({(acc.outreach || []).length})</p>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <select value={outChannel} onChange={e => setOutChannel(e.target.value)} className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 outline-none">
+                  {OUT_CHANNELS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+                <select value={outContact} onChange={e => setOutContact(e.target.value)} className="flex-1 min-w-[120px] bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 outline-none">
+                  <option value="">Sem contato específico</option>
+                  {(acc.contacts || []).map((c: any) => <option key={c.id} value={c.id}>{c.full_name || c.email || '(contato)'}</option>)}
+                </select>
+                <button onClick={compose} disabled={outBusy} className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs inline-flex items-center gap-1 disabled:opacity-60">
+                  {outBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} Gerar rascunho
+                </button>
+              </div>
+              <p className="text-[10px] text-zinc-600 mt-1.5">A IA escreve a partir das evidências e hipóteses aprovadas — sem inventar dados. Nada é enviado sem aprovação humana.</p>
+            </div>
+            <div className="space-y-2">
+              {(acc.outreach || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhuma abordagem ainda. Gere um rascunho acima.</p>}
+              {(acc.outreach || []).map((o: any) => (
+                <OutreachCard key={o.id} o={o} onSave={saveOutreach} onStatus={outStatus} />
+              ))}
+            </div>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function OutreachCard({ o, onSave, onStatus }: { o: any; onSave: (oid: string, patch: { subject?: string; body?: string }) => void; onStatus: (oid: string, status: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [subject, setSubject] = useState(o.subject || '');
+  const [body, setBody] = useState(o.body || '');
+  const b = OUT_STATUS[o.status] || OUT_STATUS.draft;
+  const dirty = subject !== (o.subject || '') || body !== (o.body || '');
+  const editable = o.status === 'draft';
+  const isEmail = o.channel === 'email';
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={`text-[9px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.label}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400">{OUT_CHANNELS.find(c => c.id === o.channel)?.label || o.channel}</span>
+        </div>
+        {editable && !editing && <button onClick={() => setEditing(true)} className="text-[11px] text-zinc-400 hover:text-cyan-300 inline-flex items-center gap-1"><PenLine className="w-3 h-3" /> editar</button>}
+      </div>
+
+      {editing ? (
+        <div className="space-y-1.5">
+          {isEmail && <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Assunto" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 outline-none focus:border-cyan-500" />}
+          <textarea value={body} onChange={e => setBody(e.target.value)} className="w-full h-32 bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-100 resize-none outline-none focus:border-cyan-500" />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => { setSubject(o.subject || ''); setBody(o.body || ''); setEditing(false); }} className="text-[11px] text-zinc-500 hover:text-zinc-300">cancelar</button>
+            <button onClick={() => { onSave(o.id, { subject, body }); setEditing(false); }} disabled={!dirty} className="text-[11px] px-2 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50">Salvar</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {o.subject && <p className="text-xs text-zinc-200 mb-1"><span className="text-zinc-500">Assunto:</span> {o.subject}</p>}
+          <p className="text-xs text-zinc-300 whitespace-pre-wrap">{o.body}</p>
+        </>
+      )}
+
+      {!editing && (
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          {o.status === 'draft' && <button onClick={() => onStatus(o.id, 'pending_approval')} className="text-[11px] px-2 py-1 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white inline-flex items-center gap-1"><Send className="w-3 h-3" /> Enviar p/ aprovação</button>}
+          {o.status === 'pending_approval' && <>
+            <button onClick={() => onStatus(o.id, 'approved')} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center gap-1"><Check className="w-3 h-3" /> Aprovar</button>
+            <button onClick={() => onStatus(o.id, 'draft')} className="text-[11px] text-zinc-500 hover:text-zinc-300">voltar p/ rascunho</button>
+          </>}
+          {o.status === 'approved' && <button onClick={() => onStatus(o.id, 'sent')} className="text-[11px] px-2 py-1 rounded-lg bg-sky-600/90 hover:bg-sky-600 text-white inline-flex items-center gap-1"><Send className="w-3 h-3" /> Marcar como enviada</button>}
+          {o.status === 'sent' && o.sent_at && <span className="text-[10px] text-zinc-500">enviada</span>}
+          {o.status !== 'sent' && <button onClick={() => onStatus(o.id, 'rejected')} className="text-[11px] text-zinc-500 hover:text-red-400 ml-auto">descartar</button>}
+        </div>
+      )}
     </div>
   );
 }

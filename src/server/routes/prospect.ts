@@ -126,4 +126,33 @@ router.post("/accounts/:id/score", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Composer de abordagem (IA) + fila de aprovação ───────────────────────
+// Gera um rascunho (e-mail/WhatsApp/ligação) a partir de evidências + hipóteses.
+router.post("/accounts/:id/outreach", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectService.composeOutreach(orgId, req.params.id, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.patch("/outreach/:oid", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.updateOutreach(orgId, req.params.oid, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/outreach/:oid/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.setOutreachStatus(orgId, req.params.oid, String(req.body?.status || ""), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/approval-queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectService.listApprovalQueue(orgId));
+});
+
 export default router;

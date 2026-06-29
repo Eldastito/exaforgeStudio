@@ -23,13 +23,26 @@ export function ChannelsPanel() {
   const [forwardWhats, setForwardWhats] = useState('');
   const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
   const [docAreaId, setDocAreaId] = useState('');
+  const [rawChannels, setRawChannels] = useState<any[]>([]);
 
+  const loadRaw = () => apiFetch('/api/channels').then(r => r.json()).then(d => setRawChannels(Array.isArray(d) ? d : [])).catch(() => {});
   useEffect(() => {
     fetchChannels();
     loadRagDocuments();
+    loadRaw();
     apiFetch('/api/channels/forward-whatsapp').then(r => r.json()).then(d => setForwardWhats(d.forward_whatsapp || '')).catch(() => {});
     apiFetch('/api/areas').then(r => r.json()).then(d => setAreas(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
+
+  // Marca/desmarca um canal como INTERNO (número da equipe / Coordenador IA).
+  const setChannelKind = async (id: string, internal: boolean) => {
+    try {
+      await apiFetch(`/api/channels/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: internal ? 'internal' : 'client' }) });
+      toast.success(internal ? 'Número definido como interno (Coordenador IA).' : 'Número voltou a ser de atendimento ao cliente.');
+      loadRaw();
+    } catch { toast.error('Não foi possível atualizar o canal.'); }
+  };
+  const waChannels = rawChannels.filter(c => ['evolution', 'whatsapp_cloud', 'whatsapp_web'].includes(c.provider) && c.status !== 'disabled');
 
   const saveForward = async () => {
     await apiFetch('/api/channels/forward-whatsapp', {
@@ -451,6 +464,37 @@ export function ChannelsPanel() {
               <Button onClick={saveForward} className="bg-emerald-600 hover:bg-emerald-700 text-white">Salvar</Button>
             </div>
           </div>
+        </div>
+
+        {/* Coordenador IA — número interno da equipe */}
+        <div className="rounded-xl border border-indigo-900/40 bg-slate-900/50 p-6">
+          <div className="flex items-start gap-3 mb-1">
+            <BrainCircuit className="w-5 h-5 text-indigo-400 mt-0.5" />
+            <div>
+              <h3 className="text-lg font-semibold text-slate-100">Coordenador IA (número da equipe)</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Escolha um número de WhatsApp para ser a voz <strong>interna</strong>: os colaboradores conversam com o Coordenador IA para ver e concluir tarefas. Esse número <strong>não</strong> atende clientes.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            {waChannels.length === 0 && (
+              <p className="text-sm text-slate-500">Conecte um número de WhatsApp acima para poder designá-lo ao Coordenador IA.</p>
+            )}
+            {waChannels.map(c => (
+              <div key={c.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/50 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-200 truncate">{c.name || c.identifier}</p>
+                  <p className="text-xs text-slate-500 truncate">{c.identifier} · {c.kind === 'internal' ? 'Interno (equipe)' : 'Atendimento ao cliente'}</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input type="checkbox" className="sr-only peer" checked={c.kind === 'internal'} onChange={e => setChannelKind(c.id, e.target.checked)} />
+                  <div className="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                </label>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-slate-500">Para o Coordenador reconhecer cada colaborador, cadastre o WhatsApp dele em <strong>Configurações → Usuários</strong>.</p>
         </div>
 
         {/* Secao base de conhecimento RAG */}

@@ -103,6 +103,24 @@ router.put("/:id/status", (req: Request, res: Response): any => {
   }
 });
 
+// PUT /api/users/:id/phone — telefone do colaborador (para o Coordenador IA
+// reconhecê-lo no WhatsApp interno). Permitido ao próprio usuário ou a owner/admin.
+router.put("/:id/phone", (req: Request, res: Response): any => {
+  const orgId = getOrgId(req);
+  const { id } = req.params;
+  const actor = (req as any).user;
+  if (actor.userId !== id && actor.role !== 'owner' && actor.role !== 'admin') {
+    return res.status(403).json({ error: "Insufficient permissions" });
+  }
+  try {
+    const phone = String(req.body?.phone || '').replace(/\D/g, '') || null;
+    db.prepare('UPDATE users SET phone = ? WHERE id = ? AND organization_id = ?').run(phone, id, orgId);
+    res.json({ success: true, phone: phone || '' });
+  } catch (e) {
+    res.status(500).json({ error: "Internal error" });
+  }
+});
+
 // PUT /api/users/:id/role
 router.put("/:id/role", (req: Request, res: Response): any => {
   const orgId = getOrgId(req);

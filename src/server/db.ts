@@ -1316,6 +1316,10 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tasks', e); }
 
+  // Coordenador IA (Fase 2) — marca um canal como INTERNO (número da equipe).
+  // 'client' (padrão) = atendimento ao cliente; 'internal' = voz interna.
+  try { db.exec(`ALTER TABLE channels ADD COLUMN kind TEXT DEFAULT 'client'`); } catch(e){}
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

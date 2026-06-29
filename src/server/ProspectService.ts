@@ -212,6 +212,7 @@ export class ProspectService {
     a.signals = db.prepare("SELECT * FROM prospect_signals WHERE prospect_account_id = ? AND organization_id = ? ORDER BY created_at DESC").all(id, orgId) as any[];
     a.hypotheses = db.prepare("SELECT * FROM prospect_hypotheses WHERE prospect_account_id = ? AND organization_id = ? AND status != 'rejected' ORDER BY created_at DESC").all(id, orgId) as any[];
     a.score = db.prepare("SELECT * FROM prospect_score_snapshots WHERE prospect_account_id = ? AND organization_id = ? ORDER BY calculated_at DESC LIMIT 1").get(id, orgId) as any || null;
+    a.outreach = db.prepare("SELECT * FROM prospect_outreach WHERE prospect_account_id = ? AND organization_id = ? AND status != 'rejected' ORDER BY created_at DESC").all(id, orgId) as any[];
     return a;
   }
 
@@ -319,5 +320,100 @@ Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommend
     if (!["discovered", "researching", "qualified", "disqualified", "contacted", "converted"].includes(status)) throw new Error("Status inválido.");
     const r = db.prepare("UPDATE prospect_accounts SET account_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(status, id, orgId);
     return r.changes > 0;
+  }
+
+  // ── Composer de abordagem (IA) + fila de aprovação ──────────────────────
+  /**
+   * Gera um RASCUNHO de abordagem (e-mail/WhatsApp/ligação) a partir das
+   * EVIDÊNCIAS e HIPÓTESES APROVADAS + oferta/CTA do ICP. Guardrails do PRD:
+   * pergunta (não acusação), 1 CTA, sem inventar dado, opt-out no e-mail.
+   * Nasce em 'draft'.
+   */
+  static async composeOutreach(orgId: string, accountId: string, input: { contactId?: string; channel?: string }): Promise<any> {
+    const acc = db.prepare("SELECT * FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId) as any;
+    if (!acc) throw new Error("Conta não encontrada.");
+    const channel = ["email", "whatsapp", "call", "linkedin_manual"].includes(String(input?.channel)) ? input!.channel! : "email";
+    const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const signals = db.prepare("SELECT observation FROM prospect_signals WHERE prospect_account_id = ? AND organization_id = ?").all(accountId, orgId) as any[];
+    const hyps = db.prepare("SELECT hypothesis, recommended_question FROM prospect_hypotheses WHERE prospect_account_id = ? AND organization_id = ? AND status = 'approved'").all(accountId, orgId) as any[];
+    let contact: any = null;
+    if (input?.contactId) contact = db.prepare("SELECT full_name, role_title, email FROM prospect_contacts WHERE id = ? AND prospect_account_id = ? AND organization_id = ?").get(input.contactId, accountId, orgId);
+    let icp: any = null;
+    if (acc.campaign_id) {
+      const camp = db.prepare("SELECT icp_id FROM prospect_campaigns WHERE id = ? AND organization_id = ?").get(acc.campaign_id, orgId) as any;
+      if (camp?.icp_id) icp = this.getIcp(orgId, camp.icp_id);
+    }
+    const fmt = channel === "email" ? "um E-MAIL curto (assunto + corpo)" : channel === "call" ? "um ROTEIRO de ligação curto" : channel === "whatsapp" ? "uma mensagem de WhatsApp curta" : "uma nota curta de LinkedIn (uso manual)";
+    const prompt = `Você redige uma abordagem comercial B2B (${fmt}) para a empresa "${acc.display_name}"${contact?.full_name ? `, falando com ${contact.full_name}${contact.role_title ? ` (${contact.role_title})` : ""}` : ""}, em nome de "${biz?.business_name || "nossa empresa"}".
+REGRAS (obrigatórias):
+- Contexto observável e NÃO invasivo. Hipótese como PERGUNTA, nunca acusação.
+- NÃO invente dados, números, reclamações, cases ou prova social.
+- 1 chamada para ação pequena e clara.
+${channel === "email" ? "- No fim do e-mail, inclua uma linha curta de descadastro (opt-out)." : ""}
+- Tom respeitoso e direto, em português do Brasil.
+
+EVIDÊNCIAS OBSERVADAS:
+${signals.map((s, i) => `(${i + 1}) ${s.observation}`).join("\n") || "(sem evidências registradas)"}
+HIPÓTESES APROVADAS / PERGUNTAS DE DESCOBERTA:
+${hyps.map(h => `- ${h.hypothesis}${h.recommended_question ? ` → ${h.recommended_question}` : ""}`).join("\n") || "(nenhuma)"}
+${icp ? `OFERTA: ${icp.criteria?.oferta || "n/d"}. CTA desejado: ${icp.criteria?.cta || "conversa de 15 min"}.` : ""}
+
+Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto para revisão"}`;
+    let subject = "", body = "";
+    try {
+      const j = JSON.parse(await chat(prompt, { temperature: 0.6, json: true }));
+      subject = String(j?.subject || "").trim();
+      body = String(j?.body || "").trim();
+    } catch { /* mantém vazio */ }
+    if (!body) throw new Error("A IA não retornou a abordagem. Tente novamente.");
+    const evidenceSnapshot = { signals: signals.map(s => s.observation), hypotheses: hyps.map(h => h.hypothesis) };
+    const id = randomUUID();
+    db.prepare("INSERT INTO prospect_outreach (id, organization_id, campaign_id, prospect_account_id, contact_id, channel, subject, body, evidence_snapshot, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')")
+      .run(id, orgId, acc.campaign_id || null, accountId, input?.contactId || null, channel, subject, body, JSON.stringify(evidenceSnapshot));
+    return this.getAccount(orgId, accountId);
+  }
+
+  static updateOutreach(orgId: string, id: string, patch: { subject?: string; body?: string }): any {
+    const o = db.prepare("SELECT prospect_account_id, status FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    if (!o) throw new Error("Abordagem não encontrada.");
+    if (o.status === "sent") throw new Error("Abordagem já enviada não pode ser editada.");
+    const fields: string[] = [], params: any[] = [];
+    if (patch.subject !== undefined) { fields.push("subject = ?"); params.push(String(patch.subject)); }
+    if (patch.body !== undefined) { fields.push("body = ?"); params.push(String(patch.body)); }
+    if (fields.length) { params.push(id, orgId); db.prepare(`UPDATE prospect_outreach SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...params); }
+    return this.getAccount(orgId, o.prospect_account_id);
+  }
+
+  /** Transições: draft→pending_approval; pending→approved/rejected/draft; approved→sent/rejected. */
+  static setOutreachStatus(orgId: string, id: string, status: string, actorId?: string): any {
+    const o = db.prepare("SELECT prospect_account_id, status FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    if (!o) throw new Error("Abordagem não encontrada.");
+    const allowed: Record<string, string[]> = {
+      draft: ["pending_approval", "rejected"],
+      pending_approval: ["approved", "rejected", "draft"],
+      approved: ["sent", "rejected"],
+      rejected: ["draft"],
+      sent: [],
+    };
+    if (!(allowed[o.status] || []).includes(status)) throw new Error(`Transição inválida (${o.status} → ${status}).`);
+    const sets = ["status = ?", "updated_at = CURRENT_TIMESTAMP"];
+    const params: any[] = [status];
+    if (status === "approved") { sets.push("approved_by = ?"); params.push(actorId || null); }
+    if (status === "sent") { sets.push("sent_at = CURRENT_TIMESTAMP"); }
+    params.push(id, orgId);
+    db.prepare(`UPDATE prospect_outreach SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...params);
+    return this.getAccount(orgId, o.prospect_account_id);
+  }
+
+  /** Fila de aprovação: abordagens pendentes (com nome da conta/contato). */
+  static listApprovalQueue(orgId: string): any[] {
+    return db.prepare(`
+      SELECT o.*, a.display_name AS account_name, c.full_name AS contact_name, c.email AS contact_email
+      FROM prospect_outreach o
+      JOIN prospect_accounts a ON a.id = o.prospect_account_id
+      LEFT JOIN prospect_contacts c ON c.id = o.contact_id
+      WHERE o.organization_id = ? AND o.status = 'pending_approval'
+      ORDER BY o.created_at ASC LIMIT 200
+    `).all(orgId) as any[];
   }
 }

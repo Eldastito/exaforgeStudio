@@ -1485,6 +1485,31 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar evidências/hipóteses/score do Prospect AI', e); }
 
+  // Prospect AI (Fase 1, item 3) — abordagens (outreach) + fila de aprovação.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_outreach (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        campaign_id TEXT,
+        prospect_account_id TEXT,
+        contact_id TEXT,
+        channel TEXT DEFAULT 'email',   -- email | whatsapp | call | linkedin_manual
+        subject TEXT,
+        body TEXT,
+        evidence_snapshot TEXT,         -- JSON: evidências/hipóteses usadas
+        status TEXT DEFAULT 'draft',    -- draft | pending_approval | approved | rejected | sent
+        created_by TEXT,
+        approved_by TEXT,
+        sent_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_outreach_org ON prospect_outreach (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_prospect_outreach_acc ON prospect_outreach (organization_id, prospect_account_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar outreach do Prospect AI', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

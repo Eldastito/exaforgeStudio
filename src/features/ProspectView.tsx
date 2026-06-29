@@ -103,6 +103,12 @@ export function ProspectView() {
   }, [loadAccounts, loadQueue, loadAttr, loadRuns, loadCampaigns]);
   useEffect(() => { load(); }, [load]);
 
+  const openDiscovery = () => {
+    if (!icps.length) { toast.error('Crie um ICP primeiro (descreve quem você quer prospectar).'); setNewIcp(true); return; }
+    if (!campaigns.length) { toast.error('Crie uma campanha primeiro — é nela que você define a região da busca.'); setNewCamp(true); return; }
+    setDiscoveryCamp(campaigns[0]);
+  };
+
   const queueAction = async (oid: string, status: string) => {
     try {
       const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
@@ -212,12 +218,23 @@ export function ProspectView() {
 
       {/* Contas */}
       <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
           <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Building2 className="w-4 h-4 text-cyan-400" /> Contas ({accounts.length})</h3>
-          <Button onClick={() => setImporting(true)} className="bg-cyan-600 hover:bg-cyan-700 text-white h-8 px-2.5 text-xs"><Upload className="w-3.5 h-3.5 mr-1" /> Importar CSV</Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={openDiscovery} className="bg-violet-600 hover:bg-violet-700 text-white h-8 px-2.5 text-xs"><Radar className="w-3.5 h-3.5 mr-1" /> Descobrir com IA</Button>
+            <Button onClick={() => setImporting(true)} variant="ghost" className="text-zinc-300 h-8 px-2.5 text-xs"><Upload className="w-3.5 h-3.5 mr-1" /> Importar CSV</Button>
+          </div>
         </div>
         {loading ? <Spinner /> : accounts.length === 0 ? (
-          <Empty text="Nenhuma conta ainda. Importe uma planilha (CSV) com suas empresas/contatos — a origem fica registrada e os duplicados são mesclados." />
+          <div className="py-8 text-center">
+            <Radar className="w-8 h-8 text-violet-400/70 mx-auto mb-2" />
+            <p className="text-sm text-zinc-300 font-medium">Deixe a IA encontrar empresas pra você</p>
+            <p className="text-[12px] text-zinc-600 mt-1 max-w-md mx-auto">Informe um endereço/CEP + raio e a IA busca empresas da região (fontes públicas, sem custo) — ou importe uma planilha CSV. Tudo para na sua revisão.</p>
+            <div className="flex items-center justify-center gap-2 mt-3">
+              <Button onClick={openDiscovery} className="bg-violet-600 hover:bg-violet-700 text-white h-8 px-3 text-xs"><Radar className="w-3.5 h-3.5 mr-1" /> Descobrir com IA</Button>
+              <Button onClick={() => setImporting(true)} variant="ghost" className="text-zinc-400 h-8 px-3 text-xs"><Upload className="w-3.5 h-3.5 mr-1" /> Importar CSV</Button>
+            </div>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
@@ -916,8 +933,9 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
         <label className="text-[11px] text-zinc-400 mb-0.5 block">Raio de busca: <b className="text-zinc-200">{radius} km</b></label>
         <input type="range" min="0.5" max="10" step="0.5" value={radius} onChange={e => setRadius(e.target.value)} className="w-full accent-violet-500 mb-3" />
 
-        <label className="text-[11px] text-zinc-400 mb-0.5 block">Categorias (opcional, avançado)</label>
-        <input value={categories} onChange={e => setCategories(e.target.value)} placeholder="Ex.: shop, office, amenity=restaurant (vazio = lojas/escritórios/serviços)" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-violet-500 mb-4" />
+        <label className="text-[11px] text-zinc-400 mb-0.5 block">Tipo de negócio (opcional)</label>
+        <input value={categories} onChange={e => setCategories(e.target.value)} placeholder="Ex.: clínicas, restaurantes, petshop, academia, escritórios" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-violet-500 mb-1" />
+        <p className="text-[10px] text-zinc-600 mb-4">Escreva em português normal (separe por vírgula). <b>Deixe vazio</b> para buscar todos os tipos de comércio/serviço da região.</p>
 
         <div className="flex justify-between gap-2 mb-4">
           <Button variant="ghost" onClick={runNow} disabled={running || busy} className="text-violet-300 hover:text-violet-200">

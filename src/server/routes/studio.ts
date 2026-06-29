@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
-import { StudioService } from "../StudioService.js";
+import { StudioService, CAMPAIGN_OBJECTIVES } from "../StudioService.js";
 import { InstagramService } from "../InstagramService.js";
 
 const router = Router();
@@ -96,14 +96,49 @@ router.post("/instagram/analyze", async (req: AuthRequest, res): Promise<any> =>
   }
 });
 
-// POST /api/studio/instagram/caption { prompt } — sugere uma legenda com IA
+// GET /api/studio/objectives — objetivos de campanha disponíveis
+router.get("/objectives", (_req: AuthRequest, res): any => {
+  res.json(CAMPAIGN_OBJECTIVES.map(o => ({ id: o.id, label: o.label })));
+});
+
+// POST /api/studio/instagram/caption { prompt, objective } — sugere uma legenda com IA
 router.post("/instagram/caption", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const caption = await StudioService.suggestCaption(orgId, String(req.body?.prompt || "").trim());
+    const caption = await StudioService.suggestCaption(orgId, String(req.body?.prompt || "").trim(), req.body?.objective);
     res.json({ caption });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/studio/schedule { creationId, objective, caption, scheduledAt } — agenda a publicação
+router.post("/schedule", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { creationId, objective, caption, scheduledAt } = req.body || {};
+  if (!creationId || !scheduledAt) return res.status(400).json({ error: "Informe a criação e a data/hora." });
+  try {
+    const out = StudioService.schedulePost(orgId, { creationId: String(creationId), objective, caption, scheduledAt: String(scheduledAt) });
+    res.json({ success: true, ...out });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "Falha ao agendar." });
+  }
+});
+
+// GET /api/studio/scheduled — posts agendados/recentes
+router.get("/scheduled", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(StudioService.listScheduled(orgId));
+});
+
+// DELETE /api/studio/scheduled/:id — cancela um agendamento ainda não publicado
+router.delete("/scheduled/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = StudioService.cancelScheduled(orgId, String(req.params.id));
+  if (!ok) return res.status(400).json({ error: "Agendamento não encontrado ou já publicado." });
+  res.json({ success: true });
 });
 
 // POST /api/studio/instagram/publish { creationId, caption } — publica no Instagram

@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram } from 'lucide-react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 type Brand = { palette: string[]; tone: string; style: string; summary: string };
 type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
+type Objective = { id: string; label: string };
+type Scheduled = { id: string; creation_id: string; objective: string; caption: string; scheduled_at: string; status: string; error?: string; media_url?: string; kind?: string };
 
 // Reduz a imagem no navegador (máx. 768px, JPEG) para enviar payload pequeno.
 const fileToB64 = (file: File): Promise<{ base64: string; mime: string }> => new Promise((resolve, reject) => {
@@ -35,6 +37,19 @@ const FORMATS: { id: 'post' | 'story' | 'banner'; label: string; hint: string }[
   { id: 'banner', label: 'Banner (16:9)', hint: 'Horizontal' },
 ];
 
+// Valor mínimo (agora + 5 min) para o input datetime-local, no fuso do navegador.
+const minLocalDateTime = () => {
+  const d = new Date(Date.now() + 5 * 60000);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+const fmtWhen = (iso: string) => { try { return new Date(iso.includes('Z') || iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z').toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); } catch { return iso; } };
+const SCHED_BADGE: Record<string, { label: string; cls: string }> = {
+  scheduled: { label: 'Agendado', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  published: { label: 'Publicado', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  failed: { label: 'Falhou', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  canceled: { label: 'Cancelado', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+};
+
 export function StudioView() {
   const [brand, setBrand] = useState<Brand | null>(null);
   const [refs, setRefs] = useState<{ url: string; base64: string; mime: string }[]>([]);
@@ -46,13 +61,18 @@ export function StudioView() {
   const [result, setResult] = useState<string | null>(null);
   const [resultId, setResultId] = useState<string | null>(null);
 
-  // Publicar no Instagram
+  // Publicar / agendar no Instagram
   const [pubId, setPubId] = useState<string | null>(null);
   const [pubPrompt, setPubPrompt] = useState('');
   const [pubCaption, setPubCaption] = useState('');
   const [pubBusy, setPubBusy] = useState(false);
   const [pubCapBusy, setPubCapBusy] = useState(false);
   const [postedIds, setPostedIds] = useState<Set<string>>(new Set());
+  const [pubMode, setPubMode] = useState<'now' | 'schedule'>('now');
+  const [pubObjective, setPubObjective] = useState('vendas');
+  const [pubWhen, setPubWhen] = useState('');
+  const [objectives, setObjectives] = useState<Objective[]>([]);
+  const [scheduled, setScheduled] = useState<Scheduled[]>([]);
 
   const [creations, setCreations] = useState<Creation[]>([]);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
@@ -75,7 +95,11 @@ export function StudioView() {
     .then(d => setLimits(d && d.images && d.videos ? d : null)).catch(() => {});
   const loadIg = () => apiFetch('/api/studio/instagram/status').then(r => r.json())
     .then(d => setIg(d && typeof d.connected === 'boolean' ? d : { connected: false })).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); }, []);
+  const loadObjectives = () => apiFetch('/api/studio/objectives').then(r => r.json())
+    .then(d => setObjectives(Array.isArray(d) ? d : [])).catch(() => {});
+  const loadScheduled = () => apiFetch('/api/studio/scheduled').then(r => r.json())
+    .then(d => setScheduled(Array.isArray(d) ? d : [])).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); }, []);
 
   const analyzeInstagram = async () => {
     setIgAnalyzing(true);
@@ -161,11 +185,14 @@ export function StudioView() {
   };
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  const openPublish = (id: string, prompt: string) => { setPubId(id); setPubPrompt(prompt || ''); setPubCaption(prompt || ''); };
+  const openPublish = (id: string, prompt: string) => {
+    setPubId(id); setPubPrompt(prompt || ''); setPubCaption(prompt || '');
+    setPubMode('now'); setPubObjective('vendas'); setPubWhen('');
+  };
   const suggestCaption = async () => {
     setPubCapBusy(true);
     try {
-      const r = await apiFetch('/api/studio/instagram/caption', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: pubPrompt }) });
+      const r = await apiFetch('/api/studio/instagram/caption', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: pubPrompt, objective: pubObjective }) });
       const d = await r.json();
       if (d.caption) setPubCaption(d.caption);
     } catch { } finally { setPubCapBusy(false); }
@@ -181,6 +208,30 @@ export function StudioView() {
       toast.success('Publicado no Instagram! 🚀');
       setPubId(null);
     } catch (e: any) { toast.error(e.message); } finally { setPubBusy(false); }
+  };
+  const doSchedule = async () => {
+    if (!pubId) return;
+    if (!pubWhen) { toast.error('Escolha a data e a hora.'); return; }
+    const iso = new Date(pubWhen).toISOString();
+    if (new Date(iso).getTime() < Date.now()) { toast.error('Escolha uma data/hora no futuro.'); return; }
+    setPubBusy(true);
+    try {
+      const r = await apiFetch('/api/studio/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creationId: pubId, objective: pubObjective, caption: pubCaption, scheduledAt: iso }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao agendar.');
+      toast.success('Post agendado! 📅');
+      setPubId(null);
+      loadScheduled();
+    } catch (e: any) { toast.error(e.message); } finally { setPubBusy(false); }
+  };
+  const cancelScheduled = async (id: string) => {
+    try {
+      const r = await apiFetch(`/api/studio/scheduled/${id}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha ao cancelar.');
+      toast.success('Agendamento cancelado.');
+      loadScheduled();
+    } catch (e: any) { toast.error(e.message); }
   };
 
   const hasBrand = !!(brand && (brand.palette?.length || brand.style || brand.tone));
@@ -362,11 +413,72 @@ export function StudioView() {
         </div>
       )}
 
-      {/* Modal: publicar no Instagram */}
+      {/* Agenda de posts */}
+      {scheduled.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-sm font-medium text-zinc-300 mb-3 flex items-center gap-2"><CalendarClock className="w-4 h-4 text-fuchsia-400" /> Agenda de posts</h3>
+          <div className="space-y-2">
+            {scheduled.map(s => {
+              const badge = SCHED_BADGE[s.status] || SCHED_BADGE.scheduled;
+              const objLabel = objectives.find(o => o.id === s.objective)?.label || s.objective;
+              const isVideo = s.kind === 'video' || (s.media_url || '').endsWith('.mp4');
+              return (
+                <div key={s.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5">
+                  {s.media_url ? (
+                    isVideo
+                      ? <video src={s.media_url} muted className="w-12 h-12 object-cover rounded-md border border-zinc-800 shrink-0" />
+                      : <img src={s.media_url} alt="" className="w-12 h-12 object-cover rounded-md border border-zinc-800 shrink-0" />
+                  ) : <div className="w-12 h-12 rounded-md bg-zinc-800 shrink-0" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.cls}`}>{badge.label}</span>
+                      <span className="text-[11px] text-zinc-400">{objLabel}</span>
+                      <span className="text-[11px] text-zinc-500 inline-flex items-center gap-1"><CalendarClock className="w-3 h-3" /> {fmtWhen(s.scheduled_at)}</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 line-clamp-1 mt-0.5">{s.caption || '—'}</p>
+                    {s.status === 'failed' && s.error && <p className="text-[10px] text-red-400 line-clamp-1">{s.error}</p>}
+                  </div>
+                  {s.status === 'scheduled' && (
+                    <button onClick={() => cancelScheduled(s.id)} title="Cancelar agendamento"
+                      className="shrink-0 text-zinc-500 hover:text-red-400 p-1"><Trash2 className="w-4 h-4" /></button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: publicar / agendar no Instagram */}
       {pubId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6">
             <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-3"><Instagram className="w-5 h-5 text-pink-400" /> Publicar no Instagram</h3>
+
+            {/* Quando publicar */}
+            <div className="flex gap-2 mb-3">
+              {([['now', 'Publicar agora'], ['schedule', 'Agendar']] as const).map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setPubMode(id)}
+                  className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${pubMode === id ? 'bg-fuchsia-600 border-fuchsia-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
+              ))}
+            </div>
+
+            {/* Objetivo da campanha */}
+            <label className="text-xs text-zinc-400 mb-1 block">Objetivo da campanha</label>
+            <select value={pubObjective} onChange={e => setPubObjective(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-fuchsia-500 outline-none mb-3">
+              {objectives.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+
+            {/* Data/hora (apenas ao agendar) */}
+            {pubMode === 'schedule' && (
+              <>
+                <label className="text-xs text-zinc-400 mb-1 block">Data e hora</label>
+                <input type="datetime-local" value={pubWhen} min={minLocalDateTime()} onChange={e => setPubWhen(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-fuchsia-500 outline-none mb-3 [color-scheme:dark]" />
+              </>
+            )}
+
             <label className="text-xs text-zinc-400 mb-1 flex items-center justify-between">
               <span>Legenda</span>
               <button onClick={suggestCaption} disabled={pubCapBusy} className="text-[11px] text-fuchsia-400 hover:text-fuchsia-300 inline-flex items-center gap-1">
@@ -374,14 +486,21 @@ export function StudioView() {
               </button>
             </label>
             <textarea value={pubCaption} onChange={e => setPubCaption(e.target.value)}
-              className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 resize-none focus:border-pink-500 outline-none"
+              className="w-full h-28 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 resize-none focus:border-pink-500 outline-none"
               placeholder="Escreva a legenda do post (ou gere com IA)…" />
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setPubId(null)} disabled={pubBusy}>Cancelar</Button>
-              <Button onClick={doPublish} disabled={pubBusy} className="bg-pink-600 hover:bg-pink-700 text-white">
-                {pubBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Instagram className="w-4 h-4 mr-2" />}
-                {pubBusy ? 'Publicando…' : 'Publicar'}
-              </Button>
+              {pubMode === 'now' ? (
+                <Button onClick={doPublish} disabled={pubBusy} className="bg-pink-600 hover:bg-pink-700 text-white">
+                  {pubBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Instagram className="w-4 h-4 mr-2" />}
+                  {pubBusy ? 'Publicando…' : 'Publicar'}
+                </Button>
+              ) : (
+                <Button onClick={doSchedule} disabled={pubBusy} className="bg-fuchsia-600 hover:bg-fuchsia-700 text-white">
+                  {pubBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CalendarClock className="w-4 h-4 mr-2" />}
+                  {pubBusy ? 'Agendando…' : 'Agendar'}
+                </Button>
+              )}
             </div>
             <p className="mt-2 text-[10px] text-zinc-600">Requer a permissão de publicação aprovada pela Meta (App Review).</p>
           </div>

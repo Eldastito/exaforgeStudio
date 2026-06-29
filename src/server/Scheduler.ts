@@ -12,6 +12,7 @@ import { LgpdService } from "./LgpdService.js";
 import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
+import { InstagramService } from "./InstagramService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -33,11 +34,18 @@ export class Scheduler {
     this.timer = setInterval(() => this.tick().catch(e => console.error('[Scheduler] tick falhou', e)), INTERVAL);
     // Primeira checagem logo após o boot (com um pequeno atraso).
     setTimeout(() => this.tick().catch(() => {}), 30_000);
-    // Timer rápido (5 min) só para os lembretes de PIX, que dependem de minutos.
+    // Timer rápido (5 min): lembretes de PIX e publicação de posts agendados,
+    // ambos sensíveis a minutos.
     const FAST = parseInt(process.env.SCHEDULER_FAST_INTERVAL_MS || `${5 * 60 * 1000}`, 10);
-    this.fastTimer = setInterval(() => this.pixReminderPass().catch(e => console.error('[Scheduler] lembrete PIX falhou', e)), FAST);
-    setTimeout(() => this.pixReminderPass().catch(() => {}), 45_000);
-    console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento + cadências de follow-up + lembretes de PIX).');
+    this.fastTimer = setInterval(() => this.fastPass().catch(e => console.error('[Scheduler] passe rápido falhou', e)), FAST);
+    setTimeout(() => this.fastPass().catch(() => {}), 45_000);
+    console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento + cadências de follow-up + lembretes de PIX + posts agendados).');
+  }
+
+  /** Passe rápido (5 min): tarefas sensíveis a minutos. */
+  static async fastPass() {
+    await this.pixReminderPass().catch(e => console.error('[Scheduler] lembrete PIX falhou', e));
+    await InstagramService.publishScheduledPass().catch(e => console.error('[Scheduler] publicação agendada falhou', e));
   }
 
   static async tick() {

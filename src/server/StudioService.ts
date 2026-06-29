@@ -28,6 +28,26 @@ export interface BrandProfile {
 export type StudioFormat = "post" | "story" | "banner";
 
 /**
+ * Objetivos de campanha — orientam o TOM e a CHAMADA PARA AÇÃO da legenda
+ * gerada pela IA. Pensados para o nicho (clínica veterinária / petshop), mas
+ * genéricos o bastante para qualquer serviço.
+ */
+export interface CampaignObjective { id: string; label: string; guidance: string }
+export const CAMPAIGN_OBJECTIVES: CampaignObjective[] = [
+  { id: "vendas", label: "Vendas / Conversão", guidance: "Foque em converter: destaque o benefício e use uma chamada para ação direta de compra/contratação (ex.: 'Garanta já', 'Chame no WhatsApp')." },
+  { id: "agendamento", label: "Agendamentos", guidance: "Incentive marcar um horário/consulta. CTA claro para agendar (ex.: 'Agende agora pelo WhatsApp')." },
+  { id: "promocao", label: "Promoção / Oferta", guidance: "Destaque a oferta/condição especial e a urgência (tempo limitado). CTA para aproveitar a promoção." },
+  { id: "engajamento", label: "Engajamento", guidance: "Gere interação: faça uma pergunta e convide a comentar, curtir ou salvar o post." },
+  { id: "alcance", label: "Alcance / Reconhecimento", guidance: "Conteúdo amplo e acolhedor que apresente a marca. Hashtags mais abrangentes para alcançar gente nova." },
+  { id: "educativo", label: "Educativo / Dica", guidance: "Entregue uma dica de valor (ex.: cuidados com o pet), posicionando a marca como referência. CTA suave." },
+  { id: "reativacao", label: "Reativação de clientes", guidance: "Fale com quem já é cliente e sumiu: tom caloroso de 'sentimos sua falta' + convite para voltar." },
+  { id: "data", label: "Data comemorativa", guidance: "Tom celebrativo ligado à data. Mensagem afetuosa que conecta a marca ao momento." },
+];
+function objectiveOf(id?: string): CampaignObjective | null {
+  return CAMPAIGN_OBJECTIVES.find(x => x.id === id) || null;
+}
+
+/**
  * Estúdio de Criação: identidade visual da marca (extraída de posts de
  * referência) + geração de imagens de campanha guiadas por essa identidade e
  * pelos dados da empresa.
@@ -192,13 +212,58 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
     try { db.prepare("UPDATE studio_creations SET ig_media_id = ?, ig_posted_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(igMediaId, id, orgId); } catch { /* noop */ }
   }
 
-  /** Sugere uma legenda de Instagram com o tom da marca + CTA + hashtags. */
-  static async suggestCaption(orgId: string, prompt: string): Promise<string> {
+  /** Sugere uma legenda de Instagram com o tom da marca + objetivo de campanha + CTA + hashtags. */
+  static async suggestCaption(orgId: string, prompt: string, objectiveId?: string): Promise<string> {
     const brand = this.getBrand(orgId);
     const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const tone = brand?.tone ? `Tom da marca: ${brand.tone}.` : "";
-    const p = `Escreva uma legenda curta e envolvente para um post de Instagram da empresa "${biz?.business_name || "a empresa"}" sobre: ${prompt}. ${tone} Inclua 1 chamada para ação e de 3 a 5 hashtags relevantes. Responda SOMENTE com a legenda.`;
+    const obj = objectiveOf(objectiveId);
+    const objLine = obj ? `Objetivo da campanha: ${obj.label}. ${obj.guidance}` : "";
+    const p = `Escreva uma legenda curta e envolvente para um post de Instagram da empresa "${biz?.business_name || "a empresa"}" sobre: ${prompt}. ${tone} ${objLine} Inclua 1 chamada para ação e de 3 a 5 hashtags relevantes. Responda SOMENTE com a legenda.`;
     try { return (await chat(p, { temperature: 0.7 })).trim(); } catch { return ""; }
+  }
+
+  /**
+   * Agenda a publicação de uma criação no Instagram em uma data/hora futura,
+   * vinculada a um objetivo de campanha. `scheduledAt` deve ser ISO 8601
+   * (ex.: vindo de `new Date(...).toISOString()`); guardamos em UTC canônico.
+   */
+  static schedulePost(orgId: string, input: { creationId: string; objective?: string; caption?: string; scheduledAt: string }):
+    { id: string; scheduledAt: string } {
+    const creation = this.getCreation(orgId, String(input.creationId || ""));
+    if (!creation || !creation.media_url) throw new Error("Criação não encontrada.");
+    const when = new Date(input.scheduledAt);
+    if (isNaN(when.getTime())) throw new Error("Data/hora inválida.");
+    // Tolera pequenos atrasos de relógio, mas exige agendamento no futuro.
+    if (when.getTime() < Date.now() - 60_000) throw new Error("Escolha uma data/hora no futuro.");
+    const objective = objectiveOf(input.objective)?.id || "vendas";
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO scheduled_posts (id, organization_id, creation_id, objective, caption, scheduled_at, status)
+       VALUES (?, ?, ?, ?, ?, datetime(?), 'scheduled')`
+    ).run(id, orgId, String(input.creationId), objective, String(input.caption || ""), when.toISOString());
+    return { id, scheduledAt: when.toISOString() };
+  }
+
+  /** Lista os posts agendados/recentes (com a mídia da criação). */
+  static listScheduled(orgId: string, limit = 50): any[] {
+    return db.prepare(
+      `SELECT s.id, s.creation_id, s.objective, s.caption, s.scheduled_at, s.status, s.ig_media_id, s.error, s.published_at,
+              c.media_url, c.kind
+       FROM scheduled_posts s
+       LEFT JOIN studio_creations c ON c.id = s.creation_id
+       WHERE s.organization_id = ?
+       ORDER BY (s.status = 'scheduled') DESC, s.scheduled_at ASC
+       LIMIT ?`
+    ).all(orgId, limit) as any[];
+  }
+
+  /** Cancela um agendamento que ainda não foi publicado. */
+  static cancelScheduled(orgId: string, id: string): boolean {
+    const r = db.prepare(
+      "UPDATE scheduled_posts SET status = 'canceled' WHERE id = ? AND organization_id = ? AND status = 'scheduled'"
+    ).run(id, orgId);
+    return r.changes > 0;
   }
 
   static listCreations(orgId: string, limit = 30): any[] {

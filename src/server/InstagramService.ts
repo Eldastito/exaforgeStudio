@@ -3,6 +3,8 @@ import { chat, describeImage } from "./llm.js";
 import { StudioService, type BrandProfile } from "./StudioService.js";
 
 const GRAPH = "https://graph.instagram.com/v21.0";
+const APP_URL = (process.env.APP_URL || "https://zapflowia.tesseractauto.com.br").replace(/\/$/, "");
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /**
  * Análise da conta de Instagram conectada (Instagram API with Instagram Login).
@@ -123,5 +125,47 @@ ${topCaptions.map((c, i) => `(${i + 1}) ${c}`).join("\n") || "(sem legendas)"}`;
       top: top.map(m => ({ permalink: m.permalink, caption: (m.caption || "").slice(0, 120), likes: m.like_count || 0, comments: m.comments_count || 0, media_type: m.media_type })),
       insights,
     };
+  }
+
+  // POST form-encoded para a Graph API (com tratamento de erro legível).
+  private static async igPost(path: string, params: Record<string, string>, token: string): Promise<any> {
+    const body = new URLSearchParams({ ...params, access_token: token });
+    const res = await fetch(`${GRAPH}/${path}`, { method: "POST", body });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || `Instagram ${res.status}`);
+    return data;
+  }
+
+  private static publicUrl(mediaUrl: string): string {
+    return /^https?:\/\//i.test(mediaUrl) ? mediaUrl : `${APP_URL}${mediaUrl}`;
+  }
+
+  /**
+   * Publica uma criação no Instagram (foto no feed ou reels). Requer o escopo
+   * instagram_business_content_publish (App Review). Retorna o id da mídia.
+   */
+  static async publish(orgId: string, mediaUrl: string, caption: string, isVideo: boolean): Promise<{ mediaId: string }> {
+    const ch = this.getChannel(orgId);
+    if (!ch) throw new Error("Instagram não conectado.");
+    const url = this.publicUrl(mediaUrl);
+
+    let creation;
+    if (isVideo) {
+      creation = await this.igPost(`${ch.igId}/media`, { media_type: "REELS", video_url: url, caption: caption || "" }, ch.token);
+      // Reels precisam ser processados antes de publicar — aguarda (bounded).
+      for (let i = 0; i < 18; i++) {
+        await sleep(5000);
+        try {
+          const st = await fetch(`${GRAPH}/${creation.id}?fields=status_code&access_token=${encodeURIComponent(ch.token)}`);
+          const sd: any = await st.json().catch(() => ({}));
+          if (sd.status_code === "FINISHED") break;
+          if (sd.status_code === "ERROR") throw new Error("O Instagram falhou ao processar o vídeo.");
+        } catch (e: any) { if (String(e.message).includes("processar")) throw e; }
+      }
+    } else {
+      creation = await this.igPost(`${ch.igId}/media`, { image_url: url, caption: caption || "" }, ch.token);
+    }
+    const pub = await this.igPost(`${ch.igId}/media_publish`, { creation_id: String(creation.id) }, ch.token);
+    return { mediaId: String(pub.id) };
   }
 }

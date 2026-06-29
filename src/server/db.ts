@@ -892,6 +892,8 @@ const initDb = () => {
   // Estúdio: status/operação do fluxo assíncrono de vídeo (Veo).
   try { db.exec(`ALTER TABLE studio_creations ADD COLUMN status TEXT DEFAULT 'done'`); } catch(e){}
   try { db.exec(`ALTER TABLE studio_creations ADD COLUMN operation TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE studio_creations ADD COLUMN ig_media_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE studio_creations ADD COLUMN ig_posted_at DATETIME`); } catch(e){}
   // Fase 3 — Pesquisa de satisfação (CSAT): opt-in + atraso após o pagamento.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_delay_hours INTEGER DEFAULT 24`); } catch(e){}

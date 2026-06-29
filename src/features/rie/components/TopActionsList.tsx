@@ -1,4 +1,4 @@
-import { ArrowUpRight, Inbox, Loader2, Send } from 'lucide-react';
+import { ArrowUpRight, Inbox, Loader2, Send, UserPlus } from 'lucide-react';
 import type { RicSnapshot } from '../types';
 import { brl, RIC_TONE } from '../lib/format';
 
@@ -14,10 +14,11 @@ const ACTION_BY_SOURCE: Record<string, { verb: (n: number) => string; tone: keyo
  * Top 5 ações prioritárias — derivadas client-side das fontes de perda do
  * snapshot (ordenadas por R$ em jogo). Responde "o que priorizar hoje?".
  */
-export function TopActionsList({ snapshot, onAct, actingKey }: {
+export function TopActionsList({ snapshot, onAct, actingKey, onDelegate }: {
   snapshot: RicSnapshot;
   onAct?: (sourceKey: string) => void;
   actingKey?: string | null;
+  onDelegate?: (sourceKey: string, label: string) => void;
 }) {
   const actions = snapshot.lossSources
     .filter(s => s.amount > 0)
@@ -55,6 +56,15 @@ export function TopActionsList({ snapshot, onAct, actingKey }: {
           <span className="text-sm font-bold tabular-nums" style={{ color: RIC_TONE[a.tone] }}>
             {brl(a.amount)}
           </span>
+          {onDelegate && (
+            <button
+              onClick={() => onDelegate(a.key, a.label)}
+              title="Criar uma tarefa interna para a equipe cuidar disso"
+              className="flex flex-shrink-0 items-center gap-1 rounded-lg border border-slate-600/50 bg-slate-700/20 px-2.5 py-1 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-700/40"
+            >
+              <UserPlus className="h-3.5 w-3.5" /> Delegar
+            </button>
+          )}
           {onAct ? (
             <button
               onClick={() => onAct(a.key)}

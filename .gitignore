@@ -18,3 +18,6 @@ zappflow.db-wal
 
 # Mídias recebidas (runtime)
 media/
+
+# Scripts de teste/rascunho temporários (não versionar)
+scratchpad/

@@ -1341,6 +1341,42 @@ const initDb = () => {
   // Maestro: criar tarefa automática quando um atendimento é repassado p/ humano (opt-in).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_task_on_handoff INTEGER DEFAULT 0`); } catch(e){}
 
+  // Prospect AI (Fase 0) — Inteligência de Prospecção B2B. Fundação: ICP +
+  // campanhas em rascunho. Contas/contatos/evidências/score/outreach entram nos
+  // PRs seguintes. Tudo aditivo, atrás do módulo opcional 'prospect'.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_icp_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        name TEXT NOT NULL,
+        vertical TEXT,
+        criteria_json TEXT,       -- JSON: região, porte, sinais, exclusões, dores, oferta, CTA...
+        status TEXT DEFAULT 'active',  -- active | archived
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_icp_org ON prospect_icp_profiles (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS prospect_campaigns (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        icp_id TEXT,
+        name TEXT NOT NULL,
+        objective TEXT,           -- reuniao | diagnostico | evento | proposta
+        status TEXT DEFAULT 'draft',   -- draft | active | paused | completed | archived
+        budget_limit_brl REAL DEFAULT 0,
+        daily_contact_limit INTEGER DEFAULT 0,
+        approval_mode TEXT DEFAULT 'manual',  -- manual | manager | auto_rules
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_campaigns_org ON prospect_campaigns (organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas do Prospect AI', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -30,6 +30,7 @@ export class ModuleService {
     executive: "diretor",
     studio: "estudio",
     tasks: "execucao",
+    prospect: "prospect",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

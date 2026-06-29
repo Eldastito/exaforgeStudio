@@ -14,6 +14,7 @@ import { ExecutiveView } from '@/src/features/ExecutiveView';
 import { RevenueIntelligenceView } from '@/src/features/rie/RevenueIntelligenceView';
 import { StudioView } from '@/src/features/StudioView';
 import { TasksView } from '@/src/features/TasksView';
+import { ProspectView } from '@/src/features/ProspectView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -194,6 +195,7 @@ export default function App() {
              {viewMode === 'rie' && 'Revenue Intelligence'}
              {viewMode === 'studio' && 'Estúdio de Criação'}
              {viewMode === 'tarefas' && 'Tarefas'}
+             {viewMode === 'prospect' && 'Prospect AI'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -279,6 +281,7 @@ export default function App() {
           {viewMode === 'rie' && <RevenueIntelligenceView />}
           {viewMode === 'studio' && <StudioView />}
           {viewMode === 'tarefas' && <TasksView />}
+          {viewMode === 'prospect' && <ProspectView />}
           </ErrorBoundary>
         </main>
       </div>

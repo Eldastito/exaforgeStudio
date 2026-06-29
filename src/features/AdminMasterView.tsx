@@ -332,7 +332,7 @@ const OPTIONAL_MODULES: { key: string; label: string }[] = [
   { key: 'reservas', label: 'Reservas' }, { key: 'assinaturas', label: 'Assinaturas' }, { key: 'compras', label: 'Compras' },
   { key: 'orcamentos', label: 'Orçamentos' }, { key: 'eventos', label: 'Eventos' }, { key: 'diretor', label: 'Diretor IA' },
   { key: 'estudio', label: 'Estúdio de Criação' }, { key: 'rie', label: 'Revenue Intelligence' },
-  { key: 'execucao', label: 'Execução / Tarefas' },
+  { key: 'execucao', label: 'Execução / Tarefas' }, { key: 'prospect', label: 'Prospect AI' },
 ];
 
 function CreateCortesiaPanel() {

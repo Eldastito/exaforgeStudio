@@ -64,15 +64,62 @@ export class ProspectDiscoveryService {
     return parseInt(new Date(nowMs).toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour12: false, hour: "2-digit" }), 10) || 0;
   }
 
-  /** Geocodifica endereço/CEP → {lat, lon, display}. Nominatim, Brasil. */
-  static async geocode(address: string): Promise<{ lat: number; lon: number; display: string } | null> {
-    const q = String(address || "").trim();
+  /** Extrai um CEP (8 dígitos) de um texto livre, se houver. */
+  static extractCep(s: string): string {
+    const m = String(s || "").match(/(\d{5})-?\s?(\d{3})/);
+    return m ? `${m[1]}${m[2]}` : "";
+  }
+  /** Limpa endereço digitado à mão (separadores soltos, "en/in", barras). */
+  static cleanAddress(s: string): string {
+    return String(s || "")
+      .replace(/[;|/]+/g, ", ")
+      .replace(/\b(en|in)\b/gi, ", ")
+      .replace(/\s*,\s*/g, ", ")
+      .replace(/(,\s*)+/g, ", ")
+      .replace(/\s+/g, " ")
+      .replace(/^[,\s]+|[,\s]+$/g, "")
+      .trim();
+  }
+  /** Uma consulta livre ao Nominatim (Brasil). */
+  static async nominatim(q: string): Promise<{ lat: number; lon: number; display: string } | null> {
     if (!q) return null;
-    const url = `${NOMINATIM}?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(q)}`;
+    const url = `${NOMINATIM}?format=json&limit=1&countrycodes=br&addressdetails=0&q=${encodeURIComponent(q)}`;
     const arr = await httpJson(url);
     const hit = Array.isArray(arr) ? arr[0] : null;
     if (!hit?.lat || !hit?.lon) return null;
     return { lat: Number(hit.lat), lon: Number(hit.lon), display: String(hit.display_name || q) };
+  }
+  /** Resolve um CEP via ViaCEP → endereço estruturado → coordenadas. */
+  static async geocodeViaCep(cep: string): Promise<{ lat: number; lon: number; display: string } | null> {
+    try {
+      const v = await httpJson(`https://viacep.com.br/ws/${cep}/json/`);
+      if (!v || v.erro) return null;
+      const addr = [v.logradouro, v.bairro, v.localidade, v.uf].filter(Boolean).join(", ");
+      return addr ? await this.nominatim(addr) : null;
+    } catch { return null; }
+  }
+
+  /**
+   * Geocodifica endereço/CEP → {lat, lon}. Tolerante a texto digitado à mão:
+   * tenta a string limpa; depois resolve pelo CEP (ViaCEP → Nominatim); por fim,
+   * tenta só o texto sem o CEP. Brasil (Nominatim countrycodes=br).
+   */
+  static async geocode(address: string): Promise<{ lat: number; lon: number; display: string } | null> {
+    const raw = String(address || "").trim();
+    if (!raw) return null;
+    const cleaned = this.cleanAddress(raw);
+    let hit = await this.nominatim(cleaned).catch(() => null);
+    if (hit) return hit;
+    const cep = this.extractCep(raw);
+    if (cep) {
+      hit = await this.geocodeViaCep(cep);
+      if (hit) return hit;
+      hit = await this.nominatim(`${cep.slice(0, 5)}-${cep.slice(5)}`).catch(() => null);
+      if (hit) return hit;
+      const noCep = this.cleanAddress(raw.replace(/\d{5}-?\s?\d{3}/, ""));
+      if (noCep) { hit = await this.nominatim(noCep).catch(() => null); if (hit) return hit; }
+    }
+    return null;
   }
 
   static buildOverpass(lat: number, lon: number, radiusKm: number, categories: string[]): string {
@@ -185,7 +232,7 @@ export class ProspectDiscoveryService {
       let lat = camp.discovery_lat, lon = camp.discovery_lon;
       if (lat == null || lon == null) {
         const geo = await this.geocode(camp.discovery_address);
-        if (!geo) throw new Error("Não consegui localizar o endereço/CEP informado.");
+        if (!geo) throw new Error("Não localizei o endereço/CEP. Tente algo como 'Rua Conde de Bonfim, Tijuca, Rio de Janeiro - RJ' ou só o CEP (ex.: 20530-000).");
         lat = geo.lat; lon = geo.lon;
         db.prepare("UPDATE prospect_campaigns SET discovery_lat = ?, discovery_lon = ? WHERE id = ? AND organization_id = ?").run(lat, lon, campaignId, orgId);
       }

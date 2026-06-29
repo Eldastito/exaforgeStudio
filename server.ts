@@ -38,6 +38,7 @@ import mfaRoutes from "./src/server/routes/mfa.js";
 import lgpdRoutes from "./src/server/routes/lgpd.js";
 import executiveRoutes from "./src/server/routes/executive.js";
 import plansRoutes from "./src/server/routes/plans.js";
+import { PlanService } from "./src/server/PlanService.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
 import storefrontRoutes from "./src/server/routes/storefront.js";
@@ -317,6 +318,16 @@ async function startServer() {
   // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
   // autenticado para que /api/public/* nunca exija JWT.
   app.use("/api/public", storefrontPublicRoutes);
+
+  // LISTA DE PLANOS é PÚBLICA: a tela de cadastro/"começar grátis" precisa
+  // carregar os planos SEM login. Registrada antes do protectedApi (senão a
+  // página de signup recebe 401 e fica travada em "Carregando planos…").
+  // Só o GET da lista é público; /plans/current e /plans/select seguem
+  // protegidos no protectedApi abaixo.
+  app.get("/api/plans", (_req, res): any => {
+    try { res.json(PlanService.listPlans()); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
 
   // Conector AGNÓSTICO de PMS/OTA/ERP — autenticado por TOKEN (não JWT). Fica
   // antes do catch-all autenticado para sistemas externos empurrarem dados.

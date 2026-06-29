@@ -402,7 +402,7 @@ router.get("/ai-attendance-settings", (req, res) => {
   try {
     const o = db.prepare(`
       SELECT ai_memory_enabled, returning_greeting_enabled, returning_greeting_min_days,
-             abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message
+             abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message, auto_task_on_handoff
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any || {};
     res.json({
@@ -412,6 +412,7 @@ router.get("/ai-attendance-settings", (req, res) => {
       abandonedEnabled: !!o.abandoned_cart_enabled,
       abandonedHours: o.abandoned_cart_hours || 4,
       abandonedMessage: o.abandoned_cart_message || "",
+      autoTaskOnHandoff: !!o.auto_task_on_handoff,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -422,15 +423,16 @@ router.get("/ai-attendance-settings", (req, res) => {
 router.put("/ai-attendance-settings", (req, res) => {
   const orgId = getOrgId(req);
   try {
-    const { memoryEnabled, greetEnabled, greetMinDays, abandonedEnabled, abandonedHours, abandonedMessage } = req.body || {};
+    const { memoryEnabled, greetEnabled, greetMinDays, abandonedEnabled, abandonedHours, abandonedMessage, autoTaskOnHandoff } = req.body || {};
     const days = Math.min(365, Math.max(1, parseInt(String(greetMinDays), 10) || 7));
     const hours = Math.min(168, Math.max(1, parseInt(String(abandonedHours), 10) || 4));
     db.prepare(`
       UPDATE organization_settings
       SET ai_memory_enabled = ?, returning_greeting_enabled = ?, returning_greeting_min_days = ?,
-          abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?, updated_at = CURRENT_TIMESTAMP
+          abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?,
+          auto_task_on_handoff = ?, updated_at = CURRENT_TIMESTAMP
       WHERE organization_id = ?
-    `).run(memoryEnabled ? 1 : 0, greetEnabled ? 1 : 0, days, abandonedEnabled ? 1 : 0, hours, abandonedMessage || null, orgId);
+    `).run(memoryEnabled ? 1 : 0, greetEnabled ? 1 : 0, days, abandonedEnabled ? 1 : 0, hours, abandonedMessage || null, autoTaskOnHandoff ? 1 : 0, orgId);
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

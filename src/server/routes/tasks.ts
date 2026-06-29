@@ -56,6 +56,24 @@ router.post("/:id/move", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// POST /api/tasks/:id/resources { kind, productId?, label?, quantity?, amount? }
+router.post("/:id/resources", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(TaskService.addResource(orgId, req.params.id, req.body || {}));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// DELETE /api/tasks/:id/resources/:rid
+router.delete("/:id/resources/:rid", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(TaskService.removeResource(orgId, req.params.id, req.params.rid));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // POST /api/tasks/:id/notes { text }
 router.post("/:id/notes", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

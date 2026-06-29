@@ -755,6 +755,7 @@ function LgpdPanel() {
 type AiAttendance = {
   memoryEnabled: boolean; greetEnabled: boolean; greetMinDays: number;
   abandonedEnabled: boolean; abandonedHours: number; abandonedMessage: string;
+  autoTaskOnHandoff?: boolean;
 };
 function AiAttendancePanel() {
   const [cfg, setCfg] = useState<AiAttendance | null>(null);
@@ -846,6 +847,19 @@ function AiAttendancePanel() {
                 onBlur={e => save({ abandonedMessage: e.target.value })}
               />
             )}
+          </div>
+
+          {/* Maestro — tarefa automática no repasse para humano */}
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100">🧭 Maestro — tarefa no repasse para humano</p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                  Quando a IA repassa um atendimento para um humano, o ZapFlow cria automaticamente uma <b>tarefa interna</b> (com o resumo da conversa) na aba <b>Tarefas</b>, para a equipe assumir e nada se perder. Requer o módulo de Tarefas ativo.
+                </p>
+              </div>
+              <Toggle on={!!cfg.autoTaskOnHandoff} onClick={() => save({ autoTaskOnHandoff: !cfg.autoTaskOnHandoff })} />
+            </div>
           </div>
         </div>
       )}

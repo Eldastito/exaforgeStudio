@@ -111,3 +111,43 @@ export async function analyzeImageForChat(base64: string, mimetype = "image/jpeg
    Responda exatamente neste formato: "TIPO: foto — <descrição bem curta do que aparece>. PERGUNTAR: o cliente enviou uma foto; pergunte com simpatia o que ele gostaria que você identificasse ou em que pode ajudar."`;
   return describeImage(base64, mimetype, prompt);
 }
+
+/** Extrai o texto de um PDF (best-effort). Vazio se não conseguir. */
+export async function extractPdfText(buffer: Buffer): Promise<string> {
+  const mod: any = await import("pdf-parse");
+  const PDFParse = mod.PDFParse || mod.default?.PDFParse || mod.default;
+  if (typeof PDFParse !== "function") return "";
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  try {
+    const r = await parser.getText();
+    return String(r?.text || "").trim();
+  } finally {
+    try { await parser.destroy?.(); } catch { /* noop */ }
+  }
+}
+
+/**
+ * "Olhos" para PDFs: extrai o texto e classifica/resume (comprovante, nota,
+ * recibo, receita, boleto, contrato…) num formato que a IA de atendimento usa
+ * para reagir. Se não der para ler, pede para reenviar como foto.
+ */
+export async function analyzePdfForChat(buffer: Buffer): Promise<string> {
+  let text = "";
+  try { text = await extractPdfText(buffer); } catch (e) { console.error("[PDF] Falha ao extrair texto:", e); }
+  if (!text) {
+    return "TIPO: documento (PDF) — não consegui ler o conteúdo. PERGUNTAR: peça com simpatia para o cliente reenviar como FOTO/imagem ou descrever o que precisa.";
+  }
+  const snippet = text.slice(0, 6000);
+  const prompt = `Você é os "olhos" de um atendente por WhatsApp. Abaixo está o TEXTO extraído de um PDF enviado pelo cliente. Responda em português:
+- Comece com "TIPO: <tipo do documento>" (ex.: comprovante de PIX, nota fiscal, recibo, receita/prescrição, boleto, contrato, outro).
+- Em seguida liste os DADOS-CHAVE relevantes (valor, data, nome, nº/ID, itens, total). Seja fiel ao texto; NÃO invente. Se não houver dados claros, resuma o assunto em 1-2 frases.
+
+TEXTO DO PDF:
+${snippet}`;
+  try {
+    const out = await chat(prompt, { temperature: 0.2 });
+    return out.trim() || `TIPO: documento (PDF). ${snippet.slice(0, 300)}`;
+  } catch {
+    return `TIPO: documento (PDF). Conteúdo: ${snippet.slice(0, 500)}`;
+  }
+}

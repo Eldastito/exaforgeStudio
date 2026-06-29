@@ -55,7 +55,7 @@ import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { transcribeAudio, describeImage, analyzeImageForChat } from "./src/server/llm.js";
+import { transcribeAudio, describeImage, analyzeImageForChat, analyzePdfForChat } from "./src/server/llm.js";
 import { JWT_SECRET } from "./src/server/config/secret.js";
 import fs from "fs";
 
@@ -690,9 +690,18 @@ async function startServer() {
                 console.error("[Vision] Falha ao analisar documento-imagem:", e);
                 incomingMessageText = docCaption || "📄 [Documento recebido]";
               }
+            } else if (docB64 && docMime === "application/pdf") {
+              // PDF: extrai o texto e classifica (comprovante/nota/recibo/receita…).
+              try {
+                const desc = await analyzePdfForChat(Buffer.from(docB64, 'base64'));
+                incomingMessageText = docCaption ? `[Documento recebido] ${docCaption}\n${desc}` : `[Documento recebido]\n${desc}`;
+              } catch (e) {
+                console.error("[PDF] Falha ao analisar PDF:", e);
+                incomingMessageText = docCaption || "📄 [Documento PDF recebido]";
+              }
             } else {
-              // PDF e demais formatos: ainda não lemos o conteúdo automaticamente.
-              incomingMessageText = `[Documento recebido${docCaption ? `: ${docCaption}` : ""}] O cliente enviou um arquivo (${docMime || 'documento'}). Se precisar que você leia o conteúdo, peça com simpatia para ele enviar como FOTO/imagem.`;
+              // Demais formatos (docx, xls, etc.): ainda não lemos automaticamente.
+              incomingMessageText = `[Documento recebido${docCaption ? `: ${docCaption}` : ""}] O cliente enviou um arquivo (${docMime || 'documento'}). Se precisar que você leia o conteúdo, peça com simpatia para ele enviar como FOTO/imagem ou PDF.`;
             }
           }
           else if (msgObj.stickerMessage || msgObj.StickerMessage) incomingMessageText = "🔖 [Figurinha]";

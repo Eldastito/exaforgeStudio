@@ -40,6 +40,33 @@ router.post("/generate", async (req: AuthRequest, res): Promise<any> => {
   }
 });
 
+// POST /api/studio/video { prompt, format } — inicia a geração de vídeo (Veo)
+router.post("/video", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const briefing = String(req.body?.prompt || "").trim();
+  const format = (["post", "story", "banner"].includes(req.body?.format) ? req.body.format : "story");
+  if (!briefing) return res.status(400).json({ error: "Descreva o vídeo que você quer criar." });
+  try {
+    const out = await StudioService.startVideo(orgId, briefing, format);
+    res.json(out);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao iniciar o vídeo." });
+  }
+});
+
+// GET /api/studio/video/:jobId — andamento/resultado do vídeo
+router.get("/video/:jobId", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = await StudioService.pollVideo(orgId, req.params.jobId);
+    res.json(out);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao consultar o vídeo." });
+  }
+});
+
 // GET /api/studio/creations — galeria das criações
 router.get("/creations", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

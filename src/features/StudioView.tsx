@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 type Brand = { palette: string[]; tone: string; style: string; summary: string };
-type Creation = { id: string; prompt: string; media_url: string; created_at: string };
+type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
 
 // Reduz a imagem no navegador (máx. 768px, JPEG) para enviar payload pequeno.
 const fileToB64 = (file: File): Promise<{ base64: string; mime: string }> => new Promise((resolve, reject) => {
@@ -47,6 +47,13 @@ export function StudioView() {
 
   const [creations, setCreations] = useState<Creation[]>([]);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
+
+  // Vídeo (Veo) — fluxo assíncrono com polling.
+  const [vBriefing, setVBriefing] = useState('');
+  const [vFormat, setVFormat] = useState<'story' | 'banner'>('story');
+  const [vStatus, setVStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle');
+  const [vUrl, setVUrl] = useState<string | null>(null);
+  const pollRef = useRef<any>(null);
 
   const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(d => setBrand(d && Array.isArray(d.palette) ? d : null)).catch(() => {});
   const loadCreations = () => apiFetch('/api/studio/creations').then(r => r.json()).then((d) => setCreations(Array.isArray(d) ? d : [])).catch(() => {});
@@ -99,6 +106,33 @@ export function StudioView() {
       toast.success('Arte criada! 🎨');
     } catch (e: any) { toast.error(e.message); } finally { setGenerating(false); }
   };
+
+  // Acompanha o job de vídeo até ficar pronto (ou falhar).
+  const pollVideo = (jobId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await apiFetch(`/api/studio/video/${jobId}`);
+        const d = await res.json();
+        if (d.status === 'done') { clearInterval(pollRef.current); setVStatus('done'); setVUrl(d.mediaUrl); loadCreations(); loadLimits(); toast.success('Vídeo pronto! 🎬'); }
+        else if (d.status === 'error') { clearInterval(pollRef.current); setVStatus('error'); toast.error(d.error || 'Falha na geração do vídeo.'); }
+      } catch { /* tenta de novo no próximo tick */ }
+    }, 8000);
+  };
+  const startVideo = async () => {
+    if (!vBriefing.trim()) { toast.error('Descreva o vídeo que você quer criar.'); return; }
+    setVStatus('processing'); setVUrl(null);
+    try {
+      const res = await apiFetch('/api/studio/video', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: vBriefing, format: vFormat }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao iniciar o vídeo.');
+      toast.success('Geração iniciada — o vídeo leva alguns minutos. ⏳');
+      pollVideo(data.jobId);
+    } catch (e: any) { setVStatus('error'); toast.error(e.message); }
+  };
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   const hasBrand = !!(brand && (brand.palette?.length || brand.style || brand.tone));
 
@@ -192,17 +226,58 @@ export function StudioView() {
         </div>
       </div>
 
+      {/* Gerar vídeo (Veo) */}
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Film className="w-4 h-4 text-fuchsia-400" /> Gerar vídeo</h3>
+          {limits?.videos && <span className="text-[11px] text-zinc-500">Vídeos este mês: <span className="text-zinc-300 font-medium">{limits.videos.used}/{limits.videos.limit}</span></span>}
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">Vídeo curto de campanha (leva alguns minutos). {hasBrand ? 'Usando a identidade da marca.' : ''}</p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[{ id: 'story', label: 'Story 9:16' }, { id: 'banner', label: 'Paisagem 16:9' }].map(f => (
+            <button key={f.id} type="button" onClick={() => setVFormat(f.id as any)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${vFormat === f.id ? 'bg-fuchsia-600 border-fuchsia-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>{f.label}</button>
+          ))}
+        </div>
+        <textarea value={vBriefing} onChange={e => setVBriefing(e.target.value)}
+          placeholder="Ex.: Vídeo curto de banho & tosa com um pet feliz e a marca ao final."
+          className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 resize-none focus:border-fuchsia-500 outline-none" />
+        <Button onClick={startVideo} disabled={vStatus === 'processing' || !vBriefing.trim()} className="mt-3 bg-fuchsia-600 hover:bg-fuchsia-700 text-white">
+          {vStatus === 'processing' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Film className="w-4 h-4 mr-2" />}
+          {vStatus === 'processing' ? 'Gerando vídeo…' : 'Gerar vídeo'}
+        </Button>
+        {vStatus === 'processing' && <p className="mt-2 text-xs text-zinc-500">Pode levar alguns minutos — deixe esta aba aberta que avisamos quando ficar pronto.</p>}
+        {vUrl && vStatus === 'done' && (
+          <div className="mt-4">
+            <video src={vUrl} controls className="w-full max-w-sm rounded-lg border border-zinc-800" />
+            <a href={vUrl} download className="mt-2 inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3.5 h-3.5" /> Baixar</a>
+          </div>
+        )}
+      </div>
+
       {/* Galeria */}
       {creations.length > 0 && (
         <div className="mt-6">
           <h3 className="text-sm font-medium text-zinc-300 mb-3">Minhas criações</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {creations.map(c => (
-              <a key={c.id} href={c.media_url} target="_blank" rel="noreferrer" className="group block">
-                <img src={c.media_url} alt={c.prompt} className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />
-                <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
-              </a>
-            ))}
+            {creations.map(c => {
+              const isVideo = c.kind === 'video' || (c.media_url || '').endsWith('.mp4');
+              if (c.status === 'processing' || !c.media_url) {
+                return (
+                  <div key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-950 aspect-square flex flex-col items-center justify-center gap-1 text-[10px] text-zinc-500">
+                    <Loader2 className="w-4 h-4 animate-spin" /> gerando vídeo…
+                  </div>
+                );
+              }
+              return (
+                <a key={c.id} href={c.media_url} target="_blank" rel="noreferrer" className="group block">
+                  {isVideo
+                    ? <video src={c.media_url} muted className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />
+                    : <img src={c.media_url} alt={c.prompt} className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />}
+                  <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
+                </a>
+              );
+            })}
           </div>
         </div>
       )}

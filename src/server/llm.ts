@@ -147,6 +147,53 @@ export async function generateImageB64(
   return b64;
 }
 
+function googleAiKey(): string {
+  return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
+}
+
+/** Inicia a geração de vídeo (Veo, long-running) e retorna o nome da operação. */
+export async function startVideoGoogle(prompt: string, aspectRatio: "16:9" | "9:16" = "16:9"): Promise<string> {
+  const key = googleAiKey();
+  if (!key) throw new Error("GOOGLE_AI_API_KEY não configurada para gerar vídeo.");
+  const model = process.env.GOOGLE_VIDEO_MODEL || "veo-3.0-generate-001";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning?key=${key}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instances: [{ prompt }], parameters: { aspectRatio } }),
+  });
+  if (!res.ok) throw new Error(`Veo ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+  const data: any = await res.json();
+  if (!data?.name) throw new Error("Veo não retornou a operação.");
+  return data.name;
+}
+
+/** Consulta a operação do Veo. Em done, devolve o vídeo (uri/base64) ou erro. */
+export async function pollVideoGoogle(operationName: string): Promise<{ done: boolean; b64?: string; uri?: string; error?: string }> {
+  const key = googleAiKey();
+  if (!key) return { done: false, error: "sem chave" };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${key}`);
+  if (!res.ok) return { done: false, error: `poll ${res.status}` };
+  const data: any = await res.json();
+  if (!data?.done) return { done: false };
+  if (data.error) return { done: true, error: data.error.message || "erro na geração" };
+  const r = data.response || {};
+  const sample = r?.generateVideoResponse?.generatedSamples?.[0] || r?.generatedSamples?.[0] || r?.predictions?.[0] || {};
+  const uri = sample?.video?.uri || sample?.video?.fileUri || sample?.uri || sample?.videoUri;
+  const b64 = sample?.video?.bytesBase64Encoded || sample?.bytesBase64Encoded;
+  recordUsage(process.env.GOOGLE_VIDEO_MODEL || "veo-3.0-generate-001", "video", 0, 0, Number(process.env.GOOGLE_VIDEO_COST_USD || 0.5));
+  return { done: true, b64, uri };
+}
+
+/** Baixa o arquivo de vídeo (anexa a chave para URIs de arquivo da Gemini API). */
+export async function downloadVideoBuffer(uri: string): Promise<Buffer> {
+  const key = googleAiKey();
+  const u = /key=/.test(uri) ? uri : `${uri}${uri.includes("?") ? "&" : "?"}key=${key}`;
+  const res = await fetch(u);
+  if (!res.ok) throw new Error(`download vídeo ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /** Transcreve um áudio (Buffer) para texto via Whisper. */
 export async function transcribeAudio(
   buffer: Buffer,

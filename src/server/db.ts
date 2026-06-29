@@ -889,6 +889,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ai_memory_enabled INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN returning_greeting_enabled INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN returning_greeting_min_days INTEGER DEFAULT 7`); } catch(e){}
+  // Estúdio: status/operação do fluxo assíncrono de vídeo (Veo).
+  try { db.exec(`ALTER TABLE studio_creations ADD COLUMN status TEXT DEFAULT 'done'`); } catch(e){}
+  try { db.exec(`ALTER TABLE studio_creations ADD COLUMN operation TEXT`); } catch(e){}
   // Fase 3 — Pesquisa de satisfação (CSAT): opt-in + atraso após o pagamento.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN nps_delay_hours INTEGER DEFAULT 24`); } catch(e){}

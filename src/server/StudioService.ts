@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
-import { chat, describeImage, generateImageB64 } from "./llm.js";
+import { chat, describeImage, generateImageB64, startVideoGoogle, pollVideoGoogle, downloadVideoBuffer } from "./llm.js";
 import { PlanService } from "./PlanService.js";
 
 // Mesmo diretório de mídia servido em /media (avatares, imagens de chat, etc.).
@@ -10,8 +10,11 @@ const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
 try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch { /* noop */ }
 
 function saveB64(b64: string, ext = "png"): string {
+  return saveBuffer(Buffer.from(b64, "base64"), ext);
+}
+function saveBuffer(buf: Buffer, ext = "png"): string {
   const name = `studio_${randomUUID()}.${ext}`;
-  fs.writeFileSync(path.join(MEDIA_DIR, name), Buffer.from(b64, "base64"));
+  fs.writeFileSync(path.join(MEDIA_DIR, name), buf);
   return `/media/${name}`;
 }
 
@@ -120,9 +123,65 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
     return { id, mediaUrl, prompt: briefing };
   }
 
+  /** Inicia a geração de um vídeo (Veo, assíncrono). Reserva a cota na hora. */
+  static async startVideo(orgId: string, briefing: string, format: StudioFormat = "story"): Promise<{ jobId: string; status: string }> {
+    const gate = PlanService.studioAllowed(orgId, "video");
+    if (!gate.allowed) {
+      const msg = gate.reason === "monthly_limit"
+        ? `Limite de vídeos do plano atingido (${gate.used}/${gate.limit} este mês).`
+        : gate.reason === "plan_no_studio"
+          ? "Seu plano não inclui geração de vídeos no Estúdio."
+          : "Geração indisponível no momento (verifique o status da conta).";
+      throw new Error(msg);
+    }
+    const aspect: "16:9" | "9:16" = format === "story" ? "9:16" : "16:9";
+    const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const brand = this.getBrand(orgId);
+    const brandLine = brand && (brand.palette.length || brand.style || brand.tone)
+      ? `Identidade da marca — paleta: ${brand.palette.join(", ") || "n/d"}; estilo: ${brand.style || "n/d"}; tom: ${brand.tone || "n/d"}.`
+      : "";
+    const fullPrompt = `Vídeo curto de marketing para a empresa "${biz?.business_name || "a empresa"}". ${briefing}. ${brandLine} Movimento suave, alta qualidade, adequado para redes sociais.`;
+
+    const operation = await startVideoGoogle(fullPrompt, aspect);
+    const id = randomUUID();
+    // Cria a criação já como "processing" (conta na cota desde já).
+    db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, operation) VALUES (?, ?, 'video', ?, NULL, 'processing', ?)")
+      .run(id, orgId, briefing, operation);
+    return { jobId: id, status: "processing" };
+  }
+
+  /** Verifica o andamento do vídeo; quando pronto, baixa e salva em /media. */
+  static async pollVideo(orgId: string, jobId: string): Promise<{ status: string; mediaUrl?: string; error?: string }> {
+    const row = db.prepare("SELECT id, status, operation, media_url FROM studio_creations WHERE id = ? AND organization_id = ? AND kind = 'video'").get(jobId, orgId) as any;
+    if (!row) return { status: "error", error: "Vídeo não encontrado." };
+    if (row.status === "done") return { status: "done", mediaUrl: row.media_url };
+    if (row.status === "error") return { status: "error", error: "A geração falhou." };
+
+    let p;
+    try { p = await pollVideoGoogle(row.operation); }
+    catch (e: any) { return { status: "processing" }; } // erro transitório: tenta de novo depois
+    if (!p.done) return { status: "processing" };
+    if (p.error) {
+      db.prepare("UPDATE studio_creations SET status = 'error' WHERE id = ?").run(jobId);
+      return { status: "error", error: p.error };
+    }
+    try {
+      let buf: Buffer | null = null;
+      if (p.b64) buf = Buffer.from(p.b64, "base64");
+      else if (p.uri) buf = await downloadVideoBuffer(p.uri);
+      if (!buf) { db.prepare("UPDATE studio_creations SET status = 'error' WHERE id = ?").run(jobId); return { status: "error", error: "Vídeo sem conteúdo." }; }
+      const mediaUrl = saveBuffer(buf, "mp4");
+      db.prepare("UPDATE studio_creations SET media_url = ?, status = 'done' WHERE id = ?").run(mediaUrl, jobId);
+      return { status: "done", mediaUrl };
+    } catch (e: any) {
+      db.prepare("UPDATE studio_creations SET status = 'error' WHERE id = ?").run(jobId);
+      return { status: "error", error: e.message || "Falha ao baixar o vídeo." };
+    }
+  }
+
   static listCreations(orgId: string, limit = 30): any[] {
     return db.prepare(
-      "SELECT id, kind, prompt, media_url, created_at FROM studio_creations WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?"
+      "SELECT id, kind, prompt, media_url, COALESCE(status,'done') AS status, created_at FROM studio_creations WHERE organization_id = ? AND (media_url IS NOT NULL OR COALESCE(status,'done') = 'processing') ORDER BY created_at DESC LIMIT ?"
     ).all(orgId, limit) as any[];
   }
 }

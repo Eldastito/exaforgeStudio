@@ -1439,6 +1439,52 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar contas/contatos do Prospect AI', e); }
 
+  // Prospect AI (Fase 1, item 2) — ledger de evidências, hipóteses de dor e
+  // snapshots de score. Evidência ≠ hipótese (princípio do PRD).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_signals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        prospect_account_id TEXT,
+        signal_type TEXT,          -- cobertura_digital | complexidade_operacional | oferta | crescimento | conteudo_proprio | resposta_comercial | outro
+        observation TEXT,          -- dado observado
+        evidence_reference TEXT,   -- URL / origem / nota
+        confidence REAL DEFAULT 0.6,
+        source_kind TEXT DEFAULT 'user',  -- user | connector | ai
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_signals_acc ON prospect_signals (organization_id, prospect_account_id);
+
+      CREATE TABLE IF NOT EXISTS prospect_hypotheses (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        prospect_account_id TEXT,
+        hypothesis TEXT,           -- em linguagem probabilística
+        evidence_refs TEXT,        -- JSON com as observações usadas
+        recommended_question TEXT,
+        related_capability TEXT,   -- RIC, CRM, Copiloto...
+        confidence TEXT DEFAULT 'media',  -- baixa | media | alta
+        status TEXT DEFAULT 'draft',      -- draft | approved | rejected
+        created_by_type TEXT DEFAULT 'ai',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_hyp_acc ON prospect_hypotheses (organization_id, prospect_account_id);
+
+      CREATE TABLE IF NOT EXISTS prospect_score_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        prospect_account_id TEXT,
+        account_fit REAL, pain_evidence REAL, reachability REAL,
+        data_confidence REAL, compliance REAL, priority REAL,
+        explanation_json TEXT,
+        calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_scores_acc ON prospect_score_snapshots (organization_id, prospect_account_id, calculated_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar evidências/hipóteses/score do Prospect AI', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

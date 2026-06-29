@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone } from 'lucide-react';
+import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -300,21 +300,71 @@ function ImportModal({ campaigns, onClose, onDone }: { campaigns: Campaign[]; on
   );
 }
 
+const SIGNAL_TYPES: { id: string; label: string }[] = [
+  { id: 'cobertura_digital', label: 'Cobertura digital' },
+  { id: 'complexidade_operacional', label: 'Complexidade operacional' },
+  { id: 'oferta', label: 'Oferta / serviços' },
+  { id: 'crescimento', label: 'Crescimento' },
+  { id: 'conteudo_proprio', label: 'Conteúdo próprio' },
+  { id: 'resposta_comercial', label: 'Resposta comercial' },
+  { id: 'outro', label: 'Outro' },
+];
+
 function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
-  const [acc, setAcc] = useState<Account | null>(null);
-  useEffect(() => { apiFetch(`/api/prospect/accounts/${id}`).then(r => r.json()).then(d => { if (d && d.id) setAcc(d); }).catch(() => {}); }, [id]);
+  const [acc, setAcc] = useState<Account | any>(null);
+  const [sigType, setSigType] = useState('cobertura_digital');
+  const [sigObs, setSigObs] = useState('');
+  const [sigRef, setSigRef] = useState('');
+  const [genBusy, setGenBusy] = useState(false);
+  const [scoreBusy, setScoreBusy] = useState(false);
+
+  const refresh = () => apiFetch(`/api/prospect/accounts/${id}`).then(r => r.json()).then(d => { if (d && d.id) setAcc(d); }).catch(() => {});
+  useEffect(() => { refresh(); }, [id]);
+  const apply = (d: any) => { if (d && d.id) setAcc(d); onChanged(); };
 
   const setStatus = async (status: string) => {
     try {
       const r = await apiFetch(`/api/prospect/accounts/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
       if (!r.ok) throw new Error();
-      setAcc(a => a ? { ...a, account_status: status } : a); onChanged();
+      setAcc((a: any) => a ? { ...a, account_status: status } : a); onChanged();
     } catch { toast.error('Não foi possível atualizar o status.'); }
   };
+  const addSignal = async () => {
+    if (!sigObs.trim()) { toast.error('Descreva o dado observado.'); return; }
+    try {
+      const r = await apiFetch(`/api/prospect/accounts/${id}/signals`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signalType: sigType, observation: sigObs, evidenceReference: sigRef }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d); setSigObs(''); setSigRef('');
+    } catch (e: any) { toast.error(e.message); }
+  };
+  const removeSignal = async (sid: string) => {
+    try { const r = await apiFetch(`/api/prospect/accounts/${id}/signals/${sid}`, { method: 'DELETE' }); const d = await r.json(); if (!r.ok) throw new Error(); apply(d); } catch { toast.error('Falha ao remover.'); }
+  };
+  const genHyp = async () => {
+    setGenBusy(true);
+    try {
+      const r = await apiFetch(`/api/prospect/accounts/${id}/hypotheses`, { method: 'POST' });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d);
+      toast.success('Hipóteses geradas. Revise e aprove. 💡');
+    } catch (e: any) { toast.error(e.message); } finally { setGenBusy(false); }
+  };
+  const setHyp = async (hid: string, status: string) => {
+    try { const r = await apiFetch(`/api/prospect/accounts/${id}/hypotheses/${hid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) throw new Error(); apply(d); } catch { toast.error('Falha.'); }
+  };
+  const recompute = async () => {
+    setScoreBusy(true);
+    try { const r = await apiFetch(`/api/prospect/accounts/${id}/score`, { method: 'POST' }); if (!r.ok) throw new Error(); await refresh(); toast.success('Score recalculado.'); }
+    catch { toast.error('Falha ao calcular o score.'); } finally { setScoreBusy(false); }
+  };
+
+  const sc = acc?.score;
+  const ScoreBar = ({ label, v }: { label: string; v: number }) => (
+    <div><div className="flex justify-between text-[10px] text-zinc-500"><span>{label}</span><span className="text-zinc-300">{Math.round(v || 0)}</span></div>
+      <div className="h-1.5 rounded-full bg-zinc-800 mt-0.5"><div className="h-1.5 rounded-full bg-cyan-500" style={{ width: `${Math.max(0, Math.min(100, v || 0))}%` }} /></div></div>
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
-      <div className="h-full w-full max-w-[440px] bg-zinc-900 border-l border-zinc-800 overflow-auto p-5" onClick={e => e.stopPropagation()}>
+      <div className="h-full w-full max-w-[460px] bg-zinc-900 border-l border-zinc-800 overflow-auto p-5" onClick={e => e.stopPropagation()}>
         {!acc ? <Spinner /> : (
           <>
             <div className="flex items-start justify-between gap-2 mb-3">
@@ -325,7 +375,7 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400 mb-4">
+            <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400 mb-3">
               {acc.industry && <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2"><span className="text-zinc-500 block">Segmento</span>{acc.industry}</div>}
               {(acc.city || acc.state) && <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2"><span className="text-zinc-500 block">Local</span>{[acc.city, acc.state].filter(Boolean).join('/')}</div>}
             </div>
@@ -335,6 +385,70 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               {Object.entries(ACCOUNT_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
 
+            {/* Score */}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1"><Gauge className="w-3.5 h-3.5 text-cyan-400" /> Score{sc ? <span className="ml-1 text-cyan-300">· Prioridade {Math.round(sc.priority)}</span> : ''}</span>
+                <button onClick={recompute} disabled={scoreBusy} className="text-[11px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1">{scoreBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Gauge className="w-3 h-3" />} {sc ? 'Recalcular' : 'Calcular'}</button>
+              </div>
+              {sc ? (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                  <ScoreBar label="Aderência" v={sc.account_fit} />
+                  <ScoreBar label="Evidência de dor" v={sc.pain_evidence} />
+                  <ScoreBar label="Contatabilidade" v={sc.reachability} />
+                  <ScoreBar label="Confiança do dado" v={sc.data_confidence} />
+                  <ScoreBar label="Conformidade" v={sc.compliance} />
+                </div>
+              ) : <p className="text-[11px] text-zinc-600">Calcule o score a partir dos dados, contatos e evidências.</p>}
+            </div>
+
+            {/* Evidências */}
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Evidências ({acc.signals?.length || 0})</p>
+            <div className="space-y-1.5 mb-2">
+              {(acc.signals || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhuma evidência. Registre o que você observou (site, materiais, resposta do prospect).</p>}
+              {(acc.signals || []).map((s: any) => (
+                <div key={s.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs">
+                  <div className="flex items-start gap-2">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 shrink-0">{SIGNAL_TYPES.find(t => t.id === s.signal_type)?.label || s.signal_type}</span>
+                    <span className="flex-1 text-zinc-200">{s.observation}</span>
+                    <button onClick={() => removeSignal(s.id)} className="text-zinc-600 hover:text-red-400 shrink-0"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                  {s.evidence_reference && <p className="text-[10px] text-zinc-500 mt-0.5 truncate">fonte: {s.evidence_reference}</p>}
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mb-4">
+              <select value={sigType} onChange={e => setSigType(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 outline-none">
+                {SIGNAL_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <input value={sigObs} onChange={e => setSigObs(e.target.value)} placeholder="O que você observou" className="flex-1 min-w-[120px] bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 outline-none focus:border-cyan-500" />
+              <input value={sigRef} onChange={e => setSigRef(e.target.value)} placeholder="fonte/URL (opc.)" className="w-28 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 outline-none" />
+              <button onClick={addSignal} className="px-2 py-1 rounded-lg bg-zinc-800 text-zinc-200 hover:bg-zinc-700"><Plus className="w-3.5 h-3.5" /></button>
+            </div>
+
+            {/* Hipóteses de dor */}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Hipóteses de dor ({acc.hypotheses?.length || 0})</p>
+              <button onClick={genHyp} disabled={genBusy} className="text-[11px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1">{genBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} Gerar com IA</button>
+            </div>
+            <div className="space-y-2 mb-3">
+              {(acc.hypotheses || []).length === 0 && <p className="text-[11px] text-zinc-600">Adicione evidências e gere hipóteses (linguagem probabilística, com base só nas evidências).</p>}
+              {(acc.hypotheses || []).map((h: any) => (
+                <div key={h.id} className={`rounded-lg border p-2.5 ${h.status === 'approved' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-950'}`}>
+                  <p className="text-xs text-zinc-200">{h.hypothesis}</p>
+                  {h.recommended_question && <p className="text-[11px] text-cyan-300 mt-1">❓ {h.recommended_question}</p>}
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400">confiança: {h.confidence}</span>
+                    {h.status === 'approved'
+                      ? <span className="text-[10px] text-emerald-400 inline-flex items-center gap-1"><Check className="w-3 h-3" /> aprovada</span>
+                      : <button onClick={() => setHyp(h.id, 'approved')} className="text-[10px] text-emerald-400 hover:text-emerald-300">aprovar</button>}
+                    <button onClick={() => setHyp(h.id, 'rejected')} className="text-[10px] text-zinc-500 hover:text-red-400">descartar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Contatos */}
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Contatos ({acc.contacts?.length || 0})</p>
             <div className="space-y-2">
               {(acc.contacts || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhum contato.</p>}
@@ -346,7 +460,7 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                 </div>
               ))}
             </div>
-            <p className="mt-4 text-[10px] text-zinc-600">Próximas etapas: evidências, hipótese de dor, score e abordagem aprovável.</p>
+            <p className="mt-4 text-[10px] text-zinc-600">Próxima etapa: composer de abordagem (e-mail) + fila de aprovação.</p>
           </>
         )}
       </div>

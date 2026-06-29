@@ -407,6 +407,13 @@ export async function processIncomingMessage(
              GoogleOAuthService.syncAppointment(orgId, apptId).catch(() => {});
              // Confirmação por e-mail ao cliente (best-effort; respeita o toggle do dono).
              GoogleAutomationService.confirmAppointment(orgId, apptId).catch(() => {});
+             // Agendamento confirmado: move o card para "Agendado" no Kanban
+             // (a IA marcava só "proposta"; o avanço de estágio é feito aqui).
+             if (ticket.stage !== 'agendado') {
+               db.prepare('UPDATE tickets SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run('agendado', ticket.id);
+               ticket.stage = 'agendado';
+               if (io) io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, contactId: contact.id, newStage: 'agendado' });
+             }
           }
        }
        

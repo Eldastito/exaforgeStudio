@@ -1,4 +1,5 @@
 import { chat } from "./llm.js";
+import db from "./db.js";
 import { BusinessContextService } from "./BusinessContextService.js";
 import { RevenueAuditService } from "./RevenueAuditService.js";
 
@@ -73,6 +74,43 @@ Para cada ação, escreva 1 linha começando com um verbo de comando e, quando f
     } catch (e) {
       console.error("[DiretorIA] Falha no plano 30/60/90:", e);
       return "Não consegui gerar o plano agora. Tente novamente em instantes.";
+    }
+  }
+
+  /**
+   * Coordenador IA (Execution Intelligence) — assessora o COLABORADOR a entregar
+   * uma tarefa: passos práticos + um roteiro de abordagem quando houver cliente.
+   * Foco e baixo custo: usa só a tarefa + nome/segmento da empresa (sem o
+   * panorama financeiro inteiro, que é coisa do Diretor).
+   */
+  static async taskAssist(orgId: string, task: { title: string; description?: string; contactName?: string; refLabel?: string }): Promise<string> {
+    const title = String(task?.title || "").trim();
+    if (!title) return "Sem tarefa para orientar.";
+    let biz: any = {};
+    try { biz = db.prepare("SELECT business_name, vertical FROM organization_settings WHERE organization_id = ?").get(orgId) || {}; } catch { biz = {}; }
+    const ctx = [
+      biz?.business_name ? `Empresa: ${biz.business_name}.` : "",
+      biz?.vertical ? `Segmento: ${biz.vertical}.` : "",
+      task.contactName ? `Cliente envolvido: ${task.contactName}.` : "",
+      task.refLabel ? `Referência: ${task.refLabel}.` : "",
+    ].filter(Boolean).join(" ");
+    const prompt = `Você é o COORDENADOR IA — ajuda os colaboradores da empresa a executar tarefas com produtividade. Seja prático, direto e gentil.
+${ctx}
+
+TAREFA:
+Título: ${title}
+${task.description ? `Detalhes: ${task.description}` : ""}
+
+Oriente o colaborador a entregar esta tarefa:
+1. Um CHECKLIST objetivo (3 a 6 passos, em ordem).
+2. Se a tarefa envolve falar com um cliente, um ROTEIRO curto de mensagem/abordagem (tom acolhedor, pronto para enviar).
+3. Um lembrete final de 1 linha (o que NÃO esquecer).
+Seja conciso. Não invente dados que você não tem.`;
+    try {
+      return (await chat(prompt, { temperature: 0.4 })).trim();
+    } catch (e) {
+      console.error("[CoordenadorIA] Falha ao assessorar tarefa:", e);
+      return "Não consegui gerar a orientação agora. Tente novamente em instantes.";
     }
   }
 

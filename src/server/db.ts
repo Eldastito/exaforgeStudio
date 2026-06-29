@@ -1278,6 +1278,44 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar ric_recovery_actions', e); }
 
+  // Execution Intelligence v1 — tarefas internas (delegação à equipe) + trilha
+  // de acompanhamento. Núcleo da camada de execução (Coordenador IA na Fase 2).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        title TEXT NOT NULL,
+        description TEXT,
+        assigned_to TEXT,                 -- user responsável (NULL = sem dono)
+        created_by TEXT,
+        priority TEXT DEFAULT 'media',    -- baixa | media | alta
+        status TEXT DEFAULT 'a_fazer',    -- a_fazer | fazendo | feito | cancelada
+        due_at DATETIME,
+        source TEXT DEFAULT 'manual',     -- manual | ric | ia
+        contact_id TEXT,                  -- vínculo opcional a um cliente
+        ticket_id TEXT,                   -- vínculo opcional a uma conversa
+        ref_label TEXT,                   -- rótulo livre (ex.: "Orçamento #41")
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_org_status ON tasks (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_org_assignee ON tasks (organization_id, assigned_to);
+
+      CREATE TABLE IF NOT EXISTS task_updates (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        organization_id TEXT,
+        author_user_id TEXT,
+        kind TEXT DEFAULT 'note',         -- note | status_change | assign
+        text TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_updates_task ON task_updates (task_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tasks', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

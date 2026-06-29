@@ -3,6 +3,7 @@ import { Gauge, RefreshCw, AlertTriangle, SlidersHorizontal } from 'lucide-react
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { useStore } from '@/src/store/useStore';
 import type { RicPeriod, RicSnapshot, RicRecoveryAction } from './types';
 import { MoneyKpiCard } from './components/MoneyKpiCard';
 import { IqrGauge } from './components/IqrGauge';
@@ -83,6 +84,7 @@ export function RevenueIntelligenceView() {
   const [drillDriver, setDrillDriver] = useState<DriverKey | null>(null);
   const [actions, setActions] = useState<RicRecoveryAction[]>([]);
   const [actingKey, setActingKey] = useState<string | null>(null);
+  const canDelegate = useStore(s => s.isModuleEnabled('execucao'));
   const topActionsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (p: RicPeriod) => {
@@ -123,6 +125,18 @@ export function RevenueIntelligenceView() {
       setActingKey(null);
     }
   }, [loadActions]);
+
+  // Delega uma fonte de perda como TAREFA interna para a equipe (Execution Intel).
+  const delegate = useCallback(async (_sourceKey: string, label: string) => {
+    try {
+      const r = await apiFetch('/api/tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: label, source: 'ric', priority: 'alta' }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha ao delegar.');
+      toast.success('Tarefa criada em Tarefas — defina o responsável lá. 📋');
+    } catch (e: any) { toast.error(e.message || 'Não foi possível delegar.'); }
+  }, []);
 
   useEffect(() => { load(period); }, [period, load]);
   useEffect(() => { loadActions(); }, [loadActions]);
@@ -266,7 +280,7 @@ export function RevenueIntelligenceView() {
                   ))}
                 </div>
               ) : (
-                <TopActionsList snapshot={snapshot} onAct={act} actingKey={actingKey} />
+                <TopActionsList snapshot={snapshot} onAct={act} actingKey={actingKey} onDelegate={canDelegate ? delegate : undefined} />
               )}
             </Card>
           </div>

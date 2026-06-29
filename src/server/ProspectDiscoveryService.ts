@@ -23,6 +23,44 @@ const OVERPASS = "https://overpass-api.de/api/interpreter";
 const MAX_PER_RUN = 10;        // teto de contas novas por rodada
 const MIN_GAP_HOURS = 3;       // intervalo mínimo entre rodadas da mesma campanha
 
+// Conjunto padrão (quando o usuário não informa categoria): cobre a maioria dos
+// negócios locais — lojas, escritórios, serviços, saúde, alimentação, hotelaria.
+const DEFAULT_CATS = [
+  "shop", "office", "craft", "healthcare",
+  "amenity=restaurant", "amenity=cafe", "amenity=bar", "amenity=fast_food",
+  "amenity=pharmacy", "amenity=clinic", "amenity=doctors", "amenity=dentist",
+  "amenity=veterinary", "amenity=bank", "amenity=fuel", "amenity=school",
+  "amenity=driving_school", "amenity=gym", "tourism=hotel", "tourism=guest_house",
+  "leisure=fitness_centre",
+];
+// Chaves OSM válidas que o usuário pode digitar direto.
+const OSM_KEYS = new Set(["shop", "office", "craft", "amenity", "healthcare", "leisure", "tourism", "club"]);
+// Termos comuns em PT-BR → etiquetas OSM (o empresário não precisa saber OSM).
+const PT_CATEGORY_MAP: Record<string, string[]> = {
+  clinica: ["amenity=clinic", "amenity=doctors", "healthcare"],
+  consultorio: ["amenity=doctors", "amenity=dentist", "healthcare"],
+  medico: ["amenity=doctors", "healthcare"],
+  dentista: ["amenity=dentist"],
+  hospital: ["amenity=hospital"],
+  laboratorio: ["healthcare=laboratory", "amenity=clinic"],
+  farmacia: ["amenity=pharmacy"],
+  veterinaria: ["amenity=veterinary"], veterinario: ["amenity=veterinary"],
+  petshop: ["shop=pet"], pet: ["shop=pet"],
+  restaurante: ["amenity=restaurant"], lanchonete: ["amenity=fast_food"],
+  cafe: ["amenity=cafe"], bar: ["amenity=bar"], padaria: ["shop=bakery"],
+  hotel: ["tourism=hotel"], pousada: ["tourism=guest_house"],
+  academia: ["leisure=fitness_centre", "amenity=gym"],
+  salao: ["shop=hairdresser", "shop=beauty"], barbearia: ["shop=hairdresser"],
+  estetica: ["shop=beauty", "amenity=clinic"],
+  escritorio: ["office"], advogado: ["office=lawyer"], contador: ["office=accountant"],
+  imobiliaria: ["office=estate_agent"], escola: ["amenity=school"],
+  autoescola: ["amenity=driving_school"], oficina: ["shop=car_repair", "craft"],
+  loja: ["shop"], mercado: ["shop=supermarket", "shop=convenience"], supermercado: ["shop=supermarket"],
+};
+function norm(s: any): string {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
 function normName(s: any): string {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/\b(ltda|me|eireli|s\.?a\.?|epp|cia|company|inc|corp)\b/g, "")
@@ -122,9 +160,26 @@ export class ProspectDiscoveryService {
     return null;
   }
 
+  /**
+   * Traduz o campo "categorias" (texto livre, em PT-BR) para etiquetas OSM:
+   * aceita chave OSM (shop), par chave=valor (amenity=restaurant) e termos
+   * comuns (clínica, petshop, restaurante…). Termos desconhecidos são ignorados
+   * — se sobrar vazio, a busca usa o conjunto padrão (amplo).
+   */
+  static resolveCategories(raw: string): string[] {
+    const out = new Set<string>();
+    for (const term of String(raw || "").split(",").map(norm).filter(Boolean)) {
+      if (term.includes("=")) { out.add(term); continue; }
+      if (OSM_KEYS.has(term)) { out.add(term); continue; }
+      const mapped = PT_CATEGORY_MAP[term] || PT_CATEGORY_MAP[term.replace(/s$/, "")];
+      if (mapped) mapped.forEach(m => out.add(m));
+    }
+    return [...out];
+  }
+
   static buildOverpass(lat: number, lon: number, radiusKm: number, categories: string[]): string {
     const r = Math.max(50, Math.round((Number(radiusKm) || 1) * 1000));
-    const cats = categories.length ? categories : ["shop", "office", "craft"];
+    const cats = categories.length ? categories : DEFAULT_CATS;
     const clauses = cats.flatMap(c => {
       const sel = c.includes("=") ? `["${c.split("=")[0]}"="${c.split("=").slice(1).join("=")}"]` : `["${c}"]`;
       return [`node(around:${r},${lat},${lon})${sel};`, `way(around:${r},${lat},${lon})${sel};`];
@@ -236,7 +291,7 @@ export class ProspectDiscoveryService {
         lat = geo.lat; lon = geo.lon;
         db.prepare("UPDATE prospect_campaigns SET discovery_lat = ?, discovery_lon = ? WHERE id = ? AND organization_id = ?").run(lat, lon, campaignId, orgId);
       }
-      const categories = String(camp.discovery_categories || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+      const categories = this.resolveCategories(camp.discovery_categories || "");
       const results = await this.searchOSM(lat, lon, camp.discovery_radius_km || 1, categories);
       const srcId = randomUUID();
       db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, 'osm_overpass', ?, 'public', 'tenant_policy', 0.6)").run(srcId, orgId, area);

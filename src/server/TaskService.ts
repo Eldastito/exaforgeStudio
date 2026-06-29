@@ -45,12 +45,40 @@ export class TaskService {
       LEFT JOIN users u ON u.id = tu.author_user_id
       WHERE tu.task_id = ? ORDER BY tu.created_at ASC
     `).all(id) as any[];
+    t.resources = db.prepare("SELECT * FROM task_resources WHERE task_id = ? ORDER BY created_at ASC").all(id) as any[];
+    // Verba total alocada = budget_amount fixo + soma das linhas financeiras.
+    const lineTotal = (t.resources as any[]).filter(r => r.kind === "financeiro").reduce((s, r) => s + Number(r.amount || 0), 0);
+    t.allocated_total = Math.round((Number(t.budget_amount || 0) + lineTotal) * 100) / 100;
     return t;
+  }
+
+  /** Adiciona uma linha de recurso (material: produto+qtd; financeiro: verba). */
+  static addResource(orgId: string, taskId: string, input: { kind: string; productId?: string | null; label?: string; quantity?: number; amount?: number }): any {
+    const exists = db.prepare("SELECT id FROM tasks WHERE id = ? AND organization_id = ?").get(taskId, orgId);
+    if (!exists) throw new Error("Tarefa não encontrada.");
+    const kind = input.kind === "financeiro" ? "financeiro" : "material";
+    let label = String(input.label || "").trim();
+    // Material com produto vinculado: usa o nome do produto se não veio rótulo.
+    if (kind === "material" && input.productId && !label) {
+      const p = db.prepare("SELECT name FROM products_services WHERE id = ? AND organization_id = ?").get(input.productId, orgId) as any;
+      if (p?.name) label = p.name;
+    }
+    if (!label) throw new Error("Descreva o recurso.");
+    db.prepare("INSERT INTO task_resources (id, task_id, organization_id, kind, product_id, label, quantity, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(randomUUID(), taskId, orgId, kind, kind === "material" ? (input.productId || null) : null, label,
+        Math.max(0, Number(input.quantity) || (kind === "material" ? 1 : 0)), Math.max(0, Number(input.amount) || 0));
+    db.prepare("UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(taskId);
+    return this.get(orgId, taskId);
+  }
+
+  static removeResource(orgId: string, taskId: string, resourceId: string): any {
+    db.prepare("DELETE FROM task_resources WHERE id = ? AND task_id = ? AND organization_id = ?").run(resourceId, taskId, orgId);
+    return this.get(orgId, taskId);
   }
 
   static create(orgId: string, input: {
     title: string; description?: string; assignedTo?: string | null; priority?: string;
-    dueAt?: string | null; source?: string; contactId?: string | null; ticketId?: string | null; refLabel?: string | null;
+    dueAt?: string | null; source?: string; contactId?: string | null; ticketId?: string | null; refLabel?: string | null; budget?: number;
   }, actorId?: string): any {
     const title = String(input.title || "").trim();
     if (!title) throw new Error("Informe um título para a tarefa.");
@@ -58,10 +86,10 @@ export class TaskService {
     const source = ["manual", "ric", "ia"].includes(String(input.source)) ? input.source : "manual";
     const id = randomUUID();
     db.prepare(`
-      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, title, input.description || "", input.assignedTo || null, actorId || null, priority,
-      input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null);
+      input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null, Math.max(0, Number(input.budget) || 0));
     if (input.assignedTo) this.notifyAssignee(orgId, input.assignedTo, title);
     return this.get(orgId, id);
   }
@@ -76,6 +104,7 @@ export class TaskService {
     if (patch.priority !== undefined && PRIORITIES.includes(patch.priority)) set("priority", patch.priority);
     if (patch.dueAt !== undefined) set("due_at", patch.dueAt || null);
     if (patch.refLabel !== undefined) set("ref_label", patch.refLabel || null);
+    if (patch.budget !== undefined) set("budget_amount", Math.max(0, Number(patch.budget) || 0));
     let reassignedTo: string | null = null;
     if (patch.assignedTo !== undefined && patch.assignedTo !== cur.assigned_to) {
       set("assigned_to", patch.assignedTo || null);

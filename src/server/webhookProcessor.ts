@@ -23,6 +23,7 @@ import { QuoteService } from "./QuoteService.js";
 import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
+import { MaestroService } from "./MaestroService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -386,6 +387,8 @@ export async function processIncomingMessage(
           }
           // Notifica a equipe: cliente precisa de atendente humano.
           try { NotificationService.handoff(orgId, contact.name); } catch (e) { /* noop */ }
+          // Maestro: cria uma tarefa interna delegada do repasse (opt-in por org).
+          try { MaestroService.onHandoff(orgId, { contactId: contact.id, ticketId: ticket.id, contactName: contact.name, summary: handoffSummary }); } catch (e) { /* noop */ }
        }
        
        // E-mail capturado pela IA na conversa: salva no contato ANTES de criar

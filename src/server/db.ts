@@ -1320,6 +1320,27 @@ const initDb = () => {
   // 'client' (padrão) = atendimento ao cliente; 'internal' = voz interna.
   try { db.exec(`ALTER TABLE channels ADD COLUMN kind TEXT DEFAULT 'client'`); } catch(e){}
 
+  // Execution Intelligence (Fase 3) — alocação de recursos por tarefa + Maestro.
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN budget_amount REAL DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_resources (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        organization_id TEXT,
+        kind TEXT,             -- material | financeiro
+        product_id TEXT,       -- opcional (quando material referencia um produto)
+        label TEXT,
+        quantity REAL DEFAULT 1,
+        amount REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_resources_task ON task_resources (task_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar task_resources', e); }
+  // Maestro: criar tarefa automática quando um atendimento é repassado p/ humano (opt-in).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_task_on_handoff INTEGER DEFAULT 0`); } catch(e){}
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

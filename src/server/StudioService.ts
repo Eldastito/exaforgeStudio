@@ -76,15 +76,19 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
       } catch { /* mantém perfil vazio se a síntese falhar */ }
     }
 
+    this.saveBrand(orgId, profile);
+    return profile;
+  }
+
+  /** Persiste (upsert) a identidade da marca de uma empresa. */
+  static saveBrand(orgId: string, profile: BrandProfile): void {
     db.prepare(
       `INSERT INTO brand_profiles (organization_id, palette, tone, style, summary, updated_at)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(organization_id) DO UPDATE SET
          palette = excluded.palette, tone = excluded.tone, style = excluded.style,
          summary = excluded.summary, updated_at = CURRENT_TIMESTAMP`
-    ).run(orgId, JSON.stringify(profile.palette), profile.tone, profile.style, profile.summary);
-
-    return profile;
+    ).run(orgId, JSON.stringify(profile.palette || []), profile.tone || "", profile.style || "", profile.summary || "");
   }
 
   /** Gera uma arte de campanha guiada pela identidade da marca + dados da empresa. */

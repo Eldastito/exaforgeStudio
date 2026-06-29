@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film } from 'lucide-react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -47,6 +47,9 @@ export function StudioView() {
 
   const [creations, setCreations] = useState<Creation[]>([]);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
+  const [ig, setIg] = useState<{ connected: boolean; username?: string }>({ connected: false });
+  const [igAnalyzing, setIgAnalyzing] = useState(false);
+  const [igPerf, setIgPerf] = useState('');
 
   // Vídeo (Veo) — fluxo assíncrono com polling.
   const [vBriefing, setVBriefing] = useState('');
@@ -61,7 +64,21 @@ export function StudioView() {
   // retornar um erro, ex.: módulo do Estúdio ainda não habilitado).
   const loadLimits = () => apiFetch('/api/studio/limits').then(r => r.json())
     .then(d => setLimits(d && d.images && d.videos ? d : null)).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); }, []);
+  const loadIg = () => apiFetch('/api/studio/instagram/status').then(r => r.json())
+    .then(d => setIg(d && typeof d.connected === 'boolean' ? d : { connected: false })).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); }, []);
+
+  const analyzeInstagram = async () => {
+    setIgAnalyzing(true);
+    try {
+      const res = await apiFetch('/api/studio/instagram/analyze', { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Falha ao analisar o Instagram.');
+      if (d.brand) setBrand(d.brand);
+      setIgPerf(d.performance || '');
+      toast.success('Identidade captada do seu Instagram! ✨');
+    } catch (e: any) { toast.error(e.message); } finally { setIgAnalyzing(false); }
+  };
 
   const onPickRefs = async (files: FileList | null) => {
     if (!files) return;
@@ -149,7 +166,18 @@ export function StudioView() {
         {/* Identidade da marca */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
           <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2 mb-1"><Palette className="w-4 h-4 text-fuchsia-400" /> Identidade da marca</h3>
-          <p className="text-xs text-zinc-500 mb-3">Suba de 1 a 5 posts de referência. A IA capta as cores, o estilo e o tom para aplicar nas artes.</p>
+          <p className="text-xs text-zinc-500 mb-3">A IA capta as cores, o estilo e o tom — do seu Instagram ou de posts de referência.</p>
+
+          {ig.connected && (
+            <>
+              <button onClick={analyzeInstagram} disabled={igAnalyzing}
+                className="flex items-center justify-center gap-2 w-full rounded-lg bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-700 hover:to-pink-700 text-white py-2.5 text-sm font-medium transition-colors disabled:opacity-60">
+                {igAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Instagram className="w-4 h-4" />}
+                {igAnalyzing ? 'Analisando seu feed…' : `Analisar meu Instagram${ig.username ? ` (@${ig.username})` : ''}`}
+              </button>
+              <div className="text-center text-[10px] text-zinc-600 my-2">ou suba posts manualmente</div>
+            </>
+          )}
 
           <label className="flex items-center justify-center gap-2 w-full cursor-pointer rounded-lg border border-dashed border-zinc-700 bg-zinc-950 py-4 text-sm text-zinc-400 hover:border-fuchsia-500/50 hover:text-zinc-200 transition-colors">
             <Upload className="w-4 h-4" /> Selecionar posts (até 5)
@@ -184,6 +212,12 @@ export function StudioView() {
               {brand!.style && <p className="text-xs text-zinc-400"><span className="text-zinc-500">Estilo:</span> {brand!.style}</p>}
               {brand!.tone && <p className="text-xs text-zinc-400"><span className="text-zinc-500">Tom:</span> {brand!.tone}</p>}
               {brand!.summary && <p className="text-xs text-zinc-500 italic">{brand!.summary}</p>}
+            </div>
+          )}
+
+          {igPerf && (
+            <div className="mt-3 rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/5 p-3 text-xs text-fuchsia-200">
+              <span className="font-medium">O que mais performa no seu Instagram:</span> {igPerf}
             </div>
           )}
         </div>

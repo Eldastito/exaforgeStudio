@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MessageProviderService } from "../MessageProviderService.js";
+import { PlanService } from "../PlanService.js";
 
 const router = Router();
 
@@ -200,6 +201,50 @@ router.delete("/org-invites/:id", (req: AuthRequest, res) => {
   try {
     db.prepare(`UPDATE org_invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'`).run(req.params.id);
     logAuthEvent(req.organizationId, req.user?.userId, req.params.id, 'ADMIN_ORG_INVITE_REVOKED', {});
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// Planos & Limites — o super admin edita preço e limites de cada plano
+// (respostas de IA, contatos, canais, usuários, trial e limites do Estúdio).
+// ============================================================================
+
+// GET /api/admin/plans — lista os planos com features (limites) já parseadas.
+router.get("/plans", (req: AuthRequest, res) => {
+  try {
+    res.json(PlanService.listPlans());
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/admin/plans/:id — atualiza nome/preço/limites de um plano.
+router.put("/plans/:id", (req: AuthRequest, res): any => {
+  try {
+    const plan = db.prepare("SELECT features FROM plans WHERE id = ?").get(req.params.id) as any;
+    if (!plan) return res.status(404).json({ error: "Plano não encontrado." });
+    let cur: any = {};
+    try { cur = plan.features ? JSON.parse(plan.features) : {}; } catch { cur = {}; }
+
+    const { name, price, features } = req.body || {};
+    const NUM_KEYS = ["ai_monthly_limit", "contacts_limit", "channels_limit", "users_limit", "trial_days", "studio_images_monthly", "studio_videos_monthly"];
+    const next = { ...cur };
+    if (features && typeof features === "object") {
+      for (const k of NUM_KEYS) {
+        if (features[k] !== undefined && features[k] !== null && features[k] !== "") {
+          const n = parseInt(String(features[k]), 10);
+          if (!isNaN(n)) next[k] = Math.max(0, n);
+        }
+      }
+    }
+    db.prepare("UPDATE plans SET name = COALESCE(?, name), price = COALESCE(?, price), features = ? WHERE id = ?")
+      .run(name != null && String(name).trim() ? String(name).trim() : null,
+           price != null && price !== "" && !isNaN(Number(price)) ? Number(price) : null,
+           JSON.stringify(next), req.params.id);
+    logAuthEvent(req.organizationId, req.user?.userId, req.params.id, 'ADMIN_PLAN_UPDATED', { name, price });
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

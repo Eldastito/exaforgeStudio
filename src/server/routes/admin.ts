@@ -45,6 +45,10 @@ router.get("/overview", (req: AuthRequest, res) => {
       aiLast30d: safeCount(`SELECT COUNT(*) as c FROM ai_interactions_log WHERE created_at >= datetime('now','-30 days')`),
       aiLast24h: safeCount(`SELECT COUNT(*) as c FROM ai_interactions_log WHERE created_at >= datetime('now','-1 day')`),
       totalRevenue: safeSum(`SELECT COALESCE(SUM(total_amount),0) as s FROM orders WHERE status IN ('pago','em_preparo','entregue','concluido')`),
+      // Custo de IA (R$) — consumo de tokens das empresas.
+      aiCost30d: safeSum(`SELECT COALESCE(SUM(cost_brl),0) as s FROM ai_usage_log WHERE created_at >= datetime('now','-30 days')`),
+      aiCostTotal: safeSum(`SELECT COALESCE(SUM(cost_brl),0) as s FROM ai_usage_log`),
+      aiTokens30d: safeCount(`SELECT COALESCE(SUM(total_tokens),0) as c FROM ai_usage_log WHERE created_at >= datetime('now','-30 days')`),
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -60,6 +64,8 @@ router.get("/organizations", (req: AuthRequest, res) => {
         (SELECT COUNT(*) FROM contacts c WHERE c.organization_id = os.organization_id) AS contact_count,
         (SELECT COUNT(*) FROM ai_interactions_log a WHERE a.organization_id = os.organization_id) AS ai_total,
         (SELECT COUNT(*) FROM ai_interactions_log a WHERE a.organization_id = os.organization_id AND a.created_at >= datetime('now','-30 days')) AS ai_30d,
+        (SELECT COALESCE(SUM(u.cost_brl),0) FROM ai_usage_log u WHERE u.organization_id = os.organization_id AND u.created_at >= datetime('now','-30 days')) AS ai_cost_30d,
+        (SELECT COALESCE(SUM(u.total_tokens),0) FROM ai_usage_log u WHERE u.organization_id = os.organization_id AND u.created_at >= datetime('now','-30 days')) AS ai_tokens_30d,
         (SELECT COALESCE(SUM(o.total_amount),0) FROM orders o WHERE o.organization_id = os.organization_id AND o.status IN ('pago','em_preparo','entregue','concluido')) AS revenue,
         (SELECT MAX(m.created_at) FROM messages m WHERE m.organization_id = os.organization_id) AS last_activity
       FROM organization_settings os

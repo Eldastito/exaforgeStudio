@@ -49,6 +49,7 @@ import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./sr
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { processIncomingMessage } from "./src/server/webhookProcessor.js";
+import { setUsageOrg } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
@@ -322,6 +323,9 @@ async function startServer() {
   const protectedApi = express.Router();
   protectedApi.use(requireAuth);
   protectedApi.use(requireOrganizationAccess);
+
+  // Atribui o consumo de IA das chamadas desta requisição à empresa do usuário.
+  protectedApi.use((req: any, _res, next) => { setUsageOrg(req.organizationId || null); next(); });
 
   // GATING DE MÓDULOS: bloqueia rotas de módulos opcionais que a organização
   // não tem habilitados (deriva o módulo do 1º segmento do path). Rotas core/

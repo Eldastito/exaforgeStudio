@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
-import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift } from 'lucide-react';
+import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
 export function AdminMasterView() {
@@ -133,6 +133,8 @@ export function AdminMasterView() {
       )}
 
       <CreateCortesiaPanel />
+
+      <PlansLimitsPanel />
 
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -480,6 +482,82 @@ function CreateCortesiaPanel() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const PLAN_FIELDS: { k: string; label: string }[] = [
+  { k: 'ai_monthly_limit', label: 'Respostas IA/mês' },
+  { k: 'contacts_limit', label: 'Contatos' },
+  { k: 'channels_limit', label: 'Canais' },
+  { k: 'users_limit', label: 'Usuários' },
+  { k: 'trial_days', label: 'Dias de trial' },
+  { k: 'studio_images_monthly', label: 'Imagens/mês (Estúdio)' },
+  { k: 'studio_videos_monthly', label: 'Vídeos/mês (Estúdio)' },
+];
+
+function PlansLimitsPanel() {
+  const [plans, setPlans] = useState<any[]>([]);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  useEffect(() => { fetch('/api/admin/plans').then(r => r.json()).then(d => setPlans(Array.isArray(d) ? d : [])).catch(() => {}); }, []);
+
+  const setField = (id: string, path: string, value: any) => setPlans(ps => ps.map(p => {
+    if (p.id !== id) return p;
+    if (path === 'name') return { ...p, name: value };
+    if (path === 'price') return { ...p, price: value };
+    return { ...p, features: { ...(p.features || {}), [path]: value } };
+  }));
+
+  const save = async (p: any) => {
+    setSavingId(p.id);
+    try {
+      const f = p.features || {};
+      const features: any = {};
+      PLAN_FIELDS.forEach(x => { features[x.k] = f[x.k]; });
+      const res = await fetch(`/api/admin/plans/${p.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: p.name, price: p.price, features }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Plano atualizado!');
+    } catch { toast.error('Falha ao salvar o plano.'); } finally { setSavingId(null); }
+  };
+
+  return (
+    <div className="mb-8 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><SlidersHorizontal className="w-5 h-5 text-indigo-400" /> Planos & Limites</h3>
+      <p className="text-sm text-zinc-400 mb-5">Edite o preço e os limites de cada plano — incluindo imagens/vídeos do Estúdio. Vale para as contagens a partir do salvamento.</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {plans.length === 0 && <p className="text-sm text-zinc-500">Carregando planos…</p>}
+        {plans.map(p => (
+          <div key={p.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <input value={p.name || ''} onChange={e => setField(p.id, 'name', e.target.value)}
+                className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm text-zinc-100" />
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-xs text-zinc-500">R$</span>
+                <input type="number" value={p.price ?? 0} onChange={e => setField(p.id, 'price', e.target.value)}
+                  className="w-20 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm text-zinc-100" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {PLAN_FIELDS.map(f => (
+                <label key={f.k} className="flex flex-col gap-1">
+                  <span className="text-[10px] text-zinc-500">{f.label}</span>
+                  <input type="number" min={0} value={p.features?.[f.k] ?? ''} placeholder="—"
+                    onChange={e => setField(p.id, f.k, e.target.value)}
+                    className="w-full min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm text-zinc-100" />
+                </label>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <Button size="sm" onClick={() => save(p)} disabled={savingId === p.id} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                {savingId === p.id ? 'Salvando…' : 'Salvar'}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

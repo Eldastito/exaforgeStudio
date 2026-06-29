@@ -3,6 +3,7 @@ import path from "path";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { chat, describeImage, generateImageB64 } from "./llm.js";
+import { PlanService } from "./PlanService.js";
 
 // Mesmo diretório de mídia servido em /media (avatares, imagens de chat, etc.).
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
@@ -84,7 +85,24 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
   }
 
   /** Gera uma arte de campanha guiada pela identidade da marca + dados da empresa. */
+  /** Uso vs limite do Estúdio (para o contador da UI). */
+  static limits(orgId: string): { images: { used: number; limit: number }; videos: { used: number; limit: number } } {
+    const img = PlanService.studioAllowed(orgId, "image");
+    const vid = PlanService.studioAllowed(orgId, "video");
+    return { images: { used: img.used, limit: img.limit }, videos: { used: vid.used, limit: vid.limit } };
+  }
+
   static async generate(orgId: string, briefing: string, format: StudioFormat = "post"): Promise<{ id: string; mediaUrl: string; prompt: string }> {
+    // Limite do plano: bloqueia antes de gastar IA.
+    const gate = PlanService.studioAllowed(orgId, "image");
+    if (!gate.allowed) {
+      const msg = gate.reason === "monthly_limit"
+        ? `Limite de imagens do plano atingido (${gate.used}/${gate.limit} este mês).`
+        : gate.reason === "plan_no_studio"
+          ? "Seu plano não inclui geração de imagens no Estúdio."
+          : "Geração indisponível no momento (verifique o status da conta).";
+      throw new Error(msg);
+    }
     const size = format === "story" ? "1024x1536" : format === "banner" ? "1536x1024" : "1024x1024";
     const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const brand = this.getBrand(orgId);

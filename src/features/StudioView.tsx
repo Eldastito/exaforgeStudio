@@ -46,10 +46,12 @@ export function StudioView() {
   const [result, setResult] = useState<string | null>(null);
 
   const [creations, setCreations] = useState<Creation[]>([]);
+  const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
 
   const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(setBrand).catch(() => {});
   const loadCreations = () => apiFetch('/api/studio/creations').then(r => r.json()).then((d) => setCreations(Array.isArray(d) ? d : [])).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); }, []);
+  const loadLimits = () => apiFetch('/api/studio/limits').then(r => r.json()).then(setLimits).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); }, []);
 
   const onPickRefs = async (files: FileList | null) => {
     if (!files) return;
@@ -90,6 +92,7 @@ export function StudioView() {
       if (!res.ok) throw new Error(data.error || 'Falha ao gerar.');
       setResult(data.mediaUrl);
       loadCreations();
+      loadLimits();
       toast.success('Arte criada! 🎨');
     } catch (e: any) { toast.error(e.message); } finally { setGenerating(false); }
   };
@@ -150,7 +153,12 @@ export function StudioView() {
 
         {/* Gerar arte */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2 mb-1"><ImageIcon className="w-4 h-4 text-fuchsia-400" /> Gerar arte</h3>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><ImageIcon className="w-4 h-4 text-fuchsia-400" /> Gerar arte</h3>
+            {limits && (
+              <span className="text-[11px] text-zinc-500">Imagens este mês: <span className="text-zinc-300 font-medium">{limits.images.used}/{limits.images.limit}</span></span>
+            )}
+          </div>
           <p className="text-xs text-zinc-500 mb-3">{hasBrand ? 'Usando a identidade da sua marca.' : 'Dica: analise sua identidade ao lado para artes com a cara da marca.'}</p>
 
           <div className="flex flex-wrap gap-2 mb-3">

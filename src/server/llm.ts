@@ -95,15 +95,54 @@ export async function embed(texts: string[]): Promise<number[][]> {
   return res.data.map((d) => d.embedding as number[]);
 }
 
-/** Gera uma imagem (base64) a partir de um prompt — Estúdio de Criação. */
+const SIZE_TO_ASPECT: Record<string, string> = {
+  "1024x1024": "1:1",
+  "1024x1536": "9:16",
+  "1536x1024": "16:9",
+};
+
+/** Gera imagem via Google Imagen (Gemini API). Retorna base64 (ou "" se falhar). */
+async function generateImageGoogle(prompt: string, size: string, apiKey: string): Promise<string> {
+  const model = process.env.GOOGLE_IMAGE_MODEL || "imagen-3.0-generate-002";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      instances: [{ prompt }],
+      parameters: { sampleCount: 1, aspectRatio: SIZE_TO_ASPECT[size] || "1:1" },
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Imagen ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data: any = await res.json();
+  const b64 = data?.predictions?.[0]?.bytesBase64Encoded || data?.predictions?.[0]?.image?.imageBytes || "";
+  recordUsage(model, "image", 0, 0, Number(process.env.GOOGLE_IMAGE_COST_USD || 0.04));
+  return b64;
+}
+
+/**
+ * Gera uma imagem (base64) — Estúdio de Criação. Usa o Google Imagen quando há
+ * GOOGLE_AI_API_KEY; senão cai para o OpenAI (gpt-image-1) para não quebrar.
+ */
 export async function generateImageB64(
   prompt: string,
   size: "1024x1024" | "1024x1536" | "1536x1024" = "1024x1024"
 ): Promise<string> {
+  const googleKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  if (googleKey) {
+    try {
+      const b64 = await generateImageGoogle(prompt, size, googleKey);
+      if (b64) return b64;
+    } catch (e) {
+      console.error("[Imagen] falha; tentando OpenAI:", e);
+    }
+  }
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
   const res = await getClient().images.generate({ model, prompt, size, n: 1 });
   const b64 = (res as any).data?.[0]?.b64_json || "";
-  // Imagens são cobradas por imagem (não por token); custo configurável por env.
   recordUsage(model, "image", 0, 0, Number(process.env.OPENAI_IMAGE_COST_USD || 0.04));
   return b64;
 }

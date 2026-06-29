@@ -34,7 +34,13 @@ const IG_APP_ID = process.env.INSTAGRAM_APP_ID || process.env.IG_APP_ID || '';
 const IG_APP_SECRET = process.env.INSTAGRAM_APP_SECRET || process.env.IG_APP_SECRET || '';
 const APP_URL = (process.env.APP_URL || 'https://zapflowia.tesseractauto.com.br').replace(/\/$/, '');
 const REDIRECT_URI = `${APP_URL}/api/integrations/instagram/callback`;
-const SCOPES = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments';
+// Escopos base (mensagens/comentários). O de INSIGHTS só é pedido quando
+// IG_INSIGHTS_SCOPE=1 (após o App Review da Meta), para não quebrar o login
+// de apps ainda não aprovados para esse escopo.
+const BASE_SCOPES = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments';
+const SCOPES = process.env.IG_INSIGHTS_SCOPE === '1'
+  ? `${BASE_SCOPES},instagram_business_manage_insights`
+  : BASE_SCOPES;
 
 // GET /api/integrations/instagram/login-url — devolve a URL de autorização (protegida)
 router.get("/instagram/login-url", (req: AuthRequest, res): any => {

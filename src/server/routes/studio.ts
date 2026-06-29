@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { StudioService } from "../StudioService.js";
+import { InstagramService } from "../InstagramService.js";
 
 const router = Router();
 
@@ -72,6 +73,27 @@ router.get("/creations", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(StudioService.listCreations(orgId));
+});
+
+// GET /api/studio/instagram/status — conta de Instagram conectada?
+router.get("/instagram/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ch = InstagramService.getChannel(orgId);
+  res.json({ connected: !!ch, username: ch?.username || "" });
+});
+
+// POST /api/studio/instagram/analyze — lê o feed, capta a identidade e o que performa
+router.post("/instagram/analyze", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = await InstagramService.analyzeAccount(orgId);
+    if (!out.connected) return res.status(400).json({ error: "Instagram não conectado. Conecte em Canais e I.A." });
+    res.json(out);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Falha ao analisar o Instagram." });
+  }
 });
 
 // GET /api/studio/limits — uso vs limite do plano (imagens/vídeos no mês)

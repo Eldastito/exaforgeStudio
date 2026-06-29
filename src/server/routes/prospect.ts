@@ -88,4 +88,42 @@ router.post("/accounts/:id/status", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Evidências ───────────────────────────────────────────────────────────
+router.post("/accounts/:id/signals", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.addSignal(orgId, req.params.id, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete("/accounts/:id/signals/:sid", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.removeSignal(orgId, req.params.id, req.params.sid)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Hipóteses de dor (IA) ────────────────────────────────────────────────
+router.post("/accounts/:id/hypotheses", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectService.generateHypotheses(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/accounts/:id/hypotheses/:hid/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.setHypothesisStatus(orgId, req.params.id, req.params.hid, String(req.body?.status || ""))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Score (recalcula sob demanda) ────────────────────────────────────────
+router.post("/accounts/:id/score", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.computeScore(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

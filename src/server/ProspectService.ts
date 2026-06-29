@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "node:crypto";
+import { chat } from "./llm.js";
 
 /**
  * Prospect AI — Inteligência de Prospecção B2B (Fase 0: fundação).
@@ -208,7 +209,110 @@ export class ProspectService {
     const a = db.prepare("SELECT * FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) return null;
     a.contacts = db.prepare("SELECT * FROM prospect_contacts WHERE prospect_account_id = ? AND organization_id = ? ORDER BY created_at ASC").all(id, orgId) as any[];
+    a.signals = db.prepare("SELECT * FROM prospect_signals WHERE prospect_account_id = ? AND organization_id = ? ORDER BY created_at DESC").all(id, orgId) as any[];
+    a.hypotheses = db.prepare("SELECT * FROM prospect_hypotheses WHERE prospect_account_id = ? AND organization_id = ? AND status != 'rejected' ORDER BY created_at DESC").all(id, orgId) as any[];
+    a.score = db.prepare("SELECT * FROM prospect_score_snapshots WHERE prospect_account_id = ? AND organization_id = ? ORDER BY calculated_at DESC LIMIT 1").get(id, orgId) as any || null;
     return a;
+  }
+
+  // ── Evidências (ledger) ─────────────────────────────────────────────────
+  static addSignal(orgId: string, accountId: string, input: { signalType?: string; observation?: string; evidenceReference?: string; confidence?: number }): any {
+    const acc = db.prepare("SELECT id FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId);
+    if (!acc) throw new Error("Conta não encontrada.");
+    const obs = String(input?.observation || "").trim();
+    if (!obs) throw new Error("Descreva o dado observado.");
+    db.prepare("INSERT INTO prospect_signals (id, organization_id, prospect_account_id, signal_type, observation, evidence_reference, confidence, source_kind) VALUES (?, ?, ?, ?, ?, ?, ?, 'user')")
+      .run(randomUUID(), orgId, accountId, String(input?.signalType || "outro"), obs, String(input?.evidenceReference || "").trim() || null, Math.max(0, Math.min(1, Number(input?.confidence) || 0.6)));
+    return this.getAccount(orgId, accountId);
+  }
+
+  static removeSignal(orgId: string, accountId: string, signalId: string): any {
+    db.prepare("DELETE FROM prospect_signals WHERE id = ? AND prospect_account_id = ? AND organization_id = ?").run(signalId, accountId, orgId);
+    return this.getAccount(orgId, accountId);
+  }
+
+  // ── Hipóteses de dor (IA, com evidência) ────────────────────────────────
+  static async generateHypotheses(orgId: string, accountId: string): Promise<any> {
+    const acc = db.prepare("SELECT * FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId) as any;
+    if (!acc) throw new Error("Conta não encontrada.");
+    const signals = db.prepare("SELECT signal_type, observation, evidence_reference FROM prospect_signals WHERE prospect_account_id = ? AND organization_id = ?").all(accountId, orgId) as any[];
+    if (!signals.length) throw new Error("Adicione ao menos uma evidência antes de gerar hipóteses.");
+    // Contexto do ICP, se a conta estiver ligada a uma campanha com ICP.
+    let icpLine = "";
+    if (acc.campaign_id) {
+      const camp = db.prepare("SELECT icp_id FROM prospect_campaigns WHERE id = ? AND organization_id = ?").get(acc.campaign_id, orgId) as any;
+      if (camp?.icp_id) {
+        const icp = this.getIcp(orgId, camp.icp_id);
+        if (icp) icpLine = `ICP-alvo: ${icp.name}. Dor prioritária do ICP: ${icp.criteria?.dor || "n/d"}. Oferta: ${icp.criteria?.oferta || "n/d"}.`;
+      }
+    }
+    const evid = signals.map((s, i) => `(${i + 1}) [${s.signal_type}] ${s.observation}${s.evidence_reference ? ` — fonte: ${s.evidence_reference}` : ""}`).join("\n");
+    const prompt = `Você é um analista de prospecção B2B. Com base SOMENTE nas evidências abaixo, gere de 1 a 3 HIPÓTESES de dor para a empresa "${acc.display_name}".
+${icpLine}
+REGRAS:
+- Hipótese em linguagem PROBABILÍSTICA (ex.: "pode haver", "talvez"), NUNCA afirmação de fato.
+- NÃO invente dados, números, reclamações ou falhas que não estejam nas evidências.
+- Cada hipótese deve citar quais evidências a sustentam (pelos números).
+- Tom respeitoso, sem acusação ou comparação depreciativa.
+
+EVIDÊNCIAS:
+${evid}
+
+Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommended_question":"pergunta de descoberta","related_capability":"RIC|CRM|Copiloto|Estúdio|...","confidence":"baixa|media|alta"}]}`;
+    let arr: any[] = [];
+    try {
+      const raw = await chat(prompt, { temperature: 0.4, json: true });
+      const j = JSON.parse(raw);
+      arr = Array.isArray(j?.hypotheses) ? j.hypotheses.slice(0, 3) : [];
+    } catch { arr = []; }
+    const ins = db.prepare("INSERT INTO prospect_hypotheses (id, organization_id, prospect_account_id, hypothesis, evidence_refs, recommended_question, related_capability, confidence, status, created_by_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'ai')");
+    for (const h of arr) {
+      const text = String(h?.hypothesis || "").trim();
+      if (!text) continue;
+      const refs = Array.isArray(h?.evidence) ? h.evidence.map((n: any) => signals[Number(n) - 1]?.observation).filter(Boolean) : [];
+      const conf = ["baixa", "media", "alta"].includes(String(h?.confidence)) ? h.confidence : "media";
+      ins.run(randomUUID(), orgId, accountId, text, JSON.stringify(refs), String(h?.recommended_question || "").trim() || null, String(h?.related_capability || "").trim() || null, conf);
+    }
+    return this.getAccount(orgId, accountId);
+  }
+
+  static setHypothesisStatus(orgId: string, accountId: string, hypId: string, status: string): any {
+    if (!["draft", "approved", "rejected"].includes(status)) throw new Error("Status inválido.");
+    db.prepare("UPDATE prospect_hypotheses SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND prospect_account_id = ? AND organization_id = ?").run(status, hypId, accountId, orgId);
+    return this.getAccount(orgId, accountId);
+  }
+
+  // ── Score de aderência/prioridade (determinístico, explicável) ───────────
+  static computeScore(orgId: string, accountId: string): any {
+    const acc = db.prepare("SELECT * FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId) as any;
+    if (!acc) throw new Error("Conta não encontrada.");
+    const contacts = db.prepare("SELECT * FROM prospect_contacts WHERE prospect_account_id = ? AND organization_id = ?").all(accountId, orgId) as any[];
+    const signals = db.prepare("SELECT confidence FROM prospect_signals WHERE prospect_account_id = ? AND organization_id = ?").all(accountId, orgId) as any[];
+    const approvedHyp = db.prepare("SELECT COUNT(*) n FROM prospect_hypotheses WHERE prospect_account_id = ? AND organization_id = ? AND status = 'approved'").get(accountId, orgId) as any;
+    const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
+
+    // Confiança do dado: completude do cadastro da empresa.
+    const fields = [acc.domain, acc.website_url, acc.industry, acc.city, acc.cnpj].filter(Boolean).length;
+    const dataConfidence = clamp(40 + fields * 12);
+    // Aderência: empresa "real" (com domínio) + setor/cidade preenchidos.
+    const accountFit = clamp(45 + (acc.domain ? 25 : 0) + (acc.industry ? 15 : 0) + (acc.city ? 15 : 0));
+    // Contatabilidade: e-mail + telefone + nome.
+    const hasEmail = contacts.some(c => (c.email || "").includes("@") && c.email_status !== "invalid" && c.email_status !== "suppressed");
+    const hasPhone = contacts.some(c => c.phone);
+    const hasName = contacts.some(c => c.full_name);
+    const reachability = clamp((hasEmail ? 45 : 0) + (hasPhone ? 35 : 0) + (hasName ? 20 : 0));
+    // Evidência de dor: nº de evidências + hipóteses aprovadas.
+    const painEvidence = clamp(signals.length * 18 + Number(approvedHyp?.n || 0) * 25);
+    // Conformidade: cai se algum contato em opt-out; sobe com fonte registrada.
+    const optedOut = contacts.some(c => c.opt_out_at);
+    const compliance = clamp((acc.source_id ? 80 : 60) + (optedOut ? -40 : 20));
+    // Prioridade (pesos do PRD).
+    const priority = clamp(accountFit * 0.35 + painEvidence * 0.20 + reachability * 0.15 + dataConfidence * 0.15 + compliance * 0.15);
+
+    const explanation = { fields, hasEmail, hasPhone, hasName, signals: signals.length, approvedHyp: Number(approvedHyp?.n || 0), optedOut };
+    db.prepare("INSERT INTO prospect_score_snapshots (id, organization_id, prospect_account_id, account_fit, pain_evidence, reachability, data_confidence, compliance, priority, explanation_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(randomUUID(), orgId, accountId, accountFit, painEvidence, reachability, dataConfidence, compliance, priority, JSON.stringify(explanation));
+    return { account_fit: accountFit, pain_evidence: painEvidence, reachability, data_confidence: dataConfidence, compliance, priority, explanation };
   }
 
   static updateAccountStatus(orgId: string, id: string, status: string): boolean {

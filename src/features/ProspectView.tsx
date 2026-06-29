@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine, Trophy, TrendingUp, Lightbulb } from 'lucide-react';
+import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine, Trophy, TrendingUp, Lightbulb, Radar, MapPin, Play } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 type Icp = { id: string; name: string; vertical?: string; criteria?: any; created_at: string };
-type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string };
+type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string };
 type Account = { id: string; display_name: string; domain?: string; website_url?: string; industry?: string; city?: string; state?: string; account_status: string; contacts_count?: number; contacts?: any[] };
 
 // Parser CSV mínimo (campos com aspas, vírgulas e quebras de linha).
@@ -82,20 +82,25 @@ export function ProspectView() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [queue, setQueue] = useState<any[]>([]);
   const [attr, setAttr] = useState<any>(null);
+  const [discoveryCamp, setDiscoveryCamp] = useState<Campaign | null>(null);
+  const [runs, setRuns] = useState<any[]>([]);
 
   const loadAccounts = useCallback(() => apiFetch('/api/prospect/accounts').then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const loadQueue = useCallback(() => apiFetch('/api/prospect/approval-queue').then(r => r.json()).then(d => setQueue(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const loadAttr = useCallback(() => apiFetch('/api/prospect/attribution').then(r => r.json()).then(d => setAttr(d && typeof d === 'object' ? d : null)).catch(() => {}), []);
+  const loadRuns = useCallback(() => apiFetch('/api/prospect/discovery/runs').then(r => r.json()).then(d => setRuns(Array.isArray(d) ? d : [])).catch(() => {}), []);
+  const loadCampaigns = useCallback(() => apiFetch('/api/prospect/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
       apiFetch('/api/prospect/icps').then(r => r.json()).then(d => setIcps(Array.isArray(d) ? d : [])).catch(() => {}),
-      apiFetch('/api/prospect/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {}),
+      loadCampaigns(),
       loadAccounts(),
       loadQueue(),
       loadAttr(),
+      loadRuns(),
     ]).finally(() => setLoading(false));
-  }, [loadAccounts, loadQueue, loadAttr]);
+  }, [loadAccounts, loadQueue, loadAttr, loadRuns, loadCampaigns]);
   useEffect(() => { load(); }, [load]);
 
   const queueAction = async (oid: string, status: string) => {
@@ -193,6 +198,8 @@ export function ProspectView() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.label}</span>
                       <span className="text-sm font-medium text-zinc-100">{c.name}</span>
+                      {c.discovery_enabled ? <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-500/30 bg-violet-500/10 text-violet-300 inline-flex items-center gap-1"><Radar className="w-2.5 h-2.5" /> auto</span> : null}
+                      <button onClick={() => setDiscoveryCamp(c)} className="ml-auto text-[11px] text-violet-300 hover:text-violet-200 inline-flex items-center gap-1"><Radar className="w-3 h-3" /> Descoberta</button>
                     </div>
                     <p className="text-[11px] text-zinc-500 mt-1">{obj}{c.icp_name ? ` · ICP: ${c.icp_name}` : ''}</p>
                   </div>
@@ -233,6 +240,32 @@ export function ProspectView() {
         )}
       </div>
 
+      {/* Descoberta automática — rodadas recentes (resumo da noite) */}
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Radar className="w-4 h-4 text-violet-400" /> Descoberta automática</h3>
+          <span className="text-[11px] text-zinc-600">A IA varre a região (19h–6h) e deixa as contas prontas pra você revisar.</span>
+        </div>
+        {loading ? <Spinner /> : runs.length === 0 ? (
+          <Empty text="Nenhuma rodada ainda. Abra uma campanha em “Descoberta”, informe o endereço/CEP + raio e ative — ou rode agora pra testar." />
+        ) : (
+          <div className="space-y-2">
+            {runs.slice(0, 8).map(r => (
+              <div key={r.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${r.status === 'done' ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : r.status === 'error' ? 'text-red-300 bg-red-500/10 border-red-500/30' : 'text-amber-300 bg-amber-500/10 border-amber-500/30'}`}>{r.status === 'done' ? 'Concluída' : r.status === 'error' ? 'Erro' : 'Rodando'}</span>
+                  <span className="text-xs text-zinc-300 inline-flex items-center gap-1"><MapPin className="w-3 h-3 text-zinc-500" /> {r.area}</span>
+                  <span className="text-[10px] text-zinc-500">{r.trigger === 'manual' ? 'manual' : 'automática'}</span>
+                  <span className="ml-auto text-[11px] text-zinc-400">+{r.created_count} nova(s) · {r.found_count} achada(s)</span>
+                </div>
+                {r.summary && <p className="text-[11px] text-zinc-400 mt-1">{r.summary}</p>}
+                {r.error && <p className="text-[11px] text-red-400 mt-1">{r.error}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Fila de aprovação */}
       <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
         <div className="flex items-center justify-between mb-3">
@@ -269,6 +302,7 @@ export function ProspectView() {
 
       {newIcp && <IcpModal onClose={() => setNewIcp(false)} onSaved={() => { setNewIcp(false); load(); }} />}
       {newCamp && <CampaignModal icps={icps} onClose={() => setNewCamp(false)} onSaved={() => { setNewCamp(false); load(); }} />}
+      {discoveryCamp && <DiscoveryModal campaign={discoveryCamp} onClose={() => setDiscoveryCamp(null)} onChanged={() => { loadCampaigns(); loadRuns(); loadAccounts(); }} />}
       {importing && <ImportModal campaigns={campaigns} onClose={() => setImporting(false)} onDone={() => { setImporting(false); loadAccounts(); }} />}
       {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={() => { loadAccounts(); loadQueue(); loadAttr(); }} />}
     </div>
@@ -820,6 +854,96 @@ function CampaignModal({ icps, onClose, onSaved }: { icps: Icp[]; onClose: () =>
           </Button>
         </div>
         <p className="mt-3 text-[10px] text-zinc-600">A campanha nasce em rascunho. Descoberta de contas e abordagem entram nas próximas etapas.</p>
+      </div>
+    </div>
+  );
+}
+
+function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; onClose: () => void; onChanged: () => void }) {
+  const [enabled, setEnabled] = useState(!!campaign.discovery_enabled);
+  const [address, setAddress] = useState(campaign.discovery_address || '');
+  const [radius, setRadius] = useState(String(campaign.discovery_radius_km || 1));
+  const [categories, setCategories] = useState(campaign.discovery_categories || '');
+  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runs, setRuns] = useState<any[]>([]);
+
+  const loadRuns = useCallback(() => apiFetch(`/api/prospect/discovery/runs?campaignId=${campaign.id}`).then(r => r.json()).then(d => setRuns(Array.isArray(d) ? d : [])).catch(() => {}), [campaign.id]);
+  useEffect(() => { loadRuns(); }, [loadRuns]);
+
+  const save = async () => {
+    if (enabled && !address.trim()) { toast.error('Informe o endereço ou CEP de referência.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/prospect/campaigns/${campaign.id}/discovery`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discoveryEnabled: enabled, address, radiusKm: parseFloat(radius.replace(',', '.')) || 1, categories }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha');
+      toast.success('Descoberta automática salva. 🛰'); onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const runNow = async () => {
+    if (!address.trim()) { toast.error('Informe o endereço/CEP e salve antes de rodar.'); return; }
+    setRunning(true);
+    try {
+      const r = await apiFetch(`/api/prospect/campaigns/${campaign.id}/discovery/run`, { method: 'POST' });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha');
+      toast.success(`Rodada concluída: +${d.created_count} nova(s).`); loadRuns(); onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setRunning(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[520px] p-6 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Radar className="w-5 h-5 text-violet-400" /> Descoberta automática</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
+        </div>
+        <p className="text-xs text-zinc-500 mb-4">Campanha: <b className="text-zinc-300">{campaign.name}</b>. A IA busca empresas por região em fontes públicas (OpenStreetMap), de madrugada (19h–6h), e deixa tudo pronto pra você revisar. Sem scraping, sem custo de API.</p>
+
+        <label className="flex items-center gap-2 mb-3 cursor-pointer">
+          <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} className="accent-violet-500 w-4 h-4" />
+          <span className="text-sm text-zinc-200">Ativar varredura automática noturna</span>
+        </label>
+
+        <label className="text-[11px] text-zinc-400 mb-0.5 block">Endereço ou CEP de referência *</label>
+        <div className="flex items-center gap-2 mb-3">
+          <MapPin className="w-4 h-4 text-zinc-500 shrink-0" />
+          <input value={address} onChange={e => setAddress(e.target.value)} placeholder="Ex.: Av. Paulista, 1000, São Paulo — ou 01310-100" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-violet-500" />
+        </div>
+
+        <label className="text-[11px] text-zinc-400 mb-0.5 block">Raio de busca: <b className="text-zinc-200">{radius} km</b></label>
+        <input type="range" min="0.5" max="10" step="0.5" value={radius} onChange={e => setRadius(e.target.value)} className="w-full accent-violet-500 mb-3" />
+
+        <label className="text-[11px] text-zinc-400 mb-0.5 block">Categorias (opcional, avançado)</label>
+        <input value={categories} onChange={e => setCategories(e.target.value)} placeholder="Ex.: shop, office, amenity=restaurant (vazio = lojas/escritórios/serviços)" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-violet-500 mb-4" />
+
+        <div className="flex justify-between gap-2 mb-4">
+          <Button variant="ghost" onClick={runNow} disabled={running || busy} className="text-violet-300 hover:text-violet-200">
+            {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}Rodar agora
+          </Button>
+          <Button onClick={save} disabled={busy} className="bg-violet-600 hover:bg-violet-700 text-white">
+            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}Salvar
+          </Button>
+        </div>
+
+        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Rodadas desta campanha</p>
+        {runs.length === 0 ? <p className="text-[11px] text-zinc-600">Nenhuma rodada ainda. Use “Rodar agora” pra testar a área.</p> : (
+          <div className="space-y-1.5">
+            {runs.slice(0, 6).map(r => (
+              <div key={r.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+                <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                  <span className={r.status === 'done' ? 'text-emerald-400' : r.status === 'error' ? 'text-red-400' : 'text-amber-400'}>{r.status === 'done' ? '✓ concluída' : r.status === 'error' ? '✕ erro' : '… rodando'}</span>
+                  <span className="text-zinc-500">{r.trigger === 'manual' ? 'manual' : 'auto'}</span>
+                  <span className="ml-auto text-zinc-400">+{r.created_count} nova(s) · {r.found_count} achada(s)</span>
+                </div>
+                {r.summary && <p className="text-[11px] text-zinc-400 mt-0.5">{r.summary}</p>}
+                {r.error && <p className="text-[11px] text-red-400 mt-0.5">{r.error}</p>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine } from 'lucide-react';
+import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine, Trophy, TrendingUp, Lightbulb } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -55,6 +55,8 @@ const ACCOUNT_STATUS: Record<string, string> = {
   discovered: 'Descoberta', researching: 'Pesquisando', qualified: 'Qualificada',
   disqualified: 'Desqualificada', contacted: 'Contatada', converted: 'Convertida',
 };
+const brl = (n: number) => (Number(n) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+
 const OUT_CHANNELS: { id: string; label: string }[] = [
   { id: 'email', label: 'E-mail' },
   { id: 'whatsapp', label: 'WhatsApp' },
@@ -79,9 +81,11 @@ export function ProspectView() {
   const [importing, setImporting] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [queue, setQueue] = useState<any[]>([]);
+  const [attr, setAttr] = useState<any>(null);
 
   const loadAccounts = useCallback(() => apiFetch('/api/prospect/accounts').then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const loadQueue = useCallback(() => apiFetch('/api/prospect/approval-queue').then(r => r.json()).then(d => setQueue(Array.isArray(d) ? d : [])).catch(() => {}), []);
+  const loadAttr = useCallback(() => apiFetch('/api/prospect/attribution').then(r => r.json()).then(d => setAttr(d && typeof d === 'object' ? d : null)).catch(() => {}), []);
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
@@ -89,8 +93,9 @@ export function ProspectView() {
       apiFetch('/api/prospect/campaigns').then(r => r.json()).then(d => setCampaigns(Array.isArray(d) ? d : [])).catch(() => {}),
       loadAccounts(),
       loadQueue(),
+      loadAttr(),
     ]).finally(() => setLoading(false));
-  }, [loadAccounts, loadQueue]);
+  }, [loadAccounts, loadQueue, loadAttr]);
   useEffect(() => { load(); }, [load]);
 
   const queueAction = async (oid: string, status: string) => {
@@ -116,6 +121,30 @@ export function ProspectView() {
         <p className="text-zinc-400 text-sm mt-1">Encontre contas com aderência, organize evidências e prospecte com método — sem spam.</p>
         <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-1.5 text-xs text-cyan-200">
           <Crosshair className="w-3.5 h-3.5" /> Defina o <b>ICP</b>, importe contas, registre <b>evidências</b>, gere hipóteses e <b>abordagens</b> com IA — tudo revisado por um humano antes de sair. Sem scraping, sem spam.
+        </div>
+      </div>
+
+      {/* Receita originada pela prospecção (atribuição) */}
+      <div className="mb-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+          <div className="flex items-center gap-1.5 text-[11px] text-emerald-300/80"><Trophy className="w-3.5 h-3.5" /> Receita originada</div>
+          <div className="text-2xl font-semibold text-emerald-300 mt-1 tabular-nums">{brl(attr?.totalWon || 0)}</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">{attr?.wonCount || 0} conta(s) ganha(s)</div>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400"><Building2 className="w-3.5 h-3.5" /> Em pipeline</div>
+          <div className="text-2xl font-semibold text-zinc-100 mt-1 tabular-nums">{attr?.pipelineCount ?? 0}</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">contas em aberto</div>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400"><TrendingUp className="w-3.5 h-3.5" /> Taxa de ganho</div>
+          <div className="text-2xl font-semibold text-zinc-100 mt-1 tabular-nums">{attr?.winRate ?? 0}%</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">ganhas ÷ (ganhas + perdidas)</div>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400"><Gauge className="w-3.5 h-3.5" /> Ticket médio</div>
+          <div className="text-2xl font-semibold text-zinc-100 mt-1 tabular-nums">{brl(attr?.avgDeal || 0)}</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">por conta ganha</div>
         </div>
       </div>
 
@@ -241,7 +270,7 @@ export function ProspectView() {
       {newIcp && <IcpModal onClose={() => setNewIcp(false)} onSaved={() => { setNewIcp(false); load(); }} />}
       {newCamp && <CampaignModal icps={icps} onClose={() => setNewCamp(false)} onSaved={() => { setNewCamp(false); load(); }} />}
       {importing && <ImportModal campaigns={campaigns} onClose={() => setImporting(false)} onDone={() => { setImporting(false); loadAccounts(); }} />}
-      {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={() => { loadAccounts(); loadQueue(); }} />}
+      {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={() => { loadAccounts(); loadQueue(); loadAttr(); }} />}
     </div>
   );
 }
@@ -379,6 +408,11 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [outChannel, setOutChannel] = useState('email');
   const [outContact, setOutContact] = useState('');
   const [outBusy, setOutBusy] = useState(false);
+  const [copilot, setCopilot] = useState('');
+  const [copilotBusy, setCopilotBusy] = useState(false);
+  const [wonValue, setWonValue] = useState('');
+  const [lostReason, setLostReason] = useState('');
+  const [outcomeMode, setOutcomeMode] = useState<'' | 'won' | 'lost'>('');
 
   const refresh = () => apiFetch(`/api/prospect/accounts/${id}`).then(r => r.json()).then(d => { if (d && d.id) setAcc(d); }).catch(() => {});
   useEffect(() => { refresh(); }, [id]);
@@ -433,6 +467,19 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
     try { const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d); }
     catch (e: any) { toast.error(e.message); }
   };
+  const askCopilot = async () => {
+    setCopilotBusy(true);
+    try { const r = await apiFetch(`/api/prospect/accounts/${id}/copilot`, { method: 'POST' }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); setCopilot(d.advice || ''); }
+    catch (e: any) { toast.error(e.message); } finally { setCopilotBusy(false); }
+  };
+  const recordOutcome = async (outcome: string, body: any = {}) => {
+    try {
+      const r = await apiFetch(`/api/prospect/accounts/${id}/outcome`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome, ...body }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d);
+      setOutcomeMode(''); setWonValue(''); setLostReason('');
+      toast.success(outcome === 'won' ? 'Conta marcada como ganha. 🏆' : outcome === 'lost' ? 'Conta marcada como perdida.' : 'Conta reaberta.');
+    } catch (e: any) { toast.error(e.message); }
+  };
 
   const sc = acc?.score;
   const ScoreBar = ({ label, v }: { label: string; v: number }) => (
@@ -459,9 +506,60 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
             </div>
 
             <label className="text-[11px] text-zinc-500 mb-1 block">Status da conta</label>
-            <select value={acc.account_status} onChange={e => setStatus(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-cyan-500 mb-4">
+            <select value={acc.account_status} onChange={e => setStatus(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-cyan-500 mb-3">
               {Object.entries(ACCOUNT_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
+
+            {/* Desfecho (atribuição de receita) */}
+            {acc.account_status === 'converted' ? (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 mb-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-emerald-300 inline-flex items-center gap-1"><Trophy className="w-3.5 h-3.5" /> Ganha · {brl(acc.won_value || 0)}</span>
+                  <button onClick={() => recordOutcome('reopen')} className="text-[10px] text-zinc-500 hover:text-zinc-300">reabrir</button>
+                </div>
+              </div>
+            ) : acc.account_status === 'disqualified' ? (
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3 mb-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-zinc-400 truncate">Perdida{acc.lost_reason ? ` · ${acc.lost_reason}` : ''}</span>
+                  <button onClick={() => recordOutcome('reopen')} className="text-[10px] text-zinc-500 hover:text-zinc-300 shrink-0">reabrir</button>
+                </div>
+              </div>
+            ) : outcomeMode === 'won' ? (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 mb-4 space-y-2">
+                <label className="text-[11px] text-emerald-300 block">Valor fechado (receita originada)</label>
+                <input value={wonValue} onChange={e => setWonValue(e.target.value.replace(/[^\d.,]/g, ''))} inputMode="decimal" placeholder="Ex.: 4500" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setOutcomeMode('')} className="text-[11px] text-zinc-500 hover:text-zinc-300">cancelar</button>
+                  <button onClick={() => recordOutcome('won', { wonValue: parseFloat(wonValue.replace(/\./g, '').replace(',', '.')) || 0 })} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">Confirmar ganho</button>
+                </div>
+              </div>
+            ) : outcomeMode === 'lost' ? (
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3 mb-4 space-y-2">
+                <label className="text-[11px] text-zinc-400 block">Motivo da perda (opcional)</label>
+                <input value={lostReason} onChange={e => setLostReason(e.target.value)} placeholder="Ex.: sem orçamento agora" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-cyan-500" />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setOutcomeMode('')} className="text-[11px] text-zinc-500 hover:text-zinc-300">cancelar</button>
+                  <button onClick={() => recordOutcome('lost', { lostReason })} className="text-[11px] px-2 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-100">Marcar perdida</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2 mb-4">
+                <button onClick={() => setOutcomeMode('won')} className="flex-1 text-xs px-2 py-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center justify-center gap-1"><Trophy className="w-3.5 h-3.5" /> Marcar como ganha</button>
+                <button onClick={() => setOutcomeMode('lost')} className="flex-1 text-xs px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300">Marcar como perdida</button>
+              </div>
+            )}
+
+            {/* Copiloto do SDR */}
+            <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 p-3 mb-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-violet-300 flex items-center gap-1"><Lightbulb className="w-3.5 h-3.5" /> Copiloto do SDR</span>
+                <button onClick={askCopilot} disabled={copilotBusy} className="text-[11px] text-violet-300 hover:text-violet-200 inline-flex items-center gap-1">{copilotBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} {copilot ? 'Atualizar' : 'Próxima melhor ação'}</button>
+              </div>
+              {copilot
+                ? <p className="text-xs text-zinc-200 whitespace-pre-wrap mt-2">{copilot}</p>
+                : <p className="text-[11px] text-zinc-500 mt-1">A IA sugere o próximo passo com base nas evidências, score e abordagens — sem inventar dados.</p>}
+            </div>
 
             {/* Score */}
             <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-4">

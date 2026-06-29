@@ -416,4 +416,96 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
       ORDER BY o.created_at ASC LIMIT 200
     `).all(orgId) as any[];
   }
+
+  // ── Atribuição: receita originada pela prospecção + copiloto do SDR ──────
+  /**
+   * Registra o DESFECHO de uma conta: ganha (com valor REAL informado pelo SDR)
+   * ou perdida (com motivo). Não toca na estimativa do RIC — é receita de fato.
+   * 'won' → converted + won_value/won_at; 'lost' → disqualified + lost_reason;
+   * 'reopen' → volta para 'qualified' e limpa o desfecho.
+   */
+  static recordOutcome(orgId: string, id: string, input: { outcome: string; wonValue?: number; lostReason?: string }): any {
+    const acc = db.prepare("SELECT id FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    if (!acc) throw new Error("Conta não encontrada.");
+    const outcome = String(input?.outcome || "");
+    if (outcome === "won") {
+      const v = Math.max(0, Number(input?.wonValue) || 0);
+      db.prepare("UPDATE prospect_accounts SET account_status = 'converted', won_value = ?, won_at = CURRENT_TIMESTAMP, lost_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(v, id, orgId);
+    } else if (outcome === "lost") {
+      db.prepare("UPDATE prospect_accounts SET account_status = 'disqualified', lost_reason = ?, won_value = NULL, won_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(String(input?.lostReason || "").trim() || null, id, orgId);
+    } else if (outcome === "reopen") {
+      db.prepare("UPDATE prospect_accounts SET account_status = 'qualified', won_value = NULL, won_at = NULL, lost_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(id, orgId);
+    } else {
+      throw new Error("Desfecho inválido (use won, lost ou reopen).");
+    }
+    return this.getAccount(orgId, id);
+  }
+
+  /**
+   * Resumo de atribuição: receita REAL originada pela prospecção (contas ganhas)
+   * — total, nº de contas, em aberto (pipeline) e quebra por campanha.
+   */
+  static attributionSummary(orgId: string): any {
+    const won = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(won_value), 0) AS total FROM prospect_accounts WHERE organization_id = ? AND account_status = 'converted'").get(orgId) as any;
+    const lost = db.prepare("SELECT COUNT(*) AS n FROM prospect_accounts WHERE organization_id = ? AND account_status = 'disqualified'").get(orgId) as any;
+    const pipeline = db.prepare("SELECT COUNT(*) AS n FROM prospect_accounts WHERE organization_id = ? AND account_status IN ('discovered','researching','qualified','contacted')").get(orgId) as any;
+    const wonCount = Number(won?.n || 0);
+    const totalWon = Number(won?.total || 0);
+    const byCampaign = db.prepare(`
+      SELECT a.campaign_id, c.name AS campaign_name,
+             COUNT(*) AS won_count, COALESCE(SUM(a.won_value), 0) AS won_total
+      FROM prospect_accounts a
+      LEFT JOIN prospect_campaigns c ON c.id = a.campaign_id
+      WHERE a.organization_id = ? AND a.account_status = 'converted'
+      GROUP BY a.campaign_id ORDER BY won_total DESC
+    `).all(orgId) as any[];
+    return {
+      totalWon, wonCount,
+      lostCount: Number(lost?.n || 0),
+      pipelineCount: Number(pipeline?.n || 0),
+      winRate: wonCount + Number(lost?.n || 0) > 0 ? Math.round((wonCount / (wonCount + Number(lost?.n || 0))) * 100) : 0,
+      avgDeal: wonCount > 0 ? Math.round(totalWon / wonCount) : 0,
+      byCampaign: byCampaign.map(b => ({ campaignId: b.campaign_id, name: b.campaign_name || "(sem campanha)", wonCount: Number(b.won_count), wonTotal: Number(b.won_total) })),
+    };
+  }
+
+  /**
+   * Copiloto do SDR: sugere a PRÓXIMA MELHOR AÇÃO para a conta, com base só nos
+   * dados registrados (evidências, hipóteses aprovadas, score, abordagens,
+   * contatos). Não inventa dados; pensa como um SDR experiente e consultivo.
+   */
+  static async sdrCopilot(orgId: string, accountId: string): Promise<{ advice: string }> {
+    const acc = this.getAccount(orgId, accountId);
+    if (!acc) throw new Error("Conta não encontrada.");
+    const biz = db.prepare("SELECT business_name, vertical FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const signals = (acc.signals || []).map((s: any, i: number) => `(${i + 1}) ${s.observation}`).join("\n") || "(sem evidências)";
+    const hyps = (acc.hypotheses || []).filter((h: any) => h.status === "approved").map((h: any) => `- ${h.hypothesis}`).join("\n") || "(nenhuma hipótese aprovada)";
+    const sc = acc.score;
+    const scoreLine = sc ? `Prioridade ${Math.round(sc.priority)} (aderência ${Math.round(sc.account_fit)}, dor ${Math.round(sc.pain_evidence)}, contatabilidade ${Math.round(sc.reachability)}).` : "(score ainda não calculado)";
+    const outreach = (acc.outreach || []).map((o: any) => `${o.channel}: ${o.status}`).join("; ") || "(nenhuma abordagem)";
+    const contacts = (acc.contacts || []).map((c: any) => `${c.full_name || "(sem nome)"}${c.role_title ? ` (${c.role_title})` : ""}${c.email ? ` <${c.email}>` : ""}`).join("; ") || "(sem contatos)";
+    const prompt = `Você é o COPILOTO DO SDR — um pré-vendas B2B experiente e consultivo. Recomende a PRÓXIMA MELHOR AÇÃO para avançar esta conta, com base SÓ nos dados abaixo. Não invente dados. Português do Brasil, direto.
+${biz?.business_name ? `Nossa empresa: ${biz.business_name}${biz?.vertical ? ` (${biz.vertical})` : ""}.` : ""}
+
+CONTA: ${acc.display_name}${acc.industry ? ` · ${acc.industry}` : ""}${acc.city ? ` · ${acc.city}/${acc.state || ""}` : ""}
+STATUS: ${acc.account_status}
+SCORE: ${scoreLine}
+CONTATOS: ${contacts}
+EVIDÊNCIAS:\n${signals}
+HIPÓTESES APROVADAS:\n${hyps}
+ABORDAGENS: ${outreach}
+
+Responda em no máximo ~120 palavras, neste formato:
+1. PRÓXIMA AÇÃO (uma frase objetiva: o que fazer agora).
+2. POR QUÊ (1 linha ligada às evidências/score).
+3. SE FALTA DADO: o que descobrir antes (1 linha), quando aplicável.
+Se faltar evidência/contato para agir bem, diga isso com franqueza.`;
+    try {
+      const advice = (await chat(prompt, { temperature: 0.4 })).trim();
+      return { advice: advice || "Não consegui gerar a recomendação agora. Tente novamente." };
+    } catch (e) {
+      console.error("[ProspectAI] Falha no copiloto do SDR:", e);
+      return { advice: "Não consegui gerar a recomendação agora. Tente novamente em instantes." };
+    }
+  }
 }

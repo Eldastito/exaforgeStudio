@@ -155,4 +155,25 @@ router.get("/approval-queue", (req: AuthRequest, res): any => {
   res.json(ProspectService.listApprovalQueue(orgId));
 });
 
+// ── Atribuição (receita originada) + copiloto do SDR ─────────────────────
+router.post("/accounts/:id/outcome", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectService.recordOutcome(orgId, req.params.id, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/attribution", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectService.attributionSummary(orgId));
+});
+
+router.post("/accounts/:id/copilot", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectService.sdrCopilot(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

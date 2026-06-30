@@ -5,10 +5,13 @@ import './index.css';
 import { AuthProvider } from './contexts/AuthContext.tsx';
 import { Toaster } from './components/ui/Toaster.tsx';
 import { Storefront } from './storefront/Storefront.tsx';
+import { LandingPage } from './landing/LandingPage.tsx';
 
 // Vitrine pública (loja virtual) — renderizada fora do app autenticado.
 // Qualquer URL /loja/:slug abre a landing page Glass Toggle, sem login.
 const isStorefront = window.location.pathname.startsWith('/loja/');
+// Landing comercial pública (/lp) — fora do app autenticado, sem login.
+const isLanding = window.location.pathname === '/lp' || window.location.pathname.startsWith('/lp/');
 
 const originalFetch = window.fetch;
 Object.defineProperty(window, 'fetch', {
@@ -34,6 +37,8 @@ createRoot(rootEl).render(
   <StrictMode>
     {isStorefront ? (
       <Storefront />
+    ) : isLanding ? (
+      <LandingPage />
     ) : (
       <AuthProvider>
         <App />

@@ -53,7 +53,7 @@ export function OnboardingView() {
 
         {/* Header */}
         <div className="bg-indigo-600/10 border-b border-indigo-500/20 px-8 py-6 text-center">
-          <h2 className="text-xl font-semibold text-zinc-100">Bem-vindo ao Zappflow AI</h2>
+          <h2 className="text-xl font-semibold text-zinc-100">Bem-vindo ao Zapp<span style={{ color: 'var(--color-zf-teal)' }}>Flow</span></h2>
           <p className="text-zinc-400 text-sm mt-1">Sua conta foi criada. Vamos configurar primeiros passos rápidos.</p>
           <span className="mt-3 inline-block text-xs font-medium text-indigo-300">Passo {step} de 3</span>
         </div>

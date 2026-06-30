@@ -266,11 +266,29 @@ export class ProspectDiscoveryService {
     return { created, skipped, accountIds };
   }
 
-  /** "Maestro": dá sequência ao fluxo nas contas novas (hipóteses + score). */
-  static async orchestrate(orgId: string, accountIds: string[]): Promise<void> {
+  /**
+   * "Maestro": dá sequência ao fluxo nas contas novas (hipóteses + score). Com
+   * `autodraft` (opt-in da campanha), também prepara um rascunho de abordagem
+   * para contas COM contato e bom encaixe, deixando-o na FILA DE APROVAÇÃO —
+   * nada é enviado: o humano aprova. Tudo best-effort (uma falha não derruba a rodada).
+   */
+  static async orchestrate(orgId: string, accountIds: string[], opts: { autodraft?: boolean } = {}): Promise<void> {
     for (const id of accountIds) {
       try { await ProspectService.generateHypotheses(orgId, id); } catch (e) { /* segue */ }
-      try { ProspectService.computeScore(orgId, id); } catch (e) { /* segue */ }
+      let score: any = null;
+      try { score = ProspectService.computeScore(orgId, id); } catch (e) { /* segue */ }
+      if (opts.autodraft && score && score.priority >= 40) {
+        try {
+          const acc = ProspectService.getAccount(orgId, id);
+          const contact = (acc?.contacts || []).find((c: any) => c.email || c.phone);
+          if (contact) {
+            const channel = contact.email ? "email" : "whatsapp";
+            const updated = await ProspectService.composeOutreach(orgId, id, { contactId: contact.id, channel });
+            const draft = (updated?.outreach || []).find((o: any) => o.status === "draft");
+            if (draft) ProspectService.setOutreachStatus(orgId, draft.id, "pending_approval");
+          }
+        } catch (e) { /* segue */ }
+      }
     }
   }
 
@@ -315,7 +333,7 @@ export class ProspectDiscoveryService {
       db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, ?, ?, ?, 'tenant_policy', ?)")
         .run(srcId, orgId, provider, area, useGoogle ? "licensed" : "public", useGoogle ? 0.85 : 0.6);
       const { created, skipped, accountIds } = this.createFromResults(orgId, camp, results, srcId, provider);
-      await this.orchestrate(orgId, accountIds);
+      await this.orchestrate(orgId, accountIds, { autodraft: !!camp.discovery_autodraft });
       const summary = await this.summarize(area, created, results);
       db.prepare("UPDATE prospect_discovery_runs SET status = 'done', found_count = ?, created_count = ?, skipped_count = ?, summary = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(results.length, created, skipped, summary, runId);
@@ -358,6 +376,7 @@ export class ProspectDiscoveryService {
     if (patch.radiusKm !== undefined) { fields.push("discovery_radius_km = ?"); params.push(Math.max(0.1, Math.min(25, Number(patch.radiusKm) || 1))); }
     if (patch.categories !== undefined) { fields.push("discovery_categories = ?"); params.push(String(patch.categories || "").trim() || null); }
     if (patch.source !== undefined) { fields.push("discovery_source = ?"); params.push(patch.source === "google_places" ? "google_places" : "osm"); }
+    if (patch.autodraft !== undefined) { fields.push("discovery_autodraft = ?"); params.push(patch.autodraft ? 1 : 0); }
     if (fields.length) { params.push(campaignId, orgId); db.prepare(`UPDATE prospect_campaigns SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...params); }
     return db.prepare("SELECT * FROM prospect_campaigns WHERE id = ? AND organization_id = ?").get(campaignId, orgId);
   }

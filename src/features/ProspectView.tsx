@@ -5,7 +5,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 type Icp = { id: string; name: string; vertical?: string; criteria?: any; created_at: string };
-type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string; discovery_source?: string };
+type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string; discovery_source?: string; discovery_autodraft?: number };
 type Account = { id: string; display_name: string; domain?: string; website_url?: string; industry?: string; city?: string; state?: string; account_status: string; contacts_count?: number; contacts?: any[] };
 
 // Parser CSV mínimo (campos com aspas, vírgulas e quebras de linha).
@@ -884,6 +884,7 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
   const [radius, setRadius] = useState(String(campaign.discovery_radius_km || 1));
   const [categories, setCategories] = useState(campaign.discovery_categories || '');
   const [source, setSource] = useState(campaign.discovery_source === 'google_places' ? 'google_places' : 'osm');
+  const [autodraft, setAutodraft] = useState(!!campaign.discovery_autodraft);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [runs, setRuns] = useState<any[]>([]);
@@ -909,7 +910,7 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
     try {
       const r = await apiFetch(`/api/prospect/campaigns/${campaign.id}/discovery`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discoveryEnabled: enabled, address, radiusKm: parseFloat(radius.replace(',', '.')) || 1, categories, source }),
+        body: JSON.stringify({ discoveryEnabled: enabled, address, radiusKm: parseFloat(radius.replace(',', '.')) || 1, categories, source, autodraft }),
       });
       if (!r.ok) throw new Error((await r.json()).error || 'Falha');
       toast.success('Descoberta automática salva. 🛰'); onChanged();
@@ -979,7 +980,14 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
 
         <label className="text-[11px] text-zinc-400 mb-0.5 block">Tipo de negócio (opcional)</label>
         <input value={categories} onChange={e => setCategories(e.target.value)} placeholder="Ex.: clínicas, restaurantes, petshop, academia, escritórios" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-violet-500 mb-1" />
-        <p className="text-[10px] text-zinc-600 mb-4">Escreva em português normal (separe por vírgula). <b>Deixe vazio</b> para buscar todos os tipos de comércio/serviço da região.</p>
+        <p className="text-[10px] text-zinc-600 mb-3">Escreva em português normal (separe por vírgula). <b>Deixe vazio</b> para buscar todos os tipos de comércio/serviço da região.</p>
+
+        <label className="flex items-start gap-2 mb-4 cursor-pointer rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
+          <input type="checkbox" checked={autodraft} onChange={e => setAutodraft(e.target.checked)} className="accent-violet-500 w-4 h-4 mt-0.5" />
+          <span className="text-xs text-zinc-200">Já preparar rascunho de abordagem (Maestro)
+            <span className="block text-[10px] text-zinc-500 mt-0.5">Para cada conta nova <b>com contato</b>, a IA escreve um rascunho e o coloca na <b>Fila de aprovação</b>. Nada é enviado — você só aprova. (Melhor com a fonte Premium, que traz telefone.)</span>
+          </span>
+        </label>
 
         <div className="flex justify-between gap-2 mb-4">
           <Button variant="ghost" onClick={runNow} disabled={running || busy} className="text-violet-300 hover:text-violet-200">

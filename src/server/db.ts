@@ -1527,6 +1527,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_radius_km REAL DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_categories TEXT`); } catch(e){} // CSV de categorias OSM (vazio = amplo)
   try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_last_run DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_campaigns ADD COLUMN discovery_source TEXT DEFAULT 'osm'`); } catch(e){} // osm | google_places
+  // Chave da Google Places API (New) por organização (premium: telefone + avaliações).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN prospect_places_api_key TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN external_ref TEXT`); } catch(e){} // ex.: osm:node/123 (dedup da descoberta)
   try {
     db.exec(`

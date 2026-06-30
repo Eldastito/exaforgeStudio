@@ -47,6 +47,46 @@ export function norm(s: any): string {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
+// Termos PT-BR \u2192 TIPOS da Google Places API (New). Vazio = busca ampla (sem filtro).
+export const GOOGLE_TYPE_MAP: Record<string, string[]> = {
+  clinica: ["doctor", "hospital"], consultorio: ["doctor", "dentist"], medico: ["doctor"],
+  dentista: ["dentist"], hospital: ["hospital"], laboratorio: ["medical_lab"],
+  farmacia: ["pharmacy"], drogaria: ["pharmacy"],
+  veterinaria: ["veterinary_care"], veterinario: ["veterinary_care"],
+  petshop: ["pet_store"], pet: ["pet_store"],
+  restaurante: ["restaurant"], lanchonete: ["fast_food_restaurant"], cafe: ["cafe"],
+  bar: ["bar"], padaria: ["bakery"],
+  hotel: ["hotel"], pousada: ["bed_and_breakfast", "guest_house"],
+  academia: ["gym", "fitness_center"], salao: ["beauty_salon", "hair_salon"],
+  barbearia: ["barber_shop"], estetica: ["beauty_salon", "spa"],
+  escritorio: ["corporate_office"], advogado: ["lawyer"], contador: ["accounting"],
+  imobiliaria: ["real_estate_agency"], escola: ["school"], autoescola: ["driving_school"],
+  oficina: ["car_repair"], loja: ["store"], mercado: ["supermarket", "grocery_store"],
+  supermercado: ["supermarket"],
+};
+// Tipos v\u00e1lidos da Google Places (New) que o usu\u00e1rio pode digitar direto. Restrito
+// a uma allowlist para que termo inv\u00e1lido N\u00c3O vire includedType (evita erro 400).
+export const GOOGLE_VALID_TYPES = new Set<string>([
+  ...Object.values(GOOGLE_TYPE_MAP).flat(),
+  "clothing_store", "shoe_store", "electronics_store", "furniture_store", "hardware_store",
+  "book_store", "jewelry_store", "florist", "convenience_store", "department_store",
+  "shopping_mall", "car_dealer", "car_wash", "gas_station", "bank", "atm", "insurance_agency",
+  "travel_agency", "courier_service", "moving_company", "storage", "night_club", "spa",
+  "physiotherapist", "wellness_center", "dental_clinic",
+]);
+
+/** Traduz "categorias" (PT-BR) \u2192 TIPOS da Google Places (New). Vazio = amplo. */
+export function resolveGoogleTypes(raw: string): string[] {
+  const out = new Set<string>();
+  for (const term0 of String(raw || "").split(",").map(norm).filter(Boolean)) {
+    const term = term0.replace(/\s+/g, "_");
+    const mapped = GOOGLE_TYPE_MAP[term0] || GOOGLE_TYPE_MAP[term0.replace(/s$/, "")];
+    if (mapped) { mapped.forEach(m => out.add(m)); continue; }
+    if (GOOGLE_VALID_TYPES.has(term)) out.add(term);
+  }
+  return [...out];
+}
+
 /**
  * Traduz "categorias" (texto livre PT-BR) → etiquetas OSM. Aceita chave OSM
  * (shop), par chave=valor (amenity=restaurant) e termos comuns (clínica…).

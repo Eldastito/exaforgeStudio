@@ -858,7 +858,7 @@ function AiAttendancePanel() {
               <div className="min-w-0">
                 <p className="text-sm font-medium text-zinc-100">🧭 Maestro — tarefa no repasse para humano</p>
                 <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
-                  Quando a IA repassa um atendimento para um humano, o ZapFlow cria automaticamente uma <b>tarefa interna</b> (com o resumo da conversa) na aba <b>Tarefas</b>, para a equipe assumir e nada se perder. Requer o módulo de Tarefas ativo.
+                  Quando a IA repassa um atendimento para um humano, o ZappFlow cria automaticamente uma <b>tarefa interna</b> (com o resumo da conversa) na aba <b>Tarefas</b>, para a equipe assumir e nada se perder. Requer o módulo de Tarefas ativo.
                 </p>
               </div>
               <Toggle on={!!cfg.autoTaskOnHandoff} onClick={() => save({ autoTaskOnHandoff: !cfg.autoTaskOnHandoff })} />

@@ -229,7 +229,7 @@ export function LoginView() {
                   )}
                   {orgInviteToken && orgInviteInfo ? (
                     <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">
-                      🎉 Você foi convidado para criar a empresa <b className="text-emerald-200">{orgInviteInfo.businessName || 'sua empresa'}</b> no ZapFlow.
+                      🎉 Você foi convidado para criar a empresa <b className="text-emerald-200">{orgInviteInfo.businessName || 'sua empresa'}</b> no ZappFlow.
                       <div className="text-xs text-emerald-400/80 mt-1">
                         Plano: <b>{orgInviteInfo.planName}</b>{orgInviteInfo.modules?.length ? ` · ${orgInviteInfo.modules.length} módulo(s) liberado(s)` : ' · acesso completo'}. É só criar seu acesso abaixo.
                       </div>

@@ -168,7 +168,8 @@ export function LoginView() {
     <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4">
        <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-8">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-zinc-100">Zappflow AI</h1>
+            <h1 className="text-2xl font-bold text-zinc-100">Zapp<span style={{ color: 'var(--color-zf-teal)' }}>Flow</span></h1>
+            <p className="text-[11px] uppercase tracking-widest text-zinc-500 mt-0.5">Inteligência Operacional</p>
             <p className="text-zinc-400 mt-2">
                {view === 'register' && 'Crie sua conta para começar'}
                {view === 'login' && 'Faça login na sua conta'}

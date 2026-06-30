@@ -22,7 +22,7 @@ export function Sidebar() {
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-indigo-600 shadow-lg shadow-indigo-600/20">
             <Layers className="h-5 w-5 text-white" />
           </div>
-          <span className="text-lg font-bold text-slate-100 tracking-tight">Zappflow<span className="text-indigo-400">.ai</span></span>
+          <span className="text-lg font-bold text-slate-100 tracking-tight">Zapp<span style={{ color: 'var(--color-zf-teal)' }}>Flow</span><span className="text-slate-500 font-medium">.ai</span></span>
         </div>
       </div>
 

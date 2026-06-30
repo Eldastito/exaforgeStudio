@@ -46,6 +46,21 @@
 
   --radius-ric-card: 16px;   /* cards (rounded-2xl) */
   --radius-ric-hero: 20px;   /* blocos hero / painel IA */
+
+  /* ===== ZappFlow — paleta oficial da marca (Brand Book v1.0) =====
+     ADITIVO: tokens novos (zf-*) para telas/charts adotarem a identidade aos
+     poucos. NÃO substitui nem altera os tokens existentes — nada quebra. */
+  --color-zf-midnight:   #07111F;  /* base de aplicação */
+  --color-zf-navy:       #0D1A2B;  /* superfície (cards/menus) */
+  --color-zf-slate:      #152942;  /* superfície elevada / hover */
+  --color-zf-teal:       #22D3B6;  /* marca/ação e fluxo */
+  --color-zf-blue:       #6395FF;  /* inteligência / IA / análises */
+  --color-zf-amber:      #F6B84A;  /* Supply: compras, cobertura, prioridade */
+  --color-zf-green:      #43D39E;  /* sucesso / aprovado / saudável */
+  --color-zf-coral:      #F56C78;  /* risco / ruptura / destrutivo */
+  --color-zf-cloud:      #F5F8FC;  /* títulos e números */
+  --color-zf-steel:      #9BAEC1;  /* texto secundário */
+  --color-zf-grid:       #243B58;  /* bordas / divisores / inputs */
 }
 
 @layer base {

@@ -61,6 +61,33 @@
   --color-zf-cloud:      #F5F8FC;  /* títulos e números */
   --color-zf-steel:      #9BAEC1;  /* texto secundário */
   --color-zf-grid:       #243B58;  /* bordas / divisores / inputs */
+
+  /* Tokens de identidade usados pelas classes zf-* (kit de componentes).
+     Nomes NOVOS (não colidem com os existentes). Usados na landing e em telas
+     novas que optarem por adotar a marca. */
+  --color-flow:               #22d3b6;
+  --color-flow-strong:        #16bfa6;
+  --color-flow-soft:          #153d42;
+  --color-intelligence:       #6395ff;
+  --color-intelligence-strong:#4a7eff;
+  --color-intelligence-soft:  #1b3158;
+  --color-supply:             #f6b84a;
+  --color-supply-strong:      #eea82c;
+  --color-supply-soft:        #4a3718;
+  --color-success:            #43d39e;
+  --color-success-soft:       #133a32;
+  --color-warning:            #f6b84a;
+  --color-warning-soft:       #4a3718;
+  --color-danger:             #f56c78;
+  --color-danger-soft:        #4a202b;
+  --color-surface-1:          #0d1a2b;
+  --color-surface-2:          #102137;
+  --color-surface-3:          #152942;
+  --color-surface-overlay:    #1b3552;
+  --color-grid:               #243b58;
+  --color-text-strong:        #f5f8fc;
+  --color-text-muted:         #9baec1;
+  --font-display: "Sora", "Manrope", "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -101,4 +128,42 @@
     100% { opacity: 0; transform: translateY(-16px); }
   }
   .ric-floatup { animation: ric-floatup 1.6s ease-out forwards; }
+}
+
+/* ===== ZappFlow — kit de componentes (classes zf-*) =====
+   ADITIVO: classes novas usadas pela landing pública e por telas que optarem
+   por adotar a marca. Não altera nenhuma tela existente. Fonte: Design System
+   ZappFlow v1.1. (Sora/Manrope caem em Inter até serem instaladas.) */
+@layer components {
+  .zf-panel { border: 1px solid rgba(36,59,88,0.9); border-radius: var(--radius-lg); background: linear-gradient(145deg, rgba(21,41,66,0.88), rgba(13,26,43,0.96)); box-shadow: 0 18px 48px rgba(0,0,0,0.18); }
+  .zf-panel-subtle { border: 1px solid rgba(36,59,88,0.78); border-radius: var(--radius-md); background: rgba(16,33,55,0.72); }
+  .zf-panel-hover { transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+  .zf-panel-hover:hover { transform: translateY(-2px); border-color: rgba(34,211,182,0.44); box-shadow: 0 22px 56px rgba(0,0,0,0.28); }
+
+  .zf-kicker { color: var(--color-flow); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  .zf-display { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.035em; }
+  .zf-data-value { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
+  .zf-data-label { color: var(--color-text-muted); font-size: 0.75rem; font-weight: 650; letter-spacing: 0.02em; }
+
+  .zf-button { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: var(--radius-md); padding: 0.58rem 0.95rem; font-size: 0.9rem; font-weight: 750; line-height: 1.2; transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease; }
+  .zf-button:focus-visible, .zf-input:focus-visible { outline: 2px solid var(--color-flow); outline-offset: 2px; }
+  .zf-button:active { transform: translateY(1px); }
+  .zf-button-primary { color: #041310; background: linear-gradient(135deg, var(--color-flow), var(--color-intelligence)); box-shadow: 0 10px 24px rgba(34,211,182,0.16); }
+  .zf-button-primary:hover { box-shadow: 0 14px 30px rgba(34,211,182,0.24); filter: brightness(1.04); }
+  .zf-button-secondary { border: 1px solid var(--color-border); color: var(--color-foreground); background: rgba(21,41,66,0.84); }
+  .zf-button-secondary:hover { border-color: rgba(99,149,255,0.55); background: rgba(27,53,82,0.92); }
+  .zf-button-supply { color: #231704; background: linear-gradient(135deg, var(--color-supply), #ffd17a); box-shadow: 0 10px 24px rgba(246,184,74,0.14); }
+
+  .zf-input { width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-foreground); background: rgba(7,17,31,0.68); padding: 0.64rem 0.76rem; transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease; }
+  .zf-input:focus { border-color: var(--color-flow); background: rgba(7,17,31,0.9); box-shadow: 0 0 0 3px rgba(34,211,182,0.12); }
+
+  .zf-status-flow, .zf-status-intelligence, .zf-status-supply, .zf-status-success, .zf-status-warning, .zf-status-danger { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 999px; padding: 0.28rem 0.62rem; font-size: 0.75rem; font-weight: 750; line-height: 1; }
+  .zf-status-flow { color: var(--color-flow); background: var(--color-flow-soft); }
+  .zf-status-intelligence { color: var(--color-intelligence); background: var(--color-intelligence-soft); }
+  .zf-status-supply { color: var(--color-supply); background: var(--color-supply-soft); }
+  .zf-status-success { color: var(--color-success); background: var(--color-success-soft); }
+  .zf-status-warning { color: var(--color-warning); background: var(--color-warning-soft); }
+  .zf-status-danger { color: var(--color-danger); background: var(--color-danger-soft); }
+
+  .zf-supply-card { border: 1px solid rgba(246,184,74,0.34); border-radius: var(--radius-lg); background: linear-gradient(145deg, rgba(74,55,24,0.56), rgba(13,26,43,0.96)); }
 }

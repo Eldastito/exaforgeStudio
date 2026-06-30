@@ -149,13 +149,14 @@ export function ProcurementView() {
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
       <div className="p-6 max-w-6xl mx-auto">
+      <p className="text-[11px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--color-zf-amber)' }}>ZappFlow Supply</p>
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
-          <PackageCheck className="h-6 w-6 text-indigo-400" /> Compras / Reposição
+          <PackageCheck className="h-6 w-6" style={{ color: 'var(--color-zf-amber)' }} /> Compras / Reposição
         </h2>
       </div>
       <p className="text-sm text-zinc-400 mb-4">
-        A IA observa o estoque, cota com fornecedores locais e da <b>rede ZappFlow</b>, e você escolhe o vencedor com um clique.
+        Antes de faltar, o ZappFlow sinaliza: a IA observa o estoque, cota com fornecedores locais e da <b>rede ZappFlow</b>, e você escolhe o vencedor com um clique.
       </p>
 
       {/* Abas: Reposição (Fase 1+2) · Buscar na rede (emergência) · Pedidos recebidos · Perfil de fornecedor */}

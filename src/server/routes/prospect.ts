@@ -191,6 +191,20 @@ router.get("/discovery/runs", (req: AuthRequest, res): any => {
   res.json(ProspectDiscoveryService.listRuns(orgId, req.query.campaignId as string));
 });
 
+// Chave da Google Places API (premium) — status (sem expor o valor) e gravação.
+router.get("/discovery/places-key", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectDiscoveryService.getPlacesKeyInfo(orgId));
+});
+
+router.post("/discovery/places-key", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectDiscoveryService.setPlacesKey(orgId, String(req.body?.apiKey || ""))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.post("/accounts/:id/copilot", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

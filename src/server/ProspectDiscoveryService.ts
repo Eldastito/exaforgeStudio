@@ -2,7 +2,8 @@ import db from "./db.js";
 import { randomUUID } from "node:crypto";
 import { chat } from "./llm.js";
 import { ProspectService } from "./ProspectService.js";
-import { DEFAULT_CATS, resolveCategories } from "./prospectCategories.js";
+import { DEFAULT_CATS, resolveCategories, resolveGoogleTypes } from "./prospectCategories.js";
+import { GooglePlacesService, type DiscoveryResult } from "./GooglePlacesService.js";
 
 /**
  * Prospect AI — DESCOBERTA AUTOMÁTICA por região (Fase 2).
@@ -52,10 +53,8 @@ async function httpJson(url: string, opts: { method?: string; body?: string; tim
   } finally { clearTimeout(t); }
 }
 
-export interface OsmResult {
-  name: string; osmRef: string; segment: string; phone: string; website: string;
-  street: string; city: string; state: string; lat?: number; lon?: number;
-}
+// Resultado de descoberta (OSM ou Google Places) — tipo comum em GooglePlacesService.
+export type { DiscoveryResult };
 
 export class ProspectDiscoveryService {
   /** Janela noturna ativa? (19h às 6h, horário de Brasília). */
@@ -147,6 +146,40 @@ export class ProspectDiscoveryService {
     return [];
   }
 
+  /** Tipos do Google Places para a campanha (campo explícito → senão ICP). Vazio = amplo. */
+  static googleTypesForCampaign(camp: any): string[] {
+    const explicit = resolveGoogleTypes(camp?.discovery_categories || "");
+    if (explicit.length) return explicit;
+    if (camp?.icp_id) {
+      const icp = db.prepare("SELECT name, vertical, criteria_json FROM prospect_icp_profiles WHERE id = ? AND organization_id = ?").get(camp.icp_id, camp.organization_id) as any;
+      if (icp) {
+        let crit: any = {}; try { crit = JSON.parse(icp.criteria_json || "{}"); } catch { /* ignora */ }
+        const derived = resolveGoogleTypes([icp.vertical, icp.name, crit?.segmento, crit?.sinais].filter(Boolean).join(", "));
+        if (derived.length) return derived;
+      }
+    }
+    return [];
+  }
+
+  // ── Chave da Google Places API (premium), por organização ────────────────
+  static placesKey(orgId: string): string {
+    const row = db.prepare("SELECT prospect_places_api_key FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    return String(row?.prospect_places_api_key || process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "").trim();
+  }
+  static setPlacesKey(orgId: string, key: string): { configured: boolean } {
+    const k = String(key || "").trim();
+    db.prepare("UPDATE organization_settings SET prospect_places_api_key = ? WHERE organization_id = ?").run(k || null, orgId);
+    return { configured: !!k };
+  }
+  /** Status da chave (sem expor o valor): configurada? dica do final? veio do ambiente? */
+  static getPlacesKeyInfo(orgId: string): { configured: boolean; hint: string; fromEnv: boolean } {
+    const row = db.prepare("SELECT prospect_places_api_key FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    const orgKey = String(row?.prospect_places_api_key || "").trim();
+    const envKey = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "").trim();
+    const key = orgKey || envKey;
+    return { configured: !!key, hint: key ? `…${key.slice(-4)}` : "", fromEnv: !orgKey && !!envKey };
+  }
+
   static buildOverpass(lat: number, lon: number, radiusKm: number, categories: string[]): string {
     const r = Math.max(50, Math.round((Number(radiusKm) || 1) * 1000));
     const cats = categories.length ? categories : DEFAULT_CATS;
@@ -157,8 +190,8 @@ export class ProspectDiscoveryService {
     return `[out:json][timeout:25];(${clauses});out center tags 150;`;
   }
 
-  static parseOsm(json: any): OsmResult[] {
-    const out: OsmResult[] = [];
+  static parseOsm(json: any): DiscoveryResult[] {
+    const out: DiscoveryResult[] = [];
     const seen = new Set<string>();
     for (const el of (json?.elements || [])) {
       const t = el?.tags || {};
@@ -184,7 +217,7 @@ export class ProspectDiscoveryService {
   }
 
   /** Busca empresas na área (Overpass). Pode ser substituída em testes. */
-  static async searchOSM(lat: number, lon: number, radiusKm: number, categories: string[]): Promise<OsmResult[]> {
+  static async searchOSM(lat: number, lon: number, radiusKm: number, categories: string[]): Promise<DiscoveryResult[]> {
     const query = this.buildOverpass(lat, lon, radiusKm, categories);
     const json = await httpJson(OVERPASS, { method: "POST", body: "data=" + encodeURIComponent(query), timeoutMs: 30000 });
     return this.parseOsm(json);
@@ -194,10 +227,10 @@ export class ProspectDiscoveryService {
    * Cria contas a partir dos resultados (dedup por OSM id / nome), até MAX_PER_RUN.
    * Registra sinais observáveis e (quando há) contato com telefone.
    */
-  static createFromResults(orgId: string, campaign: any, results: OsmResult[], sourceId: string): { created: number; skipped: number; accountIds: string[] } {
+  static createFromResults(orgId: string, campaign: any, results: DiscoveryResult[], sourceId: string, provider = "osm_overpass"): { created: number; skipped: number; accountIds: string[] } {
     const findByRef = db.prepare("SELECT id FROM prospect_accounts WHERE organization_id = ? AND external_ref = ?");
     const findByName = db.prepare("SELECT id FROM prospect_accounts WHERE organization_id = ? AND dedupe_key = ?");
-    const insAcc = db.prepare(`INSERT INTO prospect_accounts (id, organization_id, campaign_id, display_name, domain, website_url, industry, city, state, source_id, source, account_status, dedupe_key, external_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'osm_overpass', 'discovered', ?, ?)`);
+    const insAcc = db.prepare(`INSERT INTO prospect_accounts (id, organization_id, campaign_id, display_name, domain, website_url, industry, city, state, source_id, source, account_status, dedupe_key, external_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?)`);
     const insSig = db.prepare(`INSERT INTO prospect_signals (id, organization_id, prospect_account_id, signal_type, observation, evidence_reference, confidence, source_kind) VALUES (?, ?, ?, ?, ?, ?, ?, 'connector')`);
     const insContact = db.prepare(`INSERT INTO prospect_contacts (id, organization_id, prospect_account_id, full_name, role_title, email, email_status, phone, source_id, confidence) VALUES (?, ?, ?, NULL, NULL, '', 'unknown', ?, ?, 0.5)`);
 
@@ -212,11 +245,18 @@ export class ProspectDiscoveryService {
         if ((findByRef.get(orgId, r.osmRef) as any) || (findByName.get(orgId, key) as any)) { skipped++; continue; }
         const accId = randomUUID();
         const domain = normDomain(r.website);
-        insAcc.run(accId, orgId, campaign.id, r.name, domain || null, r.website || null, r.segment || null, r.city || null, r.state || null, sourceId, key, r.osmRef);
+        const ref = r.osmRef;
+        insAcc.run(accId, orgId, campaign.id, r.name, domain || null, r.website || null, r.segment || null, r.city || null, r.state || null, sourceId, provider, key, ref);
         // Sinal-base (sempre): garante ≥1 evidência para gerar hipóteses.
-        insSig.run(randomUUID(), orgId, accId, "outro", `Empresa encontrada na varredura de ${areaLabel}${r.segment ? ` — segmento: ${r.segment}` : ""}.`, `osm:${r.osmRef}`, 0.6);
-        if (!r.website) insSig.run(randomUUID(), orgId, accId, "cobertura_digital", "Sem site informado na fonte pública (possível baixa presença digital).", `osm:${r.osmRef}`, 0.5);
-        if (!r.phone) insSig.run(randomUUID(), orgId, accId, "resposta_comercial", "Sem telefone público listado (canal de contato a confirmar).", `osm:${r.osmRef}`, 0.5);
+        insSig.run(randomUUID(), orgId, accId, "outro", `Empresa encontrada na varredura de ${areaLabel}${r.segment ? ` — segmento: ${r.segment}` : ""}.`, ref, 0.6);
+        // Avaliações públicas (Google Places): viram sinal de reputação/dor.
+        if (typeof r.rating === "number") {
+          const rc = r.ratingCount || 0;
+          if (r.rating < 4.0) insSig.run(randomUUID(), orgId, accId, "resposta_comercial", `Reputação a melhorar: ${r.rating.toFixed(1)}★ em ${rc} avaliação(ões) públicas — oportunidade de atendimento.`, ref, 0.7);
+          else insSig.run(randomUUID(), orgId, accId, "outro", `Reputação pública: ${r.rating.toFixed(1)}★ (${rc} avaliações).`, ref, 0.5);
+        }
+        if (!r.website) insSig.run(randomUUID(), orgId, accId, "cobertura_digital", "Sem site informado na fonte pública (possível baixa presença digital).", ref, 0.5);
+        if (!r.phone) insSig.run(randomUUID(), orgId, accId, "resposta_comercial", "Sem telefone público listado (canal de contato a confirmar).", ref, 0.5);
         if (r.phone) insContact.run(randomUUID(), orgId, accId, onlyDigits(r.phone), sourceId);
         accountIds.push(accId);
         created++;
@@ -234,7 +274,7 @@ export class ProspectDiscoveryService {
     }
   }
 
-  static async summarize(area: string, created: number, results: OsmResult[]): Promise<string> {
+  static async summarize(area: string, created: number, results: DiscoveryResult[]): Promise<string> {
     if (!created) return `Varri ${area} e não encontrei empresas novas nesta rodada.`;
     const nomes = results.slice(0, created).map(r => r.name).join(", ");
     try {
@@ -261,11 +301,20 @@ export class ProspectDiscoveryService {
         lat = geo.lat; lon = geo.lon;
         db.prepare("UPDATE prospect_campaigns SET discovery_lat = ?, discovery_lon = ? WHERE id = ? AND organization_id = ?").run(lat, lon, campaignId, orgId);
       }
-      const categories = this.categoriesForCampaign(camp);
-      const results = await this.searchOSM(lat, lon, camp.discovery_radius_km || 1, categories);
+      const useGoogle = camp.discovery_source === "google_places";
+      let results: DiscoveryResult[];
+      const provider = useGoogle ? "google_places" : "osm_overpass";
+      if (useGoogle) {
+        const key = this.placesKey(orgId);
+        if (!key) throw new Error("Fonte Premium selecionada, mas falta a chave da Google Places API. Configure-a na campanha (Descoberta).");
+        results = await GooglePlacesService.searchNearby(lat, lon, camp.discovery_radius_km || 1, this.googleTypesForCampaign(camp), key);
+      } else {
+        results = await this.searchOSM(lat, lon, camp.discovery_radius_km || 1, this.categoriesForCampaign(camp));
+      }
       const srcId = randomUUID();
-      db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, 'osm_overpass', ?, 'public', 'tenant_policy', 0.6)").run(srcId, orgId, area);
-      const { created, skipped, accountIds } = this.createFromResults(orgId, camp, results, srcId);
+      db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, ?, ?, ?, 'tenant_policy', ?)")
+        .run(srcId, orgId, provider, area, useGoogle ? "licensed" : "public", useGoogle ? 0.85 : 0.6);
+      const { created, skipped, accountIds } = this.createFromResults(orgId, camp, results, srcId, provider);
       await this.orchestrate(orgId, accountIds);
       const summary = await this.summarize(area, created, results);
       db.prepare("UPDATE prospect_discovery_runs SET status = 'done', found_count = ?, created_count = ?, skipped_count = ?, summary = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -308,6 +357,7 @@ export class ProspectDiscoveryService {
     }
     if (patch.radiusKm !== undefined) { fields.push("discovery_radius_km = ?"); params.push(Math.max(0.1, Math.min(25, Number(patch.radiusKm) || 1))); }
     if (patch.categories !== undefined) { fields.push("discovery_categories = ?"); params.push(String(patch.categories || "").trim() || null); }
+    if (patch.source !== undefined) { fields.push("discovery_source = ?"); params.push(patch.source === "google_places" ? "google_places" : "osm"); }
     if (fields.length) { params.push(campaignId, orgId); db.prepare(`UPDATE prospect_campaigns SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...params); }
     return db.prepare("SELECT * FROM prospect_campaigns WHERE id = ? AND organization_id = ?").get(campaignId, orgId);
   }

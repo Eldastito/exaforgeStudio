@@ -5,7 +5,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 type Icp = { id: string; name: string; vertical?: string; criteria?: any; created_at: string };
-type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string };
+type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string; discovery_source?: string };
 type Account = { id: string; display_name: string; domain?: string; website_url?: string; industry?: string; city?: string; state?: string; account_status: string; contacts_count?: number; contacts?: any[] };
 
 // Parser CSV mínimo (campos com aspas, vírgulas e quebras de linha).
@@ -883,20 +883,33 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
   const [address, setAddress] = useState(campaign.discovery_address || '');
   const [radius, setRadius] = useState(String(campaign.discovery_radius_km || 1));
   const [categories, setCategories] = useState(campaign.discovery_categories || '');
+  const [source, setSource] = useState(campaign.discovery_source === 'google_places' ? 'google_places' : 'osm');
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [runs, setRuns] = useState<any[]>([]);
+  const [keyInfo, setKeyInfo] = useState<{ configured: boolean; hint: string; fromEnv: boolean } | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
 
   const loadRuns = useCallback(() => apiFetch(`/api/prospect/discovery/runs?campaignId=${campaign.id}`).then(r => r.json()).then(d => setRuns(Array.isArray(d) ? d : [])).catch(() => {}), [campaign.id]);
-  useEffect(() => { loadRuns(); }, [loadRuns]);
+  const loadKey = useCallback(() => apiFetch('/api/prospect/discovery/places-key').then(r => r.json()).then(d => setKeyInfo(d && typeof d === 'object' ? d : null)).catch(() => {}), []);
+  useEffect(() => { loadRuns(); loadKey(); }, [loadRuns, loadKey]);
 
+  const saveKey = async () => {
+    setSavingKey(true);
+    try {
+      const r = await apiFetch('/api/prospect/discovery/places-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha');
+      setApiKey(''); await loadKey(); toast.success('Chave do Google Places salva. 🔑');
+    } catch (e: any) { toast.error(e.message); } finally { setSavingKey(false); }
+  };
   const save = async () => {
     if (enabled && !address.trim()) { toast.error('Informe o endereço ou CEP de referência.'); return; }
     setBusy(true);
     try {
       const r = await apiFetch(`/api/prospect/campaigns/${campaign.id}/discovery`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discoveryEnabled: enabled, address, radiusKm: parseFloat(radius.replace(',', '.')) || 1, categories }),
+        body: JSON.stringify({ discoveryEnabled: enabled, address, radiusKm: parseFloat(radius.replace(',', '.')) || 1, categories, source }),
       });
       if (!r.ok) throw new Error((await r.json()).error || 'Falha');
       toast.success('Descoberta automática salva. 🛰'); onChanged();
@@ -919,7 +932,36 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
           <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Radar className="w-5 h-5 text-violet-400" /> Descoberta automática</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
         </div>
-        <p className="text-xs text-zinc-500 mb-4">Campanha: <b className="text-zinc-300">{campaign.name}</b>. A IA busca empresas por região em fontes públicas (OpenStreetMap), de madrugada (19h–6h), e deixa tudo pronto pra você revisar. Sem scraping, sem custo de API.</p>
+        <p className="text-xs text-zinc-500 mb-3">Campanha: <b className="text-zinc-300">{campaign.name}</b>. A IA busca empresas por região, de madrugada (19h–6h), e deixa tudo pronto pra você revisar. Sem scraping.</p>
+
+        {/* Fonte de dados */}
+        <label className="text-[11px] text-zinc-400 mb-1 block">Fonte de dados</label>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <button type="button" onClick={() => setSource('osm')} className={`text-left rounded-lg border p-2.5 ${source === 'osm' ? 'border-violet-500 bg-violet-500/10' : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'}`}>
+            <p className="text-xs font-medium text-zinc-100">Grátis (OpenStreetMap)</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Sem custo. Telefone/avaliações raros.</p>
+          </button>
+          <button type="button" onClick={() => setSource('google_places')} className={`text-left rounded-lg border p-2.5 ${source === 'google_places' ? 'border-violet-500 bg-violet-500/10' : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'}`}>
+            <p className="text-xs font-medium text-zinc-100">Premium (Google Places)</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Telefone, site e avaliações. Custo por busca.</p>
+          </button>
+        </div>
+        {source === 'google_places' && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5 mb-3">
+            {keyInfo?.configured ? (
+              <p className="text-[11px] text-emerald-400">🔑 Chave configurada ({keyInfo.hint}){keyInfo.fromEnv ? ' · do servidor' : ''}. <button type="button" onClick={() => setKeyInfo({ configured: false, hint: '', fromEnv: false })} className="text-zinc-500 hover:text-zinc-300 underline">trocar</button></p>
+            ) : (
+              <>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Chave da Google Places API (New)</label>
+                <div className="flex items-center gap-2">
+                  <input value={apiKey} onChange={e => setApiKey(e.target.value)} type="password" placeholder="Cole a API key do seu Google Cloud" className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-violet-500" />
+                  <Button onClick={saveKey} disabled={savingKey || !apiKey.trim()} className="bg-violet-600 hover:bg-violet-700 text-white h-8 px-2.5 text-xs">{savingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Salvar chave'}</Button>
+                </div>
+                <p className="text-[10px] text-zinc-600 mt-1">Ative a “Places API (New)” no Google Cloud e cole a chave. Fica guardada com segurança (não é exibida de novo). A cobrança é na sua conta Google.</p>
+              </>
+            )}
+          </div>
+        )}
 
         <label className="flex items-center gap-2 mb-3 cursor-pointer">
           <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} className="accent-violet-500 w-4 h-4" />

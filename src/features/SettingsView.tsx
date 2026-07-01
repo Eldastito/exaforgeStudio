@@ -875,7 +875,7 @@ function AiAttendancePanel() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-zinc-100">📹 Maestro — tarefa em evento crítico do Vision VMS</p>
                   <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
-                    Quando o Vision VMS detecta um evento de severidade <b>alta</b> ou <b>crítica</b> (ex.: gateway offline, botão de pânico) e ele ainda não foi revisado, o ZappFlow cria automaticamente uma <b>tarefa interna</b> na aba <b>Tarefas</b>, para a equipe agir mesmo sem estar com o Vision VMS aberto.
+                    Quando o Vision VMS detecta um evento de severidade <b>alta</b> ou <b>crítica</b> (ex.: gateway offline, botão de pânico) e ele ainda não foi revisado, o ZappFlow cria automaticamente uma <b>tarefa interna</b> na aba <b>Tarefas</b> e envia uma <b>notificação in-app</b> (sino no topo) para a equipe, para agir mesmo sem estar com o Vision VMS aberto.
                   </p>
                 </div>
                 <Toggle on={!!cfg.autoTaskOnVisionEvent} onClick={() => save({ autoTaskOnVisionEvent: !cfg.autoTaskOnVisionEvent })} />

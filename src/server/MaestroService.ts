@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { TaskService } from "./TaskService.js";
+import { NotificationService } from "./NotificationService.js";
 
 // Rótulos legíveis para os poucos event_type que o Vision Cloud já é capaz de
 // detectar honestamente hoje (ver apps/vision-cloud/healthMonitor.ts e
@@ -46,13 +47,14 @@ export class MaestroService {
   }
 
   /**
-   * Ponte Vision VMS -> Tarefas (poll periódico, chamado por Scheduler.fastPass).
-   * O core NUNCA escreve em `vision_events` (tabela do vision-cloud, ver
-   * apps/vision-cloud/db.ts) — só faz SELECT, no MESMO arquivo SQLite
-   * (ADR-001 addendum: Vision Cloud é processo/deploy separado, mas
-   * compartilha o arquivo do core). Idempotência via `vision_event_tasks`
-   * (tabela do CORE, ver src/server/db.ts), que registra que evento já virou
-   * tarefa — nunca duplica mesmo rodando este poll repetidas vezes.
+   * Ponte Vision VMS -> Tarefas + Notificação in-app (poll periódico, chamado
+   * por Scheduler.fastPass). O core NUNCA escreve em `vision_events` (tabela
+   * do vision-cloud, ver apps/vision-cloud/db.ts) — só faz SELECT, no MESMO
+   * arquivo SQLite (ADR-001 addendum: Vision Cloud é processo/deploy
+   * separado, mas compartilha o arquivo do core). Idempotência via
+   * `vision_event_tasks` (tabela do CORE, ver src/server/db.ts), que registra
+   * que evento já virou tarefa — nunca duplica (tarefa OU notificação) mesmo
+   * rodando este poll repetidas vezes.
    *
    * Regra deliberadamente simples (determinística, sem IA): severidade
    * 'alta'/'critica' e ainda não revisado ('detected') — hoje isso cobre
@@ -61,6 +63,13 @@ export class MaestroService {
    * depender do Edge físico. Opt-in por organização
    * (organization_settings.vision_auto_task_enabled), mesmo padrão de
    * auto_task_on_handoff.
+   *
+   * Deliberadamente NÃO em tempo real: continua no mesmo passe rápido do
+   * Scheduler (minutos, não segundos) — o PRD §15.2 é explícito que o botão
+   * de pânico "registra e abre para a equipe humana agir", não é uma sirene;
+   * dar um SLA de segundos exigiria o vision-cloud chamar de volta o core de
+   * forma síncrona, reacoplando os dois processos que o ADR-001 deliberou
+   * manter separados. Mais simples e com menos superfície de falha assim.
    */
   static reactToVisionEvents(): void {
     let events: any[] = [];
@@ -92,6 +101,7 @@ export class MaestroService {
           refLabel: `vision_event:${ev.id}`,
         });
         db.prepare(`INSERT OR IGNORE INTO vision_event_tasks (event_id, task_id) VALUES (?, ?)`).run(ev.id, task.id);
+        NotificationService.visionCriticalEvent(ev.organization_id, label, ev.severity);
         console.log(`[Maestro] Tarefa criada a partir de evento Vision VMS (org ${ev.organization_id}, evento ${ev.id}, tipo ${ev.event_type}).`);
       } catch (e) {
         console.error("[Maestro] Falha ao criar tarefa a partir de evento Vision VMS:", ev.id, e);

@@ -145,6 +145,34 @@ export function initVisionDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_vision_events_org ON vision_events(organization_id, status);
     CREATE INDEX IF NOT EXISTS idx_vision_events_gateway ON vision_events(gateway_id, event_type, status);
+
+    -- Ocorrências (PRD §12/§15) — status simplificado a 'open'/'resolved'
+    -- (o PRD tem mais nuance para incidentes com evidência de vídeo real;
+    -- sem vídeo/gravação ainda, um 3º estado não agregaria nada).
+    -- legal_hold existe desde já como campo (mesmo sem uso — nenhuma
+    -- evidência de vídeo existe para travar ainda) só para não exigir uma
+    -- migration nova quando vision_evidence for implementado (Fase de
+    -- gravação, bloqueada em laboratório com hardware real) e precisar
+    -- checar se este incidente bloqueia expurgo de evidência (ADR-004).
+    CREATE TABLE IF NOT EXISTS vision_incidents (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      site_id TEXT,
+      gateway_id TEXT,
+      source_event_id TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      severity TEXT NOT NULL DEFAULT 'media',
+      status TEXT NOT NULL DEFAULT 'open',
+      is_panic INTEGER NOT NULL DEFAULT 0,
+      legal_hold INTEGER NOT NULL DEFAULT 0,
+      opened_by TEXT,
+      resolved_by TEXT,
+      resolved_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_incidents_org ON vision_incidents(organization_id, status);
   `);
 }
 

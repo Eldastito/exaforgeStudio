@@ -121,6 +121,30 @@ export function initVisionDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_vision_role_assignments_scope
       ON vision_role_assignments(organization_id, user_id);
+
+    -- Eventos técnicos (PRD §12.2/§12.3), Sprint 2 — só os tipos que dá pra
+    -- detectar honestamente sem câmera/Edge físico: saúde de gateway
+    -- (heartbeat perdido/recuperado). Tipos que dependem de vídeo real
+    -- (camera_offline por perda de stream, tamper, IA visual) ficam para
+    -- quando o Vision Edge existir de verdade.
+    -- status segue a máquina de estados do PRD, reduzida ao que faz sentido
+    -- agora: detected -> acknowledged/resolved/false_positive.
+    CREATE TABLE IF NOT EXISTS vision_events (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      site_id TEXT,
+      gateway_id TEXT,
+      event_type TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'media',
+      status TEXT NOT NULL DEFAULT 'detected',
+      detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      resolved_at DATETIME,
+      payload_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_events_org ON vision_events(organization_id, status);
+    CREATE INDEX IF NOT EXISTS idx_vision_events_gateway ON vision_events(gateway_id, event_type, status);
   `);
 }
 

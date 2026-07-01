@@ -27,7 +27,9 @@ import roleAssignmentsRoutes from "./routes/roleAssignments.js";
 import eventsRoutes from "./routes/events.js";
 import incidentsRoutes from "./routes/incidents.js";
 import panicRoutes from "./routes/panic.js";
+import webhooksRoutes from "./routes/webhooks.js";
 import { startHealthMonitor } from "./healthMonitor.js";
+import { startWebhookDispatcher } from "./webhookDispatcher.js";
 
 const PORT = Number(process.env.VISION_CLOUD_PORT || 3101);
 const JWT_SECRET = process.env.JWT_SECRET || "";
@@ -69,11 +71,14 @@ app.use("/role-assignments", roleAssignmentsRoutes);
 app.use("/events", eventsRoutes);
 app.use("/incidents", incidentsRoutes);
 app.use("/panic", panicRoutes);
+app.use("/webhooks", webhooksRoutes);
 
 // Detecção de gateway offline por timeout de heartbeat (Sprint 2 — eventos
 // técnicos). Ver healthMonitor.ts para o porquê disso roda aqui, não no
 // Scheduler.ts do core.
 startHealthMonitor();
+// Entrega dos webhooks de saída do Vision Integration Gateway (PRD §16.3).
+startWebhookDispatcher();
 
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`[vision-cloud] ouvindo em http://127.0.0.1:${PORT}`);

@@ -13,6 +13,7 @@ import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import db from "../db.js";
 import { VisionRequest, requireAuth, requireVisionRole } from "../auth.js";
+import { enqueueWebhookDeliveries } from "../webhooks.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -39,6 +40,14 @@ router.post("/", requireVisionRole(PANIC_ROLES), (req: VisionRequest, res) => {
 
   const event = db.prepare(`SELECT * FROM vision_events WHERE id = ?`).get(eventId);
   const incident = db.prepare(`SELECT * FROM vision_incidents WHERE id = ?`).get(incidentId);
+
+  // Este INSERT é direto (não passa por createEventIfNotOpen — o pânico
+  // sempre cria, nunca reaproveita um evento já aberto), então enfileira o
+  // webhook de evento aqui também, além dos dois tópicos específicos.
+  enqueueWebhookDeliveries(req.organizationId!, "vision.event.detected", event as any);
+  enqueueWebhookDeliveries(req.organizationId!, "vision.panic.activated", event as any);
+  enqueueWebhookDeliveries(req.organizationId!, "vision.incident.created", incident as any);
+
   res.status(201).json({ event, incident });
 });
 

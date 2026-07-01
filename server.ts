@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
-import { createProxyMiddleware } from "http-proxy-middleware";
+import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 
 import channelsRoutes from "./src/server/routes/channels.js";
 import messagesRoutes from "./src/server/routes/messages.js";
@@ -359,8 +359,16 @@ async function startServer() {
   // `vision -> "vms"`; o Authorization: Bearer original segue para o processo
   // vision-cloud, que revalida o mesmo JWT de forma independente (defesa em
   // profundidade — este processo não "confia cegamente" no hop do proxy).
+  // `fixRequestBody` é obrigatório aqui: `express.json()" já rodou (mais acima
+  // neste arquivo) e consumiu o stream original do corpo da requisição antes
+  // do proxy conseguir repassá-lo — sem isso, todo POST/PATCH para
+  // /api/vision/* trava (o vision-cloud fica esperando um corpo que nunca
+  // chega até o fim, e o cliente recebe 504 depois do timeout do proxy).
+  // Descoberto e corrigido durante teste real em browser desta funcionalidade
+  // (não só em testes de API) — ver http-proxy-middleware README, seção
+  // "Intercept and manipulate requests", e o issue #40 do projeto.
   const visionCloudTarget = `http://127.0.0.1:${process.env.VISION_CLOUD_PORT || 3101}`;
-  protectedApi.use("/vision", createProxyMiddleware({ target: visionCloudTarget, changeOrigin: true }));
+  protectedApi.use("/vision", createProxyMiddleware({ target: visionCloudTarget, changeOrigin: true, on: { proxyReq: fixRequestBody } }));
 
   protectedApi.use("/channels", channelsRoutes);
   protectedApi.use("/messages", messagesRoutes);

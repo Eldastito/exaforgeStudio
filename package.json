@@ -21,7 +21,8 @@
     "test:vision-events": "tsx scripts/test-vision-events.ts",
     "test:vision-incidents": "tsx scripts/test-vision-incidents.ts",
     "test:vision-maestro-bridge": "tsx scripts/test-vision-maestro-bridge.ts",
-    "test:vision-webhooks": "tsx scripts/test-vision-webhooks.ts"
+    "test:vision-webhooks": "tsx scripts/test-vision-webhooks.ts",
+    "test:vision-zone-rules": "tsx scripts/test-vision-zone-rules.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Video, Plus, X, Loader2, Siren, Radio, Camera as CameraIcon, HardDrive, MapPin, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { Video, Plus, X, Loader2, Siren, Radio, Camera as CameraIcon, HardDrive, MapPin, AlertTriangle, CheckCircle2, ShieldAlert, UserCog, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -15,10 +15,28 @@ type Device = { id: string; site_id: string; gateway_id: string | null; device_t
 type Camera = { id: string; site_id: string; device_id: string | null; gateway_id: string | null; name: string; area_name: string | null; status: string; is_enabled: number };
 type VisionEvent = { id: string; site_id: string | null; gateway_id: string | null; event_type: string; severity: string; status: string; detected_at: string };
 type Incident = { id: string; site_id: string | null; title: string; description: string | null; severity: string; status: string; is_panic: number; created_at: string };
+type RoleAssignment = { id: string; user_id: string; role: string; site_id: string | null; granted_by: string | null; expires_at: string | null; created_at: string };
+type OrgUser = { id: string; name: string; email: string };
 
-type Tab = 'sites' | 'gateways' | 'devices' | 'cameras' | 'events' | 'incidents';
+type Tab = 'sites' | 'gateways' | 'devices' | 'cameras' | 'events' | 'incidents' | 'roles';
 
 const inputClass = 'w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100';
+
+// Espelha VISION_ROLES de apps/vision-cloud/auth.ts (PRD §20.1) — rótulos em
+// PT-BR para quem está concedendo o acesso, não os valores crus salvos no banco.
+const VISION_ROLE_LABELS: Record<string, string> = {
+  vision_admin: 'Vision Admin (acesso total ao módulo)',
+  security_operator: 'Operador de Segurança',
+  operations_manager: 'Gerente de Operações',
+  portaria_operator: 'Operador de Portaria',
+  access_controller: 'Controlador de Acesso',
+  evidence_auditor: 'Auditor de Evidências',
+  unit_manager: 'Síndico / Gestor da Unidade',
+  administradora_master: 'Administradora (Master)',
+  support_tecnico: 'Suporte Técnico (acesso temporário)',
+  identity_search_officer: 'Oficial de Busca de Identidade',
+};
+const VISION_ROLE_KEYS = Object.keys(VISION_ROLE_LABELS);
 
 async function apiJson(url: string, options: RequestInit = {}) {
   const res = await apiFetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -67,16 +85,21 @@ export function VisionVmsView() {
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [events, setEvents] = useState<VisionEvent[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [roles, setRoles] = useState<RoleAssignment[]>([]);
+  const [rolesForbidden, setRolesForbidden] = useState(false);
+  const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
 
   const [showSiteModal, setShowSiteModal] = useState(false);
   const [showGatewayModal, setShowGatewayModal] = useState(false);
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showIncidentModal, setShowIncidentModal] = useState(false);
+  const [showRoleModal, setShowRoleModal] = useState(false);
   const [gatewayKeyReveal, setGatewayKeyReveal] = useState<string | null>(null);
 
   const siteName = (id: string | null) => sites.find(s => s.id === id)?.name || '—';
   const gatewayName = (id: string | null) => gateways.find(g => g.id === id)?.name || '—';
+  const userLabel = (id: string) => { const u = orgUsers.find(x => x.id === id); return u ? (u.name || u.email) : `Usuário ${id.slice(0, 8)}…`; };
 
   const loadAll = () => {
     setLoading(true);
@@ -87,6 +110,13 @@ export function VisionVmsView() {
       apiFetch('/api/vision/cameras').then(r => r.json()).then(d => setCameras(d.cameras || [])).catch(() => setCameras([])),
       apiFetch('/api/vision/events').then(r => r.json()).then(d => setEvents(d.events || [])).catch(() => setEvents([])),
       apiFetch('/api/vision/incidents').then(r => r.json()).then(d => setIncidents(d.incidents || [])).catch(() => setIncidents([])),
+      apiFetch('/api/vision/role-assignments').then(async r => {
+        if (r.status === 403) { setRolesForbidden(true); setRoles([]); return; }
+        setRolesForbidden(false);
+        const d = await r.json().catch(() => ({}));
+        setRoles(d.role_assignments || []);
+      }).catch(() => setRoles([])),
+      apiFetch('/api/users').then(r => r.json()).then(d => setOrgUsers(d.users || [])).catch(() => setOrgUsers([])),
     ]).finally(() => setLoading(false));
   };
 
@@ -124,6 +154,18 @@ export function VisionVmsView() {
     loadAll();
   };
 
+  const revokeRole = async (r: RoleAssignment) => {
+    const confirmed = await confirmDialog(
+      `Remover o papel "${VISION_ROLE_LABELS[r.role] || r.role}" de ${userLabel(r.user_id)}?`,
+      { title: 'Revogar papel Vision?', confirmText: 'Revogar', danger: true }
+    );
+    if (!confirmed) return;
+    const { ok, status, body } = await apiJson(`/api/vision/role-assignments/${r.id}`, { method: 'DELETE' });
+    if (!ok) { toast.error(errorMessage(status, body, 'Falha ao revogar papel.')); return; }
+    toast.success('Papel revogado.');
+    loadAll();
+  };
+
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'sites', label: 'Sites', count: sites.length },
     { key: 'gateways', label: 'Gateways', count: gateways.length },
@@ -131,6 +173,7 @@ export function VisionVmsView() {
     { key: 'cameras', label: 'Câmeras', count: cameras.length },
     { key: 'events', label: 'Eventos', count: events.filter(e => e.status === 'detected' || e.status === 'acknowledged').length },
     { key: 'incidents', label: 'Ocorrências', count: incidents.filter(i => i.status === 'open').length },
+    { key: 'roles', label: 'Papéis', count: roles.length },
   ];
 
   return (
@@ -279,6 +322,41 @@ export function VisionVmsView() {
                 ))}
               </Section>
             )}
+
+            {tab === 'roles' && (
+              <Section
+                title="Papéis Vision"
+                onNew={() => setShowRoleModal(true)}
+                newLabel="Conceder papel"
+                disabled={rolesForbidden || orgUsers.length === 0}
+                disabledHint={rolesForbidden ? 'Só quem já é Vision Admin pode conceder papéis.' : undefined}
+              >
+                {rolesForbidden ? (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                    Você precisa ser <b>Vision Admin</b> (ou owner/admin da conta) para ver e gerenciar papéis. Peça para quem administra o Vision VMS na sua organização conceder o acesso.
+                  </div>
+                ) : roles.length === 0 ? (
+                  <EmptyState icon={<UserCog className="w-6 h-6" />} title="Nenhum papel concedido ainda" description="Owner/admin da conta já têm acesso total por padrão. Conceda papéis granulares (PRD §20.1) para o resto da equipe usar o Vision VMS sem compartilhar login de admin." actionLabel={orgUsers.length ? 'Conceder papel' : undefined} onAction={orgUsers.length ? () => setShowRoleModal(true) : undefined} />
+                ) : roles.map(r => {
+                  const expired = !!r.expires_at && new Date(r.expires_at).getTime() < Date.now();
+                  return (
+                    <Row key={r.id}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-zinc-100 truncate">{userLabel(r.user_id)}</p>
+                        <p className="text-[11px] text-zinc-500 truncate">
+                          {VISION_ROLE_LABELS[r.role] || r.role} · {r.site_id ? siteName(r.site_id) : 'Toda a organização'}
+                          {r.expires_at ? ` · expira em ${r.expires_at}${expired ? ' (expirado)' : ''}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {expired && <span className="text-[11px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-500">expirado</span>}
+                        <IconBtn title="Revogar papel" onClick={() => revokeRole(r)}><Trash2 className="w-4 h-4" /></IconBtn>
+                      </div>
+                    </Row>
+                  );
+                })}
+              </Section>
+            )}
           </>
         )}
       </div>
@@ -294,6 +372,7 @@ export function VisionVmsView() {
       {showDeviceModal && <DeviceModal sites={sites} gateways={gateways} onClose={() => setShowDeviceModal(false)} onSaved={() => { setShowDeviceModal(false); loadAll(); }} />}
       {showCameraModal && <CameraModal sites={sites} devices={devices} gateways={gateways} onClose={() => setShowCameraModal(false)} onSaved={() => { setShowCameraModal(false); loadAll(); }} />}
       {showIncidentModal && <IncidentModal onClose={() => setShowIncidentModal(false)} onSaved={() => { setShowIncidentModal(false); loadAll(); }} />}
+      {showRoleModal && <RoleModal sites={sites} orgUsers={orgUsers} onClose={() => setShowRoleModal(false)} onSaved={() => { setShowRoleModal(false); loadAll(); }} />}
       {gatewayKeyReveal && <GatewayKeyModal apiKey={gatewayKeyReveal} onClose={() => setGatewayKeyReveal(null)} />}
     </div>
   );
@@ -591,6 +670,59 @@ function IncidentModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           <option value="alta">Alta</option>
           <option value="critica">Crítica</option>
         </select>
+      </div>
+    </ModalShell>
+  );
+}
+
+function RoleModal({ sites, orgUsers, onClose, onSaved }: { sites: Site[]; orgUsers: OrgUser[]; onClose: () => void; onSaved: () => void }) {
+  const [userId, setUserId] = useState(orgUsers[0]?.id || '');
+  const [role, setRole] = useState(VISION_ROLE_KEYS[0]);
+  const [siteId, setSiteId] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!userId) { toast.error('Escolha o usuário.'); return; }
+    setSaving(true);
+    const { ok, status, body } = await apiJson('/api/vision/role-assignments', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, role, site_id: siteId || null, expires_at: expiresAt || null }),
+    });
+    setSaving(false);
+    if (!ok) { toast.error(errorMessage(status, body, 'Erro ao conceder papel.')); return; }
+    toast.success('Papel concedido.');
+    onSaved();
+  };
+
+  return (
+    <ModalShell title="Conceder papel Vision" onClose={onClose} footer={<>
+      <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+      <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={save} disabled={saving || !userId}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Conceder'}</Button>
+    </>}>
+      <div>
+        <label className="text-sm text-zinc-400 mb-1 block">Usuário</label>
+        <select className={inputClass} value={userId} onChange={e => setUserId(e.target.value)}>
+          {orgUsers.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-sm text-zinc-400 mb-1 block">Papel (PRD §20.1)</label>
+        <select className={inputClass} value={role} onChange={e => setRole(e.target.value)}>
+          {VISION_ROLE_KEYS.map(k => <option key={k} value={k}>{VISION_ROLE_LABELS[k]}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-sm text-zinc-400 mb-1 block">Escopo</label>
+        <select className={inputClass} value={siteId} onChange={e => setSiteId(e.target.value)}>
+          <option value="">Toda a organização</option>
+          {sites.map(s => <option key={s.id} value={s.id}>Só o site: {s.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-sm text-zinc-400 mb-1 block">Expira em (opcional)</label>
+        <input type="date" className={inputClass} value={expiresAt} onChange={e => setExpiresAt(e.target.value)} />
+        <p className="text-[11px] text-zinc-500 mt-1">Deixe em branco para acesso sem prazo. Use um prazo curto para acesso temporário (ex.: Suporte Técnico, PRD §20.1).</p>
       </div>
     </ModalShell>
   );

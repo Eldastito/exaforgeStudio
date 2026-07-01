@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
+import { createProxyMiddleware } from "http-proxy-middleware";
 
 import channelsRoutes from "./src/server/routes/channels.js";
 import messagesRoutes from "./src/server/routes/messages.js";
@@ -352,6 +353,15 @@ async function startServer() {
     return res.status(403).json({ error: "module_disabled", module: mod });
   });
   
+  // ZappFlow Vision Cloud: processo separado do core (docs/adr/ADR-001, adendo
+  // "Vision Cloud como terceiro serviço"). NÃO é um router local — é um proxy
+  // para http://127.0.0.1:VISION_CLOUD_PORT. O gate de módulo acima já resolveu
+  // `vision -> "vms"`; o Authorization: Bearer original segue para o processo
+  // vision-cloud, que revalida o mesmo JWT de forma independente (defesa em
+  // profundidade — este processo não "confia cegamente" no hop do proxy).
+  const visionCloudTarget = `http://127.0.0.1:${process.env.VISION_CLOUD_PORT || 3101}`;
+  protectedApi.use("/vision", createProxyMiddleware({ target: visionCloudTarget, changeOrigin: true }));
+
   protectedApi.use("/channels", channelsRoutes);
   protectedApi.use("/messages", messagesRoutes);
   protectedApi.use("/tickets", ticketsRoutes);

@@ -8,6 +8,10 @@ const dbPath = path.join(dataDir, 'zappflow.db');
 const db = new Database(dbPath, process.env.NODE_ENV === 'production' ? {} : { verbose: console.log });
 
 db.pragma('journal_mode = WAL');
+// busy_timeout: com o vision-cloud (processo separado, ver ADR-001 addendum)
+// abrindo o MESMO arquivo, uma escrita concorrente rara deve esperar e tentar
+// de novo em vez de falhar imediatamente com SQLITE_BUSY.
+db.pragma('busy_timeout = 5000');
 
 // Migrations / Create Tables
 const initDb = () => {
@@ -408,6 +412,22 @@ const initDb = () => {
       details TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Vision VMS (Fase 0/1): flags granulares por org/site/câmera, complementares
+    -- ao gate grosso de ModuleService.enabled_modules (módulo "vms" liga/desliga
+    -- o produto inteiro; esta tabela liga/desliga sub-recursos dentro dele, ex.:
+    -- vision_ptz, vision_lpr — ver docs/PRD-VISION-VMS-RECONCILIACAO.md bloco 4).
+    CREATE TABLE IF NOT EXISTS vision_feature_flags (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      site_id TEXT,
+      flag_key TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vision_feature_flags_scope
+      ON vision_feature_flags(organization_id, COALESCE(site_id, ''), flag_key);
   `);
   
   // Migrations for existing tables

@@ -5,6 +5,7 @@
 // pontas nunca duplicarem/divergirem a lógica de "o que é um evento aberto".
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
+import { enqueueWebhookDeliveries } from "./webhooks.js";
 
 export type Severity = "baixa" | "media" | "alta" | "critica";
 
@@ -45,6 +46,9 @@ export function createEventIfNotOpen(params: {
     params.severity,
     params.payload ? JSON.stringify(params.payload) : null
   );
+  enqueueWebhookDeliveries(params.organizationId, "vision.event.detected", {
+    id, event_type: params.eventType, severity: params.severity, site_id: params.siteId || null, gateway_id: params.gatewayId || null,
+  });
   return { created: true, eventId: id };
 }
 

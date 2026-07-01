@@ -5,6 +5,7 @@ import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import db from "../db.js";
 import { VisionRequest, requireAuth, requireVisionRole } from "../auth.js";
+import { enqueueWebhookDeliveries } from "../webhooks.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -44,6 +45,7 @@ router.post("/", requireVisionRole(MANAGE_ROLES), (req: VisionRequest, res) => {
   ).run(id, req.organizationId, site_id || null, gateway_id || null, title, description || null, severity || "media", req.userId || null);
 
   const row = db.prepare(`SELECT * FROM vision_incidents WHERE id = ?`).get(id);
+  enqueueWebhookDeliveries(req.organizationId!, "vision.incident.created", row as any);
   res.status(201).json({ incident: row });
 });
 
@@ -58,6 +60,7 @@ router.post("/:id/resolve", requireVisionRole(MANAGE_ROLES), (req: VisionRequest
   ).run(req.userId || null, req.organizationId, req.params.id);
 
   const row = db.prepare(`SELECT * FROM vision_incidents WHERE id = ?`).get(req.params.id);
+  enqueueWebhookDeliveries(req.organizationId!, "vision.incident.resolved", row as any);
   res.json({ incident: row });
 });
 

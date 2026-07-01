@@ -173,6 +173,50 @@ export function initVisionDb() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_vision_incidents_org ON vision_incidents(organization_id, status);
+
+    -- Vision Integration Gateway — webhooks de saída (PRD §16.3). secret_enc
+    -- guarda o segredo de assinatura CIFRADO (ver crypto.ts) — diferente da
+    -- api_key_hash do gateway físico (só hash, nunca lido de volta), aqui
+    -- precisamos do valor em claro para assinar cada entrega, então é
+    -- cifrado (reversível), não hasheado. event_types é um array JSON dos
+    -- tópicos (ex.: ["vision.panic.activated"]); NULL/vazio = todos os tópicos.
+    CREATE TABLE IF NOT EXISTS vision_webhooks (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      url TEXT NOT NULL,
+      secret_enc TEXT NOT NULL,
+      event_types TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_webhooks_org ON vision_webhooks(organization_id);
+
+    -- Log de entrega + fila de retry (PRD §16.3: "status de entrega", "log de
+    -- payload", "possibilidade de reprocessamento autorizado"). Uma linha por
+    -- tentativa de ENTREGA lógica (não por tentativa HTTP) — attempt_count
+    -- cresce a cada tentativa HTTP na MESMA linha, em vez de criar uma linha
+    -- nova, para o id da linha servir de idempotency key estável entre
+    -- retries (ver webhookDispatcher.ts).
+    CREATE TABLE IF NOT EXISTS vision_webhook_deliveries (
+      id TEXT PRIMARY KEY,
+      webhook_id TEXT NOT NULL,
+      organization_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_response_status INTEGER,
+      last_error TEXT,
+      delivered_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_webhook_deliveries_webhook ON vision_webhook_deliveries(webhook_id, status);
+    CREATE INDEX IF NOT EXISTS idx_vision_webhook_deliveries_org ON vision_webhook_deliveries(organization_id);
+    CREATE INDEX IF NOT EXISTS idx_vision_webhook_deliveries_due ON vision_webhook_deliveries(status, next_attempt_at);
   `);
 }
 

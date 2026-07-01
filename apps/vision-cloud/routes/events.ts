@@ -5,6 +5,7 @@ import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import db from "../db.js";
 import { VisionRequest, requireAuth, hasVisionRole } from "../auth.js";
+import { enqueueWebhookDeliveries } from "../webhooks.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -88,6 +89,7 @@ router.post("/:id/review", (req: VisionRequest, res) => {
       req.userId || null
     );
     incident = db.prepare(`SELECT * FROM vision_incidents WHERE id = ?`).get(incidentId);
+    enqueueWebhookDeliveries(req.organizationId!, "vision.incident.created", incident as any);
   }
 
   const row = db.prepare(`SELECT * FROM vision_events WHERE id = ?`).get(req.params.id);

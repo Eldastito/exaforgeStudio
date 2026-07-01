@@ -4,7 +4,7 @@
  */
 export const marketingConfig = {
   primaryCtaUrl: "#diagnostico",   // destino do botão principal (ou âncora)
-  whatsappUrl: "",                 // ex.: "https://wa.me/55XXXXXXXXXXX?text=..."
+  whatsappUrl: "https://wa.me/5521999947477?text=" + encodeURIComponent("Olá! Quero agendar um diagnóstico operacional com o ZappFlow."),
   calendarUrl: "",                 // ex.: link do Calendly/Google Agenda
   email: "",                       // ex.: "contato@zappflow.ai"
 };

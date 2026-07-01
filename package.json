@@ -8,12 +8,15 @@
     "dev:vision-cloud": "tsx apps/vision-cloud/server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "build:vision-cloud": "esbuild apps/vision-cloud/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/vision-cloud.cjs",
+    "build:supervisor": "esbuild scripts/supervisor.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/supervisor.cjs",
     "start": "node dist/server.cjs",
     "start:vision-cloud": "node dist/vision-cloud.cjs",
+    "start:supervisor": "node dist/supervisor.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test:isolation": "tsx scripts/test-tenant-isolation.ts"
+    "test:isolation": "tsx scripts/test-tenant-isolation.ts",
+    "test:supervisor": "tsx scripts/test-supervisor.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

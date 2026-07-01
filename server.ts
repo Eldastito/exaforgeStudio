@@ -999,6 +999,16 @@ async function startServer() {
     });
   }
 
+  // ATENÇÃO se algum dia adicionar `process.on('SIGTERM', ...)` aqui: em
+  // produção este processo roda como filho do supervisor em
+  // scripts/supervisor.ts (ver docs/adr/ADR-008-process-supervisor.md), que
+  // hoje assume que o core morre IMEDIATAMENTE ao receber SIGTERM (sem
+  // handler, comportamento default do Node) — o supervisor só espera pelo
+  // evento "exit" para considerar o shutdown completo. Um handler de
+  // graceful shutdown aqui (ex.: fechar conexões HTTP em voo) é seguro de
+  // adicionar, mas MUDA quanto tempo o core demora para sair; revise o
+  // orçamento de tempo do supervisor (comentários em scripts/supervisor.ts,
+  // janela de ~10s do Docker/Coolify) se isso passar de poucos segundos.
   const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

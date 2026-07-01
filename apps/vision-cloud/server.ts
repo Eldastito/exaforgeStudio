@@ -28,6 +28,7 @@ import eventsRoutes from "./routes/events.js";
 import incidentsRoutes from "./routes/incidents.js";
 import panicRoutes from "./routes/panic.js";
 import webhooksRoutes from "./routes/webhooks.js";
+import zonesRoutes from "./routes/zones.js";
 import { startHealthMonitor } from "./healthMonitor.js";
 import { startWebhookDispatcher } from "./webhookDispatcher.js";
 
@@ -72,6 +73,7 @@ app.use("/events", eventsRoutes);
 app.use("/incidents", incidentsRoutes);
 app.use("/panic", panicRoutes);
 app.use("/webhooks", webhooksRoutes);
+app.use("/zones", zonesRoutes);
 
 // Detecção de gateway offline por timeout de heartbeat (Sprint 2 — eventos
 // técnicos). Ver healthMonitor.ts para o porquê disso roda aqui, não no

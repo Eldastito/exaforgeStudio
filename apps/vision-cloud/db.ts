@@ -217,6 +217,62 @@ export function initVisionDb() {
     CREATE INDEX IF NOT EXISTS idx_vision_webhook_deliveries_webhook ON vision_webhook_deliveries(webhook_id, status);
     CREATE INDEX IF NOT EXISTS idx_vision_webhook_deliveries_org ON vision_webhook_deliveries(organization_id);
     CREATE INDEX IF NOT EXISTS idx_vision_webhook_deliveries_due ON vision_webhook_deliveries(status, next_attempt_at);
+
+    -- Zonas + regras (PRD §19.1: vision_zones/vision_rules) — a camada
+    -- DETERMINÍSTICA de "vídeo analytics": decide quando um fato observado
+    -- (quantas pessoas tem numa zona agora, ver zoneRules.ts) vira um evento,
+    -- sem IA nenhuma envolvida na decisão em si (mesmo espírito do Maestro no
+    -- core: regra simples e auditável, não um modelo "decidindo" na hora).
+    -- camera_id é opcional: uma zona pode representar uma área coberta por
+    -- várias câmeras (ou nenhuma ainda) — não amarra 1:1.
+    CREATE TABLE IF NOT EXISTS vision_zones (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      site_id TEXT NOT NULL,
+      camera_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_zones_org ON vision_zones(organization_id, site_id);
+
+    -- rule_type: 'dwell_time' (minutos de presença contínua) | 'occupancy_count'
+    -- (pessoas simultâneas) | 'after_hours_presence' (qualquer presença fora
+    -- da janela active_hours_start/end). threshold_value é interpretado
+    -- conforme rule_type (minutos, contagem, ou ignorado). last_triggered_session_at
+    -- é a idempotência: guarda o session_started_at (ver vision_zone_occupancy)
+    -- da última vez que ESTA regra disparou, pra nunca repetir o evento
+    -- enquanto a mesma "sessão" de ocupação continuar — só dispara de novo
+    -- numa sessão NOVA (zona esvaziou e encheu de novo).
+    CREATE TABLE IF NOT EXISTS vision_rules (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      zone_id TEXT NOT NULL,
+      rule_type TEXT NOT NULL,
+      threshold_value REAL,
+      active_hours_start TEXT,
+      active_hours_end TEXT,
+      severity TEXT NOT NULL DEFAULT 'media',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      last_triggered_session_at DATETIME,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_rules_zone ON vision_rules(zone_id, is_active);
+
+    -- Estado atual de ocupação de cada zona (1 linha por zona, upsert a cada
+    -- observação) — session_started_at NULL = zona vazia agora; preenchido =
+    -- desde quando está continuamente ocupada (usado pelo rule_type dwell_time).
+    CREATE TABLE IF NOT EXISTS vision_zone_occupancy (
+      zone_id TEXT PRIMARY KEY,
+      current_count INTEGER NOT NULL DEFAULT 0,
+      session_started_at DATETIME,
+      last_observed_at DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 }
 

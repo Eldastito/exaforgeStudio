@@ -10,6 +10,9 @@ import { NotificationService } from "./NotificationService.js";
 const VISION_EVENT_LABELS: Record<string, string> = {
   gateway_offline: "Gateway offline",
   panic_activated: "Botão de pânico acionado",
+  zone_dwell_time: "Permanência prolongada em zona monitorada",
+  zone_occupancy_count: "Ocupação acima do limite em zona monitorada",
+  zone_after_hours_presence: "Presença fora do horário em zona monitorada",
 };
 
 /**

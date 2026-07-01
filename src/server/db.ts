@@ -428,6 +428,19 @@ const initDb = () => {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_vision_feature_flags_scope
       ON vision_feature_flags(organization_id, COALESCE(site_id, ''), flag_key);
+
+    -- Ponte Maestro <-> Vision (MaestroService.reactToVisionEvents): tabela
+    -- PRÓPRIA do core que registra quais vision_events já viraram tarefa, para
+    -- o poll periódico nunca criar duas tarefas para o mesmo evento. Vive aqui
+    -- (não em apps/vision-cloud/db.ts) porque é o CORE quem escreve nela — o
+    -- core só faz SELECT em vision_events (nunca escreve lá; dono continua
+    -- sendo o vision-cloud, ver apps/vision-cloud/db.ts), e escreve/lê esta
+    -- tabela para o próprio controle de idempotência.
+    CREATE TABLE IF NOT EXISTS vision_event_tasks (
+      event_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   
   // Migrations for existing tables
@@ -1360,6 +1373,9 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar task_resources', e); }
   // Maestro: criar tarefa automática quando um atendimento é repassado p/ humano (opt-in).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_task_on_handoff INTEGER DEFAULT 0`); } catch(e){}
+  // Maestro: criar tarefa automática quando um evento Vision VMS de severidade
+  // alta/crítica é detectado (opt-in, mesmo padrão de auto_task_on_handoff).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_auto_task_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // Prospect AI (Fase 0) — Inteligência de Prospecção B2B. Fundação: ICP +
   // campanhas em rascunho. Contas/contatos/evidências/score/outreach entram nos

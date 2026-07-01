@@ -127,4 +127,18 @@ export class NotificationService {
       message: ok ? 'Seu backup foi gerado e está disponível para download em Integrações.' : 'Não conseguimos gerar o backup. Tente novamente.',
     });
   }
+
+  // Vision VMS: evento crítico (ex.: botão de pânico, gateway offline) detectado
+  // e ainda não revisado. Chamado por MaestroService.reactToVisionEvents, que já
+  // garante uma chamada por evento via vision_event_tasks — NÃO usa dedupeKey
+  // aqui de propósito: o dedupe do push() compara por título+mensagem+tipo, não
+  // pelo valor de dedupeKey, e dois pânicos DIFERENTES geram o mesmo texto — um
+  // dedupe por conteúdo suprimiria (errado) o segundo incidente real.
+  static visionCriticalEvent(orgId: string, label: string, severity: 'alta' | 'critica') {
+    return this.push({
+      organizationId: orgId, type: severity === 'critica' ? 'alert' : 'warning',
+      title: severity === 'critica' ? '🚨 Evento crítico no Vision VMS' : '⚠️ Evento no Vision VMS',
+      message: `${label} — severidade ${severity}. Abra o Vision VMS → Eventos para revisar.`,
+    });
+  }
 }

@@ -181,6 +181,12 @@ async function main() {
         return roDb.prepare("SELECT * FROM vision_event_tasks WHERE event_id = ?").get(eventId) as any;
       } finally { roDb.close(); }
     };
+    const readNotifications = (orgId: string) => {
+      const roDb = new Database(dbPath, { readonly: true });
+      try {
+        return roDb.prepare("SELECT * FROM notifications WHERE organization_id = ? AND title LIKE '%Vision VMS%'").all(orgId) as any[];
+      } finally { roDb.close(); }
+    };
 
     const taskCreatedA = await waitUntil(() => readTasks(orgA).length === 1, 10000, 300);
     check("Scheduler do CORE cria a tarefa a partir do evento Vision VMS (org A, opt-in ligado)", taskCreatedA, `tasks=${readTasks(orgA).length}`);
@@ -194,11 +200,17 @@ async function main() {
     const bridgeRow = readBridge(eventIdA);
     check("Tabela de ponte (vision_event_tasks) registra evento -> tarefa", !!bridgeRow && bridgeRow.task_id === taskA?.id);
 
+    const notificationsA = readNotifications(orgA);
+    check("Notificação in-app criada junto com a tarefa (org A)", notificationsA.length === 1, `count=${notificationsA.length}`);
+    check("Notificação tem type='alert' (severidade crítica)", notificationsA[0]?.type === "alert", `type=${notificationsA[0]?.type}`);
+
     check("Org B (sem opt-in) NÃO recebe tarefa, mesmo com evento crítico igualmente aberto", readTasks(orgB).length === 0, `tasks=${readTasks(orgB).length}`);
+    check("Org B (sem opt-in) também NÃO recebe notificação", readNotifications(orgB).length === 0, `count=${readNotifications(orgB).length}`);
 
     // ===== Idempotência: espera outro(s) passe(s) rápido(s) e confirma que NÃO duplica =====
     await sleep(2600); // pelo menos +2 ciclos do passe rápido (1200ms cada)
     check("Passes subsequentes do Scheduler NÃO duplicam a tarefa do mesmo evento", readTasks(orgA).length === 1, `tasks=${readTasks(orgA).length}`);
+    check("Passes subsequentes do Scheduler NÃO duplicam a notificação do mesmo evento", readNotifications(orgA).length === 1, `count=${readNotifications(orgA).length}`);
 
     // ===== Não-regressão: MaestroService.onHandoff (repasse IA->humano) continua OK =====
     const roDb = new Database(dbPath, { readonly: true });

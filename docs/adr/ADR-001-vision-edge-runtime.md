@@ -64,3 +64,43 @@ Equipe precisa manter dois deployables (core e edge) com pipelines de build/vers
 ## Plano de rollback
 
 Como o Vision Edge é um processo novo e isolado, o rollback é trivial na Fase 0: desligar o processo/flag `vision_edge` não afeta o core em nenhuma hipótese, pois nenhuma dependência é injetada de volta no `server.ts`.
+
+---
+
+## Adendo — Vision Cloud como terceiro serviço (separado do core, mesmo banco, mesmo domínio)
+
+**Status:** Aceito e validado com prova de conceito em runtime.
+**Data:** pós-Fase 0, antes do início da Fase 1.
+
+### Contexto do adendo
+
+Este ADR, na versão original, resolveu a separação entre `zappflow-core` e `vision-edge` (o serviço que roda fisicamente no site do cliente). Ficou em aberto onde rodaria a parte de **gestão na nuvem** do Vision (Command Center, dashboards, Event Inbox, RBAC de câmeras/sites) — implicitamente, ela poderia nascer dentro do próprio `server.ts`, como mais um módulo (padrão de Reservas/Assinaturas).
+
+Decidiu-se ir um passo além: essa parte também nasce como **processo separado do `server.ts`**, chamado **Vision Cloud**, pelos mesmos motivos de isolamento de falha, deploy independente e organização de código já usados para justificar a separação do Edge — mas com uma diferença importante: o Vision Cloud **compartilha o mesmo banco de dados** do core e é exposto **no mesmo domínio**, com **login único**. Ao contrário do Edge (que precisa de banco próprio local para operar sem internet), o Vision Cloud roda ao lado do core na mesma infraestrutura de nuvem, então não há motivo técnico para duplicar banco ou autenticação.
+
+### Decisão
+
+1. **Estrutura**: novo diretório `apps/vision-cloud/server.ts` — processo Express próprio, sem importar nenhum módulo do grafo do `zappflow-core` (nenhum `import` de `src/server/*`). Isso preserva o isolamento de falha: um bug no Vision Cloud não pode derrubar o processo do CRM porque são binários/processos diferentes.
+2. **Banco compartilhado**: o Vision Cloud abre sua própria conexão `better-sqlite3` para o **mesmo arquivo** `zappflow.db` (mesma variável `DATA_DIR`), em vez de importar `src/server/db.ts`. O banco já roda em modo **WAL** (`db.ts:10`), que é o que permite múltiplos processos lerem/escreverem no mesmo arquivo sem se bloquearem. Foi adicionado `db.pragma('busy_timeout = 5000')` nos dois lados (core e vision-cloud) para que uma rara colisão de escrita espere e tente de novo em vez de falhar imediatamente.
+3. **Mesmo domínio via proxy interno**: o `server.ts` ganhou um proxy (`http-proxy-middleware`, MIT) que encaminha `/api/vision/*` para `http://127.0.0.1:VISION_CLOUD_PORT` — **depois** do middleware de autenticação e do gate de módulo já existentes (`protectedApi.use(requireAuth)`, `requireOrganizationAccess`, gate por `ModuleService.MODULE_BY_ROUTE`). O Vision Cloud nunca é exposto publicamente por conta própria (escuta só em `127.0.0.1`).
+4. **Login único / defesa em profundidade**: o Vision Cloud valida **o mesmo JWT** (`JWT_SECRET` compartilhado) de forma **independente** — ele não confia cegamente no fato de a requisição ter vindo do proxy do core; ele revalida a assinatura do token por conta própria. Isso dá login único para o usuário e, ao mesmo tempo, segurança de que o Vision Cloud não pode ser enganado por uma requisição direta não autenticada, caso algum dia seja alcançável de outra forma.
+5. **Gate de módulo**: registrado `vision -> "vms"` em `ModuleService.MODULE_BY_ROUTE` (`ModuleService.ts`). O módulo `"vms"` foi adicionado à lista de módulos opcionais conhecidos (`verticals.ts: OPTIONAL_MODULES`), mas **deliberadamente excluído** do preset de todas as verticais (inclusive "outro", que liga o resto) — só pode ser ativado por ação explícita em Configurações › Módulos, conforme a regra do PRD de feature flags desligadas por padrão.
+6. **Flags granulares**: criada a tabela aditiva `vision_feature_flags` (`organization_id`, `site_id` opcional, `flag_key`, `enabled`, com índice único de escopo) — complementar ao gate grosso do módulo `"vms"`, para permitir ligar/desligar sub-recursos (`vision_ptz`, `vision_lpr` etc.) por tenant e por site quando essas rotas existirem de fato (Fase 1+).
+7. **Deploy em produção — item em aberto, não resolvido por este adendo**: a decisão de proxy dentro do `server.ts` evita mudar infraestrutura (DNS, certificado, Traefik/Coolify) agora, mas ainda não resolve **como os dois processos sobem juntos em produção** (hoje o `Dockerfile` builda/roda um único processo). Isso precisa de uma decisão de deploy antes da Fase 1 ir a produção — candidatos: (a) um pequeno supervisor de processo dentro do mesmo container (ex.: o `CMD` do Docker sobe `vision-cloud` em background e depois o `server.ts` em foreground), ou (b) migrar para dois containers com roteamento por path na borda (Traefik/Coolify), como já foi cogitado e adiado nesta conversa. Não alterar o `Dockerfile`/processo de start em produção sem essa decisão explícita.
+
+### Prova de conceito (validação em runtime, não só no papel)
+
+Antes de fechar este adendo, os três pontos de risco técnico foram testados de verdade neste ambiente (não apenas assumidos):
+
+- **Login único funciona de ponta a ponta**: um JWT gerado com o mesmo `JWT_SECRET` do core autenticou com sucesso em `GET /whoami` no processo `vision-cloud`; um token sem header foi rejeitado com 401; um token assinado com segredo diferente também foi rejeitado com 401.
+- **Leitura cross-processo do mesmo banco funciona**: `vision-cloud`, com sua própria conexão `better-sqlite3`, leu corretamente uma linha de `organization_settings` inserida por um processo separado simulando o core.
+- **Escrita concorrente de dois processos no mesmo arquivo SQLite não gera erro de lock**: um teste de carga de ~2 segundos com dois processos Node independentes escrevendo simultaneamente (um em `organization_settings`, outro em `vision_feature_flags`) produziu **mais de 46 mil escritas combinadas com zero erros de `SQLITE_BUSY`/`database is locked`**, confirmando que WAL + `busy_timeout` sustentam o modelo de dois processos compartilhando o mesmo arquivo sob a carga esperada de um SaaS deste porte.
+
+### Riscos (adendo)
+
+- **Médio**: sem o item 7 resolvido, este scaffold funciona em desenvolvimento local (dois processos rodados manualmente) mas **não deve ser considerado pronto para produção** até a decisão de deploy ser tomada.
+- **Baixo**: volume de escrita concorrente em produção real (muitos tenants) pode ser maior que o teste sintético de 2 segundos — o `busy_timeout` de 5s dá margem, mas vale reincluir esse cenário nos testes de carga da Fase 1 (já previstos no PRD §29).
+
+### Plano de rollback (adendo)
+
+Reverter é trivial: remover o proxy `protectedApi.use("/vision", ...)` do `server.ts` (uma linha), o que faz `/api/vision/*` voltar a responder 404 sem nenhum efeito colateral no resto do core. As tabelas (`vision_feature_flags`) e o módulo (`"vms"`) são aditivos e podem ficar sem uso sem custo.

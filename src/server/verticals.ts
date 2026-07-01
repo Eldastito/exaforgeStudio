@@ -22,7 +22,14 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
+  "vms",
 ] as const;
+
+// "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de
+// câmera no site do cliente — não deve ser ligado automaticamente por nenhuma
+// vertical (nem "outro"), só por ativação explícita em Configurações › Módulos
+// após diagnóstico/piloto (PRD §0.5: feature flags desligadas por padrão).
+const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms");
 
 export const VERTICALS: Vertical[] = [
   {
@@ -64,7 +71,7 @@ export const VERTICALS: Vertical[] = [
   {
     key: "outro", label: "Outro / Genérico", icon: "✨",
     descricao: "Liga todos os módulos. Você refina depois em Configurações › Módulos.",
-    modules: [...OPTIONAL_MODULES],
+    modules: [...OUTRO_MODULES],
     saleMode: "unit",
   },
 ];

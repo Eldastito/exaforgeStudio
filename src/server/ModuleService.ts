@@ -31,6 +31,7 @@ export class ModuleService {
     studio: "estudio",
     tasks: "execucao",
     prospect: "prospect",
+    vision: "vms",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

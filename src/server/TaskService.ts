@@ -83,7 +83,7 @@ export class TaskService {
     const title = String(input.title || "").trim();
     if (!title) throw new Error("Informe um título para a tarefa.");
     const priority = PRIORITIES.includes(String(input.priority)) ? input.priority : "media";
-    const source = ["manual", "ric", "ia"].includes(String(input.source)) ? input.source : "manual";
+    const source = ["manual", "ric", "ia", "vision"].includes(String(input.source)) ? input.source : "manual";
     const id = randomUUID();
     db.prepare(`
       INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount)

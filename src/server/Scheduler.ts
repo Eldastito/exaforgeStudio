@@ -14,6 +14,7 @@ import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { InstagramService } from "./InstagramService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
+import { MaestroService } from "./MaestroService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -39,7 +40,10 @@ export class Scheduler {
     // ambos sensíveis a minutos.
     const FAST = parseInt(process.env.SCHEDULER_FAST_INTERVAL_MS || `${5 * 60 * 1000}`, 10);
     this.fastTimer = setInterval(() => this.fastPass().catch(e => console.error('[Scheduler] passe rápido falhou', e)), FAST);
-    setTimeout(() => this.fastPass().catch(() => {}), 45_000);
+    // Atraso da primeira passada rápida — configurável só para teste automatizado
+    // (scripts/test-vision-maestro-bridge.ts) não precisar esperar 45s de verdade.
+    const FAST_INITIAL_DELAY = parseInt(process.env.SCHEDULER_FAST_INITIAL_DELAY_MS || '45000', 10);
+    setTimeout(() => this.fastPass().catch(() => {}), FAST_INITIAL_DELAY);
     console.log('[Scheduler] iniciado (reativação automática + lembretes de agendamento + cadências de follow-up + lembretes de PIX + posts agendados).');
   }
 
@@ -47,6 +51,7 @@ export class Scheduler {
   static async fastPass() {
     await this.pixReminderPass().catch(e => console.error('[Scheduler] lembrete PIX falhou', e));
     await InstagramService.publishScheduledPass().catch(e => console.error('[Scheduler] publicação agendada falhou', e));
+    try { MaestroService.reactToVisionEvents(); } catch (e) { console.error('[Scheduler] ponte Vision VMS -> Tarefas falhou', e); }
   }
 
   static async tick() {

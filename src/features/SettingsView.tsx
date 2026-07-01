@@ -759,9 +759,11 @@ type AiAttendance = {
   memoryEnabled: boolean; greetEnabled: boolean; greetMinDays: number;
   abandonedEnabled: boolean; abandonedHours: number; abandonedMessage: string;
   autoTaskOnHandoff?: boolean;
+  autoTaskOnVisionEvent?: boolean;
 };
 function AiAttendancePanel() {
   const [cfg, setCfg] = useState<AiAttendance | null>(null);
+  const visionEnabled = useStore(s => s.isModuleEnabled('vms'));
 
   useEffect(() => { apiFetch('/api/analytics/ai-attendance-settings').then(r => r.json()).then(setCfg).catch(() => {}); }, []);
 
@@ -864,6 +866,21 @@ function AiAttendancePanel() {
               <Toggle on={!!cfg.autoTaskOnHandoff} onClick={() => save({ autoTaskOnHandoff: !cfg.autoTaskOnHandoff })} />
             </div>
           </div>
+
+          {/* Maestro — tarefa automática em evento crítico do Vision VMS */}
+          {visionEnabled && (
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-zinc-100">📹 Maestro — tarefa em evento crítico do Vision VMS</p>
+                  <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                    Quando o Vision VMS detecta um evento de severidade <b>alta</b> ou <b>crítica</b> (ex.: gateway offline, botão de pânico) e ele ainda não foi revisado, o ZappFlow cria automaticamente uma <b>tarefa interna</b> na aba <b>Tarefas</b>, para a equipe agir mesmo sem estar com o Vision VMS aberto.
+                  </p>
+                </div>
+                <Toggle on={!!cfg.autoTaskOnVisionEvent} onClick={() => save({ autoTaskOnVisionEvent: !cfg.autoTaskOnVisionEvent })} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>

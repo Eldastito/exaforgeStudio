@@ -25,6 +25,8 @@ import devicesRoutes from "./routes/devices.js";
 import camerasRoutes from "./routes/cameras.js";
 import roleAssignmentsRoutes from "./routes/roleAssignments.js";
 import eventsRoutes from "./routes/events.js";
+import incidentsRoutes from "./routes/incidents.js";
+import panicRoutes from "./routes/panic.js";
 import { startHealthMonitor } from "./healthMonitor.js";
 
 const PORT = Number(process.env.VISION_CLOUD_PORT || 3101);
@@ -65,6 +67,8 @@ app.use("/devices", devicesRoutes);
 app.use("/cameras", camerasRoutes);
 app.use("/role-assignments", roleAssignmentsRoutes);
 app.use("/events", eventsRoutes);
+app.use("/incidents", incidentsRoutes);
+app.use("/panic", panicRoutes);
 
 // Detecção de gateway offline por timeout de heartbeat (Sprint 2 — eventos
 // técnicos). Ver healthMonitor.ts para o porquê disso roda aqui, não no

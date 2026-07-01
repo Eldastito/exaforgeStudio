@@ -24,6 +24,8 @@ import gatewaysRoutes from "./routes/gateways.js";
 import devicesRoutes from "./routes/devices.js";
 import camerasRoutes from "./routes/cameras.js";
 import roleAssignmentsRoutes from "./routes/roleAssignments.js";
+import eventsRoutes from "./routes/events.js";
+import { startHealthMonitor } from "./healthMonitor.js";
 
 const PORT = Number(process.env.VISION_CLOUD_PORT || 3101);
 const JWT_SECRET = process.env.JWT_SECRET || "";
@@ -62,6 +64,12 @@ app.use("/gateways", gatewaysRoutes);
 app.use("/devices", devicesRoutes);
 app.use("/cameras", camerasRoutes);
 app.use("/role-assignments", roleAssignmentsRoutes);
+app.use("/events", eventsRoutes);
+
+// Detecção de gateway offline por timeout de heartbeat (Sprint 2 — eventos
+// técnicos). Ver healthMonitor.ts para o porquê disso roda aqui, não no
+// Scheduler.ts do core.
+startHealthMonitor();
 
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`[vision-cloud] ouvindo em http://127.0.0.1:${PORT}`);

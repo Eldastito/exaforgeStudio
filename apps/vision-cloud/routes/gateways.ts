@@ -12,6 +12,7 @@ import crypto from "crypto";
 import bcrypt from "bcrypt";
 import db from "../db.js";
 import { VisionRequest, requireAuth, requireVisionRole } from "../auth.js";
+import { autoResolveOpenEvents, createEventIfNotOpen } from "../events.js";
 
 const router = Router();
 
@@ -70,27 +71,46 @@ async function requireGatewayKey(req: any, res: any, next: any) {
   if (!key || typeof key !== "string") return res.status(401).json({ error: "gateway_key_required" });
 
   const gateway = db
-    .prepare(`SELECT id, organization_id, api_key_hash FROM vision_gateways WHERE id = ?`)
+    .prepare(`SELECT id, organization_id, site_id, status, api_key_hash FROM vision_gateways WHERE id = ?`)
     .get(req.params.id) as any;
   if (!gateway || !gateway.api_key_hash) return res.status(401).json({ error: "invalid_gateway_key" });
 
   const ok = await bcrypt.compare(key, gateway.api_key_hash);
   if (!ok) return res.status(401).json({ error: "invalid_gateway_key" });
 
-  req.gatewayOrganizationId = gateway.organization_id;
+  req.gateway = gateway; // status ANTES deste heartbeat — usado para detectar recuperação
   next();
 }
 
 router.post("/:id/heartbeat", requireGatewayKey, (req: any, res) => {
   const { agent_version } = req.body || {};
+  const gateway = req.gateway;
+  const wasOffline = gateway.status === "offline";
+
   const result = db
     .prepare(
       `UPDATE vision_gateways SET status = 'online', last_heartbeat_at = CURRENT_TIMESTAMP,
        agent_version = COALESCE(?, agent_version), updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     )
-    .run(agent_version || null, req.params.id, req.gatewayOrganizationId);
+    .run(agent_version || null, req.params.id, gateway.organization_id);
   if (result.changes === 0) return res.status(404).json({ error: "gateway_not_found" });
+
+  // Recuperação detectada na hora — não espera o próximo tick do
+  // healthMonitor.ts. Resolve o evento técnico aberto e registra a
+  // recuperação como evento informativo (severidade baixa).
+  if (wasOffline) {
+    autoResolveOpenEvents(gateway.id, "gateway_offline");
+    createEventIfNotOpen({
+      organizationId: gateway.organization_id,
+      siteId: gateway.site_id,
+      gatewayId: gateway.id,
+      eventType: "gateway_online",
+      severity: "baixa",
+      payload: { reason: "heartbeat recebido após período offline" },
+    });
+  }
+
   res.json({ ok: true });
 });
 

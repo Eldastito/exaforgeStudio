@@ -395,6 +395,7 @@ const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
   { key: 'cadencias', label: 'Cadências', desc: 'Sequências de follow-up automático.' },
   { key: 'areas', label: 'Áreas de Atendimento', desc: 'Vários profissionais num número.' },
   { key: 'integracoes', label: 'Integrações', desc: 'Google Workspace e outras conexões.' },
+  { key: 'vms', label: 'Vision VMS', desc: 'Monitoramento de câmeras: sites, gateways, dispositivos, câmeras, eventos e ocorrências. Add-on que depende de hardware no site do cliente — ative só após diagnóstico/piloto.' },
 ];
 
 function ModulesPanel() {

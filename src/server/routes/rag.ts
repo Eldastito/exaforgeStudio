@@ -1,9 +1,9 @@
 import { Router } from "express";
 import multer from "multer";
 import db from "../db.js";
-import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { processDocument, deleteDocument } from "../geminiRAG.js";
+import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
 
@@ -18,17 +18,6 @@ function hasAllowedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return ALLOWED_EXT.some((ext) => lower.endsWith(ext));
 }
-
-const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
-  try {
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId || null, actorId || null, targetId || null, eventType, JSON.stringify(meta));
-  } catch(e) {
-    console.error("Failed to log auth event", e);
-  }
-};
 
 // Lista os documentos da base de conhecimento
 router.get("/documents", (req: AuthRequest, res): any => {

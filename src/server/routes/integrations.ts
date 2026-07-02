@@ -1,8 +1,10 @@
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
+import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { BackupService } from "../BackupService.js";
+import { StorageService } from "../StorageService.js";
 import { NotificationService } from "../NotificationService.js";
 import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit } from "../webhookSecurity.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
@@ -181,17 +183,6 @@ router.post("/whatsapp-webhook/rotate", (req: AuthRequest, res): any => {
   res.json({ success: true, url: `${base}/api/webhooks/evolution?secret=${secret}` });
 });
 
-const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
-  try {
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId || null, actorId || null, targetId || null, eventType, JSON.stringify(meta));
-  } catch(e) {
-    console.error("Failed to log auth event", e);
-  }
-};
-
 router.post("/inbound", (req: AuthRequest, res) => {
   const orgId = req.organizationId;
   const authHeader = req.headers['authorization'];
@@ -332,6 +323,14 @@ router.post("/backups", (req: AuthRequest, res): any => {
         `).run(result.fileName, id);
         logAuthEvent(orgId, userId, id, 'BACKUP_COMPLETED', { size: result.sizeBytes, records: result.recordCount });
         try { NotificationService.backupReady(orgId, true); } catch (e) { /* noop */ }
+        // Espelho best-effort no S3 (S3_ENABLED=true): redundância além do
+        // disco local. Download/exclusão continuam servindo do disco local,
+        // que segue sendo a fonte de verdade — o mirror nunca bloqueia nem
+        // muda o fluxo existente se falhar ou estiver desligado.
+        if (StorageService.isS3Enabled()) {
+          const fullPath = BackupService.resolveFile(orgId, result.fileName);
+          if (fullPath) StorageService.mirrorToS3(fullPath, `backups/${result.fileName}`).catch(() => {});
+        }
       } catch (err: any) {
         console.error('[Backup] Falha ao gerar:', err);
         try {

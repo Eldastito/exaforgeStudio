@@ -3,6 +3,7 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from "pdfkit";
 import db from "./db.js";
+import { StorageService } from "./StorageService.js";
 
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
 const REPORTS_DIR = path.join(MEDIA_DIR, "reports");
@@ -64,8 +65,17 @@ export class ReportPdfService {
       });
 
       const base = (process.env.APP_URL || "").replace(/\/$/, "");
-      const url = `${base}/media/reports/${id}.pdf`;
-      return { url };
+      const localUrl = `${base}/media/reports/${id}.pdf`;
+
+      // Espelho best-effort no S3 (S3_ENABLED=true): quando configurado, a URL
+      // devolvida é a do S3 (portável entre instâncias) em vez da local; o
+      // arquivo local continua existindo do mesmo jeito de sempre.
+      if (StorageService.isS3Enabled()) {
+        const mirror = await StorageService.mirrorToS3(filePath, `reports/${id}.pdf`);
+        if (mirror.stored && mirror.url) return { url: mirror.url };
+      }
+
+      return { url: localUrl };
     } catch (e) {
       console.error("[ReportPdf] Falha ao gerar PDF:", e);
       return null;

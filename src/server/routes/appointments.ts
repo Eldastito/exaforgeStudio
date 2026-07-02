@@ -5,19 +5,9 @@ import { AuthRequest } from "../middleware/auth.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { AppointmentService } from "../AppointmentService.js";
+import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
-
-const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
-  try {
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId || null, actorId || null, targetId || null, eventType, JSON.stringify(meta));
-  } catch(e) {
-    console.error("Failed to log auth event", e);
-  }
-};
 
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

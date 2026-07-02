@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { RadarService } from "../RadarService.js";
+import { ConversionVelocityService } from "../ConversionVelocityService.js";
 
 const router = Router();
 
@@ -102,6 +103,32 @@ router.post("/sessions/:id/complete", (req: AuthRequest, res): any => {
   if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores concluem o diagnóstico." });
   try { res.json(RadarService.completeSession(orgId, req.params.id, actorId(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Índice de Velocidade de Conversão (IVC) — medido a partir de dados reais da
+// própria organização, não do questionário. Não depende de radar_sessions:
+// pode ser calculado avulso a qualquer momento (produto de entrada leve) ou
+// anexado a uma sessão existente via { sessionId } no corpo.
+router.post("/velocity/calculate", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores calculam o índice de velocidade." });
+  try { res.status(201).json(ConversionVelocityService.calculate(orgId, actorId(req), req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/velocity", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ConversionVelocityService.list(orgId, req.query.sessionId as string | undefined));
+});
+
+router.get("/velocity/latest", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const snapshot = ConversionVelocityService.latest(orgId);
+  if (!snapshot) return res.status(404).json({ error: "Nenhum cálculo de velocidade ainda para esta organização." });
+  res.json(snapshot);
 });
 
 export default router;

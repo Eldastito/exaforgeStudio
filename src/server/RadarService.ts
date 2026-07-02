@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { logRadarEvent } from "./radarAudit.js";
 
 // ZappFlow Radar de Execução IA — Fase 1 (fundação de dados e motor de score).
 //
@@ -39,9 +40,9 @@ function maturityLevel(score: number): string {
   return "inteligente";
 }
 
-// Reaproveita auth_audit_logs (namespace de eventos radar_*, PRD §24) em vez de
-// criar uma tabela de auditoria só para o módulo — é o padrão mais próximo já
-// ativo no projeto (ver docs/adr do módulo Radar).
+// Wrapper fino sobre o helper compartilhado (src/server/radarAudit.ts), só para
+// não precisar tocar em cada um dos call sites abaixo — mantém a assinatura
+// "sessionId como 4º argumento" que já era usada neste arquivo.
 function logEvent(
   organizationId: string,
   actorUserId: string | null | undefined,
@@ -49,10 +50,7 @@ function logEvent(
   sessionId: string,
   metadata: Record<string, any> = {}
 ) {
-  db.prepare(
-    `INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-     VALUES (?, ?, ?, NULL, ?, ?)`
-  ).run(randomUUID(), organizationId, actorUserId || null, eventType, JSON.stringify({ sessionId, ...metadata }));
+  logRadarEvent(organizationId, actorUserId, eventType, { sessionId, ...metadata });
 }
 
 export class RadarService {

@@ -22,14 +22,21 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-  "vms",
+  "vms", "radar",
 ] as const;
 
 // "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de
 // câmera no site do cliente — não deve ser ligado automaticamente por nenhuma
 // vertical (nem "outro"), só por ativação explícita em Configurações › Módulos
 // após diagnóstico/piloto (PRD §0.5: feature flags desligadas por padrão).
-const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms");
+//
+// "radar" (ZappFlow Radar de Execução IA) segue o MESMO princípio, pelo mesmo
+// motivo declarado no PRD do módulo (§3, regra 3: feature flag
+// `ai_execution_radar_enabled`, desligada por padrão): nenhuma organização
+// existente deve "ganhar" o módulo sozinha num deploy — só ativação explícita
+// via Configurações › Módulos (ou, no piloto, direto no banco/API) por uma
+// organização de cada vez.
+const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar");
 
 export const VERTICALS: Vertical[] = [
   {

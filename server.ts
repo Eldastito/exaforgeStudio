@@ -47,6 +47,7 @@ import reservationsRoutes from "./src/server/routes/reservations.js";
 import subscriptionsRoutes from "./src/server/routes/subscriptions.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
+import radarRoutes from "./src/server/routes/radar.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
@@ -407,6 +408,7 @@ async function startServer() {
   protectedApi.use("/reservations", reservationsRoutes);
   protectedApi.use("/subscriptions", subscriptionsRoutes);
   protectedApi.use("/uploads", uploadsRoutes);
+  protectedApi.use("/radar", radarRoutes);
 
   // Rotas de webhook (/api/webhooks/*) são chamadas por serviços EXTERNOS
   // (Evolution, Meta) que NÃO enviam JWT. Elas são registradas abaixo, em `app`.

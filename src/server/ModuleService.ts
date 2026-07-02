@@ -32,6 +32,7 @@ export class ModuleService {
     tasks: "execucao",
     prospect: "prospect",
     vision: "vms",
+    radar: "radar",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

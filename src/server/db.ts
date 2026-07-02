@@ -2050,6 +2050,17 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar background_jobs', e); }
 
+  // Radar — Fase 2 (landing pública). Colunas de token público em
+  // radar_sessions, aditivas via ALTER TABLE (mesmo padrão do resto do
+  // arquivo). Reaproveita o padrão de org_invitations: token opaco só existe
+  // em texto plano no momento da criação (devolvido uma vez à resposta da
+  // API); o banco guarda só o hash. Ver src/server/RadarPublicService.ts e
+  // docs/adr/ADR-012-radar-fase2-landing-publica.md.
+  try { db.exec(`ALTER TABLE radar_sessions ADD COLUMN contact_role TEXT`); } catch(e){} // "cargo" — campo do onboarding público (PRD §5) que faltou na Fase 1
+  try { db.exec(`ALTER TABLE radar_sessions ADD COLUMN public_token_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE radar_sessions ADD COLUMN public_token_expires_at DATETIME`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_sessions_public_token ON radar_sessions(public_token_hash) WHERE public_token_hash IS NOT NULL`); } catch(e){}
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

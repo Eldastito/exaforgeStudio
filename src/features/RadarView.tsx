@@ -68,6 +68,7 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   in_progress: { label: 'Em andamento', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
   needs_information: { label: 'Falta info', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
   awaiting_review: { label: 'Aguardando revisão', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  approved: { label: 'Aprovado pelo consultor', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
   completed: { label: 'Concluído', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
 };
 const IVC_BAND_LABEL: Record<string, string> = {
@@ -111,7 +112,7 @@ export function RadarView() {
   const openSession = useCallback(async (id: string) => {
     try {
       const s: Session = await api(`/sessions/${id}`);
-      if (s.status === 'completed' || s.status === 'awaiting_review') {
+      if (['completed', 'awaiting_review', 'approved'].includes(s.status)) {
         setActiveSession(s);
         setView('result');
         return;
@@ -544,6 +545,83 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
                 }`}>{r.priority_band}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      <RespondentsSection sessionId={session.id} />
+    </div>
+  );
+}
+
+type Respondent = { id: string; name: string; email: string | null; role_title: string | null; area: string | null };
+
+// Registro de quem mais ajudou a responder o diagnóstico (Fase 3, ADR-014).
+// Só cadastro/histórico por enquanto — convite por link próprio (respondente
+// sem login) é uma peça maior, deliberadamente fora desta rodada.
+function RespondentsSection({ sessionId }: { sessionId: string }) {
+  const [respondents, setRespondents] = useState<Respondent[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: '', roleTitle: '', area: '', email: '' });
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    api(`/sessions/${sessionId}/respondents`).then((d) => setRespondents(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [sessionId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async () => {
+    if (!form.name.trim() || saving) return;
+    setSaving(true);
+    try {
+      await api(`/sessions/${sessionId}/respondents`, { method: 'POST', body: JSON.stringify(form) });
+      setForm({ name: '', roleTitle: '', area: '', email: '' });
+      setAdding(false);
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível adicionar o respondente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-white/50 uppercase tracking-wide">Respondentes</h3>
+        {!adding && (
+          <button onClick={() => setAdding(true)} className="text-xs text-white/50 hover:text-white/80 inline-flex items-center gap-1">
+            <Plus size={13} /> Adicionar
+          </button>
+        )}
+      </div>
+
+      {respondents.length === 0 && !adding && (
+        <p className="mt-2 text-sm text-white/40">Ninguém registrado ainda além de quem criou o diagnóstico.</p>
+      )}
+
+      {respondents.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {respondents.map((r) => (
+            <div key={r.id} className="text-sm text-white/70">
+              {r.name}{r.role_title ? ` · ${r.role_title}` : ''}{r.area ? ` · ${r.area}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && (
+        <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Nome *"><input className={inputCls} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></Field>
+          <Field label="Cargo"><input className={inputCls} value={form.roleTitle} onChange={(e) => setForm((f) => ({ ...f, roleTitle: e.target.value }))} /></Field>
+          <Field label="Área"><input className={inputCls} value={form.area} onChange={(e) => setForm((f) => ({ ...f, area: e.target.value }))} /></Field>
+          <Field label="E-mail"><input className={inputCls} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></Field>
+          <div className="sm:col-span-2 flex gap-2">
+            <button onClick={submit} disabled={!form.name.trim() || saving} className="rounded-lg px-4 py-2 text-sm font-semibold text-[#0b0f12] disabled:opacity-40" style={{ background: teal }}>
+              {saving ? <Loader2 className="animate-spin" size={16} /> : 'Salvar'}
+            </button>
+            <button onClick={() => setAdding(false)} className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white/70">Cancelar</button>
           </div>
         </div>
       )}

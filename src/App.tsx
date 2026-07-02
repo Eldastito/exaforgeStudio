@@ -17,6 +17,7 @@ import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
 import { VisionVmsView } from '@/src/features/VisionVmsView';
 import { RadarView } from '@/src/features/RadarView';
+import { RadarConsultantView } from '@/src/features/RadarConsultantView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -201,6 +202,7 @@ export default function App() {
              {viewMode === 'prospect' && 'Prospect AI'}
              {viewMode === 'vision' && 'Vision VMS'}
              {viewMode === 'radar' && 'Radar de Execução IA'}
+             {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -289,6 +291,7 @@ export default function App() {
           {viewMode === 'prospect' && <ProspectView />}
           {viewMode === 'vision' && <VisionVmsView />}
           {viewMode === 'radar' && <RadarView />}
+          {viewMode === 'radar_consultant' && <RadarConsultantView />}
           </ErrorBoundary>
         </main>
       </div>

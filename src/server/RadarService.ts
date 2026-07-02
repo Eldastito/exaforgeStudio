@@ -231,4 +231,30 @@ export class RadarService {
     calculateAndPersist(sessionId, actorUserId);
     return this.getSession(orgId, sessionId);
   }
+
+  // Respondentes (Fase 3, ADR-014): registro de QUEM mais está ajudando a
+  // responder uma sessão além de quem a criou — só cadastro/listagem por
+  // enquanto. `radar_respondents` já existia desde a Fase 1 (radar_answers já
+  // aceita respondent_id), mas nada expunha essa tabela até agora. Convite
+  // por link próprio (respondente sem login do ZappFlow) é uma peça maior,
+  // deliberadamente fora desta rodada — ver ADR-014.
+  static listRespondents(orgId: string, sessionId: string) {
+    const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
+    if (!session) throw new Error("Sessão não encontrada.");
+    return db.prepare(`SELECT * FROM radar_respondents WHERE session_id = ? ORDER BY created_at`).all(sessionId);
+  }
+
+  static addRespondent(orgId: string, sessionId: string, actorUserId: string | undefined, payload: any) {
+    const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
+    if (!session) throw new Error("Sessão não encontrada.");
+    if (!payload.name || !String(payload.name).trim()) throw new Error("Nome do respondente é obrigatório.");
+
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO radar_respondents (id, session_id, organization_id, name, email, role_title, area, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'invited')`
+    ).run(id, sessionId, orgId, payload.name.trim(), payload.email || null, payload.roleTitle || null, payload.area || null);
+    logEvent(orgId, actorUserId, "radar_respondent_added", sessionId, { respondentId: id });
+    return this.listRespondents(orgId, sessionId);
+  }
 }

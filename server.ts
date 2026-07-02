@@ -48,6 +48,7 @@ import subscriptionsRoutes from "./src/server/routes/subscriptions.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
+import radarPublicRoutes from "./src/server/routes/radarPublic.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
@@ -320,6 +321,10 @@ async function startServer() {
   // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
   // autenticado para que /api/public/* nunca exija JWT.
   app.use("/api/public", storefrontPublicRoutes);
+
+  // Radar de Execução IA — diagnóstico rápido PÚBLICO (landing sem login,
+  // Fase 2/ADR-012). Mesmo motivo de registro cedo: nunca deve exigir JWT.
+  app.use("/api/public/radar", radarPublicRoutes);
 
   // LISTA DE PLANOS é PÚBLICA: a tela de cadastro/"começar grátis" precisa
   // carregar os planos SEM login. Registrada antes do protectedApi (senão a

@@ -140,7 +140,7 @@ export class ProspectService {
    * contactName, role, email, phone }. Deduplica conta por domínio (ou nome) e
    * contato por e-mail/telefone. Registra a fonte (origem + política).
    */
-  static importRecords(orgId: string, input: { campaignId?: string; sourceRef?: string; records: any[] }, _actorId?: string):
+  static importRecords(orgId: string, input: { campaignId?: string; sourceRef?: string; provider?: string; records: any[] }, _actorId?: string):
     { sourceId: string; accountsCreated: number; accountsMerged: number; contactsCreated: number; contactsSkipped: number; total: number } {
     const records = Array.isArray(input?.records) ? input.records.slice(0, 5000) : [];
     if (!records.length) throw new Error("Nenhum registro para importar.");
@@ -148,13 +148,16 @@ export class ProspectService {
       const c = db.prepare("SELECT id FROM prospect_campaigns WHERE id = ? AND organization_id = ?").get(input.campaignId, orgId);
       if (!c) throw new Error("Campanha não encontrada.");
     }
+    // provider: origem do lote (csv_import | user_input | radar_ia | ...) —
+    // default 'csv_import' preserva o comportamento de todo call site existente.
+    const provider = String(input?.provider || "csv_import");
     const sourceId = randomUUID();
-    db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, 'csv_import', ?, 'user_provided', 'tenant_policy', 1.0)")
-      .run(sourceId, orgId, String(input?.sourceRef || "importação CSV"));
+    db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, ?, ?, 'user_provided', 'tenant_policy', 1.0)")
+      .run(sourceId, orgId, provider, String(input?.sourceRef || "importação CSV"));
 
     let accountsCreated = 0, accountsMerged = 0, contactsCreated = 0, contactsSkipped = 0;
     const findAccount = db.prepare("SELECT id FROM prospect_accounts WHERE organization_id = ? AND dedupe_key = ?");
-    const insAccount = db.prepare(`INSERT INTO prospect_accounts (id, organization_id, campaign_id, display_name, domain, website_url, industry, city, state, cnpj, source_id, source, account_status, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'csv_import', 'discovered', ?)`);
+    const insAccount = db.prepare(`INSERT INTO prospect_accounts (id, organization_id, campaign_id, display_name, domain, website_url, industry, city, state, cnpj, source_id, source, account_status, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?)`);
     const findContact = db.prepare("SELECT id FROM prospect_contacts WHERE organization_id = ? AND prospect_account_id = ? AND ((email != '' AND email = ?) OR (phone != '' AND phone = ?))");
     const insContact = db.prepare(`INSERT INTO prospect_contacts (id, organization_id, prospect_account_id, full_name, role_title, email, email_status, phone, source_id, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.6)`);
 
@@ -176,7 +179,7 @@ export class ProspectService {
           insAccount.run(accId, orgId, input?.campaignId || null, company || domain, domain || null,
             String(r?.website || "").trim() || null, String(r?.industry || "").trim() || null,
             String(r?.city || "").trim() || null, String(r?.state || "").trim() || null,
-            onlyDigits(r?.cnpj) || null, sourceId, dedupeKey);
+            onlyDigits(r?.cnpj) || null, sourceId, provider, dedupeKey);
           accountsCreated++;
         }
 

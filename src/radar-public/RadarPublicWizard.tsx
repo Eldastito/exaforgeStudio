@@ -290,13 +290,13 @@ function OnboardingStep({ onBack, onCreated }: { onBack: () => void; onCreated: 
           </div>
         </Field>
         <Field label="Segmento">
-          <select className={inputCls} value={form.segment} onChange={set('segment')}>
+          <select className={inputCls} style={selectStyle} value={form.segment} onChange={set('segment')}>
             <option value="" style={optionStyle}>Selecione</option>
             {SEGMENTS.map((s) => <option key={s} value={s} style={optionStyle}>{s}</option>)}
           </select>
         </Field>
         <Field label="Porte (nº de pessoas)">
-          <select className={inputCls} value={form.companySize} onChange={set('companySize')}>
+          <select className={inputCls} style={selectStyle} value={form.companySize} onChange={set('companySize')}>
             <option value="" style={optionStyle}>Selecione</option>
             {SIZES.map((s) => <option key={s} value={s} style={optionStyle}>{s}</option>)}
           </select>
@@ -345,7 +345,13 @@ const inputCls = 'w-full rounded-lg border border-white/15 bg-white/[0.04] px-3 
 // <option> não herda o fundo escuro do <select> no popup nativo do navegador
 // (o popup costuma renderizar com fundo claro por padrão) — sem isso, o texto
 // branco ficava branco sobre branco, ilegível ao abrir Segmento/Porte.
+// `background-color` inline em <option> sozinho é insuficiente em vários
+// motores de navegador (o popup nativo é parcialmente fora do alcance do CSS
+// de autor) — `color-scheme: dark` no <select> é o sinal padrão que faz o
+// navegador desenhar o popup nativo já no tema escuro, então as duas coisas
+// juntas cobrem o maior número de navegadores/SOs.
 const optionStyle: CSSProperties = { backgroundColor: '#12181c', color: '#ffffff' };
+const selectStyle: CSSProperties = { colorScheme: 'dark' };
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

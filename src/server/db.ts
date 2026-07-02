@@ -1975,6 +1975,53 @@ const initDb = () => {
     }
   } catch(e){ console.error('[DB] Falha ao popular seed do Radar de Execução IA', e); }
 
+  // ZappFlow Radar — Índice de Velocidade de Conversão (IVC). Complementar ao
+  // score de maturidade (autodeclarado via questionário): este índice é MEDIDO
+  // a partir de dados reais de tickets/mensagens da própria organização — só
+  // faz sentido para quem já é cliente ativo do ZappFlow (tem conversas no
+  // banco). Motor determinístico em ConversionVelocityService — ver
+  // docs/adr/ADR-010-radar-velocidade-conversao.md.
+  //
+  // session_id é opcional (nullable): dá para calcular o IVC avulso a qualquer
+  // momento para a organização (produto de entrada leve, sem precisar abrir um
+  // diagnóstico completo), ou anexado a uma radar_sessions quando o consultor
+  // quiser empacotar os dois números no mesmo relatório.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS radar_velocity_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        session_id TEXT,
+        period_start DATETIME NOT NULL,
+        period_end DATETIME NOT NULL,
+        ivc_score REAL,
+        ivc_band TEXT,                        -- critica|reativa|em_organizacao|controlada|otimizada
+        sla_threshold_seconds INTEGER,        -- limiar usado neste cálculo (rastreável se a config mudar depois)
+        sla_compliance_rate REAL,             -- 0-1
+        first_response_p50_seconds INTEGER,
+        first_response_p90_seconds INTEGER,
+        first_response_p95_seconds INTEGER,
+        out_of_hours_messages_total INTEGER,
+        out_of_hours_covered_total INTEGER,
+        out_of_hours_coverage_rate REAL,      -- 0-1, null quando não houve mensagem fora do horário no período
+        followup_at_risk_total INTEGER,
+        followup_compliant_total INTEGER,
+        followup_compliance_rate REAL,        -- 0-1, null quando não houve ticket em risco no período
+        conversion_closed_total INTEGER,
+        conversion_traceable_total INTEGER,
+        conversion_traceability_rate REAL,    -- 0-1, null quando não houve ticket fechado no período
+        tickets_analyzed INTEGER,
+        tickets_never_responded INTEGER,
+        scoring_version INTEGER DEFAULT 1,
+        calculation_json TEXT,                -- detalhamento completo (pesos aplicados, componentes excluídos etc.)
+        calculated_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_velocity_org ON radar_velocity_snapshots(organization_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_radar_velocity_session ON radar_velocity_snapshots(session_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar radar_velocity_snapshots', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -3,7 +3,7 @@ import db from "./db.js";
 // Fuso de Brasília (sem horário de verão desde 2019) = UTC-3. A IA gera os
 // horários com offset -03:00; aqui usamos o mesmo offset fixo para a aritmética
 // de slots. Configurável por env se um dia precisar.
-const TZ_OFFSET_MIN = Number(process.env.APP_TZ_OFFSET_MINUTES ?? -180);
+export const TZ_OFFSET_MIN = Number(process.env.APP_TZ_OFFSET_MINUTES ?? -180);
 const TZ = process.env.APP_TIMEZONE || "America/Sao_Paulo";
 
 const DAY_LABEL: Record<number, string> = { 1: "seg", 2: "ter", 3: "qua", 4: "qui", 5: "sex", 6: "sáb", 7: "dom" };

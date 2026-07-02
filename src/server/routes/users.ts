@@ -2,6 +2,8 @@ import { Router, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
+import { requireRole } from "../middleware/auth.js";
+import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
 
@@ -31,17 +33,13 @@ router.get("/", (req: Request, res: Response): any => {
 });
 
 // POST /api/users/invite
-router.post("/invite", (req: Request, res: Response): any => {
+router.post("/invite", requireRole("owner", "admin"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const { email, role } = req.body;
   const actor = (req as any).user;
 
   if (!email || !role) {
     return res.status(400).json({ error: "Missing email or role" });
-  }
-  
-  if (actor.role !== 'owner' && actor.role !== 'admin') {
-    return res.status(403).json({ error: "Insufficient permissions" });
   }
 
   try {
@@ -65,10 +63,7 @@ router.post("/invite", (req: Request, res: Response): any => {
       console.warn(`[USERS] Convite criado para ${email} (${role}). Configure um provedor de e-mail para entregar o token.`);
     }
     
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId, actor.userId, 'USER_INVITED', JSON.stringify({ email, role }));
+    logAuthEvent(orgId, actor.userId, undefined, 'USER_INVITED', { email, role });
 
     // Retornamos o token para o owner/admin compartilhar o convite manualmente
     // (o app não envia e-mail). O front monta o link de convite com esse token.
@@ -79,24 +74,15 @@ router.post("/invite", (req: Request, res: Response): any => {
 });
 
 // PUT /api/users/:id/status
-router.put("/:id/status", (req: Request, res: Response): any => {
+router.put("/:id/status", requireRole("owner", "admin"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const { id } = req.params;
   const { status } = req.body; // active, blocked
   const actor = (req as any).user;
 
-  if (actor.role !== 'owner' && actor.role !== 'admin') {
-     return res.status(403).json({ error: "Insufficient permissions" });
-  }
-  
   try {
      db.prepare('UPDATE users SET global_status = ? WHERE id = ? AND organization_id = ?').run(status, id, orgId);
-     
-     db.prepare(`
-        INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), orgId, actor.userId, id, 'USER_STATUS_CHANGED', JSON.stringify({ status }));
-
+     logAuthEvent(orgId, actor.userId, id, 'USER_STATUS_CHANGED', { status });
      res.json({ success: true });
   } catch(e) {
      res.status(500).json({ error: "Internal error" });
@@ -121,19 +107,19 @@ router.put("/:id/phone", (req: Request, res: Response): any => {
   }
 });
 
-// PUT /api/users/:id/role
-router.put("/:id/role", (req: Request, res: Response): any => {
+// PUT /api/users/:id/role — troca o papel de um colaborador (ex.: agent -> admin).
+// Mutação sensível (pode dar acesso de administrador a alguém): antes desta
+// mudança não gerava NENHUM registro de auditoria — corrigido abaixo.
+router.put("/:id/role", requireRole("owner", "admin"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const { id } = req.params;
-  const { role } = req.body; 
+  const { role } = req.body;
   const actor = (req as any).user;
 
-  if (actor.role !== 'owner' && actor.role !== 'admin') {
-     return res.status(403).json({ error: "Insufficient permissions" });
-  }
-  
   try {
+     const before = db.prepare('SELECT role FROM users WHERE id = ? AND organization_id = ?').get(id, orgId) as any;
      db.prepare('UPDATE users SET role = ? WHERE id = ? AND organization_id = ?').run(role, id, orgId);
+     logAuthEvent(orgId, actor.userId, id, 'USER_ROLE_CHANGED', { from: before?.role ?? null, to: role });
      res.json({ success: true });
   } catch(e) {
      res.status(500).json({ error: "Internal error" });

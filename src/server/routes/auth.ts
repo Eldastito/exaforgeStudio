@@ -8,6 +8,7 @@ import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 import { ModuleService } from "../ModuleService.js";
 import { PlanService } from "../PlanService.js";
+import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
 
@@ -45,17 +46,6 @@ function passwordPolicyError(pw: string): string | null {
   }
   return null;
 }
-
-const logAuthEvent = (orgId: string | null, actorId: string | null, targetId: string | null, eventType: string, meta: any = {}) => {
-  try {
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId, actorId, targetId, eventType, JSON.stringify(meta));
-  } catch(e) {
-    console.error("Failed to log auth event", e);
-  }
-};
 
 // GET /api/auth/org-invite/:token — dados públicos de um convite de NOVA EMPRESA
 // (cortesia), para a tela de cadastro mostrar o que está incluído.

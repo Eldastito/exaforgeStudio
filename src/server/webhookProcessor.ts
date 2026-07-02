@@ -16,6 +16,7 @@ import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { ReservationService } from "./ReservationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
+import { JobQueueService } from "./JobQueueService.js";
 import { HandoffSummaryService } from "./HandoffSummaryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
 import { SupplierQuoteService } from "./SupplierQuoteService.js";
@@ -26,6 +27,23 @@ import { CoordenadorService } from "./CoordenadorService.js";
 import { MaestroService } from "./MaestroService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
+
+// Handler da fila de jobs (JobQueueService) para o relatório em PDF do Zapp
+// gestor — usado só quando PDF_REPORT_ASYNC_ENABLED=true (ver mais abaixo).
+// Mesma lógica de fallback nativo->link que existia inline, só que rodando em
+// background em vez de bloquear a resposta ao gestor.
+JobQueueService.registerHandler("generate_manager_pdf", async (p: any) => {
+  const pdf = await ReportPdfService.generateManagerReport(p.orgId, { title: p.title, summary: p.summary, panorama: p.panorama });
+  if (!pdf?.url) return { sent: false };
+  const fileName = `${(p.title || "Relatório").replace(/[^\w\sÀ-ÿ-]/g, "").trim().slice(0, 40) || "Relatório"}.pdf`;
+  try {
+    await MessageProviderService.sendDocument(p.channelId, p.toIdentifier, pdf.url, fileName, "📄 Seu relatório");
+    return { sent: true, native: true, url: pdf.url };
+  } catch (e) {
+    await MessageProviderService.sendMessage(p.channelId, p.toIdentifier, `📄 Seu relatório em PDF: ${pdf.url}`);
+    return { sent: true, native: false, url: pdf.url };
+  }
+});
 
 export async function processIncomingMessage(
   payload: {
@@ -670,24 +688,40 @@ export async function processIncomingMessage(
          } catch (e) { console.error("[Assinaturas] Falha ao reenviar PIX da mensalidade:", e); }
        }
 
-       // RELATÓRIO EM PDF (Zapp gestor): gera o PDF (resumo + panorama). Tenta
+       // RELATÓRIO EM PDF (Zapp gestor): gera o PDF (resumo + panorama) e tenta
        // enviar como DOCUMENTO nativo no WhatsApp; se não der, cai para o link em
        // texto (best-effort — nunca quebra a resposta).
+       //
+       // PDF_REPORT_ASYNC_ENABLED=false (padrão): comportamento ORIGINAL,
+       // inalterado — gera dentro do próprio processamento do webhook e só
+       // libera a resposta ao gestor depois de terminar.
+       // PDF_REPORT_ASYNC_ENABLED=true: enfileira (JobQueueService) e libera a
+       // resposta imediatamente; o documento chega como mensagem separada
+       // segundos depois. Mesma lógica de fallback nativo->link, só que em
+       // background — ver o handler 'generate_manager_pdf' no topo deste arquivo.
+       // Desligado por padrão até ser validado com tráfego real de WhatsApp.
        if (aiResult.exportPdf) {
-         try {
-           const pdf = await ReportPdfService.generateManagerReport(orgId, {
+         if (process.env.PDF_REPORT_ASYNC_ENABLED === "true") {
+           JobQueueService.enqueue("generate_manager_pdf", {
+             orgId, channelId: channel.id, toIdentifier: payload.senderId,
              title: aiResult.pdfTitle, summary: aiResult.reply, panorama: aiResult.pdfBody,
-           });
-           if (pdf?.url) {
-             const fileName = `${(aiResult.pdfTitle || "Relatório").replace(/[^\w\sÀ-ÿ-]/g, "").trim().slice(0, 40) || "Relatório"}.pdf`;
-             let nativeOk = false;
-             try {
-               await MessageProviderService.sendDocument(channel.id, payload.senderId, pdf.url, fileName, "📄 Seu relatório");
-               nativeOk = true;
-             } catch (e) { console.error("[Zapp] Envio nativo do PDF falhou, usando link:", e); }
-             if (!nativeOk) finalReply = `${finalReply}\n\n📄 Seu relatório em PDF: ${pdf.url}`;
-           }
-         } catch (e) { console.error("[Zapp] Falha ao gerar o PDF:", e); }
+           }, { organizationId: orgId });
+         } else {
+           try {
+             const pdf = await ReportPdfService.generateManagerReport(orgId, {
+               title: aiResult.pdfTitle, summary: aiResult.reply, panorama: aiResult.pdfBody,
+             });
+             if (pdf?.url) {
+               const fileName = `${(aiResult.pdfTitle || "Relatório").replace(/[^\w\sÀ-ÿ-]/g, "").trim().slice(0, 40) || "Relatório"}.pdf`;
+               let nativeOk = false;
+               try {
+                 await MessageProviderService.sendDocument(channel.id, payload.senderId, pdf.url, fileName, "📄 Seu relatório");
+                 nativeOk = true;
+               } catch (e) { console.error("[Zapp] Envio nativo do PDF falhou, usando link:", e); }
+               if (!nativeOk) finalReply = `${finalReply}\n\n📄 Seu relatório em PDF: ${pdf.url}`;
+             }
+           } catch (e) { console.error("[Zapp] Falha ao gerar o PDF:", e); }
+         }
        }
 
        // Save AI message

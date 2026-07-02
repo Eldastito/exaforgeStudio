@@ -54,3 +54,17 @@ export const requireMasterAdmin = (req: AuthRequest, res: Response, next: NextFu
   }
   next();
 };
+
+// Papel do usuário dentro da própria organização (owner/admin/agent — ver
+// users.role, db.ts). Diferente de requireMasterAdmin, que é cross-tenant.
+//
+// Antes de existir, cada rota repetia `if (actor.role !== 'owner' && actor.role
+// !== 'admin') return res.status(403)...` na mão — 8 cópias da mesma checagem
+// espalhadas em managers.ts/users.ts/audit.ts, cada uma podendo divergir. Uso:
+// `router.post("/x", requireRole("owner", "admin"), handler)`.
+export const requireRole = (...roles: string[]) => (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ error: "Forbidden: insufficient role" });
+  }
+  next();
+};

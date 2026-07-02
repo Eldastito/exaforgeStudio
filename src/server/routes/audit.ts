@@ -1,20 +1,20 @@
 import { Router } from "express";
 import db from "../db.js";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 
 const router = Router();
 
-// Only master admins or authorized roles can access this
-router.get("/", (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
+// Já protegida por requireMasterAdmin (cross-tenant, server.ts); esta camada
+// extra exige também role='admin' na própria organização do master admin.
+router.get("/", requireRole("admin"), (req: AuthRequest, res) => {
   try {
+    // Bug corrigido: users não tem coluna "username" (só "name") — a consulta
+    // original quebrava com "no such column: u.username" para qualquer master
+    // admin que tentasse ver a trilha de auditoria.
     const logs = db.prepare(`
-      SELECT l.*, u.username as actor_name 
-      FROM auth_audit_logs l 
-      LEFT JOIN users u ON l.actor_user_id = u.id 
+      SELECT l.*, u.name as actor_name
+      FROM auth_audit_logs l
+      LEFT JOIN users u ON l.actor_user_id = u.id
       ORDER BY l.created_at DESC LIMIT 100
     `).all();
     res.json(logs);

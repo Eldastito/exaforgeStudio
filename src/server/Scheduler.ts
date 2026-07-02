@@ -15,6 +15,7 @@ import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { InstagramService } from "./InstagramService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
+import { JobQueueService } from "./JobQueueService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -52,6 +53,10 @@ export class Scheduler {
     await this.pixReminderPass().catch(e => console.error('[Scheduler] lembrete PIX falhou', e));
     await InstagramService.publishScheduledPass().catch(e => console.error('[Scheduler] publicação agendada falhou', e));
     try { MaestroService.reactToVisionEvents(); } catch (e) { console.error('[Scheduler] ponte Vision VMS -> Tarefas falhou', e); }
+    // Rede de segurança da fila de jobs (JobQueueService): reprocessa jobs que
+    // ficaram travados por reinício do processo — o caminho normal (setImmediate
+    // no enqueue) já resolve o caso comum sem esperar este passe.
+    try { JobQueueService.sweepStale(); } catch (e) { console.error('[Scheduler] varredura da fila de jobs falhou', e); }
   }
 
   static async tick() {

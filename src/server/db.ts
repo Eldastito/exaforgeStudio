@@ -2022,6 +2022,34 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar radar_velocity_snapshots', e); }
 
+  // Fila de jobs em segundo plano (JobQueueService). Padrão já usado ad-hoc
+  // pelo backup (backup_jobs + setImmediate em routes/integrations.ts) —
+  // generalizado aqui para qualquer trabalho pesado que hoje roda preso ao
+  // ciclo da própria requisição (ex.: geração de PDF dentro do processamento
+  // de webhook). Não é uma fila distribuída (ainda é um único processo) — ver
+  // docs/adr/ADR-011-hardening-rbac-auditoria-fila-storage.md para o porquê de
+  // NÃO ser Redis/BullMQ nesta fase.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS background_jobs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,
+        type TEXT NOT NULL,
+        payload_json TEXT,
+        status TEXT NOT NULL DEFAULT 'pending', -- pending|processing|completed|failed
+        attempts INTEGER DEFAULT 0,
+        max_attempts INTEGER DEFAULT 3,
+        last_error TEXT,
+        result_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        started_at DATETIME,
+        completed_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_background_jobs_status ON background_jobs(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_background_jobs_org ON background_jobs(organization_id, created_at DESC);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar background_jobs', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -1,6 +1,8 @@
 import { Router, Request, Response } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
+import { requireRole } from "../middleware/auth.js";
+import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
 
@@ -27,15 +29,12 @@ router.get("/", (req: Request, res: Response): any => {
 });
 
 // POST /api/managers — cadastra um número de gestor (dono/sócios)
-router.post("/", (req: Request, res: Response): any => {
+router.post("/", requireRole("owner", "admin"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const actor = (req as any).user;
   const { name } = req.body;
   const identifier = normalizeNumber(req.body.identifier);
 
-  if (actor.role !== 'owner' && actor.role !== 'admin') {
-    return res.status(403).json({ error: "Apenas dono/admin podem cadastrar gestores" });
-  }
   if (!identifier || identifier.length < 10) {
     return res.status(400).json({ error: "Número inválido. Use DDI+DDD+número (ex.: 5521999998888)." });
   }
@@ -50,10 +49,7 @@ router.post("/", (req: Request, res: Response): any => {
       'INSERT INTO authorized_managers (id, organization_id, identifier, name) VALUES (?, ?, ?, ?)'
     ).run(uuidv4(), orgId, identifier, name || null);
 
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId, actor.userId, 'MANAGER_ADDED', JSON.stringify({ identifier, name }));
+    logAuthEvent(orgId, actor.userId, undefined, 'MANAGER_ADDED', { identifier, name });
 
     res.json({ success: true });
   } catch (e) {
@@ -62,17 +58,17 @@ router.post("/", (req: Request, res: Response): any => {
 });
 
 // DELETE /api/managers/:id — remove um gestor
-router.delete("/:id", (req: Request, res: Response): any => {
+router.delete("/:id", requireRole("owner", "admin"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const actor = (req as any).user;
   const { id } = req.params;
 
-  if (actor.role !== 'owner' && actor.role !== 'admin') {
-    return res.status(403).json({ error: "Apenas dono/admin podem remover gestores" });
-  }
-
   try {
+    // Registra ANTES de apagar, para o log guardar quem era o gestor removido
+    // (antes desta mudança, remover um gestor não deixava rastro nenhum).
+    const existing = db.prepare('SELECT identifier, name FROM authorized_managers WHERE id = ? AND organization_id = ?').get(id, orgId) as any;
     db.prepare('DELETE FROM authorized_managers WHERE id = ? AND organization_id = ?').run(id, orgId);
+    if (existing) logAuthEvent(orgId, actor.userId, id, 'MANAGER_REMOVED', { identifier: existing.identifier, name: existing.name });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: "Falha ao remover gestor" });

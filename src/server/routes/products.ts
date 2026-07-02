@@ -1,6 +1,7 @@
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
+import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
 import { chat, isAIConfigured } from "../llm.js";
@@ -112,17 +113,6 @@ router.post("/:id/movements", (req: AuthRequest, res): any => {
     res.json({ success: true, id: movId });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
-
-const logAuthEvent = (orgId: string | undefined, actorId: string | undefined, targetId: string | undefined, eventType: string, meta: any = {}) => {
-  try {
-    db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), orgId || null, actorId || null, targetId || null, eventType, JSON.stringify(meta));
-  } catch(e) {
-    console.error("Failed to log auth event", e);
-  }
-};
 
 // GET /api/products — produtos com estoque ao vivo (disponível e vendável)
 router.get("/", (req: AuthRequest, res): any => {

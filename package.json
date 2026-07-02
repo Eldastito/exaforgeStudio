@@ -16,6 +16,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
+    "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",
     "test:supervisor": "tsx scripts/test-supervisor.ts",
     "test:vision-foundation": "tsx scripts/test-vision-foundation.ts",
     "test:vision-events": "tsx scripts/test-vision-events.ts",

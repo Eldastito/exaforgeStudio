@@ -1,0 +1,107 @@
+import { Router } from "express";
+import { AuthRequest } from "../middleware/auth.js";
+import { RadarService } from "../RadarService.js";
+
+const router = Router();
+
+// Kill-switch global (defesa em profundidade, além do gate por tenant em
+// ModuleService/verticals.ts). PRD §3 regra 4: `ai_execution_radar_enabled`.
+// Default ligado — quem controla o rollout por organização é o módulo opcional
+// 'radar' (Configurações › Módulos); esta env só serve para desligar o módulo
+// em TODAS as organizações de uma vez (ex.: incidente em produção), sem exigir
+// deploy de código.
+router.use((_req, res, next) => {
+  if (process.env.AI_EXECUTION_RADAR_ENABLED === "false") {
+    return res.status(404).json({ error: "not_found" });
+  }
+  next();
+});
+
+const actorId = (req: any) => req.user?.userId || req.user?.id;
+// RBAC simplificado da Fase 1 (ver ADR do módulo): só owner/admin administram
+// sessões (criar, editar, recalcular). Qualquer usuário autenticado da
+// organização pode responder perguntas (equivalente a "líder de área"/
+// "colaborador" do PRD) — os perfis granulares completos (consultor, analista,
+// gestor de conta) chegam quando houver uso real desses papéis.
+const isManager = (req: any) => req.user?.role === "owner" || req.user?.role === "admin";
+
+router.get("/templates", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RadarService.listTemplates(orgId));
+});
+
+router.get("/templates/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const template = RadarService.getTemplateWithQuestions(orgId, req.params.id);
+  if (!template) return res.status(404).json({ error: "Template não encontrado." });
+  res.json(template);
+});
+
+router.get("/catalog/use-cases", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RadarService.listUseCaseCatalog());
+});
+
+router.get("/sessions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RadarService.listSessions(orgId, req.query.status as string | undefined));
+});
+
+router.post("/sessions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores criam diagnósticos." });
+  try { res.status(201).json(RadarService.createSession(orgId, actorId(req), req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/sessions/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const session = RadarService.getSession(orgId, req.params.id);
+  if (!session) return res.status(404).json({ error: "Sessão não encontrada." });
+  res.json(session);
+});
+
+router.patch("/sessions/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores editam o diagnóstico." });
+  try { res.json(RadarService.updateSession(orgId, req.params.id, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/sessions/:id/consent", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarService.recordConsent(orgId, req.params.id, actorId(req), req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/sessions/:id/answers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarService.saveAnswer(orgId, req.params.id, actorId(req), req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/sessions/:id/recalculate", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores recalculam o score." });
+  try { res.json(RadarService.recalculate(orgId, req.params.id, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/sessions/:id/complete", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores concluem o diagnóstico." });
+  try { res.json(RadarService.completeSession(orgId, req.params.id, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+export default router;

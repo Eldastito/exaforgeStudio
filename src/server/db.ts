@@ -1591,6 +1591,390 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar discovery runs do Prospect AI', e); }
 
+  // ===== ZappFlow Radar de Execução IA (Fase 1 — fundação) =====
+  // Módulo de diagnóstico de maturidade/vazamentos operacionais, atrás do
+  // módulo opcional 'radar' (opt-in, ver verticals.ts — mesmo padrão do 'vms':
+  // nenhuma vertical liga sozinha). Score é 100% determinístico (motor em
+  // RadarService, ver PRD_ZappFlow_Radar_de_Execucao_IA); IA generativa (Fase 4,
+  // ainda não implementada) nunca decide score/prioridade.
+  //
+  // organization_id é NULLABLE em radar_sessions/radar_answers/radar_pillar_scores/
+  // radar_recommendations/radar_consent_records de propósito: sessões públicas
+  // pré-conversão (visitante anônimo, Fase 2 — ainda não implementada) não têm
+  // tenant até virarem lead. É a ÚNICA família de tabelas do projeto com essa
+  // exceção ao padrão "organization_id NOT NULL" — todo código que lê estas
+  // tabelas deve tratar organization_id nulo como "ainda não é de nenhum tenant"
+  // e NUNCA usar isso para pular o filtro de tenant quando ele existir.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS radar_templates (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,              -- NULL = template global (padrão ZappFlow)
+        name TEXT NOT NULL,
+        description TEXT,
+        segment TEXT,
+        session_type TEXT NOT NULL DEFAULT 'quick', -- quick | executive
+        is_active INTEGER DEFAULT 1,
+        version INTEGER DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_templates_org ON radar_templates(organization_id, is_active);
+
+      CREATE TABLE IF NOT EXISTS radar_questions (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        pillar TEXT NOT NULL,              -- estrategia|receita|processos|dados|pessoas|governanca|metricas
+        title TEXT NOT NULL,
+        help_text TEXT,
+        answer_type TEXT NOT NULL DEFAULT 'scale', -- scale (0-4, via options_json) | boolean | text
+        is_required INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0,
+        weight REAL DEFAULT 1,
+        options_json TEXT,                 -- [{ value, label, score(0-4) }] para answer_type='scale'
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_questions_code ON radar_questions(template_id, code);
+      CREATE INDEX IF NOT EXISTS idx_radar_questions_template ON radar_questions(template_id, pillar, display_order);
+
+      CREATE TABLE IF NOT EXISTS radar_sessions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT,              -- NULL até virar lead (ver nota acima)
+        template_id TEXT NOT NULL,
+        session_type TEXT NOT NULL DEFAULT 'quick', -- quick | executive | reassessment
+        status TEXT NOT NULL DEFAULT 'draft', -- draft|in_progress|awaiting_review|needs_information|approved|published|archived|expired
+        source TEXT DEFAULT 'consultant',  -- landing|consultant|tenant|campaign|api
+        company_name TEXT,
+        contact_name TEXT,
+        contact_email TEXT,
+        contact_phone TEXT,
+        segment TEXT,
+        company_size TEXT,
+        city TEXT,
+        state TEXT,
+        primary_goal TEXT,
+        consultant_user_id TEXT,
+        owner_user_id TEXT,
+        consent_version TEXT,
+        consent_at DATETIME,
+        started_at DATETIME,
+        completed_at DATETIME,
+        scoring_version INTEGER DEFAULT 1,
+        overall_maturity_score REAL,
+        execution_gap_index REAL,          -- calculado só a partir da Fase 3 (radar_processes)
+        confidence_score REAL,
+        maturity_level TEXT,
+        next_action TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_sessions_org ON radar_sessions(organization_id, status, updated_at);
+
+      CREATE TABLE IF NOT EXISTS radar_respondents (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        organization_id TEXT,
+        user_id TEXT,
+        name TEXT,
+        email TEXT,
+        role_title TEXT,
+        area TEXT,
+        status TEXT DEFAULT 'invited',     -- invited|active|completed|revoked
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_respondents_session ON radar_respondents(session_id);
+
+      CREATE TABLE IF NOT EXISTS radar_answers (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        organization_id TEXT,
+        question_id TEXT NOT NULL,
+        respondent_id TEXT,
+        answer_json TEXT NOT NULL,
+        score_raw REAL,
+        score_normalized REAL,
+        confidence_multiplier REAL DEFAULT 0.6,
+        is_not_known INTEGER DEFAULT 0,
+        comment TEXT,
+        answered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_answers_session ON radar_answers(session_id, question_id);
+
+      CREATE TABLE IF NOT EXISTS radar_pillar_scores (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        organization_id TEXT,
+        pillar TEXT NOT NULL,
+        score REAL,
+        confidence_score REAL,
+        evidence_count INTEGER DEFAULT 0,
+        calculation_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_pillar_scores_session ON radar_pillar_scores(session_id, pillar);
+
+      CREATE TABLE IF NOT EXISTS radar_use_case_catalog (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        applicable_segments_json TEXT,
+        applicable_areas_json TEXT,
+        prerequisites_json TEXT,
+        integrations_json TEXT,
+        risk_profile TEXT DEFAULT 'medium', -- low|medium|high
+        human_review_required INTEGER DEFAULT 1,
+        complexity TEXT DEFAULT 'medium',   -- low|medium|high
+        duration_days_min INTEGER,
+        duration_days_max INTEGER,
+        metrics_json TEXT,
+        quick_win_steps_json TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_use_case_code ON radar_use_case_catalog(code);
+
+      CREATE TABLE IF NOT EXISTS radar_recommendations (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        organization_id TEXT,
+        use_case_id TEXT NOT NULL,
+        priority_score REAL,
+        priority_band TEXT,                -- alta|media|baixa
+        impact_score REAL,
+        effort_score REAL,
+        risk_score REAL,
+        readiness_score REAL,
+        confidence_score REAL,
+        recommendation_status TEXT DEFAULT 'generated', -- generated|reviewed|approved|rejected|implemented|deferred
+        rationale_json TEXT,
+        prerequisites_json TEXT,
+        owner_user_id TEXT,
+        target_date DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_recommendations_session ON radar_recommendations(session_id, priority_score);
+
+      CREATE TABLE IF NOT EXISTS radar_consent_records (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        organization_id TEXT,
+        consent_type TEXT NOT NULL,        -- diagnostico|contato_comercial|comunicacoes
+        legal_basis_label TEXT,
+        version TEXT,
+        granted INTEGER DEFAULT 1,
+        granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        revoked_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_consent_session ON radar_consent_records(session_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas do Radar de Execução IA', e); }
+
+  // Seed idempotente do template padrão "Diagnóstico Rápido ZappFlow" (PRD §10,
+  // adaptado a perguntas de escala 0-4 diretamente pontuáveis) + catálogo inicial
+  // de 12 casos de uso (PRD §12). IDs fixos (não randomUUID) para o INSERT OR
+  // IGNORE ser estável entre reinícios — sem isso, cada boot criaria duplicatas.
+  try {
+    const TEMPLATE_ID = "radar_tpl_diagnostico_rapido_v1";
+    db.prepare(
+      `INSERT OR IGNORE INTO radar_templates (id, organization_id, name, description, session_type, version)
+       VALUES (?, NULL, ?, ?, 'quick', 1)`
+    ).run(TEMPLATE_ID, "Diagnóstico Rápido ZappFlow", "Template padrão de 18 perguntas cobrindo os 7 pilares de maturidade (PRD Radar de Execução IA §6/§10).");
+
+    // Rótulos padrão da escala 0-4 (PRD §7): reaproveitados quando a pergunta
+    // não precisa de um enunciado mais específico por opção.
+    const scale = (labels: [string, string, string, string, string]) =>
+      labels.map((label, score) => ({ value: String(score), label, score }));
+
+    type QuestionSeed = { code: string; pillar: string; title: string; helpText: string; order: number; options: { value: string; label: string; score: number }[] };
+    const questions: QuestionSeed[] = [
+      { code: "q_estrategia_responsavel", pillar: "estrategia", order: 1,
+        title: "Existe um responsável claro por liderar as iniciativas de melhoria/IA na empresa?",
+        helpText: "Pense em quem toca esse assunto no dia a dia, não só quem 'apoia'.",
+        options: scale(["Não há responsável definido", "O dono cuida disso quando sobra tempo", "Há responsável, mas sem tempo/orçamento dedicado", "Há responsável com prioridade e acompanhamento periódico", "Há responsável, meta mensurável e orçamento aprovado"]) },
+      { code: "q_estrategia_meta", pillar: "estrategia", order: 2,
+        title: "A empresa tem uma meta clara para os próximos 90 dias (vendas, atendimento, organização etc.)?",
+        helpText: "Vale qualquer meta de negócio, não precisa ser sobre IA.",
+        options: scale(["Não há meta definida", "Existe uma ideia geral, não escrita", "Existe meta, mas sem prazo/indicador claro", "Meta definida com prazo e indicador", "Meta definida, acompanhada e revisada periodicamente"]) },
+
+      { code: "q_receita_tempo_resposta", pillar: "receita", order: 3,
+        title: "A empresa mede o tempo de resposta a um novo contato/lead?",
+        helpText: "Tempo entre o cliente mandar mensagem e alguém responder.",
+        options: scale(["Não mede", "Sabe informalmente, sem números", "Mede às vezes, sem processo formal", "Mede regularmente com um indicador", "Mede em tempo real, com meta e alerta quando atrasa"]) },
+      { code: "q_receita_followup", pillar: "receita", order: 4,
+        title: "Todo lead recebe follow-up com prazo definido?",
+        helpText: "Follow-up = retomar contato com quem ainda não decidiu comprar.",
+        options: scale(["Não há follow-up estruturado", "Depende de quem atendeu lembrar", "Existe orientação, mas nem sempre é seguida", "Existe processo com responsável e prazo", "Processo automatizado com lembrete e cobrança de prazo"]) },
+      { code: "q_receita_conversas_centralizadas", pillar: "receita", order: 5,
+        title: "As conversas com clientes ficam organizadas em um único lugar?",
+        helpText: "Ao contrário de espalhadas em vários celulares/pessoas sem histórico.",
+        options: scale(["Espalhadas, sem controle", "Parcialmente centralizadas", "Centralizadas na maior parte dos canais", "Totalmente centralizadas, com histórico", "Centralizadas, com histórico e busca, integradas a outros sistemas"]) },
+      { code: "q_receita_conversao", pillar: "receita", order: 6,
+        title: "A empresa acompanha a taxa de conversão (quantos contatos viram venda)?",
+        helpText: "Não precisa ser um número exato, mas precisa ser acompanhado.",
+        options: scale(["Não acompanha", "Tem uma ideia aproximada", "Acompanha ocasionalmente", "Acompanha com indicador por canal/etapa", "Acompanha, com meta e ação corretiva quando cai"]) },
+
+      { code: "q_processos_padronizacao", pillar: "processos", order: 7,
+        title: "As tarefas mais repetitivas da equipe têm um jeito padronizado de serem feitas?",
+        helpText: "Pense nas 3-5 tarefas que mais se repetem no dia a dia.",
+        options: scale(["Cada um faz do seu jeito", "Existe um jeito 'certo', mas não está escrito", "Está escrito, mas pouca gente segue", "Está documentado e a maioria segue", "Documentado, seguido e revisado periodicamente"]) },
+      { code: "q_processos_responsavel_prazo", pillar: "processos", order: 8,
+        title: "Tarefas e aprovações têm responsável, prazo e acompanhamento?",
+        helpText: "",
+        options: scale(["Não há dono nem prazo", "Às vezes há um responsável informal", "Há responsável, mas sem prazo cobrado", "Responsável e prazo definidos, com cobrança", "Responsável, prazo, cobrança automática e indicador de atraso"]) },
+      { code: "q_processos_manual", pillar: "processos", order: 9,
+        title: "Quantas etapas manuais (planilha, papel, mensagem solta) são necessárias para concluir uma venda/pedido/agendamento?",
+        helpText: "",
+        options: scale(["Muitas etapas manuais, alto risco de erro", "Bastante manual, com algum controle", "Parcialmente sistematizado", "Maior parte sistematizada, pouco manual", "Quase tudo sistematizado, manual é exceção"]) },
+
+      { code: "q_dados_sistemas_integrados", pillar: "dados", order: 10,
+        title: "Os sistemas usados (CRM, agenda, estoque, financeiro) conversam entre si ou cada um vive isolado?",
+        helpText: "",
+        options: scale(["Totalmente isolados", "Isolados, com exportação manual ocasional", "Alguma integração pontual", "Integração parcial entre os principais", "Integrados, dados sincronizados automaticamente"]) },
+      { code: "q_dados_qualidade", pillar: "dados", order: 11,
+        title: "Os dados de clientes/produtos estão atualizados e sem duplicidade?",
+        helpText: "",
+        options: scale(["Desatualizados e duplicados", "Parcialmente atualizados", "Razoavelmente atualizados, duplicidade ocasional", "Atualizados, duplicidade rara", "Atualizados, únicos e com dono responsável pela qualidade"]) },
+
+      { code: "q_pessoas_uso_ia", pillar: "pessoas", order: 12,
+        title: "Colaboradores já usam ferramentas de IA no trabalho?",
+        helpText: "",
+        options: scale(["Ninguém usa", "Uso isolado, sem padrão", "Vários usam, sem orientação", "Uso orientado pela empresa", "Uso orientado, treinado e medido"]) },
+      { code: "q_pessoas_treinamento", pillar: "pessoas", order: 13,
+        title: "Existe treinamento ou política para o uso de IA/ferramentas digitais?",
+        helpText: "",
+        options: scale(["Não existe", "Orientação verbal informal", "Existe material, pouco divulgado", "Treinamento formal realizado", "Treinamento contínuo, atualizado e obrigatório"]) },
+      { code: "q_pessoas_revisao_humana", pillar: "pessoas", order: 14,
+        title: "A equipe revisa/confere respostas e decisões geradas por IA antes de valerem para o cliente?",
+        helpText: "",
+        options: scale(["Não há revisão", "Revisão ocasional, sem regra", "Revisão informal na maioria dos casos", "Revisão obrigatória definida", "Revisão obrigatória, registrada e auditável"]) },
+
+      { code: "q_governanca_dados_externos", pillar: "governanca", order: 15,
+        title: "Dados de clientes são enviados para ferramentas externas com alguma regra clara de controle?",
+        helpText: "",
+        options: scale(["Enviados sem nenhuma regra", "Envio informal, sem controle", "Alguma orientação, pouco seguida", "Regra clara, seguida na maioria dos casos", "Regra clara, seguida e auditada"]) },
+      { code: "q_governanca_acesso", pillar: "governanca", order: 16,
+        title: "Existe alguma política (mesmo simples) de acesso a sistemas e dados da empresa?",
+        helpText: "",
+        options: scale(["Qualquer um acessa tudo", "Controle informal", "Algum controle de acesso por função", "Controle de acesso definido e revisado", "Controle de acesso definido, revisado e com log de auditoria"]) },
+
+      { code: "q_metricas_baseline", pillar: "metricas", order: 17,
+        title: "A empresa tem algum número de referência (baseline) para medir se uma mudança deu resultado?",
+        helpText: "",
+        options: scale(["Não tem nenhum número de referência", "Tem uma ideia aproximada", "Tem números, mas desatualizados", "Tem baseline atualizado", "Tem baseline atualizado e usado para decisão"]) },
+      { code: "q_metricas_acompanhamento", pillar: "metricas", order: 18,
+        title: "Os indicadores da empresa são acompanhados com que frequência?",
+        helpText: "",
+        options: scale(["Nunca são olhados", "Olhados raramente, sem rotina", "Olhados mensalmente, de forma informal", "Olhados em rotina definida (reunião/relatório)", "Olhados em rotina definida, com plano de ação por indicador"]) },
+    ];
+
+    const insertQuestion = db.prepare(
+      `INSERT OR IGNORE INTO radar_questions (id, template_id, code, pillar, title, help_text, answer_type, is_required, display_order, weight, options_json)
+       VALUES (?, ?, ?, ?, ?, ?, 'scale', 1, ?, 1, ?)`
+    );
+    for (const q of questions) {
+      insertQuestion.run(`${TEMPLATE_ID}_${q.code}`, TEMPLATE_ID, q.code, q.pillar, q.title, q.helpText || null, q.order, JSON.stringify(q.options));
+    }
+
+    // Catálogo inicial de 12 casos de uso (PRD §12). `metrics_json.primaryPillar`
+    // é o pilar usado pelo motor de priorização (RadarService.generateRecommendations)
+    // como proxy de "impacto de negócio" enquanto radar_processes (Fase 3) não existe.
+    type UseCaseSeed = {
+      code: string; name: string; description: string; primaryPillar: string;
+      areas: string[]; risk: "low" | "medium" | "high"; complexity: "low" | "medium" | "high";
+      humanReview: 0 | 1; durationMin: number; durationMax: number;
+      prerequisites: string[]; integrations: string[]; quickWinSteps: string[];
+    };
+    const useCases: UseCaseSeed[] = [
+      { code: "atendimento_triagem_whatsapp", name: "Atendimento e triagem no WhatsApp",
+        description: "IA recebe, classifica e encaminha conversas por área/urgência antes do humano assumir.",
+        primaryPillar: "receita", areas: ["atendimento"], risk: "medium", complexity: "low", humanReview: 1,
+        durationMin: 15, durationMax: 30, prerequisites: ["Canal de WhatsApp conectado"], integrations: ["whatsapp"],
+        quickWinSteps: ["Mapear as 5 dúvidas mais frequentes", "Configurar triagem automática por área", "Medir tempo de resposta antes/depois"] },
+      { code: "qualificacao_leads", name: "Qualificação de leads",
+        description: "IA faz perguntas de qualificação e pontua o lead antes de repassar ao time comercial.",
+        primaryPillar: "receita", areas: ["vendas"], risk: "low", complexity: "low", humanReview: 1,
+        durationMin: 15, durationMax: 30, prerequisites: ["Critérios de qualificação definidos"], integrations: ["whatsapp", "crm"],
+        quickWinSteps: ["Definir 3-5 perguntas de qualificação", "Configurar pontuação automática", "Acompanhar taxa de leads qualificados"] },
+      { code: "followup_comercial_automatico", name: "Follow-up comercial automático",
+        description: "Sequência automática de mensagens para leads que não respondem ou não fecham.",
+        primaryPillar: "receita", areas: ["vendas"], risk: "low", complexity: "medium", humanReview: 1,
+        durationMin: 15, durationMax: 30, prerequisites: ["Estágios do funil definidos"], integrations: ["whatsapp"],
+        quickWinSteps: ["Escolher o estágio com mais leads parados", "Criar sequência de 3 mensagens", "Medir taxa de retomada"] },
+      { code: "crm_assistido", name: "CRM assistido e criação automática de tarefas",
+        description: "IA registra informações da conversa no CRM e cria tarefas de acompanhamento automaticamente.",
+        primaryPillar: "processos", areas: ["vendas", "atendimento"], risk: "low", complexity: "medium", humanReview: 1,
+        durationMin: 30, durationMax: 45, prerequisites: ["CRM em uso"], integrations: ["crm"],
+        quickWinSteps: ["Definir quais campos a IA preenche", "Configurar criação de tarefa por gatilho", "Auditar 10 registros criados pela IA"] },
+      { code: "agendamento_confirmacao", name: "Agendamento e confirmação inteligente",
+        description: "IA oferece horários disponíveis, agenda e envia lembrete/confirmação automaticamente.",
+        primaryPillar: "processos", areas: ["atendimento", "operacao"], risk: "medium", complexity: "medium", humanReview: 1,
+        durationMin: 30, durationMax: 45, prerequisites: ["Agenda com horários definidos"], integrations: ["agenda", "whatsapp"],
+        quickWinSteps: ["Definir regras de disponibilidade", "Ativar confirmação automática", "Medir taxa de não comparecimento"] },
+      { code: "base_conhecimento_rag", name: "Base de conhecimento interna com RAG governado",
+        description: "IA responde dúvidas de clientes/equipe a partir de documentos internos aprovados, com controle de acesso.",
+        primaryPillar: "dados", areas: ["atendimento", "operacao"], risk: "medium", complexity: "high", humanReview: 1,
+        durationMin: 45, durationMax: 90, prerequisites: ["Documentos internos organizados", "Dono do conteúdo definido"], integrations: ["rag"],
+        quickWinSteps: ["Selecionar 5-10 documentos mais consultados", "Definir quem aprova o conteúdo", "Testar respostas com casos reais antes de publicar"] },
+      { code: "orcamentos_propostas_assistidas", name: "Orçamentos e propostas assistidas",
+        description: "IA monta rascunho de orçamento/proposta a partir da conversa, para revisão humana antes do envio.",
+        primaryPillar: "receita", areas: ["vendas"], risk: "medium", complexity: "medium", humanReview: 1,
+        durationMin: 30, durationMax: 45, prerequisites: ["Tabela de preços atualizada"], integrations: ["crm"],
+        quickWinSteps: ["Padronizar itens/preços mais usados", "Configurar rascunho automático", "Medir tempo de envio antes/depois"] },
+      { code: "atendimento_pos_venda", name: "Atendimento pós-venda",
+        description: "IA acompanha o cliente após a venda (dúvidas, suporte, satisfação) e escala casos sensíveis.",
+        primaryPillar: "receita", areas: ["atendimento"], risk: "medium", complexity: "low", humanReview: 1,
+        durationMin: 15, durationMax: 30, prerequisites: ["Critério de escalonamento definido"], integrations: ["whatsapp"],
+        quickWinSteps: ["Mapear dúvidas pós-venda mais comuns", "Configurar resposta + escalonamento", "Medir satisfação (CSAT)"] },
+      { code: "alerta_estoque_reposicao", name: "Alerta de estoque e reposição",
+        description: "Alerta automático quando um item cai abaixo do mínimo, com sugestão de quantidade de reposição.",
+        primaryPillar: "processos", areas: ["operacao"], risk: "low", complexity: "low", humanReview: 0,
+        durationMin: 15, durationMax: 30, prerequisites: ["Estoque com quantidade mínima definida"], integrations: ["estoque"],
+        quickWinSteps: ["Definir estoque mínimo dos itens críticos", "Ativar alerta automático", "Revisar 1 mês de alertas gerados"] },
+      { code: "processamento_documentos_email", name: "Processamento de e-mails e documentos",
+        description: "IA extrai dados-chave de e-mails/documentos recebidos (pedidos, notas, cobranças) e organiza para a equipe.",
+        primaryPillar: "processos", areas: ["operacao", "financeiro"], risk: "medium", complexity: "medium", humanReview: 1,
+        durationMin: 30, durationMax: 60, prerequisites: ["Volume mínimo de documentos recorrentes"], integrations: ["email"],
+        quickWinSteps: ["Escolher o tipo de documento mais repetitivo", "Definir os campos a extrair", "Validar extração em uma amostra"] },
+      { code: "resumo_reunioes_tarefas", name: "Resumo de reuniões e criação de tarefas",
+        description: "IA resume reuniões internas e cria tarefas com responsável e prazo a partir do que foi decidido.",
+        primaryPillar: "pessoas", areas: ["operacao"], risk: "low", complexity: "medium", humanReview: 1,
+        durationMin: 15, durationMax: 30, prerequisites: ["Reuniões gravadas ou com ata"], integrations: [],
+        quickWinSteps: ["Escolher a reunião recorrente mais importante", "Testar resumo automático por 2 semanas", "Comparar tarefas geradas com o combinado"] },
+      { code: "treinamento_interno_funcao", name: "Treinamento interno por função",
+        description: "Assistente de IA treina/orienta cada função (vendas, atendimento etc.) com base nos processos da empresa.",
+        primaryPillar: "pessoas", areas: ["rh", "operacao"], risk: "low", complexity: "high", humanReview: 1,
+        durationMin: 45, durationMax: 90, prerequisites: ["Processos documentados por função"], integrations: [],
+        quickWinSteps: ["Escolher a função com maior rotatividade", "Montar roteiro de treinamento a partir do processo atual", "Medir tempo de rampa de um novo colaborador"] },
+    ];
+
+    const insertUseCase = db.prepare(
+      `INSERT OR IGNORE INTO radar_use_case_catalog (
+        id, code, name, description, applicable_segments_json, applicable_areas_json,
+        prerequisites_json, integrations_json, risk_profile, human_review_required,
+        complexity, duration_days_min, duration_days_max, metrics_json, quick_win_steps_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const uc of useCases) {
+      insertUseCase.run(
+        uc.code, uc.code, uc.name, uc.description, JSON.stringify(["*"]), JSON.stringify(uc.areas),
+        JSON.stringify(uc.prerequisites), JSON.stringify(uc.integrations), uc.risk, uc.humanReview,
+        uc.complexity, uc.durationMin, uc.durationMax, JSON.stringify({ primaryPillar: uc.primaryPillar }), JSON.stringify(uc.quickWinSteps)
+      );
+    }
+  } catch(e){ console.error('[DB] Falha ao popular seed do Radar de Execução IA', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -16,6 +16,7 @@ import { StudioView } from '@/src/features/StudioView';
 import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
 import { VisionVmsView } from '@/src/features/VisionVmsView';
+import { RadarView } from '@/src/features/RadarView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -57,7 +58,7 @@ export default function App() {
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
-      vision: 'vms',
+      vision: 'vms', radar: 'radar',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
@@ -199,6 +200,7 @@ export default function App() {
              {viewMode === 'tarefas' && 'Tarefas'}
              {viewMode === 'prospect' && 'Prospect AI'}
              {viewMode === 'vision' && 'Vision VMS'}
+             {viewMode === 'radar' && 'Radar de Execução IA'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               <GlobalSearch />
@@ -286,6 +288,7 @@ export default function App() {
           {viewMode === 'tarefas' && <TasksView />}
           {viewMode === 'prospect' && <ProspectView />}
           {viewMode === 'vision' && <VisionVmsView />}
+          {viewMode === 'radar' && <RadarView />}
           </ErrorBoundary>
         </main>
       </div>

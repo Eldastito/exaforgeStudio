@@ -396,6 +396,7 @@ const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
   { key: 'areas', label: 'Áreas de Atendimento', desc: 'Vários profissionais num número.' },
   { key: 'integracoes', label: 'Integrações', desc: 'Google Workspace e outras conexões.' },
   { key: 'vms', label: 'Vision VMS', desc: 'Monitoramento de câmeras: sites, gateways, dispositivos, câmeras, eventos e ocorrências. Add-on que depende de hardware no site do cliente — ative só após diagnóstico/piloto.' },
+  { key: 'radar', label: 'Radar de Execução IA', desc: 'Diagnóstico de maturidade em IA (7 pilares, recomendações priorizadas) e Índice de Velocidade de Conversão medido a partir dos próprios atendimentos.' },
 ];
 
 function ModulesPanel() {

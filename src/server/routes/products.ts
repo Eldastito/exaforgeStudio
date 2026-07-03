@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
-import { chat, isAIConfigured, extractProductFromImage } from "../llm.js";
+import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } from "../llm.js";
 
 const router = Router();
 
@@ -161,6 +161,144 @@ router.post("/smart-scan/:draftId/confirm", (req: AuthRequest, res): any => {
     logAuthEvent(orgId, userId, draft.id, "PRODUCT_SCAN_CONFIRMED", { productId: id, confidenceScore: draft.confidence_score, changedFields });
 
     res.status(201).json({ success: true, id });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/products/invoice-scan (multipart, campo "file") — Cadastro por
+// Nota Fiscal (Smart Inventory Fase 1, ADR-021): extrai TODOS os itens de
+// compra de uma foto de nota fiscal e grava um RASCUNHO (invoice_scan_drafts)
+// — nenhum produto é criado/estoque é mexido ainda. Mesmo padrão de
+// upload/rate-limit/pré-processamento do /smart-scan (ADR-019/ADR-020).
+router.post("/invoice-scan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  if (scanRateLimited(orgId)) return res.status(429).json({ error: "Muitos cadastros por foto em pouco tempo. Aguarde um minuto e tente de novo." });
+
+  scanUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
+    try {
+      // Nota fiscal tem bem mais texto miúdo que a foto de um produto único —
+      // usa uma resolução maior (2000px) que o /smart-scan (1600px) pra dar à
+      // IA a melhor chance de ler cada linha corretamente. Mesmo tratamento de
+      // EXIF/rotação do /smart-scan.
+      const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+
+      const name = `${uuidv4()}.jpg`;
+      fs.writeFileSync(path.join(MEDIA_DIR, name), processed);
+      const imageUrl = `/media/${name}`;
+
+      const raw = await extractInvoiceItems(processed.toString("base64"), "image/jpeg");
+      let parsed: any = {};
+      try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+
+      const confidenceScore = Math.max(0, Math.min(100, Number(parsed.confidence)));
+      const items = (Array.isArray(parsed.items) ? parsed.items : []).slice(0, 60).map((it: any) => ({
+        name: String(it?.name || "").trim().slice(0, 120),
+        quantity: Math.max(0, Number(it?.quantity) || 0),
+        unit: it?.unit ? String(it.unit).trim().slice(0, 20) : null,
+        unitCost: Math.max(0, Number(it?.unitCost) || 0),
+        confidence: Math.max(0, Math.min(100, Number(it?.confidence) || 0)),
+      })).filter((it: any) => it.name);
+      const supplierName = parsed.supplierName ? String(parsed.supplierName).trim().slice(0, 120) : null;
+
+      if (!items.length) return res.status(422).json({ error: "Não foi possível identificar itens de compra nesta foto. Tente uma foto mais nítida da nota fiscal." });
+
+      const draftId = uuidv4();
+      db.prepare(
+        `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+      ).run(draftId, orgId, userId || null, imageUrl, JSON.stringify({ supplierName, items, rawModelOutput: raw }), Number.isFinite(confidenceScore) ? confidenceScore : 0);
+      logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore, itemCount: items.length });
+
+      res.json({ draftId, imageUrl, supplierName, items, confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 0 });
+    } catch (e: any) {
+      console.error("[Invoice Scan] erro", e);
+      res.status(500).json({ error: "Falha ao analisar a nota fiscal com a IA. Tente novamente ou cadastre manualmente." });
+    }
+  });
+});
+
+// POST /api/products/invoice-scan/:draftId/confirm — só aqui produtos são
+// criados/repostos de verdade, item por item, conforme a ação escolhida pelo
+// humano para cada linha: 'create' (produto novo), 'restock' (soma estoque a
+// um produto já existente, escolhido pelo humano) ou 'skip' (ignora a linha —
+// ex.: item que não é de revenda). Idempotente por rascunho, mesmo padrão do
+// /smart-scan/:draftId/confirm. Toda entrada de estoque passa por
+// InventoryService.recordMovement, que já atualiza o custo médio ponderado.
+router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const draft = db.prepare(`SELECT * FROM invoice_scan_drafts WHERE id = ? AND organization_id = ?`).get(req.params.draftId, orgId) as any;
+  if (!draft) return res.status(404).json({ error: "Rascunho não encontrado." });
+  if (draft.status !== "pending") return res.status(400).json({ error: "Este rascunho já foi confirmado ou descartado." });
+
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: "Nenhum item para confirmar." });
+
+  let supplierName: string | null = null;
+  try { supplierName = JSON.parse(draft.raw_extraction_json || "{}").supplierName || null; } catch { /* noop */ }
+
+  const created: string[] = [];
+  const restocked: string[] = [];
+  const skipped: number[] = [];
+
+  try {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i] || {};
+      const action = it.action;
+      if (action === "skip" || !action) { skipped.push(i); continue; }
+
+      const quantity = Math.max(0, parseInt(String(it.quantity), 10) || 0);
+      const unitCost = Math.max(0, Number(it.unitCost) || 0);
+      if (quantity <= 0) return res.status(400).json({ error: `Item "${it.name || i + 1}": informe uma quantidade válida.` });
+
+      if (action === "create") {
+        const name = String(it.name || "").trim();
+        if (!name) return res.status(400).json({ error: `Item ${i + 1}: informe o nome do produto.` });
+        if (!(Number(it.salePrice) > 0)) return res.status(400).json({ error: `Item "${name}": informe o preço de venda antes de publicar.` });
+
+        const productId = uuidv4();
+        db.prepare(
+          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category)
+           VALUES (?, ?, 'product', ?, '', ?, 1, ?)`
+        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null);
+
+        InventoryService.recordMovement(orgId, {
+          productId, type: "entrada", quantity, unitCost,
+          origin: "invoice_scan", note: supplierName ? `Nota fiscal — ${supplierName}` : "Nota fiscal", createdBy: userId,
+        });
+        logAuthEvent(orgId, userId, productId, "PRODUCT_CREATED", { name, type: "product", source: "invoice_scan" });
+        created.push(productId);
+      } else if (action === "restock") {
+        const matchedProductId = String(it.matchedProductId || "");
+        const product = db.prepare(`SELECT id FROM products_services WHERE id = ? AND organization_id = ?`).get(matchedProductId, orgId) as any;
+        if (!product) return res.status(400).json({ error: `Item ${i + 1}: produto existente selecionado não foi encontrado.` });
+
+        InventoryService.recordMovement(orgId, {
+          productId: matchedProductId, type: "entrada", quantity, unitCost,
+          origin: "invoice_scan", note: supplierName ? `Nota fiscal — ${supplierName}` : "Nota fiscal", createdBy: userId,
+        });
+        db.prepare(`UPDATE products_services SET stock_control_enabled = 1 WHERE id = ? AND organization_id = ?`).run(matchedProductId, orgId);
+        restocked.push(matchedProductId);
+      } else {
+        return res.status(400).json({ error: `Item ${i + 1}: ação inválida.` });
+      }
+    }
+
+    db.prepare(`UPDATE invoice_scan_drafts SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(draft.id);
+    logAuthEvent(orgId, userId, draft.id, "INVOICE_SCAN_CONFIRMED", {
+      confidenceScore: draft.confidence_score, created: created.length, restocked: restocked.length, skipped: skipped.length,
+    });
+
+    res.status(201).json({ success: true, created, restocked, skipped: skipped.length });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

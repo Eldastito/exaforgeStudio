@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2 } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2, Receipt } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
@@ -37,6 +37,16 @@ export function CatalogView() {
   const [scanForm, setScanForm] = useState<any>(emptyScanForm);
   const [scanSaving, setScanSaving] = useState(false);
   const [scanReviewed, setScanReviewed] = useState(false);
+
+  // Cadastro por Nota Fiscal (Smart Inventory Fase 1, ADR-021) — foto da nota
+  // -> IA extrai TODOS os itens comprados (com custo) e grava um rascunho ->
+  // usuário revisa linha a linha (produto novo, repor estoque de um produto
+  // existente, ou ignorar) -> só então produtos/estoque são criados de fato.
+  const [showInvoiceScan, setShowInvoiceScan] = useState(false);
+  const [invoiceScanning, setInvoiceScanning] = useState(false);
+  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; confidenceScore: number } | null>(null);
+  const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -193,6 +203,71 @@ export function CatalogView() {
     }
   };
 
+  const openInvoiceScan = () => { setInvoiceDraft(null); setInvoiceItems([]); setShowInvoiceScan(true); };
+
+  const handleInvoiceUpload = async (file: File) => {
+    setInvoiceScanning(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await apiFetch('/api/products/invoice-scan', { method: 'POST', body });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível analisar a nota fiscal.'); return; }
+      setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl, supplierName: d.supplierName || null, confidenceScore: d.confidenceScore });
+      setInvoiceItems((d.items || []).map((it: any) => {
+        const match = products.find(p => p.name.trim().toLowerCase() === String(it.name || '').trim().toLowerCase());
+        return {
+          name: it.name || '', quantity: String(it.quantity || 1), unit: it.unit || '',
+          unitCost: it.unitCost ? String(it.unitCost) : '0', confidence: it.confidence || 0,
+          selection: match ? match.id : 'create', salePrice: '',
+        };
+      }));
+    } catch (e) {
+      toast.error('Erro ao enviar a foto da nota fiscal.');
+    } finally {
+      setInvoiceScanning(false);
+    }
+  };
+
+  const updateInvoiceItem = (index: number, patch: any) => {
+    setInvoiceItems((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  const handleInvoiceConfirm = async () => {
+    if (!invoiceDraft) return;
+    const payloadItems: any[] = [];
+    for (const row of invoiceItems) {
+      if (row.selection === 'skip') { payloadItems.push({ action: 'skip' }); continue; }
+      const quantity = parseInt(row.quantity, 10) || 0;
+      if (quantity <= 0) { toast.error(`Informe uma quantidade válida para "${row.name}".`); return; }
+      if (row.selection === 'create') {
+        if (!row.salePrice || Number(row.salePrice) <= 0) { toast.error(`Informe o preço de venda de "${row.name}" antes de publicar.`); return; }
+        payloadItems.push({ action: 'create', name: row.name, quantity, unitCost: Number(row.unitCost) || 0, salePrice: Number(row.salePrice) });
+      } else {
+        payloadItems.push({ action: 'restock', matchedProductId: row.selection, quantity, unitCost: Number(row.unitCost) || 0 });
+      }
+    }
+    if (!payloadItems.some((i) => i.action !== 'skip')) { toast.error('Selecione ao menos um item para confirmar.'); return; }
+
+    setInvoiceSaving(true);
+    try {
+      const res = await apiFetch(`/api/products/invoice-scan/${invoiceDraft.draftId}/confirm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: payloadItems }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(result.error || 'Não foi possível confirmar a nota fiscal.'); return; }
+
+      toast.success(`Nota fiscal processada: ${result.created.length} produto(s) novo(s), ${result.restocked.length} reposto(s). 🧾`);
+      setShowInvoiceScan(false); setInvoiceDraft(null); setInvoiceItems([]);
+      loadProducts();
+    } catch (e) {
+      toast.error('Erro ao confirmar a nota fiscal.');
+    } finally {
+      setInvoiceSaving(false);
+    }
+  };
+
   const isLow = (p: Product) =>
     !!p.stock_control_enabled && (p.sellable ?? 0) <= (p.low_stock_threshold || 0);
 
@@ -209,6 +284,9 @@ export function CatalogView() {
         <div className="flex gap-2">
           <Button variant="outline" className="border-emerald-700/50 text-emerald-300 hover:border-emerald-500" onClick={openScan}>
             <Camera className="w-4 h-4 mr-2" /> Cadastro Inteligente
+          </Button>
+          <Button variant="outline" className="border-emerald-700/50 text-emerald-300 hover:border-emerald-500" onClick={openInvoiceScan}>
+            <Receipt className="w-4 h-4 mr-2" /> Nota Fiscal
           </Button>
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowImport(true)}>
             <Upload className="w-4 h-4 mr-2" /> Importar CSV
@@ -476,6 +554,113 @@ export function CatalogView() {
                   <Button type="button" variant="ghost" onClick={() => { setScanResult(null); setScanForm(emptyScanForm); setScanReviewed(false); }}>Tirar outra foto</Button>
                   <Button onClick={handleScanConfirm} disabled={scanSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {scanSaving ? 'Publicando...' : 'Aprovar e Publicar'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cadastro por Nota Fiscal (Smart Inventory Fase 1) */}
+      {showInvoiceScan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[820px] max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-emerald-400" /> Cadastro por Nota Fiscal
+              </h3>
+              <button className="text-zinc-400 hover:text-white" onClick={() => { setShowInvoiceScan(false); setInvoiceDraft(null); setInvoiceItems([]); }}><X className="w-5 h-5" /></button>
+            </div>
+
+            {!invoiceDraft && (
+              <div>
+                <p className="text-sm text-zinc-400 mb-4">Fotografe a nota fiscal de uma compra — a IA lê todos os itens comprados (com quantidade e custo) de uma vez. Você revisa cada item, escolhe se é produto novo ou reposição de estoque, e define o preço de venda antes de publicar.</p>
+                <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-700 rounded-xl py-10 cursor-pointer hover:border-emerald-500/50 transition-colors">
+                  {invoiceScanning ? (
+                    <>
+                      <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+                      <span className="text-sm text-zinc-400">Lendo a nota fiscal com IA...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Receipt className="w-8 h-8 text-zinc-500" />
+                      <span className="text-sm text-zinc-400">Toque para tirar/escolher a foto da nota</span>
+                    </>
+                  )}
+                  <input
+                    type="file" accept="image/png,image/jpeg,image/webp" capture="environment" className="hidden"
+                    disabled={invoiceScanning}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleInvoiceUpload(f); e.target.value = ''; }}
+                  />
+                </label>
+              </div>
+            )}
+
+            {invoiceDraft && (
+              <div className="space-y-4">
+                <div className="flex gap-3 items-start">
+                  <img src={invoiceDraft.imageUrl} alt="Nota fiscal" className="w-20 h-20 object-cover rounded-lg border border-zinc-800" />
+                  <div className="flex-1 text-xs text-zinc-500">
+                    <p>Revise cada item — nada é criado ou reposto no estoque sem sua confirmação.</p>
+                    {invoiceDraft.supplierName && <p className="text-zinc-400 mt-1">Fornecedor identificado: {invoiceDraft.supplierName}</p>}
+                    <p className="mt-1">{invoiceItems.length} item(ns) identificado(s). Confiança geral da leitura: {invoiceDraft.confidenceScore}%.</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto -mx-6 px-6">
+                  <table className="w-full text-sm min-w-[720px]">
+                    <thead>
+                      <tr className="text-left text-zinc-500 text-xs border-b border-zinc-800">
+                        <th className="pb-2 pr-2">Item</th>
+                        <th className="pb-2 pr-2 w-20">Qtd</th>
+                        <th className="pb-2 pr-2 w-28">Custo unit. (R$)</th>
+                        <th className="pb-2 pr-2 w-52">Produto</th>
+                        <th className="pb-2 pr-2 w-28">Preço venda (R$)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoiceItems.map((row, i) => (
+                        <tr key={i} className={`border-b border-zinc-800/60 align-top ${row.selection === 'skip' ? 'opacity-40' : ''}`}>
+                          <td className="py-2 pr-2">
+                            <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100"
+                              value={row.name} onChange={(e) => updateInvoiceItem(i, { name: e.target.value })} />
+                            {row.confidence < 80 && <span className="text-[11px] text-amber-400">confiança baixa nesta linha — confira</span>}
+                          </td>
+                          <td className="py-2 pr-2">
+                            <input type="number" min="0" className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100"
+                              value={row.quantity} onChange={(e) => updateInvoiceItem(i, { quantity: e.target.value })} />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <input type="number" step="0.01" min="0" className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100"
+                              value={row.unitCost} onChange={(e) => updateInvoiceItem(i, { unitCost: e.target.value })} />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100"
+                              value={row.selection} onChange={(e) => updateInvoiceItem(i, { selection: e.target.value })}>
+                              <option value="create">+ Novo produto</option>
+                              <option value="skip">Ignorar este item</option>
+                              {products.map((p) => (<option key={p.id} value={p.id}>Repor: {p.name}</option>))}
+                            </select>
+                          </td>
+                          <td className="py-2 pr-2">
+                            {row.selection === 'create' ? (
+                              <input type="number" step="0.01" min="0" placeholder="obrigatório" className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100"
+                                value={row.salePrice} onChange={(e) => updateInvoiceItem(i, { salePrice: e.target.value })} />
+                            ) : (
+                              <span className="text-zinc-600 text-xs">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="ghost" onClick={() => { setInvoiceDraft(null); setInvoiceItems([]); }}>Tirar outra foto</Button>
+                  <Button onClick={handleInvoiceConfirm} disabled={invoiceSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {invoiceSaving ? 'Publicando...' : 'Aprovar e Publicar'}
                   </Button>
                 </div>
               </div>

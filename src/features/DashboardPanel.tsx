@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, Users, Briefcase, Bot, Download, Target,
-  Activity, Sparkles, Zap, MessageSquare, CalendarCheck, UserCheck, Loader2,
+  Activity, Sparkles, Zap, MessageSquare, CalendarCheck, UserCheck, Loader2, Radar,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
@@ -259,6 +259,10 @@ export function DashboardPanel() {
   const [profit, setProfit] = useState<Profit | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  // Radar Score (ADR-025): melhor esforço — módulo desabilitado (403) ou sem
+  // sessão pontuada ({score:null}) simplesmente não mostram o card; o painel
+  // nunca quebra por causa do Radar.
+  const [radarScore, setRadarScore] = useState<{ score: number; status: string; completedAt?: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -272,6 +276,15 @@ export function DashboardPanel() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [period]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/radar/latest-score')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d && d.score != null) setRadarScore(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const exportPdf = async () => {
     setExporting(true);
@@ -406,6 +419,30 @@ export function DashboardPanel() {
                 caption={`${m?.handoffCount ?? 0} handoffs p/ humano`} icon={<CalendarCheck className="h-5 w-5" />} accent={C.amber}
                 series={spark(S?.appointments)} />
             </div>
+
+            {/* RADAR SCORE (ADR-025) — só aparece quando o módulo Radar está
+                ativo E existe uma sessão com score calculado. */}
+            {radarScore && (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.28 }}
+                className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-5 backdrop-blur"
+              >
+                <div className="absolute inset-x-0 top-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, #2dd4bf, transparent)' }} />
+                <div className="flex items-center gap-4">
+                  <div className="rounded-xl border p-2.5" style={{ borderColor: '#2dd4bf33', backgroundColor: '#2dd4bf1a', color: '#2dd4bf' }}>
+                    <Radar className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-slate-400">Radar de Execução IA — maturidade da operação</p>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      {radarScore.status === 'awaiting_review' ? 'Diagnóstico aguardando revisão' : 'Último diagnóstico concluído'}
+                      {radarScore.completedAt ? ` em ${format(new Date(radarScore.completedAt), 'dd/MM/yyyy')}` : ''} — detalhes no módulo Radar.
+                    </p>
+                  </div>
+                  <p className="text-3xl font-bold tracking-tight text-white tabular-nums">{radarScore.score}<span className="text-base font-medium text-slate-500">/100</span></p>
+                </div>
+              </motion.div>
+            )}
 
             {/* LUCRO / MARGEM */}
             {profit && (

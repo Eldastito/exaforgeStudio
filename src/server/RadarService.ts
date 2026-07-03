@@ -297,6 +297,70 @@ export class RadarService {
     return this.listRespondents(orgId, sessionId);
   }
 
+  // Reenvio do convite (backlog ADR-025, deixado de fora na ADR-018). O banco
+  // só guarda o HASH do token — o link original é irrecuperável por design.
+  // Reenviar, portanto, sempre ROTACIONA o token: gera um novo, invalida o
+  // anterior (inclusive um link vazado) e renova a validade de 30 dias. Se o
+  // respondente já tinha começado pelo link antigo, as respostas ficam salvas
+  // (são por respondent_id, não por token) — só o link muda.
+  static async resendInvite(
+    orgId: string, sessionId: string, actorUserId: string | undefined, respondentId: string,
+    channel: "link" | "whatsapp" | "email" = "link", phone?: string
+  ) {
+    const session = db.prepare(`SELECT * FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId) as any;
+    if (!session) throw new Error("Sessão não encontrada.");
+    const respondent = db.prepare(`SELECT * FROM radar_respondents WHERE id = ? AND session_id = ?`).get(respondentId, sessionId) as any;
+    if (!respondent) throw new Error("Respondente não encontrado.");
+    if (respondent.status === "revoked") throw new Error("Este convite foi revogado — adicione o respondente novamente.");
+    if (respondent.status === "completed") throw new Error("Este respondente já concluiu as respostas.");
+
+    // Valida o canal ANTES de rotacionar — se o envio não tem para onde ir,
+    // o link antigo continua válido (não deixa o respondente na mão à toa).
+    let activeChannel: any = null;
+    if (channel === "whatsapp") {
+      const to = String(phone || "").replace(/\D/g, "");
+      if (!to) throw new Error("Informe o telefone (WhatsApp) do respondente.");
+      activeChannel = db.prepare(
+        `SELECT id FROM channels WHERE organization_id = ? AND status NOT IN ('disabled','disconnected') ORDER BY created_at LIMIT 1`
+      ).get(orgId) as any;
+      if (!activeChannel) throw new Error("Nenhum canal de WhatsApp conectado nesta organização.");
+      phone = to;
+    } else if (channel === "email") {
+      if (!respondent.email) throw new Error("Este respondente não tem e-mail cadastrado.");
+      if (!GoogleOAuthService.getConnection(orgId)) throw new Error("Conta Google não conectada.");
+    }
+
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+    db.prepare(
+      `UPDATE radar_respondents SET invite_token_hash = ?, invite_token_expires_at = datetime('now', '+30 days') WHERE id = ?`
+    ).run(tokenHash, respondentId);
+
+    const invitePath = `/radar-ia/respond/${rawToken}`;
+    const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+    const absoluteUrl = appUrl ? `${appUrl}${invitePath}` : null;
+
+    if (channel === "whatsapp") {
+      if (!absoluteUrl) throw new Error("Configure APP_URL para enviar o link por WhatsApp — o link precisa ser público.");
+      await MessageProviderService.sendMessage(
+        activeChannel.id, phone!,
+        `Olá, ${respondent.name}! Você foi convidado(a) a responder o diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}. Acesse: ${absoluteUrl}`
+      );
+    } else if (channel === "email") {
+      if (!absoluteUrl) throw new Error("Configure APP_URL para enviar o link por e-mail — o link precisa ser público.");
+      const result = await GoogleOAuthService.gmailSend(
+        orgId, respondent.email,
+        "Convite — Radar de Execução IA",
+        `Olá, ${respondent.name}! Você foi convidado(a) a responder o diagnóstico Radar de Execução IA de ${session.company_name || ""}. Acesse: ${absoluteUrl}\n\nO link é pessoal e expira em 30 dias.`
+      );
+      if ((result as any)?.error) throw new Error((result as any).error);
+    }
+
+    logEvent(orgId, actorUserId, "radar_respondent_invite_resent", sessionId, { respondentId, channel });
+    const fresh = db.prepare(`SELECT * FROM radar_respondents WHERE id = ?`).get(respondentId);
+    return { respondent: fresh, inviteToken: rawToken, inviteUrl: invitePath, sent: channel !== "link", channel };
+  }
+
   // Evidência anexada a uma resposta (reservado desde a Fase 1 — ver
   // saveAnswer acima). Sobe a confiança daquela resposta específica para 0,90
   // (nunca para baixo — evidência só reforça, uma resposta com comentário +
@@ -335,6 +399,59 @@ export class RadarService {
     const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
     if (!session) throw new Error("Sessão não encontrada.");
     return db.prepare(`SELECT * FROM radar_evidence WHERE session_id = ? ORDER BY created_at`).all(sessionId);
+  }
+
+  // Exclusão de evidência (backlog ADR-025, deixado de fora na ADR-015 — "fica
+  // para quando houver sinal de necessidade real"; o backlog aprovado é esse
+  // sinal). O ponto delicado é desfazer o boost de confiança: anexar evidência
+  // sobe a resposta para 0,90 (addEvidence acima). Ao excluir a ÚLTIMA
+  // evidência de uma resposta, a confiança volta ao patamar declarado que a
+  // resposta teria sem evidência (0,50 "não sei" / 0,75 com comentário / 0,60
+  // sem) — a mesma régua de saveAnswer — e o score é recalculado na hora.
+  // Devolve o file_url removido para a rota apagar o arquivo físico
+  // (best-effort; disco é responsabilidade da rota, como no upload).
+  static deleteEvidence(orgId: string, sessionId: string, actorUserId: string | undefined, evidenceId: string) {
+    const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
+    if (!session) throw new Error("Sessão não encontrada.");
+    const evidence = db.prepare(`SELECT * FROM radar_evidence WHERE id = ? AND session_id = ?`).get(evidenceId, sessionId) as any;
+    if (!evidence) throw new Error("Evidência não encontrada.");
+
+    db.prepare(`DELETE FROM radar_evidence WHERE id = ?`).run(evidenceId);
+
+    const remaining = (db.prepare(`SELECT COUNT(*) AS c FROM radar_evidence WHERE answer_id = ?`).get(evidence.answer_id) as any)?.c || 0;
+    if (remaining === 0) {
+      const answer = db.prepare(`SELECT * FROM radar_answers WHERE id = ?`).get(evidence.answer_id) as any;
+      if (answer) {
+        const base = answer.is_not_known ? 0.5 : (answer.comment && String(answer.comment).trim() ? 0.75 : 0.6);
+        db.prepare(`UPDATE radar_answers SET confidence_multiplier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(base, answer.id);
+      }
+    }
+
+    logEvent(orgId, actorUserId, "radar_evidence_removed", sessionId, { evidenceId, answerId: evidence.answer_id });
+    calculateAndPersist(sessionId, actorUserId);
+    return { removedFileUrl: evidence.file_url as string, session: this.getSession(orgId, sessionId) };
+  }
+
+  // Score mais recente para o card do painel executivo (backlog ADR-025, ideia
+  // registrada desde a ADR-009). Só considera sessões que já passaram do
+  // preenchimento (awaiting_review em diante) e que têm score calculado —
+  // nunca inventa número de sessão em rascunho.
+  static latestScore(orgId: string) {
+    const row = db.prepare(
+      `SELECT id, status, overall_maturity_score, completed_at, company_name
+       FROM radar_sessions
+       WHERE organization_id = ? AND overall_maturity_score IS NOT NULL
+         AND status IN ('awaiting_review', 'approved', 'completed')
+       ORDER BY COALESCE(completed_at, updated_at) DESC LIMIT 1`
+    ).get(orgId) as any;
+    if (!row) return { score: null };
+    return {
+      score: Math.round(row.overall_maturity_score),
+      status: row.status,
+      sessionId: row.id,
+      completedAt: row.completed_at,
+      companyName: row.company_name || null,
+    };
   }
 
   // Relatório em PDF (Fase 4, ADR-016) — SOB DEMANDA (não gerado

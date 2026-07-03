@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode, ChangeEvent } from 'react';
 import {
   Radar, Plus, ArrowLeft, ArrowRight, Loader2, HelpCircle, Sparkles, TrendingUp,
-  Gauge, RefreshCw, ChevronRight, Paperclip, FileText, ListChecks, Share2, MessageCircle, Mail,
+  Gauge, RefreshCw, ChevronRight, Paperclip, FileText, ListChecks, Share2, MessageCircle, Mail, Trash2,
 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -474,6 +474,19 @@ function QuestionsView({
     }
   }
 
+  // Exclusão (ADR-025) — manager-only no servidor (excluir desfaz o boost de
+  // confiança e recalcula o score); quem não for owner/admin recebe o 403 com
+  // a mensagem do servidor no toast.
+  async function removeEvidence(evidenceId: string) {
+    try {
+      const fresh = await api(`/sessions/${session.id}/evidence/${evidenceId}`, { method: 'DELETE' });
+      onSessionUpdate(fresh);
+      toast.success('Evidência excluída — confiança da resposta recalculada.');
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível excluir a evidência.');
+    }
+  }
+
   const progress = Math.round((qIndex / questions.length) * 100);
 
   return (
@@ -532,6 +545,13 @@ function QuestionsView({
                 {currentEvidence.map((ev) => (
                   <li key={ev.id} className="text-xs text-emerald-300 flex items-center gap-1.5">
                     <Paperclip size={12} /> {ev.file_name || 'evidência anexada'}
+                    <button
+                      onClick={() => removeEvidence(ev.id)}
+                      title="Excluir evidência (só donos/administradores — desfaz o boost de confiança)"
+                      className="text-white/25 hover:text-red-300 ml-1"
+                    >
+                      <Trash2 size={12} />
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -569,9 +589,27 @@ function QuestionsView({
   );
 }
 
-function ResultView({ session, onBack }: { session: Session; onBack: () => void }) {
+function ResultView({ session: initialSession, onBack }: { session: Session; onBack: () => void }) {
   const { user } = useAuth();
   const isManager = user?.role === 'owner' || user?.role === 'admin';
+  // Recalcular (ADR-025) devolve a sessão atualizada — estado local para a
+  // tela refletir o score novo sem precisar voltar pra lista. Sincroniza
+  // quando o pai troca de sessão (abrir outro diagnóstico).
+  const [session, setSession] = useState<Session>(initialSession);
+  useEffect(() => { setSession(initialSession); }, [initialSession]);
+  const [recalculating, setRecalculating] = useState(false);
+  const recalculate = async () => {
+    setRecalculating(true);
+    try {
+      const fresh = await api(`/sessions/${session.id}/recalculate`, { method: 'POST' });
+      setSession(fresh);
+      toast.success('Score recalculado com as respostas e evidências atuais.');
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível recalcular.');
+    } finally {
+      setRecalculating(false);
+    }
+  };
   const score = session.overall_maturity_score;
   const level = session.maturity_level;
   const pillarScores = session.pillarScores || [];
@@ -727,6 +765,14 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
         <div className="mt-8">
           <h3 className="text-sm font-semibold text-white/50 uppercase tracking-wide">Ações</h3>
           <div className="mt-3 flex flex-wrap gap-3">
+            {session.status === 'awaiting_review' && (
+              <button
+                onClick={recalculate} disabled={recalculating}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
+              >
+                {recalculating ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />} Recalcular score
+              </button>
+            )}
             <button
               onClick={generateReport} disabled={generatingReport || score == null}
               className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
@@ -811,6 +857,11 @@ function RespondentsSection({ sessionId }: { sessionId: string }) {
   const [saving, setSaving] = useState(false);
   const [newInviteUrl, setNewInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [resending, setResending] = useState<string | null>(null);
+  // Respondente cujo mini-formulário de "enviar por WhatsApp" está aberto
+  // (radar_respondents não guarda telefone — pede na hora do envio).
+  const [resendPhoneFor, setResendPhoneFor] = useState<string | null>(null);
+  const [resendPhone, setResendPhone] = useState('');
 
   const load = useCallback(() => {
     api(`/sessions/${sessionId}/respondents`).then((d) => setRespondents(Array.isArray(d) ? d : [])).catch(() => {});
@@ -850,6 +901,30 @@ function RespondentsSection({ sessionId }: { sessionId: string }) {
     }
   };
 
+  // Reenvio do convite (ADR-025): o servidor ROTACIONA o token (link antigo
+  // morre na hora) e devolve o novo — mostrado uma única vez, igual à criação.
+  // Com canal email/whatsapp, o próprio servidor já envia o link novo.
+  const resend = async (respondentId: string, channel: 'link' | 'email' | 'whatsapp', phone?: string) => {
+    if (resending) return;
+    setResending(respondentId);
+    try {
+      const result = await api(`/sessions/${sessionId}/respondents/${respondentId}/resend`, {
+        method: 'POST', body: JSON.stringify({ channel, phone }),
+      });
+      setNewInviteUrl(`${window.location.origin}${result.inviteUrl}`);
+      setCopied(false);
+      if (channel === 'email') toast.success('Convite reenviado por e-mail com um link novo.');
+      else if (channel === 'whatsapp') toast.success('Convite enviado por WhatsApp com um link novo.');
+      else toast.success('Novo link gerado — o anterior deixou de funcionar.');
+      setResendPhoneFor(null);
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível reenviar o convite.');
+    } finally {
+      setResending(null);
+    }
+  };
+
   return (
     <div className="mt-8">
       <div className="flex items-center justify-between">
@@ -881,15 +956,41 @@ function RespondentsSection({ sessionId }: { sessionId: string }) {
         <div className="mt-3 space-y-1.5">
           {respondents.map((r) => {
             const st = RESPONDENT_STATUS_LABEL[r.status] || { label: r.status, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' };
+            const canResend = r.status !== 'revoked' && r.status !== 'completed';
             return (
-              <div key={r.id} className="flex items-center justify-between gap-2 text-sm text-white/70">
-                <span>{r.name}{r.role_title ? ` · ${r.role_title}` : ''}{r.area ? ` · ${r.area}` : ''}</span>
-                <span className="flex items-center gap-2 shrink-0">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${st.cls}`}>{st.label}</span>
-                  {r.status !== 'revoked' && r.status !== 'completed' && (
-                    <button onClick={() => revoke(r.id)} className="text-xs text-white/30 hover:text-red-300">Revogar</button>
-                  )}
-                </span>
+              <div key={r.id} className="text-sm text-white/70">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{r.name}{r.role_title ? ` · ${r.role_title}` : ''}{r.area ? ` · ${r.area}` : ''}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${st.cls}`}>{st.label}</span>
+                    {canResend && (
+                      <>
+                        <button onClick={() => resend(r.id, 'link')} disabled={!!resending} className="text-xs text-white/30 hover:text-emerald-300 disabled:opacity-40">
+                          {resending === r.id ? '...' : 'Novo link'}
+                        </button>
+                        {r.email && (
+                          <button onClick={() => resend(r.id, 'email')} disabled={!!resending} className="text-xs text-white/30 hover:text-emerald-300 disabled:opacity-40">E-mail</button>
+                        )}
+                        <button onClick={() => { setResendPhoneFor(resendPhoneFor === r.id ? null : r.id); setResendPhone(''); }} disabled={!!resending} className="text-xs text-white/30 hover:text-emerald-300 disabled:opacity-40">WhatsApp</button>
+                        <button onClick={() => revoke(r.id)} className="text-xs text-white/30 hover:text-red-300">Revogar</button>
+                      </>
+                    )}
+                  </span>
+                </div>
+                {resendPhoneFor === r.id && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <input
+                      className="flex-1 max-w-[220px] rounded border border-white/15 bg-white/[0.04] px-2 py-1 text-xs text-white/80"
+                      placeholder="Telefone com DDD, ex.: 11 99999-9999"
+                      value={resendPhone} onChange={(e) => setResendPhone(e.target.value)}
+                    />
+                    <button
+                      onClick={() => resend(r.id, 'whatsapp', resendPhone)}
+                      disabled={!resendPhone.trim() || !!resending}
+                      className="text-xs px-2 py-1 rounded border border-emerald-500/40 text-emerald-300 disabled:opacity-40"
+                    >Enviar</button>
+                  </div>
+                )}
               </div>
             );
           })}

@@ -208,4 +208,23 @@ router.get("/velocity/latest", (req: AuthRequest, res): any => {
   res.json(snapshot);
 });
 
+// Fase 4 — relatório em PDF (SOB DEMANDA, ver RadarService.generateReport).
+router.post("/sessions/:id/report", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores geram o relatório." });
+  RadarService.generateReport(orgId, req.params.id, actorId(req))
+    .then((result) => res.status(201).json(result))
+    .catch((e: any) => res.status(400).json({ error: e.message }));
+});
+
+// Fase 5 — ponte com Tarefas (SOB DEMANDA, ver RadarService.createTasksFromRecommendations).
+router.post("/sessions/:id/create-tasks", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores criam tarefas a partir do diagnóstico." });
+  try { res.status(201).json(RadarService.createTasksFromRecommendations(orgId, req.params.id, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

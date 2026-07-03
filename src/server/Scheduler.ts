@@ -16,6 +16,7 @@ import { InstagramService } from "./InstagramService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
+import { RadarService } from "./RadarService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -72,6 +73,7 @@ export class Scheduler {
     await this.npsPass().catch(e => console.error('[Scheduler] pesquisa de satisfação falhou', e));
     await this.memoryPass().catch(e => console.error('[Scheduler] memória do cliente falhou', e));
     await ProspectDiscoveryService.runDue().catch(e => console.error('[Scheduler] descoberta de prospecção falhou', e));
+    try { RadarService.reassessmentReminderPass(); } catch (e) { console.error('[Scheduler] lembrete de reavaliação do Radar falhou', e); }
     this.trialPass();
   }
 

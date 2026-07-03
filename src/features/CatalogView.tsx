@@ -10,7 +10,7 @@ type Product = {
   id: string; type: string; name: string; description?: string; price?: number;
   currency?: string; active?: number; stock_control_enabled?: number;
   quantity_available?: number; quantity_reserved?: number; sellable?: number | null;
-  low_stock_threshold?: number;
+  low_stock_threshold?: number; avg_cost?: number; suggested_price?: number | null;
 };
 
 const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '' };
@@ -215,7 +215,10 @@ export function CatalogView() {
       return {
         name: it.name || '', quantity: String(it.quantity || 1), unit: it.unit || '',
         unitCost: it.unitCost ? String(it.unitCost) : '0', confidence: it.confidence || 0,
-        selection: match ? match.id : 'create', salePrice: '',
+        selection: match ? match.id : 'create',
+        // Sugestão a partir do custo real da nota (markup padrão) — só
+        // pré-preenche o campo, continua 100% editável antes de publicar.
+        salePrice: it.suggestedSalePrice ? String(it.suggestedSalePrice) : '',
       };
     }));
     if (d.truncated) toast.error('O XML tem mais itens do que o exibido (limite de 200 por importação). Confirme estes e importe o restante em outro lote.');
@@ -398,6 +401,11 @@ export function CatalogView() {
                   <label className="text-sm text-zinc-400 mb-1 block">Preço (R$)</label>
                   <input required type="number" step="0.01" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
                     value={form.price} onChange={(e) => setForm({...form, price: e.target.value})} />
+                  {!!editing?.suggested_price && (
+                    <p className="text-[11px] text-zinc-500 mt-1">
+                      Custo médio: R$ {(editing.avg_cost || 0).toFixed(2)} — sugestão de venda: R$ {editing.suggested_price.toFixed(2)}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm text-zinc-400 mb-1 block">Preço mínimo <span className="text-zinc-600">(negociação)</span></label>
@@ -651,7 +659,7 @@ export function CatalogView() {
                         <th className="pb-2 pr-2 w-20">Qtd</th>
                         <th className="pb-2 pr-2 w-28">Custo unit. (R$)</th>
                         <th className="pb-2 pr-2 w-52">Produto</th>
-                        <th className="pb-2 pr-2 w-28">Preço venda (R$)</th>
+                        <th className="pb-2 pr-2 w-28">Preço venda (R$) <span className="text-zinc-700 normal-case">— sugestão</span></th>
                       </tr>
                     </thead>
                     <tbody>

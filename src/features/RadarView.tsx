@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode, ChangeEvent } from 'react';
 import {
   Radar, Plus, ArrowLeft, ArrowRight, Loader2, HelpCircle, Sparkles, TrendingUp,
-  Gauge, RefreshCw, ChevronRight, Paperclip,
+  Gauge, RefreshCw, ChevronRight, Paperclip, FileText, ListChecks,
 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -564,12 +564,46 @@ function QuestionsView({
 }
 
 function ResultView({ session, onBack }: { session: Session; onBack: () => void }) {
+  const { user } = useAuth();
+  const isManager = user?.role === 'owner' || user?.role === 'admin';
   const score = session.overall_maturity_score;
   const level = session.maturity_level;
   const pillarScores = session.pillarScores || [];
   const sorted = [...pillarScores].filter((p) => p.score != null).sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
   const gaps = sorted.slice(0, 2);
   const topRecs = (session.recommendations || []).slice(0, 3);
+  const hasHighPriority = (session.recommendations || []).some((r) => r.priority_band === 'alta');
+
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportUrl, setReportUrl] = useState<string | null>(null);
+  const [creatingTasks, setCreatingTasks] = useState(false);
+  const [tasksResult, setTasksResult] = useState<{ created: number; skipped: number } | null>(null);
+
+  const generateReport = async () => {
+    setGeneratingReport(true);
+    try {
+      const result = await api(`/sessions/${session.id}/report`, { method: 'POST' });
+      setReportUrl(result.url);
+      toast.success(result.hasNarrative ? 'Relatório gerado com resumo por IA.' : 'Relatório gerado (sem resumo por IA — configure a IA para incluir essa seção).');
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível gerar o relatório.');
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const createTasks = async () => {
+    setCreatingTasks(true);
+    try {
+      const result = await api(`/sessions/${session.id}/create-tasks`, { method: 'POST' });
+      setTasksResult(result);
+      toast.success(result.created > 0 ? `${result.created} tarefa(s) criada(s) em Tarefas.` : 'Nenhuma tarefa nova (já existiam ou não há recomendações de prioridade alta).');
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível criar as tarefas.');
+    } finally {
+      setCreatingTasks(false);
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -639,6 +673,38 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {isManager && (
+        <div className="mt-8">
+          <h3 className="text-sm font-semibold text-white/50 uppercase tracking-wide">Ações</h3>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button
+              onClick={generateReport} disabled={generatingReport || score == null}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
+            >
+              {generatingReport ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />} Gerar relatório (PDF)
+            </button>
+            {hasHighPriority && (
+              <button
+                onClick={createTasks} disabled={creatingTasks}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
+              >
+                {creatingTasks ? <Loader2 className="animate-spin" size={16} /> : <ListChecks size={16} />} Criar tarefas das recomendações de prioridade alta
+              </button>
+            )}
+          </div>
+          {reportUrl && (
+            <a href={reportUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1.5 text-sm" style={{ color: teal }}>
+              <FileText size={14} /> Abrir relatório gerado
+            </a>
+          )}
+          {tasksResult && (
+            <p className="mt-2 text-xs text-white/40">
+              {tasksResult.created} criada(s){tasksResult.skipped > 0 ? `, ${tasksResult.skipped} já existente(s)` : ''}.
+            </p>
+          )}
         </div>
       )}
 

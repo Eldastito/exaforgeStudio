@@ -2,6 +2,20 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logRadarEvent } from "./radarAudit.js";
 import { PILLAR_WEIGHTS, SCORING_VERSION, Pillar, calculateAndPersist } from "./RadarScoringEngine.js";
+import { generateNarrative } from "./RadarNarrativeService.js";
+import { ReportPdfService } from "./ReportPdfService.js";
+import { TaskService } from "./TaskService.js";
+import { NotificationService } from "./NotificationService.js";
+
+const PILLAR_LABEL: Record<string, string> = {
+  estrategia: "Estratégia e liderança",
+  receita: "Receita e atendimento",
+  processos: "Processos operacionais",
+  dados: "Dados e integração",
+  pessoas: "Pessoas e capacitação",
+  governanca: "Governança e segurança",
+  metricas: "Métricas e ROI",
+};
 
 // ZappFlow Radar de Execução IA — Fase 1 (fundação de dados) + Fase 2 (o motor
 // de score em si mora em RadarScoringEngine.ts, compartilhado com o fluxo
@@ -302,5 +316,105 @@ export class RadarService {
     const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
     if (!session) throw new Error("Sessão não encontrada.");
     return db.prepare(`SELECT * FROM radar_evidence WHERE session_id = ? ORDER BY created_at`).all(sessionId);
+  }
+
+  // Relatório em PDF (Fase 4, ADR-016) — SOB DEMANDA (não gerado
+  // automaticamente ao concluir/aprovar): quem decide se quer gastar a
+  // chamada de IA e o tempo de geração é o usuário, clicando "Gerar
+  // relatório". A narrativa em texto é best-effort — se a IA não estiver
+  // configurada ou a chamada falhar, o PDF sai igual, só sem essa seção
+  // (RadarNarrativeService.generateNarrative nunca lança).
+  static async generateReport(orgId: string, sessionId: string, actorUserId?: string) {
+    const session = this.getSession(orgId, sessionId) as any;
+    if (!session) throw new Error("Sessão não encontrada.");
+    if (session.overall_maturity_score == null) {
+      throw new Error("Conclua o diagnóstico antes de gerar o relatório.");
+    }
+
+    const pillarScores = (session.pillarScores || []).map((p: any) => ({ pillar: p.pillar, label: PILLAR_LABEL[p.pillar] || p.pillar, score: p.score }));
+    const topRecommendation = (session.recommendations || [])[0] || null;
+
+    const narrative = await generateNarrative({
+      companyName: session.company_name,
+      overallScore: session.overall_maturity_score,
+      maturityLevel: session.maturity_level,
+      confidenceScore: session.confidence_score,
+      pillarScores: pillarScores.map((p: any) => ({ pillar: p.pillar, score: p.score })),
+      topRecommendation: topRecommendation ? { use_case_name: topRecommendation.use_case_name, priority_band: topRecommendation.priority_band } : null,
+    });
+
+    const pdf = await ReportPdfService.generateRadarReport(orgId, {
+      companyName: session.company_name,
+      overallScore: session.overall_maturity_score,
+      maturityLevel: session.maturity_level,
+      confidenceScore: session.confidence_score,
+      pillarScores,
+      recommendations: (session.recommendations || []).map((r: any) => ({ use_case_name: r.use_case_name, priority_band: r.priority_band })),
+      narrative,
+    });
+    if (!pdf) throw new Error("Não foi possível gerar o PDF. Tente novamente.");
+
+    logEvent(orgId, actorUserId, "radar_report_generated", sessionId, { hasNarrative: !!narrative });
+    return { url: pdf.url, hasNarrative: !!narrative };
+  }
+
+  // Ponte com Tarefas (Fase 5, ADR-016) — SOB DEMANDA (botão, não automático
+  // ao aprovar): mesma regra do produto de nunca deixar a IA/o sistema agir
+  // sozinho sem controle humano. Idempotente: recomendações que já viraram
+  // tarefa (ref_label já usado) são puladas, não duplicadas.
+  static createTasksFromRecommendations(orgId: string, sessionId: string, actorUserId?: string) {
+    const session = db.prepare(`SELECT id, company_name FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId) as any;
+    if (!session) throw new Error("Sessão não encontrada.");
+
+    const highPriority = db.prepare(`
+      SELECT r.*, c.name AS use_case_name FROM radar_recommendations r
+      JOIN radar_use_case_catalog c ON c.id = r.use_case_id
+      WHERE r.session_id = ? AND r.priority_band = 'alta'
+    `).all(sessionId) as any[];
+
+    let created = 0, skipped = 0;
+    const createdTasks: any[] = [];
+    for (const rec of highPriority) {
+      const refLabel = `radar:${sessionId}:${rec.id}`;
+      const existing = db.prepare(`SELECT id FROM tasks WHERE organization_id = ? AND ref_label = ?`).get(orgId, refLabel);
+      if (existing) { skipped++; continue; }
+
+      const task = TaskService.create(orgId, {
+        title: `[Radar] ${rec.use_case_name}`,
+        description: `Recomendação de prioridade alta do diagnóstico "${session.company_name || sessionId}" (score de prioridade ${rec.priority_score}).`,
+        priority: "alta",
+        source: "radar",
+        refLabel,
+      }, actorUserId);
+      createdTasks.push(task);
+      created++;
+    }
+
+    logEvent(orgId, actorUserId, "radar_tasks_created", sessionId, { created, skipped });
+    return { created, skipped, tasks: createdTasks };
+  }
+
+  // Lembrete de reavaliação (Fase 5, ADR-016) — passe agendado (Scheduler.tick).
+  // Sessão concluída há 90+ dias gera UMA notificação in-app (nunca WhatsApp/
+  // e-mail automático — ver ADR-016 para o porquê disso ficar fora desta
+  // rodada). dedupeKey com janela de ~1 ano evita repetir a mesma notificação
+  // a cada hora que o Scheduler roda.
+  static reassessmentReminderPass() {
+    const stale = db.prepare(`
+      SELECT id, organization_id, company_name FROM radar_sessions
+      WHERE organization_id IS NOT NULL AND status IN ('awaiting_review', 'approved', 'completed')
+        AND completed_at IS NOT NULL AND completed_at <= datetime('now', '-90 days')
+    `).all() as any[];
+    for (const s of stale) {
+      NotificationService.push({
+        organizationId: s.organization_id,
+        title: "Hora de reavaliar seu diagnóstico de IA",
+        message: `O diagnóstico "${s.company_name || "sem nome"}" foi concluído há mais de 90 dias. Que tal um novo Radar para acompanhar sua evolução?`,
+        type: "info",
+        dedupeKey: `radar_reassess_${s.id}`,
+        dedupeWindowMin: 60 * 24 * 365,
+      });
+    }
+    return { checked: stale.length };
   }
 }

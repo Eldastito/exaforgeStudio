@@ -849,6 +849,25 @@ const initDb = () => {
         confirmed_at DATETIME
       );
       CREATE INDEX IF NOT EXISTS idx_product_scan_drafts_org ON product_scan_drafts(organization_id, status, created_at);
+      -- Rascunho do Cadastro por Nota Fiscal (Smart Inventory Fase 1, ADR-021):
+      -- mesma lógica do product_scan_drafts, mas para UMA foto que pode conter
+      -- VÁRIOS itens de compra. raw_extraction_json guarda a lista bruta que a
+      -- IA leu (fornecedor + itens com custo unitário); os produtos/baixas de
+      -- estoque só são criados de verdade em POST /invoice-scan/:draftId/confirm,
+      -- item por item, conforme a decisão do humano (criar produto novo, repor
+      -- estoque de um produto existente, ou ignorar aquele item).
+      CREATE TABLE IF NOT EXISTS invoice_scan_drafts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        uploaded_by TEXT,
+        image_url TEXT NOT NULL,
+        raw_extraction_json TEXT,
+        confidence_score REAL,
+        status TEXT DEFAULT 'pending', -- pending | confirmed | discarded
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        confirmed_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_invoice_scan_drafts_org ON invoice_scan_drafts(organization_id, status, created_at);
       -- Token público que amarra um acesso da vitrine a um contato/ticket do WhatsApp.
       CREATE TABLE IF NOT EXISTS storefront_links (
         token TEXT PRIMARY KEY,

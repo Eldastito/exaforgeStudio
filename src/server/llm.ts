@@ -269,6 +269,42 @@ Regras rígidas: NUNCA invente marca, peso ou categoria que não estejam visíve
 }
 
 /**
+ * Cadastro por Nota Fiscal (Smart Inventory Fase 1, ADR-021): a partir da FOTO
+ * de uma nota fiscal/cupom/comprovante de COMPRA de mercadorias, extrai TODOS
+ * os itens comprados (nome, quantidade, custo unitário) em JSON estruturado —
+ * diferente de `extractProductFromImage()`, aqui a IA JÁ TEM o custo real (veio
+ * da nota), então pode ser usado depois para atualizar o custo médio do
+ * produto (InventoryService.recordMovement). Mesma regra de "não invente": só
+ * lista o que está de fato na nota, ignora frete/impostos/totais, e sinaliza
+ * baixa confiança por item quando a leitura ficar duvidosa em vez de inventar
+ * um número. Continua sem sugerir PREÇO DE VENDA — só custo de compra; quem
+ * decide a margem/preço final é sempre o humano.
+ */
+export async function extractInvoiceItems(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const system = `Você é um assistente de leitura de notas fiscais e comprovantes de compra de mercadorias para varejo brasileiro. A partir da foto de uma nota fiscal, cupom fiscal ou comprovante de compra, extraia os itens comprados e devolva SOMENTE um JSON:
+{"supplierName": "nome do fornecedor/emitente da nota, se legível (ou null)", "items": [{"name": "nome do item exatamente como aparece na nota", "quantity": <número, quantidade comprada>, "unit": "unidade como aparece na nota, ex.: 'un', 'kg', 'cx' (ou null se não estiver claro)", "unitCost": <número, custo unitário em reais>, "confidence": <número inteiro de 0 a 100, confiança na leitura DESTE item específico>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura da nota>}
+Regras rígidas: liste TODOS os itens de MERCADORIA visíveis na nota — IGNORE linhas de frete, impostos, descontos e a linha de total. NUNCA invente itens que não estejam na nota. Se a quantidade ou o custo unitário de um item não estiverem claros, inclua o item mesmo assim com sua melhor leitura e um confidence baixo nesse item (não descarte o item). Responda SOMENTE o JSON, sem texto ao redor.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Leia esta nota fiscal e devolva o JSON pedido com todos os itens comprados." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0.2,
+    max_tokens: 1500,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * "Olhos" do atendimento: analisa uma imagem recebida, CLASSIFICA (documento vs
  * foto comum) e, quando for documento (comprovante de PIX, nota fiscal, recibo,
  * receita, boleto…), extrai os dados-chave. Retorna um texto pronto para a IA

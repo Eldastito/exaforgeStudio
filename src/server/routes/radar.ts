@@ -151,6 +151,20 @@ router.post("/sessions/:id/respondents/:respondentId/revoke", (req: AuthRequest,
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// Reenvio do convite (ADR-025): rotaciona o token (o hash antigo morre) e,
+// opcionalmente, já envia o link novo por WhatsApp/e-mail reaproveitando a
+// mesma infraestrutura do envio de relatório (ADR-017). channel 'link' (ou
+// ausente) só devolve o link novo para copiar.
+router.post("/sessions/:id/respondents/:respondentId/resend", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores reenviam convites." });
+  const channel = req.body?.channel || "link";
+  if (!["link", "whatsapp", "email"].includes(channel)) return res.status(400).json({ error: "Canal inválido (use link, whatsapp ou email)." });
+  try { res.json(await RadarService.resendInvite(orgId, req.params.id, actorId(req), req.params.respondentId, channel, req.body?.phone)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.get("/sessions/:id/evidence", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -188,6 +202,35 @@ router.post("/sessions/:id/evidence", (req: AuthRequest, res): any => {
       res.status(400).json({ error: e.message || "Falha ao anexar evidência." });
     }
   });
+});
+
+// Exclusão de evidência (ADR-025) — manager-only, diferente do upload: excluir
+// mexe no score (desfaz o boost de confiança), então é ação de curadoria de
+// quem revisa o diagnóstico, não de quem respondeu. O arquivo físico local é
+// apagado best-effort (a linha do banco é a fonte de verdade da exclusão).
+router.delete("/sessions/:id/evidence/:evidenceId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores excluem evidências." });
+  try {
+    const { removedFileUrl, session } = RadarService.deleteEvidence(orgId, req.params.id, actorId(req), req.params.evidenceId);
+    if (removedFileUrl && removedFileUrl.startsWith("/media/radar-evidence/")) {
+      const name = path.basename(removedFileUrl);
+      try { fs.unlinkSync(path.join(EVIDENCE_DIR, name)); } catch { /* best-effort */ }
+    }
+    res.json(session);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Score mais recente para o card do painel executivo (ADR-025). Sem sessão
+// pontuada devolve { score: null } — o painel simplesmente não mostra o card.
+router.get("/latest-score", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarService.latestScore(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Índice de Velocidade de Conversão (IVC) — medido a partir de dados reais da

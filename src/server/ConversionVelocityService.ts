@@ -98,6 +98,13 @@ export class ConversionVelocityService {
 
     const cfg = RevenueIntelligenceService.getConfig(orgId);
     const slaThresholdSeconds = cfg.slow_response_seconds;
+    // SLA por canal (ADR-026): cada ticket é avaliado contra o limiar do SEU
+    // canal quando configurado; canal sem entrada herda o limiar único da
+    // organização. Os percentis (p50/p90/p95) e o responseTimeScore continuam
+    // agregados no limiar padrão — são métricas da operação inteira, não de um
+    // canal; o que muda por canal é a régua de conformidade/risco por ticket.
+    const slaByChannel = cfg.sla_by_channel || {};
+    const slaFor = (channelId: string | null) => (channelId && slaByChannel[channelId]) || slaThresholdSeconds;
     const agenda = AppointmentService.config(orgId);
 
     // Primeiro contato -> primeira resposta, por ticket (mesmo padrão de
@@ -107,9 +114,11 @@ export class ConversionVelocityService {
     // subsequente) — suficiente para "velocidade de entrada", documentado aqui
     // como limite conhecido da v1.
     const rows = db.prepare(`
-      SELECT tk.id AS ticket_id, tk.status AS ticket_status, fc.t AS contact_at, fb.t AS response_at,
+      SELECT tk.id AS ticket_id, tk.status AS ticket_status, ct.channel_id AS channel_id,
+        fc.t AS contact_at, fb.t AS response_at,
         CASE WHEN fb.t IS NOT NULL THEN (julianday(fb.t) - julianday(fc.t)) * 86400.0 END AS response_seconds
       FROM tickets tk
+      LEFT JOIN contacts ct ON ct.id = tk.contact_id
       JOIN (SELECT ticket_id, MIN(created_at) t FROM messages WHERE organization_id = ? AND sender_type = 'contact' GROUP BY ticket_id) fc
         ON fc.ticket_id = tk.id
       LEFT JOIN (SELECT ticket_id, MIN(created_at) t FROM messages WHERE organization_id = ? AND sender_type IN ('bot','agent') GROUP BY ticket_id) fb
@@ -121,8 +130,8 @@ export class ConversionVelocityService {
     const respondedSeconds = rows.filter((r) => r.response_seconds != null).map((r) => Math.max(0, Number(r.response_seconds))).sort((a, b) => a - b);
     const ticketsNeverResponded = ticketsAnalyzed - respondedSeconds.length;
 
-    // --- Conformidade de SLA ---
-    const slaCompliantCount = respondedSeconds.filter((s) => s <= slaThresholdSeconds).length;
+    // --- Conformidade de SLA (limiar do canal de cada ticket) ---
+    const slaCompliantCount = rows.filter((r) => r.response_seconds != null && r.response_seconds <= slaFor(r.channel_id)).length;
     const slaComplianceRate = ticketsAnalyzed > 0 ? slaCompliantCount / ticketsAnalyzed : null;
 
     // --- Percentis de primeira resposta ---
@@ -138,14 +147,14 @@ export class ConversionVelocityService {
       if (contactMs == null) continue;
       if (isWithinBusinessHours(contactMs, agenda)) continue; // só nos interessa o que caiu FORA do horário
       outOfHoursTotal++;
-      if (r.response_seconds != null && r.response_seconds <= slaThresholdSeconds) outOfHoursCovered++;
+      if (r.response_seconds != null && r.response_seconds <= slaFor(r.channel_id)) outOfHoursCovered++;
     }
     const outOfHoursCoverageRate = outOfHoursTotal > 0 ? outOfHoursCovered / outOfHoursTotal : null;
 
     // --- Conformidade de follow-up (tickets em risco: nunca respondido OU
     // respondido acima do SLA) ---
     const atRiskIds = rows
-      .filter((r) => r.response_seconds == null || r.response_seconds > slaThresholdSeconds)
+      .filter((r) => r.response_seconds == null || r.response_seconds > slaFor(r.channel_id))
       .map((r) => r.ticket_id);
     let followupCompliantTotal = 0;
     if (atRiskIds.length) {
@@ -206,6 +215,7 @@ export class ConversionVelocityService {
     const calculationJson = {
       scoringVersion: SCORING_VERSION,
       slaThresholdSeconds,
+      slaByChannel, // auditabilidade: qual régua valia por canal neste cálculo (ADR-026)
       businessHours: agenda,
       componentsConsidered: components,
       componentsExcluded: components.filter((c) => c.value == null).map((c) => c.key),

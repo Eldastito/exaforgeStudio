@@ -95,7 +95,44 @@ export class RadarService {
     // questionário do zero mesmo com respostas já salvas.
     const answers = db.prepare(`SELECT * FROM radar_answers WHERE session_id = ?`).all(id);
     const evidence = db.prepare(`SELECT * FROM radar_evidence WHERE session_id = ?`).all(id);
-    return { ...session, pillarScores, recommendations, answers, evidence };
+    return { ...session, pillarScores, recommendations, answers, evidence, measuredHints: this.measuredHints(orgId, session.template_id) };
+  }
+
+  // Pilar "Receita e atendimento" pré-informado com dados MEDIDOS (backlog
+  // ADR-026, ideia registrada desde a ADR-009). Deliberadamente são DICAS ao
+  // lado da pergunta, não respostas automáticas: o humano continua declarando
+  // (mesma regra de "nunca deixar o sistema agir sozinho" da ADR-016), e a
+  // confiança 1,00 ("baseline medido") continua reservada — preencher a
+  // resposta sozinho mudaria a semântica do score declarado. A fonte é o
+  // snapshot mais recente do IVC (ConversionVelocityService), que mede a
+  // operação real da organização.
+  static measuredHints(orgId: string, templateId: string): Record<string, string> {
+    const snap = db.prepare(
+      `SELECT * FROM radar_velocity_snapshots WHERE organization_id = ? ORDER BY created_at DESC LIMIT 1`
+    ).get(orgId) as any;
+    if (!snap) return {};
+
+    const pct = (v: any) => (v == null ? null : `${Math.round(Number(v) * 100)}%`);
+    const mins = (v: any) => (v == null ? null : `${Math.round(Number(v) / 60)} min`);
+    const hints: Record<string, string> = {};
+    const q = (code: string) => (db.prepare(`SELECT id FROM radar_questions WHERE template_id = ? AND id LIKE ?`).get(templateId, `%${code}`) as any)?.id;
+
+    const qTempo = q("q_receita_tempo_resposta");
+    if (qTempo && (snap.first_response_p90_seconds != null || snap.sla_compliance_rate != null)) {
+      const parts = [];
+      if (snap.first_response_p90_seconds != null) parts.push(`90% dos novos contatos respondidos em até ${mins(snap.first_response_p90_seconds)}`);
+      if (snap.sla_compliance_rate != null) parts.push(`${pct(snap.sla_compliance_rate)} dentro do SLA`);
+      hints[qTempo] = `Medido na sua operação: ${parts.join("; ")}.`;
+    }
+    const qFollowup = q("q_receita_followup");
+    if (qFollowup && snap.followup_compliance_rate != null) {
+      hints[qFollowup] = `Medido na sua operação: ${pct(snap.followup_compliance_rate)} dos atendimentos em risco receberam follow-up.`;
+    }
+    const qConversao = q("q_receita_conversao");
+    if (qConversao && snap.conversion_traceability_rate != null) {
+      hints[qConversao] = `Medido na sua operação: ${pct(snap.conversion_traceability_rate)} das vendas são rastreáveis até a conversa de origem.`;
+    }
+    return hints;
   }
 
   static createSession(orgId: string, actorUserId: string | undefined, payload: any) {
@@ -207,27 +244,40 @@ export class RadarService {
     // pontua pilar nesta fase (evita inventar uma conversão score arbitrária).
     const scoreNormalized = scoreRaw != null ? (scoreRaw / 4) * 100 : null;
 
-    const existing = payload.respondentId
-      ? db.prepare(`SELECT id FROM radar_answers WHERE session_id = ? AND question_id = ? AND respondent_id = ?`)
-          .get(sessionId, question.id, payload.respondentId) as any
-      : db.prepare(`SELECT id FROM radar_answers WHERE session_id = ? AND question_id = ? AND respondent_id IS NULL`)
-          .get(sessionId, question.id) as any;
-
-    if (existing) {
+    // Upsert ATÔMICO (ADR-026): o antigo SELECT-depois-INSERT/UPDATE não era
+    // transacional — dois respondentes salvando a mesma pergunta ao mesmo
+    // tempo podiam duplicar a linha. Os índices únicos parciais de
+    // radar_answers (ver db.ts) + ON CONFLICT resolvem no nível do banco:
+    // cada (sessão, pergunta, respondente) tem exatamente UMA linha, e
+    // escrita simultânea vira last-writer-wins em vez de duplicata.
+    const upsertArgs = [
+      randomUUID(), sessionId, orgId, question.id, JSON.stringify(payload.value ?? null),
+      scoreRaw, scoreNormalized, confidence, isNotKnown ? 1 : 0, payload.comment || null,
+    ];
+    if (payload.respondentId) {
       db.prepare(
-        `UPDATE radar_answers SET answer_json = ?, score_raw = ?, score_normalized = ?, confidence_multiplier = ?,
-         is_not_known = ?, comment = ?, answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).run(JSON.stringify(payload.value ?? null), scoreRaw, scoreNormalized, confidence, isNotKnown ? 1 : 0, payload.comment || null, existing.id);
+        `INSERT INTO radar_answers (
+          id, session_id, organization_id, question_id, respondent_id, answer_json,
+          score_raw, score_normalized, confidence_multiplier, is_not_known, comment
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, question_id, respondent_id) WHERE respondent_id IS NOT NULL DO UPDATE SET
+          answer_json = excluded.answer_json, score_raw = excluded.score_raw,
+          score_normalized = excluded.score_normalized, confidence_multiplier = excluded.confidence_multiplier,
+          is_not_known = excluded.is_not_known, comment = excluded.comment,
+          answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`
+      ).run(upsertArgs[0], upsertArgs[1], upsertArgs[2], upsertArgs[3], payload.respondentId, ...upsertArgs.slice(4));
     } else {
       db.prepare(
         `INSERT INTO radar_answers (
           id, session_id, organization_id, question_id, respondent_id, answer_json,
           score_raw, score_normalized, confidence_multiplier, is_not_known, comment
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        randomUUID(), sessionId, orgId, question.id, payload.respondentId || null, JSON.stringify(payload.value ?? null),
-        scoreRaw, scoreNormalized, confidence, isNotKnown ? 1 : 0, payload.comment || null
-      );
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, question_id) WHERE respondent_id IS NULL DO UPDATE SET
+          answer_json = excluded.answer_json, score_raw = excluded.score_raw,
+          score_normalized = excluded.score_normalized, confidence_multiplier = excluded.confidence_multiplier,
+          is_not_known = excluded.is_not_known, comment = excluded.comment,
+          answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`
+      ).run(...upsertArgs);
     }
     logEvent(orgId, actorUserId, "radar_answer_saved", sessionId, { questionId: question.id });
     return { success: true };
@@ -491,7 +541,7 @@ export class RadarService {
     if (!pdf) throw new Error("Não foi possível gerar o PDF. Tente novamente.");
 
     logEvent(orgId, actorUserId, "radar_report_generated", sessionId, { hasNarrative: !!narrative });
-    return { url: pdf.url, hasNarrative: !!narrative };
+    return { url: pdf.url, filePath: pdf.filePath, hasNarrative: !!narrative };
   }
 
   // Ponte com Tarefas (Fase 5, ADR-016) — SOB DEMANDA (botão, não automático
@@ -583,7 +633,7 @@ export class RadarService {
       if (!GoogleOAuthService.getConnection(orgId)) throw new Error("Conta Google não conectada.");
     }
 
-    const { url } = await this.generateReport(orgId, sessionId, actorUserId);
+    const { url, filePath } = await this.generateReport(orgId, sessionId, actorUserId);
     if (!/^https?:\/\//.test(url)) {
       throw new Error("Configure APP_URL (ou um storage S3) para poder enviar o relatório — o link gerado precisa ser público.");
     }
@@ -594,10 +644,23 @@ export class RadarService {
         `Aqui está o relatório do diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}.`
       );
     } else {
+      // Anexo binário de verdade (ADR-026, deixado de fora na ADR-017 —
+      // gmailSend agora aceita contentBase64 para binário). Best-effort: se o
+      // arquivo local não estiver disponível ou for grande demais para o
+      // Gmail (~25MB), o e-mail vai só com o link, como antes — nunca falha
+      // o envio por causa do anexo.
+      let attachment: { filename: string; mimeType: string; contentBase64: string } | undefined;
+      try {
+        const fsMod = await import("node:fs");
+        if (filePath && fsMod.existsSync(filePath) && fsMod.statSync(filePath).size <= 20 * 1024 * 1024) {
+          attachment = { filename: "diagnostico-radar.pdf", mimeType: "application/pdf", contentBase64: fsMod.readFileSync(filePath).toString("base64") };
+        }
+      } catch { /* segue sem anexo */ }
       const result = await GoogleOAuthService.gmailSend(
         orgId, session.contact_email,
         "Seu relatório do Radar de Execução IA",
-        `Olá! Segue o link do relatório do diagnóstico "${session.company_name || ""}": ${url}`
+        `Olá! Segue o relatório do diagnóstico "${session.company_name || ""}"${attachment ? " em anexo" : ""}. Link: ${url}`,
+        attachment
       );
       if ((result as any)?.error) throw new Error((result as any).error);
     }

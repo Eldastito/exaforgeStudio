@@ -2133,6 +2133,30 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE radar_respondents ADD COLUMN invite_token_expires_at DATETIME`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_respondents_invite_token ON radar_respondents(invite_token_hash) WHERE invite_token_hash IS NOT NULL`); } catch(e){}
 
+  // SLA por canal (backlog ADR-026, deixado de fora na ADR-010): JSON
+  // { channel_id: segundos } — canal sem entrada herda o limiar único da
+  // organização (slow_response_seconds).
+  try { db.exec(`ALTER TABLE revenue_intelligence_config ADD COLUMN sla_by_channel_json TEXT`); } catch(e){}
+
+  // Integridade de radar_answers (backlog ADR-026): sem índice único, duas
+  // escritas simultâneas da mesma resposta podiam duplicar a linha (o
+  // SELECT-depois-INSERT antigo de saveAnswer não era atômico). Dedupe antes
+  // (mantém a linha mais recente) e trava com índices únicos parciais —
+  // parciais porque respondent_id NULL (fluxo autenticado) precisa de
+  // unicidade própria, e UNIQUE normal em SQLite trata NULLs como distintos.
+  try {
+    db.exec(`
+      DELETE FROM radar_answers WHERE rowid NOT IN (
+        SELECT MAX(rowid) FROM radar_answers
+        GROUP BY session_id, question_id, COALESCE(respondent_id, '')
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_answers_unique_null
+        ON radar_answers(session_id, question_id) WHERE respondent_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_answers_unique_resp
+        ON radar_answers(session_id, question_id, respondent_id) WHERE respondent_id IS NOT NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao deduplicar/indexar radar_answers', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

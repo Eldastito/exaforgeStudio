@@ -17,6 +17,7 @@ type StorefrontSettings = {
   default_mode: 'day' | 'night';
   whatsapp_number: string;
   published: boolean;
+  default_markup_percent?: number | null;
 };
 
 type SaleMode = 'unit' | 'slice' | 'size' | 'weight' | 'volume';
@@ -227,6 +228,7 @@ export function StorefrontSettingsView() {
           default_mode: settings.default_mode,
           whatsapp_number: settings.whatsapp_number,
           published: settings.published,
+          default_markup_percent: settings.default_markup_percent ?? null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -365,6 +367,17 @@ export function StorefrontSettingsView() {
                   onChange={(e) => setField('whatsapp_number', e.target.value)}
                   placeholder="+55 11 99999-9999"
                 />
+              </Field>
+
+              <Field label="Margem padrão do preço sugerido (%)">
+                <input
+                  className={inputClass}
+                  type="number" min={1} max={500} step={1}
+                  value={settings.default_markup_percent ?? ''}
+                  onChange={(e) => setField('default_markup_percent', e.target.value === '' ? null : Number(e.target.value))}
+                  placeholder="40 (padrão)"
+                />
+                <p className="text-[11px] text-zinc-500 mt-1">Usada só para SUGERIR o preço de venda a partir do custo da nota fiscal — você sempre revisa antes de publicar.</p>
               </Field>
 
               <div className="grid grid-cols-1 gap-4">

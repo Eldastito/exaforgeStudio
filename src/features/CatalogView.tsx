@@ -44,9 +44,12 @@ export function CatalogView() {
   // existente, ou ignorar) -> só então produtos/estoque são criados de fato.
   const [showInvoiceScan, setShowInvoiceScan] = useState(false);
   const [invoiceScanning, setInvoiceScanning] = useState(false);
-  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; confidenceScore: number } | null>(null);
+  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; supplierContact?: { id: string; name: string } | null; confidenceScore: number } | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
+  // Fila de rascunhos ainda não revisados quando um lote de XMLs é importado
+  // de uma vez (ADR-024) — revisão continua sendo um por vez.
+  const [invoiceQueue, setInvoiceQueue] = useState<any[]>([]);
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -203,21 +206,25 @@ export function CatalogView() {
     }
   };
 
-  const openInvoiceScan = () => { setInvoiceDraft(null); setInvoiceItems([]); setShowInvoiceScan(true); };
+  const openInvoiceScan = () => { setInvoiceDraft(null); setInvoiceItems([]); setInvoiceQueue([]); setShowInvoiceScan(true); };
 
   // Compartilhado pela foto (/invoice-scan) e pelo XML de NF-e
-  // (/invoice-scan/xml) — as duas rotas devolvem exatamente o mesmo formato
-  // de resposta, então a tela de revisão nem sabe qual das duas foi usada.
+  // (/invoice-scan/xml) — as duas rotas devolvem o mesmo formato por rascunho,
+  // então a tela de revisão nem sabe qual das duas foi usada.
   const applyInvoiceScanResult = (d: any) => {
-    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, confidenceScore: d.confidenceScore });
+    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, supplierContact: d.supplierContact || null, confidenceScore: d.confidenceScore });
     setInvoiceItems((d.items || []).map((it: any) => {
-      const match = products.find(p => p.name.trim().toLowerCase() === String(it.name || '').trim().toLowerCase());
+      // Pré-seleção de reposição: preferir o match aproximado do servidor
+      // (produtos com nome parecido, não só idêntico — ADR-024); manter o
+      // match exato local como fallback.
+      const exact = products.find(p => p.name.trim().toLowerCase() === String(it.name || '').trim().toLowerCase());
       return {
         name: it.name || '', quantity: String(it.quantity || 1), unit: it.unit || '',
         unitCost: it.unitCost ? String(it.unitCost) : '0', confidence: it.confidence || 0,
-        selection: match ? match.id : 'create',
-        // Sugestão a partir do custo real da nota (markup padrão) — só
-        // pré-preenche o campo, continua 100% editável antes de publicar.
+        selection: it.matchedProductId || (exact ? exact.id : 'create'),
+        matchedProductName: it.matchedProductName || null,
+        // Sugestão a partir do custo real da nota (markup da organização) —
+        // só pré-preenche o campo, continua 100% editável antes de publicar.
         salePrice: it.suggestedSalePrice ? String(it.suggestedSalePrice) : '',
       };
     }));
@@ -240,15 +247,22 @@ export function CatalogView() {
     }
   };
 
-  const handleInvoiceXmlUpload = async (file: File) => {
+  const handleInvoiceXmlUpload = async (files: File[]) => {
     setInvoiceScanning(true);
     try {
       const body = new FormData();
-      body.append('file', file);
+      for (const f of files.slice(0, 20)) body.append('file', f);
       const res = await apiFetch('/api/products/invoice-scan/xml', { method: 'POST', body });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(d.error || 'Não foi possível ler este XML.'); return; }
-      applyInvoiceScanResult(d);
+      if (!res.ok) { toast.error(d.error || 'Não foi possível ler o(s) XML(s).'); return; }
+      // Lote (ADR-024): o servidor devolve um rascunho por arquivo válido —
+      // revisa o primeiro agora e enfileira os demais; arquivos pulados
+      // (duplicado, não é NF-e) são avisados um a um, nunca em silêncio.
+      const drafts = d.drafts || [];
+      for (const s of d.skipped || []) toast.error(`${s.fileName}: ${s.error}`);
+      if (!drafts.length) return;
+      applyInvoiceScanResult(drafts[0]);
+      setInvoiceQueue(drafts.slice(1));
     } catch (e) {
       toast.error('Erro ao enviar o XML da nota fiscal.');
     } finally {
@@ -286,8 +300,16 @@ export function CatalogView() {
       if (!res.ok) { toast.error(result.error || 'Não foi possível confirmar a nota fiscal.'); return; }
 
       toast.success(`Nota fiscal processada: ${result.created.length} produto(s) novo(s), ${result.restocked.length} reposto(s). 🧾`);
-      setShowInvoiceScan(false); setInvoiceDraft(null); setInvoiceItems([]);
       loadProducts();
+      // Lote de XMLs: se ainda há notas na fila, mostra a próxima em vez de
+      // fechar — o lojista revisa uma por vez até esvaziar.
+      if (invoiceQueue.length > 0) {
+        const [next, ...rest] = invoiceQueue;
+        applyInvoiceScanResult(next);
+        setInvoiceQueue(rest);
+      } else {
+        setShowInvoiceScan(false); setInvoiceDraft(null); setInvoiceItems([]);
+      }
     } catch (e) {
       toast.error('Erro ao confirmar a nota fiscal.');
     } finally {
@@ -602,7 +624,7 @@ export function CatalogView() {
               <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-emerald-400" /> Cadastro por Nota Fiscal
               </h3>
-              <button className="text-zinc-400 hover:text-white" onClick={() => { setShowInvoiceScan(false); setInvoiceDraft(null); setInvoiceItems([]); }}><X className="w-5 h-5" /></button>
+              <button className="text-zinc-400 hover:text-white" onClick={() => { setShowInvoiceScan(false); setInvoiceDraft(null); setInvoiceItems([]); setInvoiceQueue([]); }}><X className="w-5 h-5" /></button>
             </div>
 
             {!invoiceDraft && (
@@ -628,11 +650,16 @@ export function CatalogView() {
                 </label>
                 <div className="flex items-center gap-2 text-xs text-zinc-600"><div className="flex-1 h-px bg-zinc-800" />ou<div className="flex-1 h-px bg-zinc-800" /></div>
                 <label className="flex items-center justify-center gap-2 border border-zinc-700 rounded-lg py-3 cursor-pointer hover:border-emerald-500/50 transition-colors text-sm text-zinc-300">
-                  <Upload className="w-4 h-4" /> Importar XML de NF-e
+                  <Upload className="w-4 h-4" /> Importar XML de NF-e (um ou vários)
                   <input
-                    type="file" accept=".xml,text/xml,application/xml" className="hidden"
+                    type="file" accept=".xml,text/xml,application/xml" multiple className="hidden"
                     disabled={invoiceScanning}
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleInvoiceXmlUpload(f); e.target.value = ''; }}
+                    onChange={(e) => {
+                      const fl = e.target.files; const fs: File[] = [];
+                      for (let i = 0; fl && i < fl.length; i++) fs.push(fl[i]);
+                      if (fs.length) handleInvoiceXmlUpload(fs);
+                      e.target.value = '';
+                    }}
                   />
                 </label>
               </div>
@@ -646,8 +673,16 @@ export function CatalogView() {
                   )}
                   <div className="flex-1 text-xs text-zinc-500">
                     <p>Revise cada item — nada é criado ou reposto no estoque sem sua confirmação.</p>
-                    {invoiceDraft.supplierName && <p className="text-zinc-400 mt-1">Fornecedor identificado: {invoiceDraft.supplierName}</p>}
+                    {invoiceDraft.supplierName && (
+                      <p className="text-zinc-400 mt-1">
+                        Fornecedor identificado: {invoiceDraft.supplierName}
+                        {invoiceDraft.supplierContact && <span className="text-emerald-400"> — vinculado ao contato "{invoiceDraft.supplierContact.name}" do CRM</span>}
+                      </p>
+                    )}
                     <p className="mt-1">{invoiceItems.length} item(ns) identificado(s). Confiança geral da leitura: {invoiceDraft.confidenceScore}%.</p>
+                    {invoiceQueue.length > 0 && (
+                      <p className="mt-1 text-amber-400">+ {invoiceQueue.length} nota(s) na fila — aparecem uma a uma após confirmar esta.</p>
+                    )}
                   </div>
                 </div>
 
@@ -701,7 +736,18 @@ export function CatalogView() {
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button type="button" variant="ghost" onClick={() => { setInvoiceDraft(null); setInvoiceItems([]); }}>Importar outra nota</Button>
+                  <Button type="button" variant="ghost" onClick={() => {
+                    // Com fila de lote: pular esta nota mostra a próxima; sem
+                    // fila, volta pra tela de upload. As puladas continuam
+                    // 'pending' no banco — nada se perde.
+                    if (invoiceQueue.length > 0) {
+                      const [next, ...rest] = invoiceQueue;
+                      applyInvoiceScanResult(next);
+                      setInvoiceQueue(rest);
+                    } else {
+                      setInvoiceDraft(null); setInvoiceItems([]);
+                    }
+                  }}>{invoiceQueue.length > 0 ? 'Pular para a próxima nota' : 'Importar outra nota'}</Button>
                   <Button onClick={handleInvoiceConfirm} disabled={invoiceSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {invoiceSaving ? 'Publicando...' : 'Aprovar e Publicar'}
                   </Button>

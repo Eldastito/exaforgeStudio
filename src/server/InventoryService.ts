@@ -117,6 +117,7 @@ export class InventoryService {
   static recordMovement(orgId: string, params: {
     productId: string; variantId?: string | null; type: 'entrada' | 'saida' | 'ajuste' | 'transferencia';
     quantity: number; unitCost?: number; origin?: string; note?: string; createdBy?: string;
+    supplierContactId?: string | null; // contato do CRM com is_supplier=1 (entradas por nota fiscal, ADR-024)
   }): string {
     const qty = Math.abs(parseInt(String(params.quantity), 10) || 0);
     if (qty <= 0 && params.type !== 'ajuste') throw new Error("Quantidade inválida.");
@@ -142,9 +143,9 @@ export class InventoryService {
 
       const movId = uuidv4();
       db.prepare(`
-        INSERT INTO stock_movements (id, organization_id, product_service_id, variant_id, type, quantity, unit_cost, origin, note, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(movId, orgId, params.productId, params.variantId || null, params.type, qty, params.unitCost || 0, params.origin || null, params.note || null, params.createdBy || null);
+        INSERT INTO stock_movements (id, organization_id, product_service_id, variant_id, type, quantity, unit_cost, origin, note, created_by, supplier_contact_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(movId, orgId, params.productId, params.variantId || null, params.type, qty, params.unitCost || 0, params.origin || null, params.note || null, params.createdBy || null, params.supplierContactId || null);
       return movId;
     });
     return tx();

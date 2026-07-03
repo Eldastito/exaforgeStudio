@@ -450,7 +450,7 @@ export class AIOrchestratorService {
       const maxDisc = parseInt(String(o.negotiator_max_discount || 0), 10);
 
       // Lista os produtos com preço mínimo definido (>0).
-      const prods = db.prepare("SELECT name, price, min_price FROM products_services WHERE organization_id = ? AND active = 1 AND min_price IS NOT NULL AND min_price > 0").all(orgId) as any[];
+      const prods = db.prepare("SELECT name, price, min_price FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1 AND min_price IS NOT NULL AND min_price > 0").all(orgId) as any[];
       const minLines = prods.map(p => `- ${p.name}: preço R$ ${Number(p.price || 0).toFixed(2)}, MÍNIMO R$ ${Number(p.min_price).toFixed(2)}`).join('\n');
 
       let txt = `NEGOCIADOR ATIVO — você pode negociar preço, MAS com regras rígidas:
@@ -573,7 +573,7 @@ export class AIOrchestratorService {
 
       // Casa o produto por nome (case-insensitive) dentro da organização.
       const product = db.prepare(
-        'SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND lower(name) = lower(?)'
+        'SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1 AND lower(name) = lower(?)'
       ).get(orgId, name) as any;
       if (!product) {
         return { items: [], error: `Não encontrei "${name}" no nosso catálogo. Pode confirmar o nome do produto? 🙂` };
@@ -612,11 +612,11 @@ export class AIOrchestratorService {
     for (const r of reqs) {
       // 1) match exato; 2) aproximado (contém).
       let product = db.prepare(
-        'SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND lower(name) = lower(?)'
+        'SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1 AND lower(name) = lower(?)'
       ).get(orgId, r.name) as any;
       if (!product) {
         product = db.prepare(
-          "SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND lower(name) LIKE lower(?) ORDER BY length(name) ASC LIMIT 1"
+          "SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1 AND lower(name) LIKE lower(?) ORDER BY length(name) ASC LIMIT 1"
         ).get(orgId, `%${r.name}%`) as any;
       }
       if (!product) { notFound.push(r.name); continue; }
@@ -872,12 +872,17 @@ export class AIOrchestratorService {
 
   private static async getProductsContext(orgId: string): Promise<string> {
      try {
+       // storefront_visible (ADR-028, decisão explícita de produto): o toggle
+       // "Visível/Oculto" da vitrine agora vale TAMBÉM para a IA do WhatsApp —
+       // antes a IA vendia produto oculto (só filtrava active=1). Ocultar da
+       // vitrine = ocultar de todos os canais de venda; tirar de circulação de
+       // vez continua sendo desativar (active=0).
        // Estoque do produto (linha sem variação) — evita duplicar linhas das variações.
        const rows: any[] = db.prepare(`
          SELECT ps.*, inv.quantity_available, inv.quantity_reserved
          FROM products_services ps
          LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
-         WHERE ps.organization_id = ? AND ps.active = 1
+         WHERE ps.organization_id = ? AND ps.active = 1 AND COALESCE(ps.storefront_visible, 1) = 1
        `).all(orgId);
        if (!rows.length) return "";
        const variantStmt = db.prepare(`

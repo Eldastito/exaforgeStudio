@@ -24,16 +24,20 @@ import { ProductModal } from './ProductModal';
 import { CartDrawer } from './CartDrawer';
 import { ReservationWidget } from './ReservationWidget';
 
-// Lê o slug do pathname (/loja/:slug) e o token ?c=.
-function readUrl(): { slug: string; token: string | null } {
+// Lê o slug do pathname (/loja/:slug), o deep-link de produto
+// (/loja/:slug/produto/:productSlug — ADR-028) e o token ?c=.
+function readUrl(): { slug: string; productSlug: string | null; token: string | null } {
   const path = window.location.pathname;
   const prefix = '/loja/';
   let slug = '';
+  let productSlug: string | null = null;
   if (path.startsWith(prefix)) {
-    slug = decodeURIComponent(path.slice(prefix.length).split('/')[0] ?? '');
+    const segments = path.slice(prefix.length).split('/');
+    slug = decodeURIComponent(segments[0] ?? '');
+    if (segments[1] === 'produto' && segments[2]) productSlug = decodeURIComponent(segments[2]);
   }
   const token = new URLSearchParams(window.location.search).get('c');
-  return { slug, token };
+  return { slug, productSlug, token };
 }
 
 const DEFAULT_ACCENT = '#6366f1';
@@ -51,7 +55,7 @@ function logStoreEvent(slug: string, type: 'view' | 'product_click', productId?:
 }
 
 export function Storefront() {
-  const { slug, token } = useMemo(readUrl, []);
+  const { slug, productSlug, token } = useMemo(readUrl, []);
 
   const [data, setData] = useState<StoreResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,6 +86,12 @@ export function Storefront() {
         const json = (await res.json()) as StoreResponse;
         if (!alive) return;
         setData(json);
+        // Deep-link de produto (ADR-028): /loja/:slug/produto/:productSlug
+        // abre o produto direto — é a URL que aparece nas prévias de link.
+        if (productSlug) {
+          const linked = json.products.find((pr) => pr.slug === productSlug);
+          if (linked) setActiveProduct(linked);
+        }
         // Registra a visita (relatório da vitrine) — best-effort.
         logStoreEvent(slug, 'view');
         // Inicializa o tema a partir do default da loja (com persistência).
@@ -151,6 +161,16 @@ export function Storefront() {
   const openProduct = useCallback((product: Product) => {
     logStoreEvent(slug, 'product_click', product.id);
     setActiveProduct(product);
+    // URL própria por produto (ADR-028) — compartilhável e com prévia de link
+    // (meta tags injetadas pelo servidor). replaceState: sem poluir o histórico.
+    if (product.slug) {
+      try { window.history.replaceState(null, '', `/loja/${encodeURIComponent(slug)}/produto/${encodeURIComponent(product.slug)}${window.location.search}`); } catch { /* noop */ }
+    }
+  }, [slug]);
+
+  const closeProduct = useCallback(() => {
+    setActiveProduct(null);
+    try { window.history.replaceState(null, '', `/loja/${encodeURIComponent(slug)}${window.location.search}`); } catch { /* noop */ }
   }, [slug]);
 
   const handleBuyNow = useCallback((product: Product, option: ChosenOption, qty: number) => {
@@ -329,7 +349,7 @@ export function Storefront() {
           mode={mode}
           isFavorite={favorites.includes(activeProduct.id)}
           onToggleFavorite={toggleFavorite}
-          onClose={() => setActiveProduct(null)}
+          onClose={closeProduct}
           onAdd={handleAdd}
           onBuyNow={handleBuyNow}
         />

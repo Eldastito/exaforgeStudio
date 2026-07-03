@@ -2157,6 +2157,28 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao deduplicar/indexar radar_answers', e); }
 
+  // Slug por PRODUTO (backlog ADR-028, itens 32+33 — antes só a LOJA tinha
+  // slug): URL própria por produto na vitrine + meta tags para SEO. Backfill
+  // idempotente para produtos existentes; produtos novos ganham slug na
+  // criação (routes/products.ts) com fallback preguiçoso na vitrine pública.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN slug TEXT`); } catch(e){}
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_org_slug ON products_services(organization_id, slug) WHERE slug IS NOT NULL`);
+    const slugifyLocal = (s: string) => String(s || "")
+      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+    const pending = db.prepare(`SELECT id, organization_id, name FROM products_services WHERE slug IS NULL AND type = 'product'`).all() as any[];
+    const setSlug = db.prepare(`UPDATE products_services SET slug = ? WHERE id = ?`);
+    const exists = db.prepare(`SELECT 1 FROM products_services WHERE organization_id = ? AND slug = ? LIMIT 1`);
+    for (const p of pending) {
+      const base = slugifyLocal(p.name) || "produto";
+      let candidate = base;
+      let n = 2;
+      while (exists.get(p.organization_id, candidate)) candidate = `${base}-${n++}`;
+      try { setSlug.run(candidate, p.id); } catch { /* corrida improvável no boot: ignora, fallback preguiçoso cobre */ }
+    }
+  } catch(e){ console.error('[DB] Falha no backfill de slug de produtos', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

@@ -1011,6 +1011,52 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+
+    // SEO por produto (ADR-028): a vitrine continua SPA, mas a URL de produto
+    // (/loja/:slug/produto/:productSlug) recebe o index.html com <title> e
+    // meta/OpenGraph injetados no servidor — é isso que crawlers e prévias de
+    // link (WhatsApp/redes) leem; o React assume normalmente no navegador.
+    // Sem SSR, sem framework novo: substituição de string no template
+    // estático. Qualquer falha cai no catch-all normal da SPA.
+    app.get('/loja/:slug/produto/:productSlug', (req, res, next) => {
+      try {
+        const store = db.prepare(
+          `SELECT organization_id, title, slug FROM storefront_settings WHERE slug = ? AND published = 1`
+        ).get(req.params.slug) as any;
+        if (!store) return next();
+        const product = db.prepare(
+          `SELECT id, name, description FROM products_services
+           WHERE organization_id = ? AND slug = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1`
+        ).get(store.organization_id, req.params.productSlug) as any;
+        if (!product) return next();
+        const image = db.prepare(
+          `SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC LIMIT 1`
+        ).get(product.id) as any;
+
+        const esc = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const title = `${product.name} — ${store.title || 'Loja'}`;
+        const desc = String(product.description || '').slice(0, 160) || `Compre ${product.name} na ${store.title || 'nossa loja'}.`;
+        const base = (process.env.APP_URL || '').replace(/\/$/, '');
+        const pageUrl = base ? `${base}/loja/${encodeURIComponent(store.slug)}/produto/${encodeURIComponent(req.params.productSlug)}` : '';
+        const imgUrl = image?.url ? (image.url.startsWith('http') ? image.url : (base ? `${base}${image.url}` : '')) : '';
+
+        let html = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
+        const meta =
+          `<title>${esc(title)}</title>` +
+          `<meta name="description" content="${esc(desc)}">` +
+          `<meta property="og:type" content="product">` +
+          `<meta property="og:title" content="${esc(title)}">` +
+          `<meta property="og:description" content="${esc(desc)}">` +
+          (pageUrl ? `<meta property="og:url" content="${esc(pageUrl)}">` : '') +
+          (imgUrl ? `<meta property="og:image" content="${esc(imgUrl)}">` : '');
+        html = html.replace(/<title>.*?<\/title>/s, meta);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+      } catch (e) {
+        next();
+      }
+    });
+
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

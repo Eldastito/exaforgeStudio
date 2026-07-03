@@ -12,6 +12,7 @@ import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } fr
 import { parseNFeXml } from "../nfeParser.js";
 import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
+import { uniqueProductSlug } from "../productSlug.js";
 
 const router = Router();
 
@@ -184,9 +185,9 @@ router.post("/smart-scan/:draftId/confirm", (req: AuthRequest, res): any => {
   try {
     const id = uuidv4();
     db.prepare(
-      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category)
-       VALUES (?, ?, 'product', ?, ?, ?, ?, ?)`
-    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null);
+      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug)
+       VALUES (?, ?, 'product', ?, ?, ?, ?, ?, ?)`
+    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, String(name)));
 
     if (stock_control_enabled) {
       db.prepare(
@@ -412,9 +413,9 @@ router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
 
         const productId = uuidv4();
         db.prepare(
-          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category)
-           VALUES (?, ?, 'product', ?, '', ?, 1, ?)`
-        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null);
+          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug)
+           VALUES (?, ?, 'product', ?, '', ?, 1, ?, ?)`
+        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, name));
 
         InventoryService.recordMovement(orgId, {
           productId, type: "entrada", quantity, unitCost,
@@ -647,12 +648,13 @@ router.post("/", (req: AuthRequest, res): any => {
 
   try {
     db.prepare(`
-      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, slug)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null, (min_price !== undefined && min_price !== '' ? Number(min_price) : null),
        type === 'reservation' ? (Number(capacity) > 0 ? Number(capacity) : 1) : null,
        type === 'reservation' ? (['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night') : null,
-       category ? String(category).trim().slice(0, 80) : null);
+       category ? String(category).trim().slice(0, 80) : null,
+       (type || 'product') === 'product' ? uniqueProductSlug(orgId, String(name || '')) : null);
 
     if (stock_control_enabled) {
       db.prepare(`
@@ -788,8 +790,8 @@ router.post("/import", (req: AuthRequest, res): any => {
           updated++;
         } else {
           const pid = uuidv4();
-          db.prepare('INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(pid, orgId, type, name, desc, price, stockControlled ? 1 : 0);
+          db.prepare('INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(pid, orgId, type, name, desc, price, stockControlled ? 1 : 0, type === 'product' ? uniqueProductSlug(orgId, name) : null);
           if (stockControlled) InventoryService.setQuantity(orgId, pid, qty);
           created++;
         }

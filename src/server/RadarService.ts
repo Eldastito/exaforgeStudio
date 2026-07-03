@@ -6,6 +6,8 @@ import { generateNarrative } from "./RadarNarrativeService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
 import { TaskService } from "./TaskService.js";
 import { NotificationService } from "./NotificationService.js";
+import { MessageProviderService } from "./MessageProviderService.js";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 const PILLAR_LABEL: Record<string, string> = {
   estrategia: "Estratégia e liderança",
@@ -416,5 +418,57 @@ export class RadarService {
       });
     }
     return { checked: stale.length };
+  }
+
+  // Envio do relatório pelo canal da PRÓPRIA organização (não da ZappFlow —
+  // ver ADR-017 para o porquê disso não ser o mesmo caso da landing pública).
+  // Sempre (re)gera o PDF na hora do envio, para nunca mandar um link de um
+  // relatório desatualizado (ex.: gerado antes de anexar uma evidência nova).
+  // Link em vez de anexo binário nos dois canais: WhatsApp Cloud API já
+  // funciona só com link (MessageProviderService.sendDocument); e-mail com
+  // anexo binário de verdade exigiria mexer na codificação de
+  // GoogleOAuthService.gmailSend (hoje só testada para texto/.ics) — link é
+  // suficiente e mais simples, sem tocar em código que já funciona pra outra
+  // coisa.
+  static async sendReport(orgId: string, sessionId: string, actorUserId: string | undefined, channel: "whatsapp" | "email") {
+    const session = db.prepare(`SELECT * FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId) as any;
+    if (!session) throw new Error("Sessão não encontrada.");
+
+    // Valida ANTES de gastar a geração do PDF (que já chama a IA para a
+    // narrativa) — não faz sentido gerar um relatório que sabemos de
+    // antemão que não vai ter para onde ir.
+    let activeChannel: any = null;
+    if (channel === "whatsapp") {
+      if (!session.contact_phone) throw new Error("Esta sessão não tem telefone de contato registrado.");
+      activeChannel = db.prepare(
+        `SELECT id FROM channels WHERE organization_id = ? AND status NOT IN ('disabled','disconnected') ORDER BY created_at LIMIT 1`
+      ).get(orgId) as any;
+      if (!activeChannel) throw new Error("Nenhum canal de WhatsApp conectado nesta organização.");
+    } else {
+      if (!session.contact_email) throw new Error("Esta sessão não tem e-mail de contato registrado.");
+      if (!GoogleOAuthService.getConnection(orgId)) throw new Error("Conta Google não conectada.");
+    }
+
+    const { url } = await this.generateReport(orgId, sessionId, actorUserId);
+    if (!/^https?:\/\//.test(url)) {
+      throw new Error("Configure APP_URL (ou um storage S3) para poder enviar o relatório — o link gerado precisa ser público.");
+    }
+
+    if (channel === "whatsapp") {
+      await MessageProviderService.sendDocument(
+        activeChannel.id, session.contact_phone, url, "diagnostico-radar.pdf",
+        `Aqui está o relatório do diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}.`
+      );
+    } else {
+      const result = await GoogleOAuthService.gmailSend(
+        orgId, session.contact_email,
+        "Seu relatório do Radar de Execução IA",
+        `Olá! Segue o link do relatório do diagnóstico "${session.company_name || ""}": ${url}`
+      );
+      if ((result as any)?.error) throw new Error((result as any).error);
+    }
+
+    logEvent(orgId, actorUserId, "radar_report_sent", sessionId, { channel });
+    return { sent: true, channel };
   }
 }

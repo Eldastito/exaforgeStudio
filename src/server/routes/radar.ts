@@ -227,4 +227,16 @@ router.post("/sessions/:id/create-tasks", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// Envio do relatório pelo canal já conectado da PRÓPRIA organização (ver RadarService.sendReport).
+router.post("/sessions/:id/send", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores enviam o relatório." });
+  const channel = req.body?.channel === "email" ? "email" : req.body?.channel === "whatsapp" ? "whatsapp" : null;
+  if (!channel) return res.status(400).json({ error: "Informe channel: 'whatsapp' ou 'email'." });
+  RadarService.sendReport(orgId, req.params.id, actorId(req), channel)
+    .then((result) => res.status(201).json(result))
+    .catch((e: any) => res.status(400).json({ error: e.message }));
+});
+
 export default router;

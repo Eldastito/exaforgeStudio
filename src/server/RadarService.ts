@@ -73,7 +73,13 @@ export class RadarService {
        FROM radar_recommendations r JOIN radar_use_case_catalog c ON c.id = r.use_case_id
        WHERE r.session_id = ? ORDER BY r.priority_score DESC`
     ).all(id);
-    return { ...session, pillarScores, recommendations };
+    // Faltava até aqui — sem isso, reabrir uma sessão em andamento sempre
+    // parecia "nada respondido ainda" pra quem chama (RadarView.tsx calcula a
+    // primeira pergunta sem resposta a partir deste array), reiniciando o
+    // questionário do zero mesmo com respostas já salvas.
+    const answers = db.prepare(`SELECT * FROM radar_answers WHERE session_id = ?`).all(id);
+    const evidence = db.prepare(`SELECT * FROM radar_evidence WHERE session_id = ?`).all(id);
+    return { ...session, pillarScores, recommendations, answers, evidence };
   }
 
   static createSession(orgId: string, actorUserId: string | undefined, payload: any) {
@@ -256,5 +262,45 @@ export class RadarService {
     ).run(id, sessionId, orgId, payload.name.trim(), payload.email || null, payload.roleTitle || null, payload.area || null);
     logEvent(orgId, actorUserId, "radar_respondent_added", sessionId, { respondentId: id });
     return this.listRespondents(orgId, sessionId);
+  }
+
+  // Evidência anexada a uma resposta (reservado desde a Fase 1 — ver
+  // saveAnswer acima). Sobe a confiança daquela resposta específica para 0,90
+  // (nunca para baixo — evidência só reforça, uma resposta com comentário +
+  // evidência continua em 0,90, não regride para 0,75) e recalcula a sessão
+  // na hora, porque o score/confiança já podem estar visíveis (sessão
+  // concluída) quando a evidência é anexada depois.
+  static addEvidence(orgId: string, sessionId: string, actorUserId: string | undefined, payload: {
+    questionId: string; respondentId?: string | null; fileUrl: string; fileName?: string; mimeType?: string;
+  }) {
+    const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
+    if (!session) throw new Error("Sessão não encontrada.");
+    if (!payload.fileUrl) throw new Error("Arquivo de evidência é obrigatório.");
+
+    const answer = payload.respondentId
+      ? db.prepare(`SELECT id, confidence_multiplier FROM radar_answers WHERE session_id = ? AND question_id = ? AND respondent_id = ?`)
+          .get(sessionId, payload.questionId, payload.respondentId) as any
+      : db.prepare(`SELECT id, confidence_multiplier FROM radar_answers WHERE session_id = ? AND question_id = ? AND respondent_id IS NULL`)
+          .get(sessionId, payload.questionId) as any;
+    if (!answer) throw new Error("Responda a pergunta antes de anexar evidência.");
+
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO radar_evidence (id, session_id, organization_id, answer_id, file_url, file_name, mime_type, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, sessionId, orgId, answer.id, payload.fileUrl, payload.fileName || null, payload.mimeType || null, actorUserId || null);
+
+    const boosted = Math.max(answer.confidence_multiplier ?? 0, 0.9);
+    db.prepare(`UPDATE radar_answers SET confidence_multiplier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(boosted, answer.id);
+
+    logEvent(orgId, actorUserId, "radar_evidence_added", sessionId, { evidenceId: id, questionId: payload.questionId });
+    calculateAndPersist(sessionId, actorUserId); // atualiza confiança/score já visíveis, se a sessão já tiver sido concluída
+    return this.getSession(orgId, sessionId);
+  }
+
+  static listEvidence(orgId: string, sessionId: string) {
+    const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
+    if (!session) throw new Error("Sessão não encontrada.");
+    return db.prepare(`SELECT * FROM radar_evidence WHERE session_id = ? ORDER BY created_at`).all(sessionId);
   }
 }

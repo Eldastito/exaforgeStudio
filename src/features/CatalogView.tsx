@@ -205,6 +205,22 @@ export function CatalogView() {
 
   const openInvoiceScan = () => { setInvoiceDraft(null); setInvoiceItems([]); setShowInvoiceScan(true); };
 
+  // Compartilhado pela foto (/invoice-scan) e pelo XML de NF-e
+  // (/invoice-scan/xml) — as duas rotas devolvem exatamente o mesmo formato
+  // de resposta, então a tela de revisão nem sabe qual das duas foi usada.
+  const applyInvoiceScanResult = (d: any) => {
+    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, confidenceScore: d.confidenceScore });
+    setInvoiceItems((d.items || []).map((it: any) => {
+      const match = products.find(p => p.name.trim().toLowerCase() === String(it.name || '').trim().toLowerCase());
+      return {
+        name: it.name || '', quantity: String(it.quantity || 1), unit: it.unit || '',
+        unitCost: it.unitCost ? String(it.unitCost) : '0', confidence: it.confidence || 0,
+        selection: match ? match.id : 'create', salePrice: '',
+      };
+    }));
+    if (d.truncated) toast.error('O XML tem mais itens do que o exibido (limite de 200 por importação). Confirme estes e importe o restante em outro lote.');
+  };
+
   const handleInvoiceUpload = async (file: File) => {
     setInvoiceScanning(true);
     try {
@@ -213,17 +229,25 @@ export function CatalogView() {
       const res = await apiFetch('/api/products/invoice-scan', { method: 'POST', body });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { toast.error(d.error || 'Não foi possível analisar a nota fiscal.'); return; }
-      setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl, supplierName: d.supplierName || null, confidenceScore: d.confidenceScore });
-      setInvoiceItems((d.items || []).map((it: any) => {
-        const match = products.find(p => p.name.trim().toLowerCase() === String(it.name || '').trim().toLowerCase());
-        return {
-          name: it.name || '', quantity: String(it.quantity || 1), unit: it.unit || '',
-          unitCost: it.unitCost ? String(it.unitCost) : '0', confidence: it.confidence || 0,
-          selection: match ? match.id : 'create', salePrice: '',
-        };
-      }));
+      applyInvoiceScanResult(d);
     } catch (e) {
       toast.error('Erro ao enviar a foto da nota fiscal.');
+    } finally {
+      setInvoiceScanning(false);
+    }
+  };
+
+  const handleInvoiceXmlUpload = async (file: File) => {
+    setInvoiceScanning(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await apiFetch('/api/products/invoice-scan/xml', { method: 'POST', body });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível ler este XML.'); return; }
+      applyInvoiceScanResult(d);
+    } catch (e) {
+      toast.error('Erro ao enviar o XML da nota fiscal.');
     } finally {
       setInvoiceScanning(false);
     }
@@ -574,17 +598,17 @@ export function CatalogView() {
             </div>
 
             {!invoiceDraft && (
-              <div>
-                <p className="text-sm text-zinc-400 mb-4">Fotografe a nota fiscal de uma compra — a IA lê todos os itens comprados (com quantidade e custo) de uma vez. Você revisa cada item, escolhe se é produto novo ou reposição de estoque, e define o preço de venda antes de publicar.</p>
-                <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-700 rounded-xl py-10 cursor-pointer hover:border-emerald-500/50 transition-colors">
+              <div className="space-y-3">
+                <p className="text-sm text-zinc-400 mb-1">Fotografe a nota fiscal de uma compra (a IA lê os itens) ou importe direto o XML da NF-e (mais rápido e confiável, sem precisar de IA). Você revisa cada item, escolhe se é produto novo ou reposição de estoque, e define o preço de venda antes de publicar.</p>
+                <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-700 rounded-xl py-8 cursor-pointer hover:border-emerald-500/50 transition-colors">
                   {invoiceScanning ? (
                     <>
-                      <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
-                      <span className="text-sm text-zinc-400">Lendo a nota fiscal com IA...</span>
+                      <Loader2 className="w-7 h-7 text-emerald-400 animate-spin" />
+                      <span className="text-sm text-zinc-400">Lendo a nota fiscal...</span>
                     </>
                   ) : (
                     <>
-                      <Receipt className="w-8 h-8 text-zinc-500" />
+                      <Receipt className="w-7 h-7 text-zinc-500" />
                       <span className="text-sm text-zinc-400">Toque para tirar/escolher a foto da nota</span>
                     </>
                   )}
@@ -594,13 +618,24 @@ export function CatalogView() {
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) handleInvoiceUpload(f); e.target.value = ''; }}
                   />
                 </label>
+                <div className="flex items-center gap-2 text-xs text-zinc-600"><div className="flex-1 h-px bg-zinc-800" />ou<div className="flex-1 h-px bg-zinc-800" /></div>
+                <label className="flex items-center justify-center gap-2 border border-zinc-700 rounded-lg py-3 cursor-pointer hover:border-emerald-500/50 transition-colors text-sm text-zinc-300">
+                  <Upload className="w-4 h-4" /> Importar XML de NF-e
+                  <input
+                    type="file" accept=".xml,text/xml,application/xml" className="hidden"
+                    disabled={invoiceScanning}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleInvoiceXmlUpload(f); e.target.value = ''; }}
+                  />
+                </label>
               </div>
             )}
 
             {invoiceDraft && (
               <div className="space-y-4">
                 <div className="flex gap-3 items-start">
-                  <img src={invoiceDraft.imageUrl} alt="Nota fiscal" className="w-20 h-20 object-cover rounded-lg border border-zinc-800" />
+                  {invoiceDraft.imageUrl && (
+                    <img src={invoiceDraft.imageUrl} alt="Nota fiscal" className="w-20 h-20 object-cover rounded-lg border border-zinc-800" />
+                  )}
                   <div className="flex-1 text-xs text-zinc-500">
                     <p>Revise cada item — nada é criado ou reposto no estoque sem sua confirmação.</p>
                     {invoiceDraft.supplierName && <p className="text-zinc-400 mt-1">Fornecedor identificado: {invoiceDraft.supplierName}</p>}
@@ -658,7 +693,7 @@ export function CatalogView() {
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button type="button" variant="ghost" onClick={() => { setInvoiceDraft(null); setInvoiceItems([]); }}>Tirar outra foto</Button>
+                  <Button type="button" variant="ghost" onClick={() => { setInvoiceDraft(null); setInvoiceItems([]); }}>Importar outra nota</Button>
                   <Button onClick={handleInvoiceConfirm} disabled={invoiceSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {invoiceSaving ? 'Publicando...' : 'Aprovar e Publicar'}
                   </Button>

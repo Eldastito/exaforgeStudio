@@ -235,6 +235,38 @@ export async function describeImage(
 }
 
 /**
+ * Cadastro Inteligente (Smart Inventory, ADR-019): a partir da FOTO de UM
+ * produto, extrai os campos de cadastro em JSON estruturado — nunca inventa
+ * o que não está visível na embalagem/produto (mesma regra de "não invente"
+ * já usada em /ai/describe). NUNCA sugere preço aqui: sem nota fiscal/custo
+ * conhecido, a IA não tem base para precificar — quem define o preço final é
+ * sempre o humano, na tela de confirmação (nunca publicado sem essa revisão).
+ */
+export async function extractProductFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const system = `Você é um assistente de cadastro de produtos para varejo brasileiro. A partir da foto de um produto (embalagem, rótulo, etiqueta), extraia os dados visíveis e devolva SOMENTE um JSON com os campos:
+{"name": "nome comercial do produto, ex.: 'Feijão Preto Kicaldo 1kg'", "brand": "marca (ou null se não identificável)", "category": "categoria/subcategoria em português, ex.: 'Alimentos > Grãos' (ou null)", "weightLabel": "peso/volume/tamanho como aparece na embalagem, ex.: '1 Kg' (ou null)", "description": "descrição de venda curta e honesta, 1-2 frases", "confidence": "high, medium ou low, conforme sua certeza na leitura"}
+Regras rígidas: NUNCA invente marca, peso ou categoria que não estejam visíveis/dedutíveis da imagem — use null quando não tiver certeza. NUNCA inclua preço (não há como saber o preço de custo/venda a partir de uma foto). Responda SOMENTE o JSON, sem texto ao redor.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Identifique este produto e devolva o JSON pedido." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0.2,
+    max_tokens: 400,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * "Olhos" do atendimento: analisa uma imagem recebida, CLASSIFICA (documento vs
  * foto comum) e, quando for documento (comprovante de PIX, nota fiscal, recibo,
  * receita, boleto…), extrai os dados-chave. Retorna um texto pronto para a IA

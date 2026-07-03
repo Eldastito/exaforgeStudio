@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
@@ -14,6 +14,7 @@ type Product = {
 };
 
 const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '' };
+const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1' };
 
 export function CatalogView() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -26,6 +27,14 @@ export function CatalogView() {
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [suggestedTitle, setSuggestedTitle] = useState('');
+
+  // Cadastro Inteligente (Smart Inventory, ADR-019) — foto do produto -> IA
+  // extrai os campos -> usuário revisa e confirma -> só então é criado.
+  const [showScan, setShowScan] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{ imageUrl: string; extracted: any } | null>(null);
+  const [scanForm, setScanForm] = useState<any>(emptyScanForm);
+  const [scanSaving, setScanSaving] = useState(false);
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -120,6 +129,69 @@ export function CatalogView() {
     finally { setImporting(false); }
   };
 
+  const openScan = () => { setScanResult(null); setScanForm(emptyScanForm); setShowScan(true); };
+
+  const handleScanUpload = async (file: File) => {
+    setScanning(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await apiFetch('/api/products/smart-scan', { method: 'POST', body });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível analisar a foto.'); return; }
+      setScanResult(d);
+      setScanForm({
+        name: d.extracted.name || '',
+        category: d.extracted.category || '',
+        description: d.extracted.description || '',
+        price: '',
+        stock_control_enabled: true,
+        initial_stock: '1',
+      });
+      if (d.extracted.confidence === 'low') {
+        toast.info('A IA teve pouca certeza na leitura — revise os campos antes de confirmar.');
+      }
+    } catch (e) {
+      toast.error('Erro ao enviar a foto.');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleScanConfirm = async () => {
+    if (!scanForm.name.trim()) { toast.error('Informe o nome do produto.'); return; }
+    if (!scanForm.price || Number(scanForm.price) <= 0) { toast.error('Informe o preço de venda antes de publicar.'); return; }
+    setScanSaving(true);
+    try {
+      const createRes = await apiFetch('/api/products', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'product', name: scanForm.name, category: scanForm.category || undefined,
+          description: scanForm.description, price: parseFloat(scanForm.price),
+          stock_control_enabled: scanForm.stock_control_enabled,
+          initial_stock: parseInt(scanForm.initial_stock || '0', 10),
+        }),
+      });
+      const created = await createRes.json().catch(() => ({}));
+      if (!createRes.ok) { toast.error(created.error || 'Não foi possível criar o produto.'); return; }
+
+      if (scanResult?.imageUrl) {
+        await apiFetch(`/api/storefront/products/${created.id}/images`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: scanResult.imageUrl }),
+        }).catch(() => {}); // a imagem é um plus — falha aqui não deve travar o cadastro já feito
+      }
+
+      toast.success('Produto cadastrado a partir da foto — já disponível na loja e para a IA vender. 📸');
+      setShowScan(false); setScanResult(null); setScanForm(emptyScanForm);
+      loadProducts();
+    } catch (e) {
+      toast.error('Erro ao publicar o produto.');
+    } finally {
+      setScanSaving(false);
+    }
+  };
+
   const isLow = (p: Product) =>
     !!p.stock_control_enabled && (p.sellable ?? 0) <= (p.low_stock_threshold || 0);
 
@@ -134,6 +206,9 @@ export function CatalogView() {
           <p className="text-zinc-400 text-sm mt-1">Produtos, serviços e controle de estoque usado pela IA vendedora</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" className="border-emerald-700/50 text-emerald-300 hover:border-emerald-500" onClick={openScan}>
+            <Camera className="w-4 h-4 mr-2" /> Cadastro Inteligente
+          </Button>
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowImport(true)}>
             <Upload className="w-4 h-4 mr-2" /> Importar CSV
           </Button>
@@ -288,6 +363,103 @@ export function CatalogView() {
                 {importing ? 'Importando...' : 'Importar'}
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cadastro Inteligente (Smart Inventory) */}
+      {showScan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[460px] max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+                <Camera className="w-5 h-5 text-emerald-400" /> Cadastro Inteligente
+              </h3>
+              <button className="text-zinc-400 hover:text-white" onClick={() => { setShowScan(false); setScanResult(null); }}><X className="w-5 h-5" /></button>
+            </div>
+
+            {!scanResult && (
+              <div>
+                <p className="text-sm text-zinc-400 mb-4">Tire ou envie uma foto do produto — a IA identifica nome, marca, categoria e peso automaticamente. Você revisa e define o preço antes de publicar.</p>
+                <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-700 rounded-xl py-10 cursor-pointer hover:border-emerald-500/50 transition-colors">
+                  {scanning ? (
+                    <>
+                      <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+                      <span className="text-sm text-zinc-400">Analisando com IA...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-8 h-8 text-zinc-500" />
+                      <span className="text-sm text-zinc-400">Toque para tirar/escolher uma foto</span>
+                    </>
+                  )}
+                  <input
+                    type="file" accept="image/png,image/jpeg,image/webp" capture="environment" className="hidden"
+                    disabled={scanning}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleScanUpload(f); e.target.value = ''; }}
+                  />
+                </label>
+              </div>
+            )}
+
+            {scanResult && (
+              <div className="space-y-4">
+                <div className="flex gap-3">
+                  <img src={scanResult.imageUrl} alt="Produto" className="w-20 h-20 object-cover rounded-lg border border-zinc-800" />
+                  <div className="flex-1">
+                    <p className="text-xs text-zinc-500">Revise os campos abaixo antes de publicar — nada é publicado sem sua confirmação.</p>
+                    {scanResult.extracted.weightLabel && (
+                      <p className="text-xs text-emerald-400 mt-1">Peso/volume identificado: {scanResult.extracted.weightLabel}</p>
+                    )}
+                    {scanResult.extracted.brand && (
+                      <p className="text-xs text-zinc-400">Marca identificada: {scanResult.extracted.brand}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Nome</label>
+                  <input required className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                    value={scanForm.name} onChange={(e) => setScanForm({ ...scanForm, name: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Categoria</label>
+                    <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                      value={scanForm.category} onChange={(e) => setScanForm({ ...scanForm, category: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Preço de venda (R$) *</label>
+                    <input required type="number" step="0.01" placeholder="a IA não sugere preço" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                      value={scanForm.price} onChange={(e) => setScanForm({ ...scanForm, price: e.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Descrição</label>
+                  <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 h-16 resize-none"
+                    value={scanForm.description} onChange={(e) => setScanForm({ ...scanForm, description: e.target.value })} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input id="scanstockctl" type="checkbox" checked={scanForm.stock_control_enabled}
+                    onChange={(e) => setScanForm({ ...scanForm, stock_control_enabled: e.target.checked })} />
+                  <label htmlFor="scanstockctl" className="text-sm text-zinc-300">Controlar estoque</label>
+                </div>
+                {scanForm.stock_control_enabled && (
+                  <div>
+                    <label className="text-sm text-zinc-400 mb-1 block">Quantidade em estoque</label>
+                    <input type="number" min="0" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                      value={scanForm.initial_stock} onChange={(e) => setScanForm({ ...scanForm, initial_stock: e.target.value })} />
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="ghost" onClick={() => { setScanResult(null); setScanForm(emptyScanForm); }}>Tirar outra foto</Button>
+                  <Button onClick={handleScanConfirm} disabled={scanSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {scanSaving ? 'Publicando...' : 'Aprovar e Publicar'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

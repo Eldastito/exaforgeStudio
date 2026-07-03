@@ -1,12 +1,73 @@
 import { Router } from "express";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
-import { chat, isAIConfigured } from "../llm.js";
+import { chat, isAIConfigured, extractProductFromImage } from "../llm.js";
 
 const router = Router();
+
+// Cadastro Inteligente (Smart Inventory, ADR-019) — mesmo padrão de disco
+// local de src/server/routes/uploads.ts (MEDIA_DIR, servido em /media).
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) { /* noop */ }
+const SCAN_EXT: Record<string, string> = {
+  "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp",
+};
+const scanUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (SCAN_EXT[file.mimetype]) cb(null, true);
+    else cb(new Error("Formato de imagem não suportado (use PNG, JPG ou WEBP)."));
+  },
+});
+
+// POST /api/products/smart-scan (multipart, campo "file") — extrai um
+// cadastro de produto a partir da FOTO, sem criar nada no banco ainda: a
+// extração é só uma PRÉVIA editável, devolvida pro usuário confirmar/corrigir
+// na tela antes de qualquer POST /api/products de verdade. Nunca publica
+// sozinho — ver ADR-019.
+router.post("/smart-scan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+
+  scanUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
+    try {
+      const ext = SCAN_EXT[file.mimetype] || ".jpg";
+      const name = `${uuidv4()}${ext}`;
+      fs.writeFileSync(path.join(MEDIA_DIR, name), file.buffer);
+      const imageUrl = `/media/${name}`;
+
+      const raw = await extractProductFromImage(file.buffer.toString("base64"), file.mimetype);
+      let parsed: any = {};
+      try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+
+      res.json({
+        imageUrl,
+        extracted: {
+          name: String(parsed.name || "").trim().slice(0, 120),
+          brand: parsed.brand ? String(parsed.brand).trim().slice(0, 80) : null,
+          category: parsed.category ? String(parsed.category).trim().slice(0, 80) : null,
+          weightLabel: parsed.weightLabel ? String(parsed.weightLabel).trim().slice(0, 40) : null,
+          description: String(parsed.description || "").trim().slice(0, 500),
+          confidence: ["high", "medium", "low"].includes(parsed.confidence) ? parsed.confidence : "low",
+        },
+      });
+    } catch (e: any) {
+      console.error("[Smart Scan] erro", e);
+      res.status(500).json({ error: "Falha ao analisar a imagem com a IA. Tente novamente ou cadastre manualmente." });
+    }
+  });
+});
 
 // POST /ai/describe — curadoria pela IA: gera um título atraente e uma descrição
 // de venda para o produto. Não inventa especificações; só melhora a apresentação.
@@ -148,16 +209,17 @@ router.post("/", (req: AuthRequest, res): any => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit } = req.body;
+  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category } = req.body;
   const id = uuidv4();
 
   try {
     db.prepare(`
-      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null, (min_price !== undefined && min_price !== '' ? Number(min_price) : null),
        type === 'reservation' ? (Number(capacity) > 0 ? Number(capacity) : 1) : null,
-       type === 'reservation' ? (['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night') : null);
+       type === 'reservation' ? (['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night') : null,
+       category ? String(category).trim().slice(0, 80) : null);
 
     if (stock_control_enabled) {
       db.prepare(`
@@ -184,7 +246,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     const product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
     if (!product) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit } = req.body;
+    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category } = req.body;
     const updates: string[] = [];
     const vals: any[] = [];
     if (name !== undefined) { updates.push("name = ?"); vals.push(name); }
@@ -193,6 +255,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     if (active !== undefined) { updates.push("active = ?"); vals.push(active ? 1 : 0); }
     if (type !== undefined) { updates.push("type = ?"); vals.push(type); }
     if (stock_control_enabled !== undefined) { updates.push("stock_control_enabled = ?"); vals.push(stock_control_enabled ? 1 : 0); }
+    if (category !== undefined) { updates.push("category = ?"); vals.push(category ? String(category).trim().slice(0, 80) : null); }
     if (min_price !== undefined) { updates.push("min_price = ?"); vals.push(min_price === '' || min_price === null ? null : Number(min_price)); }
     if (capacity !== undefined) { updates.push("capacity = ?"); vals.push(Number(capacity) > 0 ? Number(capacity) : 1); }
     if (reservation_unit !== undefined) { updates.push("reservation_unit = ?"); vals.push(['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night'); }

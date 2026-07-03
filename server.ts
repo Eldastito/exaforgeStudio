@@ -49,6 +49,7 @@ import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
+import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
@@ -393,6 +394,7 @@ async function startServer() {
   protectedApi.use("/prospect", prospectRoutes);
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
+  protectedApi.use("/radar-consultant", requireMasterAdmin, radarConsultantRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/rag", ragRoutes);

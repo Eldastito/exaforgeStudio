@@ -105,6 +105,21 @@ router.post("/sessions/:id/complete", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+router.get("/sessions/:id/respondents", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarService.listRespondents(orgId, req.params.id)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.post("/sessions/:id/respondents", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores adicionam respondentes." });
+  try { res.status(201).json(RadarService.addRespondent(orgId, req.params.id, actorId(req), req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // Índice de Velocidade de Conversão (IVC) — medido a partir de dados reais da
 // própria organização, não do questionário. Não depende de radar_sessions:
 // pode ser calculado avulso a qualquer momento (produto de entrada leve) ou

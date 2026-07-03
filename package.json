@@ -22,6 +22,7 @@
     "test:job-queue": "tsx scripts/test-job-queue.ts",
     "test:storage-service": "tsx scripts/test-storage-service.ts",
     "test:radar-public": "tsx scripts/test-radar-public.ts",
+    "test:radar-consultant": "tsx scripts/test-radar-consultant.ts",
     "test:supervisor": "tsx scripts/test-supervisor.ts",
     "test:vision-foundation": "tsx scripts/test-vision-foundation.ts",
     "test:vision-events": "tsx scripts/test-vision-events.ts",

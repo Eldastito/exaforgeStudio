@@ -59,6 +59,9 @@ export function Sidebar() {
              {user?.email === 'eldastito@gmail.com' && (
                <NavItem icon={<ShieldCheck />} label="Admin Master" active={viewMode === 'admin'} onClick={() => setViewMode('admin')} />
              )}
+             {user?.email === 'eldastito@gmail.com' && (
+               <NavItem icon={<Radar />} label="Radar — Consultor" active={viewMode === 'radar_consultant'} onClick={() => setViewMode('radar_consultant')} />
+             )}
           </nav>
         </div>
         

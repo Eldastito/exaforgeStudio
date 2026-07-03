@@ -28,13 +28,15 @@ export function CatalogView() {
   const [aiLoading, setAiLoading] = useState(false);
   const [suggestedTitle, setSuggestedTitle] = useState('');
 
-  // Cadastro Inteligente (Smart Inventory, ADR-019) — foto do produto -> IA
-  // extrai os campos -> usuário revisa e confirma -> só então é criado.
+  // Cadastro Inteligente (Smart Inventory, ADR-019/ADR-020) — foto do produto
+  // -> IA extrai os campos e grava um rascunho -> usuário revisa e confirma
+  // -> só então o produto é criado de verdade.
   const [showScan, setShowScan] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<{ imageUrl: string; extracted: any } | null>(null);
+  const [scanResult, setScanResult] = useState<{ draftId: string; imageUrl: string; extracted: any; confidenceScore: number } | null>(null);
   const [scanForm, setScanForm] = useState<any>(emptyScanForm);
   const [scanSaving, setScanSaving] = useState(false);
+  const [scanReviewed, setScanReviewed] = useState(false);
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -129,7 +131,7 @@ export function CatalogView() {
     finally { setImporting(false); }
   };
 
-  const openScan = () => { setScanResult(null); setScanForm(emptyScanForm); setShowScan(true); };
+  const openScan = () => { setScanResult(null); setScanForm(emptyScanForm); setScanReviewed(false); setShowScan(true); };
 
   const handleScanUpload = async (file: File) => {
     setScanning(true);
@@ -140,6 +142,7 @@ export function CatalogView() {
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { toast.error(d.error || 'Não foi possível analisar a foto.'); return; }
       setScanResult(d);
+      setScanReviewed(false);
       setScanForm({
         name: d.extracted.name || '',
         category: d.extracted.category || '',
@@ -148,9 +151,6 @@ export function CatalogView() {
         stock_control_enabled: true,
         initial_stock: '1',
       });
-      if (d.extracted.confidence === 'low') {
-        toast.info('A IA teve pouca certeza na leitura — revise os campos antes de confirmar.');
-      }
     } catch (e) {
       toast.error('Erro ao enviar a foto.');
     } finally {
@@ -158,32 +158,33 @@ export function CatalogView() {
     }
   };
 
+  const scanConfidenceTier = (score: number): 'high' | 'medium' | 'low' =>
+    score >= 95 ? 'high' : score >= 80 ? 'medium' : 'low';
+
   const handleScanConfirm = async () => {
+    if (!scanResult) return;
     if (!scanForm.name.trim()) { toast.error('Informe o nome do produto.'); return; }
     if (!scanForm.price || Number(scanForm.price) <= 0) { toast.error('Informe o preço de venda antes de publicar.'); return; }
+    if (scanConfidenceTier(scanResult.confidenceScore) === 'low' && !scanReviewed) {
+      toast.error('Confirme que revisou os campos (confiança baixa da IA nesta foto).');
+      return;
+    }
     setScanSaving(true);
     try {
-      const createRes = await apiFetch('/api/products', {
+      const res = await apiFetch(`/api/products/smart-scan/${scanResult.draftId}/confirm`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'product', name: scanForm.name, category: scanForm.category || undefined,
+          name: scanForm.name, category: scanForm.category || undefined,
           description: scanForm.description, price: parseFloat(scanForm.price),
           stock_control_enabled: scanForm.stock_control_enabled,
           initial_stock: parseInt(scanForm.initial_stock || '0', 10),
         }),
       });
-      const created = await createRes.json().catch(() => ({}));
-      if (!createRes.ok) { toast.error(created.error || 'Não foi possível criar o produto.'); return; }
-
-      if (scanResult?.imageUrl) {
-        await apiFetch(`/api/storefront/products/${created.id}/images`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: scanResult.imageUrl }),
-        }).catch(() => {}); // a imagem é um plus — falha aqui não deve travar o cadastro já feito
-      }
+      const created = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(created.error || 'Não foi possível criar o produto.'); return; }
 
       toast.success('Produto cadastrado a partir da foto — já disponível na loja e para a IA vender. 📸');
-      setShowScan(false); setScanResult(null); setScanForm(emptyScanForm);
+      setShowScan(false); setScanResult(null); setScanForm(emptyScanForm); setScanReviewed(false);
       loadProducts();
     } catch (e) {
       toast.error('Erro ao publicar o produto.');
@@ -375,7 +376,7 @@ export function CatalogView() {
               <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
                 <Camera className="w-5 h-5 text-emerald-400" /> Cadastro Inteligente
               </h3>
-              <button className="text-zinc-400 hover:text-white" onClick={() => { setShowScan(false); setScanResult(null); }}><X className="w-5 h-5" /></button>
+              <button className="text-zinc-400 hover:text-white" onClick={() => { setShowScan(false); setScanResult(null); setScanReviewed(false); }}><X className="w-5 h-5" /></button>
             </div>
 
             {!scanResult && (
@@ -404,6 +405,17 @@ export function CatalogView() {
 
             {scanResult && (
               <div className="space-y-4">
+                {(() => {
+                  const tier = scanConfidenceTier(scanResult.confidenceScore);
+                  const banner = tier === 'high'
+                    ? { cls: 'border-emerald-700/50 bg-emerald-950/30 text-emerald-300', text: `IA confiante na leitura (${scanResult.confidenceScore}%). Confira e publique.` }
+                    : tier === 'medium'
+                    ? { cls: 'border-amber-700/50 bg-amber-950/30 text-amber-300', text: `Confiança média (${scanResult.confidenceScore}%) — confira estes campos com atenção.` }
+                    : { cls: 'border-red-700/50 bg-red-950/30 text-red-300', text: `Confiança baixa (${scanResult.confidenceScore}%) — a foto ficou pouco nítida ou incompleta. Revise com atenção antes de publicar.` };
+                  return (
+                    <div className={`text-xs rounded-lg border px-3 py-2 ${banner.cls}`}>{banner.text}</div>
+                  );
+                })()}
                 <div className="flex gap-3">
                   <img src={scanResult.imageUrl} alt="Produto" className="w-20 h-20 object-cover rounded-lg border border-zinc-800" />
                   <div className="flex-1">
@@ -452,8 +464,16 @@ export function CatalogView() {
                   </div>
                 )}
 
+                {scanConfidenceTier(scanResult.confidenceScore) === 'low' && (
+                  <div className="flex items-start gap-2 border border-red-700/40 bg-red-950/20 rounded-lg p-2">
+                    <input id="scanreviewed" type="checkbox" className="mt-0.5" checked={scanReviewed}
+                      onChange={(e) => setScanReviewed(e.target.checked)} />
+                    <label htmlFor="scanreviewed" className="text-sm text-red-300">Revisei e confirmo os dados acima manualmente.</label>
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button type="button" variant="ghost" onClick={() => { setScanResult(null); setScanForm(emptyScanForm); }}>Tirar outra foto</Button>
+                  <Button type="button" variant="ghost" onClick={() => { setScanResult(null); setScanForm(emptyScanForm); setScanReviewed(false); }}>Tirar outra foto</Button>
                   <Button onClick={handleScanConfirm} disabled={scanSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {scanSaving ? 'Publicando...' : 'Aprovar e Publicar'}
                   </Button>

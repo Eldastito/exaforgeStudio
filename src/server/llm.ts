@@ -235,17 +235,19 @@ export async function describeImage(
 }
 
 /**
- * Cadastro Inteligente (Smart Inventory, ADR-019): a partir da FOTO de UM
- * produto, extrai os campos de cadastro em JSON estruturado — nunca inventa
- * o que não está visível na embalagem/produto (mesma regra de "não invente"
- * já usada em /ai/describe). NUNCA sugere preço aqui: sem nota fiscal/custo
- * conhecido, a IA não tem base para precificar — quem define o preço final é
- * sempre o humano, na tela de confirmação (nunca publicado sem essa revisão).
+ * Cadastro Inteligente (Smart Inventory, ADR-019/ADR-020): a partir da FOTO
+ * de UM produto, extrai os campos de cadastro em JSON estruturado — nunca
+ * inventa o que não está visível na embalagem/produto (mesma regra de "não
+ * invente" já usada em /ai/describe). NUNCA sugere preço aqui: sem nota
+ * fiscal/custo conhecido, a IA não tem base para precificar — quem define o
+ * preço final é sempre o humano, na tela de confirmação (nunca publicado sem
+ * essa revisão). `confidence` numérico (0-100) orienta a UI a exigir mais ou
+ * menos atenção do humano na revisão (ADR-020).
  */
 export async function extractProductFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
   const system = `Você é um assistente de cadastro de produtos para varejo brasileiro. A partir da foto de um produto (embalagem, rótulo, etiqueta), extraia os dados visíveis e devolva SOMENTE um JSON com os campos:
-{"name": "nome comercial do produto, ex.: 'Feijão Preto Kicaldo 1kg'", "brand": "marca (ou null se não identificável)", "category": "categoria/subcategoria em português, ex.: 'Alimentos > Grãos' (ou null)", "weightLabel": "peso/volume/tamanho como aparece na embalagem, ex.: '1 Kg' (ou null)", "description": "descrição de venda curta e honesta, 1-2 frases", "confidence": "high, medium ou low, conforme sua certeza na leitura"}
-Regras rígidas: NUNCA invente marca, peso ou categoria que não estejam visíveis/dedutíveis da imagem — use null quando não tiver certeza. NUNCA inclua preço (não há como saber o preço de custo/venda a partir de uma foto). Responda SOMENTE o JSON, sem texto ao redor.`;
+{"name": "nome comercial do produto, ex.: 'Feijão Preto Kicaldo 1kg'", "brand": "marca (ou null se não identificável)", "category": "categoria/subcategoria em português, ex.: 'Alimentos > Grãos' (ou null)", "weightLabel": "peso/volume/tamanho como aparece na embalagem, ex.: '1 Kg' (ou null)", "description": "descrição de venda curta e honesta, 1-2 frases", "confidence": <número inteiro de 0 a 100 representando sua certeza geral na leitura — 95+ se a embalagem está nítida e todos os dados principais são claramente legíveis, 80-94 se há alguma dúvida pontual, abaixo de 80 se a imagem está borrada/incompleta/ambígua>}
+Regras rígidas: NUNCA invente marca, peso ou categoria que não estejam visíveis/dedutíveis da imagem — use null quando não tiver certeza (e reflita isso num confidence mais baixo). NUNCA inclua preço (não há como saber o preço de custo/venda a partir de uma foto). Responda SOMENTE o JSON, sem texto ao redor.`;
   const res = await getClient().chat.completions.create({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
     messages: [

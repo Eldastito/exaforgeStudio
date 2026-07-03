@@ -831,6 +831,24 @@ const initDb = () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_service_id);
+      -- Rascunho do Cadastro Inteligente (Smart Inventory, ADR-020): a extração
+      -- da IA fica gravada aqui ANTES de qualquer produto existir — se o
+      -- usuário fechar a tela sem confirmar, nada se perde (dá pra auditar o
+      -- que a IA disse mesmo sem virar produto). Vira 'confirmed' só quando o
+      -- humano publica de fato (product_id preenchido nesse momento).
+      CREATE TABLE IF NOT EXISTS product_scan_drafts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        uploaded_by TEXT,
+        image_url TEXT NOT NULL,
+        raw_extraction_json TEXT,
+        confidence_score REAL,
+        status TEXT DEFAULT 'pending', -- pending | confirmed | discarded
+        product_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        confirmed_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_product_scan_drafts_org ON product_scan_drafts(organization_id, status, created_at);
       -- Token público que amarra um acesso da vitrine a um contato/ticket do WhatsApp.
       CREATE TABLE IF NOT EXISTS storefront_links (
         token TEXT PRIMARY KEY,

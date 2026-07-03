@@ -1,9 +1,32 @@
 import { Router } from "express";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { RadarService } from "../RadarService.js";
 import { ConversionVelocityService } from "../ConversionVelocityService.js";
+import { StorageService } from "../StorageService.js";
 
 const router = Router();
+
+// Upload de evidência (mesmo padrão de src/server/routes/uploads.ts): disco
+// local sob MEDIA_DIR é sempre a fonte de verdade; S3 é espelho best-effort.
+// Aceita imagem OU PDF (evidência costuma ser print de tela ou relatório
+// exportado) — mais amplo que uploads.ts, que só aceita imagem.
+const EVIDENCE_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media", "radar-evidence");
+try { fs.mkdirSync(EVIDENCE_DIR, { recursive: true }); } catch (e) { /* noop */ }
+const EVIDENCE_EXT: Record<string, string> = {
+  "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp", "application/pdf": ".pdf",
+};
+const evidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (EVIDENCE_EXT[file.mimetype]) cb(null, true);
+    else cb(new Error("Formato não suportado (use PNG, JPG, WEBP ou PDF)."));
+  },
+});
 
 // Kill-switch global (defesa em profundidade, além do gate por tenant em
 // ModuleService/verticals.ts). PRD §3 regra 4: `ai_execution_radar_enabled`.
@@ -118,6 +141,45 @@ router.post("/sessions/:id/respondents", (req: AuthRequest, res): any => {
   if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores adicionam respondentes." });
   try { res.status(201).json(RadarService.addRespondent(orgId, req.params.id, actorId(req), req.body || {})); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/sessions/:id/evidence", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarService.listEvidence(orgId, req.params.id)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+// multipart (campo "file") + questionId/respondentId no corpo. Mesma
+// permissão de responder pergunta (não é ação de manager) — quem respondeu
+// deve poder anexar a própria evidência.
+router.post("/sessions/:id/evidence", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  evidenceUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+    if (!req.body?.questionId) return res.status(400).json({ error: "questionId é obrigatório." });
+    try {
+      const ext = EVIDENCE_EXT[file.mimetype] || ".bin";
+      const name = `${uuidv4()}${ext}`;
+      const filePath = path.join(EVIDENCE_DIR, name);
+      fs.writeFileSync(filePath, file.buffer);
+      let fileUrl = `/media/radar-evidence/${name}`;
+      if (StorageService.isS3Enabled()) {
+        const mirror = await StorageService.mirrorToS3(filePath, `radar-evidence/${name}`);
+        if (mirror.stored && mirror.url) fileUrl = mirror.url;
+      }
+      const result = RadarService.addEvidence(orgId, req.params.id, actorId(req), {
+        questionId: req.body.questionId, respondentId: req.body.respondentId || null,
+        fileUrl, fileName: file.originalname, mimeType: file.mimetype,
+      });
+      res.status(201).json(result);
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || "Falha ao anexar evidência." });
+    }
+  });
 });
 
 // Índice de Velocidade de Conversão (IVC) — medido a partir de dados reais da

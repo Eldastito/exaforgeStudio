@@ -60,7 +60,8 @@ export class RadarConsultantService {
       WHERE a.session_id = ? ORDER BY q.display_order
     `).all(sessionId);
 
-    return { ...session, pillarScores, recommendations, respondents, answers };
+    const evidence = db.prepare(`SELECT * FROM radar_evidence WHERE session_id = ? ORDER BY created_at`).all(sessionId);
+    return { ...session, pillarScores, recommendations, respondents, answers, evidence };
   }
 
   // Nota do consultor + quem revisou por último. Não exige transição de

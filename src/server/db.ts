@@ -1689,6 +1689,27 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_radar_respondents_session ON radar_respondents(session_id);
 
+      -- Anexo de evidência a uma resposta já dada (PRD §7.4 -- reservado desde a
+      -- Fase 1, ver comentário em RadarService.saveAnswer). Anexar evidência
+      -- sobe a confiança daquela resposta de 0,60/0,75 (declarada) para 0,90
+      -- (declarada + evidência) -- RadarService.addEvidence. O nível 1,00
+      -- ("baseline medido") continua reservado para quando um pilar for
+      -- preenchido a partir de dado medido (ex.: RevenueIntelligenceService),
+      -- não implementado aqui.
+      CREATE TABLE IF NOT EXISTS radar_evidence (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        organization_id TEXT,
+        answer_id TEXT NOT NULL,
+        file_url TEXT NOT NULL,
+        file_name TEXT,
+        mime_type TEXT,
+        uploaded_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_evidence_answer ON radar_evidence(answer_id);
+      CREATE INDEX IF NOT EXISTS idx_radar_evidence_session ON radar_evidence(session_id);
+
       CREATE TABLE IF NOT EXISTS radar_answers (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,

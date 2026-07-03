@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode, ChangeEvent } from 'react';
 import {
   Radar, Plus, ArrowLeft, ArrowRight, Loader2, HelpCircle, Sparkles, TrendingUp,
-  Gauge, RefreshCw, ChevronRight,
+  Gauge, RefreshCw, ChevronRight, Paperclip,
 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -39,7 +39,8 @@ type Session = {
   updated_at: string;
   pillarScores?: { pillar: string; score: number | null; evidence_count: number }[];
   recommendations?: { priority_band: string; use_case_name: string }[];
-  answers?: { question_id: string; answer_json: string; is_not_known: number }[];
+  answers?: { id: string; question_id: string; respondent_id: string | null; answer_json: string; is_not_known: number; confidence_multiplier: number }[];
+  evidence?: { id: string; answer_id: string; file_url: string; file_name: string | null; mime_type: string | null }[];
 };
 
 type VelocitySnapshot = {
@@ -80,6 +81,14 @@ async function api(path: string, opts: RequestInit = {}) {
     ...opts,
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
   });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || `Erro (${res.status})`);
+  return json;
+}
+
+// Sem Content-Type manual — o browser define o boundary do multipart sozinho.
+async function apiUpload(path: string, formData: FormData) {
+  const res = await apiFetch(`/api/radar${path}`, { method: 'POST', body: formData });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error || `Erro (${res.status})`);
   return json;
@@ -160,6 +169,7 @@ export function RadarView() {
       {view === 'questions' && activeSession && template && (
         <QuestionsView
           session={activeSession} template={template} qIndex={qIndex} setQIndex={setQIndex}
+          onSessionUpdate={setActiveSession}
           onBack={() => { setView('list'); loadSessions(); }}
           onDone={async () => {
             const result = await api(`/sessions/${activeSession.id}/complete`, { method: 'POST' });
@@ -368,9 +378,10 @@ function NewSessionForm({ onBack, onCreated }: { onBack: () => void; onCreated: 
 }
 
 function QuestionsView({
-  session, template, qIndex, setQIndex, onBack, onDone,
+  session, template, qIndex, setQIndex, onBack, onDone, onSessionUpdate,
 }: {
   session: Session; template: Template; qIndex: number; setQIndex: (n: number) => void; onBack: () => void; onDone: () => Promise<void>;
+  onSessionUpdate: (s: Session) => void;
 }) {
   const questions = template.questions;
   const q = questions[qIndex];
@@ -388,12 +399,42 @@ function QuestionsView({
   const [notKnown, setNotKnown] = useState(!!answeredMap.get(q.id)?.isNotKnown);
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
   useEffect(() => {
     setSelected(answeredMap.get(q.id)?.value ?? null);
     setNotKnown(!!answeredMap.get(q.id)?.isNotKnown);
     setComment('');
   }, [q.id, answeredMap]);
+
+  const currentAnswer = (session.answers || []).find((a) => a.question_id === q.id && !a.respondent_id);
+  const currentEvidence = (session.evidence || []).filter((e) => e.answer_id === currentAnswer?.id);
+
+  async function refreshSession() {
+    const fresh = await api(`/sessions/${session.id}`);
+    onSessionUpdate(fresh);
+    return fresh;
+  }
+
+  // Salva a resposta assim que uma opção é escolhida (não só ao clicar
+  // "Próxima") — sem isso, não existe momento em que a pergunta ATUAL já
+  // tenha uma resposta persistida, e anexar evidência exige uma resposta
+  // salva (RadarService.addEvidence). "Próxima" ainda salva de novo (mesmo
+  // question/session, é upsert) para capturar um comentário digitado depois.
+  async function saveCurrent(value: string | null, isNotKnown: boolean) {
+    setSaving(true);
+    try {
+      await api(`/sessions/${session.id}/answers`, {
+        method: 'POST',
+        body: JSON.stringify({ questionId: q.id, value, isNotKnown, comment }),
+      });
+      await refreshSession();
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível salvar a resposta.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function advance() {
     if (!selected && !notKnown) return;
@@ -403,12 +444,29 @@ function QuestionsView({
         method: 'POST',
         body: JSON.stringify({ questionId: q.id, value: selected, isNotKnown: notKnown, comment }),
       });
+      await refreshSession();
       if (qIndex < questions.length - 1) setQIndex(qIndex + 1);
       else await onDone();
     } catch (e: any) {
       toast.error(e.message || 'Não foi possível salvar a resposta.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function uploadEvidence(file: File) {
+    setUploadingEvidence(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('questionId', q.id);
+      const fresh = await apiUpload(`/sessions/${session.id}/evidence`, form);
+      onSessionUpdate(fresh);
+      toast.success('Evidência anexada — confiança da resposta atualizada.');
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível anexar a evidência.');
+    } finally {
+      setUploadingEvidence(false);
     }
   }
 
@@ -432,7 +490,7 @@ function QuestionsView({
         {(q.options || []).map((opt) => (
           <button
             key={opt.value}
-            onClick={() => { setSelected(opt.value); setNotKnown(false); }}
+            onClick={() => { setSelected(opt.value); setNotKnown(false); saveCurrent(opt.value, false); }}
             className={`w-full text-left rounded-lg border px-4 py-3 text-sm transition ${
               selected === opt.value && !notKnown ? 'border-transparent text-[#0b0f12]' : 'border-white/15 bg-white/[0.03] text-white/80 hover:border-white/30'
             }`}
@@ -442,7 +500,7 @@ function QuestionsView({
           </button>
         ))}
         <button
-          onClick={() => { setNotKnown(true); setSelected(null); }}
+          onClick={() => { setNotKnown(true); setSelected(null); saveCurrent(null, true); }}
           className={`w-full text-left rounded-lg border px-4 py-3 text-sm transition flex items-center gap-2 ${
             notKnown ? 'border-transparent text-[#0b0f12]' : 'border-dashed border-white/15 text-white/50 hover:border-white/30'
           }`}
@@ -456,6 +514,35 @@ function QuestionsView({
         <span className="block text-xs font-medium text-white/50 mb-1.5">Quer explicar melhor? (opcional — melhora a confiança da resposta)</span>
         <textarea className={`${inputCls} min-h-[70px]`} value={comment} onChange={(e) => setComment(e.target.value)} />
       </label>
+
+      <div className="mt-4">
+        <span className="block text-xs font-medium text-white/50 mb-1.5">
+          Evidência (opcional — print de tela ou PDF sobe a confiança para 0,90)
+        </span>
+        {!currentAnswer ? (
+          <p className="text-xs text-white/30">Responda a pergunta primeiro para poder anexar evidência.</p>
+        ) : (
+          <>
+            {currentEvidence.length > 0 && (
+              <ul className="mb-2 space-y-1">
+                {currentEvidence.map((ev) => (
+                  <li key={ev.id} className="text-xs text-emerald-300 flex items-center gap-1.5">
+                    <Paperclip size={12} /> {ev.file_name || 'evidência anexada'}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label className="inline-flex items-center gap-2 rounded-lg border border-dashed border-white/20 px-3 py-2 text-xs text-white/60 hover:border-white/40 cursor-pointer">
+              {uploadingEvidence ? <Loader2 className="animate-spin" size={14} /> : <Paperclip size={14} />}
+              {uploadingEvidence ? 'Enviando...' : 'Anexar arquivo (PNG, JPG, WEBP ou PDF)'}
+              <input
+                type="file" className="hidden" accept=".png,.jpg,.jpeg,.webp,.pdf" disabled={uploadingEvidence}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadEvidence(f); e.target.value = ''; }}
+              />
+            </label>
+          </>
+        )}
+      </div>
 
       <div className="mt-7 flex items-center gap-3">
         {qIndex > 0 && (
@@ -499,6 +586,12 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
         <div>
           <div className="text-lg font-semibold">{level ? LEVEL_LABEL[level] || level : 'Sem dados suficientes'}</div>
           <div className="text-sm text-white/50">Índice de maturidade (0-100)</div>
+          {session.confidence_score != null && (
+            <div className="text-xs text-white/40 mt-1">
+              Confiança das respostas: {Math.round(session.confidence_score * 100)}%
+              {session.confidence_score < 0.85 && ' — anexe evidências nas respostas para aumentar'}
+            </div>
+          )}
         </div>
       </Card>
 

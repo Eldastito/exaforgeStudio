@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode, ChangeEvent } from 'react';
 import {
   Radar, Plus, ArrowLeft, ArrowRight, Loader2, HelpCircle, Sparkles, TrendingUp,
-  Gauge, RefreshCw, ChevronRight, Paperclip, FileText, ListChecks,
+  Gauge, RefreshCw, ChevronRight, Paperclip, FileText, ListChecks, Share2, MessageCircle, Mail,
 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -31,6 +31,8 @@ type Session = {
   status: string;
   template_id: string;
   company_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
   segment: string | null;
   company_size: string | null;
   overall_maturity_score: number | null;
@@ -578,6 +580,9 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
   const [reportUrl, setReportUrl] = useState<string | null>(null);
   const [creatingTasks, setCreatingTasks] = useState(false);
   const [tasksResult, setTasksResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [sendingChannel, setSendingChannel] = useState<'whatsapp' | 'email' | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const canNativeShare = typeof navigator !== 'undefined' && !!(navigator as any).share;
 
   const generateReport = async () => {
     setGeneratingReport(true);
@@ -585,10 +590,48 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
       const result = await api(`/sessions/${session.id}/report`, { method: 'POST' });
       setReportUrl(result.url);
       toast.success(result.hasNarrative ? 'Relatório gerado com resumo por IA.' : 'Relatório gerado (sem resumo por IA — configure a IA para incluir essa seção).');
+      return result.url as string;
     } catch (e: any) {
       toast.error(e.message || 'Não foi possível gerar o relatório.');
+      return null;
     } finally {
       setGeneratingReport(false);
+    }
+  };
+
+  // Compartilhamento nativo do aparelho (celular): abre a folha de compartilhar
+  // do próprio sistema operacional, para o usuário escolher em qual app já
+  // instalado (WhatsApp, e-mail, Drive...) enviar ou salvar o PDF — não passa
+  // pelo canal conectado da organização, é 100% local ao dispositivo de quem
+  // está vendo a tela. Só aparece em navegadores que suportam a Web Share API
+  // (a maioria dos navegadores mobile; desktop geralmente não tem).
+  const shareNative = async () => {
+    setSharing(true);
+    try {
+      const url = reportUrl || (await generateReport());
+      if (!url) return;
+      const absoluteUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
+      await (navigator as any).share({
+        title: 'Relatório do Radar de Execução IA',
+        text: `Diagnóstico de ${session.company_name || 'maturidade em IA'}`,
+        url: absoluteUrl,
+      });
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') toast.error('Não foi possível compartilhar.');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const sendReport = async (channel: 'whatsapp' | 'email') => {
+    setSendingChannel(channel);
+    try {
+      await api(`/sessions/${session.id}/send`, { method: 'POST', body: JSON.stringify({ channel }) });
+      toast.success(channel === 'whatsapp' ? 'Relatório enviado por WhatsApp.' : 'Relatório enviado por e-mail.');
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível enviar o relatório.');
+    } finally {
+      setSendingChannel(null);
     }
   };
 
@@ -694,6 +737,30 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
                 {creatingTasks ? <Loader2 className="animate-spin" size={16} /> : <ListChecks size={16} />} Criar tarefas das recomendações de prioridade alta
               </button>
             )}
+            {canNativeShare && (
+              <button
+                onClick={shareNative} disabled={sharing || generatingReport || score == null}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
+              >
+                {sharing ? <Loader2 className="animate-spin" size={16} /> : <Share2 size={16} />} Compartilhar
+              </button>
+            )}
+            {session.contact_phone && (
+              <button
+                onClick={() => sendReport('whatsapp')} disabled={sendingChannel === 'whatsapp' || score == null}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
+              >
+                {sendingChannel === 'whatsapp' ? <Loader2 className="animate-spin" size={16} /> : <MessageCircle size={16} />} Enviar por WhatsApp
+              </button>
+            )}
+            {session.contact_email && (
+              <button
+                onClick={() => sendReport('email')} disabled={sendingChannel === 'email' || score == null}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 hover:border-white/30 disabled:opacity-40"
+              >
+                {sendingChannel === 'email' ? <Loader2 className="animate-spin" size={16} /> : <Mail size={16} />} Enviar por e-mail
+              </button>
+            )}
           </div>
           {reportUrl && (
             <a href={reportUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1.5 text-sm" style={{ color: teal }}>
@@ -703,6 +770,11 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
           {tasksResult && (
             <p className="mt-2 text-xs text-white/40">
               {tasksResult.created} criada(s){tasksResult.skipped > 0 ? `, ${tasksResult.skipped} já existente(s)` : ''}.
+            </p>
+          )}
+          {!session.contact_phone && !session.contact_email && (
+            <p className="mt-2 text-xs text-white/30">
+              Sem telefone/e-mail de contato nesta sessão — envio direto pelo canal da organização não está disponível (o "Compartilhar" acima funciona igual).
             </p>
           )}
         </div>

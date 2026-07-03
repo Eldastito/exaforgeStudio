@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import sharp from "sharp";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
@@ -11,62 +12,158 @@ import { chat, isAIConfigured, extractProductFromImage } from "../llm.js";
 
 const router = Router();
 
-// Cadastro Inteligente (Smart Inventory, ADR-019) — mesmo padrão de disco
-// local de src/server/routes/uploads.ts (MEDIA_DIR, servido em /media).
+// Cadastro Inteligente (Smart Inventory, ADR-019/ADR-020) — mesmo padrão de
+// disco local de src/server/routes/uploads.ts (MEDIA_DIR, servido em /media).
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
 try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) { /* noop */ }
+
+// HEIC/HEIF (foto padrão do iPhone) foi avaliado e DELIBERADAMENTE não é
+// aceito: o binário do `sharp` distribuído via npm só decodifica HEIF no
+// perfil AVIF (royalty-free) — o HEVC que o iPhone realmente grava exige um
+// decodificador licenciado que não vem embutido. Fingir suportar e falhar
+// silenciosamente seria pior do que recusar com uma mensagem clara. Ver
+// ADR-020.
 const SCAN_EXT: Record<string, string> = {
   "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp",
 };
 const scanUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB (ADR-020)
   fileFilter: (_req, file, cb) => {
-    if (SCAN_EXT[file.mimetype]) cb(null, true);
-    else cb(new Error("Formato de imagem não suportado (use PNG, JPG ou WEBP)."));
+    if (SCAN_EXT[file.mimetype]) return cb(null, true);
+    if (file.mimetype === "image/heic" || file.mimetype === "image/heif") {
+      return cb(new Error("Fotos em HEIC/HEIF (padrão de câmera do iPhone) ainda não são suportadas. No iPhone: Ajustes > Câmera > Formatos > \"Mais Compatível\", ou escolha a foto já em JPG/PNG."));
+    }
+    cb(new Error("Formato de imagem não suportado (use PNG, JPG ou WEBP)."));
   },
 });
 
+// Rate limit simples por organização, em memória — cada scan é uma chamada
+// de IA paga; sem isso, um uso descontrolado (ou automatizado por engano)
+// queimaria orçamento de IA sem limite. Mesmo padrão de
+// src/server/routes/radarPublic.ts (não exportado de lá, replicado aqui).
+const scanRateBuckets = new Map<string, { count: number; resetTime: number }>();
+function scanRateLimited(orgId: string, max = 20, windowMs = 60 * 1000): boolean {
+  const now = Date.now();
+  let b = scanRateBuckets.get(orgId);
+  if (!b || now > b.resetTime) b = { count: 0, resetTime: now + windowMs };
+  b.count++;
+  scanRateBuckets.set(orgId, b);
+  return b.count > max;
+}
+
 // POST /api/products/smart-scan (multipart, campo "file") — extrai um
-// cadastro de produto a partir da FOTO, sem criar nada no banco ainda: a
-// extração é só uma PRÉVIA editável, devolvida pro usuário confirmar/corrigir
-// na tela antes de qualquer POST /api/products de verdade. Nunca publica
-// sozinho — ver ADR-019.
+// cadastro de produto a partir da FOTO e grava um RASCUNHO (product_scan_drafts)
+// — nenhum produto é criado ainda. A extração é só uma prévia editável; só
+// vira produto de verdade em POST /smart-scan/:draftId/confirm. Nunca
+// publica sozinho — ver ADR-019/ADR-020.
 router.post("/smart-scan", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
+  const userId = req.user?.userId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  if (scanRateLimited(orgId)) return res.status(429).json({ error: "Muitos cadastros por foto em pouco tempo. Aguarde um minuto e tente de novo." });
 
   scanUpload.single("file")(req, res, async (err: any) => {
     if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
     const file = (req as any).file;
     if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
     try {
-      const ext = SCAN_EXT[file.mimetype] || ".jpg";
-      const name = `${uuidv4()}${ext}`;
-      fs.writeFileSync(path.join(MEDIA_DIR, name), file.buffer);
+      // Sempre reprocessa via sharp antes de guardar/enviar pra IA:
+      // - .rotate() sem argumento lê a orientação EXIF e já gira os pixels
+      //   fisicamente (corrige fotos "de lado" tiradas com celular);
+      // - reencodar como JPEG novo remove o EXIF original (localização,
+      //   modelo do aparelho, etc.) — privacidade, sem exigir uma etapa à parte;
+      // - normaliza todo upload pro mesmo formato de saída (JPEG), então o
+      //   restante do código nunca precisa se preocupar com PNG vs WEBP.
+      const processed = await sharp(file.buffer).rotate().resize(1600, 1600, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+
+      const name = `${uuidv4()}.jpg`;
+      fs.writeFileSync(path.join(MEDIA_DIR, name), processed);
       const imageUrl = `/media/${name}`;
 
-      const raw = await extractProductFromImage(file.buffer.toString("base64"), file.mimetype);
+      const raw = await extractProductFromImage(processed.toString("base64"), "image/jpeg");
       let parsed: any = {};
       try { parsed = JSON.parse(raw); } catch { parsed = {}; }
 
-      res.json({
-        imageUrl,
-        extracted: {
-          name: String(parsed.name || "").trim().slice(0, 120),
-          brand: parsed.brand ? String(parsed.brand).trim().slice(0, 80) : null,
-          category: parsed.category ? String(parsed.category).trim().slice(0, 80) : null,
-          weightLabel: parsed.weightLabel ? String(parsed.weightLabel).trim().slice(0, 40) : null,
-          description: String(parsed.description || "").trim().slice(0, 500),
-          confidence: ["high", "medium", "low"].includes(parsed.confidence) ? parsed.confidence : "low",
-        },
-      });
+      const confidenceScore = Math.max(0, Math.min(100, Number(parsed.confidence)));
+      const extracted = {
+        name: String(parsed.name || "").trim().slice(0, 120),
+        brand: parsed.brand ? String(parsed.brand).trim().slice(0, 80) : null,
+        category: parsed.category ? String(parsed.category).trim().slice(0, 80) : null,
+        weightLabel: parsed.weightLabel ? String(parsed.weightLabel).trim().slice(0, 40) : null,
+        description: String(parsed.description || "").trim().slice(0, 500),
+      };
+
+      const draftId = uuidv4();
+      db.prepare(
+        `INSERT INTO product_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+      ).run(draftId, orgId, userId || null, imageUrl, JSON.stringify({ extracted, rawModelOutput: raw }), Number.isFinite(confidenceScore) ? confidenceScore : 0);
+      logAuthEvent(orgId, userId, draftId, "PRODUCT_SCAN_EXTRACTED", { confidenceScore });
+
+      res.json({ draftId, imageUrl, extracted, confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 0 });
     } catch (e: any) {
       console.error("[Smart Scan] erro", e);
       res.status(500).json({ error: "Falha ao analisar a imagem com a IA. Tente novamente ou cadastre manualmente." });
     }
   });
+});
+
+// POST /api/products/smart-scan/:draftId/confirm — só aqui um produto é
+// criado de verdade. Idempotente por rascunho: um draftId já 'confirmed' não
+// pode virar um segundo produto (evita duplicar com duplo clique/retry).
+// Audita o que a IA sugeriu vs. o que o humano de fato salvou.
+router.post("/smart-scan/:draftId/confirm", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const draft = db.prepare(`SELECT * FROM product_scan_drafts WHERE id = ? AND organization_id = ?`).get(req.params.draftId, orgId) as any;
+  if (!draft) return res.status(404).json({ error: "Rascunho não encontrado." });
+  if (draft.status !== "pending") return res.status(400).json({ error: "Este rascunho já foi confirmado ou descartado." });
+
+  const { name, category, description, price, stock_control_enabled, initial_stock } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: "Informe o nome do produto." });
+  if (!(Number(price) > 0)) return res.status(400).json({ error: "Informe o preço de venda antes de publicar." });
+
+  try {
+    const id = uuidv4();
+    db.prepare(
+      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category)
+       VALUES (?, ?, 'product', ?, ?, ?, ?, ?)`
+    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null);
+
+    if (stock_control_enabled) {
+      db.prepare(
+        `INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, low_stock_threshold)
+         VALUES (?, ?, ?, ?, 0)`
+      ).run(uuidv4(), orgId, id, Math.max(0, parseInt(String(initial_stock ?? "0"), 10) || 0));
+    }
+
+    const count = (db.prepare("SELECT COUNT(*) AS c FROM product_images WHERE product_service_id = ?").get(id) as any)?.c || 0;
+    db.prepare("INSERT INTO product_images (id, organization_id, product_service_id, url, position) VALUES (?, ?, ?, ?, ?)")
+      .run(uuidv4(), orgId, id, draft.image_url, count);
+
+    db.prepare(`UPDATE product_scan_drafts SET status = 'confirmed', product_id = ?, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id, draft.id);
+
+    // Diff entre o que a IA sugeriu e o que o humano de fato publicou —
+    // alimenta futura análise de qualidade do prompt, sem bloquear nada agora.
+    let extracted: any = {};
+    try { extracted = JSON.parse(draft.raw_extraction_json || "{}").extracted || {}; } catch { /* noop */ }
+    const changedFields = ["name", "category", "description"].filter((f) => {
+      const before = (extracted as any)[f === "name" ? "name" : f] ?? null;
+      const after = f === "name" ? name : f === "category" ? category : description;
+      return String(before ?? "").trim() !== String(after ?? "").trim();
+    });
+
+    logAuthEvent(orgId, userId, id, "PRODUCT_CREATED", { name, type: "product", source: "smart_scan" });
+    logAuthEvent(orgId, userId, draft.id, "PRODUCT_SCAN_CONFIRMED", { productId: id, confidenceScore: draft.confidence_score, changedFields });
+
+    res.status(201).json({ success: true, id });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /ai/describe — curadoria pela IA: gera um título atraente e uma descrição

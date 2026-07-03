@@ -557,6 +557,51 @@ router.post("/:id/movements", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// GET /api/products/sales-analytics?days=30 — mais/menos vendidos (backlog
+// ADR-027, registrado desde a ADR-019: "o dado bruto existe em order_items,
+// nenhum relatório usa"). Mesmo filtro de status do best_sellers da vitrine
+// (só pedidos que viraram receita de verdade). Inclui produtos ativos com
+// ZERO venda no período — o "menos vendido" mais importante é o que nunca
+// vendeu e continua ocupando vitrine/estoque.
+router.get("/sales-analytics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
+  try {
+    const rows = db.prepare(`
+      SELECT ps.id, ps.name, ps.price,
+        COALESCE(s.units, 0) AS units_sold,
+        COALESCE(s.revenue, 0) AS revenue,
+        s.last_sale_at AS last_sale_at
+      FROM products_services ps
+      LEFT JOIN (
+        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue, MAX(o.created_at) last_sale_at
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
+          AND o.created_at >= datetime('now', ?)
+        GROUP BY oi.product_service_id
+      ) s ON s.product_service_id = ps.id
+      WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
+      ORDER BY units_sold DESC, revenue DESC
+    `).all(orgId, `-${days} days`, orgId) as any[];
+
+    const withSales = rows.filter((r) => r.units_sold > 0);
+    res.json({
+      days,
+      top: withSales.slice(0, 10),
+      bottom: rows.slice(-10).reverse(), // os 10 piores (inclui zero-venda), do pior pro "menos pior"
+      totals: {
+        productsActive: rows.length,
+        productsWithSales: withSales.length,
+        unitsSold: withSales.reduce((s, r) => s + r.units_sold, 0),
+        revenue: Math.round(withSales.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/products — produtos com estoque ao vivo (disponível e vendável)
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

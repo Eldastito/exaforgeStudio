@@ -34,6 +34,7 @@
     "test:backlog-inventory": "tsx scripts/test-backlog-inventory.ts",
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",
     "test:backlog-radar-infra": "tsx scripts/test-backlog-radar-infra.ts",
+    "test:sales-analytics": "tsx scripts/test-sales-analytics.ts",
     "test:supervisor": "tsx scripts/test-supervisor.ts",
     "test:vision-foundation": "tsx scripts/test-vision-foundation.ts",
     "test:vision-events": "tsx scripts/test-vision-events.ts",

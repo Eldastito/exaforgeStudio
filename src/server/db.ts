@@ -1060,6 +1060,13 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN is_supplier INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN supplier_categories TEXT`); } catch(e){} // CSV de categorias atendidas
   try { db.exec(`ALTER TABLE products_services ADD COLUMN category TEXT`); } catch(e){}    // categoria do produto (casa com a do fornecedor)
+  // Smart Inventory — backlog ADR-024: vínculo da entrada de estoque com o
+  // fornecedor do CRM (quando o nome da nota casa com um contato is_supplier=1),
+  // chave de acesso da NF-e para dedupe de importação, e markup padrão
+  // configurável para o preço sugerido (antes fixo em 40%, ADR-023).
+  try { db.exec(`ALTER TABLE stock_movements ADD COLUMN supplier_contact_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE invoice_scan_drafts ADD COLUMN access_key TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN default_markup_percent REAL`); } catch(e){}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS purchase_quotes (

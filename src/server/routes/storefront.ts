@@ -50,6 +50,17 @@ router.put("/settings", (req: AuthRequest, res): any => {
   for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published"]) {
     if (b[k] !== undefined) fields[k] = k === "published" ? (b[k] ? 1 : 0) : b[k];
   }
+  // Markup padrão do preço sugerido (ADR-024): null/vazio volta ao padrão
+  // (40%); valores fora de 1–500% são rejeitados em vez de gravados tortos.
+  if (b.default_markup_percent !== undefined) {
+    if (b.default_markup_percent === null || b.default_markup_percent === "") {
+      fields.default_markup_percent = null;
+    } else {
+      const v = Number(b.default_markup_percent);
+      if (!Number.isFinite(v) || v < 1 || v > 500) return res.status(400).json({ error: "Margem padrão deve ser um percentual entre 1 e 500." });
+      fields.default_markup_percent = v;
+    }
+  }
   // Slug: valida unicidade (não pode colidir com outra org).
   if (b.slug !== undefined) {
     const slug = slugify(b.slug);

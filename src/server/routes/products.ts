@@ -11,6 +11,7 @@ import { InventoryService } from "../InventoryService.js";
 import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } from "../llm.js";
 import { parseNFeXml } from "../nfeParser.js";
 import { suggestSalePrice } from "../pricing.js";
+import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
 
 const router = Router();
 
@@ -52,6 +53,44 @@ const xmlUpload = multer({
     cb(new Error("Envie um arquivo XML de NF-e (.xml)."));
   },
 });
+
+// Markup padrão da organização para o preço sugerido (ADR-023/ADR-024).
+// Configurável em storefront_settings.default_markup_percent; 40% quando não
+// definido. Clamp em 0–500 para uma configuração corrompida nunca gerar uma
+// sugestão absurda.
+function orgMarkup(orgId: string): number {
+  const row = db.prepare(`SELECT default_markup_percent FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
+  const v = Number(row?.default_markup_percent);
+  if (!Number.isFinite(v) || v <= 0) return 40;
+  return Math.min(500, v);
+}
+
+// Enriquece os itens extraídos de uma nota com o melhor candidato do catálogo
+// (matching aproximado, ver src/server/productMatcher.ts) — a tela de revisão
+// pré-seleciona "repor" em vez de "novo produto" quando há um match forte,
+// evitando cadastro duplicado a cada recompra. Só produtos ativos entram como
+// candidatos.
+function attachCatalogMatches(orgId: string, items: any[]): any[] {
+  const catalog = db.prepare(`SELECT id, name FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1`).all(orgId) as any[];
+  return items.map((it) => {
+    const match = findBestProductMatch(it.name, catalog);
+    return match ? { ...it, matchedProductId: match.id, matchedProductName: match.name, matchScore: Math.round(match.score * 100) / 100 } : it;
+  });
+}
+
+// Fornecedor da nota -> contato do CRM já marcado como fornecedor
+// (contacts.is_supplier=1). Só VINCULA quando o nome casa com folga — nunca
+// cria contato sozinho (contato exige canal/identificador que a nota não tem).
+function matchSupplierContact(orgId: string, supplierName: string | null): { id: string; name: string } | null {
+  if (!supplierName) return null;
+  const suppliers = db.prepare(`SELECT id, name FROM contacts WHERE organization_id = ? AND COALESCE(is_supplier, 0) = 1`).all(orgId) as any[];
+  let best: { id: string; name: string; score: number } | null = null;
+  for (const s of suppliers) {
+    const score = nameSimilarity(supplierName, s.name || "");
+    if (score >= 0.7 && (!best || score > best.score)) best = { id: s.id, name: s.name, score };
+  }
+  return best ? { id: best.id, name: best.name } : null;
+}
 
 // Rate limit simples por organização, em memória — cada scan é uma chamada
 // de IA paga; sem isso, um uso descontrolado (ou automatizado por engano)
@@ -224,19 +263,22 @@ router.post("/invoice-scan", (req: AuthRequest, res): any => {
 
       if (!items.length) return res.status(422).json({ error: "Não foi possível identificar itens de compra nesta foto. Tente uma foto mais nítida da nota fiscal." });
 
+      const supplierContact = matchSupplierContact(orgId, supplierName);
       const draftId = uuidv4();
       db.prepare(
         `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status)
          VALUES (?, ?, ?, ?, ?, ?, 'pending')`
-      ).run(draftId, orgId, userId || null, imageUrl, JSON.stringify({ supplierName, items, rawModelOutput: raw }), Number.isFinite(confidenceScore) ? confidenceScore : 0);
+      ).run(draftId, orgId, userId || null, imageUrl, JSON.stringify({ supplierName, supplierContactId: supplierContact?.id || null, items, rawModelOutput: raw }), Number.isFinite(confidenceScore) ? confidenceScore : 0);
       logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore, itemCount: items.length });
 
-      // Sugestão de preço de venda a partir do custo real da nota (markup
-      // padrão, ver src/server/pricing.ts) — sempre editável, nunca aplicada
-      // sem o humano revisar e publicar.
-      const itemsWithSuggestion = items.map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost) }));
+      // Sugestão de preço de venda a partir do custo real da nota (markup da
+      // organização, ver orgMarkup/pricing.ts) — sempre editável, nunca
+      // aplicada sem o humano revisar e publicar. matchedProductId pré-aponta
+      // reposição de um produto já existente quando o nome casa com folga.
+      const markup = orgMarkup(orgId);
+      const enriched = attachCatalogMatches(orgId, items).map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost, markup) }));
 
-      res.json({ draftId, imageUrl, supplierName, items: itemsWithSuggestion, confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 0 });
+      res.json({ draftId, imageUrl, supplierName, supplierContact, items: enriched, confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 0 });
     } catch (e: any) {
       console.error("[Invoice Scan] erro", e);
       res.status(500).json({ error: "Falha ao analisar a nota fiscal com a IA. Tente novamente ou cadastre manualmente." });
@@ -259,32 +301,66 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (scanRateLimited(orgId)) return res.status(429).json({ error: "Muitos cadastros em pouco tempo. Aguarde um minuto e tente de novo." });
 
-  xmlUpload.single("file")(req, res, (err: any) => {
+  // Aceita LOTE (até 20 XMLs de uma vez, ADR-024) — quem baixa as notas do
+  // ERP/fornecedor geralmente baixa o mês inteiro. Cada arquivo vira um
+  // rascunho independente, revisado um por vez na tela; arquivos com problema
+  // (não é NF-e, nota já importada) entram em `skipped` com o motivo, sem
+  // derrubar o lote inteiro.
+  xmlUpload.array("file", 20)(req, res, (err: any) => {
     if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
-    const file = (req as any).file;
-    if (!file) return res.status(400).json({ error: "Nenhum arquivo XML enviado." });
-    try {
-      const xmlText = file.buffer.toString("utf-8");
-      const parsed = parseNFeXml(xmlText);
-      if (!parsed.items.length) return res.status(422).json({ error: "Não foi possível identificar itens de mercadoria neste XML." });
+    const files: any[] = (req as any).files || [];
+    if (!files.length) return res.status(400).json({ error: "Nenhum arquivo XML enviado." });
 
-      // Dado estruturado direto da NF-e — não é uma "leitura" com incerteza
-      // como a foto, então confiança é sempre máxima (não há o que a IA errar).
-      const items = parsed.items.slice(0, 200).map((it) => ({ ...it, confidence: 100 }));
-      const truncated = parsed.items.length > 200;
+    const markup = orgMarkup(orgId);
+    const drafts: any[] = [];
+    const skipped: { fileName: string; error: string }[] = [];
+    const seenKeysInBatch = new Set<string>();
 
-      const draftId = uuidv4();
-      db.prepare(
-        `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status)
-         VALUES (?, ?, ?, ?, ?, 100, 'pending')`
-      ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, items, source: "xml" }));
-      logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
+    for (const file of files) {
+      const fileName = file.originalname || "arquivo.xml";
+      try {
+        const parsed = parseNFeXml(file.buffer.toString("utf-8"));
+        if (!parsed.items.length) { skipped.push({ fileName, error: "Nenhum item de mercadoria neste XML." }); continue; }
 
-      const itemsWithSuggestion = items.map((it) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost) }));
-      res.json({ draftId, imageUrl: "", supplierName: parsed.supplierName, items: itemsWithSuggestion, confidenceScore: 100, truncated });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message || "Não foi possível ler este XML." });
+        // Dedupe pela chave de acesso (44 dígitos, única por NF-e no Brasil):
+        // mesma nota já importada nesta organização — ou repetida dentro do
+        // próprio lote — é pulada com aviso, nunca reimportada em silêncio.
+        if (parsed.accessKey) {
+          if (seenKeysInBatch.has(parsed.accessKey)) { skipped.push({ fileName, error: "NF-e repetida dentro do próprio lote." }); continue; }
+          const dupe = db.prepare(
+            `SELECT id, status FROM invoice_scan_drafts WHERE organization_id = ? AND access_key = ? AND status IN ('pending', 'confirmed') LIMIT 1`
+          ).get(orgId, parsed.accessKey) as any;
+          if (dupe) {
+            skipped.push({ fileName, error: dupe.status === "confirmed" ? "Esta NF-e já foi importada e confirmada antes." : "Esta NF-e já tem uma importação pendente de revisão." });
+            continue;
+          }
+          seenKeysInBatch.add(parsed.accessKey);
+        }
+
+        // Dado estruturado direto da NF-e — não é uma "leitura" com incerteza
+        // como a foto, então confiança é sempre máxima.
+        const items = parsed.items.slice(0, 200).map((it) => ({ ...it, confidence: 100 }));
+        const truncated = parsed.items.length > 200;
+        const supplierContact = matchSupplierContact(orgId, parsed.supplierName);
+
+        const draftId = uuidv4();
+        db.prepare(
+          `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status, access_key)
+           VALUES (?, ?, ?, ?, ?, 100, 'pending', ?)`
+        ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, supplierContactId: supplierContact?.id || null, items, source: "xml" }), parsed.accessKey);
+        logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
+
+        const enriched = attachCatalogMatches(orgId, items).map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost, markup) }));
+        drafts.push({ draftId, imageUrl: "", fileName, supplierName: parsed.supplierName, supplierContact, items: enriched, confidenceScore: 100, truncated });
+      } catch (e: any) {
+        skipped.push({ fileName, error: e.message || "Não foi possível ler este XML." });
+      }
     }
+
+    if (!drafts.length) {
+      return res.status(422).json({ error: skipped[0]?.error || "Nenhum XML pôde ser importado.", skipped });
+    }
+    res.json({ drafts, skipped });
   });
 });
 
@@ -308,7 +384,12 @@ router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
   if (!items.length) return res.status(400).json({ error: "Nenhum item para confirmar." });
 
   let supplierName: string | null = null;
-  try { supplierName = JSON.parse(draft.raw_extraction_json || "{}").supplierName || null; } catch { /* noop */ }
+  let supplierContactId: string | null = null;
+  try {
+    const rawDraft = JSON.parse(draft.raw_extraction_json || "{}");
+    supplierName = rawDraft.supplierName || null;
+    supplierContactId = rawDraft.supplierContactId || null;
+  } catch { /* noop */ }
 
   const created: string[] = [];
   const restocked: string[] = [];
@@ -338,6 +419,7 @@ router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
         InventoryService.recordMovement(orgId, {
           productId, type: "entrada", quantity, unitCost,
           origin: "invoice_scan", note: supplierName ? `Nota fiscal — ${supplierName}` : "Nota fiscal", createdBy: userId,
+          supplierContactId,
         });
         logAuthEvent(orgId, userId, productId, "PRODUCT_CREATED", { name, type: "product", source: "invoice_scan" });
         created.push(productId);
@@ -349,6 +431,7 @@ router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
         InventoryService.recordMovement(orgId, {
           productId: matchedProductId, type: "entrada", quantity, unitCost,
           origin: "invoice_scan", note: supplierName ? `Nota fiscal — ${supplierName}` : "Nota fiscal", createdBy: userId,
+          supplierContactId,
         });
         db.prepare(`UPDATE products_services SET stock_control_enabled = 1 WHERE id = ? AND organization_id = ?`).run(matchedProductId, orgId);
         restocked.push(matchedProductId);
@@ -495,13 +578,14 @@ router.get("/", (req: AuthRequest, res): any => {
       WHERE ps.organization_id = ?
       ORDER BY ps.created_at DESC
     `).all(orgId) as any[];
+    const markup = orgMarkup(orgId);
     res.json(products.map(p => ({
       ...p,
       sellable: p.stock_control_enabled ? Math.max(0, (p.quantity_available || 0) - (p.quantity_reserved || 0)) : null,
       // Sugestão informativa a partir do custo médio real (Fases 1/2 do Smart
       // Inventory) — nunca substitui o preço já definido, só orienta quem
-      // está editando. Ver src/server/pricing.ts.
-      suggested_price: p.avg_cost > 0 ? suggestSalePrice(p.avg_cost) : null,
+      // está editando. Markup configurável por organização (ADR-024).
+      suggested_price: p.avg_cost > 0 ? suggestSalePrice(p.avg_cost, markup) : null,
     })));
   } catch (e: any) {
     res.status(500).json({ error: e.message });

@@ -9,6 +9,7 @@ import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
 import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } from "../llm.js";
+import { parseNFeXml } from "../nfeParser.js";
 
 const router = Router();
 
@@ -35,6 +36,19 @@ const scanUpload = multer({
       return cb(new Error("Fotos em HEIC/HEIF (padrão de câmera do iPhone) ainda não são suportadas. No iPhone: Ajustes > Câmera > Formatos > \"Mais Compatível\", ou escolha a foto já em JPG/PNG."));
     }
     cb(new Error("Formato de imagem não suportado (use PNG, JPG ou WEBP)."));
+  },
+});
+
+// Upload de XML de NF-e (Smart Inventory Fase 2, ADR-022) — arquivo pequeno,
+// sem processamento de imagem nenhum (não passa por sharp/MEDIA_DIR).
+const xmlUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB — XML de NF-e é texto, raramente passa de algumas centenas de KB
+  fileFilter: (_req, file, cb) => {
+    const okMime = ["text/xml", "application/xml", "application/octet-stream"].includes(file.mimetype);
+    const okExt = (file.originalname || "").toLowerCase().endsWith(".xml");
+    if (okMime || okExt) return cb(null, true);
+    cb(new Error("Envie um arquivo XML de NF-e (.xml)."));
   },
 });
 
@@ -220,6 +234,49 @@ router.post("/invoice-scan", (req: AuthRequest, res): any => {
     } catch (e: any) {
       console.error("[Invoice Scan] erro", e);
       res.status(500).json({ error: "Falha ao analisar a nota fiscal com a IA. Tente novamente ou cadastre manualmente." });
+    }
+  });
+});
+
+// POST /api/products/invoice-scan/xml (multipart, campo "file") — mesma ideia
+// do /invoice-scan (foto), mas a partir do XML de NF-e em vez de OCR de foto
+// (Smart Inventory Fase 2, ADR-022). Dado estruturado e assinado, muito mais
+// confiável que a foto — por isso NÃO passa pela IA (nem exige
+// isAIConfigured()): quem não tem IA configurada ainda consegue usar este
+// caminho. Devolve exatamente o mesmo formato de resposta do /invoice-scan
+// (draftId/imageUrl/supplierName/items/confidenceScore), então o restante do
+// fluxo (revisão na tela, POST /invoice-scan/:draftId/confirm) é 100%
+// reaproveitado sem nenhuma mudança — só a extração é diferente.
+router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (scanRateLimited(orgId)) return res.status(429).json({ error: "Muitos cadastros em pouco tempo. Aguarde um minuto e tente de novo." });
+
+  xmlUpload.single("file")(req, res, (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhum arquivo XML enviado." });
+    try {
+      const xmlText = file.buffer.toString("utf-8");
+      const parsed = parseNFeXml(xmlText);
+      if (!parsed.items.length) return res.status(422).json({ error: "Não foi possível identificar itens de mercadoria neste XML." });
+
+      // Dado estruturado direto da NF-e — não é uma "leitura" com incerteza
+      // como a foto, então confiança é sempre máxima (não há o que a IA errar).
+      const items = parsed.items.slice(0, 200).map((it) => ({ ...it, confidence: 100 }));
+      const truncated = parsed.items.length > 200;
+
+      const draftId = uuidv4();
+      db.prepare(
+        `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status)
+         VALUES (?, ?, ?, ?, ?, 100, 'pending')`
+      ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, items, source: "xml" }));
+      logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
+
+      res.json({ draftId, imageUrl: "", supplierName: parsed.supplierName, items, confidenceScore: 100, truncated });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || "Não foi possível ler este XML." });
     }
   });
 });

@@ -2082,6 +2082,13 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE radar_sessions ADD COLUMN public_token_expires_at DATETIME`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_sessions_public_token ON radar_sessions(public_token_hash) WHERE public_token_hash IS NOT NULL`); } catch(e){}
 
+  // Convite de respondente por link próprio (ADR-018): mesmo padrão de
+  // public_token_hash acima — token opaco só existe em texto plano no
+  // momento da criação, o banco guarda só o hash. Ver RadarRespondentService.ts.
+  try { db.exec(`ALTER TABLE radar_respondents ADD COLUMN invite_token_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE radar_respondents ADD COLUMN invite_token_expires_at DATETIME`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_respondents_invite_token ON radar_respondents(invite_token_hash) WHERE invite_token_hash IS NOT NULL`); } catch(e){}
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

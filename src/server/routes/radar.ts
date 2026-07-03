@@ -143,6 +143,14 @@ router.post("/sessions/:id/respondents", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+router.post("/sessions/:id/respondents/:respondentId/revoke", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores revogam convites." });
+  try { res.json(RadarService.revokeRespondent(orgId, req.params.id, actorId(req), req.params.respondentId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.get("/sessions/:id/evidence", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

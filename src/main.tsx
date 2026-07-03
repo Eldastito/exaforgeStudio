@@ -7,6 +7,7 @@ import { Toaster } from './components/ui/Toaster.tsx';
 import { Storefront } from './storefront/Storefront.tsx';
 import { LandingPage } from './landing/LandingPage.tsx';
 import { RadarPublicWizard } from './radar-public/RadarPublicWizard.tsx';
+import { RadarRespondentWizard } from './radar-public/RadarRespondentWizard.tsx';
 
 // Vitrine pública (loja virtual) — renderizada fora do app autenticado.
 // Qualquer URL /loja/:slug abre a landing page Glass Toggle, sem login.
@@ -14,7 +15,11 @@ const isStorefront = window.location.pathname.startsWith('/loja/');
 // Landing comercial pública (/lp) — fora do app autenticado, sem login.
 const isLanding = window.location.pathname === '/lp' || window.location.pathname.startsWith('/lp/');
 // Radar de Execução IA — diagnóstico rápido público (/radar-ia), sem login.
-const isRadarPublic = window.location.pathname === '/radar-ia' || window.location.pathname.startsWith('/radar-ia/');
+// /radar-ia/respond/:token é o convite de respondente (ADR-018) — sessão de
+// um tenant já existente, mas respondida sem login; precisa vir ANTES da
+// checagem genérica de /radar-ia/ (que cobre o diagnóstico anônimo, Fase 2).
+const isRadarRespondent = window.location.pathname.startsWith('/radar-ia/respond/');
+const isRadarPublic = !isRadarRespondent && (window.location.pathname === '/radar-ia' || window.location.pathname.startsWith('/radar-ia/'));
 
 const originalFetch = window.fetch;
 Object.defineProperty(window, 'fetch', {
@@ -42,6 +47,8 @@ createRoot(rootEl).render(
       <Storefront />
     ) : isLanding ? (
       <LandingPage />
+    ) : isRadarRespondent ? (
+      <RadarRespondentWizard />
     ) : isRadarPublic ? (
       <RadarPublicWizard />
     ) : (

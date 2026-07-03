@@ -385,6 +385,8 @@ function QuestionsView({
   session: Session; template: Template; qIndex: number; setQIndex: (n: number) => void; onBack: () => void; onDone: () => Promise<void>;
   onSessionUpdate: (s: Session) => void;
 }) {
+  const { user } = useAuth();
+  const isManager = user?.role === 'owner' || user?.role === 'admin';
   const questions = template.questions;
   const q = questions[qIndex];
   const answeredMap = useMemo(() => {
@@ -561,6 +563,8 @@ function QuestionsView({
           {saving ? <Loader2 className="animate-spin" size={18} /> : qIndex < questions.length - 1 ? <>Próxima <ArrowRight size={18} /></> : <>Ver resultado <Sparkles size={18} /></>}
         </button>
       </div>
+
+      {isManager && <RespondentsSection sessionId={session.id} />}
     </div>
   );
 }
@@ -785,16 +789,28 @@ function ResultView({ session, onBack }: { session: Session; onBack: () => void 
   );
 }
 
-type Respondent = { id: string; name: string; email: string | null; role_title: string | null; area: string | null };
+type Respondent = { id: string; name: string; email: string | null; role_title: string | null; area: string | null; status: string };
 
-// Registro de quem mais ajudou a responder o diagnóstico (Fase 3, ADR-014).
-// Só cadastro/histórico por enquanto — convite por link próprio (respondente
-// sem login) é uma peça maior, deliberadamente fora desta rodada.
+const RESPONDENT_STATUS_LABEL: Record<string, { label: string; cls: string }> = {
+  invited: { label: 'Convidado', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+  active: { label: 'Respondendo', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  completed: { label: 'Concluído', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  revoked: { label: 'Revogado', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+};
+
+// Registro de quem mais ajudou a responder o diagnóstico (Fase 3, ADR-014) +
+// convite por link próprio, sem login (Fase 3/ADR-018): o respondente recebe
+// um link opaco (mesmo padrão de segurança do diagnóstico público) e
+// responde as MESMAS 18 perguntas em nome dessa sessão — as respostas dele
+// entram na mesma média de pilar de quem já respondeu (diagnóstico coletivo,
+// não um segundo diagnóstico paralelo).
 function RespondentsSection({ sessionId }: { sessionId: string }) {
   const [respondents, setRespondents] = useState<Respondent[]>([]);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: '', roleTitle: '', area: '', email: '' });
   const [saving, setSaving] = useState(false);
+  const [newInviteUrl, setNewInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(() => {
     api(`/sessions/${sessionId}/respondents`).then((d) => setRespondents(Array.isArray(d) ? d : [])).catch(() => {});
@@ -806,14 +822,31 @@ function RespondentsSection({ sessionId }: { sessionId: string }) {
     if (!form.name.trim() || saving) return;
     setSaving(true);
     try {
-      await api(`/sessions/${sessionId}/respondents`, { method: 'POST', body: JSON.stringify(form) });
+      const result = await api(`/sessions/${sessionId}/respondents`, { method: 'POST', body: JSON.stringify(form) });
       setForm({ name: '', roleTitle: '', area: '', email: '' });
       setAdding(false);
+      const absoluteUrl = `${window.location.origin}${result.inviteUrl}`;
+      setNewInviteUrl(absoluteUrl);
+      setCopied(false);
       load();
     } catch (e: any) {
       toast.error(e.message || 'Não foi possível adicionar o respondente.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const copyInvite = () => {
+    if (!newInviteUrl) return;
+    navigator.clipboard.writeText(newInviteUrl).then(() => setCopied(true)).catch(() => toast.error('Não foi possível copiar. Selecione e copie manualmente.'));
+  };
+
+  const revoke = async (respondentId: string) => {
+    try {
+      await api(`/sessions/${sessionId}/respondents/${respondentId}/revoke`, { method: 'POST' });
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível revogar o convite.');
     }
   };
 
@@ -823,22 +856,43 @@ function RespondentsSection({ sessionId }: { sessionId: string }) {
         <h3 className="text-sm font-semibold text-white/50 uppercase tracking-wide">Respondentes</h3>
         {!adding && (
           <button onClick={() => setAdding(true)} className="text-xs text-white/50 hover:text-white/80 inline-flex items-center gap-1">
-            <Plus size={13} /> Adicionar
+            <Plus size={13} /> Convidar
           </button>
         )}
       </div>
 
+      {newInviteUrl && (
+        <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+          <p className="text-xs text-white/50 mb-1.5">Link de convite (guarde agora — não é mostrado de novo):</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs text-white/80 truncate">{newInviteUrl}</code>
+            <button onClick={copyInvite} className="text-xs px-2 py-1 rounded border border-white/15 text-white/70 hover:border-white/30 shrink-0">
+              {copied ? 'Copiado!' : 'Copiar'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {respondents.length === 0 && !adding && (
-        <p className="mt-2 text-sm text-white/40">Ninguém registrado ainda além de quem criou o diagnóstico.</p>
+        <p className="mt-2 text-sm text-white/40">Ninguém convidado ainda além de quem criou o diagnóstico.</p>
       )}
 
       {respondents.length > 0 && (
         <div className="mt-3 space-y-1.5">
-          {respondents.map((r) => (
-            <div key={r.id} className="text-sm text-white/70">
-              {r.name}{r.role_title ? ` · ${r.role_title}` : ''}{r.area ? ` · ${r.area}` : ''}
-            </div>
-          ))}
+          {respondents.map((r) => {
+            const st = RESPONDENT_STATUS_LABEL[r.status] || { label: r.status, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' };
+            return (
+              <div key={r.id} className="flex items-center justify-between gap-2 text-sm text-white/70">
+                <span>{r.name}{r.role_title ? ` · ${r.role_title}` : ''}{r.area ? ` · ${r.area}` : ''}</span>
+                <span className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${st.cls}`}>{st.label}</span>
+                  {r.status !== 'revoked' && r.status !== 'completed' && (
+                    <button onClick={() => revoke(r.id)} className="text-xs text-white/30 hover:text-red-300">Revogar</button>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 

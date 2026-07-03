@@ -10,6 +10,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
 import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } from "../llm.js";
 import { parseNFeXml } from "../nfeParser.js";
+import { suggestSalePrice } from "../pricing.js";
 
 const router = Router();
 
@@ -230,7 +231,12 @@ router.post("/invoice-scan", (req: AuthRequest, res): any => {
       ).run(draftId, orgId, userId || null, imageUrl, JSON.stringify({ supplierName, items, rawModelOutput: raw }), Number.isFinite(confidenceScore) ? confidenceScore : 0);
       logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore, itemCount: items.length });
 
-      res.json({ draftId, imageUrl, supplierName, items, confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 0 });
+      // Sugestão de preço de venda a partir do custo real da nota (markup
+      // padrão, ver src/server/pricing.ts) — sempre editável, nunca aplicada
+      // sem o humano revisar e publicar.
+      const itemsWithSuggestion = items.map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost) }));
+
+      res.json({ draftId, imageUrl, supplierName, items: itemsWithSuggestion, confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 0 });
     } catch (e: any) {
       console.error("[Invoice Scan] erro", e);
       res.status(500).json({ error: "Falha ao analisar a nota fiscal com a IA. Tente novamente ou cadastre manualmente." });
@@ -274,7 +280,8 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
       ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, items, source: "xml" }));
       logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
 
-      res.json({ draftId, imageUrl: "", supplierName: parsed.supplierName, items, confidenceScore: 100, truncated });
+      const itemsWithSuggestion = items.map((it) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost) }));
+      res.json({ draftId, imageUrl: "", supplierName: parsed.supplierName, items: itemsWithSuggestion, confidenceScore: 100, truncated });
     } catch (e: any) {
       res.status(400).json({ error: e.message || "Não foi possível ler este XML." });
     }
@@ -477,7 +484,8 @@ router.get("/", (req: AuthRequest, res): any => {
       SELECT ps.*,
         COALESCE(prod.quantity_available, agg.qa) AS quantity_available,
         COALESCE(prod.quantity_reserved, agg.qr) AS quantity_reserved,
-        prod.low_stock_threshold AS low_stock_threshold
+        prod.low_stock_threshold AS low_stock_threshold,
+        prod.avg_cost AS avg_cost
       FROM products_services ps
       LEFT JOIN inventory_items prod ON prod.product_service_id = ps.id AND prod.variant_id IS NULL
       LEFT JOIN (
@@ -490,6 +498,10 @@ router.get("/", (req: AuthRequest, res): any => {
     res.json(products.map(p => ({
       ...p,
       sellable: p.stock_control_enabled ? Math.max(0, (p.quantity_available || 0) - (p.quantity_reserved || 0)) : null,
+      // Sugestão informativa a partir do custo médio real (Fases 1/2 do Smart
+      // Inventory) — nunca substitui o preço já definido, só orienta quem
+      // está editando. Ver src/server/pricing.ts.
+      suggested_price: p.avg_cost > 0 ? suggestSalePrice(p.avg_cost) : null,
     })));
   } catch (e: any) {
     res.status(500).json({ error: e.message });

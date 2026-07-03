@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { RadarPublicService } from "../RadarPublicService.js";
+import { RadarRespondentService } from "../RadarRespondentService.js";
 
 // Rotas PÚBLICAS do diagnóstico rápido do Radar — sem login, sem
 // organização. Montadas em server.ts ANTES do bloco `protectedApi`, mesmo
@@ -94,5 +95,30 @@ router.get("/sessions/:token/result", (req, res): any => {
 function randomFakeToken(): string {
   return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 }
+
+// Convite de respondente por link próprio (ADR-018) — sessão de um tenant já
+// existente, mas quem responde não tem (nem precisa ter) login no ZappFlow.
+// Reaproveita o mesmo kill-switch/rate-limit desta rota pública; o convite em
+// si só é válido se PUBLIC_RADAR_ENABLED continuar ligado (mesma chave, para
+// não precisar de uma segunda env só pra isso).
+router.get("/respond/:token", (req, res): any => {
+  const ctx = RadarRespondentService.getByToken(req.params.token);
+  if (!ctx) return res.status(404).json({ error: "Convite expirado, revogado ou inválido." });
+  res.json(ctx);
+});
+
+router.post("/respond/:token/answers", (req, res): any => {
+  const ip = clientIp(req);
+  if (!rateLimit(`radar_respond_answer:${ip}`, 300, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: "Muitas requisições." });
+  }
+  try { res.json(RadarRespondentService.saveAnswer(req.params.token, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/respond/:token/complete", (req, res): any => {
+  try { res.json(RadarRespondentService.complete(req.params.token)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
 
 export default router;

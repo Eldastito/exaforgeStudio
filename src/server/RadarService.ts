@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import db from "./db.js";
 import { logRadarEvent } from "./radarAudit.js";
 import { PILLAR_WEIGHTS, SCORING_VERSION, Pillar, calculateAndPersist } from "./RadarScoringEngine.js";
@@ -254,12 +254,13 @@ export class RadarService {
     return this.getSession(orgId, sessionId);
   }
 
-  // Respondentes (Fase 3, ADR-014): registro de QUEM mais está ajudando a
-  // responder uma sessão além de quem a criou — só cadastro/listagem por
-  // enquanto. `radar_respondents` já existia desde a Fase 1 (radar_answers já
-  // aceita respondent_id), mas nada expunha essa tabela até agora. Convite
-  // por link próprio (respondente sem login do ZappFlow) é uma peça maior,
-  // deliberadamente fora desta rodada — ver ADR-014.
+  // Respondentes (Fase 3, ADR-014) + convite por link próprio (ADR-018):
+  // registro de QUEM mais está ajudando a responder uma sessão além de quem
+  // a criou. `radar_respondents` já existia desde a Fase 1 (radar_answers já
+  // aceita respondent_id), mas nada expunha essa tabela até a ADR-014, que
+  // cobria só cadastro/listagem. O convite (token opaco, mesmo padrão de
+  // `radar_sessions.public_token_hash`/RadarPublicService) mora aqui;
+  // respondê-lo mora em RadarRespondentService.ts (rota pública sem login).
   static listRespondents(orgId: string, sessionId: string) {
     const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
     if (!session) throw new Error("Sessão não encontrada.");
@@ -272,11 +273,27 @@ export class RadarService {
     if (!payload.name || !String(payload.name).trim()) throw new Error("Nome do respondente é obrigatório.");
 
     const id = randomUUID();
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
     db.prepare(
-      `INSERT INTO radar_respondents (id, session_id, organization_id, name, email, role_title, area, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'invited')`
-    ).run(id, sessionId, orgId, payload.name.trim(), payload.email || null, payload.roleTitle || null, payload.area || null);
+      `INSERT INTO radar_respondents (id, session_id, organization_id, name, email, role_title, area, status, invite_token_hash, invite_token_expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'invited', ?, datetime('now', '+30 days'))`
+    ).run(id, sessionId, orgId, payload.name.trim(), payload.email || null, payload.roleTitle || null, payload.area || null, tokenHash);
     logEvent(orgId, actorUserId, "radar_respondent_added", sessionId, { respondentId: id });
+
+    const respondent = db.prepare(`SELECT * FROM radar_respondents WHERE id = ?`).get(id);
+    // rawToken só existe em texto plano aqui, na resposta desta chamada — o
+    // banco guarda só o hash. Quem chama é responsável por mostrar o link
+    // pro usuário UMA vez (RadarView.tsx copia pra área de transferência).
+    return { respondent, inviteToken: rawToken, inviteUrl: `/radar-ia/respond/${rawToken}` };
+  }
+
+  static revokeRespondent(orgId: string, sessionId: string, actorUserId: string | undefined, respondentId: string) {
+    const session = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId);
+    if (!session) throw new Error("Sessão não encontrada.");
+    const result = db.prepare(`UPDATE radar_respondents SET status = 'revoked' WHERE id = ? AND session_id = ?`).run(respondentId, sessionId);
+    if (result.changes === 0) throw new Error("Respondente não encontrado.");
+    logEvent(orgId, actorUserId, "radar_respondent_revoked", sessionId, { respondentId });
     return this.listRespondents(orgId, sessionId);
   }
 

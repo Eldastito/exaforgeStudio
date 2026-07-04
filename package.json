@@ -46,7 +46,8 @@
     "test:vision-webhooks": "tsx scripts/test-vision-webhooks.ts",
     "test:vision-zone-rules": "tsx scripts/test-vision-zone-rules.ts",
     "test:whatsapp-inventory-intake": "tsx scripts/test-whatsapp-inventory-intake.ts",
-    "test:whatsapp-inventory-fase-b": "tsx scripts/test-whatsapp-inventory-fase-b.ts"
+    "test:whatsapp-inventory-fase-b": "tsx scripts/test-whatsapp-inventory-fase-b.ts",
+    "test:store-lifecycle": "tsx scripts/test-store-lifecycle.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

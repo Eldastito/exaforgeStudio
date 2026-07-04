@@ -2237,6 +2237,32 @@ const initDb = () => {
   // Rate-limit do aviso proativo de produtos sem preço/margem (só quando o
   // gestor já está conversando — nunca dispara mensagem nova só para isso).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pending_pricing_nudge_at DATETIME`); } catch(e){}
+
+  // ADR-033: ocultar automaticamente da vitrine quando o estoque zera, e
+  // restaurar ao repor — opt-in por loja ("conforme configuração do
+  // lojista"). out_of_stock_hidden distingue "escondido pelo sistema por
+  // falta de estoque" de "escondido manualmente pelo lojista" — só o próprio
+  // mecanismo restaura a visibilidade que ele mesmo tirou; uma escolha manual
+  // do lojista nunca é desfeita por uma mudança de estoque.
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN auto_hide_out_of_stock INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN out_of_stock_hidden INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-033: histórico versionado de edições pós-criação (nome/descrição/
+  // preço/categoria/visibilidade/destaque) — complementa a auditoria de
+  // eventos (auth_audit_logs) com o DIFF de cada alteração manual.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_edit_history (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        changed_by TEXT,
+        changed_fields_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_product_edit_history_product ON product_edit_history(organization_id, product_id, created_at DESC);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar product_edit_history', e); }
 };
 
 initDb();

@@ -18,6 +18,7 @@ import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { RadarService } from "./RadarService.js";
 import { FashionAvatarService } from "./FashionAvatarService.js";
+import { FashionTryOnService } from "./FashionTryOnService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -73,6 +74,8 @@ export class Scheduler {
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }
+    // Resultados de try-on vencidos (FAS-3, ADR-037): mesma janela de retenção.
+    try { FashionTryOnService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de try-on (fashion) falhou', e); }
     await this.abandonedCartPass().catch(e => console.error('[Scheduler] carrinho abandonado falhou', e));
     await this.npsPass().catch(e => console.error('[Scheduler] pesquisa de satisfação falhou', e));
     await this.memoryPass().catch(e => console.error('[Scheduler] memória do cliente falhou', e));

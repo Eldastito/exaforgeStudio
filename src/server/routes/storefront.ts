@@ -47,8 +47,8 @@ router.put("/settings", (req: AuthRequest, res): any => {
   ensureSettings(orgId);
   const b = req.body || {};
   const fields: Record<string, any> = {};
-  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published"]) {
-    if (b[k] !== undefined) fields[k] = k === "published" ? (b[k] ? 1 : 0) : b[k];
+  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled"]) {
+    if (b[k] !== undefined) fields[k] = (k === "published" || k === "ai_catalog_photos_enabled") ? (b[k] ? 1 : 0) : b[k];
   }
   // Markup padrão do preço sugerido (ADR-024): null/vazio volta ao padrão
   // (40%); valores fora de 1–500% são rejeitados em vez de gravados tortos.

@@ -2217,6 +2217,26 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_price_history_org_category ON product_price_history(organization_id, category);
     `);
   } catch(e){ console.error('[DB] Falha ao criar product_price_history', e); }
+
+  // Regras novas do cadastro por WhatsApp (Fase B): a IA nunca publica sem o
+  // humano ter decidido o preço de venda — margin_percent é o registro
+  // explícito de QUAL margem foi praticada (para reaproveitar numa reposição
+  // e avisar o dono, em vez de perguntar de novo); pricing_declined_at marca
+  // quando o lojista recusou informar preço/margem (produto fica só no
+  // controle de estoque, nunca na vitrine, até alguém completar o cadastro).
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN margin_percent REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN pricing_declined_at DATETIME`); } catch(e){}
+  // Foto de catálogo gerada pela IA do Estúdio (fundo trocado, identidade
+  // visual da loja) — separada da foto crua enviada pelo lojista
+  // (product_images) para o orquestrador saber se já existe uma versão
+  // profissional pronta e reaproveitar, sem gastar IA de novo no mesmo produto.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN studio_image_url TEXT`); } catch(e){}
+  // Opt-in por loja (decisão do produto: custa uma chamada de IA extra por
+  // produto novo, nem toda loja vai querer o custo/estilo por padrão).
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN ai_catalog_photos_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // Rate-limit do aviso proativo de produtos sem preço/margem (só quando o
+  // gestor já está conversando — nunca dispara mensagem nova só para isso).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pending_pricing_nudge_at DATETIME`); } catch(e){}
 };
 
 initDb();

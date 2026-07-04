@@ -2193,6 +2193,30 @@ const initDb = () => {
       } catch { /* lista inválida: ignora */ }
     }
   } catch(e){ /* coluna pode não existir ainda */ }
+
+  // Cadastro por foto direto no WhatsApp (backlog: "IA do negócio" separada da
+  // IA de atendimento, canal do gestor autorizado — ver ManagerInventoryIntake).
+  // Histórico de custo/margem/preço informado pelo lojista na conversa: não é
+  // aprendizado de modelo (sem treino/fine-tuning) — é um registro estruturado
+  // que cresce a cada cadastro e pode alimentar sugestões futuras (ex.: margem
+  // típica por categoria) sem depender de o produto ainda existir no catálogo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_price_history (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_id TEXT,
+        product_name TEXT NOT NULL,
+        category TEXT,
+        cost_price REAL,
+        margin_percent REAL,
+        sale_price REAL NOT NULL,
+        source TEXT NOT NULL, -- 'whatsapp_manager' | outros no futuro
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_price_history_org_category ON product_price_history(organization_id, category);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar product_price_history', e); }
 };
 
 initDb();

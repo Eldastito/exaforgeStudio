@@ -305,6 +305,67 @@ Regras rígidas: liste TODOS os itens de MERCADORIA visíveis na nota — IGNORE
 }
 
 /**
+ * Cadastro por foto direto no WhatsApp (canal do gestor/lojista, separado da
+ * IA de atendimento ao cliente): classificação BARATA e rápida (sem extrair
+ * nada ainda) — só decide se a foto é de UM produto avulso (embalagem/rótulo)
+ * ou de uma NOTA FISCAL (tabela de itens, fornecedor, total), para então
+ * chamar extractProductFromImage/extractInvoiceItems (já testados, ADR-030).
+ * 'unclear' quando a IA não tem certeza — quem chama pergunta ao gestor.
+ */
+export async function classifyInventoryPhoto(base64: string, mimetype = "image/jpeg"): Promise<"product" | "invoice" | "unclear"> {
+  const system = `Classifique a foto enviada por um lojista para cadastro de estoque. Responda SOMENTE um JSON: {"type": "product"|"invoice"|"unclear"}.
+"product": foto de UM produto/embalagem/rótulo avulso (sem tabela de itens).
+"invoice": nota fiscal, cupom fiscal ou comprovante de compra com lista de itens/fornecedor/total.
+"unclear": não dá para saber com confiança.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Classifique esta foto." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0,
+    max_tokens: 20,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  try {
+    const parsed = JSON.parse(res.choices[0]?.message?.content || "{}");
+    if (parsed.type === "product" || parsed.type === "invoice") return parsed.type;
+  } catch { /* cai no unclear */ }
+  return "unclear";
+}
+
+/**
+ * Interpreta a resposta em texto livre do gestor durante o cadastro
+ * conversacional por WhatsApp (custo pago, margem, preço de venda direto,
+ * quantidade em estoque) — o lojista pode responder tudo de uma vez
+ * ("paguei 5, quero 40% de margem, tenho 20 unidades") ou aos poucos.
+ * Só preenche o que estiver INEQUIVOCAMENTE na mensagem; nunca inventa
+ * valor para um campo que não foi mencionado (fica null/undefined).
+ */
+export async function parseInventoryReply(text: string, awaiting: string[]): Promise<{ costPrice?: number; marginPercent?: number; salePrice?: number; quantity?: number }> {
+  const system = `Extraia valores numéricos de uma resposta de lojista brasileiro sobre um produto que está cadastrando. Campos possíveis: costPrice (quanto pagou/custo), marginPercent (margem de lucro em %), salePrice (preço de venda final, se ele disse direto), quantity (quantidade em estoque, unidades inteiras). Responda SOMENTE um JSON só com os campos que a mensagem realmente informa (omita o resto, NUNCA invente ou assuma um valor não dito). Campos que a IA está aguardando nesta pergunta: ${awaiting.join(", ")}.`;
+  const raw = await chat(text, { json: true, temperature: 0, system });
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    const out: { costPrice?: number; marginPercent?: number; salePrice?: number; quantity?: number } = {};
+    if (Number.isFinite(Number(parsed.costPrice)) && Number(parsed.costPrice) > 0) out.costPrice = Number(parsed.costPrice);
+    if (Number.isFinite(Number(parsed.marginPercent)) && Number(parsed.marginPercent) >= 0) out.marginPercent = Number(parsed.marginPercent);
+    if (Number.isFinite(Number(parsed.salePrice)) && Number(parsed.salePrice) > 0) out.salePrice = Number(parsed.salePrice);
+    if (Number.isFinite(Number(parsed.quantity)) && Number(parsed.quantity) >= 0) out.quantity = Math.round(Number(parsed.quantity));
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * "Olhos" do atendimento: analisa uma imagem recebida, CLASSIFICA (documento vs
  * foto comum) e, quando for documento (comprovante de PIX, nota fiscal, recibo,
  * receita, boleto…), extrai os dados-chave. Retorna um texto pronto para a IA

@@ -20,6 +20,8 @@ type StorefrontSettings = {
   default_markup_percent?: number | null;
   ai_catalog_photos_enabled?: boolean;
   auto_hide_out_of_stock?: boolean;
+  fashion_studio_enabled?: boolean;
+  fashion_daily_generation_limit?: number | null;
 };
 
 type SaleMode = 'unit' | 'slice' | 'size' | 'weight' | 'volume';
@@ -51,6 +53,8 @@ const emptySettings: StorefrontSettings = {
   published: false,
   ai_catalog_photos_enabled: false,
   auto_hide_out_of_stock: false,
+  fashion_studio_enabled: false,
+  fashion_daily_generation_limit: 3,
 };
 
 function getOrigin(): string {
@@ -199,6 +203,7 @@ export function StorefrontSettingsView() {
           published: !!data.published,
           ai_catalog_photos_enabled: !!data.ai_catalog_photos_enabled,
           auto_hide_out_of_stock: !!data.auto_hide_out_of_stock,
+          fashion_studio_enabled: !!data.fashion_studio_enabled,
           default_mode: (data.default_mode === 'night' ? 'night' : 'day'),
         });
       })
@@ -237,6 +242,8 @@ export function StorefrontSettingsView() {
           default_markup_percent: settings.default_markup_percent ?? null,
           ai_catalog_photos_enabled: settings.ai_catalog_photos_enabled,
           auto_hide_out_of_stock: settings.auto_hide_out_of_stock,
+          fashion_studio_enabled: settings.fashion_studio_enabled,
+          fashion_daily_generation_limit: settings.fashion_daily_generation_limit ?? null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -247,6 +254,7 @@ export function StorefrontSettingsView() {
           published: !!data.published,
           ai_catalog_photos_enabled: !!data.ai_catalog_photos_enabled,
           auto_hide_out_of_stock: !!data.auto_hide_out_of_stock,
+          fashion_studio_enabled: !!data.fashion_studio_enabled,
           default_mode: (data.default_mode === 'night' ? 'night' : 'day'),
         });
         toast.success('Configurações da loja salvas.');
@@ -471,6 +479,44 @@ export function StorefrontSettingsView() {
                     }`}
                   />
                 </button>
+              </div>
+
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-100">Provador Virtual (Fashion AI Studio)</p>
+                    <p className="text-xs text-zinc-500">Habilita o provador virtual e a consultora de looks na vitrine (em implantação por fases). Desligar aqui desativa o recurso inteiro na hora.</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!!settings.fashion_studio_enabled}
+                    onClick={() => setField('fashion_studio_enabled', !settings.fashion_studio_enabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      settings.fashion_studio_enabled ? 'bg-indigo-600' : 'bg-zinc-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        settings.fashion_studio_enabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                {settings.fashion_studio_enabled && (
+                  <div className="mt-3">
+                    <Field label="Limite diário de imagens geradas por cliente">
+                      <input
+                        className={inputClass}
+                        type="number" min={1} max={20} step={1}
+                        value={settings.fashion_daily_generation_limit ?? ''}
+                        onChange={(e) => setField('fashion_daily_generation_limit', e.target.value === '' ? null : Number(e.target.value))}
+                        placeholder="3 (padrão)"
+                      />
+                      <p className="text-[11px] text-zinc-500 mt-1">Cada imagem do provador custa uma chamada de IA — o limite protege o custo e evita abuso.</p>
+                    </Field>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2">

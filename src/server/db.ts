@@ -2263,6 +2263,147 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_product_edit_history_product ON product_edit_history(organization_id, product_id, created_at DESC);
     `);
   } catch(e){ console.error('[DB] Falha ao criar product_edit_history', e); }
+
+  // ===== Fashion AI Studio — FAS-0, fundação (ADR-034 / PRD-E-006) =====
+  // Flag por loja (desligada por padrão; o próprio toggle é o kill switch do
+  // RF-035) e limite diário de gerações (RF-031, padrão 3 — só será consumido
+  // a partir do FAS-3; criado agora para o contrato de configuração nascer
+  // completo). Nenhuma tabela abaixo tem caminho de escrita público ainda —
+  // o schema nasce na fundação para as fases seguintes não precisarem de
+  // migration coordenada com código em produção.
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_studio_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_daily_generation_limit INTEGER DEFAULT 3`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fashion_customer_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,            -- conta de cliente do provador (FAS-1); vira lead (contacts) no cadastro
+        personalization_enabled INTEGER DEFAULT 0, -- 0 até consentimento explícito (RF-002)
+        preference_version INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deleted_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_profiles_org_customer ON fashion_customer_profiles(organization_id, customer_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_preferences (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        preference_type TEXT NOT NULL,        -- color_like | color_avoid | style_like | fit_avoid | budget_range | occasion ...
+        value_json TEXT,
+        source TEXT NOT NULL,                 -- explicit | observed | purchase | feedback
+        confidence REAL,                      -- só para sinal observado; dado explícito não tem
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_prefs_profile ON fashion_preferences(organization_id, profile_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_avatar_assets (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        storage_key TEXT,                     -- NUNCA um caminho público /media (storage privado nasce no FAS-1)
+        status TEXT DEFAULT 'quarantined',    -- quarantined | approved | rejected | expired | deleted
+        safety_report_json TEXT,              -- sem imagem bruta (RNF-004)
+        consent_id TEXT,
+        expires_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deleted_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_avatars_org_customer ON fashion_avatar_assets(organization_id, customer_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_look_requests (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        avatar_id TEXT,
+        occasion TEXT,
+        answers_json TEXT,
+        generation_window TEXT,               -- ex.: '2026-07-04'
+        credits_reserved INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'draft',          -- draft | submitted | completed | failed | cancelled
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_requests_org_customer ON fashion_look_requests(organization_id, customer_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_looks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        explanation TEXT,
+        source TEXT DEFAULT 'ai_recommended', -- customer_selected | ai_recommended
+        status TEXT DEFAULT 'candidate',      -- candidate | selected | generated | failed | archived
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_looks_request ON fashion_looks(organization_id, request_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_look_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        look_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,     -- FK do catálogo real (products_services) — nunca duplicar catálogo
+        variant_id TEXT,
+        role TEXT DEFAULT 'main',             -- main | bottom | outerwear | shoes | accessory
+        quantity INTEGER DEFAULT 1,
+        price_snapshot REAL                   -- para a explicação; o checkout SEMPRE revalida preço/estoque
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_look_items_look ON fashion_look_items(organization_id, look_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_tryon_jobs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        look_id TEXT NOT NULL,
+        provider_key TEXT,                    -- provedor plugável (ADR candidata A do PRD) — decidido no FAS-3
+        provider_job_id TEXT,
+        status TEXT DEFAULT 'CREATED',        -- CREATED..DELETED (seção 9.4 do PRD)
+        input_hash TEXT,                      -- idempotência
+        output_storage_key TEXT,              -- privado; nunca /media público
+        error_code TEXT,
+        error_message_safe TEXT,
+        started_at DATETIME,
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_jobs_org_customer ON fashion_tryon_jobs(organization_id, customer_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_usage_credits (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        window_start DATETIME NOT NULL,
+        window_end DATETIME NOT NULL,
+        limit_total INTEGER NOT NULL,
+        used_count INTEGER DEFAULT 0,
+        reserved_count INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_credits_org_customer ON fashion_usage_credits(organization_id, customer_id, window_start);
+
+      CREATE TABLE IF NOT EXISTS fashion_consents (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        consent_type TEXT NOT NULL,           -- avatar_processing | personalization | whatsapp_notification | guardian_approval (menor via conta do responsável)
+        policy_version TEXT,
+        granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        revoked_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_consents_org_customer ON fashion_consents(organization_id, customer_id);
+
+      CREATE TABLE IF NOT EXISTS fashion_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        customer_id TEXT,
+        event_type TEXT NOT NULL,             -- FashionLookRequested, FashionTryOnSucceeded... (seção 17 do PRD)
+        payload_json TEXT,                    -- nunca conteúdo visual/base64 (RNF-004)
+        correlation_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_events_org_type ON fashion_events(organization_id, event_type, created_at DESC);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas do Fashion AI Studio', e); }
 };
 
 initDb();

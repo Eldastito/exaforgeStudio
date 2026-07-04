@@ -207,6 +207,28 @@ router.post("/looks/:id/save", requireCustomer, (req: FashionRequest, res): any 
   res.json({ ok: true });
 });
 
+// POST /api/public/fashion/looks/:id/feedback — gostei / não gostei / não usaria (FAS-5, 11.2)
+router.post("/looks/:id/feedback", requireCustomer, (req: FashionRequest, res): any => {
+  const result = FashionLookService.recordLookFeedback(req.fashionOrgId!, req.fashionCustomerId!, req.params.id, String(req.body?.verdict || ""));
+  if (!result.ok) return res.status(400).json({ error: (result as any).error });
+  res.json({ ok: true });
+});
+
+// GET /api/public/fashion/profile — personalização + preferências (11.4)
+router.get("/profile", requireCustomer, (req: FashionRequest, res): any => {
+  res.json({
+    personalizationEnabled: FashionLookService.personalizationEnabled(req.fashionOrgId!, req.fashionCustomerId!),
+    preferences: FashionLookService.listPreferences(req.fashionOrgId!, req.fashionCustomerId!),
+  });
+});
+
+// PATCH /api/public/fashion/profile — liga/desliga a personalização (11.4)
+router.patch("/profile", requireCustomer, (req: FashionRequest, res): any => {
+  if (req.body?.personalizationEnabled === undefined) return res.status(400).json({ error: "Nada para alterar." });
+  FashionLookService.setPersonalization(req.fashionOrgId!, req.fashionCustomerId!, !!req.body.personalizationEnabled);
+  res.json({ ok: true, personalizationEnabled: !!req.body.personalizationEnabled });
+});
+
 // GET /api/public/fashion/profile/preferences — a cliente vê o que foi salvo (11.4)
 router.get("/profile/preferences", requireCustomer, (req: FashionRequest, res): any => {
   res.json({ preferences: FashionLookService.listPreferences(req.fashionOrgId!, req.fashionCustomerId!) });

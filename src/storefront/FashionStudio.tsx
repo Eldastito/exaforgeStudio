@@ -13,7 +13,8 @@ import { hexToRgba, lsGet, lsSet } from './utils';
 // validação -> status. As próximas fases (looks/geração) plugam aqui.
 // ============================================================================
 
-type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks' | 'shared';
+type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks' | 'shared' | 'prefs';
+type Preference = { id: string; type: string; value: any };
 type Avatar = { id: string; status: string; url: string | null; expiresAt: string | null };
 type Me = { name: string; email: string; consents: { avatar_processing: boolean }; avatars: Avatar[]; retentionDays: number };
 type LookItem = { productId: string; name: string; price: number; image: string | null; role: string };
@@ -87,6 +88,55 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
   // ---- consultora por ocasião (FAS-2) ----
   const [quiz, setQuiz] = useState({ occasion: '', dayNight: '', style: '', colorsAvoid: '', piecesAvoid: '', budgetMax: '' });
   const [looks, setLooks] = useState<Look[]>([]);
+
+  // ---- memória de estilo (FAS-5) ----
+  const [prefs, setPrefs] = useState<Preference[]>([]);
+  const [personalization, setPersonalization] = useState(true);
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<string, string>>({});
+
+  async function loadProfile() {
+    const r = await api('/profile', {}, token);
+    if (!r.ok) return null;
+    setPrefs(r.data.preferences || []);
+    setPersonalization(!!r.data.personalizationEnabled);
+    return r.data;
+  }
+
+  // Cliente recorrente (J-004): abrir o quiz pré-preenche com as preferências
+  // salvas — ocasião sempre em branco (é o contexto de HOJE).
+  async function openQuiz() {
+    setError('');
+    const p = await loadProfile();
+    if (p?.personalizationEnabled && (p.preferences || []).length) {
+      const byType = (t: string) => (p.preferences as Preference[]).filter((x) => x.type === t).map((x) => x.value);
+      setQuiz((q) => ({
+        ...q,
+        occasion: '',
+        style: q.style || byType('style_like')[0] || '',
+        colorsAvoid: q.colorsAvoid || byType('color_avoid').join(', '),
+        piecesAvoid: q.piecesAvoid || byType('fit_avoid').join(', '),
+        budgetMax: q.budgetMax || (byType('budget_range')[0]?.max ? String(byType('budget_range')[0].max) : ''),
+      }));
+    }
+    setStep('quiz');
+  }
+
+  async function sendFeedback(lookId: string, verdict: string) {
+    const r = await api(`/looks/${lookId}/feedback`, { method: 'POST', body: JSON.stringify({ verdict }) }, token);
+    if (!r.ok) { setError(r.data?.error || 'Não foi possível registrar.'); return; }
+    setFeedbackGiven((f) => ({ ...f, [lookId]: verdict }));
+  }
+
+  async function togglePersonalization() {
+    const next = !personalization;
+    const r = await api('/profile', { method: 'PATCH', body: JSON.stringify({ personalizationEnabled: next }) }, token);
+    if (r.ok) setPersonalization(next);
+  }
+
+  async function deletePref(id: string) {
+    await api(`/profile/preferences/${id}`, { method: 'DELETE' }, token);
+    setPrefs((p) => p.filter((x) => x.id !== id));
+  }
 
   async function submitQuiz() {
     if (!quiz.occasion.trim()) { setError('Conte para a consultora qual é a ocasião.'); return; }
@@ -371,8 +421,11 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                       {approved.url && (
                         <img src={approved.url} alt="Sua foto do provador" className="mx-auto max-h-64 rounded-2xl object-contain" />
                       )}
-                      <button type="button" className={primaryBtn} style={{ background: accent }} onClick={() => { setError(''); setStep('quiz'); }}>
+                      <button type="button" className={primaryBtn} style={{ background: accent }} onClick={openQuiz}>
                         Montar meu look por ocasião
+                      </button>
+                      <button type="button" className="w-full text-center text-xs opacity-60 underline-offset-2 hover:underline" onClick={async () => { await loadProfile(); setStep('prefs'); }}>
+                        Minhas preferências e personalização
                       </button>
                       <div className="flex gap-2">
                         <button type="button" className="flex-1 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: hexToRgba(accent, 0.4) }} onClick={() => setStep('guide')}>
@@ -484,10 +537,62 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                           {shareCopied === look.id ? '✓ Link copiado' : 'Compartilhar'}
                         </button>
                       </div>
+                      <div className="mt-2 flex items-center justify-center gap-2 text-[11px]">
+                        {feedbackGiven[look.id] ? (
+                          <span className="opacity-60">Obrigada pelo feedback! ✓</span>
+                        ) : (
+                          <>
+                            <span className="opacity-50">Esse look:</span>
+                            <button type="button" className="rounded-full border px-2 py-0.5 opacity-70 hover:opacity-100" style={{ borderColor: hexToRgba(accent, 0.3) }} onClick={() => sendFeedback(look.id, 'liked')}>👍 Gostei</button>
+                            <button type="button" className="rounded-full border px-2 py-0.5 opacity-70 hover:opacity-100" style={{ borderColor: hexToRgba(accent, 0.3) }} onClick={() => sendFeedback(look.id, 'disliked')}>👎 Não gostei</button>
+                            <button type="button" className="rounded-full border px-2 py-0.5 opacity-70 hover:opacity-100" style={{ borderColor: hexToRgba(accent, 0.3) }} onClick={() => sendFeedback(look.id, 'would_not_wear')}>🚫 Não usaria</button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {credits && <p className="text-center text-[11px] opacity-50">{credits.available} de {credits.limit} prévias restantes hoje.</p>}
                   <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('quiz')}>Ajustar respostas</button>
+                </div>
+              )}
+
+              {step === 'prefs' && (
+                <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+                  <h3 className="text-sm font-semibold">Minhas preferências</h3>
+                  <div className="flex items-center justify-between rounded-xl border px-3 py-2" style={{ borderColor: hexToRgba(accent, 0.3) }}>
+                    <div>
+                      <p className="text-xs font-semibold">Personalização</p>
+                      <p className="text-[11px] opacity-60">Ligada: suas respostas e feedbacks melhoram as próximas sugestões. Desligada: nada é salvo nem usado.</p>
+                    </div>
+                    <button type="button" role="switch" aria-checked={personalization} onClick={togglePersonalization}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${personalization ? '' : 'bg-zinc-600'}`}
+                      style={personalization ? { background: accent } : {}}>
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${personalization ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {prefs.length === 0 ? (
+                    <p className="text-xs opacity-60">Nenhuma preferência salva ainda — responda o questionário para começar.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {prefs.map((p) => (
+                        <div key={p.id} className="flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs" style={{ borderColor: hexToRgba(accent, 0.2) }}>
+                          <span className="flex-1">
+                            {p.type === 'occasion' ? `Ocasião: ${p.value}` :
+                             p.type === 'style_like' ? `Estilo: ${p.value}` :
+                             p.type === 'color_avoid' ? `Evita a cor: ${p.value}` :
+                             p.type === 'fit_avoid' ? `Evita: ${p.value}` :
+                             p.type === 'budget_range' ? `Orçamento: até R$ ${p.value?.max}` :
+                             p.type === 'look_feedback' ? `Feedback de look: ${p.value?.verdict === 'liked' ? 'gostei' : p.value?.verdict === 'disliked' ? 'não gostei' : 'não usaria'}${p.value?.categories?.length ? ` (${p.value.categories.join(', ')})` : ''}` :
+                             `${p.type}`}
+                          </span>
+                          <button type="button" className="text-red-500/70 hover:text-red-500" onClick={() => deletePref(p.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('status')}>Voltar</button>
                 </div>
               )}
 

@@ -92,6 +92,98 @@ export class FashionLookService {
     return r.changes > 0;
   }
 
+  // ---- memória de estilo (FAS-5, ADR-039 — seção 11 do PRD) ----
+
+  /** Personalização ligada? Sem perfil ainda = ligada (o primeiro questionário cria com o aceite). */
+  static personalizationEnabled(orgId: string, customerId: string): boolean {
+    const profile = db.prepare(`SELECT personalization_enabled FROM fashion_customer_profiles WHERE organization_id = ? AND customer_id = ? AND deleted_at IS NULL`).get(orgId, customerId) as any;
+    return profile ? !!profile.personalization_enabled : true;
+  }
+
+  /**
+   * Desligar personalização (11.4): o sistema PARA de salvar e de usar a
+   * memória — mas NÃO apaga nada (apagar é o outro controle, delete-all).
+   * Religar volta a usar o que já existia.
+   */
+  static setPersonalization(orgId: string, customerId: string, enabled: boolean): void {
+    const profileId = this.ensureProfile(orgId, customerId);
+    db.prepare(`UPDATE fashion_customer_profiles SET personalization_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(enabled ? 1 : 0, profileId);
+    if (enabled) {
+      if (!FashionAvatarService.activeConsent(orgId, customerId, "personalization")) {
+        FashionAvatarService.grantConsent(orgId, customerId, "personalization", "v1-2026-07");
+      }
+    } else {
+      // Revoga só o consentimento de personalização — avatar não é afetado.
+      db.prepare(`UPDATE fashion_consents SET revoked_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND customer_id = ? AND consent_type = 'personalization' AND revoked_at IS NULL`).run(orgId, customerId);
+      FashionStudioService.recordEvent(orgId, "FashionConsentRevoked", { consentType: "personalization" }, customerId);
+    }
+  }
+
+  /**
+   * Feedback explícito de look (11.2: gostei / não gostei / não usaria) —
+   * vira sinal de memória com as CATEGORIAS das peças (nunca inferência de
+   * atributo sensível, 11.3). Recusado com aviso quando a personalização
+   * está desligada: sem aceite, nada é gravado.
+   */
+  static recordLookFeedback(orgId: string, customerId: string, lookId: string, verdict: string):
+    { ok: true } | { ok: false; error: string } {
+    if (!["liked", "disliked", "would_not_wear"].includes(verdict)) return { ok: false, error: "Feedback inválido." };
+    const look = db.prepare(
+      `SELECT fl.id FROM fashion_looks fl JOIN fashion_look_requests flr ON flr.id = fl.request_id
+       WHERE fl.id = ? AND fl.organization_id = ? AND flr.customer_id = ?`
+    ).get(lookId, orgId, customerId) as any;
+    if (!look) return { ok: false, error: "Look não encontrado." };
+    if (!this.personalizationEnabled(orgId, customerId)) {
+      return { ok: false, error: "Sua personalização está desligada — ligue-a no seu perfil para o feedback contar nas próximas sugestões." };
+    }
+    const categories = (db.prepare(
+      `SELECT DISTINCT ps.category FROM fashion_look_items fli JOIN products_services ps ON ps.id = fli.product_service_id
+       WHERE fli.look_id = ? AND fli.organization_id = ? AND ps.category IS NOT NULL`
+    ).all(lookId, orgId) as any[]).map((r) => r.category);
+
+    const profileId = this.ensureProfile(orgId, customerId);
+    // Um feedback por look: o mais recente substitui (a cliente mudou de ideia).
+    db.prepare(`UPDATE fashion_preferences SET active = 0 WHERE organization_id = ? AND profile_id = ? AND preference_type = 'look_feedback' AND active = 1 AND value_json LIKE ?`)
+      .run(orgId, profileId, `%"lookId":"${lookId}"%`);
+    db.prepare(`INSERT INTO fashion_preferences (id, organization_id, profile_id, preference_type, value_json, source, active) VALUES (?, ?, ?, 'look_feedback', ?, 'feedback', 1)`)
+      .run(uuidv4(), orgId, profileId, JSON.stringify({ lookId, verdict, categories }));
+    FashionStudioService.recordEvent(orgId, "FashionPreferenceSaved", { types: ["look_feedback"], verdict }, customerId, lookId);
+    return { ok: true };
+  }
+
+  /**
+   * Resumo da memória observada (11.2): categorias curtidas/recusadas pelo
+   * feedback + categorias COMPRADAS (pedidos com atribuição look->pedido do
+   * FAS-4, encadeados até esta cliente). Determinístico e transparente —
+   * exatamente o que alimenta o prompt da recomendação, nada além.
+   */
+  static styleMemorySummary(orgId: string, customerId: string): { likedCategories: string[]; rejectedCategories: string[]; purchasedCategories: string[] } {
+    const profile = db.prepare(`SELECT id FROM fashion_customer_profiles WHERE organization_id = ? AND customer_id = ? AND deleted_at IS NULL`).get(orgId, customerId) as any;
+    const liked = new Set<string>(), rejected = new Set<string>();
+    if (profile) {
+      const rows = db.prepare(`SELECT value_json FROM fashion_preferences WHERE organization_id = ? AND profile_id = ? AND preference_type = 'look_feedback' AND active = 1`).all(orgId, profile.id) as any[];
+      for (const r of rows) {
+        try {
+          const v = JSON.parse(r.value_json);
+          for (const c of v.categories || []) {
+            if (v.verdict === "liked") liked.add(c);
+            else if (v.verdict === "would_not_wear") rejected.add(c);
+          }
+        } catch { /* noop */ }
+      }
+    }
+    const purchased = (db.prepare(
+      `SELECT DISTINCT ps.category
+       FROM orders o
+       JOIN fashion_looks fl ON fl.id = o.fashion_look_id
+       JOIN fashion_look_requests flr ON flr.id = fl.request_id
+       JOIN order_items oi ON oi.order_id = o.id
+       JOIN products_services ps ON ps.id = oi.product_service_id
+       WHERE o.organization_id = ? AND flr.customer_id = ? AND ps.category IS NOT NULL`
+    ).all(orgId, customerId) as any[]).map((r) => r.category);
+    return { likedCategories: [...liked], rejectedCategories: [...rejected], purchasedCategories: [...new Set(purchased)] };
+  }
+
   // ---- filtros determinísticos (rede de segurança sobre a IA) ----
 
   /** O nome do item contém alguma palavra evitada (cor/peça)? Normalizado, sem acento. */
@@ -195,12 +287,20 @@ export class FashionLookService {
     const eligible = FashionStudioService.eligibleItems(orgId) as EligibleItem[];
     if (!eligible.length) return { ok: false, error: "A loja ainda não tem peças disponíveis para montar looks." };
 
-    // Responder o questionário é o ato explícito de personalização — registra
-    // o consentimento de personalização (revogável) e salva as preferências.
-    if (!FashionAvatarService.activeConsent(orgId, customerId, "personalization")) {
-      FashionAvatarService.grantConsent(orgId, customerId, "personalization", "v1-2026-07");
+    // Memória de estilo (FAS-5): só participa quando a personalização está
+    // LIGADA (11.4) — desligada, o questionário funciona normalmente mas nada
+    // é salvo nem usado além das respostas desta sessão.
+    const personalization = this.personalizationEnabled(orgId, customerId);
+    let memory: { likedCategories: string[]; rejectedCategories: string[]; purchasedCategories: string[] } | null = null;
+    if (personalization) {
+      // Responder o questionário é o ato explícito de personalização — registra
+      // o consentimento (revogável) e salva as preferências.
+      if (!FashionAvatarService.activeConsent(orgId, customerId, "personalization")) {
+        FashionAvatarService.grantConsent(orgId, customerId, "personalization", "v1-2026-07");
+      }
+      this.savePreferencesFromAnswers(orgId, customerId, answers);
+      memory = this.styleMemorySummary(orgId, customerId);
     }
-    this.savePreferencesFromAnswers(orgId, customerId, answers);
 
     const requestId = uuidv4();
     db.prepare(
@@ -216,7 +316,12 @@ export class FashionLookService {
       try {
         const catalogLines = eligible.slice(0, 120).map((e) => `${e.id} | ${e.name} | ${e.category || "sem categoria"} | R$ ${e.price.toFixed(2)}`).join("\n");
         const system = `Você é uma consultora de moda de uma loja brasileira. Monte looks APENAS com itens da lista fornecida, referenciando-os pelo ID exato. Regras rígidas: nunca invente itens, características, tecidos ou benefícios; nunca comente corpo, peso, beleza ou aparência da cliente; nunca use "perfeito para você" ou "ideal para seu corpo"; a explicação cita só o que a cliente declarou (ocasião, estilo, orçamento) e dados reais do item (nome, categoria, preço). Responda SOMENTE JSON.`;
-        const prompt = `Itens disponíveis (id | nome | categoria | preço):\n${catalogLines}\n\nCliente respondeu: ocasião=${occasion}; período=${answers.dayNight || "não informado"}; estilo=${answers.style || "não informado"}; cores a evitar=${(answers.colorsAvoid || []).join(", ") || "nenhuma"}; peças a evitar=${(answers.piecesAvoid || []).join(", ") || "nenhuma"}; orçamento máximo do look=${answers.budgetMax ? `R$ ${answers.budgetMax}` : "não informado"}.\n\nMonte até 3 looks completos (1 a 5 itens cada, papéis: main, bottom, outerwear, shoes, accessory). Responda: {"looks":[{"items":[{"id":"...","role":"main"}],"explanation":"1-2 frases"}]}`;
+        // Memória observada (11.2): entra como CONTEXTO da consultora — nunca
+        // como rótulo. A explicação continua citando só o que a cliente declarou.
+        const memoryLine = memory && (memory.likedCategories.length || memory.rejectedCategories.length || memory.purchasedCategories.length)
+          ? `\nHistórico (com aceite da cliente): gostou de looks com ${memory.likedCategories.join(", ") || "—"}; não usaria ${memory.rejectedCategories.join(", ") || "—"}; já comprou ${memory.purchasedCategories.join(", ") || "—"}. Use como orientação sutil, priorize sempre o que ela declarou HOJE.`
+          : "";
+        const prompt = `Itens disponíveis (id | nome | categoria | preço):\n${catalogLines}\n\nCliente respondeu: ocasião=${occasion}; período=${answers.dayNight || "não informado"}; estilo=${answers.style || "não informado"}; cores a evitar=${(answers.colorsAvoid || []).join(", ") || "nenhuma"}; peças a evitar=${(answers.piecesAvoid || []).join(", ") || "nenhuma"}; orçamento máximo do look=${answers.budgetMax ? `R$ ${answers.budgetMax}` : "não informado"}.${memoryLine}\n\nMonte até 3 looks completos (1 a 5 itens cada, papéis: main, bottom, outerwear, shoes, accessory). Responda: {"looks":[{"items":[{"id":"...","role":"main"}],"explanation":"1-2 frases"}]}`;
         const raw = await chat(prompt, { json: true, temperature: 0.4, system });
         let parsed: any = {};
         try { parsed = JSON.parse(raw || "{}"); } catch { /* fica {} */ }
@@ -225,7 +330,15 @@ export class FashionLookService {
         console.error("[FashionLook] IA falhou ao compor looks; usando fallback:", e);
       }
     }
-    if (!looks.length) looks = this.fallbackCompose(eligible, answers);
+    if (!looks.length) {
+      // Fallback com memória: categoria marcada como "não usaria" sai do
+      // conjunto — o único uso determinístico da memória (o resto é contexto
+      // da IA). Se a exclusão zerar as opções, tenta sem ela: melhor sugerir
+      // algo do que nada.
+      const rejectedSet = new Set(memory?.rejectedCategories || []);
+      const filtered = rejectedSet.size ? eligible.filter((e) => !rejectedSet.has(e.category || "")) : eligible;
+      looks = this.fallbackCompose(filtered.length ? filtered : eligible, answers);
+    }
     if (!looks.length) {
       db.prepare(`UPDATE fashion_look_requests SET status = 'failed' WHERE id = ?`).run(requestId);
       return { ok: false, error: "Não encontramos peças que combinem com o que você pediu. Tente ajustar a faixa de preço ou as restrições." };

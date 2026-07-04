@@ -37,6 +37,7 @@
     "test:sales-analytics": "tsx scripts/test-sales-analytics.ts",
     "test:backlog-loja": "tsx scripts/test-backlog-loja.ts",
     "test:nfe-signature": "tsx scripts/test-nfe-signature.ts",
+    "validate:ai-vision": "tsx scripts/validate-ai-vision.ts",
     "test:supervisor": "tsx scripts/test-supervisor.ts",
     "test:vision-foundation": "tsx scripts/test-vision-foundation.ts",
     "test:vision-events": "tsx scripts/test-vision-events.ts",

@@ -2133,6 +2133,52 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE radar_respondents ADD COLUMN invite_token_expires_at DATETIME`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_respondents_invite_token ON radar_respondents(invite_token_hash) WHERE invite_token_hash IS NOT NULL`); } catch(e){}
 
+  // SLA por canal (backlog ADR-026, deixado de fora na ADR-010): JSON
+  // { channel_id: segundos } — canal sem entrada herda o limiar único da
+  // organização (slow_response_seconds).
+  try { db.exec(`ALTER TABLE revenue_intelligence_config ADD COLUMN sla_by_channel_json TEXT`); } catch(e){}
+
+  // Integridade de radar_answers (backlog ADR-026): sem índice único, duas
+  // escritas simultâneas da mesma resposta podiam duplicar a linha (o
+  // SELECT-depois-INSERT antigo de saveAnswer não era atômico). Dedupe antes
+  // (mantém a linha mais recente) e trava com índices únicos parciais —
+  // parciais porque respondent_id NULL (fluxo autenticado) precisa de
+  // unicidade própria, e UNIQUE normal em SQLite trata NULLs como distintos.
+  try {
+    db.exec(`
+      DELETE FROM radar_answers WHERE rowid NOT IN (
+        SELECT MAX(rowid) FROM radar_answers
+        GROUP BY session_id, question_id, COALESCE(respondent_id, '')
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_answers_unique_null
+        ON radar_answers(session_id, question_id) WHERE respondent_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_radar_answers_unique_resp
+        ON radar_answers(session_id, question_id, respondent_id) WHERE respondent_id IS NOT NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao deduplicar/indexar radar_answers', e); }
+
+  // Slug por PRODUTO (backlog ADR-028, itens 32+33 — antes só a LOJA tinha
+  // slug): URL própria por produto na vitrine + meta tags para SEO. Backfill
+  // idempotente para produtos existentes; produtos novos ganham slug na
+  // criação (routes/products.ts) com fallback preguiçoso na vitrine pública.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN slug TEXT`); } catch(e){}
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_org_slug ON products_services(organization_id, slug) WHERE slug IS NOT NULL`);
+    const slugifyLocal = (s: string) => String(s || "")
+      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+    const pending = db.prepare(`SELECT id, organization_id, name FROM products_services WHERE slug IS NULL AND type = 'product'`).all() as any[];
+    const setSlug = db.prepare(`UPDATE products_services SET slug = ? WHERE id = ?`);
+    const exists = db.prepare(`SELECT 1 FROM products_services WHERE organization_id = ? AND slug = ? LIMIT 1`);
+    for (const p of pending) {
+      const base = slugifyLocal(p.name) || "produto";
+      let candidate = base;
+      let n = 2;
+      while (exists.get(p.organization_id, candidate)) candidate = `${base}-${n++}`;
+      try { setSlug.run(candidate, p.id); } catch { /* corrida improvável no boot: ignora, fallback preguiçoso cobre */ }
+    }
+  } catch(e){ console.error('[DB] Falha no backfill de slug de produtos', e); }
+
   // Backfill idempotente do módulo 'rie' (Revenue Intelligence). O RIC era
   // sempre visível; ao torná-lo um módulo opcional (para poder cobrar à parte),
   // garantimos que NENHUMA org existente perca o acesso — só passa a ser

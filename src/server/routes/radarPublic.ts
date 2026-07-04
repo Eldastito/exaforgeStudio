@@ -35,6 +35,19 @@ function clientIp(req: any): string {
   return String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
 }
 
+// Teto genérico por IP em TODA a rota pública (ADR-026): os limites
+// específicos acima (criação 10/h, respostas 300/h) continuam valendo; este
+// aqui fecha o que ficava sem nenhum — sondagem de token (GET /sessions/:token
+// e /respond/:token em loop), consent/complete/result repetidos. Generoso o
+// bastante (600/h) para nunca atrapalhar um respondente real, que faz algumas
+// dezenas de chamadas numa sessão inteira.
+router.use((req, res, next): any => {
+  if (!rateLimit(`radar_public_all:${clientIp(req)}`, 600, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: "Muitas requisições. Tente novamente mais tarde." });
+  }
+  next();
+});
+
 router.get("/template", (_req, res): any => {
   try { res.json(RadarPublicService.getDefaultTemplate()); }
   catch (e: any) { res.status(500).json({ error: e.message }); }

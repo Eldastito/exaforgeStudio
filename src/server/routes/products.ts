@@ -12,6 +12,8 @@ import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } fr
 import { parseNFeXml } from "../nfeParser.js";
 import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
+import { uniqueProductSlug } from "../productSlug.js";
+import { verifyNFeSignature } from "../nfeSignature.js";
 
 const router = Router();
 
@@ -184,9 +186,9 @@ router.post("/smart-scan/:draftId/confirm", (req: AuthRequest, res): any => {
   try {
     const id = uuidv4();
     db.prepare(
-      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category)
-       VALUES (?, ?, 'product', ?, ?, ?, ?, ?)`
-    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null);
+      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug)
+       VALUES (?, ?, 'product', ?, ?, ?, ?, ?, ?)`
+    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, String(name)));
 
     if (stock_control_enabled) {
       db.prepare(
@@ -319,8 +321,14 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
     for (const file of files) {
       const fileName = file.originalname || "arquivo.xml";
       try {
-        const parsed = parseNFeXml(file.buffer.toString("utf-8"));
+        const xmlText = file.buffer.toString("utf-8");
+        const parsed = parseNFeXml(xmlText);
         if (!parsed.items.length) { skipped.push({ fileName, error: "Nenhum item de mercadoria neste XML." }); continue; }
+        // Assinatura digital (ADR-029): verificação LOCAL (digest + RSA do
+        // certificado embutido) — INFORMATIVA, nunca bloqueia a importação
+        // (o lojista está importando a própria compra; a consulta online à
+        // Sefaz exigiria certificado digital da organização, fora de escopo).
+        const signature = verifyNFeSignature(xmlText);
 
         // Dedupe pela chave de acesso (44 dígitos, única por NF-e no Brasil):
         // mesma nota já importada nesta organização — ou repetida dentro do
@@ -347,11 +355,11 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
         db.prepare(
           `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status, access_key)
            VALUES (?, ?, ?, ?, ?, 100, 'pending', ?)`
-        ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, supplierContactId: supplierContact?.id || null, items, source: "xml" }), parsed.accessKey);
+        ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, supplierContactId: supplierContact?.id || null, items, source: "xml", signature }), parsed.accessKey);
         logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
 
         const enriched = attachCatalogMatches(orgId, items).map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost, markup) }));
-        drafts.push({ draftId, imageUrl: "", fileName, supplierName: parsed.supplierName, supplierContact, items: enriched, confidenceScore: 100, truncated });
+        drafts.push({ draftId, imageUrl: "", fileName, supplierName: parsed.supplierName, supplierContact, items: enriched, confidenceScore: 100, truncated, signature });
       } catch (e: any) {
         skipped.push({ fileName, error: e.message || "Não foi possível ler este XML." });
       }
@@ -412,9 +420,9 @@ router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
 
         const productId = uuidv4();
         db.prepare(
-          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category)
-           VALUES (?, ?, 'product', ?, '', ?, 1, ?)`
-        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null);
+          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug)
+           VALUES (?, ?, 'product', ?, '', ?, 1, ?, ?)`
+        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, name));
 
         InventoryService.recordMovement(orgId, {
           productId, type: "entrada", quantity, unitCost,
@@ -557,6 +565,51 @@ router.post("/:id/movements", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// GET /api/products/sales-analytics?days=30 — mais/menos vendidos (backlog
+// ADR-027, registrado desde a ADR-019: "o dado bruto existe em order_items,
+// nenhum relatório usa"). Mesmo filtro de status do best_sellers da vitrine
+// (só pedidos que viraram receita de verdade). Inclui produtos ativos com
+// ZERO venda no período — o "menos vendido" mais importante é o que nunca
+// vendeu e continua ocupando vitrine/estoque.
+router.get("/sales-analytics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
+  try {
+    const rows = db.prepare(`
+      SELECT ps.id, ps.name, ps.price,
+        COALESCE(s.units, 0) AS units_sold,
+        COALESCE(s.revenue, 0) AS revenue,
+        s.last_sale_at AS last_sale_at
+      FROM products_services ps
+      LEFT JOIN (
+        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue, MAX(o.created_at) last_sale_at
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
+          AND o.created_at >= datetime('now', ?)
+        GROUP BY oi.product_service_id
+      ) s ON s.product_service_id = ps.id
+      WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
+      ORDER BY units_sold DESC, revenue DESC
+    `).all(orgId, `-${days} days`, orgId) as any[];
+
+    const withSales = rows.filter((r) => r.units_sold > 0);
+    res.json({
+      days,
+      top: withSales.slice(0, 10),
+      bottom: rows.slice(-10).reverse(), // os 10 piores (inclui zero-venda), do pior pro "menos pior"
+      totals: {
+        productsActive: rows.length,
+        productsWithSales: withSales.length,
+        unitsSold: withSales.reduce((s, r) => s + r.units_sold, 0),
+        revenue: Math.round(withSales.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/products — produtos com estoque ao vivo (disponível e vendável)
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
@@ -602,12 +655,13 @@ router.post("/", (req: AuthRequest, res): any => {
 
   try {
     db.prepare(`
-      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, slug)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null, (min_price !== undefined && min_price !== '' ? Number(min_price) : null),
        type === 'reservation' ? (Number(capacity) > 0 ? Number(capacity) : 1) : null,
        type === 'reservation' ? (['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night') : null,
-       category ? String(category).trim().slice(0, 80) : null);
+       category ? String(category).trim().slice(0, 80) : null,
+       (type || 'product') === 'product' ? uniqueProductSlug(orgId, String(name || '')) : null);
 
     if (stock_control_enabled) {
       db.prepare(`
@@ -743,8 +797,8 @@ router.post("/import", (req: AuthRequest, res): any => {
           updated++;
         } else {
           const pid = uuidv4();
-          db.prepare('INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(pid, orgId, type, name, desc, price, stockControlled ? 1 : 0);
+          db.prepare('INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(pid, orgId, type, name, desc, price, stockControlled ? 1 : 0, type === 'product' ? uniqueProductSlug(orgId, name) : null);
           if (stockControlled) InventoryService.setQuantity(orgId, pid, qty);
           created++;
         }

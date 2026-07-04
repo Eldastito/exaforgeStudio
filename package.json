@@ -33,6 +33,10 @@
     "test:pricing": "tsx scripts/test-pricing.ts",
     "test:backlog-inventory": "tsx scripts/test-backlog-inventory.ts",
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",
+    "test:backlog-radar-infra": "tsx scripts/test-backlog-radar-infra.ts",
+    "test:sales-analytics": "tsx scripts/test-sales-analytics.ts",
+    "test:backlog-loja": "tsx scripts/test-backlog-loja.ts",
+    "test:nfe-signature": "tsx scripts/test-nfe-signature.ts",
     "test:supervisor": "tsx scripts/test-supervisor.ts",
     "test:vision-foundation": "tsx scripts/test-vision-foundation.ts",
     "test:vision-events": "tsx scripts/test-vision-events.ts",
@@ -49,6 +53,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@types/better-sqlite3": "^7.6.13",
     "@vitejs/plugin-react": "^5.0.4",
+    "@xmldom/xmldom": "^0.9.10",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.10.0",
     "class-variance-authority": "^0.7.1",
@@ -78,6 +83,8 @@
     "uuid": "^14.0.0",
     "vite": "^6.2.3",
     "whatsapp-web.js": "^1.34.7",
+    "xml-crypto": "^6.1.2",
+    "xpath": "^0.0.34",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

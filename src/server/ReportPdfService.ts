@@ -96,7 +96,7 @@ export class ReportPdfService {
     pillarScores: { pillar: string; label: string; score: number | null }[];
     recommendations: { use_case_name: string; priority_band: string }[];
     narrative: string | null;
-  }): Promise<{ url: string } | null> {
+  }): Promise<{ url: string; filePath: string } | null> {
     try {
       fs.mkdirSync(REPORTS_DIR, { recursive: true });
       const id = uuidv4();
@@ -163,12 +163,15 @@ export class ReportPdfService {
       const base = (process.env.APP_URL || "").replace(/\/$/, "");
       const localUrl = `${base}/media/reports/${id}.pdf`;
 
+      // filePath também é devolvido (ADR-026): o envio por e-mail anexa o
+      // binário local — o disco local é sempre a fonte de verdade (ADR-011),
+      // mesmo quando a URL pública devolvida é a do espelho S3.
       if (StorageService.isS3Enabled()) {
         const mirror = await StorageService.mirrorToS3(filePath, `reports/${id}.pdf`);
-        if (mirror.stored && mirror.url) return { url: mirror.url };
+        if (mirror.stored && mirror.url) return { url: mirror.url, filePath };
       }
 
-      return { url: localUrl };
+      return { url: localUrl, filePath };
     } catch (e) {
       console.error("[ReportPdf] Falha ao gerar PDF do Radar:", e);
       return null;

@@ -502,6 +502,12 @@ function QuestionsView({
 
       <h2 className="mt-5 text-xl font-semibold text-balance">{q.title}</h2>
       {q.help_text && <p className="mt-1.5 text-sm text-white/50">{q.help_text}</p>}
+      {(session as any).measuredHints?.[q.id] && (
+        <div className="mt-2.5 rounded-lg border border-teal-500/25 bg-teal-500/[0.06] px-3 py-2 text-xs text-teal-300 flex items-start gap-1.5">
+          <Gauge size={13} className="mt-0.5 shrink-0" />
+          <span>{(session as any).measuredHints[q.id]} A resposta continua sendo sua — o dado medido é só referência.</span>
+        </div>
+      )}
 
       <div className="mt-6 space-y-2.5">
         {(q.options || []).map((opt) => (

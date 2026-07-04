@@ -45,6 +45,27 @@ JobQueueService.registerHandler("generate_manager_pdf", async (p: any) => {
   }
 });
 
+// Webhook -> fila de jobs (backlog ADR-029, item 04 — deixado atrás de flag
+// na ADR-011 pelo risco de mudar o caminho que atende clientes reais sem
+// testar contra tráfego real). WEBHOOK_QUEUE_ENABLED=true enfileira em vez de
+// processar inline: o webhook responde 200 na hora e o worker processa em
+// background. maxAttempts=1 DELIBERADO: retry automático de uma mensagem que
+// falhou no meio poderia responder o cliente duas vezes — falha vira registro
+// na fila (visível/auditável), não reprocesso silencioso. Padrão continua
+// inline (flag desligada) até validação com tráfego real.
+JobQueueService.registerHandler("process_incoming_message", async (p: any) => {
+  await processIncomingMessage(p, (global as any).io);
+  return { processed: true };
+});
+
+export async function dispatchIncomingMessage(payload: Parameters<typeof processIncomingMessage>[0], io: any) {
+  if (process.env.WEBHOOK_QUEUE_ENABLED === "true") {
+    JobQueueService.enqueue("process_incoming_message", payload, { organizationId: payload.organizationId || null, maxAttempts: 1 });
+    return;
+  }
+  await processIncomingMessage(payload, io);
+}
+
 export async function processIncomingMessage(
   payload: {
     channelId: string | null;  // DB ID of the channel OR null if mapping by org/identifier

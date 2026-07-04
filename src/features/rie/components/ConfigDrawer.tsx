@@ -15,6 +15,7 @@ interface Cfg {
   weight_atendimento: number;
   weight_comercial: number;
   weight_operacional: number;
+  sla_by_channel: Record<string, number>;
 }
 
 /**
@@ -24,6 +25,7 @@ interface Cfg {
 export function ConfigDrawer({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [saving, setSaving] = useState(false);
+  const [channels, setChannels] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -31,6 +33,12 @@ export function ConfigDrawer({ open, onClose, onSaved }: { open: boolean; onClos
       .then(r => r.json())
       .then(setCfg)
       .catch(() => setCfg(null));
+    // Canais da organização — para o SLA por canal (ADR-026); falha só
+    // esconde a seção, nunca quebra o drawer.
+    apiFetch('/api/channels')
+      .then(r => r.json())
+      .then(d => setChannels(Array.isArray(d) ? d.map((c: any) => ({ id: c.id, name: c.name || c.identifier || c.provider })) : []))
+      .catch(() => setChannels([]));
   }, [open]);
 
   const set = (k: keyof Cfg, v: number | null) => setCfg(c => (c ? { ...c, [k]: v } : c));
@@ -85,6 +93,25 @@ export function ConfigDrawer({ open, onClose, onSaved }: { open: boolean; onClos
               <Num label="Cliente inativo após (dias)" value={cfg.inactive_days} onChange={v => set('inactive_days', v)} />
               <Num label="Janela de atribuição do RRI (dias)" value={cfg.attribution_window_days} onChange={v => set('attribution_window_days', v)} />
             </Group>
+
+            {channels.length > 0 && (
+              <Group title="SLA por canal (s) — vazio herda o padrão acima">
+                {channels.map((ch) => (
+                  <div key={ch.id}>
+                    <Num
+                      label={ch.name}
+                      value={cfg.sla_by_channel?.[ch.id] ?? 0}
+                      onChange={(v) => setCfg((c) => {
+                        if (!c) return c;
+                        const next = { ...(c.sla_by_channel || {}) };
+                        if (v > 0) next[ch.id] = v; else delete next[ch.id];
+                        return { ...c, sla_by_channel: next };
+                      })}
+                    />
+                  </div>
+                ))}
+              </Group>
+            )}
 
             <Group title="Ticket médio">
               <Num

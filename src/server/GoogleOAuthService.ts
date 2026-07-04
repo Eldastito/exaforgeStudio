@@ -335,7 +335,10 @@ export class GoogleOAuthService {
 
   // ---- Gmail ----
   // Envia um e-mail pela conta Google conectada (escopo gmail.send).
-  static async gmailSend(orgId: string, to: string, subject: string, body: string, attachment?: { filename: string; mimeType: string; content: string }): Promise<{ id: string } | { error: string }> {
+  // Anexo: `content` para texto (ex.: .ics — codificado como UTF-8) OU
+  // `contentBase64` para binário de verdade (ex.: PDF — ADR-026; codificar um
+  // binário como UTF-8 corrompe os bytes, por isso são dois campos distintos).
+  static async gmailSend(orgId: string, to: string, subject: string, body: string, attachment?: { filename: string; mimeType: string; content?: string; contentBase64?: string }): Promise<{ id: string } | { error: string }> {
     const token = await this.getAccessToken(orgId);
     if (!token) return { error: "Conta Google não conectada." };
     const conn = this.getConnection(orgId);
@@ -345,9 +348,9 @@ export class GoogleOAuthService {
     const subjEnc = `=?UTF-8?B?${Buffer.from(String(subject || ""), "utf-8").toString("base64")}?=`;
     let mime: string;
     if (attachment) {
-      // E-mail com anexo: multipart/mixed (corpo de texto + arquivo, ex.: .ics).
+      // E-mail com anexo: multipart/mixed (corpo de texto + arquivo, ex.: .ics/PDF).
       const boundary = "exaforge_" + uuidv4().replace(/-/g, "");
-      const att64 = Buffer.from(attachment.content, "utf-8").toString("base64").replace(/(.{76})/g, "$1\r\n");
+      const att64 = (attachment.contentBase64 || Buffer.from(attachment.content || "", "utf-8").toString("base64")).replace(/(.{76})/g, "$1\r\n");
       mime =
         `To: ${to}\r\n` +
         `From: ${from}\r\n` +

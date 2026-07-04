@@ -5,6 +5,7 @@ import { NotificationService } from "../NotificationService.js";
 import { PaymentService } from "../PaymentService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReservationService } from "../ReservationService.js";
+import { ensureProductSlug } from "../productSlug.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -63,6 +64,9 @@ function productPayload(orgId: string, p: any): any {
 
   return {
     id: p.id,
+    // slug preguiçoso (ADR-028): produtos criados por caminhos antigos podem
+    // ainda não ter slug — a vitrine garante um na primeira renderização.
+    slug: ensureProductSlug(orgId, p),
     name: p.name,
     description: p.description || "",
     price: p.price || 0,

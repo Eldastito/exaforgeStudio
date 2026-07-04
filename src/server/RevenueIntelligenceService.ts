@@ -18,6 +18,8 @@ interface RicConfig {
   weight_atendimento: number;
   weight_comercial: number;
   weight_operacional: number;
+  /** SLA por canal (ADR-026): { channel_id: segundos }. Canal ausente herda slow_response_seconds. */
+  sla_by_channel: Record<string, number>;
 }
 
 const DEFAULT_CONFIG: RicConfig = {
@@ -33,10 +35,24 @@ const DEFAULT_CONFIG: RicConfig = {
   weight_atendimento: 40,
   weight_comercial: 40,
   weight_operacional: 20,
+  sla_by_channel: {},
 };
 
 function clamp(v: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, v));
+}
+
+// SLA por canal (ADR-026): só entradas com segundos válidos (10s a 24h) são
+// gravadas — um valor torto nunca vira um limiar absurdo no cálculo do IVC.
+function sanitizeSlaByChannel(raw: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (raw && typeof raw === "object") {
+    for (const [channelId, v] of Object.entries(raw)) {
+      const n = Number(v);
+      if (channelId && Number.isFinite(n) && n >= 10 && n <= 86400) out[channelId] = Math.round(n);
+    }
+  }
+  return out;
 }
 
 function round1(v: number): number {
@@ -127,6 +143,7 @@ export class RevenueIntelligenceService {
       weight_atendimento: row.weight_atendimento ?? DEFAULT_CONFIG.weight_atendimento,
       weight_comercial: row.weight_comercial ?? DEFAULT_CONFIG.weight_comercial,
       weight_operacional: row.weight_operacional ?? DEFAULT_CONFIG.weight_operacional,
+      sla_by_channel: (() => { try { return JSON.parse(row.sla_by_channel_json || "{}") || {}; } catch { return {}; } })(),
     };
   }
 
@@ -137,8 +154,8 @@ export class RevenueIntelligenceService {
       INSERT INTO revenue_intelligence_config (
         organization_id, prob_lead_slow_response, prob_quote_no_response, prob_abandoned, prob_inactive,
         slow_response_seconds, quote_stale_hours, inactive_days, attribution_window_days,
-        custom_ticket_amount, weight_atendimento, weight_comercial, weight_operacional, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        custom_ticket_amount, weight_atendimento, weight_comercial, weight_operacional, sla_by_channel_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(organization_id) DO UPDATE SET
         prob_lead_slow_response = excluded.prob_lead_slow_response,
         prob_quote_no_response = excluded.prob_quote_no_response,
@@ -152,12 +169,14 @@ export class RevenueIntelligenceService {
         weight_atendimento = excluded.weight_atendimento,
         weight_comercial = excluded.weight_comercial,
         weight_operacional = excluded.weight_operacional,
+        sla_by_channel_json = excluded.sla_by_channel_json,
         updated_at = CURRENT_TIMESTAMP
     `).run(
       orgId,
       next.prob_lead_slow_response, next.prob_quote_no_response, next.prob_abandoned, next.prob_inactive,
       next.slow_response_seconds, next.quote_stale_hours, next.inactive_days, next.attribution_window_days,
       next.custom_ticket_amount, next.weight_atendimento, next.weight_comercial, next.weight_operacional,
+      JSON.stringify(sanitizeSlaByChannel(next.sla_by_channel)),
     );
     return next;
   }

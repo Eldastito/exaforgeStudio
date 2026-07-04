@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2, Receipt } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2, Receipt, BarChart3 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
@@ -44,12 +44,29 @@ export function CatalogView() {
   // existente, ou ignorar) -> só então produtos/estoque são criados de fato.
   const [showInvoiceScan, setShowInvoiceScan] = useState(false);
   const [invoiceScanning, setInvoiceScanning] = useState(false);
-  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; supplierContact?: { id: string; name: string } | null; confidenceScore: number } | null>(null);
+  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; supplierContact?: { id: string; name: string } | null; confidenceScore: number; signature?: any } | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   // Fila de rascunhos ainda não revisados quando um lote de XMLs é importado
   // de uma vez (ADR-024) — revisão continua sendo um por vez.
   const [invoiceQueue, setInvoiceQueue] = useState<any[]>([]);
+
+  // Mais/menos vendidos (ADR-027) — leitura de order_items que já existia
+  // sem nenhum relatório em cima.
+  const [showSales, setShowSales] = useState(false);
+  const [salesData, setSalesData] = useState<any | null>(null);
+  const [salesDays, setSalesDays] = useState(30);
+  const [salesLoading, setSalesLoading] = useState(false);
+
+  const openSales = (days = salesDays) => {
+    setShowSales(true);
+    setSalesLoading(true);
+    apiFetch(`/api/products/sales-analytics?days=${days}`)
+      .then(r => r.json())
+      .then(d => setSalesData(d))
+      .catch(() => toast.error('Não foi possível carregar as vendas.'))
+      .finally(() => setSalesLoading(false));
+  };
 
   const loadProducts = () => {
     apiFetch('/api/products')
@@ -212,7 +229,7 @@ export function CatalogView() {
   // (/invoice-scan/xml) — as duas rotas devolvem o mesmo formato por rascunho,
   // então a tela de revisão nem sabe qual das duas foi usada.
   const applyInvoiceScanResult = (d: any) => {
-    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, supplierContact: d.supplierContact || null, confidenceScore: d.confidenceScore });
+    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, supplierContact: d.supplierContact || null, confidenceScore: d.confidenceScore, signature: d.signature || null });
     setInvoiceItems((d.items || []).map((it: any) => {
       // Pré-seleção de reposição: preferir o match aproximado do servidor
       // (produtos com nome parecido, não só idêntico — ADR-024); manter o
@@ -336,6 +353,9 @@ export function CatalogView() {
           </Button>
           <Button variant="outline" className="border-emerald-700/50 text-emerald-300 hover:border-emerald-500" onClick={openInvoiceScan}>
             <Receipt className="w-4 h-4 mr-2" /> Nota Fiscal
+          </Button>
+          <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => openSales()}>
+            <BarChart3 className="w-4 h-4 mr-2" /> Vendas
           </Button>
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowImport(true)}>
             <Upload className="w-4 h-4 mr-2" /> Importar CSV
@@ -680,6 +700,15 @@ export function CatalogView() {
                       </p>
                     )}
                     <p className="mt-1">{invoiceItems.length} item(ns) identificado(s). Confiança geral da leitura: {invoiceDraft.confidenceScore}%.</p>
+                    {invoiceDraft.signature && (
+                      invoiceDraft.signature.valid === true ? (
+                        <p className="mt-1 text-emerald-400">Assinatura digital íntegra{invoiceDraft.signature.certSubject ? ` — emitida para ${invoiceDraft.signature.certSubject}` : ''}.</p>
+                      ) : invoiceDraft.signature.signed ? (
+                        <p className="mt-1 text-red-400">Assinatura digital NÃO confere — o XML pode ter sido alterado. Confira a origem do arquivo antes de confirmar.</p>
+                      ) : (
+                        <p className="mt-1 text-amber-400">XML sem assinatura digital — confira a origem do arquivo.</p>
+                      )
+                    )}
                     {invoiceQueue.length > 0 && (
                       <p className="mt-1 text-amber-400">+ {invoiceQueue.length} nota(s) na fila — aparecem uma a uma após confirmar esta.</p>
                     )}
@@ -751,6 +780,70 @@ export function CatalogView() {
                   <Button onClick={handleInvoiceConfirm} disabled={invoiceSaving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {invoiceSaving ? 'Publicando...' : 'Aprovar e Publicar'}
                   </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Mais/Menos Vendidos (ADR-027) */}
+      {showSales && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[640px] max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-indigo-400" /> Mais e menos vendidos
+              </h3>
+              <button className="text-zinc-400 hover:text-white" onClick={() => setShowSales(false)}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="flex items-center gap-2 mb-4">
+              {[30, 90, 365].map((d) => (
+                <button key={d}
+                  onClick={() => { setSalesDays(d); openSales(d); }}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition ${salesDays === d ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10' : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}
+                >{d === 365 ? '1 ano' : `${d} dias`}</button>
+              ))}
+            </div>
+
+            {salesLoading && <div className="py-10 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>}
+
+            {!salesLoading && salesData && (
+              <div className="space-y-5">
+                <p className="text-xs text-zinc-500">
+                  {salesData.totals.unitsSold} unidade(s) vendida(s) · R$ {Number(salesData.totals.revenue).toFixed(2)} em receita ·{' '}
+                  {salesData.totals.productsWithSales} de {salesData.totals.productsActive} produto(s) ativo(s) venderam no período.
+                </p>
+
+                <div>
+                  <h4 className="text-sm font-semibold text-emerald-300 mb-2">Mais vendidos</h4>
+                  {salesData.top.length === 0 ? (
+                    <p className="text-sm text-zinc-500">Nenhuma venda registrada no período.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {salesData.top.map((p: any, i: number) => (
+                        <div key={p.id} className="flex items-center justify-between text-sm py-1 border-b border-zinc-800/60">
+                          <span className="text-zinc-200"><span className="text-zinc-600 mr-2 tabular-nums">{i + 1}.</span>{p.name}</span>
+                          <span className="text-zinc-400 tabular-nums shrink-0">{p.units_sold} un · R$ {Number(p.revenue).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold text-amber-300 mb-2">Menos vendidos (atenção: parados na vitrine)</h4>
+                  <div className="space-y-1">
+                    {salesData.bottom.map((p: any) => (
+                      <div key={p.id} className="flex items-center justify-between text-sm py-1 border-b border-zinc-800/60">
+                        <span className="text-zinc-200">{p.name}</span>
+                        <span className={`tabular-nums shrink-0 ${p.units_sold === 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                          {p.units_sold === 0 ? 'zero vendas' : `${p.units_sold} un · R$ ${Number(p.revenue).toFixed(2)}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

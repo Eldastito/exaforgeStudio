@@ -44,7 +44,8 @@
     "test:vision-incidents": "tsx scripts/test-vision-incidents.ts",
     "test:vision-maestro-bridge": "tsx scripts/test-vision-maestro-bridge.ts",
     "test:vision-webhooks": "tsx scripts/test-vision-webhooks.ts",
-    "test:vision-zone-rules": "tsx scripts/test-vision-zone-rules.ts"
+    "test:vision-zone-rules": "tsx scripts/test-vision-zone-rules.ts",
+    "test:whatsapp-inventory-intake": "tsx scripts/test-whatsapp-inventory-intake.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

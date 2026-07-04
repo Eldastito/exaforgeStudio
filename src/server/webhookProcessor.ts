@@ -77,6 +77,8 @@ export async function processIncomingMessage(
     contactAvatar?: string;
     text: string;
     mediaUrl?: string;
+    imageBase64?: string; // foto original em base64 (cadastro de estoque por WhatsApp, ver WhatsAppInventoryIntake.ts)
+    imageMime?: string;
   },
   io: any
 ) {
@@ -365,6 +367,8 @@ export async function processIncomingMessage(
           areaPersona,
           areaId: ticket.area_id || null,
           returningAfterDays,
+          imageBase64: payload.imageBase64,
+          imageMime: payload.imageMime,
        });
 
        // ROTEAMENTO PELA IA: quando a IA sinaliza que o cliente quer outra área

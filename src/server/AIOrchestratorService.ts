@@ -17,6 +17,8 @@ import { SubscriptionService } from "./SubscriptionService.js";
 import { ReferralService } from "./ReferralService.js";
 import { AppointmentService } from "./AppointmentService.js";
 import { QuoteService } from "./QuoteService.js";
+import { getPendingAction as getPendingActionShared, savePendingAction as savePendingActionShared, clearPendingAction as clearPendingActionShared } from "./PendingManagerActions.js";
+import { WhatsAppInventoryIntake } from "./WhatsAppInventoryIntake.js";
 
 export class AIOrchestratorService {
   /**
@@ -35,6 +37,8 @@ export class AIOrchestratorService {
     areaPersona?: string;
     areaId?: string | null;
     returningAfterDays?: number | null;
+    imageBase64?: string;
+    imageMime?: string;
   }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string }, eventInquiry?: { eventType: string; headcount?: number; eventDate?: string; halls?: string; budget?: number; specialRequests?: string } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
@@ -52,11 +56,27 @@ export class AIOrchestratorService {
       isOrchestratorCommand = true;
     }
 
-    // CONFIRMAÇÃO de ação pendente (Zapp dispara campanha com confirmação):
-    // se um gestor tem uma ação aguardando "SIM", a resposta dele resolve a ação,
-    // mesmo sem o prefixo "zapp".
+    // CADASTRO DE ESTOQUE POR FOTO (IA do negócio, separada da IA de
+    // atendimento ao cliente): um gestor autorizado que manda uma foto de
+    // produto/nota fiscal entra direto no fluxo de cadastro conversacional —
+    // não precisa do prefixo "zap" (a própria foto já é a intenção). Uma foto
+    // nova sempre começa um cadastro do zero (substitui qualquer pendência
+    // anterior do mesmo gestor, ver PendingManagerActions.savePendingAction).
+    if (isManager && params.imageBase64) {
+      const reply = await WhatsAppInventoryIntake.handlePhoto(params.organizationId, params.senderId, params.imageBase64, params.imageMime || "image/jpeg");
+      return { reply, actions: [], needsHuman: false };
+    }
+
+    // CONFIRMAÇÃO de ação pendente (Zapp dispara campanha com confirmação, ou
+    // continuação do cadastro de estoque por foto iniciado acima):
+    // se um gestor tem uma ação aguardando resposta, a resposta dele resolve
+    // a ação, mesmo sem o prefixo "zapp".
     if (isManager) {
       const pending = this.getPendingAction(params.organizationId, params.senderId);
+      if (pending && pending.action_type !== "create_campaign") {
+        const reply = await WhatsAppInventoryIntake.handleReply(params.organizationId, params.senderId, pending, text);
+        return { reply, actions: [], needsHuman: false };
+      }
       if (pending) {
         const t = text.toLowerCase();
         const confirmed = /^(sim|confirmo|confirmar|pode|pode enviar|manda|envia|ok|isso|👍)\b/.test(t);
@@ -826,23 +846,18 @@ export class AIOrchestratorService {
     return out;
   }
 
+  // Delegam para PendingManagerActions.ts (compartilhado com
+  // WhatsAppInventoryIntake.ts, sem criar import circular entre os dois).
   private static getPendingAction(orgId: string, identifier: string): any {
-    try {
-      return db.prepare(`SELECT * FROM pending_manager_actions WHERE organization_id = ? AND identifier = ? ORDER BY created_at DESC LIMIT 1`).get(orgId, identifier);
-    } catch (e) { return null; }
+    return getPendingActionShared(orgId, identifier);
   }
 
   private static savePendingAction(orgId: string, identifier: string, type: string, payload: any) {
-    try {
-      // Substitui qualquer pendência anterior do mesmo gestor.
-      db.prepare(`DELETE FROM pending_manager_actions WHERE organization_id = ? AND identifier = ?`).run(orgId, identifier);
-      db.prepare(`INSERT INTO pending_manager_actions (id, organization_id, identifier, action_type, payload_json, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now','+1 hour'))`)
-        .run(uuidv4(), orgId, identifier, type, JSON.stringify(payload));
-    } catch (e) { /* noop */ }
+    savePendingActionShared(orgId, identifier, type, payload);
   }
 
   private static clearPendingAction(id: string) {
-    try { db.prepare(`DELETE FROM pending_manager_actions WHERE id = ?`).run(id); } catch (e) { /* noop */ }
+    clearPendingActionShared(id);
   }
 
   /** Executa a ação confirmada pelo gestor. Hoje: criar e disparar campanha. */

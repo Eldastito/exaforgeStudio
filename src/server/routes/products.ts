@@ -60,7 +60,7 @@ const xmlUpload = multer({
 // Configurável em storefront_settings.default_markup_percent; 40% quando não
 // definido. Clamp em 0–500 para uma configuração corrompida nunca gerar uma
 // sugestão absurda.
-function orgMarkup(orgId: string): number {
+export function orgMarkup(orgId: string): number {
   const row = db.prepare(`SELECT default_markup_percent FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
   const v = Number(row?.default_markup_percent);
   if (!Number.isFinite(v) || v <= 0) return 40;

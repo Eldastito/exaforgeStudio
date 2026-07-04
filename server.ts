@@ -698,6 +698,11 @@ async function startServer() {
 
         // URL da mídia (imagem) para renderizar no chat.
         let incomingMediaUrl: string | undefined = undefined;
+        // Base64 original da foto — repassado ao orquestrador para o cadastro
+        // de estoque por WhatsApp (WhatsAppInventoryIntake.ts); só é USADO se
+        // o remetente for um gestor autorizado (checado dentro do orquestrador).
+        let capturedImageBase64: string | undefined = undefined;
+        let capturedImageMime: string | undefined = undefined;
 
         // Outras mídias sem legenda: registra um placeholder para aparecer no app.
         if (!incomingMessageText) {
@@ -709,6 +714,8 @@ async function startServer() {
               const mime = msgObj.imageMessage?.mimetype || msgObj.ImageMessage?.mimetype || "image/jpeg";
               const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
               incomingMediaUrl = saveMediaBase64(imgB64, ext) || undefined;
+              capturedImageBase64 = imgB64;
+              capturedImageMime = mime;
               // Visão/OCR: classifica (documento vs foto) e extrai os dados-chave.
               try {
                 const desc = await analyzeImageForChat(imgB64, mime);
@@ -782,7 +789,9 @@ async function startServer() {
            contactName: pushName,
            contactAvatar: undefined,
            text: incomingMessageText,
-           mediaUrl: incomingMediaUrl
+           mediaUrl: incomingMediaUrl,
+           imageBase64: capturedImageBase64,
+           imageMime: capturedImageMime,
         }, (global as any).io);
 
         // Foto de perfil do WhatsApp em segundo plano: atualiza o card de

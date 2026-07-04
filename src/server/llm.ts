@@ -390,6 +390,39 @@ export async function parseInventoryReply(text: string, awaiting: string[]): Pro
 }
 
 /**
+ * Provador Virtual (FAS-1, ADR-035): valida a FOTO GUIADA contra os critérios
+ * da seção 6.2 do PRD-E-006 (uma pessoa adulta, corpo inteiro, frontal, boa
+ * luz, sem nudez, sem múltiplas pessoas, sem documento em primeiro plano).
+ * Devolve JSON estruturado com flags booleanas — quem mapeia flags para as
+ * mensagens de recusa LEGÍVEIS (seção 6.3) é código nosso, determinístico
+ * (FashionAvatarService.evaluatePhotoReport): o texto mostrado à cliente
+ * nunca vem de texto livre da IA, então nunca pode "julgar aparência".
+ */
+export async function validateGuidedPhoto(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const system = `Você avalia se uma foto serve para um provador virtual de roupas. Responda SOMENTE um JSON com flags booleanas objetivas:
+{"singlePerson": <exatamente UMA pessoa visível?>, "adultApparent": <a pessoa aparenta ser adulta?>, "fullBody": <corpo inteiro visível, da cabeça aos pés?>, "frontal": <pose frontal ou quase frontal?>, "goodLighting": <iluminação/nitidez suficientes para distinguir a silhueta?>, "armsVisible": <braços não totalmente colados/escondidos?>, "safeContent": <SEM nudez, roupa íntima exposta ou conteúdo sexualizado?>, "noDocuments": <SEM documento, QR code ou dados de terceiros em primeiro plano?>}
+Regras: avalie SÓ o que está pedido, com true/false. NUNCA descreva, avalie ou comente o corpo, peso, beleza ou aparência da pessoa.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Avalie esta foto e devolva o JSON pedido." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0,
+    max_tokens: 120,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * "Olhos" do atendimento: analisa uma imagem recebida, CLASSIFICA (documento vs
  * foto comum) e, quando for documento (comprovante de PIX, nota fiscal, recibo,
  * receita, boleto…), extrai os dados-chave. Retorna um texto pronto para a IA

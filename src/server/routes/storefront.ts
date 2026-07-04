@@ -48,8 +48,20 @@ router.put("/settings", (req: AuthRequest, res): any => {
   ensureSettings(orgId);
   const b = req.body || {};
   const fields: Record<string, any> = {};
-  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock"]) {
-    if (b[k] !== undefined) fields[k] = (k === "published" || k === "ai_catalog_photos_enabled" || k === "auto_hide_out_of_stock") ? (b[k] ? 1 : 0) : b[k];
+  const boolKeys = new Set(["published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled"]);
+  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled"]) {
+    if (b[k] !== undefined) fields[k] = boolKeys.has(k) ? (b[k] ? 1 : 0) : b[k];
+  }
+  // Limite diário de gerações do provador virtual (FAS-0, RF-031): 1–20;
+  // vazio/null volta ao padrão (3). Fora da faixa é rejeitado, não gravado torto.
+  if (b.fashion_daily_generation_limit !== undefined) {
+    if (b.fashion_daily_generation_limit === null || b.fashion_daily_generation_limit === "") {
+      fields.fashion_daily_generation_limit = 3;
+    } else {
+      const v = Number(b.fashion_daily_generation_limit);
+      if (!Number.isFinite(v) || v < 1 || v > 20) return res.status(400).json({ error: "Limite diário de gerações deve ser entre 1 e 20." });
+      fields.fashion_daily_generation_limit = Math.round(v);
+    }
   }
   // Markup padrão do preço sugerido (ADR-024): null/vazio volta ao padrão
   // (40%); valores fora de 1–500% são rejeitados em vez de gravados tortos.

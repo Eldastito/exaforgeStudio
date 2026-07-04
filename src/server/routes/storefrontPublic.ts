@@ -6,6 +6,7 @@ import { PaymentService } from "../PaymentService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReservationService } from "../ReservationService.js";
 import { ensureProductSlug } from "../productSlug.js";
+import { FashionStudioService } from "../FashionStudioService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -126,6 +127,21 @@ function resolveCollections(orgId: string): { id: string; title: string; product
   }
   return out;
 }
+
+// GET /api/public/store/:slug/fashion/eligible -> catálogo elegível para o
+// provador virtual (Fashion AI Studio, FAS-0 / ADR-034). 404 quando o módulo
+// está desligado na loja — indistinguível de rota inexistente de propósito
+// (não revela que a loja tem o recurso disponível mas desativado).
+router.get("/store/:slug/fashion/eligible", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada ou não publicada." });
+  const orgId = store.organization_id;
+  if (!FashionStudioService.isEnabled(orgId)) return res.status(404).json({ error: "Recurso não disponível." });
+
+  const items = FashionStudioService.eligibleItems(orgId);
+  FashionStudioService.recordEvent(orgId, "FashionEligibleCatalogViewed", { itemCount: items.length });
+  res.json({ enabled: true, dailyGenerationLimit: FashionStudioService.dailyGenerationLimit(orgId), items });
+});
 
 // GET /api/public/store/:slug  -> configurações da loja + produtos visíveis
 router.get("/store/:slug", (req, res): any => {

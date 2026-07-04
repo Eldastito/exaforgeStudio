@@ -62,12 +62,14 @@ export class InventoryService {
     }
     const r = this.ensureRow(orgId, productId, variantId);
     db.prepare('UPDATE inventory_items SET quantity_reserved = quantity_reserved + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(qty, r.id);
+    this.syncStorefrontVisibility(orgId, productId, variantId);
   }
 
   static release(orgId: string, productId: string, qty: number, variantId?: string | null) {
     if (!this.hasStockControl(orgId, productId)) return;
     const r = this.row(orgId, productId, variantId);
     if (r) db.prepare('UPDATE inventory_items SET quantity_reserved = MAX(0, quantity_reserved - ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(qty, r.id);
+    this.syncStorefrontVisibility(orgId, productId, variantId);
   }
 
   static commit(orgId: string, productId: string, qty: number, variantId?: string | null) {
@@ -75,6 +77,36 @@ export class InventoryService {
     const r = this.row(orgId, productId, variantId);
     if (r) db.prepare('UPDATE inventory_items SET quantity_available = MAX(0, quantity_available - ?), quantity_reserved = MAX(0, quantity_reserved - ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(qty, qty, r.id);
     this.checkLowStock(orgId, productId, variantId);
+    this.syncStorefrontVisibility(orgId, productId, variantId);
+  }
+
+  /**
+   * Ocultar/restaurar a vitrine automaticamente conforme o estoque zera ou é
+   * reposto (ADR-033) — opt-in por loja (storefront_settings.
+   * auto_hide_out_of_stock), só para o produto-base (sem variação: cada
+   * variação já mostra "SEM ESTOQUE" individualmente, esconder o produto
+   * inteiro por causa de UMA variação não faz sentido).
+   *
+   * `out_of_stock_hidden` marca que foi ESTE mecanismo que escondeu o
+   * produto — uma escolha manual do lojista (PUT /storefront/products/:id)
+   * sempre zera essa marca, então uma mudança de estoque nunca desfaz uma
+   * decisão humana explícita de visibilidade.
+   */
+  private static syncStorefrontVisibility(orgId: string, productId: string, variantId?: string | null): void {
+    if (variantId) return;
+    try {
+      const org = db.prepare('SELECT auto_hide_out_of_stock FROM storefront_settings WHERE organization_id = ?').get(orgId) as any;
+      if (!org?.auto_hide_out_of_stock) return;
+      const p = db.prepare('SELECT stock_control_enabled, storefront_visible, out_of_stock_hidden, price FROM products_services WHERE id = ? AND organization_id = ?').get(productId, orgId) as any;
+      if (!p || !p.stock_control_enabled) return;
+      const sellable = this.sellable(orgId, productId, null);
+      if (sellable === null) return;
+      if (sellable <= 0 && p.storefront_visible === 1) {
+        db.prepare('UPDATE products_services SET storefront_visible = 0, out_of_stock_hidden = 1 WHERE id = ?').run(productId);
+      } else if (sellable > 0 && p.out_of_stock_hidden === 1 && p.price != null && p.price > 0) {
+        db.prepare('UPDATE products_services SET storefront_visible = 1, out_of_stock_hidden = 0 WHERE id = ?').run(productId);
+      }
+    } catch (e) { /* nunca bloqueia a movimentação de estoque */ }
   }
 
   /**
@@ -99,12 +131,14 @@ export class InventoryService {
     if (!this.hasStockControl(orgId, productId)) return;
     const r = this.ensureRow(orgId, productId, variantId);
     db.prepare('UPDATE inventory_items SET quantity_available = quantity_available + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(qty, r.id);
+    this.syncStorefrontVisibility(orgId, productId, variantId);
   }
 
   /** Define a quantidade absoluta em mãos (gestão humana / importação). */
   static setQuantity(orgId: string, productId: string, quantity: number, variantId?: string | null) {
     const r = this.ensureRow(orgId, productId, variantId);
     db.prepare('UPDATE inventory_items SET quantity_available = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(Math.max(0, quantity), r.id);
+    this.syncStorefrontVisibility(orgId, productId, variantId);
   }
 
   /**
@@ -148,7 +182,9 @@ export class InventoryService {
       `).run(movId, orgId, params.productId, params.variantId || null, params.type, qty, params.unitCost || 0, params.origin || null, params.note || null, params.createdBy || null, params.supplierContactId || null);
       return movId;
     });
-    return tx();
+    const movId = tx();
+    this.syncStorefrontVisibility(orgId, params.productId, params.variantId);
+    return movId;
   }
 
   /** Histórico de movimentações de um produto. */

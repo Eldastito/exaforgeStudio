@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { chat, isAIConfigured } from "../llm.js";
+import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -47,8 +48,8 @@ router.put("/settings", (req: AuthRequest, res): any => {
   ensureSettings(orgId);
   const b = req.body || {};
   const fields: Record<string, any> = {};
-  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled"]) {
-    if (b[k] !== undefined) fields[k] = (k === "published" || k === "ai_catalog_photos_enabled") ? (b[k] ? 1 : 0) : b[k];
+  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock"]) {
+    if (b[k] !== undefined) fields[k] = (k === "published" || k === "ai_catalog_photos_enabled" || k === "auto_hide_out_of_stock") ? (b[k] ? 1 : 0) : b[k];
   }
   // Markup padrão do preço sugerido (ADR-024): null/vazio volta ao padrão
   // (40%); valores fora de 1–500% são rejeitados em vez de gravados tortos.
@@ -446,18 +447,25 @@ function defaultTitle(rule: string): string {
 // PUT /api/storefront/products/:id -> atualiza modo de venda / visibilidade / destaque
 router.put("/products/:id", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);
-  const p = db.prepare("SELECT id FROM products_services WHERE id = ? AND organization_id = ?").get(req.params.id, orgId);
+  const p = db.prepare("SELECT * FROM products_services WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
   if (!p) return res.status(404).json({ error: "Produto não encontrado." });
   const b = req.body || {};
   const fields: Record<string, any> = {};
   if (b.sale_mode !== undefined) fields.sale_mode = ["unit", "slice", "size", "weight", "volume"].includes(b.sale_mode) ? b.sale_mode : "unit";
   if (b.sale_options !== undefined) fields.sale_options_json = JSON.stringify(b.sale_options || {});
-  if (b.storefront_visible !== undefined) fields.storefront_visible = b.storefront_visible ? 1 : 0;
+  // Escolha manual do lojista sempre vence: zera out_of_stock_hidden (ADR-033)
+  // para o auto-ocultar/restaurar por estoque nunca desfazer uma decisão humana.
+  if (b.storefront_visible !== undefined) { fields.storefront_visible = b.storefront_visible ? 1 : 0; fields.out_of_stock_hidden = 0; }
   if (b.featured !== undefined) fields.featured = b.featured ? 1 : 0;
   if (Object.keys(fields).length) {
     const sets = Object.keys(fields).map(k => `${k} = ?`).join(", ");
     db.prepare(`UPDATE products_services SET ${sets} WHERE id = ? AND organization_id = ?`)
       .run(...Object.values(fields), req.params.id, orgId);
+    // Histórico versionado (ADR-033): visibilidade/destaque também entram no diff.
+    const historyFields: Record<string, any> = {};
+    if (fields.storefront_visible !== undefined) historyFields.storefront_visible = fields.storefront_visible;
+    if (fields.featured !== undefined) historyFields.featured = fields.featured;
+    if (Object.keys(historyFields).length) ProductEditHistoryService.record(orgId, req.params.id, req.user?.userId || null, p, historyFields);
   }
   res.json({ ok: true });
 });

@@ -19,6 +19,7 @@ type StorefrontSettings = {
   published: boolean;
   default_markup_percent?: number | null;
   ai_catalog_photos_enabled?: boolean;
+  auto_hide_out_of_stock?: boolean;
 };
 
 type SaleMode = 'unit' | 'slice' | 'size' | 'weight' | 'volume';
@@ -49,6 +50,7 @@ const emptySettings: StorefrontSettings = {
   whatsapp_number: '',
   published: false,
   ai_catalog_photos_enabled: false,
+  auto_hide_out_of_stock: false,
 };
 
 function getOrigin(): string {
@@ -196,6 +198,7 @@ export function StorefrontSettingsView() {
           ...data,
           published: !!data.published,
           ai_catalog_photos_enabled: !!data.ai_catalog_photos_enabled,
+          auto_hide_out_of_stock: !!data.auto_hide_out_of_stock,
           default_mode: (data.default_mode === 'night' ? 'night' : 'day'),
         });
       })
@@ -233,6 +236,7 @@ export function StorefrontSettingsView() {
           published: settings.published,
           default_markup_percent: settings.default_markup_percent ?? null,
           ai_catalog_photos_enabled: settings.ai_catalog_photos_enabled,
+          auto_hide_out_of_stock: settings.auto_hide_out_of_stock,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -242,6 +246,7 @@ export function StorefrontSettingsView() {
           ...data,
           published: !!data.published,
           ai_catalog_photos_enabled: !!data.ai_catalog_photos_enabled,
+          auto_hide_out_of_stock: !!data.auto_hide_out_of_stock,
           default_mode: (data.default_mode === 'night' ? 'night' : 'day'),
         });
         toast.success('Configurações da loja salvas.');
@@ -441,6 +446,28 @@ export function StorefrontSettingsView() {
                   <span
                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                       settings.ai_catalog_photos_enabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-zinc-100">Ocultar automaticamente sem estoque</p>
+                  <p className="text-xs text-zinc-500">Quando o estoque de um produto zera, ele some da vitrine sozinho; ao repor, volta a aparecer. Uma alteração manual de visibilidade sempre vence sobre esse automatismo.</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!settings.auto_hide_out_of_stock}
+                  onClick={() => setField('auto_hide_out_of_stock', !settings.auto_hide_out_of_stock)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    settings.auto_hide_out_of_stock ? 'bg-indigo-600' : 'bg-zinc-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      settings.auto_hide_out_of_stock ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
                 </button>

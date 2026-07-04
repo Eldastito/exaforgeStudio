@@ -14,6 +14,7 @@ import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
 import { uniqueProductSlug } from "../productSlug.js";
 import { verifyNFeSignature } from "../nfeSignature.js";
+import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 
 const router = Router();
 
@@ -546,6 +547,14 @@ router.get("/:id/movements", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/products/:id/history — histórico versionado de edições pós-criação (ADR-033).
+router.get("/:id/history", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProductEditHistoryService.list(orgId, req.params.id)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/products/:id/movements — registra entrada/saída/ajuste/transferência
 router.post("/:id/movements", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
@@ -703,6 +712,14 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     if (reservation_unit !== undefined) { updates.push("reservation_unit = ?"); vals.push(['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night'); }
     if (updates.length) {
       db.prepare(`UPDATE products_services SET ${updates.join(', ')} WHERE id = ? AND organization_id = ?`).run(...vals, req.params.id, orgId);
+      // Histórico versionado (ADR-033): diff de cada campo comercial alterado.
+      const after: Record<string, any> = {};
+      if (name !== undefined) after.name = name;
+      if (description !== undefined) after.description = description;
+      if (price !== undefined) after.price = price;
+      if (active !== undefined) after.active = active ? 1 : 0;
+      if (category !== undefined) after.category = category ? String(category).trim().slice(0, 80) : null;
+      ProductEditHistoryService.record(orgId, req.params.id, userId, product, after);
     }
 
     // Ajuste de estoque em mãos (define a quantidade absoluta)

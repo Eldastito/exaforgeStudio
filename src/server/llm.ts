@@ -171,6 +171,22 @@ export async function editProductImageB64(base64: string, mimetype: string, styl
   return b64;
 }
 
+/**
+ * Edição multi-imagem (Provador Virtual FAS-3, ADR-037): o gpt-image-1 aceita
+ * VÁRIAS imagens de entrada no endpoint de edição — a foto da cliente + as
+ * fotos reais das peças do look — e compõe uma única saída. Mesmo princípio
+ * do editProductImageB64 (edição preserva o real; geração do zero inventaria
+ * uma pessoa/peça genérica), estendido para N entradas.
+ */
+export async function editImagesB64(images: { buffer: Buffer; name: string; mime: string }[], prompt: string): Promise<string> {
+  const files = await Promise.all(images.map((img) => toFile(img.buffer, img.name, { type: img.mime })));
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const res = await getClient().images.edit({ model, image: files as any, prompt });
+  const b64 = (res as any).data?.[0]?.b64_json || "";
+  recordUsage(model, "image", 0, 0, Number(process.env.OPENAI_IMAGE_COST_USD || 0.04));
+  return b64;
+}
+
 function googleAiKey(): string {
   return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
 }

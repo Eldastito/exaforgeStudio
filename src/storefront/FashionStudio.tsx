@@ -104,6 +104,41 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
     if (r.ok) setLooks((ls) => ls.map((l) => (l.id === id ? { ...l, saved: true } : l)));
   }
 
+  // ---- try-on: "look em você" (FAS-3) ----
+  type TryOnState = { jobId: string; status: string; url: string | null; error: string | null };
+  const [tryon, setTryon] = useState<Record<string, TryOnState>>({});
+  const [credits, setCredits] = useState<{ available: number; limit: number } | null>(null);
+
+  async function pollJob(lookId: string, jobId: string) {
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const r = await api(`/tryon-jobs/${jobId}`, {}, token);
+      if (!r.ok) return;
+      setCredits(r.data.credits || null);
+      setTryon((t) => ({ ...t, [lookId]: { jobId, status: r.data.status, url: r.data.url, error: r.data.error } }));
+      if (['SUCCEEDED', 'FAILED_FINAL', 'EXPIRED', 'DELETED'].includes(r.data.status)) return;
+    }
+  }
+
+  async function generateTryOn(lookId: string) {
+    setError('');
+    setTryon((t) => ({ ...t, [lookId]: { jobId: '', status: 'QUEUED', url: null, error: null } }));
+    const r = await api(`/looks/${lookId}/generate`, { method: 'POST' }, token);
+    if (!r.ok) {
+      setTryon((t) => { const { [lookId]: _drop, ...rest } = t; return rest; });
+      setError(r.data?.error || 'Não foi possível gerar a prévia agora.');
+      return;
+    }
+    setCredits(r.data.credits || null);
+    setTryon((t) => ({ ...t, [lookId]: { jobId: r.data.jobId, status: r.data.status, url: null, error: null } }));
+    if (r.data.status === 'SUCCEEDED') {
+      const j = await api(`/tryon-jobs/${r.data.jobId}`, {}, token);
+      if (j.ok) setTryon((t) => ({ ...t, [lookId]: { jobId: r.data.jobId, status: j.data.status, url: j.data.url, error: j.data.error } }));
+      return;
+    }
+    pollJob(lookId, r.data.jobId);
+  }
+
   async function submitAuth() {
     setBusy(true); setError('');
     const path = authTab === 'register' ? `/store/${encodeURIComponent(slug)}/register` : `/store/${encodeURIComponent(slug)}/login`;
@@ -369,13 +404,30 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
                         ))}
                       </div>
                       <p className="mb-2 text-xs opacity-70">{look.explanation}</p>
-                      <button type="button" disabled={!!look.saved} className="w-full rounded-xl border px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
-                        style={{ borderColor: hexToRgba(accent, 0.4), color: accent }} onClick={() => saveLook(look.id)}>
-                        {look.saved ? '✓ Look salvo' : 'Salvar este look'}
-                      </button>
+                      {tryon[look.id]?.url && (
+                        <img src={tryon[look.id].url!} alt="Prévia do look em você" className="mb-2 w-full rounded-xl object-contain" />
+                      )}
+                      {tryon[look.id]?.error && <p className="mb-2 text-xs text-red-500">{tryon[look.id].error}</p>}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={!!tryon[look.id] && !['SUCCEEDED', 'FAILED_FINAL', 'EXPIRED', 'DELETED'].includes(tryon[look.id].status)}
+                          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                          style={{ background: accent }}
+                          onClick={() => generateTryOn(look.id)}
+                        >
+                          {tryon[look.id] && !['SUCCEEDED', 'FAILED_FINAL', 'EXPIRED', 'DELETED'].includes(tryon[look.id].status)
+                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando…</>
+                            : tryon[look.id]?.status === 'SUCCEEDED' ? 'Gerar de novo' : 'Ver em mim'}
+                        </button>
+                        <button type="button" disabled={!!look.saved} className="flex-1 rounded-xl border px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+                          style={{ borderColor: hexToRgba(accent, 0.4), color: accent }} onClick={() => saveLook(look.id)}>
+                          {look.saved ? '✓ Look salvo' : 'Salvar este look'}
+                        </button>
+                      </div>
                     </div>
                   ))}
-                  <p className="text-center text-[11px] opacity-50">Ver o look em você (prévia na sua foto) chega na próxima etapa do provador.</p>
+                  {credits && <p className="text-center text-[11px] opacity-50">{credits.available} de {credits.limit} prévias restantes hoje.</p>}
                   <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('quiz')}>Ajustar respostas</button>
                 </div>
               )}

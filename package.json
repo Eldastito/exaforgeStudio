@@ -50,7 +50,8 @@
     "test:store-lifecycle": "tsx scripts/test-store-lifecycle.ts",
     "test:fashion-foundation": "tsx scripts/test-fashion-foundation.ts",
     "test:fashion-avatar": "tsx scripts/test-fashion-avatar.ts",
-    "test:fashion-looks": "tsx scripts/test-fashion-looks.ts"
+    "test:fashion-looks": "tsx scripts/test-fashion-looks.ts",
+    "test:fashion-tryon": "tsx scripts/test-fashion-tryon.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

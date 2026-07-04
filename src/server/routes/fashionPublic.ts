@@ -5,6 +5,7 @@ import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionCustomerService } from "../FashionCustomerService.js";
 import { FashionAvatarService } from "../FashionAvatarService.js";
 import { FashionLookService } from "../FashionLookService.js";
+import { FashionTryOnService } from "../FashionTryOnService.js";
 
 // ============================================================================
 // PROVADOR VIRTUAL — rotas públicas do cliente final (FAS-1, ADR-035).
@@ -215,6 +216,29 @@ router.get("/profile/preferences", requireCustomer, (req: FashionRequest, res): 
 router.delete("/profile/preferences/:id", requireCustomer, (req: FashionRequest, res): any => {
   const ok = FashionLookService.deletePreference(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
   if (!ok) return res.status(404).json({ error: "Preferência não encontrada." });
+  res.json({ ok: true });
+});
+
+// ---- try-on: "look em você" (FAS-3, ADR-037) ----
+
+// POST /api/public/fashion/looks/:id/generate — cria o job (créditos: limite diário da loja)
+router.post("/looks/:id/generate", requireCustomer, (req: FashionRequest, res): any => {
+  const result = FashionTryOnService.requestGeneration(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!result.ok) return res.status(400).json({ error: (result as any).error });
+  res.status(201).json({ ...result, credits: FashionTryOnService.creditsAvailable(req.fashionOrgId!, req.fashionCustomerId!) });
+});
+
+// GET /api/public/fashion/tryon-jobs/:id — status + URL assinada quando pronto
+router.get("/tryon-jobs/:id", requireCustomer, (req: FashionRequest, res): any => {
+  const job = FashionTryOnService.getJob(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!job) return res.status(404).json({ error: "Prévia não encontrada." });
+  res.json(job);
+});
+
+// POST /api/public/fashion/tryon-jobs/:id/cancel — só na fila; devolve o crédito (RF-024)
+router.post("/tryon-jobs/:id/cancel", requireCustomer, (req: FashionRequest, res): any => {
+  const ok = FashionTryOnService.cancelJob(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!ok) return res.status(400).json({ error: "Essa prévia já está sendo gerada e não pode mais ser cancelada." });
   res.json({ ok: true });
 });
 

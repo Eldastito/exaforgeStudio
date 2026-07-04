@@ -2433,6 +2433,9 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar storefront_customers', e); }
   // Retenção do avatar (RF-032/19.4): padrão 30 dias, configurável por loja.
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_avatar_retention_days INTEGER DEFAULT 30`); } catch(e){}
+  // FAS-4 (ADR-038): atribuição comercial pedido<->look (RF-027) — permite
+  // medir look->pedido/ticket sem tabela de junção; NULL para pedidos comuns.
+  try { db.exec(`ALTER TABLE orders ADD COLUMN fashion_look_id TEXT`); } catch(e){}
 };
 
 initDb();

@@ -4,6 +4,7 @@ import db from "../db.js";
 import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionCustomerService } from "../FashionCustomerService.js";
 import { FashionAvatarService } from "../FashionAvatarService.js";
+import { FashionLookService } from "../FashionLookService.js";
 
 // ============================================================================
 // PROVADOR VIRTUAL — rotas públicas do cliente final (FAS-1, ADR-035).
@@ -158,6 +159,62 @@ router.post("/avatars", requireCustomer, (req: FashionRequest, res): any => {
 router.delete("/avatars/:id", requireCustomer, (req: FashionRequest, res): any => {
   const ok = FashionAvatarService.deleteAvatar(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
   if (!ok) return res.status(404).json({ error: "Foto não encontrada." });
+  res.json({ ok: true });
+});
+
+// ---- consultora por ocasião + Look Builder (FAS-2, ADR-036) ----
+
+// POST /api/public/fashion/look-requests — questionário -> até 3 looks
+router.post("/look-requests", requireCustomer, async (req: FashionRequest, res): Promise<any> => {
+  // Cada composição pode custar uma chamada de IA — limite generoso para
+  // humanos, hostil para scripts (o limite de GERAÇÃO de imagem, 3/dia, é do
+  // FAS-3; compor look é mais barato).
+  if (rateLimited(`fashion_look:${req.fashionCustomerId}`, 20, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: "Muitos pedidos de look em pouco tempo. Aguarde um pouco." });
+  }
+  const b = req.body || {};
+  const toList = (v: any) => Array.isArray(v) ? v.map((x: any) => String(x).trim()).filter(Boolean).slice(0, 10)
+    : String(v || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 10);
+  try {
+    const result = await FashionLookService.createRequestAndRecommend(req.fashionOrgId!, req.fashionCustomerId!, {
+      occasion: b.occasion,
+      dayNight: b.dayNight || null,
+      style: b.style || null,
+      colorsAvoid: toList(b.colorsAvoid),
+      piecesAvoid: toList(b.piecesAvoid),
+      budgetMax: b.budgetMax != null && b.budgetMax !== "" && Number(b.budgetMax) > 0 ? Number(b.budgetMax) : null,
+    });
+    if (!result.ok) return res.status(400).json({ error: (result as any).error });
+    res.status(201).json(result);
+  } catch (e) {
+    console.error("[Fashion] Falha ao compor looks", e);
+    res.status(500).json({ error: "Não foi possível montar seus looks agora. Tente novamente." });
+  }
+});
+
+// GET /api/public/fashion/look-requests/:id — reabrir os looks de um pedido
+router.get("/look-requests/:id", requireCustomer, (req: FashionRequest, res): any => {
+  const data = FashionLookService.getRequestLooks(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!data) return res.status(404).json({ error: "Pedido de look não encontrado." });
+  res.json(data);
+});
+
+// POST /api/public/fashion/looks/:id/save — salvar sem carrinho (RF-018)
+router.post("/looks/:id/save", requireCustomer, (req: FashionRequest, res): any => {
+  const ok = FashionLookService.saveLook(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!ok) return res.status(404).json({ error: "Look não encontrado." });
+  res.json({ ok: true });
+});
+
+// GET /api/public/fashion/profile/preferences — a cliente vê o que foi salvo (11.4)
+router.get("/profile/preferences", requireCustomer, (req: FashionRequest, res): any => {
+  res.json({ preferences: FashionLookService.listPreferences(req.fashionOrgId!, req.fashionCustomerId!) });
+});
+
+// DELETE /api/public/fashion/profile/preferences/:id — apagar uma preferência (11.4)
+router.delete("/profile/preferences/:id", requireCustomer, (req: FashionRequest, res): any => {
+  const ok = FashionLookService.deletePreference(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!ok) return res.status(404).json({ error: "Preferência não encontrada." });
   res.json({ ok: true });
 });
 

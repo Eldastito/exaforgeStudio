@@ -13,9 +13,13 @@ import { hexToRgba, lsGet, lsSet } from './utils';
 // validação -> status. As próximas fases (looks/geração) plugam aqui.
 // ============================================================================
 
-type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status';
+type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks';
 type Avatar = { id: string; status: string; url: string | null; expiresAt: string | null };
 type Me = { name: string; email: string; consents: { avatar_processing: boolean }; avatars: Avatar[]; retentionDays: number };
+type LookItem = { productId: string; name: string; price: number; image: string | null; role: string };
+type Look = { id: string; explanation: string; total: number; items: LookItem[]; saved?: boolean };
+
+const STYLES = ['discreto', 'clássico', 'elegante', 'moderno', 'romântico', 'casual', 'marcante'];
 
 const POLICY_VERSION = 'v1-2026-07';
 
@@ -74,6 +78,31 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
   // ---- auth ----
   const [authTab, setAuthTab] = useState<'login' | 'register'>('register');
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', birthDate: '' });
+
+  // ---- consultora por ocasião (FAS-2) ----
+  const [quiz, setQuiz] = useState({ occasion: '', dayNight: '', style: '', colorsAvoid: '', piecesAvoid: '', budgetMax: '' });
+  const [looks, setLooks] = useState<Look[]>([]);
+
+  async function submitQuiz() {
+    if (!quiz.occasion.trim()) { setError('Conte para a consultora qual é a ocasião.'); return; }
+    setBusy(true); setError('');
+    const r = await api('/look-requests', {
+      method: 'POST',
+      body: JSON.stringify({
+        occasion: quiz.occasion, dayNight: quiz.dayNight || null, style: quiz.style || null,
+        colorsAvoid: quiz.colorsAvoid, piecesAvoid: quiz.piecesAvoid, budgetMax: quiz.budgetMax || null,
+      }),
+    }, token);
+    setBusy(false);
+    if (!r.ok) { setError(r.data?.error || 'Não foi possível montar seus looks agora.'); return; }
+    setLooks(r.data.looks || []);
+    setStep('looks');
+  }
+
+  async function saveLook(id: string) {
+    const r = await api(`/looks/${id}/save`, { method: 'POST' }, token);
+    if (r.ok) setLooks((ls) => ls.map((l) => (l.id === id ? { ...l, saved: true } : l)));
+  }
 
   async function submitAuth() {
     setBusy(true); setError('');
@@ -263,9 +292,9 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
                       {approved.url && (
                         <img src={approved.url} alt="Sua foto do provador" className="mx-auto max-h-64 rounded-2xl object-contain" />
                       )}
-                      <p className="text-xs opacity-60">
-                        Tudo pronto. A montagem de looks e a prévia em você chegam na próxima etapa do provador — sua foto já fica guardada com segurança até lá.
-                      </p>
+                      <button type="button" className={primaryBtn} style={{ background: accent }} onClick={() => { setError(''); setStep('quiz'); }}>
+                        Montar meu look por ocasião
+                      </button>
                       <div className="flex gap-2">
                         <button type="button" className="flex-1 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: hexToRgba(accent, 0.4) }} onClick={() => setStep('guide')}>
                           Trocar foto
@@ -289,6 +318,65 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
                   <button type="button" className="w-full text-center text-xs text-red-500/80 underline-offset-2 hover:underline" onClick={deleteEverything}>
                     Apagar minha foto, preferências e conta do provador
                   </button>
+                </div>
+              )}
+
+              {step === 'quiz' && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold">Conte para a consultora</h3>
+                  <input className={inputCls} placeholder="Qual é a ocasião? (ex.: casamento, entrevista, jantar)" value={quiz.occasion} onChange={(e) => setQuiz({ ...quiz, occasion: e.target.value })} />
+                  <div className="flex gap-2">
+                    {['dia', 'noite', 'ambos'].map((d) => (
+                      <button key={d} type="button" onClick={() => setQuiz({ ...quiz, dayNight: quiz.dayNight === d ? '' : d })}
+                        className="flex-1 rounded-xl border px-2 py-1.5 text-xs capitalize"
+                        style={quiz.dayNight === d ? { background: hexToRgba(accent, 0.18), color: accent, borderColor: accent } : { borderColor: hexToRgba(accent, 0.25), opacity: 0.7 }}>
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STYLES.map((s) => (
+                      <button key={s} type="button" onClick={() => setQuiz({ ...quiz, style: quiz.style === s ? '' : s })}
+                        className="rounded-full border px-2.5 py-1 text-xs capitalize"
+                        style={quiz.style === s ? { background: hexToRgba(accent, 0.18), color: accent, borderColor: accent } : { borderColor: hexToRgba(accent, 0.25), opacity: 0.7 }}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <input className={inputCls} placeholder="Cores que você evita (separe por vírgula)" value={quiz.colorsAvoid} onChange={(e) => setQuiz({ ...quiz, colorsAvoid: e.target.value })} />
+                  <input className={inputCls} placeholder="Peças que você evita (ex.: saia, regata)" value={quiz.piecesAvoid} onChange={(e) => setQuiz({ ...quiz, piecesAvoid: e.target.value })} />
+                  <input className={inputCls} type="number" min={0} placeholder="Orçamento máximo do look (R$, opcional)" value={quiz.budgetMax} onChange={(e) => setQuiz({ ...quiz, budgetMax: e.target.value })} />
+                  <button type="button" className={primaryBtn} style={{ background: accent }} disabled={busy} onClick={submitQuiz}>
+                    {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Montar meus looks'}
+                  </button>
+                  <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('status')}>Voltar</button>
+                </div>
+              )}
+
+              {step === 'looks' && (
+                <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+                  <h3 className="text-sm font-semibold">Seus looks para {quiz.occasion || 'a ocasião'}</h3>
+                  {looks.map((look, i) => (
+                    <div key={look.id} className="rounded-2xl border p-3" style={{ borderColor: hexToRgba(accent, 0.3) }}>
+                      <p className="mb-2 text-xs font-semibold" style={{ color: accent }}>Look {i + 1} — R$ {look.total.toFixed(2)}</p>
+                      <div className="mb-2 space-y-1.5">
+                        {look.items.map((it) => (
+                          <div key={it.productId} className="flex items-center gap-2 text-sm">
+                            {it.image && <img src={it.image} alt="" className="h-10 w-10 rounded-lg object-cover" />}
+                            <span className="flex-1">{it.name}</span>
+                            <span className="text-xs opacity-70">R$ {it.price.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mb-2 text-xs opacity-70">{look.explanation}</p>
+                      <button type="button" disabled={!!look.saved} className="w-full rounded-xl border px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+                        style={{ borderColor: hexToRgba(accent, 0.4), color: accent }} onClick={() => saveLook(look.id)}>
+                        {look.saved ? '✓ Look salvo' : 'Salvar este look'}
+                      </button>
+                    </div>
+                  ))}
+                  <p className="text-center text-[11px] opacity-50">Ver o look em você (prévia na sua foto) chega na próxima etapa do provador.</p>
+                  <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('quiz')}>Ajustar respostas</button>
                 </div>
               )}
             </motion.div>

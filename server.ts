@@ -56,7 +56,7 @@ import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
-import { processIncomingMessage } from "./src/server/webhookProcessor.js";
+import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { setUsageOrg } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
@@ -773,7 +773,7 @@ async function startServer() {
         // avatar pode travar e atrasar o atendimento). Processamos a mensagem
         // primeiro e depois disparamos a busca da foto best-effort, com timeout
         // e sem bloquear o webhook (ver maybeFetchEvolutionAvatar).
-        await processIncomingMessage({
+        await dispatchIncomingMessage({
            channelId: null, // mapped by identifier
            organizationId: null,
            identifier: businessId,
@@ -979,7 +979,7 @@ async function startServer() {
       if (incomingMessageText && senderId) {
         console.log(`[${provider.toUpperCase()}] Mensagem de ${senderId}: ${incomingMessageText}`);
         
-        await processIncomingMessage({
+        await dispatchIncomingMessage({
            channelId: null, // mapped by identifier
            organizationId: null,
            identifier: businessId,

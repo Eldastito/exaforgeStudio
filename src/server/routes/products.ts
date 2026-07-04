@@ -13,6 +13,7 @@ import { parseNFeXml } from "../nfeParser.js";
 import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
 import { uniqueProductSlug } from "../productSlug.js";
+import { verifyNFeSignature } from "../nfeSignature.js";
 
 const router = Router();
 
@@ -320,8 +321,14 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
     for (const file of files) {
       const fileName = file.originalname || "arquivo.xml";
       try {
-        const parsed = parseNFeXml(file.buffer.toString("utf-8"));
+        const xmlText = file.buffer.toString("utf-8");
+        const parsed = parseNFeXml(xmlText);
         if (!parsed.items.length) { skipped.push({ fileName, error: "Nenhum item de mercadoria neste XML." }); continue; }
+        // Assinatura digital (ADR-029): verificação LOCAL (digest + RSA do
+        // certificado embutido) — INFORMATIVA, nunca bloqueia a importação
+        // (o lojista está importando a própria compra; a consulta online à
+        // Sefaz exigiria certificado digital da organização, fora de escopo).
+        const signature = verifyNFeSignature(xmlText);
 
         // Dedupe pela chave de acesso (44 dígitos, única por NF-e no Brasil):
         // mesma nota já importada nesta organização — ou repetida dentro do
@@ -348,11 +355,11 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
         db.prepare(
           `INSERT INTO invoice_scan_drafts (id, organization_id, uploaded_by, image_url, raw_extraction_json, confidence_score, status, access_key)
            VALUES (?, ?, ?, ?, ?, 100, 'pending', ?)`
-        ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, supplierContactId: supplierContact?.id || null, items, source: "xml" }), parsed.accessKey);
+        ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, supplierContactId: supplierContact?.id || null, items, source: "xml", signature }), parsed.accessKey);
         logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
 
         const enriched = attachCatalogMatches(orgId, items).map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost, markup) }));
-        drafts.push({ draftId, imageUrl: "", fileName, supplierName: parsed.supplierName, supplierContact, items: enriched, confidenceScore: 100, truncated });
+        drafts.push({ draftId, imageUrl: "", fileName, supplierName: parsed.supplierName, supplierContact, items: enriched, confidenceScore: 100, truncated, signature });
       } catch (e: any) {
         skipped.push({ fileName, error: e.message || "Não foi possível ler este XML." });
       }

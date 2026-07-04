@@ -44,7 +44,7 @@ export function CatalogView() {
   // existente, ou ignorar) -> só então produtos/estoque são criados de fato.
   const [showInvoiceScan, setShowInvoiceScan] = useState(false);
   const [invoiceScanning, setInvoiceScanning] = useState(false);
-  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; supplierContact?: { id: string; name: string } | null; confidenceScore: number } | null>(null);
+  const [invoiceDraft, setInvoiceDraft] = useState<{ draftId: string; imageUrl: string; supplierName: string | null; supplierContact?: { id: string; name: string } | null; confidenceScore: number; signature?: any } | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   // Fila de rascunhos ainda não revisados quando um lote de XMLs é importado
@@ -229,7 +229,7 @@ export function CatalogView() {
   // (/invoice-scan/xml) — as duas rotas devolvem o mesmo formato por rascunho,
   // então a tela de revisão nem sabe qual das duas foi usada.
   const applyInvoiceScanResult = (d: any) => {
-    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, supplierContact: d.supplierContact || null, confidenceScore: d.confidenceScore });
+    setInvoiceDraft({ draftId: d.draftId, imageUrl: d.imageUrl || '', supplierName: d.supplierName || null, supplierContact: d.supplierContact || null, confidenceScore: d.confidenceScore, signature: d.signature || null });
     setInvoiceItems((d.items || []).map((it: any) => {
       // Pré-seleção de reposição: preferir o match aproximado do servidor
       // (produtos com nome parecido, não só idêntico — ADR-024); manter o
@@ -700,6 +700,15 @@ export function CatalogView() {
                       </p>
                     )}
                     <p className="mt-1">{invoiceItems.length} item(ns) identificado(s). Confiança geral da leitura: {invoiceDraft.confidenceScore}%.</p>
+                    {invoiceDraft.signature && (
+                      invoiceDraft.signature.valid === true ? (
+                        <p className="mt-1 text-emerald-400">Assinatura digital íntegra{invoiceDraft.signature.certSubject ? ` — emitida para ${invoiceDraft.signature.certSubject}` : ''}.</p>
+                      ) : invoiceDraft.signature.signed ? (
+                        <p className="mt-1 text-red-400">Assinatura digital NÃO confere — o XML pode ter sido alterado. Confira a origem do arquivo antes de confirmar.</p>
+                      ) : (
+                        <p className="mt-1 text-amber-400">XML sem assinatura digital — confira a origem do arquivo.</p>
+                      )
+                    )}
                     {invoiceQueue.length > 0 && (
                       <p className="mt-1 text-amber-400">+ {invoiceQueue.length} nota(s) na fila — aparecem uma a uma após confirmar esta.</p>
                     )}

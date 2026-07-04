@@ -1,5 +1,7 @@
+import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
+import { JWT_SECRET } from "./config/secret.js";
 import { chat, isAIConfigured } from "./llm.js";
 import { normalizeProductName } from "./productMatcher.js";
 import { FashionStudioService } from "./FashionStudioService.js";
@@ -262,6 +264,119 @@ export class FashionLookService {
     db.prepare(`UPDATE fashion_looks SET status = 'selected' WHERE id = ?`).run(lookId);
     FashionStudioService.recordEvent(orgId, "FashionLookSaved", {}, customerId, lookId);
     return true;
+  }
+
+  // ---- carrinho do look completo (FAS-4, ADR-038 — seção 10 do PRD) ----
+
+  /**
+   * "Comprar este look": revalida CADA item contra o estado ATUAL do catálogo
+   * (cenários 10.2) — disponível (ativo+visível+preço+estoque vendável),
+   * preço atual vs. snapshot (nunca cobra silenciosamente um preço diferente
+   * do que a cliente viu). O carrinho da vitrine é client-side; este endpoint
+   * é a validação transacional do lado do servidor — e o CHECKOUT revalida
+   * tudo de novo ao criar o pedido (caminho já existente da loja).
+   */
+  static prepareCart(orgId: string, customerId: string, lookId: string):
+    { ok: true; lookId: string; items: { productId: string; name: string; image: string | null; price: number; snapshotPrice: number; priceChanged: boolean; available: boolean; reason: string | null }[]; availableTotal: number }
+    | { ok: false; error: string } {
+    const look = db.prepare(
+      `SELECT fl.id FROM fashion_looks fl JOIN fashion_look_requests flr ON flr.id = fl.request_id
+       WHERE fl.id = ? AND fl.organization_id = ? AND flr.customer_id = ?`
+    ).get(lookId, orgId, customerId) as any;
+    if (!look) return { ok: false, error: "Look não encontrado." };
+
+    const rows = db.prepare(
+      `SELECT fli.product_service_id AS productId, fli.price_snapshot AS snapshotPrice,
+              ps.name, ps.price, ps.active, ps.storefront_visible, ps.stock_control_enabled, ps.studio_image_url,
+              (SELECT url FROM product_images pi WHERE pi.product_service_id = ps.id ORDER BY position ASC, created_at ASC LIMIT 1) AS cover,
+              (SELECT COALESCE(SUM(quantity_available - quantity_reserved), 0) FROM inventory_items inv WHERE inv.product_service_id = ps.id) AS sellable
+       FROM fashion_look_items fli JOIN products_services ps ON ps.id = fli.product_service_id
+       WHERE fli.look_id = ? AND fli.organization_id = ?`
+    ).all(lookId, orgId) as any[];
+    if (!rows.length) return { ok: false, error: "Este look não tem peças." };
+
+    const items = rows.map((r) => {
+      let available = true;
+      let reason: string | null = null;
+      if (!r.active || (r.storefront_visible != null && r.storefront_visible === 0)) { available = false; reason = "Esta peça saiu de circulação."; }
+      else if (!(r.price > 0)) { available = false; reason = "Esta peça está sem preço no momento."; }
+      else if (r.stock_control_enabled && (r.sellable ?? 0) <= 0) { available = false; reason = "Esta peça esgotou."; }
+      const price = r.price || 0;
+      const snapshotPrice = r.snapshotPrice || 0;
+      return {
+        productId: r.productId, name: r.name, image: r.cover || r.studio_image_url || null,
+        price, snapshotPrice,
+        priceChanged: available && snapshotPrice > 0 && Math.abs(price - snapshotPrice) >= 0.01,
+        available, reason,
+      };
+    });
+    const availableTotal = Math.round(items.filter((i) => i.available).reduce((s, i) => s + i.price, 0) * 100) / 100;
+    FashionStudioService.recordEvent(orgId, "FashionLookAddedToCart", {
+      itemCount: items.length, availableCount: items.filter((i) => i.available).length, availableTotal,
+    }, customerId, lookId);
+    return { ok: true, lookId, items, availableTotal };
+  }
+
+  /** Atribuição pedido<->look (RF-027): valida que o look existe NA organização antes de gravar no pedido. */
+  static lookIdForOrder(orgId: string, lookId: string | null | undefined): string | null {
+    if (!lookId) return null;
+    const row = db.prepare(`SELECT id FROM fashion_looks WHERE id = ? AND organization_id = ?`).get(String(lookId), orgId) as any;
+    return row?.id || null;
+  }
+
+  // ---- link de compartilhamento (RF-028, com expiração; RF-029: sem avatar) ----
+
+  private static shareSecret(): string {
+    return crypto.createHash("sha256").update(`${JWT_SECRET}:fashion_look_share_v1`).digest("hex");
+  }
+
+  /** Token stateless HMAC (lookId + expiração de 7 dias) — nada gravado, nada a vazar. */
+  static shareLook(orgId: string, customerId: string, lookId: string): { ok: true; token: string } | { ok: false; error: string } {
+    const look = db.prepare(
+      `SELECT fl.id FROM fashion_looks fl JOIN fashion_look_requests flr ON flr.id = fl.request_id
+       WHERE fl.id = ? AND fl.organization_id = ? AND flr.customer_id = ?`
+    ).get(lookId, orgId, customerId) as any;
+    if (!look) return { ok: false, error: "Look não encontrado." };
+    const exp = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const payload = `${lookId}.${exp}`;
+    const sig = crypto.createHmac("sha256", this.shareSecret()).update(payload).digest("hex").slice(0, 32);
+    return { ok: true, token: Buffer.from(`${payload}.${sig}`).toString("base64url") };
+  }
+
+  /**
+   * Resolve um token de compartilhamento (público, sem login). Devolve SÓ a
+   * composição do look (peças/preços atuais/explicação) — nunca avatar, foto
+   * gerada ou qualquer dado da cliente (RF-029, padrão conservador).
+   */
+  static resolveSharedLook(token: string): { lookId: string; explanation: string; storeSlug: string | null; items: { productId: string; name: string; image: string | null; price: number; available: boolean }[]; total: number } | null {
+    let decoded = "";
+    try { decoded = Buffer.from(String(token || ""), "base64url").toString("utf-8"); } catch { return null; }
+    const parts = decoded.split(".");
+    if (parts.length !== 3) return null;
+    const [lookId, expStr, sig] = parts;
+    const exp = Number(expStr);
+    if (!Number.isFinite(exp) || exp < Date.now()) return null;
+    const expected = crypto.createHmac("sha256", this.shareSecret()).update(`${lookId}.${exp}`).digest("hex").slice(0, 32);
+    const a = Buffer.from(sig, "utf-8"), b = Buffer.from(expected, "utf-8");
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+    const look = db.prepare(`SELECT id, organization_id, explanation FROM fashion_looks WHERE id = ?`).get(lookId) as any;
+    if (!look) return null;
+    if (!FashionStudioService.isEnabled(look.organization_id)) return null; // kill switch vale para links antigos
+    const store = db.prepare(`SELECT slug FROM storefront_settings WHERE organization_id = ?`).get(look.organization_id) as any;
+    const rows = db.prepare(
+      `SELECT fli.product_service_id AS productId, ps.name, ps.price, ps.active, ps.storefront_visible, ps.stock_control_enabled, ps.studio_image_url,
+              (SELECT url FROM product_images pi WHERE pi.product_service_id = ps.id ORDER BY position ASC, created_at ASC LIMIT 1) AS cover,
+              (SELECT COALESCE(SUM(quantity_available - quantity_reserved), 0) FROM inventory_items inv WHERE inv.product_service_id = ps.id) AS sellable
+       FROM fashion_look_items fli JOIN products_services ps ON ps.id = fli.product_service_id
+       WHERE fli.look_id = ? AND fli.organization_id = ?`
+    ).all(lookId, look.organization_id) as any[];
+    const items = rows.map((r) => ({
+      productId: r.productId, name: r.name, image: r.cover || r.studio_image_url || null, price: r.price || 0,
+      available: !!r.active && (r.storefront_visible == null || r.storefront_visible === 1) && (r.price > 0) && (!r.stock_control_enabled || (r.sellable ?? 0) > 0),
+    }));
+    const total = Math.round(items.filter((i) => i.available).reduce((s, i) => s + i.price, 0) * 100) / 100;
+    return { lookId: look.id, explanation: look.explanation || "", storeSlug: store?.slug || null, items, total };
   }
 
   /** Looks de um request (para reabrir a tela) — só da dona. */

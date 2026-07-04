@@ -219,6 +219,30 @@ router.delete("/profile/preferences/:id", requireCustomer, (req: FashionRequest,
   res.json({ ok: true });
 });
 
+// ---- carrinho do look + compartilhamento (FAS-4, ADR-038) ----
+
+// POST /api/public/fashion/looks/:id/add-to-cart — revalidação transacional (seção 10)
+router.post("/looks/:id/add-to-cart", requireCustomer, (req: FashionRequest, res): any => {
+  const result = FashionLookService.prepareCart(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!result.ok) return res.status(404).json({ error: (result as any).error });
+  res.json(result);
+});
+
+// POST /api/public/fashion/looks/:id/share — token HMAC com expiração de 7 dias (RF-028)
+router.post("/looks/:id/share", requireCustomer, (req: FashionRequest, res): any => {
+  const result = FashionLookService.shareLook(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  if (!result.ok) return res.status(404).json({ error: (result as any).error });
+  res.json({ token: (result as any).token });
+});
+
+// GET /api/public/fashion/shared-looks/:token — PÚBLICO (quem tem o link vê a
+// composição do look: peças/preços atuais; NUNCA avatar/foto gerada — RF-029)
+router.get("/shared-looks/:token", (req, res): any => {
+  const look = FashionLookService.resolveSharedLook(req.params.token);
+  if (!look) return res.status(404).json({ error: "Link expirado ou inválido." });
+  res.json(look);
+});
+
 // ---- try-on: "look em você" (FAS-3, ADR-037) ----
 
 // POST /api/public/fashion/looks/:id/generate — cria o job (créditos: limite diário da loja)

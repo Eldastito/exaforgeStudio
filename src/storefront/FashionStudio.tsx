@@ -13,7 +13,7 @@ import { hexToRgba, lsGet, lsSet } from './utils';
 // validação -> status. As próximas fases (looks/geração) plugam aqui.
 // ============================================================================
 
-type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks';
+type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks' | 'shared';
 type Avatar = { id: string; status: string; url: string | null; expiresAt: string | null };
 type Me = { name: string; email: string; consents: { avatar_processing: boolean }; avatars: Avatar[]; retentionDays: number };
 type LookItem = { productId: string; name: string; price: number; image: string | null; role: string };
@@ -32,7 +32,12 @@ async function api(path: string, opts: RequestInit = {}, token?: string | null):
   return { ok: res.ok, status: res.status, data };
 }
 
-export function FashionStudio({ slug, accent, mode }: { slug: string; accent: string; mode: Mode }) {
+type SharedLook = { lookId: string; explanation: string; items: { productId: string; name: string; image: string | null; price: number; available: boolean }[]; total: number };
+
+export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
+  slug: string; accent: string; mode: Mode;
+  onAddLookItems?: (items: { productId: string; name: string; image: string | null; price: number }[], lookId: string) => void;
+}) {
   const night = mode === 'night';
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -118,6 +123,45 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
       setTryon((t) => ({ ...t, [lookId]: { jobId, status: r.data.status, url: r.data.url, error: r.data.error } }));
       if (['SUCCEEDED', 'FAILED_FINAL', 'EXPIRED', 'DELETED'].includes(r.data.status)) return;
     }
+  }
+
+  // ---- carrinho do look + compartilhamento (FAS-4) ----
+  const [cartNotes, setCartNotes] = useState<Record<string, string[]>>({});
+  const [shareCopied, setShareCopied] = useState<string | null>(null);
+  const [sharedLook, setSharedLook] = useState<SharedLook | null>(null);
+
+  // Link compartilhado (?look=token): abre o look em modo leitura, sem login.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('look');
+    if (!t) return;
+    fetch(`/api/public/fashion/shared-looks/${encodeURIComponent(t)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) { setSharedLook(data); setStep('shared'); setOpen(true); } })
+      .catch(() => {});
+  }, []);
+
+  async function buyLook(lookId: string) {
+    setError('');
+    const r = await api(`/looks/${lookId}/add-to-cart`, { method: 'POST' }, token);
+    if (!r.ok) { setError(r.data?.error || 'Não foi possível adicionar o look.'); return; }
+    const notes: string[] = [];
+    for (const it of r.data.items || []) {
+      if (!it.available) notes.push(`${it.name}: ${it.reason || 'indisponível'}`);
+      else if (it.priceChanged) notes.push(`${it.name}: preço atualizado para R$ ${Number(it.price).toFixed(2)}`);
+    }
+    setCartNotes((n) => ({ ...n, [lookId]: notes }));
+    const available = (r.data.items || []).filter((it: any) => it.available);
+    if (!available.length) { setError('Nenhuma peça deste look está disponível agora.'); return; }
+    onAddLookItems?.(available.map((it: any) => ({ productId: it.productId, name: it.name, image: it.image, price: it.price })), lookId);
+    setOpen(false);
+  }
+
+  async function shareLook(lookId: string) {
+    const r = await api(`/looks/${lookId}/share`, { method: 'POST' }, token);
+    if (!r.ok) { setError(r.data?.error || 'Não foi possível gerar o link.'); return; }
+    const url = `${window.location.origin}/loja/${encodeURIComponent(slug)}?look=${encodeURIComponent(r.data.token)}`;
+    try { await navigator.clipboard.writeText(url); setShareCopied(lookId); setTimeout(() => setShareCopied(null), 2500); } catch { /* noop */ }
+    window.open(`https://wa.me/?text=${encodeURIComponent(`Olha o look que montei: ${url}`)}`, '_blank');
   }
 
   async function generateTryOn(lookId: string) {
@@ -425,10 +469,51 @@ export function FashionStudio({ slug, accent, mode }: { slug: string; accent: st
                           {look.saved ? '✓ Look salvo' : 'Salvar este look'}
                         </button>
                       </div>
+                      {cartNotes[look.id]?.length > 0 && (
+                        <ul className="mt-2 list-disc pl-4 text-[11px] text-amber-500">
+                          {cartNotes[look.id].map((n, j) => <li key={j}>{n}</li>)}
+                        </ul>
+                      )}
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" className="flex-1 rounded-xl border px-3 py-1.5 text-xs font-bold"
+                          style={{ borderColor: accent, color: accent }} onClick={() => buyLook(look.id)}>
+                          🛒 Comprar este look
+                        </button>
+                        <button type="button" className="rounded-xl border px-3 py-1.5 text-xs"
+                          style={{ borderColor: hexToRgba(accent, 0.4) }} onClick={() => shareLook(look.id)}>
+                          {shareCopied === look.id ? '✓ Link copiado' : 'Compartilhar'}
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {credits && <p className="text-center text-[11px] opacity-50">{credits.available} de {credits.limit} prévias restantes hoje.</p>}
                   <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('quiz')}>Ajustar respostas</button>
+                </div>
+              )}
+
+              {step === 'shared' && sharedLook && (
+                <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+                  <h3 className="text-sm font-semibold">Um look compartilhado com você ✨</h3>
+                  <div className="rounded-2xl border p-3" style={{ borderColor: hexToRgba(accent, 0.3) }}>
+                    <div className="mb-2 space-y-1.5">
+                      {sharedLook.items.map((it) => (
+                        <div key={it.productId} className="flex items-center gap-2 text-sm">
+                          {it.image && <img src={it.image} alt="" className="h-10 w-10 rounded-lg object-cover" />}
+                          <span className={`flex-1 ${it.available ? '' : 'line-through opacity-50'}`}>{it.name}</span>
+                          <span className="text-xs opacity-70">{it.available ? `R$ ${it.price.toFixed(2)}` : 'esgotado'}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {sharedLook.explanation && <p className="mb-2 text-xs opacity-70">{sharedLook.explanation}</p>}
+                    <p className="mb-2 text-xs font-semibold" style={{ color: accent }}>Total disponível: R$ {sharedLook.total.toFixed(2)}</p>
+                    <button type="button" className={primaryBtn} style={{ background: accent }}
+                      onClick={() => {
+                        const available = sharedLook.items.filter((i) => i.available);
+                        if (available.length) { onAddLookItems?.(available.map((i) => ({ productId: i.productId, name: i.name, image: i.image, price: i.price })), sharedLook.lookId); setOpen(false); }
+                      }}>
+                      Adicionar tudo ao carrinho
+                    </button>
+                  </div>
                 </div>
               )}
             </motion.div>

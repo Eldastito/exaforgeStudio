@@ -180,6 +180,27 @@ export function Storefront() {
     setCartOpen(true);
   }, [addToCart]);
 
+  // Look do provador adicionado ao carrinho (Fashion AI Studio FAS-4):
+  // guarda o id para a atribuição comercial pedido<->look no checkout.
+  const [fashionLookId, setFashionLookId] = useState<string | null>(null);
+
+  // "Comprar este look": mescla as peças no carrinho existente (nunca apaga o
+  // que já estava — cenário 10.2/4 do PRD) e abre o carrinho.
+  const addLookItems = useCallback((items: { productId: string; name: string; image: string | null; price: number }[], lookId: string) => {
+    setCart((prev) => {
+      let next = [...prev];
+      for (const it of items) {
+        const key = `${it.productId}:unit`;
+        const existing = next.find((c) => c.key === key);
+        if (existing) next = next.map((c) => (c.key === key ? { ...c, quantity: c.quantity + 1 } : c));
+        else next.push({ key, productId: it.productId, name: it.name, image: it.image, unitPrice: it.price, quantity: 1, optionLabel: 'Unidade', option: null });
+      }
+      return next;
+    });
+    setFashionLookId(lookId);
+    setCartOpen(true);
+  }, []);
+
   const submitOrder = useCallback(
     async (extra: { name: string; phone: string; email?: string; coupon?: string }): Promise<OrderResponse | null> => {
       const body = {
@@ -187,6 +208,7 @@ export function Storefront() {
         customer: { name: extra.name, phone: extra.phone, email: extra.email },
         coupon: extra.coupon,
         items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })),
+        fashionLookId: fashionLookId ?? undefined,
       };
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/order`, {
         method: 'POST',
@@ -194,9 +216,10 @@ export function Storefront() {
         body: JSON.stringify(body),
       });
       if (!res.ok) return null;
+      setFashionLookId(null);
       return (await res.json()) as OrderResponse;
     },
-    [cart, slug, token],
+    [cart, slug, token, fashionLookId],
   );
 
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
@@ -357,7 +380,7 @@ export function Storefront() {
       )}
 
       {/* Provador Virtual (Fashion AI Studio) — só renderiza quando a loja tem o módulo ligado */}
-      {data && <FashionStudio slug={slug} accent={accent} mode={mode} />}
+      {data && <FashionStudio slug={slug} accent={accent} mode={mode} onAddLookItems={addLookItems} />}
 
       {/* Carrinho */}
       <CartDrawer

@@ -7,6 +7,7 @@ import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReservationService } from "../ReservationService.js";
 import { ensureProductSlug } from "../productSlug.js";
 import { FashionStudioService } from "../FashionStudioService.js";
+import { FashionLookService } from "../FashionLookService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -366,11 +367,19 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     }
     const total = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
 
+    // Atribuição comercial pedido<->look (Fashion AI Studio FAS-4, RF-027):
+    // valida que o look é DESTA organização antes de gravar — um id forjado
+    // no body nunca vira atribuição.
+    const fashionLookId = FashionLookService.lookIdForOrder(orgId, body.fashionLookId);
+
     const tx = db.transaction(() => {
       db.prepare(
-        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes)
-         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?)`
-      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null);
+        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id)
+         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?)`
+      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null, fashionLookId);
+      if (fashionLookId) {
+        FashionStudioService.recordEvent(orgId, "FashionOrderPlaced", { orderId, total }, null, fashionLookId);
+      }
 
       const stmt = db.prepare(
         `INSERT INTO order_items (id, order_id, organization_id, product_service_id, name_snapshot, unit_price, quantity, line_total, variant_label)

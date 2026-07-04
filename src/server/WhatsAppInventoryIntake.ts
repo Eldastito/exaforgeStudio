@@ -8,7 +8,14 @@ import { findBestProductMatch } from "./productMatcher.js";
 import { suggestSalePrice } from "./pricing.js";
 import { orgMarkup } from "./routes/products.js";
 import { InventoryIntakeService } from "./InventoryIntakeService.js";
+import { StudioCatalogPhotoService } from "./StudioCatalogPhotoService.js";
 import { savePendingAction, clearPendingAction } from "./PendingManagerActions.js";
+
+// Recusa explícita a informar preço/margem/quantidade (ADR-032) — distinta de
+// uma resposta que só não trouxe NENHUM valor por acaso: só conta como
+// recusa quando a mensagem claramente diz "não" a fornecer o dado, nunca por
+// silêncio ou ambiguidade (isso continua só reperguntando).
+export const DECLINE_PATTERN = /^(n[ãa]o(\s+sei|\s+quero|\s+tenho)?|prefiro\s+n[ãa]o|depois\s+eu\s+vejo|agora\s+n[ãa]o|deixa\s+(pra\s+depois|assim|quieto)|pula|pular|sem\s+essa|n[ãa]o\s+vou\s+informar)\b/i;
 
 // Mesmo diretório de mídia usado pelo painel (routes/products.ts / routes/uploads.ts).
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
@@ -41,12 +48,38 @@ export class WhatsAppInventoryIntake {
         savePendingAction(orgId, identifier, "awaiting_photo_type", { base64, mime });
         return "Recebi a foto! Ela é de um *produto* avulso (embalagem/rótulo) ou de uma *nota fiscal*? Me responda com uma das duas palavras. 🙂";
       }
-      if (type === "product") return await this.startProductRegistration(orgId, identifier, base64, mime);
-      return await this.startInvoiceRegistration(orgId, identifier, base64, mime);
+      const reply = type === "product"
+        ? await this.startProductRegistration(orgId, identifier, base64, mime)
+        : await this.startInvoiceRegistration(orgId, identifier, base64, mime);
+      return reply + this.maybeNudge(orgId);
     } catch (e) {
       console.error("[WhatsAppInventoryIntake] Falha ao processar foto", e);
       return "Não consegui analisar essa foto agora. Pode tentar de novo em instantes?";
     }
+  }
+
+  /**
+   * Auditoria proativa de produtos sem preço/venda (ADR-032) — NUNCA dispara
+   * mensagem só para isso; só aparece grudada numa resposta que já ia sair
+   * (o gestor já está conversando). Rate-limit de 24h por organização
+   * (organization_settings.pending_pricing_nudge_at) para não virar spam a
+   * cada mensagem enquanto houver produtos incompletos.
+   */
+  /** Não-privado: testado diretamente em scripts/test-whatsapp-inventory-fase-b.ts. */
+  static maybeNudge(orgId: string): string {
+    try {
+      const org = db.prepare(`SELECT pending_pricing_nudge_at FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      if (org?.pending_pricing_nudge_at) {
+        const last = new Date(org.pending_pricing_nudge_at).getTime();
+        if (Number.isFinite(last) && Date.now() - last < 24 * 60 * 60 * 1000) return "";
+      }
+      const incomplete = InventoryIntakeService.incompletePricingProducts(orgId);
+      if (!incomplete.length) return "";
+      db.prepare(`UPDATE organization_settings SET pending_pricing_nudge_at = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(orgId);
+      const names = incomplete.slice(0, 5).map((p) => p.name).join(", ");
+      const more = incomplete.length > 5 ? ` e mais ${incomplete.length - 5}` : "";
+      return `\n\n⚠️ *Aproveitando que você está por aqui*: ${incomplete.length} produto(s) sem preço de venda, fora da vitrine: ${names}${more}. Sem o preço, ninguém consegue comprar — me diga o preço de qualquer um deles quando puder.`;
+    } catch (e) { return ""; }
   }
 
   static async handleReply(orgId: string, identifier: string, pending: any, text: string): Promise<string> {
@@ -64,14 +97,14 @@ export class WhatsAppInventoryIntake {
       if (pending.action_type === "awaiting_photo_type") {
         const t = text.toLowerCase();
         clearPendingAction(pending.id);
-        if (/produto|item|avulso/.test(t)) return await this.startProductRegistration(orgId, identifier, payload.base64, payload.mime);
-        if (/nota|fiscal|cupom|comprovante/.test(t)) return await this.startInvoiceRegistration(orgId, identifier, payload.base64, payload.mime);
+        if (/produto|item|avulso/.test(t)) return (await this.startProductRegistration(orgId, identifier, payload.base64, payload.mime)) + this.maybeNudge(orgId);
+        if (/nota|fiscal|cupom|comprovante/.test(t)) return (await this.startInvoiceRegistration(orgId, identifier, payload.base64, payload.mime)) + this.maybeNudge(orgId);
         // Resposta ambígua: restaura a pendência e pergunta de novo.
         savePendingAction(orgId, identifier, "awaiting_photo_type", payload);
         return "Não entendi — pode responder só *produto* ou *nota fiscal*?";
       }
-      if (pending.action_type === "product_registration") return await this.continueProductRegistration(orgId, identifier, pending, payload, text);
-      if (pending.action_type === "invoice_registration") return await this.continueInvoiceRegistration(orgId, identifier, pending, payload, text);
+      if (pending.action_type === "product_registration") return (await this.continueProductRegistration(orgId, identifier, pending, payload, text)) + this.maybeNudge(orgId);
+      if (pending.action_type === "invoice_registration") return (await this.continueInvoiceRegistration(orgId, identifier, pending, payload, text)) + this.maybeNudge(orgId);
       return "Ação concluída.";
     } catch (e) {
       console.error("[WhatsAppInventoryIntake] Falha ao continuar cadastro", e);
@@ -100,9 +133,29 @@ export class WhatsAppInventoryIntake {
       description: String(parsed.description || "").trim().slice(0, 500),
     };
 
-    savePendingAction(orgId, identifier, "product_registration", { imageUrl, extracted, collected: {} });
+    // Reconhece o catálogo ANTES de perguntar preço: mesmo produto já
+    // cadastrado (limiar 0.75, igual à reposição automática do Fluxo 2 — sem
+    // humano conferindo aqui) vira reposição, reaproveitando o preço/margem
+    // já praticados em vez de perguntar tudo de novo (ADR-032).
+    const catalog = db.prepare(`SELECT id, name, price, margin_percent FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1`).all(orgId) as any[];
+    const match = findBestProductMatch(extracted.name, catalog, 0.75);
+    const matchedRow = match ? catalog.find((c) => c.id === match.id) : null;
+
+    if (match && matchedRow) {
+      savePendingAction(orgId, identifier, "product_registration", {
+        mode: "restock", base64: b64, mime: "image/jpeg", imageUrl,
+        matchedProductId: match.id, matchedProductName: match.name, matchedPrice: matchedRow.price, matchedMargin: matchedRow.margin_percent,
+        collected: {},
+      });
+      const priceLine = matchedRow.price != null
+        ? `mesmo preço de R$ ${Number(matchedRow.price).toFixed(2)}${matchedRow.margin_percent != null ? ` (margem ${matchedRow.margin_percent}%)` : ""}`
+        : "sem preço de venda definido ainda";
+      return `📦 Esse produto já é seu: *${match.name}*! Vou repor o estoque usando o ${priceLine} — me diz só: quantas unidades chegaram?`;
+    }
+
+    savePendingAction(orgId, identifier, "product_registration", { mode: "new", base64: b64, mime: "image/jpeg", imageUrl, extracted, collected: {} });
     const label = [extracted.name, extracted.weightLabel].filter(Boolean).join(" — ");
-    return `📦 Identifiquei: *${label}*${extracted.brand ? ` (${extracted.brand})` : ""}. Para cadastrar e publicar na vitrine, me diga:\n1) Quanto você pagou (custo)?\n2) Que margem de lucro quer aplicar? (ou já me diga o preço de venda final)\n3) Quantas unidades tem em estoque?`;
+    return `📦 Identifiquei: *${label}*${extracted.brand ? ` (${extracted.brand})` : ""}. Para cadastrar e publicar na vitrine, me diga:\n1) Quanto você pagou (custo)?\n2) Que margem de lucro quer aplicar? (ou já me diga o preço de venda final)\n3) Quantas unidades tem em estoque?\n\n_Preciso do preço de venda porque sem ele o produto fica só no controle de estoque — não posso publicar na vitrine e nenhum cliente consegue comprar._`;
   }
 
   /** Não-privado: testado diretamente (lógica pura, sem I/O) em scripts/test-whatsapp-inventory-intake.ts. */
@@ -126,7 +179,33 @@ export class WhatsAppInventoryIntake {
     return `Ainda preciso saber: ${missing.map((m) => labels[m]).join(" e ")}.`;
   }
 
+  /** Foto de catálogo profissional (opt-in) — nunca bloqueia; falha/desligado cai na foto crua. */
+  private static async catalogImageUrl(orgId: string, payload: any, fallbackUrl: string, existingProductId?: string): Promise<string> {
+    if (existingProductId) {
+      const r = await StudioCatalogPhotoService.ensureForExistingProduct(orgId, existingProductId, payload.base64, payload.mime || "image/jpeg");
+      return r.url || fallbackUrl;
+    }
+    const url = await StudioCatalogPhotoService.generateForNewProduct(orgId, payload.base64, payload.mime || "image/jpeg");
+    return url || fallbackUrl;
+  }
+
   private static async continueProductRegistration(orgId: string, identifier: string, pending: any, payload: any, text: string): Promise<string> {
+    if (payload.mode === "restock") return this.continueProductRestock(orgId, identifier, pending, payload, text);
+
+    // Recusa explícita: só quando NADA foi extraído da mensagem e o texto
+    // claramente recusa — nunca por silêncio/ambiguidade (essas só reperguntam).
+    if (DECLINE_PATTERN.test(text.trim())) {
+      const parsedOnDecline = await parseInventoryReply(text, ["quantity"]);
+      const quantity = parsedOnDecline.quantity ?? 0;
+      clearPendingAction(pending.id);
+      const imageUrl = await this.catalogImageUrl(orgId, payload, payload.imageUrl);
+      InventoryIntakeService.commitProductWithoutPrice(orgId, {
+        name: payload.extracted.name, category: payload.extracted.category, description: payload.extracted.description,
+        quantity, imageUrl,
+      });
+      return `Tudo bem, sem problema! Guardei *${payload.extracted.name}* no estoque (${quantity} un.), mas SEM publicar na vitrine — sem o preço de venda, nenhum cliente consegue comprar esse item. Quando quiser informar o preço, é só me chamar de novo. 👍`;
+    }
+
     const before = this.resolveProductFields(payload.collected || {});
     const parsed = await parseInventoryReply(text, before.missing);
     payload.collected = { ...(payload.collected || {}), ...parsed };
@@ -139,16 +218,35 @@ export class WhatsAppInventoryIntake {
     }
 
     clearPendingAction(pending.id);
+    const imageUrl = await this.catalogImageUrl(orgId, payload, payload.imageUrl);
+    const marginPercent = payload.collected.costPrice != null && payload.collected.marginPercent != null ? payload.collected.marginPercent : null;
     const productId = InventoryIntakeService.commitProductFromScan(orgId, {
       name: payload.extracted.name, category: payload.extracted.category, description: payload.extracted.description,
-      salePrice: after.salePrice!, quantity: payload.collected.quantity, imageUrl: payload.imageUrl,
+      salePrice: after.salePrice!, marginPercent, quantity: payload.collected.quantity, imageUrl,
     });
     InventoryIntakeService.recordPriceHistory(orgId, {
       productId, productName: payload.extracted.name, category: payload.extracted.category,
-      costPrice: payload.collected.costPrice ?? null, marginPercent: payload.collected.marginPercent ?? null,
-      salePrice: after.salePrice!, source: "whatsapp_manager",
+      costPrice: payload.collected.costPrice ?? null, marginPercent, salePrice: after.salePrice!, source: "whatsapp_manager",
     });
     return `✅ Produto *${payload.extracted.name}* cadastrado e publicado na vitrine! Preço R$ ${after.salePrice!.toFixed(2)}, ${payload.collected.quantity} unidade(s) em estoque.`;
+  }
+
+  /** Reposição de um produto já reconhecido no catálogo — só falta a quantidade. */
+  private static async continueProductRestock(orgId: string, identifier: string, pending: any, payload: any, text: string): Promise<string> {
+    const parsed = await parseInventoryReply(text, ["quantity"]);
+    if (parsed.quantity == null) {
+      savePendingAction(orgId, identifier, "product_registration", payload);
+      return "Não entendi a quantidade. Quantas unidades chegaram?";
+    }
+    clearPendingAction(pending.id);
+    InventoryIntakeService.restockProductFromScan(orgId, { productId: payload.matchedProductId, quantity: parsed.quantity });
+    const { url, reused } = await StudioCatalogPhotoService.ensureForExistingProduct(orgId, payload.matchedProductId, payload.base64, payload.mime || "image/jpeg");
+    if (url && !reused) StudioCatalogPhotoService.persistForProduct(orgId, payload.matchedProductId, url);
+
+    const priceNote = payload.matchedPrice != null
+      ? `Preço mantido: R$ ${Number(payload.matchedPrice).toFixed(2)}${payload.matchedMargin != null ? ` (margem ${payload.matchedMargin}%)` : ""}.`
+      : "⚠️ Esse produto ainda não tem preço de venda definido — ele continua fora da vitrine até alguém informar o preço.";
+    return `✅ Estoque de *${payload.matchedProductName}* reposto (+${parsed.quantity} un.). ${priceNote}`;
   }
 
   // ---- Fluxo 2: foto de nota fiscal ----
@@ -199,6 +297,7 @@ export class WhatsAppInventoryIntake {
       restockSummary,
       `🆕 Encontrei *${queue.length} item(ns) novo(s)* na nota. Vamos cadastrar um de cada vez.`,
       this.askInvoiceItemPrice(first),
+      "_Preciso do preço de venda porque sem ele o item fica só no controle de estoque — não posso publicar na vitrine e nenhum cliente consegue comprar._",
     ].filter(Boolean).join("\n\n");
   }
 
@@ -206,9 +305,30 @@ export class WhatsAppInventoryIntake {
     return `*${item.name}* — custo R$ ${item.unitCost.toFixed(2)}, quantidade ${item.quantity}. Qual o preço de venda? (sugestão: R$ ${item.suggestedSalePrice.toFixed(2)})`;
   }
 
+  private static advanceInvoiceQueue(orgId: string, identifier: string, pending: any, payload: any, createdMsg: string): string {
+    const queue = payload.queue as any[];
+    const nextIndex = payload.currentIndex + 1;
+    if (nextIndex >= queue.length) {
+      clearPendingAction(pending.id);
+      return `${createdMsg}\n\n🎉 Nota fiscal totalmente processada!`;
+    }
+    payload.currentIndex = nextIndex;
+    savePendingAction(orgId, identifier, "invoice_registration", payload);
+    return `${createdMsg}\n\n${this.askInvoiceItemPrice(queue[nextIndex])}`;
+  }
+
   private static async continueInvoiceRegistration(orgId: string, identifier: string, pending: any, payload: any, text: string): Promise<string> {
     const queue = payload.queue as any[];
     const current = queue[payload.currentIndex];
+
+    if (DECLINE_PATTERN.test(text.trim())) {
+      InventoryIntakeService.commitInvoiceItemWithoutPrice(orgId, {
+        name: current.name, quantity: current.quantity, unitCost: current.unitCost, supplierName: payload.supplierName,
+      });
+      const createdMsg = `Tudo bem! Guardei *${current.name}* no estoque (${current.quantity} un., custo R$ ${current.unitCost.toFixed(2)}), mas SEM publicar na vitrine — sem o preço de venda, nenhum cliente consegue comprar esse item.`;
+      return this.advanceInvoiceQueue(orgId, identifier, pending, payload, createdMsg);
+    }
+
     const parsed = await parseInventoryReply(text, ["priceOrMargin"]);
     let salePrice = parsed.salePrice;
     if (salePrice == null && parsed.marginPercent != null) {
@@ -219,22 +339,15 @@ export class WhatsAppInventoryIntake {
       return `Não entendi o preço. ${this.askInvoiceItemPrice(current)}`;
     }
 
+    const marginPercent = parsed.marginPercent ?? (current.unitCost > 0 ? Math.round(((salePrice - current.unitCost) / current.unitCost) * 10000) / 100 : null);
     InventoryIntakeService.commitInvoiceItemCreate(orgId, {
-      name: current.name, salePrice, quantity: current.quantity, unitCost: current.unitCost, supplierName: payload.supplierName,
+      name: current.name, salePrice, marginPercent, quantity: current.quantity, unitCost: current.unitCost, supplierName: payload.supplierName,
     });
     InventoryIntakeService.recordPriceHistory(orgId, {
-      productName: current.name, costPrice: current.unitCost, marginPercent: parsed.marginPercent ?? null,
-      salePrice, source: "whatsapp_manager_invoice",
+      productName: current.name, costPrice: current.unitCost, marginPercent, salePrice, source: "whatsapp_manager_invoice",
     });
 
     const createdMsg = `✅ *${current.name}* cadastrado (R$ ${salePrice.toFixed(2)}, ${current.quantity} un.) e publicado na vitrine.`;
-    const nextIndex = payload.currentIndex + 1;
-    if (nextIndex >= queue.length) {
-      clearPendingAction(pending.id);
-      return `${createdMsg}\n\n🎉 Nota fiscal totalmente processada!`;
-    }
-    payload.currentIndex = nextIndex;
-    savePendingAction(orgId, identifier, "invoice_registration", payload);
-    return `${createdMsg}\n\n${this.askInvoiceItemPrice(queue[nextIndex])}`;
+    return this.advanceInvoiceQueue(orgId, identifier, pending, payload, createdMsg);
   }
 }

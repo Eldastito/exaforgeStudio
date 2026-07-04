@@ -147,6 +147,30 @@ export async function generateImageB64(
   return b64;
 }
 
+/**
+ * Foto profissional de catálogo a partir da FOTO REAL do produto (Fase B do
+ * cadastro por WhatsApp, ADR-032) — diferente de generateImageB64() (que cria
+ * uma imagem do ZERO a partir só de texto), aqui usamos o endpoint de EDIÇÃO
+ * da OpenAI (images.edit, gpt-image-1): a imagem de entrada é preservada
+ * (o produto fotografado continua sendo o mesmo produto) e só o prompt de
+ * estilo (fundo, iluminação, identidade visual da loja) é aplicado por cima.
+ * Gerar do zero arriscaria criar um produto GENÉRICO diferente do que está
+ * de verdade em estoque — edição preserva a fidelidade ao item real.
+ */
+export async function editProductImageB64(base64: string, mimetype: string, stylePrompt: string): Promise<string> {
+  const buffer = Buffer.from(base64, "base64");
+  const ext = mimetype.includes("png") ? "png" : "jpg";
+  const file = await toFile(buffer, `product.${ext}`, { type: mimetype });
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const res = await getClient().images.edit({
+    model, image: file,
+    prompt: `Foto de catálogo de e-commerce profissional: mantenha o produto exatamente como está na foto original (mesma embalagem, texto, formato, cores do próprio produto), mas substitua o fundo/cenário e a iluminação por um visual de vitrine profissional. ${stylePrompt}`,
+  });
+  const b64 = (res as any).data?.[0]?.b64_json || "";
+  recordUsage(model, "image", 0, 0, Number(process.env.OPENAI_IMAGE_COST_USD || 0.04));
+  return b64;
+}
+
 function googleAiKey(): string {
   return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
 }

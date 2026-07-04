@@ -23,6 +23,7 @@ import { ProductCard } from './ProductCard';
 import { ProductModal } from './ProductModal';
 import { CartDrawer } from './CartDrawer';
 import { ReservationWidget } from './ReservationWidget';
+import { FashionStudio } from './FashionStudio';
 
 // Lê o slug do pathname (/loja/:slug), o deep-link de produto
 // (/loja/:slug/produto/:productSlug — ADR-028) e o token ?c=.
@@ -354,6 +355,9 @@ export function Storefront() {
           onBuyNow={handleBuyNow}
         />
       )}
+
+      {/* Provador Virtual (Fashion AI Studio) — só renderiza quando a loja tem o módulo ligado */}
+      {data && <FashionStudio slug={slug} accent={accent} mode={mode} />}
 
       {/* Carrinho */}
       <CartDrawer

@@ -2404,6 +2404,35 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_fashion_events_org_type ON fashion_events(organization_id, event_type, created_at DESC);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do Fashion AI Studio', e); }
+
+  // ===== Fashion AI Studio — FAS-1: conta de cliente + avatar seguro (ADR-035) =====
+  // Conta de cliente do provador — decisão explícita do usuário (ADR-034):
+  // a vitrine continua 100% anônima para navegar/comprar; a conta só existe
+  // para quem usa o provador, e o cadastro vira LEAD no CRM (contact_id).
+  // birth_date sustenta o gate de 18+ (menor só via conta do responsável).
+  // O JWT desta conta usa segredo DERIVADO (ver FashionCustomerService) —
+  // NUNCA passa no requireAuth do painel do staff.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS storefront_customers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        phone TEXT,
+        password_hash TEXT NOT NULL,
+        birth_date TEXT NOT NULL,             -- ISO yyyy-mm-dd; gate 18+ no registro
+        contact_id TEXT,                      -- lead criado no CRM (best-effort)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_login_at DATETIME,
+        deleted_at DATETIME
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_storefront_customers_org_email
+        ON storefront_customers(organization_id, email) WHERE deleted_at IS NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar storefront_customers', e); }
+  // Retenção do avatar (RF-032/19.4): padrão 30 dias, configurável por loja.
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_avatar_retention_days INTEGER DEFAULT 30`); } catch(e){}
 };
 
 initDb();

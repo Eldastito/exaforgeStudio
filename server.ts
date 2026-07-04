@@ -46,6 +46,7 @@ import storefrontRoutes from "./src/server/routes/storefront.js";
 import reservationsRoutes from "./src/server/routes/reservations.js";
 import subscriptionsRoutes from "./src/server/routes/subscriptions.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
+import fashionPublicRoutes from "./src/server/routes/fashionPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
@@ -318,6 +319,11 @@ async function startServer() {
   });
 
   app.use("/api/auth", authRoutes);
+
+  // Provador Virtual (Fashion AI Studio, FAS-1) — auth PRÓPRIA de cliente
+  // final (JWT com segredo derivado, ver FashionCustomerService). Registrado
+  // antes do mount genérico /api/public por especificidade.
+  app.use("/api/public/fashion", fashionPublicRoutes);
 
   // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
   // autenticado para que /api/public/* nunca exija JWT.

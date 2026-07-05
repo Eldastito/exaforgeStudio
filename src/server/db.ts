@@ -2450,6 +2450,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_primary_pain TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_next_step TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_sales_updated_at DATETIME`); } catch(e){}
+  // Lembrete de recompra via WhatsApp (opt-in por organização).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN repurchase_reminder_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN repurchase_reminder_days INTEGER DEFAULT 30`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN repurchase_reminder_message TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN repurchase_reminder_last_run DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN repurchase_reminded_at DATETIME`); } catch(e){}
 };
 
 initDb();

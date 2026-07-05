@@ -124,6 +124,16 @@ router.get("/revenue-intelligence/top-actions", (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// Leaderboard da equipe — desempenho por operador no período.
+// GET /api/analytics/team-performance?period=month
+router.get("/team-performance", (req, res) => {
+  const orgId = getOrgId(req);
+  const period = (req.query.period as any) || "month";
+  try {
+    res.json(AnalyticsService.getTeamPerformance(orgId, { period }));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // Auditoria estruturada (10 seções) — fonte JSON do relatório.
 router.get("/revenue-intelligence/audit", (req, res) => {
   const orgId = getOrgId(req);

@@ -374,4 +374,54 @@ export class AnalyticsService {
       return { revenue: 0, cost: 0, profit: 0, margin: 0, orders: 0, hasCostData: false, byProduct: [] };
     }
   }
+
+  /**
+   * Desempenho por operador (leaderboard da equipe). Agrupa tickets por
+   * assigned_to, calcula volume, conversao, tempo de resposta e CSAT, e junta
+   * com a tabela users para nome e cargo.
+   */
+  static getTeamPerformance(orgId: string, options: FilterOptions) {
+    const dateFilter = currentFilter(options.period);
+    try {
+      const rows = db.prepare(`
+        SELECT
+          t.assigned_to                                          AS user_id,
+          COALESCE(u.name, t.assigned_to)                       AS name,
+          COALESCE(u.role, 'agent')                              AS role,
+          COUNT(DISTINCT t.id)                                   AS tickets_handled,
+          COALESCE(SUM(CASE WHEN cl.result_status = 'sucesso' THEN 1 ELSE 0 END), 0) AS closed_won,
+          AVG(resp.first_resp_sec)                               AS avg_first_response_seconds,
+          AVG(ss.score)                                          AS csat_avg
+        FROM tickets t
+        LEFT JOIN users u ON u.id = t.assigned_to
+        LEFT JOIN ticket_closures cl ON cl.ticket_id = t.id
+        LEFT JOIN (
+          SELECT m_contact.ticket_id,
+                 (julianday(m_reply.t) - julianday(m_contact.t)) * 86400.0 AS first_resp_sec
+          FROM (SELECT ticket_id, MIN(created_at) AS t FROM messages WHERE sender_type = 'contact' GROUP BY ticket_id) m_contact
+          JOIN (SELECT ticket_id, MIN(created_at) AS t FROM messages WHERE sender_type IN ('bot','agent') GROUP BY ticket_id) m_reply
+            ON m_reply.ticket_id = m_contact.ticket_id AND julianday(m_reply.t) > julianday(m_contact.t)
+        ) resp ON resp.ticket_id = t.id
+        LEFT JOIN satisfaction_surveys ss ON ss.ticket_id = t.id AND ss.status = 'answered' AND ss.score IS NOT NULL
+        WHERE t.organization_id = ? AND t.assigned_to IS NOT NULL ${dateFilter.replace(/created_at/g, 't.created_at')}
+        GROUP BY t.assigned_to
+        HAVING tickets_handled >= 1
+        ORDER BY closed_won DESC, CAST(closed_won AS REAL) / MAX(tickets_handled, 1) DESC
+      `).all(orgId) as any[];
+
+      return rows.map(r => ({
+        user_id: r.user_id,
+        name: r.name,
+        role: r.role,
+        tickets_handled: r.tickets_handled,
+        closed_won: r.closed_won,
+        conversion_rate: r.tickets_handled > 0 ? Math.round((r.closed_won / r.tickets_handled) * 1000) / 10 : 0,
+        avg_first_response_seconds: r.avg_first_response_seconds ? Math.round(r.avg_first_response_seconds) : null,
+        csat_avg: r.csat_avg ? Math.round(r.csat_avg * 10) / 10 : null,
+      }));
+    } catch (e) {
+      console.error('[AnalyticsService] getTeamPerformance error', e);
+      return [];
+    }
+  }
 }

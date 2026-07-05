@@ -1,6 +1,7 @@
 import { Router } from "express";
 import db from "../db.js";
 import { ReservationService } from "../ReservationService.js";
+import { EncryptionService } from "../EncryptionService.js";
 
 /**
  * Entrada AGNÓSTICA do conector (PMS/OTA/ERP/middleware). Autenticada por TOKEN
@@ -14,7 +15,9 @@ const router = Router();
 function orgByToken(req: any): string | null {
   const token = String(req.headers["x-connector-token"] || req.query.token || "").trim();
   if (!token || !token.startsWith("zf_")) return null;
-  const o = db.prepare(`SELECT organization_id FROM organization_settings WHERE integration_token = ?`).get(token) as any;
+  const h = EncryptionService.hash(token);
+  if (!h) return null;
+  const o = db.prepare(`SELECT organization_id FROM organization_settings WHERE integration_token_hash = ?`).get(h) as any;
   return o?.organization_id || null;
 }
 

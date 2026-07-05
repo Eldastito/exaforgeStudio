@@ -52,6 +52,7 @@ export interface RicSnapshot {
     recoverable: number;
     recovered: number;
     rri?: number | null;
+    roi?: { value: number; planCost: number } | null;
     ticket: { value: number; source: 'custom' | 'history' | 'fallback' };
     formula: string;
   };

@@ -16,6 +16,7 @@ import { ConfigDrawer } from './components/ConfigDrawer';
 import { ExportAuditButton } from './components/ExportAuditButton';
 import { DriverDrilldown } from './components/DriverDrilldown';
 import { TrendChart } from './components/TrendChart';
+import { TeamLeaderboard } from './components/TeamLeaderboard';
 import { TrialBanner } from './components/TrialBanner';
 import { brl, pct, TICKET_SOURCE_LABEL } from './lib/format';
 
@@ -223,7 +224,11 @@ export function RevenueIntelligenceView() {
               />
               <MoneyKpiCard label="Receita recuperável" value={m.recoverable} tone="recoverable" sublabel="alta chance de recuperação (IRR)" />
               <MoneyKpiCard label="Receita recuperada" value={m.recovered} tone="recovered" pulseOnIncrease sublabel={m.rri != null ? `RRI ${pct(m.rri)} · janela ${snapshot.attributionWindowDays}d` : `pelos fluxos do ZappFlow (janela ${snapshot.attributionWindowDays}d)`} />
-              <MoneyKpiCard label="Ticket-base" value={m.ticket.value} tone="info" decimals={2} sublabel={ticketSrc} />
+              {m.roi ? (
+                <MoneyKpiCard label="ROI ZappFlow" value={m.roi.value} tone="recovered" decimals={1} suffix="×" sublabel={`Recuperado ÷ plano R$ ${brl(m.roi.planCost)}`} info="Receita recuperada dividida pelo custo mensal do plano. ROI > 1× = o ZappFlow já se pagou." />
+              ) : (
+                <MoneyKpiCard label="Ticket-base" value={m.ticket.value} tone="info" decimals={2} sublabel={ticketSrc} />
+              )}
             </>
           )}
         </div>
@@ -331,6 +336,11 @@ export function RevenueIntelligenceView() {
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Simulador rápido</p>
             <SimulatorWidget />
           </Card>
+        </div>
+
+        {/* ===== Leaderboard da equipe ===== */}
+        <div className="mt-5">
+          <TeamLeaderboard period={period} />
         </div>
       </div>
 

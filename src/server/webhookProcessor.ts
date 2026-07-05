@@ -723,6 +723,55 @@ export async function processIncomingMessage(
          } catch (e) { console.error("[Assinaturas] Falha ao reenviar PIX da mensalidade:", e); }
        }
 
+       // ASSINATURA: inscrever o cliente num plano (IA identificou a intenção).
+       if (aiResult.subscribeCustomer) {
+         try {
+           const planName = aiResult.subscribeCustomer;
+           const plans = SubscriptionService.listPlans(orgId).filter((p: any) => p.active);
+           const plan = plans.find((p: any) => p.name.toLowerCase() === planName.toLowerCase());
+           if (plan) {
+             const sub = SubscriptionService.subscribe(orgId, { planId: plan.id, contactId: contact.id, createdBy: "ai" });
+             const inv = SubscriptionService.generateInvoice(orgId, sub.id);
+             const brl = `R$ ${Number(plan.amount || 0).toFixed(2)}`;
+             finalReply = `${finalReply}\n\n✅ Assinatura do plano "${plan.name}" (${brl}) criada com sucesso!`;
+             // Tenta enviar o PIX da primeira fatura.
+             if (inv) {
+               try {
+                 const charge = await PaymentService.chargeForSubscription(orgId, {
+                   invoiceId: inv.id, amount: plan.amount, contactName: contact.name, contactId: contact.id,
+                 });
+                 if (charge) {
+                   finalReply = `${finalReply}\n\n${charge}`;
+                   SubscriptionService.setInvoiceCharged(orgId, inv.id, 'sent');
+                 }
+               } catch (e) { /* best-effort */ }
+             }
+           }
+         } catch (e) { console.error("[Assinaturas] Falha ao inscrever cliente:", e); }
+       }
+
+       // ASSINATURA: cancelar.
+       if (aiResult.cancelSubscription) {
+         try {
+           const sub = SubscriptionService.contactSubscription(orgId, contact.id);
+           if (sub) {
+             SubscriptionService.setStatus(orgId, sub.id, "cancelled");
+             finalReply = `${finalReply}\n\n⚠️ Sua assinatura do plano "${sub.plan_name || "Mensalidade"}" foi cancelada.`;
+           }
+         } catch (e) { console.error("[Assinaturas] Falha ao cancelar assinatura:", e); }
+       }
+
+       // ASSINATURA: pausar.
+       if (aiResult.pauseSubscription) {
+         try {
+           const sub = SubscriptionService.contactSubscription(orgId, contact.id);
+           if (sub) {
+             SubscriptionService.setStatus(orgId, sub.id, "paused");
+             finalReply = `${finalReply}\n\n⏸️ Sua assinatura do plano "${sub.plan_name || "Mensalidade"}" foi pausada. Para reativar, é só nos chamar!`;
+           }
+         } catch (e) { console.error("[Assinaturas] Falha ao pausar assinatura:", e); }
+       }
+
        // RELATÓRIO EM PDF (Zapp gestor): gera o PDF (resumo + panorama) e tenta
        // enviar como DOCUMENTO nativo no WhatsApp; se não der, cai para o link em
        // texto (best-effort — nunca quebra a resposta).

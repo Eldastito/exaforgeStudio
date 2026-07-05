@@ -39,7 +39,7 @@ export class AIOrchestratorService {
     returningAfterDays?: number | null;
     imageBase64?: string;
     imageMime?: string;
-  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string }, eventInquiry?: { eventType: string; headcount?: number; eventDate?: string; halls?: string; budget?: number; specialRequests?: string } }> {
+  }): Promise<{ reply: string, actions: any[], newStage?: string, needsHuman: boolean, newAppointment?: any, newDelivery?: any, newOrder?: { items: { productId?: string; name: string; unitPrice: number; quantity: number }[]; autoClose: boolean }, cancelOrder?: boolean, customerEmail?: string, routeToArea?: string, newReservation?: { resource: string; start: string; end: string; units: number; guests?: number; adults?: number; children?: number; pets?: boolean; specialRequests?: string; budget?: number }, sendSubscriptionPix?: boolean, subscribeCustomer?: string, cancelSubscription?: boolean, pauseSubscription?: boolean, exportPdf?: boolean, pdfTitle?: string, pdfBody?: string, referralCodeRequest?: boolean, applyReferralCode?: string, supplyEmergency?: { need: string; category: string }, eventInquiry?: { eventType: string; headcount?: number; eventDate?: string; halls?: string; budget?: number; specialRequests?: string }, salesIntelligence?: { purchaseProbability: number; objectionType: string; funnelStage: string; primaryPain: string; nextStep: string } }> {
     
     // 1. Verificar se é um Gestor Autorizado (com casamento tolerante ao 9º dígito BR)
     const manager = this.findAuthorizedManager(params.senderId, params.organizationId);
@@ -259,6 +259,7 @@ export class AIOrchestratorService {
 
     // Assinatura/mensalidade do cliente: deixa a IA responder "quanto devo /
     // estou em dia?" com dados reais e reenviar o PIX da fatura em aberto.
+    // Também ensina a IA a inscrever, cancelar e pausar assinaturas.
     let subscriptionText = "";
     if (!isOrchestratorCommand && params.contactId) {
       try {
@@ -276,7 +277,19 @@ export class AIOrchestratorService {
           }
           txt += `\n- Responda com esses dados reais quando o cliente perguntar sobre mensalidade/pagamento ("quanto devo?", "estou em dia?", "quando vence?"). NÃO invente valores.`;
           if (inv) txt += `\n- Se o cliente pedir para pagar/receber o PIX da mensalidade ("me manda o pix", "quero pagar"), defina "send_subscription_pix": true — o sistema anexa o PIX da fatura em aberto. NÃO escreva o PIX você mesmo.`;
+          txt += `\n- CANCELAR ASSINATURA: se o cliente pedir para cancelar ("quero cancelar", "cancelar mensalidade"), confirme com empatia; com a confirmação, defina "cancel_subscription": true.`;
+          txt += `\n- PAUSAR ASSINATURA: se o cliente pedir para pausar ("pausar mensalidade", "parar por um tempo"), confirme e defina "pause_subscription": true.`;
           subscriptionText = txt;
+        } else {
+          // Sem assinatura ativa: ensina a IA a inscrever o cliente num plano.
+          const plans = SubscriptionService.listPlans(params.organizationId).filter((p: any) => p.active);
+          if (plans.length > 0) {
+            const brl = (v: any) => `R$ ${Number(v || 0).toFixed(2)}`;
+            const planList = plans.map((p: any) => `- "${p.name}" (${brl(p.amount)}/${p.interval === "yearly" ? "ano" : p.interval === "weekly" ? "semana" : "mes"}): ${p.description || "sem descricao"}`).join("\n");
+            subscriptionText = `ASSINATURA: o cliente NAO tem assinatura ativa. Planos disponiveis:\n${planList}
+- Se o cliente quiser ASSINAR ("quero assinar", "quero o plano", "mensalidade"), apresente os planos e, com a confirmacao, defina "subscribe_customer" com o NOME EXATO do plano escolhido. O sistema cria a assinatura e gera a primeira fatura.
+- NAO invente planos. Use SOMENTE os listados acima.`;
+          }
         }
       } catch (e) { /* noop */ }
     }
@@ -436,6 +449,10 @@ export class AIOrchestratorService {
         ? resultJSON.route_to_area.trim().slice(0, 80) : undefined,
       newReservation: this.sanitizeReservation(resultJSON.reservation_request),
       sendSubscriptionPix: resultJSON.send_subscription_pix === true,
+      subscribeCustomer: (typeof resultJSON.subscribe_customer === "string" && resultJSON.subscribe_customer.trim())
+        ? resultJSON.subscribe_customer.trim().slice(0, 120) : undefined,
+      cancelSubscription: resultJSON.cancel_subscription === true,
+      pauseSubscription: resultJSON.pause_subscription === true,
       referralCodeRequest: resultJSON.referral_code_request === true,
       applyReferralCode: (typeof resultJSON.apply_referral_code === "string" && resultJSON.apply_referral_code.trim())
         ? resultJSON.apply_referral_code.trim().slice(0, 20).toUpperCase() : undefined,
@@ -1048,6 +1065,9 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
     if (mLoja) _schema.push(`  "send_storefront": false,`);
     if (mReservas) _schema.push(`  "reservation_request": null, // { resource, start, end, units, guests, ... } só p/ reserva por período`);
     if (mAssinaturas) _schema.push(`  "send_subscription_pix": false, // true só quando o cliente pedir o PIX da mensalidade em aberto`);
+    if (mAssinaturas) _schema.push(`  "subscribe_customer": "", // NOME EXATO do plano para inscrever o cliente (só quando ele confirmar)`);
+    if (mAssinaturas) _schema.push(`  "cancel_subscription": false, // true quando o cliente confirmar que quer cancelar a assinatura`);
+    if (mAssinaturas) _schema.push(`  "pause_subscription": false, // true quando o cliente confirmar que quer pausar a assinatura`);
     if (referralText) _schema.push(`  "referral_code_request": false,\n  "apply_referral_code": "",`);
     if (mCompras) _schema.push(`  "supply_emergency": null, // { need, category } só quando o GESTOR/ATENDENTE indicar que faltou algo urgente no estabelecimento`);
     if (mEventos) _schema.push(`  "event_inquiry": null, // EM HOTELARIA: dados de evento/grupo, só quando o cliente pedir`);

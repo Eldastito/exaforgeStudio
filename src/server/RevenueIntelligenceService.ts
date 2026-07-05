@@ -430,6 +430,18 @@ export class RevenueIntelligenceService {
     };
   }
 
+  /** ROI = receita recuperada ÷ custo mensal do plano. Null se sem plano. */
+  private static calculateRoi(orgId: string, recovered: number): { value: number; planCost: number } | null {
+    try {
+      const o = db.prepare(
+        `SELECT os.plan_id, p.price FROM organization_settings os LEFT JOIN plans p ON p.id = os.plan_id WHERE os.organization_id = ?`
+      ).get(orgId) as any;
+      const cost = Number(o?.price || 0);
+      if (!cost || cost <= 0) return null;
+      return { value: Math.round((recovered / cost) * 100) / 100, planCost: cost };
+    } catch { return null; }
+  }
+
   /**
    * RRI — Receita Recuperada por fluxos do ZappFlow. Atribuição por janela: se
    * houve uma ação nossa (nudge de abandono, lembrete de PIX, cadência) e o
@@ -572,6 +584,7 @@ export class RevenueIntelligenceService {
         recoverable: loss.recoverable,    // IRR — parte recuperável
         recovered: recovered.total,       // receita efetivamente recuperada
         rri,                              // índice de recuperação (% recuperada/recuperável)
+        roi: this.calculateRoi(orgId, recovered.total),
         ticket: loss.ticket,
         formula: loss.formula,
       },

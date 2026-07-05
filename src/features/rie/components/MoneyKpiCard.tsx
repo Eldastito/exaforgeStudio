@@ -14,6 +14,7 @@ interface Props {
   chip?: string;        // ex.: "potencial em risco"
   info?: string;        // tooltip com a premissa/fórmula
   pulseOnIncrease?: boolean; // pulso verde + "+R$" quando o valor sobe (RRI)
+  suffix?: string;       // ex.: "×" para ROI em vez de "R$"
 }
 
 /**
@@ -23,7 +24,7 @@ interface Props {
  * Com pulseOnIncrease, pulsa verde e exibe "+R$ X" quando o valor sobe (sensação
  * de "recuperação ao vivo").
  */
-export function MoneyKpiCard({ label, value, tone, decimals = 0, sublabel, chip, info, pulseOnIncrease }: Props) {
+export function MoneyKpiCard({ label, value, tone, decimals = 0, sublabel, chip, info, pulseOnIncrease, suffix }: Props) {
   const n = useCountUp(value);
   const color = RIC_TONE[tone];
 
@@ -68,7 +69,7 @@ export function MoneyKpiCard({ label, value, tone, decimals = 0, sublabel, chip,
       </div>
 
       <p className="mt-3 text-3xl font-bold tracking-tight text-slate-100 tabular-nums">
-        {brl(n, decimals)}
+        {suffix ? `${n.toFixed(decimals)}${suffix}` : brl(n, decimals)}
       </p>
 
       {chip && (

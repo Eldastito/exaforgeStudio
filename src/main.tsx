@@ -27,9 +27,23 @@ Object.defineProperty(window, 'fetch', {
   configurable: true,
   value: async (input: RequestInfo | URL, init?: RequestInit) => {
     const token = localStorage.getItem('zappflow_token');
-    if (token && typeof input === 'string' && input.startsWith('/api') && !input.startsWith('/api/auth/register') && !input.startsWith('/api/auth/login')) {
+    // Injeta o token do PAINEL (staff) só nas rotas autenticadas do painel.
+    // NUNCA nas rotas públicas /api/public/* — elas têm autenticação própria
+    // (ex.: o Provador Virtual usa o token do CLIENTE, com segredo diferente).
+    // Sem esta exclusão, o token do painel (quando o dono está logado no mesmo
+    // navegador) era injetado por cima do token do provador e o backend
+    // recusava com 401 ("Sessão inválida"). Também respeita um Authorization
+    // que o chamador já tenha definido explicitamente.
+    const injectable =
+      token &&
+      typeof input === 'string' &&
+      input.startsWith('/api') &&
+      !input.startsWith('/api/auth/register') &&
+      !input.startsWith('/api/auth/login') &&
+      !input.startsWith('/api/public/');
+    if (injectable) {
       const headers = new Headers(init?.headers);
-      headers.set('Authorization', `Bearer ${token}`);
+      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
       init = { ...init, headers };
     }
     return originalFetch(input, init);

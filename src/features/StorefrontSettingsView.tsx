@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil, Tag, BarChart3, GripVertical } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Store, Save, Copy, Plus, X, Star, Eye, EyeOff, Image as ImageIcon, Loader2, Layers, Trash2, Pencil, Tag, BarChart3, GripVertical, TrendingUp, Users, ShoppingBag, ThumbsUp, ThumbsDown, Sparkles } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
@@ -63,6 +63,129 @@ function getOrigin(): string {
   } catch {
     return '';
   }
+}
+
+function FashionDashboard() {
+  const [data, setData] = useState<any>(null);
+  const [days, setDays] = useState(30);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch(`/api/analytics/fashion-dashboard?days=${days}`).then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
+  }, [days]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !data) return <div className="mt-4 text-xs text-zinc-500 animate-pulse">Carregando dashboard...</div>;
+  if (!data) return null;
+
+  const f = data.funnel;
+  const r = data.revenue;
+  const fb = data.feedback;
+  const fmtBRL = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+  const convRate = f.tryons > 0 ? ((f.orders / f.tryons) * 100).toFixed(1) : '0';
+
+  const Stat = ({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string | number; sub?: string }) => (
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg px-3 py-2.5 flex-1 min-w-[120px]">
+      <div className="flex items-center gap-1.5 mb-1">{icon}<span className="text-[10px] text-zinc-500 uppercase tracking-wide">{label}</span></div>
+      <p className="text-lg font-semibold text-zinc-100">{value}</p>
+      {sub && <p className="text-[10px] text-zinc-500">{sub}</p>}
+    </div>
+  );
+
+  const FunnelStep = ({ label, value, total }: { label: string; value: number; total: number }) => {
+    const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+    return (
+      <div className="flex-1 text-center">
+        <p className="text-lg font-bold text-zinc-100">{value}</p>
+        <p className="text-[10px] text-zinc-500">{label}</p>
+        {total > 0 && value !== total && <p className="text-[10px] text-indigo-400">{pct}%</p>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-indigo-400" />
+          <h3 className="text-sm font-medium text-zinc-200">Dashboard de Resultados</h3>
+        </div>
+        <div className="flex gap-1">
+          {[7, 30, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`px-2 py-0.5 text-[10px] rounded ${days === d ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="flex flex-wrap gap-2">
+        <Stat icon={<Users className="w-3.5 h-3.5 text-sky-400" />} label="Clientes" value={f.customers} sub={`${f.uniqueTryonCustomers} usaram o provador`} />
+        <Stat icon={<Sparkles className="w-3.5 h-3.5 text-violet-400" />} label="Try-ons" value={f.tryons} sub={`${f.tryonSuccess} OK / ${f.tryonFailed} falha`} />
+        <Stat icon={<ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />} label="Pedidos Fashion" value={f.orders} sub={`${convRate}% de conversao`} />
+        <Stat icon={<TrendingUp className="w-3.5 h-3.5 text-amber-400" />} label="Receita Fashion" value={fmtBRL(r.fashion)} sub={`${r.sharePercent}% do total`} />
+      </div>
+
+      {/* Funil visual */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3">
+        <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2">Funil do Provador</p>
+        <div className="flex items-end gap-1">
+          <FunnelStep label="Registros" value={f.customers} total={f.customers} />
+          <span className="text-zinc-700 text-xs pb-2">&rarr;</span>
+          <FunnelStep label="Avatares" value={f.avatars} total={f.customers} />
+          <span className="text-zinc-700 text-xs pb-2">&rarr;</span>
+          <FunnelStep label="Looks" value={f.looksGenerated} total={f.avatars} />
+          <span className="text-zinc-700 text-xs pb-2">&rarr;</span>
+          <FunnelStep label="Try-ons" value={f.tryons} total={f.looksGenerated} />
+          <span className="text-zinc-700 text-xs pb-2">&rarr;</span>
+          <FunnelStep label="Pedidos" value={f.orders} total={f.tryons} />
+        </div>
+      </div>
+
+      {/* Ticket e Feedback */}
+      <div className="flex flex-wrap gap-2">
+        <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg px-3 py-2.5 flex-1 min-w-[140px]">
+          <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Ticket medio</p>
+          <div className="flex items-baseline gap-3">
+            <div><p className="text-sm font-semibold text-indigo-400">{fmtBRL(r.avgTicketFashion)}</p><p className="text-[10px] text-zinc-500">Fashion</p></div>
+            <div><p className="text-sm font-semibold text-zinc-400">{fmtBRL(r.avgTicketGeneral)}</p><p className="text-[10px] text-zinc-500">Geral</p></div>
+          </div>
+        </div>
+        {fb.total > 0 && (
+          <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg px-3 py-2.5 flex-1 min-w-[140px]">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Feedback dos looks</p>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1 text-sm text-emerald-400"><ThumbsUp className="w-3.5 h-3.5" /> {fb.likes}</span>
+              <span className="flex items-center gap-1 text-sm text-rose-400"><ThumbsDown className="w-3.5 h-3.5" /> {fb.dislikes}</span>
+              <span className="text-[10px] text-zinc-500">{fb.total > 0 ? Math.round(fb.likes / fb.total * 100) : 0}% positivo</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Top Produtos */}
+      {data.topProducts?.length > 0 && (
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3">
+          <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2">Top produtos no provador</p>
+          <div className="space-y-1">
+            {data.topProducts.slice(0, 5).map((p: any, i: number) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <span className="text-zinc-300 truncate">{p.product_name}</span>
+                <span className="text-zinc-500 ml-2 whitespace-nowrap">{p.tryon_count} try-on{p.tryon_count !== 1 ? 's' : ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Totais historicos */}
+      <p className="text-[10px] text-zinc-600 text-right">
+        Total historico: {f.tryonsAllTime} try-ons / {f.ordersAllTime} pedidos / {fmtBRL(r.fashionAllTime)} receita
+      </p>
+    </div>
+  );
 }
 
 export function StorefrontSettingsView() {
@@ -515,6 +638,7 @@ export function StorefrontSettingsView() {
                       />
                       <p className="text-[11px] text-zinc-500 mt-1">Cada imagem do provador custa uma chamada de IA — o limite protege o custo e evita abuso.</p>
                     </Field>
+                    <FashionDashboard />
                   </div>
                 )}
               </div>

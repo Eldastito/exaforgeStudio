@@ -661,4 +661,104 @@ router.post("/reports/pdf", (req, res) => {
   }
 });
 
+// ===== Fashion AI Studio — Value Realization Dashboard =====
+router.get("/fashion-dashboard", (req, res) => {
+  const orgId = getOrgId(req);
+  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || 30), 10) || 30));
+  const since = `-${days} days`;
+  try {
+    const customers = db.prepare(`SELECT COUNT(*) AS cnt FROM storefront_customers WHERE organization_id = ? AND deleted_at IS NULL`).get(orgId) as any;
+    const avatars = db.prepare(`SELECT COUNT(*) AS cnt FROM fashion_avatar_assets WHERE organization_id = ? AND status IN ('approved','quarantined') AND deleted_at IS NULL`).get(orgId) as any;
+    const looks = db.prepare(`SELECT COUNT(*) AS cnt FROM fashion_looks WHERE organization_id = ? AND created_at >= datetime('now', ?)`).get(orgId, since) as any;
+    const looksTotal = db.prepare(`SELECT COUNT(*) AS cnt FROM fashion_looks WHERE organization_id = ?`).get(orgId) as any;
+    const tryons = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS success, SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed FROM fashion_tryon_jobs WHERE organization_id = ? AND created_at >= datetime('now', ?)`).get(orgId, since) as any;
+    const tryonsTotal = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS success FROM fashion_tryon_jobs WHERE organization_id = ?`).get(orgId) as any;
+
+    const fashionOrders = db.prepare(`
+      SELECT COUNT(*) AS cnt, COALESCE(SUM(total_amount),0) AS revenue
+      FROM orders WHERE organization_id = ? AND fashion_look_id IS NOT NULL
+        AND status IN ('pago','em_preparo','entregue','concluido')
+        AND created_at >= datetime('now', ?)
+    `).get(orgId, since) as any;
+    const fashionOrdersTotal = db.prepare(`
+      SELECT COUNT(*) AS cnt, COALESCE(SUM(total_amount),0) AS revenue
+      FROM orders WHERE organization_id = ? AND fashion_look_id IS NOT NULL
+        AND status IN ('pago','em_preparo','entregue','concluido')
+    `).get(orgId) as any;
+
+    const allOrders = db.prepare(`
+      SELECT COUNT(*) AS cnt, COALESCE(SUM(total_amount),0) AS revenue
+      FROM orders WHERE organization_id = ?
+        AND status IN ('pago','em_preparo','entregue','concluido')
+        AND created_at >= datetime('now', ?)
+    `).get(orgId, since) as any;
+
+    const avgTicketFashion = (fashionOrders?.cnt || 0) > 0 ? (fashionOrders.revenue / fashionOrders.cnt) : 0;
+    const avgTicketGeneral = (allOrders?.cnt || 0) > 0 ? (allOrders.revenue / allOrders.cnt) : 0;
+
+    const topProducts = db.prepare(`
+      SELECT ps.name AS product_name, COUNT(*) AS tryon_count
+      FROM fashion_look_items fli
+      JOIN fashion_looks fl ON fl.id = fli.look_id AND fl.organization_id = fli.organization_id
+      JOIN fashion_tryon_jobs ftj ON ftj.look_id = fl.id AND ftj.organization_id = fl.organization_id AND ftj.status = 'COMPLETED'
+      JOIN products_services ps ON ps.id = fli.product_service_id
+      WHERE fli.organization_id = ?
+      GROUP BY fli.product_service_id
+      ORDER BY tryon_count DESC LIMIT 10
+    `).all(orgId) as any[];
+
+    const feedback = db.prepare(`
+      SELECT fp.value_json FROM fashion_preferences fp
+      WHERE fp.organization_id = ? AND fp.preference_type = 'look_feedback' AND fp.active = 1
+    `).all(orgId) as any[];
+    let likes = 0, dislikes = 0;
+    for (const f of feedback) {
+      try {
+        const v = JSON.parse(f.value_json);
+        if (v?.verdict === 'like') likes++;
+        else if (v?.verdict === 'dislike') dislikes++;
+      } catch {}
+    }
+
+    const events = db.prepare(`
+      SELECT event_type, COUNT(*) AS count FROM fashion_events
+      WHERE organization_id = ? AND created_at >= datetime('now', ?)
+      GROUP BY event_type ORDER BY count DESC
+    `).all(orgId, since) as any[];
+
+    const uniqueTryonCustomers = db.prepare(`SELECT COUNT(DISTINCT customer_id) AS cnt FROM fashion_tryon_jobs WHERE organization_id = ? AND created_at >= datetime('now', ?)`).get(orgId, since) as any;
+
+    res.json({
+      period: { days },
+      funnel: {
+        customers: customers?.cnt || 0,
+        avatars: avatars?.cnt || 0,
+        looksGenerated: looks?.cnt || 0,
+        looksTotal: looksTotal?.cnt || 0,
+        tryons: tryons?.total || 0,
+        tryonSuccess: tryons?.success || 0,
+        tryonFailed: tryons?.failed || 0,
+        tryonsAllTime: tryonsTotal?.total || 0,
+        uniqueTryonCustomers: uniqueTryonCustomers?.cnt || 0,
+        orders: fashionOrders?.cnt || 0,
+        ordersAllTime: fashionOrdersTotal?.cnt || 0,
+      },
+      revenue: {
+        fashion: fashionOrders?.revenue || 0,
+        fashionAllTime: fashionOrdersTotal?.revenue || 0,
+        avgTicketFashion: Math.round(avgTicketFashion * 100) / 100,
+        avgTicketGeneral: Math.round(avgTicketGeneral * 100) / 100,
+        sharePercent: (allOrders?.revenue || 0) > 0
+          ? Math.round((fashionOrders?.revenue || 0) / allOrders.revenue * 10000) / 100
+          : 0,
+      },
+      feedback: { likes, dislikes, total: likes + dislikes },
+      topProducts,
+      events,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

@@ -93,16 +93,29 @@ export class FashionCustomerService {
 
   /** Verifica o token do cliente do provador. null = inválido/expirado/de outro tipo. */
   static verifyToken(token: string): { customerId: string; organizationId: string } | null {
+    let decoded: any;
     try {
-      const decoded = jwt.verify(token, FASHION_JWT_SECRET) as any;
-      if (decoded?.kind !== "fashion_customer" || !decoded.fashionCustomerId || !decoded.organizationId) return null;
-      const row = db.prepare(`SELECT id FROM storefront_customers WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
-        .get(decoded.fashionCustomerId, decoded.organizationId);
-      if (!row) return null;
-      return { customerId: decoded.fashionCustomerId, organizationId: decoded.organizationId };
-    } catch {
+      decoded = jwt.verify(token, FASHION_JWT_SECRET);
+    } catch (e: any) {
+      // Assinatura inválida/expirada = segredo divergente entre assinar e
+      // verificar (segredo instável / instâncias com segredos diferentes).
+      console.warn(`[FashionAuth] token recusado na verificação JWT: ${e?.name || "erro"} — ${e?.message || ""}`);
       return null;
     }
+    if (decoded?.kind !== "fashion_customer" || !decoded.fashionCustomerId || !decoded.organizationId) {
+      console.warn(`[FashionAuth] token sem os campos esperados (kind=${decoded?.kind}).`);
+      return null;
+    }
+    const row = db.prepare(`SELECT id FROM storefront_customers WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
+      .get(decoded.fashionCustomerId, decoded.organizationId);
+    if (!row) {
+      // Assinatura OK mas a conta não existe NESTE banco: o /me foi atendido
+      // por uma instância diferente da que emitiu o token (múltiplas réplicas
+      // com bancos SQLite separados). Rode UMA única instância.
+      console.warn(`[FashionAuth] token válido, mas conta ausente neste banco (customer=${decoded.fashionCustomerId}, org=${decoded.organizationId}) — provável múltiplas instâncias/bancos.`);
+      return null;
+    }
+    return { customerId: decoded.fashionCustomerId, organizationId: decoded.organizationId };
   }
 
   static getCustomer(orgId: string, customerId: string): { id: string; name: string; email: string } | null {

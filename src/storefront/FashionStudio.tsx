@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Camera, CheckCircle2, ChevronLeft, Loader2, LogOut, Shirt, Trash2, X } from 'lucide-react';
+import { Camera, CheckCircle2, ChevronLeft, Eye, EyeOff, Loader2, LogOut, Shirt, Trash2, X } from 'lucide-react';
 import type { Mode } from './types';
 import { hexToRgba, lsGet, lsSet } from './utils';
 
@@ -84,6 +84,7 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
   // ---- auth ----
   const [authTab, setAuthTab] = useState<'login' | 'register'>('register');
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', birthDate: '' });
+  const [showPassword, setShowPassword] = useState(false);
 
   // ---- consultora por ocasião (FAS-2) ----
   const [quiz, setQuiz] = useState({ occasion: '', dayNight: '', style: '', colorsAvoid: '', piecesAvoid: '', budgetMax: '' });
@@ -369,7 +370,17 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                     </>
                   )}
                   <input className={inputCls} type="email" placeholder="E-mail" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                  <input className={inputCls} type="password" placeholder="Senha (mín. 8 caracteres)" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                  <div className="relative">
+                    <input className={`${inputCls} pr-10`} type={showPassword ? 'text' : 'password'} placeholder="Senha (mín. 8 caracteres)" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                    <button
+                      type="button"
+                      aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 opacity-60 hover:opacity-100"
+                      onClick={() => setShowPassword((v) => !v)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <button type="button" className={primaryBtn} style={{ background: accent }} disabled={busy} onClick={submitAuth}>
                     {busy ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : authTab === 'register' ? 'Criar conta' : 'Entrar'}
                   </button>

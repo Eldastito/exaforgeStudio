@@ -206,6 +206,53 @@ function googleAiKey(): string {
   return process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
 }
 
+/**
+ * Provador Virtual via Google Gemini (ADR-042): envia a foto da pessoa + fotos
+ * das peças como partes multimodais e pede ao Gemini que GERE uma imagem de
+ * try-on. O Gemini com responseModalities=["IMAGE","TEXT"] trata as imagens de
+ * entrada como REFERÊNCIA e gera a composição preservando a identidade da pessoa
+ * — diferente do gpt-image-1 que re-sintetiza tudo (rosto inclusive). Mesmo
+ * padrão de fetch das outras integrações Google (Imagen, Veo); sem SDK extra.
+ */
+export async function editImagesGoogleB64(
+  images: { buffer: Buffer; mime: string }[],
+  prompt: string,
+): Promise<string> {
+  const key = googleAiKey();
+  if (!key) throw new Error("GOOGLE_AI_API_KEY não configurada para provador virtual.");
+  const model = process.env.GOOGLE_TRYON_MODEL || "gemini-2.0-flash-exp";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+  const parts: any[] = images.map((img) => ({
+    inlineData: { mimeType: img.mime, data: img.buffer.toString("base64") },
+  }));
+  parts.push({ text: prompt });
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
+    }),
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
+  }
+
+  const data: any = await res.json();
+  const candidate = data?.candidates?.[0]?.content?.parts || [];
+  for (const part of candidate) {
+    if (part?.inlineData?.data) {
+      recordUsage(model, "tryon_image", 0, 0, Number(process.env.GOOGLE_TRYON_COST_USD || 0.04));
+      return part.inlineData.data;
+    }
+  }
+  throw new Error("Gemini não retornou imagem na resposta.");
+}
+
 /** Inicia a geração de vídeo (Veo, long-running) e retorna o nome da operação. */
 export async function startVideoGoogle(prompt: string, aspectRatio: "16:9" | "9:16" = "16:9"): Promise<string> {
   const key = googleAiKey();

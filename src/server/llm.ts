@@ -177,11 +177,26 @@ export async function editProductImageB64(base64: string, mimetype: string, styl
  * fotos reais das peças do look — e compõe uma única saída. Mesmo princípio
  * do editProductImageB64 (edição preserva o real; geração do zero inventaria
  * uma pessoa/peça genérica), estendido para N entradas.
+ *
+ * IDENTIDADE (ADR-040): o gpt-image-1, por padrão (input_fidelity="low"),
+ * "reimagina" a pessoa — o rosto sai diferente. `input_fidelity: "high"` é o
+ * parâmetro feito para PRESERVAR rosto e detalhes finos da imagem de entrada;
+ * é o que faz o provador manter a MESMA pessoa. `quality: "high"` e a saída em
+ * retrato (1024x1536, corpo inteiro) completam. São opcionais para não afetar
+ * o editProductImageB64 (catálogo), que não precisa de rosto.
  */
-export async function editImagesB64(images: { buffer: Buffer; name: string; mime: string }[], prompt: string): Promise<string> {
+export async function editImagesB64(
+  images: { buffer: Buffer; name: string; mime: string }[],
+  prompt: string,
+  opts: { inputFidelity?: "high" | "low"; quality?: "high" | "medium" | "low" | "auto"; size?: "1024x1024" | "1024x1536" | "1536x1024" | "auto" } = {},
+): Promise<string> {
   const files = await Promise.all(images.map((img) => toFile(img.buffer, img.name, { type: img.mime })));
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
-  const res = await getClient().images.edit({ model, image: files as any, prompt });
+  const params: any = { model, image: files as any, prompt };
+  if (opts.inputFidelity) params.input_fidelity = opts.inputFidelity;
+  if (opts.quality) params.quality = opts.quality;
+  if (opts.size) params.size = opts.size;
+  const res = await getClient().images.edit(params);
   const b64 = (res as any).data?.[0]?.b64_json || "";
   recordUsage(model, "image", 0, 0, Number(process.env.OPENAI_IMAGE_COST_USD || 0.04));
   return b64;

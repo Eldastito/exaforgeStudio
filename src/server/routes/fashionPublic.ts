@@ -193,6 +193,20 @@ router.post("/look-requests", requireCustomer, async (req: FashionRequest, res):
   }
 });
 
+// POST /api/public/fashion/looks/custom — Look Builder MANUAL (ADR-040):
+// a cliente escolhe as peças na vitrine e monta um look { productIds: [...] }.
+router.post("/looks/custom", requireCustomer, (req: FashionRequest, res): any => {
+  if (rateLimited(`fashion_custom:${req.fashionCustomerId}`, 40, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: "Muitos looks em pouco tempo. Aguarde um pouco." });
+  }
+  const ids = Array.isArray(req.body?.productIds)
+    ? req.body.productIds.map((x: any) => String(x)).slice(0, 20)
+    : [];
+  const result = FashionLookService.createCustomLook(req.fashionOrgId!, req.fashionCustomerId!, ids);
+  if (!result.ok) return res.status(400).json({ error: (result as any).error });
+  res.status(201).json(result);
+});
+
 // GET /api/public/fashion/look-requests/:id — reabrir os looks de um pedido
 router.get("/look-requests/:id", requireCustomer, (req: FashionRequest, res): any => {
   const data = FashionLookService.getRequestLooks(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);

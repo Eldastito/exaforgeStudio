@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { SubscriptionService } from "../SubscriptionService.js";
+import db from "../db.js";
 
 const router = Router();
 const orgOf = (req: AuthRequest) => req.organizationId;
@@ -41,6 +42,24 @@ router.patch("/:id/status", (req: AuthRequest, res): any => {
   const orgId = orgOf(req); if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { SubscriptionService.setStatus(orgId, req.params.id, String(req.body?.status || "")); res.json({ success: true }); }
   catch (e: any) { res.status(400).json({ error: "Status inválido." }); }
+});
+
+// Troca de plano com proration.
+router.patch("/:id/plan", (req: AuthRequest, res): any => {
+  const orgId = orgOf(req); if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!req.body?.planId) return res.status(400).json({ error: "Informe o novo plano (planId)." });
+  const result = SubscriptionService.changePlan(orgId, req.params.id, req.body.planId);
+  if (!result) return res.status(404).json({ error: "Assinatura ou plano não encontrado." });
+  res.json({ success: true, ...result });
+});
+
+// Envia link do portal de autoatendimento ao contato via WhatsApp.
+router.post("/:id/portal-link", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = orgOf(req); if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const sub = db.prepare("SELECT contact_id FROM subscriptions WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
+  if (!sub) return res.status(404).json({ error: "Assinatura não encontrada." });
+  const sent = await SubscriptionService.sendPortalLink(orgId, sub.contact_id);
+  res.json({ success: sent });
 });
 
 // ---- Faturas ----

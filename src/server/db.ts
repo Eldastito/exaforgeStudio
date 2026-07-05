@@ -2488,6 +2488,12 @@ const initDb = () => {
 
   // Item 5: Cleanup TTL for background_jobs
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_bg_jobs_completed ON background_jobs (status, completed_at)`); } catch(e){}
+
+  // LGPD: hash columns for secret lookup (hash-for-lookup + cipher-for-display)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pay_webhook_secret_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN integration_token_hash TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_org_webhook_hash ON organization_settings (pay_webhook_secret_hash)`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_org_token_hash ON organization_settings (integration_token_hash)`); } catch(e){}
 };
 
 initDb();

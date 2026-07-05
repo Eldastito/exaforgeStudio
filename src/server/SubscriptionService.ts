@@ -1,5 +1,8 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
+import crypto from "crypto";
+import { JWT_SECRET } from "./config/secret.js";
+import { MessageProviderService } from "./MessageProviderService.js";
 
 export type Interval = "monthly" | "weekly" | "yearly";
 
@@ -69,6 +72,41 @@ export class SubscriptionService {
         WHERE s.organization_id = ?
         ORDER BY s.created_at DESC LIMIT 1000`
     ).all(orgId) as any[];
+  }
+
+  /** Troca o plano de uma assinatura com proration (crédito proporcional). */
+  static changePlan(orgId: string, subscriptionId: string, newPlanId: string): { id: string; creditAmount: number; newAmount: number } | null {
+    const sub = db.prepare("SELECT * FROM subscriptions WHERE id = ? AND organization_id = ?").get(subscriptionId, orgId) as any;
+    if (!sub || sub.status === "cancelled") return null;
+    const newPlan = db.prepare("SELECT * FROM subscription_plans WHERE id = ? AND organization_id = ?").get(newPlanId, orgId) as any;
+    if (!newPlan) return null;
+
+    // Calcula a proporção de dias restantes no ciclo atual.
+    const now = Date.now();
+    const nextCharge = sub.next_charge_at ? new Date(sub.next_charge_at).getTime() : now;
+    const lastCharge = sub.last_charge_at ? new Date(sub.last_charge_at).getTime() : new Date(sub.start_date).getTime();
+    const cycleDuration = nextCharge - lastCharge;
+    const remaining = Math.max(0, nextCharge - now);
+    const ratio = cycleDuration > 0 ? remaining / cycleDuration : 0;
+
+    const creditAmount = Math.round(Number(sub.amount || 0) * ratio * 100) / 100;
+    const newAmount = Number(newPlan.amount || 0);
+
+    // Atualiza a assinatura: novo plano e valor. Mantém next_charge_at.
+    db.prepare(
+      `UPDATE subscriptions SET plan_id = ?, amount = ?, interval = ?, interval_count = ? WHERE id = ? AND organization_id = ?`
+    ).run(newPlan.id, newAmount, newPlan.interval, newPlan.interval_count, subscriptionId, orgId);
+
+    // Se há uma fatura pendente do período atual, ajusta o valor com o crédito.
+    const pendingInv = db.prepare(
+      "SELECT id FROM subscription_invoices WHERE subscription_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1"
+    ).get(subscriptionId) as any;
+    if (pendingInv) {
+      const adjustedAmount = Math.max(0, Math.round((newAmount - creditAmount) * 100) / 100);
+      db.prepare("UPDATE subscription_invoices SET amount = ? WHERE id = ?").run(adjustedAmount, pendingInv.id);
+    }
+
+    return { id: subscriptionId, creditAmount, newAmount };
   }
 
   // ---- Faturas ----
@@ -151,5 +189,56 @@ export class SubscriptionService {
         WHERE i.organization_id = ?
         ORDER BY i.created_at DESC LIMIT 500`
     ).all(orgId) as any[];
+  }
+
+  // ---- Portal de Autoatendimento ----
+
+  /** Gera um token HMAC-SHA256 assinado para o portal do cliente (expira em 24h). */
+  static generatePortalToken(orgId: string, contactId: string): string {
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24h
+    const payload = `${orgId}:${contactId}:${expiresAt}`;
+    const sig = crypto.createHmac("sha256", JWT_SECRET).update(payload).digest("hex").slice(0, 32);
+    // Formato: base64url(payload).signature
+    const b64 = Buffer.from(payload).toString("base64url");
+    return `${b64}.${sig}`;
+  }
+
+  /** Valida um token de portal e retorna orgId + contactId, ou null se inválido/expirado. */
+  static contactByPortalToken(token: string): { orgId: string; contactId: string } | null {
+    try {
+      const [b64, sig] = String(token || "").split(".");
+      if (!b64 || !sig) return null;
+      const payload = Buffer.from(b64, "base64url").toString("utf-8");
+      const [orgId, contactId, expiresStr] = payload.split(":");
+      if (!orgId || !contactId || !expiresStr) return null;
+      // Verifica expiração.
+      if (Date.now() > Number(expiresStr)) return null;
+      // Verifica assinatura HMAC.
+      const expected = crypto.createHmac("sha256", JWT_SECRET).update(payload).digest("hex").slice(0, 32);
+      if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+      return { orgId, contactId };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Gera o link do portal e envia ao contato via WhatsApp. Retorna true se enviou. */
+  static async sendPortalLink(orgId: string, contactId: string): Promise<boolean> {
+    try {
+      const contact = db.prepare("SELECT * FROM contacts WHERE id = ? AND organization_id = ?").get(contactId, orgId) as any;
+      if (!contact) return false;
+      const channel = db.prepare("SELECT id FROM channels WHERE organization_id = ? AND status = 'connected' LIMIT 1").get(orgId) as any;
+      if (!channel) return false;
+
+      const token = this.generatePortalToken(orgId, contactId);
+      const base = (process.env.APP_URL || process.env.CORS_ORIGIN || "").replace(/\/$/, "");
+      const link = `${base}/api/public/subscription/portal?token=${token}`;
+      const msg = `Olá${contact.name ? `, ${contact.name}` : ""}! Acesse seu portal de assinatura para ver suas faturas e pagamentos:\n${link}\n\n(Link válido por 24h)`;
+      await MessageProviderService.sendMessage(channel.id, contact.identifier, msg);
+      return true;
+    } catch (e) {
+      console.error("[Subscription] Falha ao enviar link do portal:", e);
+      return false;
+    }
   }
 }

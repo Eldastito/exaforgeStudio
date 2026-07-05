@@ -3,14 +3,16 @@ import db from "../db.js";
 import { randomBytes } from "crypto";
 import { AuthRequest } from "../middleware/auth.js";
 import { ReservationService } from "../ReservationService.js";
+import { EncryptionService } from "../EncryptionService.js";
 
 const router = Router();
 
 function getOrCreateToken(orgId: string): string {
   const o = db.prepare(`SELECT integration_token FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
-  if (o?.integration_token) return o.integration_token;
+  if (o?.integration_token) return EncryptionService.decrypt(o.integration_token) || o.integration_token;
   const token = `zf_${randomBytes(24).toString("hex")}`;
-  db.prepare(`UPDATE organization_settings SET integration_token = ? WHERE organization_id = ?`).run(token, orgId);
+  db.prepare(`UPDATE organization_settings SET integration_token = ?, integration_token_hash = ? WHERE organization_id = ?`)
+    .run(EncryptionService.encrypt(token), EncryptionService.hash(token), orgId);
   return token;
 }
 
@@ -29,7 +31,8 @@ router.post("/token/rotate", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const token = `zf_${randomBytes(24).toString("hex")}`;
-    db.prepare(`UPDATE organization_settings SET integration_token = ? WHERE organization_id = ?`).run(token, orgId);
+    db.prepare(`UPDATE organization_settings SET integration_token = ?, integration_token_hash = ? WHERE organization_id = ?`)
+      .run(EncryptionService.encrypt(token), EncryptionService.hash(token), orgId);
     res.json({ token });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

@@ -30,6 +30,7 @@ export class PaymentService {
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any;
     if (o && o.pay_gateway_token) o.pay_gateway_token = EncryptionService.decrypt(o.pay_gateway_token);
+    if (o && o.pay_webhook_secret) o.pay_webhook_secret = EncryptionService.decrypt(o.pay_webhook_secret);
     return o || {};
   }
 
@@ -82,7 +83,8 @@ export class PaymentService {
   /** Gera (ou regenera) o segredo do webhook de pagamento da organização. */
   static rotateWebhookSecret(orgId: string): string {
     const secret = 'whpay_' + Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-    db.prepare(`UPDATE organization_settings SET pay_webhook_secret = ? WHERE organization_id = ?`).run(secret, orgId);
+    db.prepare(`UPDATE organization_settings SET pay_webhook_secret = ?, pay_webhook_secret_hash = ? WHERE organization_id = ?`)
+      .run(EncryptionService.encrypt(secret), EncryptionService.hash(secret), orgId);
     return secret;
   }
 
@@ -356,7 +358,9 @@ export class PaymentService {
   /** Resolve a organização a partir do segredo do webhook (gateway). */
   static orgByWebhookSecret(secret: string): string | null {
     if (!secret) return null;
-    const o = db.prepare(`SELECT organization_id FROM organization_settings WHERE pay_webhook_secret = ?`).get(secret) as any;
+    const h = EncryptionService.hash(secret);
+    if (!h) return null;
+    const o = db.prepare(`SELECT organization_id FROM organization_settings WHERE pay_webhook_secret_hash = ?`).get(h) as any;
     return o?.organization_id || null;
   }
 

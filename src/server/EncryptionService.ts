@@ -33,6 +33,14 @@ export class EncryptionService {
     return typeof value === "string" && value.startsWith(PREFIX);
   }
 
+  /** SHA-256 hex digest for lookup-by-value columns (never reversible). */
+  static hash(plain: string | null | undefined): string | null {
+    if (plain == null || plain === "") return null;
+    const val = this.isEncrypted(plain) ? this.decrypt(plain) : plain;
+    if (!val) return null;
+    return crypto.createHash("sha256").update(val).digest("hex");
+  }
+
   /** Cifra um texto. Vazio/nulo passa direto. Idempotente (não recifra). */
   static encrypt(plain: string | null | undefined): string | null {
     if (plain == null || plain === "") return (plain as any) ?? null;
@@ -86,9 +94,27 @@ export class EncryptionService {
       }
     };
     encCol("organization_settings", "organization_id", "pay_gateway_token");
+    encCol("organization_settings", "organization_id", "pay_webhook_secret");
+    encCol("organization_settings", "organization_id", "integration_token");
     encCol("oauth_connections", "id", "access_token");
     encCol("oauth_connections", "id", "refresh_token");
-    if (updated) console.log(`[Encryption] Backfill: ${updated} segredo(s) cifrado(s) em repouso.`);
+
+    // Backfill hash columns for lookup-by-value secrets.
+    const hashCol = (table: string, idCol: string, secretCol: string, hashCol: string) => {
+      let rows: any[] = [];
+      try {
+        rows = db.prepare(`SELECT ${idCol} AS id, ${secretCol} AS val FROM ${table} WHERE ${secretCol} IS NOT NULL AND ${secretCol} != '' AND (${hashCol} IS NULL OR ${hashCol} = '')`).all() as any[];
+      } catch (e) { return; }
+      const upd = db.prepare(`UPDATE ${table} SET ${hashCol} = ? WHERE ${idCol} = ?`);
+      for (const r of rows) {
+        const h = this.hash(r.val);
+        if (h) { try { upd.run(h, r.id); updated++; } catch (e) { /* noop */ } }
+      }
+    };
+    hashCol("organization_settings", "organization_id", "pay_webhook_secret", "pay_webhook_secret_hash");
+    hashCol("organization_settings", "organization_id", "integration_token", "integration_token_hash");
+
+    if (updated) console.log(`[Encryption] Backfill: ${updated} segredo(s) cifrado(s)/hasheado(s) em repouso.`);
     return { updated };
   }
 }

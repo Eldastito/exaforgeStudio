@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
-import { editImagesB64, isAIConfigured } from "./llm.js";
+import { editImagesB64, editImagesGoogleB64, isAIConfigured } from "./llm.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { FashionStudioService } from "./FashionStudioService.js";
 import { FashionAvatarService } from "./FashionAvatarService.js";
@@ -80,12 +80,37 @@ class OpenAIEditTryOnProvider implements TryOnProvider {
   }
 }
 
+class GoogleGeminiTryOnProvider implements TryOnProvider {
+  key = "google_gemini_v1";
+  available(): boolean { return !!(process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY); }
+  async generate(input: { avatar: Buffer; garments: { name: string; buffer: Buffer; mime: string }[]; notes: string }) {
+    try {
+      const images = [
+        { buffer: input.avatar, mime: "image/jpeg" },
+        ...input.garments.map((g) => ({ buffer: g.buffer, mime: g.mime })),
+      ];
+      const b64 = await editImagesGoogleB64(images, SAFETY_PROMPT);
+      if (!b64) return { ok: false as const, error: "Provedor Google não retornou imagem.", retryable: true };
+      return { ok: true as const, b64 };
+    } catch (e: any) {
+      const msg = String(e?.message || "Falha no provedor Google");
+      const status = Number(msg.match(/Gemini (\d+)/)?.[1] || 0);
+      const retryable = !(status >= 400 && status < 500);
+      return { ok: false as const, error: msg.slice(0, 200), retryable };
+    }
+  }
+}
+
 const PROVIDERS: Record<string, TryOnProvider> = {
   openai_edit: new OpenAIEditTryOnProvider(),
+  google_gemini: new GoogleGeminiTryOnProvider(),
 };
 
 function activeProvider(): TryOnProvider {
-  return PROVIDERS[process.env.FASHION_TRYON_PROVIDER || "openai_edit"] || PROVIDERS.openai_edit;
+  const explicit = process.env.FASHION_TRYON_PROVIDER;
+  if (explicit && PROVIDERS[explicit]) return PROVIDERS[explicit];
+  if (PROVIDERS.google_gemini.available()) return PROVIDERS.google_gemini;
+  return PROVIDERS.openai_edit;
 }
 
 export class FashionTryOnService {

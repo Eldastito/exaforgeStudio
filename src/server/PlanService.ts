@@ -14,8 +14,9 @@ export type PlanFeatures = {
   channels_limit?: number;
   users_limit?: number;
   trial_days?: number;
-  studio_images_monthly?: number; // limite de imagens do Estúdio por mês
-  studio_videos_monthly?: number; // limite de vídeos do Estúdio por mês
+  studio_images_monthly?: number;
+  studio_videos_monthly?: number;
+  modules?: string[];
 };
 
 export type Plan = {
@@ -184,6 +185,48 @@ export class PlanService {
     if (limit <= 0) return { allowed: false, reason: 'plan_no_studio', limit: 0, used };
     if (used >= limit) return { allowed: false, reason: 'monthly_limit', limit, used };
     return { allowed: true, limit, used };
+  }
+
+  /**
+   * Módulos que o plano da org permite. null = sem restrição de plano (plano sem
+   * lista de modules, ou org sem plano). Lista vazia = plano não inclui nenhum
+   * módulo opcional (bloqueia tudo).
+   */
+  static modulesForPlan(orgId: string): string[] | null {
+    const plan = this.getCurrentPlan(orgId);
+    if (!plan) return null;
+    return plan.features.modules ?? null;
+  }
+
+  /**
+   * Alertas de uso: retorna avisos quando a org se aproxima ou ultrapassa
+   * limites do plano (80%, 90%, 100%).
+   */
+  static getUsageAlerts(orgId: string): { key: string; label: string; used: number; limit: number; pct: number; level: "warning" | "critical" | "exceeded" }[] {
+    const plan = this.getCurrentPlan(orgId);
+    if (!plan) return [];
+    const usage = this.getUsage(orgId);
+    const f = plan.features;
+    const alerts: { key: string; label: string; used: number; limit: number; pct: number; level: "warning" | "critical" | "exceeded" }[] = [];
+
+    const check = (key: string, label: string, used: number, limit: number | undefined) => {
+      if (!limit || limit <= 0) return;
+      const pct = Math.round((used / limit) * 100);
+      if (pct >= 100) alerts.push({ key, label, used, limit, pct, level: "exceeded" });
+      else if (pct >= 90) alerts.push({ key, label, used, limit, pct, level: "critical" });
+      else if (pct >= 80) alerts.push({ key, label, used, limit, pct, level: "warning" });
+    };
+
+    check("ai", "Interações IA", usage.ai_this_month, f.ai_monthly_limit);
+    check("contacts", "Contatos", usage.contacts, f.contacts_limit);
+    check("channels", "Canais", usage.channels, f.channels_limit);
+    check("users", "Usuários", usage.users, f.users_limit);
+
+    const studio = this.studioUsage(orgId);
+    check("studio_images", "Imagens Estúdio", studio.images, f.studio_images_monthly);
+    check("studio_videos", "Vídeos Estúdio", studio.videos, f.studio_videos_monthly);
+
+    return alerts;
   }
 
   private static parseFeatures(raw: any): PlanFeatures {

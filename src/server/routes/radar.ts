@@ -121,6 +121,13 @@ router.post("/sessions/:id/recalculate", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+router.post("/sessions/:id/autofill", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarService.autoFillFromMeasuredData(orgId, req.params.id, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.post("/sessions/:id/complete", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

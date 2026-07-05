@@ -720,9 +720,9 @@ const initDb = () => {
     const row = db.prepare(`SELECT COUNT(*) AS c FROM plans`).get() as any;
     if (!row || row.c === 0) {
       const seed = db.prepare(`INSERT INTO plans (id, name, price, features) VALUES (?, ?, ?, ?)`);
-      seed.run('starter', 'Starter',  99, JSON.stringify({ ai_monthly_limit:   500, contacts_limit:  1000, channels_limit: 1,  users_limit:  2, trial_days: 14 }));
-      seed.run('pro',     'Pro',     299, JSON.stringify({ ai_monthly_limit:  3000, contacts_limit: 10000, channels_limit: 3,  users_limit:  5, trial_days: 14 }));
-      seed.run('business','Business',799, JSON.stringify({ ai_monthly_limit: 15000, contacts_limit: 50000, channels_limit: 10, users_limit: 20, trial_days: 14 }));
+      seed.run('starter', 'Starter',  99, JSON.stringify({ ai_monthly_limit: 500, contacts_limit: 1000, channels_limit: 1, users_limit: 2, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","integracoes","rie","execucao"] }));
+      seed.run('pro',     'Pro',     299, JSON.stringify({ ai_monthly_limit: 3000, contacts_limit: 10000, channels_limit: 3, users_limit: 5, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","cadencias","areas","integracoes","reservas","assinaturas","orcamentos","diretor","estudio","rie","execucao","prospect"] }));
+      seed.run('business','Business',799, JSON.stringify({ ai_monthly_limit: 15000, contacts_limit: 50000, channels_limit: 10, users_limit: 20, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","cadencias","areas","integracoes","reservas","assinaturas","compras","orcamentos","eventos","diretor","estudio","rie","execucao","prospect","radar"] }));
       console.log('[DB] Planos padrão criados (Starter, Pro, Business).');
     }
   } catch (e) { console.error('[DB] Falha ao popular planos', e); }
@@ -2156,6 +2156,8 @@ const initDb = () => {
         ON radar_answers(session_id, question_id, respondent_id) WHERE respondent_id IS NOT NULL;
     `);
   } catch(e){ console.error('[DB] Falha ao deduplicar/indexar radar_answers', e); }
+
+  try { db.exec(`ALTER TABLE radar_answers ADD COLUMN source TEXT DEFAULT 'declared'`); } catch(e){}
 
   // Slug por PRODUTO (backlog ADR-028, itens 32+33 — antes só a LOJA tinha
   // slug): URL própria por produto na vitrine + meta tags para SEO. Backfill

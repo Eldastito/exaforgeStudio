@@ -21,3 +21,6 @@ media/
 
 # Scripts de teste/rascunho temporários (não versionar)
 scratchpad/
+
+# Segredo de JWT gerado em runtime quando JWT_SECRET não está na env (nunca versionar)
+.jwt_secret

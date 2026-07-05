@@ -195,13 +195,15 @@ router.post("/look-requests", requireCustomer, async (req: FashionRequest, res):
 
 // POST /api/public/fashion/looks/custom — Look Builder MANUAL (ADR-040):
 // a cliente escolhe as peças na vitrine e monta um look { productIds: [...] }.
-router.post("/looks/custom", requireCustomer, (req: FashionRequest, res): any => {
+router.post("/looks/custom", requireCustomer, async (req: FashionRequest, res): Promise<any> => {
   if (rateLimited(`fashion_custom:${req.fashionCustomerId}`, 40, 60 * 60 * 1000)) {
     return res.status(429).json({ error: "Muitos looks em pouco tempo. Aguarde um pouco." });
   }
   const ids = Array.isArray(req.body?.productIds)
     ? req.body.productIds.map((x: any) => String(x)).slice(0, 20)
     : [];
+  // ADR-041: classificação vestível em dia antes de validar a seleção.
+  try { await FashionStudioService.ensureWearableClassified(req.fashionOrgId!); } catch { /* best-effort */ }
   const result = FashionLookService.createCustomLook(req.fashionOrgId!, req.fashionCustomerId!, ids);
   if (!result.ok) return res.status(400).json({ error: (result as any).error });
   res.status(201).json(result);

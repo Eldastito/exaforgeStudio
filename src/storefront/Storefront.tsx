@@ -67,6 +67,12 @@ export function Storefront() {
   const [onlyFavs, setOnlyFavs] = useState(false);
   const [cart, setCart] = useState<CartItem[]>(() => lsGet<CartItem[]>(`storefront_cart_${slug}`, []));
 
+  // Provador Virtual (ADR-041): as peças "para provar" escolhidas na vitrine.
+  // Só produtos VESTÍVEIS elegíveis ganham o botão "Provar" no card — a lista
+  // vem do catálogo elegível do provador (null = módulo desligado nesta loja).
+  const [fashionEligibleIds, setFashionEligibleIds] = useState<Set<string> | null>(null);
+  const [tryOnPicks, setTryOnPicks] = useState<string[]>(() => lsGet<string[]>(`fashion_picks_${slug}`, []));
+
   const [activeProduct, setActiveProduct] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
 
@@ -113,6 +119,23 @@ export function Storefront() {
   useEffect(() => { lsSet(`storefront_favs_${slug}`, favorites); }, [favorites, slug]);
   useEffect(() => { lsSet(`storefront_cart_${slug}`, cart); }, [cart, slug]);
   useEffect(() => { lsSet(`storefront_mode_${slug}`, mode); }, [mode, slug]);
+  useEffect(() => { lsSet(`fashion_picks_${slug}`, tryOnPicks); }, [tryOnPicks, slug]);
+
+  // Catálogo elegível do provador (404 = módulo desligado; segue null e nada
+  // do provador aparece). Uma busca só — o FashionStudio recebe o resultado.
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/fashion/eligible`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d?.items) setFashionEligibleIds(new Set((d.items as { id: string }[]).map((i) => i.id))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [slug]);
+
+  // Marca/desmarca a peça "para provar" (máx. 5 — mesmo limite do look).
+  const toggleTryOnPick = useCallback((id: string) => {
+    setTryOnPicks((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 5 ? prev : [...prev, id]);
+  }, []);
 
   const night = mode === 'night';
 
@@ -324,6 +347,9 @@ export function Storefront() {
                       isFavorite={favorites.includes(p.id)}
                       onToggleFavorite={toggleFavorite}
                       onOpen={setActiveProduct}
+                      canTryOn={!!fashionEligibleIds?.has(p.id)}
+                      isTryOnPicked={tryOnPicks.includes(p.id)}
+                      onToggleTryOn={toggleTryOnPick}
                     />
                   ))}
                 </div>
@@ -355,6 +381,9 @@ export function Storefront() {
                         isFavorite={favorites.includes(p.id)}
                         onToggleFavorite={toggleFavorite}
                         onOpen={openProduct}
+                        canTryOn={!!fashionEligibleIds?.has(p.id)}
+                        isTryOnPicked={tryOnPicks.includes(p.id)}
+                        onToggleTryOn={toggleTryOnPick}
                       />
                     ))}
                   </AnimatePresence>
@@ -380,7 +409,14 @@ export function Storefront() {
       )}
 
       {/* Provador Virtual (Fashion AI Studio) — só renderiza quando a loja tem o módulo ligado */}
-      {data && <FashionStudio slug={slug} accent={accent} mode={mode} onAddLookItems={addLookItems} />}
+      {data && (
+        <FashionStudio
+          slug={slug} accent={accent} mode={mode} onAddLookItems={addLookItems}
+          enabledHint={fashionEligibleIds !== null}
+          picks={tryOnPicks}
+          onPicksChange={setTryOnPicks}
+        />
+      )}
 
       {/* Carrinho */}
       <CartDrawer

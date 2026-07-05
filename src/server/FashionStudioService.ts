@@ -1,5 +1,7 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
+import { chat, isAIConfigured } from "./llm.js";
+import { normalizeProductName } from "./productMatcher.js";
 
 /**
  * Fashion AI Studio — FAS-0, fundação (ADR-034 / PRD-E-006).
@@ -18,6 +20,41 @@ import { v4 as uuidv4 } from "uuid";
  * O que este serviço deliberadamente NÃO faz ainda: foto, consentimento,
  * geração, carrinho — fases FAS-1 a FAS-4.
  */
+
+// ---- Classificação VESTÍVEL (ADR-041) ----------------------------------
+// O provador só pode conter roupa/calçado/acessório de moda — a loja pode
+// vender qualquer outra coisa (caneca, eletrônico, decoração...). A checagem
+// é em camadas: heurística por palavras (grátis, síncrona) → IA para o que a
+// heurística não decide → override manual do lojista (fashion_wearable_source
+// = 'manual' nunca é sobrescrito). Item ainda NÃO classificado fica FORA do
+// provador (conservador: nunca arriscar vestir uma caneca).
+
+// Palavras normalizadas (sem acento, minúsculas — ver normalizeProductName).
+// Casadas por PREFIXO de palavra: " calca" pega "calça" e "calças".
+const WEARABLE_WORDS = [
+  // roupas
+  "vestido", "saia", "calca", "blusa", "camisa", "camiseta", "regata", "top", "cropped",
+  "short", "bermuda", "jaqueta", "casaco", "blazer", "cardiga", "sueter", "moletom",
+  "macacao", "body", "legging", "jeans", "polo", "tricot", "trico", "malha", "sobretudo",
+  "parka", "colete", "terno", "jardineira", "pantalona", "kimono", "camisola", "pijama",
+  "lingerie", "sutia", "calcinha", "cueca", "biquini", "maio", "sunga", "uniforme", "look",
+  // calçados
+  "sapato", "tenis", "sandalia", "salto", "sapatilha", "bota", "chinelo", "rasteira",
+  "mocassim", "scarpin", "papete", "slide", "alpargata", "sapatenis",
+  // acessórios de moda (vestíveis no corpo)
+  "bolsa", "cinto", "colar", "brinco", "pulseira", "anel", "oculos", "chapeu", "bone",
+  "lenco", "echarpe", "cachecol", "gravata", "meia", "luva", "relogio", "tiara", "pochete",
+  "mochila", "carteira", "gargantilha", "tornozeleira", "abada", "saida de praia", "visor", "viseira",
+];
+const NON_WEARABLE_WORDS = [
+  "caneca", "copo", "garrafa", "squeeze", "taca", "quadro", "poster", "livro", "revista",
+  "celular", "capinha", "fone", "carregador", "cabo", "mouse", "teclado", "notebook", "tablet",
+  "perfume", "batom", "maquiagem", "shampoo", "condicionador", "hidratante", "sabonete", "esmalte",
+  "vela", "decoracao", "almofada", "toalha", "lencol", "cortina", "tapete", "panela", "caneta",
+  "caderno", "agenda", "chaveiro", "adesivo", "brinquedo", "pelucia", "jogo", "console",
+  "alimento", "chocolate", "cafe", "cha", "suplemento", "racao", "vaso", "planta", "luminaria",
+];
+
 export class FashionStudioService {
   static isEnabled(orgId: string): boolean {
     const row = db.prepare(`SELECT fashion_studio_enabled FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
@@ -33,11 +70,71 @@ export class FashionStudioService {
   }
 
   /**
+   * Heurística vestível (ADR-041): 1 = roupa/acessório, 0 = não, null = a
+   * heurística não decide (vai para a IA). Palavra casada por PREFIXO no nome
+   * + categoria normalizados; se listas opostas colidem, não decide.
+   */
+  static classifyWearableHeuristic(name: string, category: string | null): 1 | 0 | null {
+    const text = ` ${normalizeProductName(`${name || ""} ${category || ""}`)} `;
+    const hit = (words: string[]) => words.some((w) => text.includes(` ${w}`));
+    const wearable = hit(WEARABLE_WORDS);
+    const non = hit(NON_WEARABLE_WORDS);
+    if (wearable && !non) return 1;
+    if (non && !wearable) return 0;
+    return null;
+  }
+
+  /**
+   * Completa a classificação vestível da loja (ADR-041): heurística para os
+   * pendentes; IA (uma única chamada, barata) para o que sobrar. Best-effort e
+   * idempotente — cada produto é classificado UMA vez (fica gravado); o
+   * override manual do lojista ('manual') nunca é tocado. Chamada nos pontos
+   * de entrada assíncronos do provador antes de montar o catálogo elegível.
+   */
+  static async ensureWearableClassified(orgId: string): Promise<void> {
+    const pending = db.prepare(
+      `SELECT id, name, category FROM products_services
+       WHERE organization_id = ? AND type = 'product' AND active = 1 AND fashion_wearable IS NULL`
+    ).all(orgId) as any[];
+    if (!pending.length) return;
+    const setStmt = db.prepare(`UPDATE products_services SET fashion_wearable = ?, fashion_wearable_source = ? WHERE id = ? AND COALESCE(fashion_wearable_source, '') != 'manual'`);
+    const unknown: any[] = [];
+    for (const p of pending) {
+      const h = this.classifyWearableHeuristic(p.name, p.category);
+      if (h !== null) setStmt.run(h, "heuristic", p.id);
+      else unknown.push(p);
+    }
+    if (!unknown.length || !isAIConfigured()) return;
+    try {
+      const lines = unknown.slice(0, 200).map((p) => `${p.id} | ${p.name} | ${p.category || "sem categoria"}`).join("\n");
+      const raw = await chat(
+        `Produtos (id | nome | categoria):\n${lines}\n\nResponda: {"items":[{"id":"...","wearable":true}]} para TODOS os ids listados.`,
+        {
+          json: true, temperature: 0,
+          system: "Você classifica produtos de uma loja para um provador virtual de moda. wearable=true SOMENTE para roupas, calçados e acessórios de moda que uma pessoa veste ou usa no corpo (vestido, calça, tênis, bolsa, colar, óculos, chapéu...). Qualquer outra coisa (caneca, eletrônico, decoração, cosmético, livro, alimento etc.) é wearable=false. Responda SOMENTE JSON.",
+        }
+      );
+      let parsed: any = {};
+      try { parsed = JSON.parse(raw || "{}"); } catch { /* fica {} */ }
+      const known = new Set(unknown.map((p) => p.id));
+      for (const it of Array.isArray(parsed?.items) ? parsed.items : []) {
+        const id = String(it?.id || "");
+        if (!known.has(id)) continue; // a IA só grava sobre os ids que perguntamos
+        setStmt.run(it?.wearable === true ? 1 : 0, "ai", id);
+      }
+    } catch (e) {
+      console.error("[FashionStudio] Classificação IA de vestíveis falhou (itens seguem pendentes/fora do provador):", e);
+    }
+  }
+
+  /**
    * Catálogo elegível para looks (seção 8.3): publicado na vitrine, ativo,
    * com preço, com imagem comercial e com estoque vendável. Retorna o payload
    * mínimo que o Look Builder (FAS-2) e o motor de recomendação vão consumir —
    * sempre por IDs do catálogo real (regra 19.3: o motor só seleciona itens
    * por IDs daqui, nunca por texto livre).
+   * ADR-041: e VESTÍVEL — item que não é roupa/acessório (ou ainda não
+   * classificado) NUNCA entra no provador.
    */
   static eligibleItems(orgId: string): {
     id: string; name: string; slug: string | null; category: string | null;
@@ -45,13 +142,14 @@ export class FashionStudioService {
     variants: { id: string; name: string; price: number | null }[];
   }[] {
     const rows = db.prepare(`
-      SELECT ps.id, ps.name, ps.slug, ps.category, ps.price, ps.sale_mode, ps.stock_control_enabled, ps.has_variants, ps.studio_image_url
+      SELECT ps.id, ps.name, ps.slug, ps.category, ps.price, ps.sale_mode, ps.stock_control_enabled, ps.has_variants, ps.studio_image_url, ps.fashion_wearable
       FROM products_services ps
       WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
         AND COALESCE(ps.storefront_visible, 1) = 1
         AND ps.price IS NOT NULL AND ps.price > 0
       ORDER BY COALESCE(ps.storefront_position, 999999) ASC, ps.name ASC
     `).all(orgId) as any[];
+    const setWearStmt = db.prepare(`UPDATE products_services SET fashion_wearable = ?, fashion_wearable_source = 'heuristic' WHERE id = ? AND fashion_wearable IS NULL`);
 
     const coverStmt = db.prepare(`SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC LIMIT 1`);
     const sellableStmt = db.prepare(`
@@ -68,6 +166,16 @@ export class FashionStudioService {
 
     const out: any[] = [];
     for (const p of rows) {
+      // Vestível (ADR-041): 0 = fora; NULL tenta a heurística agora (síncrona,
+      // grátis) e grava; se nem ela decidir, fica FORA até a IA classificar
+      // (ensureWearableClassified) ou o lojista marcar manualmente.
+      let wearable = p.fashion_wearable;
+      if (wearable == null) {
+        const h = this.classifyWearableHeuristic(p.name, p.category);
+        if (h !== null) { setWearStmt.run(h, p.id); wearable = h; }
+      }
+      if (wearable !== 1) continue;
+
       // Imagem comercial obrigatória (8.3): a foto de estúdio (ADR-032) conta;
       // produto sem NENHUMA imagem não entra em look (o try-on precisa dela).
       const cover = (coverStmt.get(p.id) as any)?.url || p.studio_image_url || null;

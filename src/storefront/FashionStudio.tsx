@@ -36,9 +36,14 @@ async function api(path: string, opts: RequestInit = {}, token?: string | null):
 
 type SharedLook = { lookId: string; explanation: string; items: { productId: string; name: string; image: string | null; price: number; available: boolean }[]; total: number };
 
-export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
+export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint, picks, onPicksChange }: {
   slug: string; accent: string; mode: Mode;
   onAddLookItems?: (items: { productId: string; name: string; image: string | null; price: number }[], lookId: string) => void;
+  /** Quando o pai (Storefront) já consultou o catálogo elegível, evita o probe duplicado. */
+  enabledHint?: boolean;
+  /** Peças marcadas "Provar" na vitrine (ADR-041) — entram pré-selecionadas no builder. */
+  picks?: string[];
+  onPicksChange?: (ids: string[]) => void;
 }) {
   const night = mode === 'night';
   const [enabled, setEnabled] = useState(false);
@@ -52,13 +57,15 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Probe do FAS-0: 404 = módulo desligado nesta loja, não renderiza nada.
+  // Quando o pai já fez a consulta (enabledHint), usamos o resultado dele.
   useEffect(() => {
+    if (enabledHint !== undefined) { setEnabled(enabledHint); return; }
     let alive = true;
     fetch(`/api/public/store/${encodeURIComponent(slug)}/fashion/eligible`)
       .then((r) => { if (alive && r.ok) setEnabled(true); })
       .catch(() => {});
     return () => { alive = false; };
-  }, [slug]);
+  }, [slug, enabledHint]);
 
   useEffect(() => { lsSet(`fashion_token_${slug}`, token); }, [token, slug]);
 
@@ -79,7 +86,15 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
     const m = await loadMe();
     setBusy(false);
     if (!m) { setStep('intro'); return; }
-    setStep(!m.consents.avatar_processing ? 'consent' : m.avatars.length ? 'status' : 'guide');
+    if (!m.consents.avatar_processing) { setStep('consent'); return; }
+    if (!m.avatars.length) { setStep('guide'); return; }
+    // Peças marcadas "Provar" na vitrine (ADR-041): com a foto pronta, o
+    // provador abre direto no builder com elas pré-selecionadas.
+    if ((picks?.length ?? 0) > 0 && m.avatars.some((a) => a.status === 'approved')) {
+      openBuilder(picks);
+      return;
+    }
+    setStep('status');
   }
 
   // ---- auth ----
@@ -97,23 +112,37 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
 
   // Abre o modo de escolha manual: carrega o catálogo elegível da loja (mesma
   // lista que alimenta a consultora) e deixa a cliente marcar várias peças.
-  async function openBuilder() {
+  // preset = peças vindas da vitrine (botão "Provar" nos cards, ADR-041).
+  async function openBuilder(preset?: string[]) {
     setError('');
-    setSelected([]);
     setStep('builder');
-    if (!catalog.length) {
+    let items = catalog;
+    if (!items.length) {
       setBusy(true);
       try {
         const r = await fetch(`/api/public/store/${encodeURIComponent(slug)}/fashion/eligible`);
         const data = await r.json().catch(() => ({}));
-        if (r.ok) setCatalog((data.items || []).map((i: any) => ({ id: i.id, name: i.name, category: i.category ?? null, price: i.price, image: i.image ?? null })));
+        if (r.ok) {
+          items = (data.items || []).map((i: any) => ({ id: i.id, name: i.name, category: i.category ?? null, price: i.price, image: i.image ?? null }));
+          setCatalog(items);
+        }
       } catch { /* noop */ }
       setBusy(false);
     }
+    // Só o que ainda existe no catálogo elegível entra pré-selecionado.
+    setSelected((preset ?? []).filter((id) => items.some((i) => i.id === id)).slice(0, 5));
   }
 
   function toggleSelected(id: string) {
-    setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : s.length >= 5 ? s : [...s, id]);
+    if (selected.includes(id)) { removeSelected(id); return; }
+    setSelected((s) => (s.length >= 5 ? s : [...s, id]));
+  }
+
+  // Botão de excluir item dentro do provador: tira da seleção e também da
+  // marcação "Provar" da vitrine (para não voltar sozinho na próxima abertura).
+  function removeSelected(id: string) {
+    setSelected((s) => s.filter((x) => x !== id));
+    if (picks?.includes(id)) onPicksChange?.(picks.filter((x) => x !== id));
   }
 
   // "Ver as peças selecionadas em mim": compõe um look customer_selected com as
@@ -124,6 +153,9 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
     const r = await api('/looks/custom', { method: 'POST', body: JSON.stringify({ productIds: selected }) }, token);
     setBusy(false);
     if (!r.ok) { setError(r.data?.error || 'Não foi possível montar o look agora.'); return; }
+    // O look agora carrega as peças; limpa a marcação da vitrine para a
+    // próxima abertura do provador não voltar presa no builder.
+    if (picks?.length) onPicksChange?.([]);
     setLooks([r.data.look]);
     setStep('looks');
   }
@@ -376,6 +408,11 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
         style={{ background: accent }}
       >
         <Shirt className="h-4 w-4" /> Provador Virtual
+        {(picks?.length ?? 0) > 0 && (
+          <span className="grid h-5 min-w-5 place-items-center rounded-full bg-white px-1 text-[11px] font-bold" style={{ color: accent }}>
+            {picks!.length}
+          </span>
+        )}
       </button>
 
       <AnimatePresence>
@@ -508,8 +545,8 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                       <button type="button" className={primaryBtn} style={{ background: accent }} onClick={openQuiz}>
                         Montar meu look por ocasião
                       </button>
-                      <button type="button" className="w-full rounded-xl border px-4 py-2.5 text-sm font-semibold" style={{ borderColor: accent, color: accent }} onClick={openBuilder}>
-                        Escolher peças e ver em mim
+                      <button type="button" className="w-full rounded-xl border px-4 py-2.5 text-sm font-semibold" style={{ borderColor: accent, color: accent }} onClick={() => openBuilder(picks)}>
+                        Escolher peças e ver em mim{(picks?.length ?? 0) > 0 ? ` (${picks!.length} da vitrine)` : ''}
                       </button>
                       <button type="button" className="w-full text-center text-xs opacity-60 underline-offset-2 hover:underline" onClick={async () => { await loadProfile(); setStep('prefs'); }}>
                         Minhas preferências e personalização
@@ -652,6 +689,24 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                 <div className="space-y-3">
                   <h3 className="text-sm font-semibold">Escolha as peças (até 5)</h3>
                   <p className="text-xs opacity-60">Marque as peças que você quer ver vestidas em você. A IA compõe um look só com o que você selecionar.</p>
+                  {selected.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {selected.map((id) => {
+                        const it = catalog.find((c) => c.id === id);
+                        if (!it) return null;
+                        return (
+                          <span key={id} className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium"
+                            style={{ borderColor: hexToRgba(accent, 0.45), color: accent, background: hexToRgba(accent, 0.08) }}>
+                            <span className="max-w-32 truncate">{it.name}</span>
+                            <button type="button" aria-label={`Excluir ${it.name} do provador`} title="Excluir do provador"
+                              className="rounded-full opacity-70 hover:opacity-100" onClick={() => removeSelected(id)}>
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                   {busy && !catalog.length ? (
                     <p className="py-8 text-center text-sm opacity-60"><Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" /> Carregando as peças…</p>
                   ) : catalog.length === 0 ? (

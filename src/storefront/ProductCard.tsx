@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { motion } from 'motion/react';
-import { Heart, Sparkles, ImageOff } from 'lucide-react';
+import { Heart, Sparkles, ImageOff, Shirt } from 'lucide-react';
 import type { Mode, Product } from './types';
 import { hexToRgba, unitPriceLabel } from './utils';
 
@@ -11,6 +11,10 @@ interface Props {
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
   onOpen: (product: Product) => void;
+  /** Provador Virtual (ADR-041): peça vestível elegível ganha o botão "Provar". */
+  canTryOn?: boolean;
+  isTryOnPicked?: boolean;
+  onToggleTryOn?: (id: string) => void;
 }
 
 export const ProductCard: FC<Props> = ({
@@ -20,6 +24,9 @@ export const ProductCard: FC<Props> = ({
   isFavorite,
   onToggleFavorite,
   onOpen,
+  canTryOn,
+  isTryOnPicked,
+  onToggleTryOn,
 }) => {
   const cover = product.images?.[0] ?? null;
   const sold = product.available === false;
@@ -91,6 +98,29 @@ export const ProductCard: FC<Props> = ({
             }}
           />
         </button>
+
+        {/* Provar no Provador Virtual (ADR-041) — só em peça vestível elegível */}
+        {canTryOn && !sold && (
+          <button
+            type="button"
+            aria-label={isTryOnPicked ? 'Remover do provador' : 'Provar esta peça'}
+            title={isTryOnPicked ? 'Remover do provador' : 'Provar esta peça'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleTryOn?.(product.id);
+            }}
+            className={[
+              'absolute right-3 top-[3.4rem] grid h-9 w-9 place-items-center rounded-full backdrop-blur-md transition',
+              night ? 'bg-black/30 hover:bg-black/50' : 'bg-white/70 hover:bg-white',
+            ].join(' ')}
+            style={isTryOnPicked ? { backgroundColor: accent } : undefined}
+          >
+            <Shirt
+              className="h-[18px] w-[18px] transition"
+              style={{ color: isTryOnPicked ? '#fff' : night ? '#ffffff' : '#64748b' }}
+            />
+          </button>
+        )}
 
         {sold && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/55 backdrop-blur-[2px]">

@@ -2273,6 +2273,11 @@ const initDb = () => {
   // migration coordenada com código em produção.
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_studio_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_daily_generation_limit INTEGER DEFAULT 3`); } catch(e){}
+  // ADR-041: o provador só pode conter roupa/acessório VESTÍVEL — a loja pode
+  // vender outras coisas (caneca, eletrônico...). NULL = ainda não classificado;
+  // 1/0 gravado pela heurística, pela IA ou pelo lojista (source registra quem).
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN fashion_wearable INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN fashion_wearable_source TEXT`); } catch(e){}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS fashion_customer_profiles (

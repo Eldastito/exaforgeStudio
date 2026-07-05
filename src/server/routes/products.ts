@@ -697,9 +697,15 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     const product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
     if (!product) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category } = req.body;
+    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable } = req.body;
     const updates: string[] = [];
     const vals: any[] = [];
+    // Override do lojista (ADR-041): marca se o produto pode entrar no
+    // provador virtual (roupa/acessório). 'manual' vence heurística e IA.
+    if (fashion_wearable !== undefined) {
+      updates.push("fashion_wearable = ?"); vals.push(fashion_wearable === null ? null : fashion_wearable ? 1 : 0);
+      updates.push("fashion_wearable_source = ?"); vals.push(fashion_wearable === null ? null : "manual");
+    }
     if (name !== undefined) { updates.push("name = ?"); vals.push(name); }
     if (description !== undefined) { updates.push("description = ?"); vals.push(description); }
     if (price !== undefined) { updates.push("price = ?"); vals.push(price); }

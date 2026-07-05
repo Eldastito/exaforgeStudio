@@ -133,12 +133,15 @@ function resolveCollections(orgId: string): { id: string; title: string; product
 // provador virtual (Fashion AI Studio, FAS-0 / ADR-034). 404 quando o módulo
 // está desligado na loja — indistinguível de rota inexistente de propósito
 // (não revela que a loja tem o recurso disponível mas desativado).
-router.get("/store/:slug/fashion/eligible", (req, res): any => {
+router.get("/store/:slug/fashion/eligible", async (req, res): Promise<any> => {
   const store = resolveStore(req.params.slug);
   if (!store) return res.status(404).json({ error: "Loja não encontrada ou não publicada." });
   const orgId = store.organization_id;
   if (!FashionStudioService.isEnabled(orgId)) return res.status(404).json({ error: "Recurso não disponível." });
 
+  // ADR-041: só roupa/acessório aparece no provador — classifica pendentes
+  // (heurística + IA) antes de montar a lista.
+  try { await FashionStudioService.ensureWearableClassified(orgId); } catch { /* best-effort */ }
   const items = FashionStudioService.eligibleItems(orgId);
   FashionStudioService.recordEvent(orgId, "FashionEligibleCatalogViewed", { itemCount: items.length });
   res.json({ enabled: true, dailyGenerationLimit: FashionStudioService.dailyGenerationLimit(orgId), items });

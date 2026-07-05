@@ -2457,6 +2457,37 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN repurchase_reminder_message TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN repurchase_reminder_last_run DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN repurchase_reminded_at DATETIME`); } catch(e){}
+
+  // Item 1: Radar auto-send report on session completion
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_auto_send_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_auto_send_channel TEXT DEFAULT 'whatsapp'`); } catch(e){}
+
+  // Item 4: Default landing page per org
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN default_landing_view TEXT DEFAULT 'kanban'`); } catch(e){}
+
+  // Item 3: RIC daily snapshots for trend time series
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ric_daily_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        snapshot_date TEXT NOT NULL,
+        iqr_score REAL DEFAULT 0,
+        estimated_loss REAL DEFAULT 0,
+        recoverable REAL DEFAULT 0,
+        recovered REAL DEFAULT 0,
+        atendimento_score REAL DEFAULT 0,
+        comercial_score REAL DEFAULT 0,
+        operacional_score REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ric_snap_org_date ON ric_daily_snapshots (organization_id, snapshot_date);
+      CREATE INDEX IF NOT EXISTS idx_ric_snap_date ON ric_daily_snapshots (snapshot_date);
+    `);
+  } catch(e){}
+
+  // Item 5: Cleanup TTL for background_jobs
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_bg_jobs_completed ON background_jobs (status, completed_at)`); } catch(e){}
 };
 
 initDb();

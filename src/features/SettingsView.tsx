@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -79,6 +79,12 @@ export function SettingsView() {
           </button>
           <button onClick={() => setActiveTab('privacidade')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'privacidade' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Lock className="w-4 h-4" /> Privacidade (LGPD)
+          </button>
+          <button onClick={() => setActiveTab('radar')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'radar' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Crosshair className="w-4 h-4" /> Radar
+          </button>
+          <button onClick={() => setActiveTab('landing')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'landing' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Home className="w-4 h-4" /> Painel Padrão
           </button>
         </nav>
       </div>
@@ -206,6 +212,8 @@ export function SettingsView() {
           {activeTab === 'quickstart' && <QuickStartPanel />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
+          {activeTab === 'radar' && <RadarSettingsPanel />}
+          {activeTab === 'landing' && <DefaultLandingPanel />}
 
           {activeTab === 'usuarios' && (
              <UsersSettingsView />
@@ -885,6 +893,156 @@ function AiAttendancePanel() {
           )}
         </div>
       )}
+    </>
+  );
+}
+
+type RadarAutoSend = {
+  autoSendEnabled: boolean;
+  autoSendChannel: 'whatsapp' | 'email';
+};
+function RadarSettingsPanel() {
+  const [cfg, setCfg] = useState<RadarAutoSend | null>(null);
+
+  useEffect(() => {
+    apiFetch('/api/radar/settings').then(r => r.json()).then(setCfg).catch(() => {});
+  }, []);
+
+  const save = async (patch: Partial<RadarAutoSend>) => {
+    if (!cfg) return;
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    await apiFetch('/api/radar/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+    }).catch(() => {});
+  };
+
+  const Toggle = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
+    <button onClick={onClick}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+    </button>
+  );
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <Crosshair className="w-6 h-6 text-indigo-400" /> Radar
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">Envio automatico do relatorio de diagnostico quando uma sessao e aprovada.</p>
+      </div>
+
+      {!cfg ? (
+        <div className="text-sm text-zinc-500">Carregando...</div>
+      ) : (
+        <div className="space-y-6">
+          {/* Auto-envio do relatorio */}
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" /> Envio automatico do relatorio
+                </p>
+                <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                  Quando uma sessao do Radar de Execucao IA for aprovada ou publicada, o relatorio em PDF sera enviado automaticamente para o contato da sessao pelo canal escolhido abaixo. O envio e best-effort e nunca bloqueia a aprovacao.
+                </p>
+              </div>
+              <Toggle on={cfg.autoSendEnabled} onClick={() => save({ autoSendEnabled: !cfg.autoSendEnabled })} />
+            </div>
+
+            {cfg.autoSendEnabled && (
+              <div className="mt-4 flex items-center gap-4">
+                <span className="text-xs text-zinc-400">Canal de envio:</span>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="radarChannel"
+                    checked={cfg.autoSendChannel === 'whatsapp'}
+                    onChange={() => save({ autoSendChannel: 'whatsapp' })}
+                    className="accent-emerald-500"
+                  />
+                  <span className="text-sm text-zinc-200">WhatsApp</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="radarChannel"
+                    checked={cfg.autoSendChannel === 'email'}
+                    onChange={() => save({ autoSendChannel: 'email' })}
+                    className="accent-emerald-500"
+                  />
+                  <span className="text-sm text-zinc-200">Email</span>
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const LANDING_OPTIONS: { value: string; label: string }[] = [
+  { value: 'kanban', label: 'Kanban (Pipeline)' },
+  { value: 'dashboard', label: 'Dashboard' },
+  { value: 'rie', label: 'Inteligência de Receita (RIC)' },
+  { value: 'radar', label: 'Radar de Execução' },
+  { value: 'channels', label: 'Canais / Conversas' },
+  { value: 'catalog', label: 'Catálogo' },
+  { value: 'vendas', label: 'Vendas' },
+  { value: 'studio', label: 'Fashion Studio' },
+  { value: 'diretor', label: 'Visão Diretor' },
+];
+
+function DefaultLandingPanel() {
+  const [current, setCurrent] = useState('kanban');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/analytics/settings')
+      .then(r => r.json())
+      .then(s => { if (s?.default_landing_view) setCurrent(s.default_landing_view); })
+      .catch(() => {});
+  }, []);
+
+  const pick = async (view: string) => {
+    setCurrent(view);
+    setSaving(true);
+    await apiFetch('/api/analytics/settings/default-landing', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ view }),
+    }).catch(() => {});
+    setSaving(false);
+  };
+
+  return (
+    <>
+      <div className="mb-6 border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+          <Home className="w-6 h-6 text-indigo-400" /> Painel Padrão
+        </h2>
+        <p className="text-zinc-400 text-sm mt-1">Escolha a tela que abre automaticamente ao entrar no sistema.</p>
+      </div>
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {LANDING_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => pick(opt.value)}
+              disabled={saving}
+              className={`rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors ${current === opt.value ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}`}
+            >
+              <span className="flex items-center gap-2">
+                {current === opt.value && <Check className="w-4 h-4 text-indigo-400" />}
+                {opt.label}
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-4 text-xs text-zinc-600">A escolha individual do usuario (clique na sidebar) prevalece. O padrao se aplica quando o usuario nao escolheu uma vista manualmente.</p>
+      </div>
     </>
   );
 }

@@ -4,12 +4,6 @@ import { apiFetch } from '@/src/lib/api';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { brl } from '../lib/format';
 
-const WINDOWS: { id: 'today' | 'week' | 'month'; label: string }[] = [
-  { id: 'today', label: 'Hoje' },
-  { id: 'week', label: '7 dias' },
-  { id: 'month', label: '30 dias' },
-];
-
 type Row = { name: string; risco: number; recuperada: number };
 
 function ChartTooltip({ active, payload, label }: any) {
@@ -29,28 +23,43 @@ function ChartTooltip({ active, payload, label }: any) {
 }
 
 /**
- * Tendência — compara "Em risco" × "Recuperada" por janela de tempo
- * (Hoje / 7d / 30d). É dado real do tenant (1 fetch por janela). A série diária
- * persistida fica para a Fase 2 (precisa de armazenamento histórico) — por isso
- * a leitura honesta aqui é "quanto aparece conforme a janela cresce".
+ * Tendencia — serie diaria persistida de "Em risco" x "Recuperada",
+ * consumida do endpoint /api/analytics/revenue-intelligence/trend.
  */
 export function TrendChart() {
   const [rows, setRows] = useState<Row[] | null>(null);
 
   useEffect(() => {
     let alive = true;
-    Promise.all(
-      WINDOWS.map(w =>
-        apiFetch(`/api/analytics/revenue-intelligence?period=${w.id}`)
-          .then(r => r.json())
-          .then(d => ({ name: w.label, risco: d?.money?.estimatedLoss || 0, recuperada: d?.money?.recovered || 0 }))
-          .catch(() => ({ name: w.label, risco: 0, recuperada: 0 }))
-      )
-    ).then(res => { if (alive) setRows(res); });
+    apiFetch(`/api/analytics/revenue-intelligence/trend?days=30`)
+      .then(r => r.json())
+      .then((points: any[]) => {
+        if (!alive) return;
+        if (!Array.isArray(points) || points.length === 0) {
+          setRows([]);
+          return;
+        }
+        const data: Row[] = points.map((p: any) => ({
+          name: p.snapshot_date?.slice(5) || '', // MM-DD
+          risco: p.estimated_loss || 0,
+          recuperada: p.recovered || 0,
+        }));
+        setRows(data);
+      })
+      .catch(() => { if (alive) setRows([]); });
     return () => { alive = false; };
   }, []);
 
-  if (!rows) return <Skeleton className="mt-4 h-44 w-full bg-slate-700/25" />;
+  if (rows === null) return <Skeleton className="mt-4 h-44 w-full bg-slate-700/25" />;
+
+  if (rows.length === 0) {
+    return (
+      <div className="mt-4 flex flex-col items-center justify-center py-8 text-center">
+        <p className="text-sm text-slate-500">Ainda sem dados historicos.</p>
+        <p className="text-xs text-slate-600">O sistema registra um snapshot por dia. A serie aparece a partir do segundo dia.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3">
@@ -65,7 +74,7 @@ export function TrendChart() {
           <Bar dataKey="recuperada" name="Recuperada" fill="#36e39a" radius={[4, 4, 0, 0]} maxBarSize={34} />
         </BarChart>
       </ResponsiveContainer>
-      <p className="mt-1 text-[10px] text-slate-600">Acumulado por janela de tempo. Série diária na Fase 2.</p>
+      <p className="mt-1 text-[10px] text-slate-600">Serie diaria persistida (ultimos 30 dias).</p>
     </div>
   );
 }

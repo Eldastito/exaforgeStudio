@@ -19,6 +19,7 @@ import { JobQueueService } from "./JobQueueService.js";
 import { RadarService } from "./RadarService.js";
 import { FashionAvatarService } from "./FashionAvatarService.js";
 import { FashionTryOnService } from "./FashionTryOnService.js";
+import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -82,6 +83,7 @@ export class Scheduler {
     await ProspectDiscoveryService.runDue().catch(e => console.error('[Scheduler] descoberta de prospecção falhou', e));
     try { RadarService.reassessmentReminderPass(); } catch (e) { console.error('[Scheduler] lembrete de reavaliação do Radar falhou', e); }
     await this.repurchaseReminderPass().catch(e => console.error('[Scheduler] lembrete de recompra falhou', e));
+    try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
     this.trialPass();
   }
 
@@ -193,6 +195,23 @@ export class Scheduler {
       } catch (e) {
         console.error('[Scheduler] Falha na expiração de pedidos da org', org.organization_id, e);
       }
+    }
+  }
+
+  /**
+   * Snapshot diário do RIC — persiste IQR + dinheiro + drivers para cada org
+   * ativa (roda no máximo 1x/dia; idempotente por (org, data)).
+   */
+  private static ricSnapshotPass() {
+    const today = new Date().toISOString().slice(0, 10);
+    if ((this as any)._lastRicSnap === today) return;
+    (this as any)._lastRicSnap = today;
+
+    const orgs = db.prepare(
+      `SELECT DISTINCT organization_id FROM channels WHERE status NOT IN ('disabled','disconnected')`
+    ).all() as any[];
+    for (const o of orgs) {
+      try { RevenueIntelligenceService.snapshotDaily(o.organization_id); } catch (e) { /* best-effort */ }
     }
   }
 

@@ -160,7 +160,7 @@ export class RadarService {
     return this.getSession(orgId, id);
   }
 
-  static updateSession(orgId: string, id: string, patch: any) {
+  static updateSession(orgId: string, id: string, patch: any, actorUserId?: string) {
     const existing = db.prepare(`SELECT id FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(id, orgId);
     if (!existing) throw new Error("Sessão não encontrada.");
 
@@ -177,11 +177,30 @@ export class RadarService {
     if (patch.state !== undefined) set("state", patch.state);
     if (patch.primaryGoal !== undefined) set("primary_goal", patch.primaryGoal);
     if (patch.nextAction !== undefined) set("next_action", patch.nextAction);
+    const VALID_STATUSES = ['draft', 'in_progress', 'needs_information', 'awaiting_review', 'approved', 'published', 'completed'];
+    if (patch.status !== undefined && VALID_STATUSES.includes(patch.status)) set("status", patch.status);
     if (!fields.length) return this.getSession(orgId, id);
 
     fields.push("updated_at = CURRENT_TIMESTAMP");
     values.push(id, orgId);
     db.prepare(`UPDATE radar_sessions SET ${fields.join(", ")} WHERE id = ? AND organization_id = ?`).run(...values);
+
+    // Auto-send do relatório quando status transiciona para approved/published (best-effort)
+    if (patch.status === 'approved' || patch.status === 'published') {
+      try {
+        const orgSettings = db.prepare(
+          `SELECT radar_auto_send_enabled, radar_auto_send_channel FROM organization_settings WHERE organization_id = ?`
+        ).get(orgId) as any;
+        if (orgSettings?.radar_auto_send_enabled) {
+          const channel = orgSettings.radar_auto_send_channel || 'whatsapp';
+          // Fire-and-forget: auto-send should never block the status transition
+          this.sendReport(orgId, id, actorUserId, channel).catch(e => {
+            console.error('[Radar] Auto-send falhou (best-effort)', e?.message);
+          });
+        }
+      } catch (e) { /* noop — auto-send is opt-in, best-effort */ }
+    }
+
     return this.getSession(orgId, id);
   }
 

@@ -255,6 +255,10 @@ export const useStore = create<AppState>((set, get) => ({
         mods = s.enabled_modules;
       }
       set({ vertical: s?.vertical || null, enabledModules: mods });
+      const landing = s?.default_landing_view;
+      if (landing && !localStorage.getItem('zappflow_view')) {
+        set({ viewMode: landing as ViewMode });
+      }
     } catch (e) { /* mantém null = tudo liberado */ }
   },
   isModuleEnabled: (moduleKey) => {

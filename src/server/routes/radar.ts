@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
+import db from "../db.js";
 import { RadarService } from "../RadarService.js";
 import { ConversionVelocityService } from "../ConversionVelocityService.js";
 import { StorageService } from "../StorageService.js";
@@ -94,7 +95,7 @@ router.patch("/sessions/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores editam o diagnóstico." });
-  try { res.json(RadarService.updateSession(orgId, req.params.id, req.body || {})); }
+  try { res.json(RadarService.updateSession(orgId, req.params.id, req.body || {}, actorId(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
@@ -288,6 +289,36 @@ router.post("/sessions/:id/send", (req: AuthRequest, res): any => {
   RadarService.sendReport(orgId, req.params.id, actorId(req), channel)
     .then((result) => res.status(201).json(result))
     .catch((e: any) => res.status(400).json({ error: e.message }));
+});
+
+// GET /api/radar/settings — config de auto-envio do relatório Radar
+router.get("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const o = db.prepare(
+      `SELECT radar_auto_send_enabled, radar_auto_send_channel FROM organization_settings WHERE organization_id = ?`
+    ).get(orgId) as any;
+    res.json({
+      autoSendEnabled: !!(o && o.radar_auto_send_enabled),
+      autoSendChannel: o?.radar_auto_send_channel || "whatsapp",
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/radar/settings — liga/desliga auto-envio do relatório Radar
+router.put("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores alteram configurações do Radar." });
+  try {
+    const { autoSendEnabled, autoSendChannel } = req.body || {};
+    const channel = autoSendChannel === "email" ? "email" : "whatsapp";
+    db.prepare(
+      `UPDATE organization_settings SET radar_auto_send_enabled = ?, radar_auto_send_channel = ? WHERE organization_id = ?`
+    ).run(autoSendEnabled ? 1 : 0, channel, orgId);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

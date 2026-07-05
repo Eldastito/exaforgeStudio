@@ -234,6 +234,7 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
   type TryOnState = { jobId: string; status: string; url: string | null; error: string | null };
   const [tryon, setTryon] = useState<Record<string, TryOnState>>({});
   const [credits, setCredits] = useState<{ available: number; limit: number } | null>(null);
+  const [comparing, setComparing] = useState(false);
 
   async function pollJob(lookId: string, jobId: string) {
     for (let i = 0; i < 60; i++) {
@@ -302,6 +303,20 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
       return;
     }
     pollJob(lookId, r.data.jobId);
+  }
+
+  async function generateAllTryOns() {
+    const pending = looks.filter((l) => !tryon[l.id]?.url && !['QUEUED', 'PROCESSING'].includes(tryon[l.id]?.status || ''));
+    if (!pending.length) { setComparing(true); return; }
+    const { available } = credits || { available: 0 };
+    if (available < pending.length) {
+      setError(`Você precisa de ${pending.length} créditos, mas só tem ${available}. Prove um de cada vez ou volte amanhã.`);
+      return;
+    }
+    for (const look of pending) {
+      await generateTryOn(look.id);
+    }
+    setComparing(true);
   }
 
   async function submitAuth() {
@@ -678,6 +693,36 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
                       </div>
                     </div>
                   ))}
+                  {looks.length > 1 && (
+                    <button
+                      type="button"
+                      className={`${primaryBtn} flex items-center justify-center gap-2`}
+                      style={{ background: accent }}
+                      disabled={looks.every((l) => ['QUEUED', 'PROCESSING'].includes(tryon[l.id]?.status || ''))}
+                      onClick={generateAllTryOns}
+                    >
+                      {looks.some((l) => ['QUEUED', 'PROCESSING'].includes(tryon[l.id]?.status || ''))
+                        ? <><Loader2 className="h-4 w-4 animate-spin" /> Gerando prévias…</>
+                        : looks.every((l) => tryon[l.id]?.url) ? 'Comparar lado a lado' : 'Provar todos os looks'}
+                    </button>
+                  )}
+                  {comparing && looks.filter((l) => tryon[l.id]?.url).length > 1 && (
+                    <div className="rounded-2xl border p-3" style={{ borderColor: hexToRgba(accent, 0.3) }}>
+                      <p className="mb-2 text-xs font-semibold" style={{ color: accent }}>Comparação lado a lado</p>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {looks.filter((l) => tryon[l.id]?.url).map((look, i) => (
+                          <div key={look.id} className="text-center">
+                            <img src={tryon[look.id].url!} alt={`Look ${i + 1}`} className="w-full rounded-xl object-contain" />
+                            <p className="mt-1 text-[11px] font-medium" style={{ color: accent }}>Look {i + 1}</p>
+                            <p className="text-[10px] opacity-60">R$ {look.total.toFixed(2)}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <button type="button" className="mt-2 w-full text-center text-[11px] opacity-60 hover:opacity-100" onClick={() => setComparing(false)}>
+                        Fechar comparação
+                      </button>
+                    </div>
+                  )}
                   {credits && <p className="text-center text-[11px] opacity-50">{credits.available} de {credits.limit} prévias restantes hoje.</p>}
                   <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep(looks[0]?.source === 'customer_selected' ? 'builder' : 'quiz')}>
                     {looks[0]?.source === 'customer_selected' ? 'Escolher outras peças' : 'Ajustar respostas'}

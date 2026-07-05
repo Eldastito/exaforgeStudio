@@ -99,4 +99,41 @@ export class JobQueueService {
     if (status) return db.prepare(`SELECT * FROM background_jobs WHERE organization_id = ? AND status = ? ORDER BY created_at DESC`).all(orgId, status) as any[];
     return db.prepare(`SELECT * FROM background_jobs WHERE organization_id = ? ORDER BY created_at DESC`).all(orgId) as any[];
   }
+
+  static health(): { pending: number; processing: number; completed: number; failed: number; total: number; oldestPending: string | null } {
+    const counts = db.prepare(
+      `SELECT status, COUNT(*) as c FROM background_jobs GROUP BY status`
+    ).all() as any[];
+    const m: Record<string, number> = {};
+    let total = 0;
+    for (const r of counts) { m[r.status] = r.c; total += r.c; }
+    const oldest = db.prepare(
+      `SELECT created_at FROM background_jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1`
+    ).get() as any;
+    return { pending: m.pending || 0, processing: m.processing || 0, completed: m.completed || 0, failed: m.failed || 0, total, oldestPending: oldest?.created_at || null };
+  }
+
+  static cleanupCompleted(olderThanDays: number = 7): number {
+    const r = db.prepare(
+      `DELETE FROM background_jobs WHERE status = 'completed' AND completed_at < datetime('now', ?)`
+    ).run(`-${olderThanDays} days`);
+    return r.changes;
+  }
+
+  static retry(jobId: string): boolean {
+    const r = db.prepare(
+      `UPDATE background_jobs SET status = 'pending', last_error = NULL, completed_at = NULL, attempts = 0 WHERE id = ? AND status = 'failed'`
+    ).run(jobId);
+    if (r.changes > 0) {
+      setImmediate(() => { this.runJob(jobId).catch((e) => console.error("[JobQueue] retry runJob falhou", jobId, e)); });
+      return true;
+    }
+    return false;
+  }
+
+  static listRecent(limit: number = 50): any[] {
+    return db.prepare(
+      `SELECT id, organization_id, type, status, attempts, max_attempts, last_error, created_at, started_at, completed_at FROM background_jobs ORDER BY created_at DESC LIMIT ?`
+    ).all(limit) as any[];
+  }
 }

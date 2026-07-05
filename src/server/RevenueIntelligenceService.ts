@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "node:crypto";
+import { v4 as uuidv4 } from "uuid";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { CampaignService } from "./CampaignService.js";
 
@@ -645,6 +646,70 @@ export class RevenueIntelligenceService {
     db.prepare(`INSERT INTO ric_recovery_actions (id, organization_id, source_key, label, contacts_count, campaign_id, action_type, status, created_by) VALUES (?, ?, ?, ?, ?, ?, 'campaign', 'created', ?)`)
       .run(id, orgId, sourceKey, label, camp.total, camp.id, userId || null);
     return { id, campaignId: camp.id, contacts: camp.total, label };
+  }
+
+  /**
+   * Persiste o snapshot diário de hoje para uso em séries históricas (chamado
+   * pelo Scheduler). Idempotente: não sobrescreve se já existir.
+   */
+  static snapshotDaily(orgId: string): void {
+    const today = new Date().toISOString().slice(0, 10);
+    const existing = db.prepare(
+      `SELECT id FROM ric_daily_snapshots WHERE organization_id = ? AND snapshot_date = ?`
+    ).get(orgId, today);
+    if (existing) return; // already snapped today
+    const snap = this.getSnapshot(orgId, 'month');
+    if (!snap) return;
+    db.prepare(
+      `INSERT INTO ric_daily_snapshots (id, organization_id, snapshot_date, iqr_score, estimated_loss, recoverable, recovered, atendimento_score, comercial_score, operacional_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      uuidv4(), orgId, today,
+      snap.iqr?.score || 0,
+      snap.money?.estimatedLoss || 0,
+      snap.money?.recoverable || 0,
+      snap.money?.recovered || 0,
+      snap.drivers?.atendimento?.score || 0,
+      snap.drivers?.comercial?.score || 0,
+      snap.drivers?.operacional?.score || 0,
+    );
+  }
+
+  /**
+   * Retorna a série histórica de snapshots diários dos últimos N dias.
+   */
+  static getTrendSeries(orgId: string, days: number = 30): any[] {
+    return db.prepare(
+      `SELECT snapshot_date, iqr_score, estimated_loss, recoverable, recovered, atendimento_score, comercial_score, operacional_score FROM ric_daily_snapshots WHERE organization_id = ? AND snapshot_date >= date('now', ?) ORDER BY snapshot_date ASC`
+    ).all(orgId, `-${days} days`);
+  }
+
+  /**
+   * Top 5 ações prioritárias — derivadas server-side das fontes de perda,
+   * ordenadas por R$ em jogo. Responde "o que priorizar hoje?".
+   */
+  static getTopActions(orgId: string, period: string = 'month'): any[] {
+    const snap = this.getSnapshot(orgId, period as Period);
+    if (!snap) return [];
+    const sources = (snap.lossSources || [])
+      .filter((s: any) => s.amount > 0)
+      .sort((a: any, b: any) => b.amount - a.amount);
+    const verbs: Record<string, string> = {
+      slow_response: 'Acelerar resposta inicial',
+      stale_quotes: 'Retomar orçamentos pendentes',
+      abandoned: 'Recuperar conversas abandonadas',
+      inactive: 'Reativar clientes inativos',
+    };
+    return sources.slice(0, 5).map((s: any, i: number) => ({
+      rank: i + 1,
+      sourceKey: s.key,
+      action: verbs[s.key] || s.label,
+      label: s.label,
+      amount: s.amount,
+      contactsCount: s.count || 0,
+      impactPercent: snap.money?.estimatedLoss > 0
+        ? Math.round(s.amount / snap.money.estimatedLoss * 100)
+        : 0,
+    }));
   }
 
   /**

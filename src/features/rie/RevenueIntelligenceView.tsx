@@ -269,19 +269,7 @@ export function RevenueIntelligenceView() {
           <div ref={topActionsRef} className="lg:col-span-8">
             <Card>
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Top 5 ações prioritárias</p>
-              {loading || !snapshot ? (
-                <div className="mt-4 space-y-3">
-                  {[0, 1, 2, 3, 4].map(i => (
-                    <div key={i} className="flex items-center gap-3">
-                      <Skeleton className="h-7 w-7 rounded-full bg-slate-700/40" />
-                      <Skeleton className="h-4 flex-1 bg-slate-700/30" />
-                      <Skeleton className="h-4 w-20 bg-slate-700/30" />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <TopActionsList snapshot={snapshot} onAct={act} actingKey={actingKey} onDelegate={canDelegate ? delegate : undefined} />
-              )}
+              <TopActionsList period={period} onAct={act} actingKey={actingKey} onDelegate={canDelegate ? delegate : undefined} />
             </Card>
           </div>
 
@@ -335,7 +323,7 @@ export function RevenueIntelligenceView() {
         {/* ===== Tendência (8) | Simulador (4) — PR 4/5 ===== */}
         <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">
           <Card className="lg:col-span-8">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Em risco × recuperada · por janela</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Em risco × recuperada · serie diaria</p>
             <TrendChart />
           </Card>
 

@@ -6,6 +6,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { logAuthEvent } from "../auditLog.js";
+import { JobQueueService } from "../JobQueueService.js";
 
 const router = Router();
 
@@ -275,6 +276,35 @@ router.get("/security-check", async (req: AuthRequest, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// ---- Job Queue monitoring (ADR-029) ----
+
+router.get("/queue/health", (_req: AuthRequest, res) => {
+  try { res.json(JobQueueService.health()); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/queue/jobs", (req: AuthRequest, res) => {
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || 50), 10) || 50));
+  try { res.json(JobQueueService.listRecent(limit)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/queue/jobs/:id/retry", (req: AuthRequest, res): any => {
+  try {
+    const ok = JobQueueService.retry(req.params.id);
+    if (!ok) return res.status(404).json({ error: "Job not found or not in failed state." });
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/queue/cleanup", (req: AuthRequest, res) => {
+  const days = Math.max(1, parseInt(String(req.body?.olderThanDays || 7), 10) || 7);
+  try {
+    const deleted = JobQueueService.cleanupCompleted(days);
+    res.json({ deleted });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

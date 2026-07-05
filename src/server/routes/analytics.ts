@@ -104,6 +104,26 @@ router.post("/revenue-intelligence/config", (req, res) => {
   }
 });
 
+// Série histórica de snapshots diários do RIC (persistidos pelo Scheduler).
+// GET /api/analytics/revenue-intelligence/trend?days=30
+router.get("/revenue-intelligence/trend", (req, res) => {
+  const orgId = getOrgId(req);
+  const days = Math.min(365, Math.max(7, parseInt(String(req.query.days || 30), 10) || 30));
+  try {
+    res.json(RevenueIntelligenceService.getTrendSeries(orgId, days));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Top 5 ações prioritárias — derivadas server-side das fontes de perda.
+// GET /api/analytics/revenue-intelligence/top-actions?period=month
+router.get("/revenue-intelligence/top-actions", (req, res) => {
+  const orgId = getOrgId(req);
+  const period = String(req.query.period || 'month');
+  try {
+    res.json(RevenueIntelligenceService.getTopActions(orgId, period));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // Auditoria estruturada (10 seções) — fonte JSON do relatório.
 router.get("/revenue-intelligence/audit", (req, res) => {
   const orgId = getOrgId(req);
@@ -393,6 +413,18 @@ router.post("/settings", (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// PUT /api/analytics/settings/default-landing — tela padrão pós-login
+router.put("/settings/default-landing", (req, res) => {
+  const orgId = getOrgId(req);
+  const VALID_VIEWS = ['kanban', 'channels', 'dashboard', 'rie', 'radar', 'catalog', 'vendas', 'studio', 'diretor'];
+  const { view } = req.body || {};
+  if (!view || !VALID_VIEWS.includes(view)) return res.status(400).json({ error: "Vista inválida." });
+  try {
+    db.prepare(`UPDATE organization_settings SET default_landing_view = ? WHERE organization_id = ?`).run(view, orgId);
+    res.json({ success: true, view });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/analytics/ai-attendance-settings — comportamento da IA no atendimento

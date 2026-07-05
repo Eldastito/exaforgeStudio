@@ -11,6 +11,7 @@ type Product = {
   currency?: string; active?: number; stock_control_enabled?: number;
   quantity_available?: number; quantity_reserved?: number; sellable?: number | null;
   low_stock_threshold?: number; avg_cost?: number; suggested_price?: number | null;
+  fashion_wearable?: number | null; fashion_wearable_source?: string | null;
 };
 
 const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '' };
@@ -85,6 +86,7 @@ export function CatalogView() {
       price: String(p.price ?? 0), stock_control_enabled: !!p.stock_control_enabled,
       initial_stock: String(p.quantity_available ?? 0),
       min_price: (p as any).min_price != null ? String((p as any).min_price) : '',
+      fashion_wearable: p.fashion_wearable,
     });
     setShowModal(true);
   };
@@ -100,6 +102,7 @@ export function CatalogView() {
             type: form.type, stock_control_enabled: form.stock_control_enabled,
             quantity: form.stock_control_enabled ? parseInt(form.initial_stock || '0', 10) : undefined,
             min_price: form.min_price === '' ? null : parseFloat(form.min_price),
+            fashion_wearable: form.fashion_wearable,
           }),
         });
       } else {
@@ -379,7 +382,12 @@ export function CatalogView() {
           products.map(p => (
             <div key={p.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors group">
               <div className="flex justify-between items-start mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">{p.type}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">{p.type}</span>
+                  {p.type === 'product' && p.fashion_wearable === 1 && (
+                    <span className="text-[10px] text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/20" title="Aparece no provador virtual">provador</span>
+                  )}
+                </div>
                 <button onClick={() => setStockProduct(p)} className="text-zinc-400 hover:text-emerald-400" title="Estoque, variações e movimentações">
                   <Boxes className="w-4 h-4" />
                 </button>
@@ -460,6 +468,32 @@ export function CatalogView() {
                   onChange={(e) => setForm({...form, stock_control_enabled: e.target.checked})} />
                 <label htmlFor="stockctl" className="text-sm text-zinc-300">Controlar estoque</label>
               </div>
+              {editing && form.type === 'product' && (
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Provador virtual</label>
+                  <div className="flex gap-1.5">
+                    {([
+                      { value: null, label: 'Auto', desc: 'IA decide' },
+                      { value: 1, label: 'Sim', desc: 'aparece' },
+                      { value: 0, label: 'Não', desc: 'oculto' },
+                    ] as const).map(opt => (
+                      <button key={String(opt.value)} type="button"
+                        onClick={() => setForm({ ...form, fashion_wearable: opt.value })}
+                        className={`flex-1 px-2 py-1.5 rounded text-xs border transition-colors ${
+                          form.fashion_wearable === opt.value
+                            ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300'
+                            : 'border-zinc-700 bg-zinc-950 text-zinc-400 hover:border-zinc-600'
+                        }`}>
+                        {opt.label}
+                        <span className="block text-[10px] text-zinc-500">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {editing.fashion_wearable_source && (
+                    <p className="text-[10px] text-zinc-600 mt-1">Classificado por: {editing.fashion_wearable_source}</p>
+                  )}
+                </div>
+              )}
               {form.stock_control_enabled && (
                 <div>
                   <label className="text-sm text-zinc-400 mb-1 block">Quantidade em estoque</label>

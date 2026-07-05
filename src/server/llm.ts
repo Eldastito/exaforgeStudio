@@ -164,7 +164,13 @@ export async function editProductImageB64(base64: string, mimetype: string, styl
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
   const res = await getClient().images.edit({
     model, image: file,
-    prompt: `Foto de catálogo de e-commerce profissional: mantenha o produto exatamente como está na foto original (mesma embalagem, texto, formato, cores do próprio produto), mas substitua o fundo/cenário e a iluminação por um visual de vitrine profissional. ${stylePrompt}`,
+    prompt: `Transforme esta foto em uma imagem de produto com aparência profissional para e-commerce. ` +
+      `REGRAS OBRIGATÓRIAS: preserve o produto EXATAMENTE como está na foto original — mesma embalagem, rótulos, texto impresso, formato, cores, texturas e detalhes do próprio produto. ` +
+      `NÃO altere, melhore ou modifique o produto em si. ` +
+      `APENAS substitua o fundo, cenário e iluminação conforme o estilo solicitado abaixo. ` +
+      `Remova completamente qualquer elemento do cenário original (mãos, mesa, chão, outros objetos). ` +
+      `Resultado: imagem de alta resolução, cores fiéis, bordas nítidas, pronta para venda online. ` +
+      stylePrompt,
   });
   const b64 = (res as any).data?.[0]?.b64_json || "";
   recordUsage(model, "image", 0, 0, Number(process.env.OPENAI_IMAGE_COST_USD || 0.04));

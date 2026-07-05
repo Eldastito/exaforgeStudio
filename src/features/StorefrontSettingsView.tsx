@@ -19,6 +19,7 @@ type StorefrontSettings = {
   published: boolean;
   default_markup_percent?: number | null;
   ai_catalog_photos_enabled?: boolean;
+  catalog_photo_style?: string;
   auto_hide_out_of_stock?: boolean;
   fashion_studio_enabled?: boolean;
   fashion_daily_generation_limit?: number | null;
@@ -52,6 +53,7 @@ const emptySettings: StorefrontSettings = {
   whatsapp_number: '',
   published: false,
   ai_catalog_photos_enabled: false,
+  catalog_photo_style: 'marketplace',
   auto_hide_out_of_stock: false,
   fashion_studio_enabled: false,
   fashion_daily_generation_limit: 3,
@@ -364,6 +366,7 @@ export function StorefrontSettingsView() {
           published: settings.published,
           default_markup_percent: settings.default_markup_percent ?? null,
           ai_catalog_photos_enabled: settings.ai_catalog_photos_enabled,
+          catalog_photo_style: settings.catalog_photo_style,
           auto_hide_out_of_stock: settings.auto_hide_out_of_stock,
           fashion_studio_enabled: settings.fashion_studio_enabled,
           fashion_daily_generation_limit: settings.fashion_daily_generation_limit ?? null,
@@ -581,6 +584,32 @@ export function StorefrontSettingsView() {
                   />
                 </button>
               </div>
+
+              {settings.ai_catalog_photos_enabled && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+                  <p className="text-sm font-medium text-zinc-100 mb-1">Estilo das fotos de catálogo</p>
+                  <p className="text-xs text-zinc-500 mb-2.5">Define o cenário e iluminação que a IA aplica nas fotos dos produtos cadastrados via WhatsApp.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: 'marketplace', label: 'Marketplace', desc: 'Fundo branco, estúdio limpo' },
+                      { value: 'premium', label: 'Premium', desc: 'Mármore, iluminação editorial' },
+                      { value: 'lifestyle', label: 'Lifestyle', desc: 'Cenário de uso, luz natural' },
+                      { value: 'minimal', label: 'Minimal', desc: 'Degradê suave, estilo Apple' },
+                    ] as const).map(opt => (
+                      <button key={opt.value} type="button"
+                        onClick={() => setField('catalog_photo_style', opt.value)}
+                        className={`text-left px-3 py-2 rounded-lg border transition-colors ${
+                          (settings.catalog_photo_style || 'marketplace') === opt.value
+                            ? 'border-indigo-500 bg-indigo-600/15 text-indigo-300'
+                            : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-600'
+                        }`}>
+                        <span className="text-xs font-medium block">{opt.label}</span>
+                        <span className="text-[10px] text-zinc-500">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
                 <div>

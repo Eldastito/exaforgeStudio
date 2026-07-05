@@ -79,14 +79,14 @@ async function main() {
   }
 
   const ok1 = product(orgA, { name: "Vestido Elegível", price: 199.9 });
-  const noPrice = product(orgA, { name: "Sem Preço", price: null });
-  const hidden = product(orgA, { name: "Oculto", visible: 0 });
-  const inactive = product(orgA, { name: "Inativo", active: 0 });
-  const noImage = product(orgA, { name: "Sem Imagem", image: false });
-  const zeroStock = product(orgA, { name: "Sem Estoque", stockControl: 1, qty: 0 });
-  const withStock = product(orgA, { name: "Com Estoque", stockControl: 1, qty: 5 });
-  const onlyStudioImg = product(orgA, { name: "Só Foto de Estúdio", image: false, studioImage: true });
-  const orgBProduct = product(orgB, { name: "Produto da Outra Loja", price: 50 });
+  const noPrice = product(orgA, { name: "Blusa Sem Preço", price: null });
+  const hidden = product(orgA, { name: "Saia Oculta", visible: 0 });
+  const inactive = product(orgA, { name: "Camisa Inativa", active: 0 });
+  const noImage = product(orgA, { name: "Calça Sem Imagem", image: false });
+  const zeroStock = product(orgA, { name: "Vestido Sem Estoque", stockControl: 1, qty: 0 });
+  const withStock = product(orgA, { name: "Blazer Com Estoque", stockControl: 1, qty: 5 });
+  const onlyStudioImg = product(orgA, { name: "Jaqueta Só Foto de Estúdio", image: false, studioImage: true });
+  const orgBProduct = product(orgB, { name: "Vestido da Outra Loja", price: 50 });
 
   const eligible = FashionStudioService.eligibleItems(orgA);
   const ids = new Set(eligible.map((e) => e.id));

@@ -55,6 +55,7 @@
     "test:fashion-cart": "tsx scripts/test-fashion-cart.ts",
     "test:fashion-memory": "tsx scripts/test-fashion-memory.ts",
     "test:fashion-custom-look": "tsx scripts/test-fashion-custom-look.ts",
+    "test:fashion-wearable": "tsx scripts/test-fashion-wearable.ts",
     "test:jwt-secret-persist": "tsx scripts/test-jwt-secret-persist.ts"
   },
   "dependencies": {

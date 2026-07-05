@@ -284,6 +284,9 @@ export class FashionLookService {
     const occasion = String(answers.occasion || "").trim().slice(0, 80);
     if (!occasion) return { ok: false, error: "Conte para a consultora qual é a ocasião." };
 
+    // ADR-041: garante a classificação vestível ANTES do catálogo elegível —
+    // item que não é roupa/acessório nunca entra em look.
+    try { await FashionStudioService.ensureWearableClassified(orgId); } catch { /* best-effort */ }
     const eligible = FashionStudioService.eligibleItems(orgId) as EligibleItem[];
     if (!eligible.length) return { ok: false, error: "A loja ainda não tem peças disponíveis para montar looks." };
 

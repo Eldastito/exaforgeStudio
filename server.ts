@@ -1089,6 +1089,18 @@ async function startServer() {
   // janela de ~10s do Docker/Coolify) se isso passar de poucos segundos.
   const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Diagnóstico de sessão (Provador Virtual): confirma de ONDE vem o segredo
+    // de JWT e QUANTAS instâncias/bancos existem. Se aparecerem DUAS linhas
+    // [BOOT] com instanceId diferentes, há múltiplas réplicas com bancos SQLite
+    // separados — causa de "Sessão inválida" (login numa, /me na outra).
+    try {
+      const jwtSource = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16) ? "env" : "arquivo/efêmero";
+      const dbFile = path.join(process.env.DATA_DIR || process.cwd(), "zappflow.db");
+      let customers = -1;
+      try { customers = (db.prepare("SELECT COUNT(*) AS c FROM storefront_customers").get() as any)?.c ?? -1; } catch { /* tabela pode não existir */ }
+      const instanceId = Math.random().toString(36).slice(2, 8);
+      console.log(`[BOOT] instanceId=${instanceId} jwtSource=${jwtSource} db=${dbFile} storefront_customers=${customers}`);
+    } catch (e) { /* diagnóstico nunca quebra o boot */ }
   });
 
   // CORS travado para a origem do app (em prod). "*" só em dev.

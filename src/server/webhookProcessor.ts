@@ -558,6 +558,16 @@ export async function processIncomingMessage(
          } catch (e) { /* noop */ }
        }
 
+       // INTELIGÊNCIA COMERCIAL: a IA avalia cada interação e alimenta o CRM com
+       // sinais complementares ao lead_score comportamental (ADR-043). Best-effort.
+       if (aiResult.salesIntelligence) {
+         try {
+           const si = aiResult.salesIntelligence;
+           db.prepare(`UPDATE contacts SET ai_purchase_probability = ?, ai_objection_type = ?, ai_funnel_stage = ?, ai_primary_pain = ?, ai_next_step = ?, ai_sales_updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+             .run(si.purchaseProbability, si.objectionType || null, si.funnelStage || null, si.primaryPain || null, si.nextStep || null, contact.id);
+         } catch (e) { /* inteligência comercial nunca derruba o fluxo */ }
+       }
+
        if (aiResult.newOrder && Array.isArray(aiResult.newOrder.items) && aiResult.newOrder.items.length) {
          try {
            // Trava anti-duplicidade: evita reservar o mesmo pedido várias vezes

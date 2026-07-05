@@ -132,7 +132,8 @@ export class CustomerProfileService {
   static getProfile(orgId: string, contactId: string): any {
     return db.prepare(`
       SELECT id, name, identifier, lead_temperature, lead_score, purchase_count, total_spent, avg_ticket,
-             last_purchase_at, last_contact_at, tags, notes
+             last_purchase_at, last_contact_at, tags, notes,
+             ai_purchase_probability, ai_objection_type, ai_funnel_stage, ai_primary_pain, ai_next_step
       FROM contacts WHERE id = ? AND organization_id = ?
     `).get(contactId, orgId);
   }
@@ -155,6 +156,15 @@ export class CustomerProfileService {
       parts.push("ainda sem compras");
     }
     if (p.tags) parts.push(`tags: ${p.tags}`);
+    if (p.ai_purchase_probability != null) {
+      const si: string[] = [];
+      si.push(`prob. compra: ${p.ai_purchase_probability}%`);
+      if (p.ai_funnel_stage) si.push(`funil: ${p.ai_funnel_stage}`);
+      if (p.ai_objection_type) si.push(`objeção: ${p.ai_objection_type}`);
+      if (p.ai_primary_pain) si.push(`dor: ${p.ai_primary_pain}`);
+      if (p.ai_next_step) si.push(`próximo passo: ${p.ai_next_step}`);
+      parts.push(`IA comercial: ${si.join(', ')}`);
+    }
     return `PERFIL DO CLIENTE (${p.name || 'sem nome'}): ${parts.join(' · ')}.`;
   }
 }

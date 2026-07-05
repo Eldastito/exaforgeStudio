@@ -135,6 +135,114 @@ export class RadarService {
     return hints;
   }
 
+  /**
+   * Auto-fill: preenche respostas do Radar com dados MEDIDOS (não declarados),
+   * usando confidence_multiplier = 1.00 ("baseline medido" — ADR-009 §7.4).
+   * Só preenche perguntas sem resposta existente (nunca sobrescreve declaração
+   * do usuário). Retorna as perguntas preenchidas.
+   */
+  static autoFillFromMeasuredData(orgId: string, sessionId: string, actorUserId?: string): { filled: string[] } {
+    const session = db.prepare(`SELECT * FROM radar_sessions WHERE id = ? AND organization_id = ?`).get(sessionId, orgId) as any;
+    if (!session) throw new Error("Sessão não encontrada.");
+    if (!["draft", "in_progress", "needs_information"].includes(session.status)) {
+      throw new Error("Esta sessão não aceita preenchimento automático no status atual.");
+    }
+
+    const ivcSnap = db.prepare(
+      `SELECT * FROM radar_velocity_snapshots WHERE organization_id = ? ORDER BY created_at DESC LIMIT 1`
+    ).get(orgId) as any;
+
+    let rieSnapshot: any = null;
+    try {
+      rieSnapshot = db.prepare(
+        `SELECT * FROM ric_daily_snapshots WHERE organization_id = ? ORDER BY snapshot_date DESC LIMIT 1`
+      ).get(orgId) as any;
+    } catch {}
+
+    const channelCount = (() => {
+      try { return (db.prepare(`SELECT COUNT(*) as c FROM channels WHERE organization_id = ? AND status != 'disabled'`).get(orgId) as any)?.c || 0; } catch { return 0; }
+    })();
+
+    const dailySnapCount = (() => {
+      try { return (db.prepare(`SELECT COUNT(*) as c FROM ric_daily_snapshots WHERE organization_id = ?`).get(orgId) as any)?.c || 0; } catch { return 0; }
+    })();
+
+    const mappings: { code: string; score: number; comment: string }[] = [];
+
+    if (ivcSnap) {
+      if (ivcSnap.sla_compliance_rate != null) {
+        const rate = Number(ivcSnap.sla_compliance_rate);
+        const score = rate >= 0.9 ? 4 : rate >= 0.7 ? 3 : rate >= 0.5 ? 2 : rate >= 0.2 ? 1 : 0;
+        mappings.push({ code: "q_receita_tempo_resposta", score,
+          comment: `Preenchido automaticamente: SLA compliance ${Math.round(rate * 100)}%, P90 ${Math.round((ivcSnap.first_response_p90_seconds || 0) / 60)} min.` });
+      }
+      if (ivcSnap.followup_compliance_rate != null) {
+        const rate = Number(ivcSnap.followup_compliance_rate);
+        const score = rate >= 0.9 ? 4 : rate >= 0.7 ? 3 : rate >= 0.5 ? 2 : rate >= 0.2 ? 1 : 0;
+        mappings.push({ code: "q_receita_followup", score,
+          comment: `Preenchido automaticamente: ${Math.round(rate * 100)}% dos atendimentos em risco receberam follow-up.` });
+      }
+      if (ivcSnap.conversion_traceability_rate != null) {
+        const rate = Number(ivcSnap.conversion_traceability_rate);
+        const score = rate >= 0.9 ? 4 : rate >= 0.7 ? 3 : rate >= 0.5 ? 2 : rate >= 0.2 ? 1 : 0;
+        mappings.push({ code: "q_receita_conversao", score,
+          comment: `Preenchido automaticamente: ${Math.round(rate * 100)}% das vendas rastreáveis.` });
+      }
+    }
+
+    if (channelCount >= 1) {
+      const score = channelCount >= 3 ? 4 : channelCount >= 2 ? 3 : 2;
+      mappings.push({ code: "q_receita_conversas_centralizadas", score,
+        comment: `Preenchido automaticamente: ${channelCount} canal(is) conectado(s) ao ZappFlow.` });
+    }
+
+    if (ivcSnap || rieSnapshot) {
+      const score = dailySnapCount >= 7 ? 3 : 2;
+      mappings.push({ code: "q_metricas_baseline", score,
+        comment: `Preenchido automaticamente: baselines medidos pelo ZappFlow (IVC/RIE).` });
+    }
+
+    if (dailySnapCount >= 7) {
+      const score = dailySnapCount >= 30 ? 4 : 3;
+      mappings.push({ code: "q_metricas_acompanhamento", score,
+        comment: `Preenchido automaticamente: ${dailySnapCount} snapshots diários registrados.` });
+    }
+
+    if (mappings.length === 0) return { filled: [] };
+
+    const answered = new Set(
+      (db.prepare(`SELECT question_id FROM radar_answers WHERE session_id = ?`).all(sessionId) as any[])
+        .map(r => r.question_id)
+    );
+
+    const filled: string[] = [];
+    const upsert = db.prepare(
+      `INSERT INTO radar_answers (
+        id, session_id, organization_id, question_id, respondent_id, answer_json,
+        score_raw, score_normalized, confidence_multiplier, is_not_known, comment, source
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1.00, 0, ?, 'measured')
+      ON CONFLICT(session_id, question_id) WHERE respondent_id IS NULL DO UPDATE SET
+        answer_json = excluded.answer_json, score_raw = excluded.score_raw,
+        score_normalized = excluded.score_normalized, confidence_multiplier = excluded.confidence_multiplier,
+        is_not_known = excluded.is_not_known, comment = excluded.comment, source = excluded.source,
+        answered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`
+    );
+
+    for (const m of mappings) {
+      const q = db.prepare(`SELECT id FROM radar_questions WHERE template_id = ? AND code = ?`)
+        .get(session.template_id, m.code) as any;
+      if (!q) continue;
+      if (answered.has(q.id)) continue;
+      upsert.run(randomUUID(), sessionId, orgId, q.id, JSON.stringify(String(m.score)), m.score, (m.score / 4) * 100, m.comment);
+      filled.push(m.code);
+    }
+
+    if (filled.length > 0) {
+      logEvent(orgId, actorUserId, "radar_autofill_measured", sessionId, { filled, count: filled.length });
+    }
+    return { filled };
+  }
+
   static createSession(orgId: string, actorUserId: string | undefined, payload: any) {
     const template = db.prepare(
       `SELECT * FROM radar_templates WHERE id = ? AND (organization_id IS NULL OR organization_id = ?) AND is_active = 1`

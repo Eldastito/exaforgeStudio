@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { VERTICALS, OPTIONAL_MODULES, getVertical } from "./verticals.js";
+import { PlanService } from "./PlanService.js";
 
 // Gating de MÓDULOS por organização. Define quais módulos opcionais cada org
 // enxerga/usa, a partir da vertical escolhida (com override manual depois).
@@ -48,12 +49,11 @@ export class ModuleService {
   static isEnabled(orgId: string, moduleKey: string): boolean {
     if (this.CORE.includes(moduleKey)) return true;
     const em = this.enabledModules(orgId);
-    // Sem configuração explícita ⇒ só o NÚCLEO (módulos opcionais ficam ocultos
-    // até a org escolher a vertical no onboarding / Quick-Start). O backfill
-    // (backfillNullModules) torna explícito o que as orgs existentes já tinham,
-    // então esse caso só ocorre na janela curta antes do onboarding.
     if (em == null) return false;
-    return em.includes(moduleKey);
+    if (!em.includes(moduleKey)) return false;
+    const planModules = PlanService.modulesForPlan(orgId);
+    if (planModules != null && !planModules.includes(moduleKey)) return false;
+    return true;
   }
 
   /**

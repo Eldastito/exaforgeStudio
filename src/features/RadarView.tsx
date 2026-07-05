@@ -487,6 +487,26 @@ function QuestionsView({
     }
   }
 
+  const [fillingAuto, setFillingAuto] = useState(false);
+  const hasAutoFilled = (session.answers || []).some((a: any) => a.source === 'measured');
+
+  async function autoFill() {
+    setFillingAuto(true);
+    try {
+      const res = await api(`/sessions/${session.id}/autofill`, { method: 'POST' });
+      if (res.filled?.length > 0) {
+        toast.success(`${res.filled.length} pergunta(s) preenchida(s) com dados medidos.`);
+        await refreshSession();
+      } else {
+        toast.success('Nenhum dado medido disponível para esta sessão.');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Não foi possível preencher automaticamente.');
+    } finally {
+      setFillingAuto(false);
+    }
+  }
+
   const progress = Math.round((qIndex / questions.length) * 100);
 
   return (
@@ -494,6 +514,16 @@ function QuestionsView({
       <button onClick={onBack} className="text-sm text-white/50 hover:text-white/80 inline-flex items-center gap-1 mb-5">
         <ArrowLeft size={14} /> Voltar para a lista
       </button>
+
+      {!hasAutoFilled && qIndex === 0 && (
+        <button
+          onClick={autoFill} disabled={fillingAuto}
+          className="w-full mb-4 rounded-lg border border-teal-500/30 bg-teal-500/[0.06] px-4 py-3 text-sm text-teal-300 hover:bg-teal-500/10 transition flex items-center gap-2 justify-center disabled:opacity-50"
+        >
+          <Gauge size={15} />
+          {fillingAuto ? 'Preenchendo...' : 'Preencher com dados medidos da sua operação'}
+        </button>
+      )}
 
       <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
         <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: teal }} />

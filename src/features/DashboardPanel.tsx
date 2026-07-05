@@ -13,7 +13,7 @@ import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
-import { CheckCircle2, Circle, ArrowRight, Rocket, X, PartyPopper } from 'lucide-react';
+import { CheckCircle2, Circle, ArrowRight, Rocket, X, PartyPopper, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 
 const C = {
@@ -263,6 +263,11 @@ export function DashboardPanel() {
   // sessão pontuada ({score:null}) simplesmente não mostram o card; o painel
   // nunca quebra por causa do Radar.
   const [radarScore, setRadarScore] = useState<{ score: number; status: string; completedAt?: string } | null>(null);
+  const [planAlerts, setPlanAlerts] = useState<{ key: string; label: string; pct: number; level: string }[]>([]);
+
+  useEffect(() => {
+    apiFetch('/api/plans/alerts').then(r => r.json()).then(d => { if (Array.isArray(d?.alerts)) setPlanAlerts(d.alerts); }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,6 +378,17 @@ export function DashboardPanel() {
         </motion.div>
 
         <SetupChecklist />
+
+        {planAlerts.length > 0 && (
+          <div className="space-y-2">
+            {planAlerts.map(a => (
+              <div key={a.key} className={`flex items-center gap-3 rounded-xl border p-3 text-sm ${a.level === 'exceeded' ? 'bg-red-500/10 border-red-500/30 text-red-300' : a.level === 'critical' ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'}`}>
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span><strong>{a.label}:</strong> {a.level === 'exceeded' ? `Limite do plano atingido (${a.pct}%).` : `${a.pct}% do limite usado.`}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {loading && !m ? (
           <div className="space-y-6">

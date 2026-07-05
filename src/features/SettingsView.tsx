@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -241,14 +241,17 @@ function BillingPanel() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [selecting, setSelecting] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<{ key: string; label: string; used: number; limit: number; pct: number; level: string }[]>([]);
 
   const load = () => {
     Promise.all([
       fetch('/api/plans').then(r => r.json()).catch(() => []),
       fetch('/api/plans/current').then(r => r.json()).catch(() => null),
-    ]).then(([ps, sn]) => {
+      fetch('/api/plans/alerts').then(r => r.json()).catch(() => ({ alerts: [] })),
+    ]).then(([ps, sn, al]) => {
       setPlans(Array.isArray(ps) ? ps : []);
       setSnap(sn && !sn.error ? sn : null);
+      setAlerts(Array.isArray(al?.alerts) ? al.alerts : []);
     });
   };
   useEffect(() => { load(); }, []);
@@ -301,6 +304,23 @@ function BillingPanel() {
           <p className="mt-4 text-sm text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
             Você ainda não escolheu um plano. Escolha abaixo para iniciar seu período de teste.
           </p>
+        )}
+
+        {/* Alertas de uso */}
+        {alerts.length > 0 && (
+          <div className="mt-5 space-y-2">
+            {alerts.map(a => (
+              <div key={a.key} className={`flex items-center gap-3 rounded-lg border p-3 text-sm ${a.level === 'exceeded' ? 'bg-red-500/10 border-red-500/30 text-red-300' : a.level === 'critical' ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'}`}>
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>
+                  <strong>{a.label}:</strong>{' '}
+                  {a.level === 'exceeded'
+                    ? `Limite atingido (${a.used.toLocaleString('pt-BR')} / ${a.limit.toLocaleString('pt-BR')}). Considere fazer upgrade do plano.`
+                    : `${a.pct}% do limite usado (${a.used.toLocaleString('pt-BR')} / ${a.limit.toLocaleString('pt-BR')}).`}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Uso vs Limites */}

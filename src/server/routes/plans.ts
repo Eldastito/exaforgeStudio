@@ -20,6 +20,15 @@ router.get("/current", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/plans/alerts — alertas de uso (80/90/100% dos limites do plano).
+router.get("/alerts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json({ alerts: PlanService.getUsageAlerts(orgId) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/plans/select — escolhe/troca o plano da org. Inicia trial na primeira escolha.
 router.post("/select", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

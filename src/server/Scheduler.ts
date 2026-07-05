@@ -81,6 +81,7 @@ export class Scheduler {
     await this.memoryPass().catch(e => console.error('[Scheduler] memória do cliente falhou', e));
     await ProspectDiscoveryService.runDue().catch(e => console.error('[Scheduler] descoberta de prospecção falhou', e));
     try { RadarService.reassessmentReminderPass(); } catch (e) { console.error('[Scheduler] lembrete de reavaliação do Radar falhou', e); }
+    await this.repurchaseReminderPass().catch(e => console.error('[Scheduler] lembrete de recompra falhou', e));
     this.trialPass();
   }
 
@@ -625,6 +626,90 @@ export class Scheduler {
         }
       } catch (e) {
         console.error('[Scheduler] Falha no carrinho abandonado da org', org.organization_id, e);
+      }
+    }
+  }
+
+  /**
+   * Lembrete de recompra via WhatsApp (opt-in por organização). Identifica
+   * clientes que compraram há mais de N dias e ainda não receberam lembrete
+   * desde a última compra. Personaliza a mensagem com os produtos comprados.
+   * Trava semanal por org para não rodar a cada tick.
+   */
+  static async repurchaseReminderPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id, COALESCE(repurchase_reminder_days,30) AS days,
+               repurchase_reminder_message, repurchase_reminder_last_run
+        FROM organization_settings
+        WHERE COALESCE(repurchase_reminder_enabled,0) = 1
+      `).all() as any[];
+    } catch (e) { return; }
+
+    for (const org of orgs) {
+      try {
+        const orgId = org.organization_id;
+        const days = Math.max(7, parseInt(String(org.days || 30), 10) || 30);
+
+        const last = org.repurchase_reminder_last_run ? new Date(org.repurchase_reminder_last_run).getTime() : 0;
+        if (Date.now() - last < 7 * 24 * 60 * 60 * 1000) continue;
+
+        const contacts = db.prepare(`
+          SELECT c.id, c.name, c.identifier, c.channel_id, c.last_purchase_at
+          FROM contacts c
+          WHERE c.organization_id = ?
+            AND c.purchase_count > 0
+            AND c.last_purchase_at IS NOT NULL
+            AND c.last_purchase_at <= datetime('now', ?)
+            AND (c.repurchase_reminded_at IS NULL OR c.repurchase_reminded_at < c.last_purchase_at)
+            AND COALESCE(c.marketing_opt_out, 0) = 0
+            AND c.identifier IS NOT NULL AND c.identifier != ''
+          LIMIT 100
+        `).all(orgId, `-${days} days`) as any[];
+
+        db.prepare(`UPDATE organization_settings SET repurchase_reminder_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(orgId);
+        if (!contacts.length) continue;
+
+        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+
+        const tpl = org.repurchase_reminder_message
+          || "Oi {nome}! Já faz um tempo desde sua última compra ({produtos}). Temos novidades que combinam com você! Posso te mostrar? 😊";
+
+        for (const c of contacts) {
+          try {
+            const channelId = c.channel_id || fallbackChannel?.id;
+            if (!channelId) { db.prepare(`UPDATE contacts SET repurchase_reminded_at = CURRENT_TIMESTAMP WHERE id = ?`).run(c.id); continue; }
+
+            const items = db.prepare(`
+              SELECT DISTINCT oi.name_snapshot
+              FROM order_items oi
+              JOIN orders o ON o.id = oi.order_id
+              WHERE o.organization_id = ? AND o.contact_id = ?
+                AND o.status IN ('pago','em_preparo','entregue','concluido')
+              ORDER BY o.created_at DESC
+              LIMIT 3
+            `).all(orgId, c.id) as any[];
+
+            const produtos = items.length > 0
+              ? items.map(i => i.name_snapshot).join(', ')
+              : 'seus favoritos';
+
+            const first = (c.name || '').trim().split(/\s+/)[0] || '';
+            const message = tpl
+              .replace(/\{nome\}/gi, first)
+              .replace(/\{produtos\}/gi, produtos);
+
+            await MessageProviderService.sendMessage(channelId, c.identifier, message);
+            db.prepare(`UPDATE contacts SET repurchase_reminded_at = CURRENT_TIMESTAMP WHERE id = ?`).run(c.id);
+            console.log(`[Scheduler] Lembrete de recompra enviado para ${c.identifier} (contato ${c.id}).`);
+          } catch (e) {
+            console.error('[Scheduler] Falha no lembrete de recompra', c.id, e);
+          }
+        }
+        console.log(`[Scheduler] Lembretes de recompra disparados para org ${orgId}: ${contacts.length} contato(s).`);
+      } catch (e) {
+        console.error('[Scheduler] Falha no lembrete de recompra da org', org.organization_id, e);
       }
     }
   }

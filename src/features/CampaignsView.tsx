@@ -43,6 +43,7 @@ export function CampaignsView() {
     abandonedCart: { enabled: boolean; hours: number; message: string };
     nps: { enabled: boolean; delayHours: number; message: string };
     referral: { enabled: boolean; rewardPercent: number; welcomePercent: number };
+    repurchaseReminder: { enabled: boolean; days: number; message: string };
   };
   const [recovery, setRecovery] = useState<Recovery | null>(null);
 
@@ -255,6 +256,26 @@ export function CampaignsView() {
             </p>
             <Toggle on={recovery.referral.enabled} onClick={() => saveRecovery({ ...recovery, referral: { ...recovery.referral, enabled: !recovery.referral.enabled } })} />
           </div>
+
+          {/* Lembrete de recompra */}
+          <div className="flex items-center justify-between py-2 border-t border-zinc-800/70">
+            <p className="text-xs text-zinc-400 pr-3">
+              🔄 Recompra — lembra o cliente após{' '}
+              <input type="number" min="7" max="365" value={recovery.repurchaseReminder.days}
+                onChange={e => setRecovery({ ...recovery, repurchaseReminder: { ...recovery.repurchaseReminder, days: parseInt(e.target.value, 10) || 30 } })}
+                onBlur={e => saveRecovery({ ...recovery, repurchaseReminder: { ...recovery.repurchaseReminder, days: parseInt(e.target.value, 10) || 30 } })}
+                className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" /> dias sem comprar, com os produtos que ele já levou.
+            </p>
+            <Toggle on={recovery.repurchaseReminder.enabled} onClick={() => saveRecovery({ ...recovery, repurchaseReminder: { ...recovery.repurchaseReminder, enabled: !recovery.repurchaseReminder.enabled } })} />
+          </div>
+          {recovery.repurchaseReminder.enabled && (
+            <textarea rows={2} className="w-full text-xs bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-300"
+              placeholder="Oi {nome}! Já faz um tempo desde sua última compra ({produtos}). Temos novidades que combinam com você! Posso te mostrar?"
+              value={recovery.repurchaseReminder.message}
+              onChange={e => setRecovery({ ...recovery, repurchaseReminder: { ...recovery.repurchaseReminder, message: e.target.value } })}
+              onBlur={e => saveRecovery(recovery)}
+            />
+          )}
         </div>
       )}
 

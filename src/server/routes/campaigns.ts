@@ -52,7 +52,8 @@ router.get("/recovery", (req: AuthRequest, res): any => {
              pix_reminder_enabled, pix_reminder_minutes, pix_reminder_max,
              abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message,
              nps_enabled, nps_delay_hours, nps_message,
-             referral_enabled, referral_reward_percent, referral_welcome_percent
+             referral_enabled, referral_reward_percent, referral_welcome_percent,
+             repurchase_reminder_enabled, repurchase_reminder_days, repurchase_reminder_message
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any || {};
     res.json({
@@ -61,6 +62,7 @@ router.get("/recovery", (req: AuthRequest, res): any => {
       abandonedCart: { enabled: !!o.abandoned_cart_enabled, hours: o.abandoned_cart_hours || 4, message: o.abandoned_cart_message || "" },
       nps: { enabled: !!o.nps_enabled, delayHours: o.nps_delay_hours || 24, message: o.nps_message || "" },
       referral: { enabled: !!o.referral_enabled, rewardPercent: o.referral_reward_percent || 10, welcomePercent: o.referral_welcome_percent || 10 },
+      repurchaseReminder: { enabled: !!o.repurchase_reminder_enabled, days: o.repurchase_reminder_days || 30, message: o.repurchase_reminder_message || "" },
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -71,7 +73,7 @@ router.put("/recovery", (req: AuthRequest, res): any => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { orderExpiry, pixReminder, abandonedCart, nps, referral } = req.body || {};
+    const { orderExpiry, pixReminder, abandonedCart, nps, referral, repurchaseReminder } = req.body || {};
     const clampInt = (v: any, def: number, min: number, max: number) => Math.min(max, Math.max(min, parseInt(String(v), 10) || def));
     db.prepare(`
       UPDATE organization_settings SET
@@ -79,7 +81,8 @@ router.put("/recovery", (req: AuthRequest, res): any => {
         pix_reminder_enabled = ?, pix_reminder_minutes = ?, pix_reminder_max = ?,
         abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?,
         nps_enabled = ?, nps_delay_hours = ?, nps_message = ?,
-        referral_enabled = ?, referral_reward_percent = ?, referral_welcome_percent = ?
+        referral_enabled = ?, referral_reward_percent = ?, referral_welcome_percent = ?,
+        repurchase_reminder_enabled = ?, repurchase_reminder_days = ?, repurchase_reminder_message = ?
       WHERE organization_id = ?
     `).run(
       orderExpiry?.enabled ? 1 : 0, clampInt(orderExpiry?.hours, 48, 1, 720),
@@ -87,9 +90,10 @@ router.put("/recovery", (req: AuthRequest, res): any => {
       abandonedCart?.enabled ? 1 : 0, clampInt(abandonedCart?.hours, 4, 1, 168), abandonedCart?.message || null,
       nps?.enabled ? 1 : 0, clampInt(nps?.delayHours, 24, 0, 720), nps?.message || null,
       referral?.enabled ? 1 : 0, clampInt(referral?.rewardPercent, 10, 1, 90), clampInt(referral?.welcomePercent, 10, 1, 90),
+      repurchaseReminder?.enabled ? 1 : 0, clampInt(repurchaseReminder?.days, 30, 7, 365), repurchaseReminder?.message || null,
       orgId,
     );
-    logEvent(orgId, userId, undefined, 'RECOVERY_AUTOMATIONS_CHANGED', { orderExpiry: !!orderExpiry?.enabled, pixReminder: !!pixReminder?.enabled, abandonedCart: !!abandonedCart?.enabled, nps: !!nps?.enabled, referral: !!referral?.enabled });
+    logEvent(orgId, userId, undefined, 'RECOVERY_AUTOMATIONS_CHANGED', { orderExpiry: !!orderExpiry?.enabled, pixReminder: !!pixReminder?.enabled, abandonedCart: !!abandonedCart?.enabled, nps: !!nps?.enabled, referral: !!referral?.enabled, repurchaseReminder: !!repurchaseReminder?.enabled });
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

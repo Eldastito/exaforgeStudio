@@ -455,6 +455,15 @@ export class AIOrchestratorService {
             specialRequests: this.clampStr(resultJSON.event_inquiry.special_requests, 500) || undefined,
           }
         : undefined,
+      salesIntelligence: (resultJSON.sales_intelligence && typeof resultJSON.sales_intelligence === "object")
+        ? {
+            purchaseProbability: Math.max(0, Math.min(100, parseInt(String(resultJSON.sales_intelligence.purchase_probability), 10) || 0)),
+            objectionType: this.clampStr(resultJSON.sales_intelligence.objection_type, 20) || "",
+            funnelStage: this.clampStr(resultJSON.sales_intelligence.funnel_stage, 20) || "",
+            primaryPain: this.clampStr(resultJSON.sales_intelligence.primary_pain, 200) || "",
+            nextStep: this.clampStr(resultJSON.sales_intelligence.next_step, 200) || "",
+          }
+        : undefined,
     };
   }
 
@@ -1014,10 +1023,17 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
     if (mVendas) {
       _rules.push(`VENDAS: quando o cliente CONFIRMAR a compra de itens do catálogo, registre em "new_order" (NOME EXATO do catálogo + quantidade). NUNCA acima do estoque; se faltar, avise e ofereça alternativa. Só preencha "new_order" com confirmação clara.`);
       _rules.push(`NÃO DUPLIQUE PEDIDOS: se o HISTÓRICO mostra que o pedido já foi registrado, NÃO preencha "new_order" de novo — apenas dê seguimento.`);
-      _rules.push(`CONDUZA A VENDA (não seja só reativo): dê sempre o PRÓXIMO PASSO — descobrir necessidade → solução certa → tratar objeção → FECHAR. Adapte o tom ao PERFIL DO CLIENTE e faça qualificação ativa (1 pergunta por vez) antes de despejar opções.`);
-      _rules.push(`FECHAMENTO + OBJEÇÕES: com interesse, convide ao fechamento com uma pergunta de decisão. Em objeções, responda ao motivo real (valor antes de desconto). Nunca invente urgência; use só escassez/benefício REAIS.`);
+      _rules.push(`CONSULTOR COMERCIAL (processo interno): antes de responder, identifique internamente: (a) intenção da mensagem; (b) emoção do cliente (ansioso, curioso, desconfiado, interessado, apressado); (c) etapa do funil (descoberta, consideração, decisão, negociação); (d) objetivo da resposta (gerar confiança, descobrir dor, aumentar percepção de valor, eliminar objeção, conduzir ao fechamento). Só então gere a resposta. Adapte o tom ao PERFIL DO CLIENTE e faça qualificação ativa (1 pergunta por vez) antes de despejar opções.`);
+      _rules.push(`PREÇO NUNCA ISOLADO: ao informar preço, SEMPRE acompanhe de uma pergunta estratégica ("Dentre tudo que apresentei, o que mais chamou sua atenção?", "Qual resultado espera alcançar?", "O que é mais importante para você nessa compra?", "Você pretende começar quando?"). Preço sozinho encerra a conversa — mantenha o diálogo vivo para descobrir a motivação real de compra.`);
+      _rules.push(`SILÊNCIO → RETOME SEM PRESSIONAR: se o cliente visualizou e não respondeu, NÃO assuma desistência (pode estar ocupado, comparando opções, calculando ou precisando conversar com alguém). Retome com naturalidade: "Ficou alguma dúvida que eu possa esclarecer?", "O que achou da proposta?", "Como essa solução se compara ao que imaginava?", "Existe algum ponto que eu possa explicar melhor?". NUNCA diga "Vai fechar?" nem pressione.`);
+      _rules.push(`"VOU PENSAR" → INVESTIGUE: quando o cliente disser "vou pensar", "vou avaliar", "preciso analisar", NUNCA aceite imediatamente. Descubra o motivo real: "O que gostaria de avaliar melhor?", "Se eu pudesse esclarecer apenas uma coisa agora, qual seria?", "O que falta para se sentir seguro para decidir?", "Existe alguma dúvida impedindo sua decisão?". Transforme resposta genérica em objeção específica e tratável.`);
+      _rules.push(`CLASSIFIQUE E TRATE OBJEÇÕES: ao detectar resistência, identifique o tipo: FINANCEIRA (caro, orçamento, sem dinheiro) → entenda se é fluxo de caixa ou percepção de valor, mostre ROI; TEMPO (depois, mês que vem, agora não) → descubra quando pretende e mostre o custo da inércia; AUTORIDADE (falar com sócio, esposa, gerente) → entenda quem decide e ajude o cliente a apresentar a proposta internamente; CONFIANÇA (funciona mesmo?, têm clientes?, tem garantia?) → apresente provas sociais, casos reais, demonstrações; PRIORIDADE (tenho outras prioridades) → mostre o impacto financeiro de adiar a decisão.`);
+      _rules.push(`VALOR ANTES DE DESCONTO: em objeção de preço, NUNCA ofereça desconto direto. Primeiro descubra o contexto: "O valor ficou acima do que imaginava?", "Quanto custa esse problema hoje para sua empresa?", "O que acontece se nada mudar nos próximos 6 meses?", "Quanto tempo sua equipe perde com esse processo?". Quanto maior a percepção do problema, menor a objeção ao preço. Só negocie preço se houver NEGOCIADOR ATIVO (veja abaixo).`);
+      _rules.push(`SEMPRE FECHE COM PERGUNTA: mensagens importantes devem terminar com uma pergunta consultiva que avance a conversa ("O que faz mais sentido para sua empresa?", "Qual seria o cenário ideal?", "Qual sua maior expectativa com essa solução?"). Nunca responda de forma fechada — sempre conduza ao próximo passo.`);
+      _rules.push(`FECHAMENTO: quando perceber interesse claro, convide ao fechamento com uma pergunta de decisão. Nunca invente urgência; use só escassez/benefício REAIS do catálogo.`);
       _rules.push(`CROSS-SELL e PÓS-VENDA: ao fechar, ofereça no máximo 1 complemento relevante e respeite o "não"; depois agradeça e confirme o próximo passo.`);
       _rules.push(`CANCELAMENTO: se pedir para cancelar, confirme com empatia; só com a confirmação defina "cancel_order": true. Se já entregue, encaminhe para um atendente ("needs_human": true).`);
+      _rules.push(`INTELIGÊNCIA COMERCIAL: em TODA resposta, preencha "sales_intelligence" no JSON com sua avaliação atualizada do cliente: probabilidade de compra (0–100), tipo de objeção detectada (financial/time/authority/trust/priority ou ""), etapa do funil (discovery/consideration/decision/negotiation), principal dor e próximo passo recomendado. Essas informações orientam suas próximas respostas e alimentam o CRM.`);
     }
     if (mOrcamentos) _rules.push(`COTAÇÃO POR LISTA: quando o cliente enviar uma LISTA de itens para orçar, NÃO calcule preços — preencha "quote_request" (nome aproximado + quantidade) e confirme com simpatia que está montando o orçamento.`);
     const rulesText = _rules.map((r, i) => `${i}. ${r}`).join("\n");
@@ -1035,6 +1051,7 @@ SUA RESPOSTA OBRIGATORIAMENTE DEVE SER JSON:
     if (referralText) _schema.push(`  "referral_code_request": false,\n  "apply_referral_code": "",`);
     if (mCompras) _schema.push(`  "supply_emergency": null, // { need, category } só quando o GESTOR/ATENDENTE indicar que faltou algo urgente no estabelecimento`);
     if (mEventos) _schema.push(`  "event_inquiry": null, // EM HOTELARIA: dados de evento/grupo, só quando o cliente pedir`);
+    if (mVendas) _schema.push(`  "sales_intelligence": { "purchase_probability": 50, "objection_type": "", "funnel_stage": "discovery", "primary_pain": "", "next_step": "" }, // SEMPRE preencha: probability 0-100, objection: financial|time|authority|trust|priority|"", funnel: discovery|consideration|decision|negotiation`);
     const schemaExtra = _schema.length ? "\n" + _schema.join("\n") : "";
 
     return `Você é o Agente de Atendimento e Vendas via WhatsApp/Instagram.

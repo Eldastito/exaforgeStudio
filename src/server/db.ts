@@ -2441,6 +2441,15 @@ const initDb = () => {
   // FAS-4 (ADR-038): atribuição comercial pedido<->look (RF-027) — permite
   // medir look->pedido/ticket sem tabela de junção; NULL para pedidos comuns.
   try { db.exec(`ALTER TABLE orders ADD COLUMN fashion_look_id TEXT`); } catch(e){}
+  // Inteligência comercial da IA (ADR-043): a IA de atendimento avalia cada
+  // interação e alimenta o CRM com sinais complementares ao lead_score
+  // comportamental (CustomerProfileService). Colunas aditivas, seguras.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_purchase_probability INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_objection_type TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_funnel_stage TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_primary_pain TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_next_step TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN ai_sales_updated_at DATETIME`); } catch(e){}
 };
 
 initDb();

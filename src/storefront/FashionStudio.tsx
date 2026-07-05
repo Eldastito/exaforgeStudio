@@ -241,17 +241,22 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
       ? JSON.stringify({ name: form.name, email: form.email, phone: form.phone, password: form.password, birthDate: form.birthDate })
       : JSON.stringify({ email: form.email, password: form.password });
     const r = await api(path, { method: 'POST', body });
-    setBusy(false);
-    if (!r.ok) { setError(r.data?.error || 'Não foi possível continuar.'); return; }
+    if (!r.ok) { setBusy(false); setError(r.data?.error || 'Não foi possível continuar.'); return; }
     setToken(r.data.token);
     const m = await loadMe(r.data.token);
-    setStep(m && m.consents.avatar_processing ? (m.avatars.length ? 'status' : 'guide') : 'consent');
+    setBusy(false);
+    // Se o token recém-emitido já não carrega a conta, NÃO avança para o
+    // consentimento com uma sessão morta (era o que travava a tela): mantém no
+    // login com um aviso claro em vez de deixar o usuário preso.
+    if (!m) { setError('Não foi possível iniciar sua sessão. Tente novamente em instantes.'); return; }
+    setStep(m.consents.avatar_processing ? (m.avatars.length ? 'status' : 'guide') : 'consent');
   }
 
   async function grantConsent() {
     setBusy(true); setError('');
     const r = await api('/consents', { method: 'POST', body: JSON.stringify({ type: 'avatar_processing', policyVersion: POLICY_VERSION }) }, token);
     setBusy(false);
+    if (r.status === 401) { setToken(null); setMe(null); setStep('auth'); setError('Sua sessão expirou. Entre novamente para continuar.'); return; }
     if (!r.ok) { setError(r.data?.error || 'Não foi possível registrar o aceite.'); return; }
     await loadMe();
     setStep('guide');

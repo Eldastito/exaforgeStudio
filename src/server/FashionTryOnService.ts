@@ -45,14 +45,20 @@ export interface TryOnProvider {
 }
 
 // Prompt de segurança FIXO (19.2) — nunca composto com texto do catálogo/cliente.
+// A ênfase em "a MESMA pessoa da primeira foto" reforça o input_fidelity="high"
+// (ADR-040): o texto pede identidade, o parâmetro garante a preservação técnica.
 const SAFETY_PROMPT =
-  "Vista a pessoa da primeira imagem com as peças de roupa mostradas nas demais imagens, como uma prévia realista de provador virtual. " +
-  "Regras invioláveis: preserve exatamente o rosto, a identidade, o tom de pele, o cabelo e a idade aparente da pessoa; " +
+  "A primeira imagem é a foto real de uma pessoa. Gere uma prévia de provador virtual mostrando ESSA MESMA PESSOA — o mesmíssimo rosto, feições, expressão, tom de pele, cabelo, barba, formato do corpo e idade aparente da foto original — vestindo as peças de roupa mostradas nas demais imagens. " +
+  "Regras invioláveis: é PROIBIDO trocar a pessoa, gerar um rosto diferente, embelezar, afinar, emagrecer, rejuvenescer ou alterar a aparência dela — mantenha-a idêntica à primeira foto; " +
   "não adicione outras pessoas; nenhuma nudez, roupa íntima exposta ou sexualização; " +
-  "mantenha as peças fiéis às fotos originais (cor, estampa, modelagem); fundo neutro de estúdio.";
+  "mantenha as peças fiéis às fotos originais (cor, estampa, modelagem); enquadramento de corpo inteiro, fundo neutro de estúdio.";
 
 class OpenAIEditTryOnProvider implements TryOnProvider {
-  key = "openai_edit";
+  // Chave versionada (ADR-040): entra no input_hash de idempotência. Ao mudar de
+  // "openai_edit" (fidelidade padrão, rosto trocado) para esta, as prévias
+  // ANTIGAS ruins deixam de ser reaproveitadas — o próximo "Ver em mim" gera de
+  // novo já com input_fidelity="high".
+  key = "openai_edit_hifi_v1";
   available(): boolean { return isAIConfigured(); }
   async generate(input: { avatar: Buffer; garments: { name: string; buffer: Buffer; mime: string }[]; notes: string }) {
     try {
@@ -60,7 +66,9 @@ class OpenAIEditTryOnProvider implements TryOnProvider {
         { buffer: input.avatar, name: "pessoa.jpg", mime: "image/jpeg" },
         ...input.garments.map((g, i) => ({ buffer: g.buffer, name: `peca-${i + 1}${path.extname(g.name) || ".jpg"}`, mime: g.mime })),
       ];
-      const b64 = await editImagesB64(images, SAFETY_PROMPT);
+      // input_fidelity="high": preserva o rosto/identidade da foto (o ponto do
+      // provador). quality="high" + retrato 1024x1536: corpo inteiro nítido.
+      const b64 = await editImagesB64(images, SAFETY_PROMPT, { inputFidelity: "high", quality: "high", size: "1024x1536" });
       if (!b64) return { ok: false as const, error: "Provedor não retornou imagem.", retryable: true };
       return { ok: true as const, b64 };
     } catch (e: any) {

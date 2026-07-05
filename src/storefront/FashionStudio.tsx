@@ -13,12 +13,13 @@ import { hexToRgba, lsGet, lsSet } from './utils';
 // validação -> status. As próximas fases (looks/geração) plugam aqui.
 // ============================================================================
 
-type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks' | 'shared' | 'prefs';
+type Step = 'intro' | 'auth' | 'consent' | 'guide' | 'status' | 'quiz' | 'looks' | 'builder' | 'shared' | 'prefs';
 type Preference = { id: string; type: string; value: any };
 type Avatar = { id: string; status: string; url: string | null; expiresAt: string | null };
 type Me = { name: string; email: string; consents: { avatar_processing: boolean }; avatars: Avatar[]; retentionDays: number };
 type LookItem = { productId: string; name: string; price: number; image: string | null; role: string };
-type Look = { id: string; explanation: string; total: number; items: LookItem[]; saved?: boolean };
+type Look = { id: string; explanation: string; total: number; items: LookItem[]; saved?: boolean; source?: string };
+type CatalogItem = { id: string; name: string; category: string | null; price: number; image: string | null };
 
 const STYLES = ['discreto', 'clássico', 'elegante', 'moderno', 'romântico', 'casual', 'marcante'];
 
@@ -89,6 +90,43 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
   // ---- consultora por ocasião (FAS-2) ----
   const [quiz, setQuiz] = useState({ occasion: '', dayNight: '', style: '', colorsAvoid: '', piecesAvoid: '', budgetMax: '' });
   const [looks, setLooks] = useState<Look[]>([]);
+
+  // ---- Look Builder manual: escolher peças e ver em mim (ADR-040) ----
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  // Abre o modo de escolha manual: carrega o catálogo elegível da loja (mesma
+  // lista que alimenta a consultora) e deixa a cliente marcar várias peças.
+  async function openBuilder() {
+    setError('');
+    setSelected([]);
+    setStep('builder');
+    if (!catalog.length) {
+      setBusy(true);
+      try {
+        const r = await fetch(`/api/public/store/${encodeURIComponent(slug)}/fashion/eligible`);
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) setCatalog((data.items || []).map((i: any) => ({ id: i.id, name: i.name, category: i.category ?? null, price: i.price, image: i.image ?? null })));
+      } catch { /* noop */ }
+      setBusy(false);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : s.length >= 5 ? s : [...s, id]);
+  }
+
+  // "Ver as peças selecionadas em mim": compõe um look customer_selected com as
+  // peças marcadas e cai na MESMA tela de looks (com try-on/comprar/salvar).
+  async function composeSelected() {
+    if (!selected.length) { setError('Selecione ao menos uma peça.'); return; }
+    setBusy(true); setError('');
+    const r = await api('/looks/custom', { method: 'POST', body: JSON.stringify({ productIds: selected }) }, token);
+    setBusy(false);
+    if (!r.ok) { setError(r.data?.error || 'Não foi possível montar o look agora.'); return; }
+    setLooks([r.data.look]);
+    setStep('looks');
+  }
 
   // ---- memória de estilo (FAS-5) ----
   const [prefs, setPrefs] = useState<Preference[]>([]);
@@ -470,6 +508,9 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                       <button type="button" className={primaryBtn} style={{ background: accent }} onClick={openQuiz}>
                         Montar meu look por ocasião
                       </button>
+                      <button type="button" className="w-full rounded-xl border px-4 py-2.5 text-sm font-semibold" style={{ borderColor: accent, color: accent }} onClick={openBuilder}>
+                        Escolher peças e ver em mim
+                      </button>
                       <button type="button" className="w-full text-center text-xs opacity-60 underline-offset-2 hover:underline" onClick={async () => { await loadProfile(); setStep('prefs'); }}>
                         Minhas preferências e personalização
                       </button>
@@ -533,7 +574,9 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
 
               {step === 'looks' && (
                 <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
-                  <h3 className="text-sm font-semibold">Seus looks para {quiz.occasion || 'a ocasião'}</h3>
+                  <h3 className="text-sm font-semibold">
+                    {looks[0]?.source === 'customer_selected' ? 'Suas peças selecionadas' : `Seus looks para ${quiz.occasion || 'a ocasião'}`}
+                  </h3>
                   {looks.map((look, i) => (
                     <div key={look.id} className="rounded-2xl border p-3" style={{ borderColor: hexToRgba(accent, 0.3) }}>
                       <p className="mb-2 text-xs font-semibold" style={{ color: accent }}>Look {i + 1} — R$ {look.total.toFixed(2)}</p>
@@ -561,7 +604,8 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                         >
                           {tryon[look.id] && !['SUCCEEDED', 'FAILED_FINAL', 'EXPIRED', 'DELETED'].includes(tryon[look.id].status)
                             ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando…</>
-                            : tryon[look.id]?.status === 'SUCCEEDED' ? 'Gerar de novo' : 'Ver em mim'}
+                            : tryon[look.id]?.status === 'SUCCEEDED' ? 'Gerar de novo'
+                            : look.source === 'customer_selected' ? 'Ver as peças selecionadas em mim' : 'Ver em mim'}
                         </button>
                         <button type="button" disabled={!!look.saved} className="flex-1 rounded-xl border px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
                           style={{ borderColor: hexToRgba(accent, 0.4), color: accent }} onClick={() => saveLook(look.id)}>
@@ -598,7 +642,48 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
                     </div>
                   ))}
                   {credits && <p className="text-center text-[11px] opacity-50">{credits.available} de {credits.limit} prévias restantes hoje.</p>}
-                  <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('quiz')}>Ajustar respostas</button>
+                  <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep(looks[0]?.source === 'customer_selected' ? 'builder' : 'quiz')}>
+                    {looks[0]?.source === 'customer_selected' ? 'Escolher outras peças' : 'Ajustar respostas'}
+                  </button>
+                </div>
+              )}
+
+              {step === 'builder' && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold">Escolha as peças (até 5)</h3>
+                  <p className="text-xs opacity-60">Marque as peças que você quer ver vestidas em você. A IA compõe um look só com o que você selecionar.</p>
+                  {busy && !catalog.length ? (
+                    <p className="py-8 text-center text-sm opacity-60"><Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" /> Carregando as peças…</p>
+                  ) : catalog.length === 0 ? (
+                    <p className="py-8 text-center text-sm opacity-60">Nenhuma peça disponível para o provador nesta loja no momento.</p>
+                  ) : (
+                    <div className="grid max-h-[52vh] grid-cols-2 gap-2 overflow-y-auto pr-1">
+                      {catalog.map((it) => {
+                        const on = selected.includes(it.id);
+                        return (
+                          <button
+                            key={it.id} type="button" onClick={() => toggleSelected(it.id)}
+                            className="relative overflow-hidden rounded-2xl border p-2 text-left transition"
+                            style={{ borderColor: on ? accent : hexToRgba(accent, 0.2), background: on ? hexToRgba(accent, 0.1) : 'transparent' }}
+                          >
+                            {on && <span className="absolute right-2 top-2 z-10 rounded-full p-0.5 text-white" style={{ background: accent }}><CheckCircle2 className="h-4 w-4" /></span>}
+                            {it.image
+                              ? <img src={it.image} alt="" className="mb-1.5 h-28 w-full rounded-xl object-cover" />
+                              : <div className="mb-1.5 grid h-28 w-full place-items-center rounded-xl bg-black/5"><Shirt className="h-6 w-6 opacity-40" /></div>}
+                            <p className="line-clamp-2 text-xs font-medium">{it.name}</p>
+                            <p className="text-[11px] opacity-70">R$ {it.price.toFixed(2)}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <button
+                    type="button" className={`${primaryBtn} flex items-center justify-center gap-2`} style={{ background: accent }}
+                    disabled={busy || selected.length === 0} onClick={composeSelected}
+                  >
+                    {busy && catalog.length ? <Loader2 className="h-4 w-4 animate-spin" /> : `Ver as peças selecionadas em mim${selected.length ? ` (${selected.length})` : ''}`}
+                  </button>
+                  <button type="button" className="w-full text-center text-xs opacity-60 hover:opacity-100" onClick={() => setStep('status')}>Voltar</button>
                 </div>
               )}
 

@@ -366,6 +366,61 @@ export class FashionLookService {
     return { ok: true, requestId, looks: enriched };
   }
 
+  /**
+   * Look Builder MANUAL (ADR-040): a cliente escolhe as peças na vitrine e
+   * pede "ver as peças selecionadas em mim". Aqui montamos um look a partir
+   * dos IDs escolhidos — com a MESMA rede de segurança da recomendação por IA:
+   * só IDs do catálogo ELEGÍVEL (FAS-0) entram, o resto é descartado; sem
+   * duplicata; no máximo MAX_ITEMS_PER_LOOK peças. O look nasce com origem
+   * customer_selected e segue exatamente o mesmo pipeline do try-on/carrinho/
+   * compartilhamento (nada downstream muda).
+   */
+  static createCustomLook(orgId: string, customerId: string, productIds: string[]):
+    { ok: true; requestId: string; look: { id: string; explanation: string; total: number; source: string; items: { productId: string; name: string; price: number; image: string | null; role: string }[] } }
+    | { ok: false; error: string } {
+    const eligible = FashionStudioService.eligibleItems(orgId) as EligibleItem[];
+    const byId = new Map(eligible.map((e) => [e.id, e]));
+
+    const seen = new Set<string>();
+    const items: { productId: string; role: string }[] = [];
+    for (const raw of Array.isArray(productIds) ? productIds : []) {
+      const id = String(raw || "");
+      if (!byId.has(id) || seen.has(id)) continue;               // fora do elegível ou repetido: descartado
+      seen.add(id);
+      items.push({ productId: id, role: items.length === 0 ? "main" : "bottom" });
+      if (items.length >= MAX_ITEMS_PER_LOOK) break;
+    }
+    if (!items.length) return { ok: false, error: "Selecione ao menos uma peça disponível para ver em você." };
+
+    const occasion = "Seleção manual";
+    const requestId = uuidv4();
+    db.prepare(
+      `INSERT INTO fashion_look_requests (id, organization_id, customer_id, occasion, answers_json, generation_window, status)
+       VALUES (?, ?, ?, ?, ?, date('now'), 'completed')`
+    ).run(requestId, orgId, customerId, occasion, JSON.stringify({ occasion, source: "customer_selected", productIds: items.map((i) => i.productId) }));
+
+    const explanation = items.length > 1
+      ? "As peças que você escolheu, combinadas em um look para experimentar em você."
+      : "A peça que você escolheu para experimentar em você.";
+    const lookId = uuidv4();
+    db.prepare(`INSERT INTO fashion_looks (id, organization_id, request_id, explanation, source, status) VALUES (?, ?, ?, ?, 'customer_selected', 'candidate')`)
+      .run(lookId, orgId, requestId, explanation);
+    const insItem = db.prepare(`INSERT INTO fashion_look_items (id, organization_id, look_id, product_service_id, role, quantity, price_snapshot) VALUES (?, ?, ?, ?, ?, 1, ?)`);
+    const enrichedItems: any[] = [];
+    for (const it of items) {
+      const item = byId.get(it.productId)!;
+      insItem.run(uuidv4(), orgId, lookId, it.productId, it.role, item.price);
+      enrichedItems.push({ productId: it.productId, name: item.name, price: item.price, image: item.image, role: it.role });
+    }
+    FashionStudioService.recordEvent(orgId, "FashionLookRequested", { occasion, source: "customer_selected", itemCount: items.length }, customerId, requestId);
+    FashionStudioService.recordEvent(orgId, "FashionLookRecommended", { lookCount: 1, source: "customer_selected" }, customerId, requestId);
+
+    return {
+      ok: true, requestId,
+      look: { id: lookId, explanation, source: "customer_selected", total: Math.round(this.lookTotal(items, byId) * 100) / 100, items: enrichedItems },
+    };
+  }
+
   /** Salvar look sem carrinho (RF-018). Só a dona do request. */
   static saveLook(orgId: string, customerId: string, lookId: string): boolean {
     const look = db.prepare(

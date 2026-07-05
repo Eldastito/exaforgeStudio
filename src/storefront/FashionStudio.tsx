@@ -262,10 +262,40 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems }: {
     setStep('guide');
   }
 
+  // Reduz a foto no NAVEGADOR antes de enviar: fotos de celular passam de 1 MB
+  // e o proxy (nginx, limite padrão ~1 MB) devolve 413 antes de chegar ao
+  // backend. Reamostrar para no máx. 1600px de lado + JPEG mantém qualidade de
+  // sobra (o servidor já reprocessa para 1600px) e derruba o tamanho bem
+  // abaixo do limite. HEIC/formatos que o browser não decodifica caem no
+  // arquivo original — o backend recusa com mensagem clara nesse caso.
+  async function downscaleImage(file: File, maxDim = 1600, quality = 0.85): Promise<Blob> {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+      const w = Math.round(bitmap.width * scale);
+      const h = Math.round(bitmap.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+      // Se por acaso ainda ficar grande (raro), tenta uma qualidade menor.
+      if (blob && blob.size > 3_500_000) {
+        const smaller = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.7));
+        return smaller || blob;
+      }
+      return blob || file;
+    } catch {
+      return file; // browser não decodificou (ex.: HEIC): envia o original
+    }
+  }
+
   async function uploadPhoto(file: File) {
     setBusy(true); setError(''); setReasons([]);
+    const blob = await downscaleImage(file);
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', blob, 'avatar.jpg');
     const r = await api('/avatars', { method: 'POST', body: fd }, token);
     setBusy(false);
     if (!r.ok) { setError(r.data?.error || 'Falha no envio da foto.'); return; }

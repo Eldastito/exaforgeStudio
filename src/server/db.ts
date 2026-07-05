@@ -2234,6 +2234,7 @@ const initDb = () => {
   // Opt-in por loja (decisão do produto: custa uma chamada de IA extra por
   // produto novo, nem toda loja vai querer o custo/estilo por padrão).
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN ai_catalog_photos_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN catalog_photo_style TEXT DEFAULT 'marketplace'`); } catch(e){}
   // Rate-limit do aviso proativo de produtos sem preço/margem (só quando o
   // gestor já está conversando — nunca dispara mensagem nova só para isso).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pending_pricing_nudge_at DATETIME`); } catch(e){}

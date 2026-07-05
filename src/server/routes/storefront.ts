@@ -49,8 +49,11 @@ router.put("/settings", (req: AuthRequest, res): any => {
   const b = req.body || {};
   const fields: Record<string, any> = {};
   const boolKeys = new Set(["published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled"]);
-  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled"]) {
+  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled", "catalog_photo_style"]) {
     if (b[k] !== undefined) fields[k] = boolKeys.has(k) ? (b[k] ? 1 : 0) : b[k];
+  }
+  if (fields.catalog_photo_style && !["marketplace", "premium", "lifestyle", "minimal"].includes(fields.catalog_photo_style)) {
+    return res.status(400).json({ error: "Estilo de foto inválido." });
   }
   // Limite diário de gerações do provador virtual (FAS-0, RF-031): 1–20;
   // vazio/null volta ao padrão (3). Fora da faixa é rejeitado, não gravado torto.

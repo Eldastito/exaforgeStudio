@@ -32,19 +32,45 @@ export class StudioCatalogPhotoService {
     return row?.studio_image_url || null;
   }
 
-  /** Identidade visual da loja: paleta/tom (Estúdio de Criação, se já configurado) + cor de destaque/logo da vitrine. */
+  static getPhotoStyle(orgId: string): string {
+    const row = db.prepare(`SELECT catalog_photo_style FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
+    return row?.catalog_photo_style || "marketplace";
+  }
+
   private static stylePromptFor(orgId: string): string {
     const brand = db.prepare(`SELECT palette, tone, style FROM brand_profiles WHERE organization_id = ?`).get(orgId) as any;
-    const storefront = db.prepare(`SELECT accent_color, logo_url FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
-    const parts: string[] = [];
+    const storefront = db.prepare(`SELECT accent_color, logo_url, catalog_photo_style FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
+    const style = storefront?.catalog_photo_style || "marketplace";
+
+    const styleDirectives: Record<string, string> = {
+      marketplace:
+        "Fundo branco puro (#FFFFFF), iluminação de estúdio brilhante e uniforme, sem sombras pesadas. " +
+        "O produto deve estar centralizado, com bordas limpas e nítidas, pronto para marketplace (Mercado Livre, Shopee, Amazon). " +
+        "Alta resolução, cores fiéis ao original, sem reflexos nem elementos decorativos.",
+      premium:
+        "Superfície elegante de mármore ou madeira escura, iluminação suave e natural com direção lateral. " +
+        "Sombras sutis e reflexo leve no piso, profundidade de campo com fundo levemente desfocado. " +
+        "Estilo editorial de revista de moda, foco nos detalhes de textura e material do produto. Alta resolução.",
+      lifestyle:
+        "Cenário de estilo de vida aspiracional e aconchegante: mesa de madeira clara, plantas, tecidos naturais ou café ao fundo. " +
+        "Iluminação natural quente (golden hour), composição descontraída mas equilibrada. " +
+        "O produto é o protagonista mas o cenário conta uma história de uso. Paleta de tons neutros e quentes.",
+      minimal:
+        "Fundo degradê suave de cinza claro para branco, iluminação difusa sem sombras duras. " +
+        "Composição minimalista e contemporânea, muito espaço negativo ao redor do produto. " +
+        "Linhas limpas, sem distrações, estilo Apple/Muji. Cores neutras, destaque apenas no produto.",
+    };
+
+    const parts: string[] = [styleDirectives[style] || styleDirectives.marketplace];
+
     if (brand?.style) parts.push(`Estilo da marca: ${brand.style}.`);
     if (brand?.tone) parts.push(`Tom visual: ${brand.tone}.`);
     try {
       const palette = brand?.palette ? JSON.parse(brand.palette) : null;
       if (Array.isArray(palette) && palette.length) parts.push(`Paleta de cores da marca: ${palette.join(", ")}.`);
     } catch { /* noop */ }
-    if (!parts.length && storefront?.accent_color) parts.push(`Use a cor ${storefront.accent_color} como destaque sutil no fundo/composição.`);
-    if (!parts.length) parts.push("Fundo neutro claro, iluminação de estúdio, estilo clean de e-commerce.");
+    if (storefront?.accent_color) parts.push(`Cor de destaque da marca: ${storefront.accent_color}.`);
+
     return parts.join(" ");
   }
 

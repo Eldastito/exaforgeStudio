@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
 import { classifyInventoryPhoto, extractProductFromImage, extractInvoiceItems, parseInventoryReply } from "./llm.js";
 import { findBestProductMatch } from "./productMatcher.js";
+import { sanitizeGtin } from "./eanUtil.js";
 import { suggestSalePrice } from "./pricing.js";
 import { orgMarkup } from "./routes/products.js";
 import { InventoryIntakeService } from "./InventoryIntakeService.js";
@@ -130,15 +131,21 @@ export class WhatsAppInventoryIntake {
       brand: parsed.brand ? String(parsed.brand).trim().slice(0, 80) : null,
       category: parsed.category ? String(parsed.category).trim().slice(0, 80) : null,
       weightLabel: parsed.weightLabel ? String(parsed.weightLabel).trim().slice(0, 40) : null,
+      // Código de barras só é aceito se fechar o dígito verificador (descarta
+      // leitura chutada pela IA de visão) — ver eanUtil.ts.
+      ean: sanitizeGtin(parsed.ean),
       description: String(parsed.description || "").trim().slice(0, 500),
     };
 
     // Reconhece o catálogo ANTES de perguntar preço: mesmo produto já
     // cadastrado (limiar 0.75, igual à reposição automática do Fluxo 2 — sem
     // humano conferindo aqui) vira reposição, reaproveitando o preço/margem
-    // já praticados em vez de perguntar tudo de novo (ADR-032).
-    const catalog = db.prepare(`SELECT id, name, price, margin_percent FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1`).all(orgId) as any[];
-    const match = findBestProductMatch(extracted.name, catalog, 0.75);
+    // já praticados em vez de perguntar tudo de novo (ADR-032). O EAN, quando
+    // lido e válido, é um match EXATO e mais confiável que a similaridade de
+    // nome — tem prioridade sobre o fuzzy match.
+    const catalog = db.prepare(`SELECT id, name, price, margin_percent, ean FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1`).all(orgId) as any[];
+    const eanMatch = extracted.ean ? catalog.find((c) => c.ean && String(c.ean) === extracted.ean) : null;
+    const match = eanMatch ? { id: eanMatch.id, name: eanMatch.name } : findBestProductMatch(extracted.name, catalog, 0.75);
     const matchedRow = match ? catalog.find((c) => c.id === match.id) : null;
 
     if (match && matchedRow) {
@@ -201,7 +208,7 @@ export class WhatsAppInventoryIntake {
       const imageUrl = await this.catalogImageUrl(orgId, payload, payload.imageUrl);
       InventoryIntakeService.commitProductWithoutPrice(orgId, {
         name: payload.extracted.name, category: payload.extracted.category, description: payload.extracted.description,
-        quantity, imageUrl,
+        ean: payload.extracted.ean || null, quantity, imageUrl,
       });
       return `Tudo bem, sem problema! Guardei *${payload.extracted.name}* no estoque (${quantity} un.), mas SEM publicar na vitrine — sem o preço de venda, nenhum cliente consegue comprar esse item. Quando quiser informar o preço, é só me chamar de novo. 👍`;
     }
@@ -222,7 +229,7 @@ export class WhatsAppInventoryIntake {
     const marginPercent = payload.collected.costPrice != null && payload.collected.marginPercent != null ? payload.collected.marginPercent : null;
     const productId = InventoryIntakeService.commitProductFromScan(orgId, {
       name: payload.extracted.name, category: payload.extracted.category, description: payload.extracted.description,
-      salePrice: after.salePrice!, marginPercent, quantity: payload.collected.quantity, imageUrl,
+      ean: payload.extracted.ean || null, salePrice: after.salePrice!, marginPercent, quantity: payload.collected.quantity, imageUrl,
     });
     InventoryIntakeService.recordPriceHistory(orgId, {
       productId, productName: payload.extracted.name, category: payload.extracted.category,

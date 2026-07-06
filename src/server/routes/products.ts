@@ -13,6 +13,7 @@ import { parseNFeXml } from "../nfeParser.js";
 import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
 import { uniqueProductSlug } from "../productSlug.js";
+import { sanitizeGtin } from "../eanUtil.js";
 import { verifyNFeSignature } from "../nfeSignature.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 
@@ -149,6 +150,10 @@ router.post("/smart-scan", (req: AuthRequest, res): any => {
         brand: parsed.brand ? String(parsed.brand).trim().slice(0, 80) : null,
         category: parsed.category ? String(parsed.category).trim().slice(0, 80) : null,
         weightLabel: parsed.weightLabel ? String(parsed.weightLabel).trim().slice(0, 40) : null,
+        // Só aceitamos o código de barras lido pela IA se ele passar no dígito
+        // verificador (sanitizeGtin) — um EAN "quase certo" chutado pelo modelo
+        // é descartado para null (ADR: EAN errado é pior que EAN ausente).
+        ean: sanitizeGtin(parsed.ean),
         description: String(parsed.description || "").trim().slice(0, 500),
       };
 
@@ -180,16 +185,23 @@ router.post("/smart-scan/:draftId/confirm", (req: AuthRequest, res): any => {
   if (!draft) return res.status(404).json({ error: "Rascunho não encontrado." });
   if (draft.status !== "pending") return res.status(400).json({ error: "Este rascunho já foi confirmado ou descartado." });
 
-  const { name, category, description, price, stock_control_enabled, initial_stock } = req.body || {};
+  const { name, category, description, price, stock_control_enabled, initial_stock, ean } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: "Informe o nome do produto." });
   if (!(Number(price) > 0)) return res.status(400).json({ error: "Informe o preço de venda antes de publicar." });
 
   try {
+    // EAN: usa o que o humano confirmou (se veio no corpo) ou, na ausência, o
+    // código de barras que a IA leu da foto E que passou no dígito verificador
+    // no momento do scan (já persistido em extracted.ean do rascunho).
+    let draftEan: string | null = null;
+    try { draftEan = JSON.parse(draft.raw_extraction_json || "{}")?.extracted?.ean || null; } catch { /* noop */ }
+    const finalEan = ean !== undefined ? sanitizeGtin(ean) : sanitizeGtin(draftEan);
+
     const id = uuidv4();
     db.prepare(
-      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug)
-       VALUES (?, ?, 'product', ?, ?, ?, ?, ?, ?)`
-    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, String(name)));
+      `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug, ean)
+       VALUES (?, ?, 'product', ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, orgId, String(name).trim(), description || "", Number(price), stock_control_enabled ? 1 : 0, category ? String(category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, String(name)), finalEan);
 
     if (stock_control_enabled) {
       db.prepare(

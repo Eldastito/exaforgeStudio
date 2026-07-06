@@ -41,7 +41,21 @@ router.post("/google/automations", (req: AuthRequest, res): any => {
   if (req.body?.logOrders !== undefined) GoogleAutomationService.setLogOrders(req.organizationId, !!req.body.logOrders);
   if (req.body?.emailAppointments !== undefined) GoogleAutomationService.setEmailAppointments(req.organizationId, !!req.body.emailAppointments);
   if (req.body?.emailOrders !== undefined) GoogleAutomationService.setEmailOrders(req.organizationId, !!req.body.emailOrders);
+  if (req.body?.liveSync !== undefined) GoogleAutomationService.setLiveSync(req.organizationId, !!req.body.liveSync);
   res.json({ success: true, ...GoogleAutomationService.getSettings(req.organizationId) });
+});
+
+// POST /google/sheets/sync-now — força uma sincronização imediata do painel
+// vivo (também roda sozinho de hora em hora pelo Scheduler quando ligado).
+router.post("/google/sheets/sync-now", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!GoogleOAuthService.getConnection(orgId)) return res.status(400).json({ error: "Conecte a conta Google primeiro." });
+  GoogleAutomationService.setLiveSync(orgId, true);
+  const r = await GoogleAutomationService.syncLiveSheet(orgId);
+  if (!r.ok) return res.status(400).json({ error: r.reason === "desligado" ? "Sincronização desligada." : (r.reason || "Falha ao sincronizar.") });
+  const sheetUrl = r.sheetId ? `https://docs.google.com/spreadsheets/d/${r.sheetId}` : null;
+  res.json({ success: true, sheetUrl, counts: r.counts });
 });
 
 // POST desconectar

@@ -253,6 +253,8 @@ function ListView({
         )}
       </Card>
 
+      <ConsultationRequests isManager={isManager} />
+
       <h2 className="text-sm font-semibold text-white/50 uppercase tracking-wide mb-3">Diagnósticos</h2>
       {loading ? (
         <div className="text-sm text-white/40">Carregando...</div>
@@ -286,6 +288,85 @@ function ListView({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Solicitações de consultoria vindas do diagnóstico público (Radar Fase 2).
+// Só a organização de destino do funil (RADAR_LEADS_ORGANIZATION_ID) recebe
+// linhas aqui — para as demais o endpoint devolve [] e o bloco não aparece.
+type ConsultationRequest = {
+  id: string; contact_name: string; contact_email: string | null; contact_phone: string | null;
+  message: string | null; overall_score: number | null; maturity_level: string | null;
+  status: string; created_at: string;
+};
+const CONSULT_STATUS: Record<string, { label: string; cls: string }> = {
+  pending: { label: 'Pendente', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  contacted: { label: 'Contatado', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  closed: { label: 'Encerrado', cls: 'text-white/50 bg-white/5 border-white/15' },
+};
+
+function ConsultationRequests({ isManager }: { isManager: boolean }) {
+  const [items, setItems] = useState<ConsultationRequest[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const load = useCallback(async () => {
+    try { const r = await api('/consultation-requests'); setItems(Array.isArray(r) ? r : []); }
+    catch { setItems([]); }
+    finally { setLoaded(true); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const setStatus = async (id: string, status: string) => {
+    try {
+      await api(`/consultation-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, status } : it)));
+    } catch { /* silencioso — recarrega abaixo se preciso */ }
+  };
+
+  if (!loaded || items.length === 0) return null;
+  const pendingCount = items.filter((it) => it.status === 'pending').length;
+
+  return (
+    <div className="mb-6">
+      <h2 className="text-sm font-semibold text-white/50 uppercase tracking-wide mb-3">
+        Solicitações de consultoria{pendingCount > 0 ? ` · ${pendingCount} pendente(s)` : ''}
+      </h2>
+      <div className="space-y-2">
+        {items.map((it) => {
+          const st = CONSULT_STATUS[it.status] || CONSULT_STATUS.pending;
+          return (
+            <Card key={it.id} className="!p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-sm">{it.contact_name}</div>
+                  <div className="text-xs text-white/50 mt-0.5">
+                    {[it.contact_email, it.contact_phone].filter(Boolean).join(' · ') || 'sem contato'}
+                  </div>
+                  <div className="text-xs text-white/40 mt-1">
+                    Maturidade {it.maturity_level || '—'}{it.overall_score != null ? ` · score ${Math.round(it.overall_score)}/100` : ''}
+                    {' · '}{new Date(it.created_at.replace(' ', 'T') + 'Z').toLocaleDateString('pt-BR')}
+                  </div>
+                  {it.message && <div className="text-xs text-white/60 mt-2 border-l-2 border-white/10 pl-2 whitespace-pre-wrap">{it.message}</div>}
+                </div>
+                <span className={`shrink-0 text-xs px-2 py-1 rounded-full border ${st.cls}`}>{st.label}</span>
+              </div>
+              {isManager && (
+                <div className="flex items-center gap-2 mt-3">
+                  {it.status !== 'contacted' && (
+                    <button onClick={() => setStatus(it.id, 'contacted')} className="text-xs px-2.5 py-1.5 rounded-lg border border-white/15 hover:border-white/35 text-white/80">Marcar como contatado</button>
+                  )}
+                  {it.status !== 'closed' && (
+                    <button onClick={() => setStatus(it.id, 'closed')} className="text-xs px-2.5 py-1.5 rounded-lg border border-white/15 hover:border-white/35 text-white/60">Encerrar</button>
+                  )}
+                  {it.status !== 'pending' && (
+                    <button onClick={() => setStatus(it.id, 'pending')} className="text-xs px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 text-white/40">Reabrir</button>
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }

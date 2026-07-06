@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { HandoffSummaryService } from "../HandoffSummaryService.js";
+import { TicketSlaService } from "../TicketSlaService.js";
 
 const router = Router();
 
@@ -15,6 +16,7 @@ router.get("/", (req: AuthRequest, res): any => {
     const rows = db.prepare(`
       SELECT t.id, t.contact_id, t.stage, t.priority, t.ai_paused, t.status, t.assigned_to,
              t.handoff_summary, t.handoff_reason, t.created_at, t.updated_at,
+             t.sla_due_at, t.sla_first_response_at, t.sla_breached, t.sla_segment,
              c.name AS contact_name, c.identifier AS contact_identifier, c.profile_pic_url,
              (SELECT m.content FROM messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
              (SELECT m.created_at FROM messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
@@ -23,11 +25,43 @@ router.get("/", (req: AuthRequest, res): any => {
       WHERE t.organization_id = ? AND t.status = 'open'
       ORDER BY COALESCE(t.updated_at, t.created_at) DESC
       LIMIT 500
-    `).all(orgId);
+    `).all(orgId) as any[];
+    // Estado de SLA calculado ao vivo (independe do último tick do monitor) só
+    // quando o monitor está ligado — caso contrário o campo vem null e a UI
+    // simplesmente não mostra selo de SLA.
+    const slaOn = TicketSlaService.config(orgId).enabled;
+    const nowMs = Date.now();
+    for (const r of rows) {
+      r.sla_state = slaOn ? TicketSlaService.displayState(r, nowMs) : null;
+    }
     res.json(rows);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/tickets/sla-config — metas de SLA por prioridade/segmento (VIP).
+router.get("/sla-config", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TicketSlaService.config(orgId)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/tickets/sla-config — atualiza as metas + liga/desliga o monitor.
+router.put("/sla-config", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    const cfg = TicketSlaService.saveConfig(orgId, {
+      enabled: b.enabled, alta: b.alta, media: b.media, baixa: b.baixa,
+      vipSeconds: b.vipSeconds, vipMinSpent: b.vipMinSpent,
+    });
+    logAuthEvent(orgId, userId, undefined, "SLA_CONFIG_CHANGED", { enabled: cfg.enabled });
+    res.json(cfg);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.post("/:id/take-over", async (req: AuthRequest, res) => {

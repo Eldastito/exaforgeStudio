@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "./auditLog.js";
 import { InventoryService } from "./InventoryService.js";
 import { uniqueProductSlug } from "./productSlug.js";
+import { sanitizeGtin } from "./eanUtil.js";
 
 /**
  * Cadastro de estoque/vitrine acionado FORA do painel web — hoje só pelo
@@ -23,14 +24,14 @@ import { uniqueProductSlug } from "./productSlug.js";
 export class InventoryIntakeService {
   /** Cria o produto a partir de uma foto avulsa (fluxo 1) já com preço definido pelo gestor. */
   static commitProductFromScan(orgId: string, params: {
-    name: string; category?: string | null; description?: string | null;
+    name: string; category?: string | null; description?: string | null; ean?: string | null;
     salePrice: number; marginPercent?: number | null; quantity: number; imageUrl: string;
   }): string {
     const id = uuidv4();
     db.prepare(
-      `INSERT INTO products_services (id, organization_id, type, name, description, price, margin_percent, stock_control_enabled, category, slug, storefront_visible)
-       VALUES (?, ?, 'product', ?, ?, ?, ?, 1, ?, ?, 1)`
-    ).run(id, orgId, params.name.trim(), params.description || "", params.salePrice, params.marginPercent ?? null, params.category ? params.category.trim().slice(0, 80) : null, uniqueProductSlug(orgId, params.name));
+      `INSERT INTO products_services (id, organization_id, type, name, description, price, margin_percent, stock_control_enabled, category, slug, storefront_visible, ean)
+       VALUES (?, ?, 'product', ?, ?, ?, ?, 1, ?, ?, 1, ?)`
+    ).run(id, orgId, params.name.trim(), params.description || "", params.salePrice, params.marginPercent ?? null, params.category ? params.category.trim().slice(0, 80) : null, uniqueProductSlug(orgId, params.name), sanitizeGtin(params.ean));
 
     db.prepare(
       `INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, low_stock_threshold)
@@ -50,13 +51,13 @@ export class InventoryIntakeService {
    * marca o momento da recusa para a auditoria de produtos incompletos.
    */
   static commitProductWithoutPrice(orgId: string, params: {
-    name: string; category?: string | null; description?: string | null; quantity: number; imageUrl: string;
+    name: string; category?: string | null; description?: string | null; ean?: string | null; quantity: number; imageUrl: string;
   }): string {
     const id = uuidv4();
     db.prepare(
-      `INSERT INTO products_services (id, organization_id, type, name, description, stock_control_enabled, category, slug, storefront_visible, pricing_declined_at)
-       VALUES (?, ?, 'product', ?, ?, 1, ?, ?, 0, CURRENT_TIMESTAMP)`
-    ).run(id, orgId, params.name.trim(), params.description || "", params.category ? params.category.trim().slice(0, 80) : null, uniqueProductSlug(orgId, params.name));
+      `INSERT INTO products_services (id, organization_id, type, name, description, stock_control_enabled, category, slug, storefront_visible, pricing_declined_at, ean)
+       VALUES (?, ?, 'product', ?, ?, 1, ?, ?, 0, CURRENT_TIMESTAMP, ?)`
+    ).run(id, orgId, params.name.trim(), params.description || "", params.category ? params.category.trim().slice(0, 80) : null, uniqueProductSlug(orgId, params.name), sanitizeGtin(params.ean));
 
     db.prepare(
       `INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, low_stock_threshold)

@@ -726,13 +726,31 @@ function SecurityPanel() {
 // ============================================================================
 function LgpdPanel() {
   const [settings, setSettings] = useState<{ enabled: boolean; days: number } | null>(null);
+  const [consentConfig, setConsentConfig] = useState<{ categories: string[]; bannerText: string; policyVersion: string } | null>(null);
+  const [consentSummary, setConsentSummary] = useState<{ type: string; granted: number; revoked: number }[]>([]);
+  const [newCategory, setNewCategory] = useState('');
 
-  useEffect(() => { apiFetch('/api/lgpd/settings').then(r => r.json()).then(setSettings).catch(() => {}); }, []);
+  useEffect(() => {
+    apiFetch('/api/lgpd/settings').then(r => r.json()).then(setSettings).catch(() => {});
+    apiFetch('/api/lgpd/consent-config').then(r => r.json()).then(setConsentConfig).catch(() => {});
+    apiFetch('/api/lgpd/consent-summary').then(r => r.json()).then(d => setConsentSummary(d.summary || [])).catch(() => {});
+  }, []);
 
   const save = async (patch: Partial<{ enabled: boolean; days: number }>) => {
     const next = { enabled: settings?.enabled || false, days: settings?.days || 365, ...patch };
     setSettings(next);
     await apiFetch('/api/lgpd/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) }).catch(() => {});
+  };
+
+  const saveConsent = async (patch: Partial<{ categories: string[]; bannerText: string; policyVersion: string }>) => {
+    const next = { ...consentConfig!, ...patch };
+    setConsentConfig(next);
+    await apiFetch('/api/lgpd/consent-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) }).catch(() => {});
+  };
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    marketing: 'Marketing', dados_pessoais: 'Dados pessoais', perfilamento: 'Perfilamento',
+    comunicacoes: 'Comunicações', compartilhamento: 'Compartilhamento',
   };
 
   return (
@@ -741,7 +759,7 @@ function LgpdPanel() {
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
           <Lock className="w-6 h-6 text-indigo-400" /> Privacidade & LGPD
         </h2>
-        <p className="text-zinc-400 text-sm mt-1">Política de retenção de dados e direitos do titular (acesso, portabilidade e esquecimento).</p>
+        <p className="text-zinc-400 text-sm mt-1">Política de retenção de dados, consentimento granular e direitos do titular.</p>
       </div>
 
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 space-y-5">
@@ -765,11 +783,71 @@ function LgpdPanel() {
           </div>
         )}
 
+        {consentConfig && (
+          <div className="border-t border-zinc-800 pt-4 space-y-3">
+            <p className="text-sm font-medium text-zinc-100">📋 Consentimento granular</p>
+            <p className="text-xs text-zinc-500">Configure as categorias de consentimento rastreadas por contato. Use em Contatos para registrar/revogar.</p>
+
+            <div className="flex flex-wrap gap-2">
+              {consentConfig.categories.map(cat => (
+                <span key={cat} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-xs text-indigo-300">
+                  {CATEGORY_LABELS[cat] || cat}
+                  <button onClick={() => saveConsent({ categories: consentConfig.categories.filter(c => c !== cat) })}
+                    className="text-indigo-400 hover:text-indigo-200 ml-1">&times;</button>
+                </span>
+              ))}
+              <span className="inline-flex items-center gap-1">
+                <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value)}
+                  placeholder="Nova categoria..."
+                  className="w-28 text-xs bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newCategory.trim()) {
+                      saveConsent({ categories: [...consentConfig.categories, newCategory.trim().toLowerCase().replace(/\s+/g, '_')] });
+                      setNewCategory('');
+                    }
+                  }} />
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs text-zinc-400">
+              <span>Versão da política:</span>
+              <input type="text" value={consentConfig.policyVersion}
+                onChange={e => setConsentConfig({ ...consentConfig, policyVersion: e.target.value })}
+                onBlur={e => saveConsent({ policyVersion: e.target.value || '1.0' })}
+                className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-center text-zinc-200" />
+            </div>
+
+            <div>
+              <p className="text-xs text-zinc-400 mb-1">Texto do banner/aviso de consentimento (exibido na loja e formulários):</p>
+              <textarea rows={2} value={consentConfig.bannerText}
+                onChange={e => setConsentConfig({ ...consentConfig, bannerText: e.target.value })}
+                onBlur={e => saveConsent({ bannerText: e.target.value })}
+                placeholder="Ex.: Ao continuar, você concorda com nossa política de privacidade..."
+                className="w-full text-xs bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-300 resize-none" />
+            </div>
+
+            {consentSummary.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs text-zinc-500 mb-1">Resumo de consentimentos:</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {consentSummary.map(s => (
+                    <div key={s.type} className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs">
+                      <p className="text-zinc-300 font-medium">{CATEGORY_LABELS[s.type] || s.type}</p>
+                      <p className="text-emerald-400">{s.granted} ativo(s)</p>
+                      <p className="text-zinc-500">{s.revoked} revogado(s)</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="border-t border-zinc-800 pt-4">
           <p className="text-sm font-medium text-zinc-100">👤 Direitos do titular</p>
           <p className="text-xs text-zinc-500 mt-1">
-            Em <b>Contatos</b>, cada cliente tem as ações <b>Exportar dados</b> (portabilidade, baixa um JSON) e
-            <b> Esquecer</b> (anonimiza os dados pessoais e apaga o conteúdo das conversas). Use quando o titular solicitar.
+            Em <b>Contatos</b>, cada cliente tem as ações <b>Exportar dados</b> (portabilidade, baixa um JSON),
+            <b> Esquecer</b> (anonimiza os dados pessoais) e <b>Consentimentos</b> (visualiza/gerencia consentimentos granulares).
           </p>
         </div>
 

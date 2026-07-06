@@ -57,7 +57,8 @@
     "test:fashion-memory": "tsx scripts/test-fashion-memory.ts",
     "test:fashion-custom-look": "tsx scripts/test-fashion-custom-look.ts",
     "test:fashion-wearable": "tsx scripts/test-fashion-wearable.ts",
-    "test:jwt-secret-persist": "tsx scripts/test-jwt-secret-persist.ts"
+    "test:jwt-secret-persist": "tsx scripts/test-jwt-secret-persist.ts",
+    "test:lgpd-nps-abandoned": "tsx scripts/test-lgpd-nps-abandoned.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -264,9 +264,12 @@ export function DashboardPanel() {
   // nunca quebra por causa do Radar.
   const [radarScore, setRadarScore] = useState<{ score: number; status: string; completedAt?: string } | null>(null);
   const [planAlerts, setPlanAlerts] = useState<{ key: string; label: string; pct: number; level: string }[]>([]);
+  const [detractors, setDetractors] = useState<any[]>([]);
+  const [showDetractors, setShowDetractors] = useState(false);
 
   useEffect(() => {
     apiFetch('/api/plans/alerts').then(r => r.json()).then(d => { if (Array.isArray(d?.alerts)) setPlanAlerts(d.alerts); }).catch(() => {});
+    apiFetch('/api/analytics/detractors?days=90').then(r => r.json()).then(d => setDetractors(d.detractors || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -585,7 +588,7 @@ export function DashboardPanel() {
                     </div>
                   </div>
                 )}
-                {/* Satisfação (CSAT) — média, % satisfeitos e detratores. */}
+                {/* Satisfação (CSAT) — média, % satisfeitos e detratores com timeline. */}
                 {(m?.csat?.responses ?? 0) > 0 && (
                   <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
                     <p className="text-xs text-slate-400">Satisfação ({m?.csat?.responses ?? 0} respostas)</p>
@@ -593,9 +596,28 @@ export function DashboardPanel() {
                       <span className="text-2xl font-bold text-white">{m?.csat?.avgScore ?? 0}<span className="text-sm text-slate-500">/5</span></span>
                       <span className="mb-1 text-xs font-medium text-emerald-400">{m?.csat?.satisfactionPct ?? 0}% satisfeitos</span>
                       {(m?.csat?.detractors ?? 0) > 0 && (
-                        <span className="mb-1 text-xs font-medium text-rose-400">{m?.csat?.detractors} detrator(es)</span>
+                        <button onClick={() => setShowDetractors(!showDetractors)}
+                          className="mb-1 text-xs font-medium text-rose-400 hover:text-rose-300 underline underline-offset-2">
+                          {m?.csat?.detractors} detrator(es)
+                        </button>
                       )}
                     </div>
+                    {showDetractors && detractors.length > 0 && (
+                      <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+                        {detractors.map((d: any) => (
+                          <div key={d.id} className="rounded-lg bg-slate-900/60 border border-slate-800 p-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-300 font-medium">{d.contact_name || d.contact_identifier}</span>
+                              <span className="text-rose-400 font-mono">nota {d.score}</span>
+                            </div>
+                            {d.comment && d.follow_up_status === 'captured' && (
+                              <p className="mt-1 text-slate-400 italic">"{d.comment}"</p>
+                            )}
+                            <p className="mt-0.5 text-slate-600">{new Date(d.answered_at).toLocaleDateString('pt-BR')}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </Panel>

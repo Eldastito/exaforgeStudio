@@ -6,6 +6,7 @@ import { RevenueIntelligenceService } from "../RevenueIntelligenceService.js";
 import { RevenueAuditService } from "../RevenueAuditService.js";
 import { RevenueSimulatorService } from "../RevenueSimulatorService.js";
 import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
+import { SatisfactionService } from "../SatisfactionService.js";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from 'pdfkit';
@@ -801,6 +802,17 @@ router.get("/fashion-dashboard", (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// GET /api/analytics/detractors — timeline de detratores com comentários.
+router.get("/detractors", (req: any, res): any => {
+  const orgId = getOrgId(req);
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const days = parseInt(req.query.days, 10) || 90;
+    const timeline = SatisfactionService.detractorTimeline(orgId, Math.min(365, days));
+    res.json({ detractors: timeline });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

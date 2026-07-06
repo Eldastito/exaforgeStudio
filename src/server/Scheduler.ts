@@ -600,7 +600,9 @@ export class Scheduler {
     let orgs: any[] = [];
     try {
       orgs = db.prepare(`
-        SELECT organization_id, COALESCE(abandoned_cart_hours,4) AS hours, abandoned_cart_message
+        SELECT organization_id, COALESCE(abandoned_cart_hours,4) AS hours, abandoned_cart_message,
+               COALESCE(abandoned_cart_intent_enabled,0) AS abandoned_cart_intent_enabled,
+               COALESCE(abandoned_cart_intent_threshold,60) AS abandoned_cart_intent_threshold
         FROM organization_settings
         WHERE COALESCE(abandoned_cart_enabled,0) = 1
       `).all() as any[];
@@ -625,6 +627,29 @@ export class Scheduler {
             AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.ticket_id = t.id AND o.status NOT IN ('cancelado'))
             AND (SELECT MAX(m.created_at) FROM messages m WHERE m.ticket_id = t.id) <= datetime('now', ?)
         `).all(orgId, `-${hours} hours`) as any[];
+
+        // Pre-proposal intent: tickets where AI detected purchase probability >= threshold
+        // even if the stage hasn't moved to proposta/qualificado yet
+        const intentEnabled = !!(org as any).abandoned_cart_intent_enabled;
+        const intentThreshold = parseInt(String((org as any).abandoned_cart_intent_threshold || 60), 10) || 60;
+        if (intentEnabled) {
+          try {
+            const intentTickets = db.prepare(`
+              SELECT t.id, t.contact_id,
+                     c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
+              FROM tickets t
+              JOIN contacts c ON c.id = t.contact_id
+              WHERE t.organization_id = ?
+                AND t.status = 'open'
+                AND t.stage NOT IN ('proposta','qualificado')
+                AND t.abandoned_nudged_at IS NULL
+                AND COALESCE(c.ai_purchase_probability, 0) >= ?
+                AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.ticket_id = t.id AND o.status NOT IN ('cancelado'))
+                AND (SELECT MAX(m.created_at) FROM messages m WHERE m.ticket_id = t.id) <= datetime('now', ?)
+            `).all(orgId, intentThreshold, `-${hours} hours`) as any[];
+            for (const it of intentTickets) tickets.push(it);
+          } catch (e) { /* intent columns may not exist yet */ }
+        }
 
         if (!tickets.length) continue;
         const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;

@@ -263,6 +263,35 @@ export class RadarPublicService {
     }
   }
 
+  static requestConsultation(rawToken: string, payload: { name?: string; email?: string; phone?: string; message?: string }): any {
+    const session = this.requireSession(rawToken);
+    if (session.status !== "completed") throw new Error("Complete o diagnóstico antes de solicitar consultoria.");
+
+    const name = String(payload.name || "").trim().slice(0, 120);
+    const email = String(payload.email || "").trim().slice(0, 200);
+    const phone = String(payload.phone || "").trim().replace(/\D/g, "").slice(0, 15);
+    const message = String(payload.message || "").trim().slice(0, 2000);
+
+    if (!name) throw new Error("Informe seu nome.");
+    if (!email && !phone) throw new Error("Informe e-mail ou telefone.");
+    if (email && !isValidEmail(email)) throw new Error("E-mail inválido.");
+
+    const existing = db.prepare(`SELECT id FROM radar_consultation_requests WHERE session_id = ? LIMIT 1`).get(session.id) as any;
+    if (existing) throw new Error("Solicitação de consultoria já registrada para este diagnóstico.");
+
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO radar_consultation_requests (id, session_id, contact_name, contact_email, contact_phone, message, overall_score, maturity_level)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, session.id, name, email || null, phone || null, message || null,
+      session.overall_maturity_score, session.maturity_level);
+
+    const leadResult = this.maybeCreateLead(session.id);
+
+    logRadarEvent(null, null, "radar_consultation_requested", { sessionId: session.id, requestId: id });
+    return { success: true, requestId: id, lead: leadResult };
+  }
+
   static getResult(rawToken: string, leadResult?: { created: boolean; reason?: string }): any {
     const session = this.requireSession(rawToken);
     const pillarScores = db.prepare(`SELECT pillar, score, evidence_count FROM radar_pillar_scores WHERE session_id = ?`).all(session.id);

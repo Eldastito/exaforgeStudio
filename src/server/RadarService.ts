@@ -26,7 +26,7 @@ const PILLAR_LABEL: Record<string, string> = {
 // Regra não-negociável do PRD (§3): o score é 100% determinístico, versionado
 // e auditável — nenhuma IA generativa decide maturidade, prioridade ou risco.
 // Este módulo é a fonte de verdade do fluxo AUTENTICADO (sessão sempre presa a
-// uma organização); a narrativa em IA (Fase 4, ainda não implementada) só pode
+// uma organização); a narrativa em IA (Fase 4, RadarNarrativeService.ts) só pode
 // redigir texto a partir do JSON que o motor produz, nunca alterar os números.
 
 export { PILLAR_WEIGHTS, SCORING_VERSION };

@@ -15,6 +15,7 @@ export interface ParsedInvoiceItem {
   quantity: number;
   unit: string | null;
   unitCost: number;
+  ean: string | null;
 }
 
 export interface ParsedInvoice {
@@ -58,11 +59,14 @@ export function parseNFeXml(xmlText: string): ParsedInvoice {
   const items: ParsedInvoiceItem[] = detList
     .map((det: any) => {
       const prod = det?.prod || {};
+      const rawEan = String(prod.cEAN || prod.cEANTrib || "").trim();
+      const ean = rawEan && /^\d{8,14}$/.test(rawEan) && rawEan !== "SEM GTIN" ? rawEan : null;
       return {
         name: String(prod.xProd || "").trim().slice(0, 120),
         quantity: Math.max(0, Number(prod.qCom) || 0),
         unit: prod.uCom ? String(prod.uCom).trim().slice(0, 20) : null,
         unitCost: Math.max(0, Number(prod.vUnCom) || 0),
+        ean,
       };
     })
     .filter((it: ParsedInvoiceItem) => it.name);

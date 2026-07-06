@@ -105,6 +105,15 @@ router.get("/sessions/:token/result", (req, res): any => {
   catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
+router.post("/sessions/:token/request-consultation", (req, res): any => {
+  const ip = clientIp(req);
+  if (!rateLimit(`radar_consultation:${ip}`, 5, 60 * 60 * 1000)) {
+    return res.status(429).json({ error: "Muitas solicitações. Tente novamente mais tarde." });
+  }
+  try { res.json(RadarPublicService.requestConsultation(req.params.token, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 function randomFakeToken(): string {
   return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 }

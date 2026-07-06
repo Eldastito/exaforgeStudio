@@ -420,10 +420,11 @@ router.post("/invoice-scan/:draftId/confirm", (req: AuthRequest, res): any => {
         if (!(Number(it.salePrice) > 0)) return res.status(400).json({ error: `Item "${name}": informe o preço de venda antes de publicar.` });
 
         const productId = uuidv4();
+        const eanVal = it.ean ? String(it.ean).trim().slice(0, 14) : null;
         db.prepare(
-          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug)
-           VALUES (?, ?, 'product', ?, '', ?, 1, ?, ?)`
-        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, name));
+          `INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, category, slug, ean)
+           VALUES (?, ?, 'product', ?, '', ?, 1, ?, ?, ?)`
+        ).run(productId, orgId, name, Number(it.salePrice), it.category ? String(it.category).trim().slice(0, 80) : null, uniqueProductSlug(orgId, name), eanVal);
 
         InventoryService.recordMovement(orgId, {
           productId, type: "entrada", quantity, unitCost,
@@ -725,18 +726,19 @@ router.post("/", (req: AuthRequest, res): any => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category } = req.body;
+  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, ean } = req.body;
   const id = uuidv4();
 
   try {
     db.prepare(`
-      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, slug)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, slug, ean)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null, (min_price !== undefined && min_price !== '' ? Number(min_price) : null),
        type === 'reservation' ? (Number(capacity) > 0 ? Number(capacity) : 1) : null,
        type === 'reservation' ? (['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night') : null,
        category ? String(category).trim().slice(0, 80) : null,
-       (type || 'product') === 'product' ? uniqueProductSlug(orgId, String(name || '')) : null);
+       (type || 'product') === 'product' ? uniqueProductSlug(orgId, String(name || '')) : null,
+       ean ? String(ean).trim().slice(0, 14) : null);
 
     if (stock_control_enabled) {
       db.prepare(`
@@ -763,7 +765,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     const product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
     if (!product) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable } = req.body;
+    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable, ean } = req.body;
     const updates: string[] = [];
     const vals: any[] = [];
     // Override do lojista (ADR-041): marca se o produto pode entrar no
@@ -779,6 +781,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     if (type !== undefined) { updates.push("type = ?"); vals.push(type); }
     if (stock_control_enabled !== undefined) { updates.push("stock_control_enabled = ?"); vals.push(stock_control_enabled ? 1 : 0); }
     if (category !== undefined) { updates.push("category = ?"); vals.push(category ? String(category).trim().slice(0, 80) : null); }
+    if (ean !== undefined) { updates.push("ean = ?"); vals.push(ean ? String(ean).trim().slice(0, 14) : null); }
     if (min_price !== undefined) { updates.push("min_price = ?"); vals.push(min_price === '' || min_price === null ? null : Number(min_price)); }
     if (capacity !== undefined) { updates.push("capacity = ?"); vals.push(Number(capacity) > 0 ? Number(capacity) : 1); }
     if (reservation_unit !== undefined) { updates.push("reservation_unit = ?"); vals.push(['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night'); }

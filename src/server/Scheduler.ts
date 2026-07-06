@@ -232,38 +232,67 @@ export class Scheduler {
     } catch (e) { /* noop — tabela/colunas podem não existir ainda */ }
   }
 
-  /** Reativação automática semanal (opt-in por organização). */
+  /** Reativação automática por sequência progressiva (opt-in por organização).
+   *  Cada contato passa por até 3 etapas (step 1→2→3), com intervalo semanal
+   *  entre cada. Se o contato compra antes de receber todas, é removido da fila. */
   static async reactivationPass() {
     let orgs: any[] = [];
     try {
       orgs = db.prepare(`
-        SELECT organization_id, auto_reactivation_days, auto_reactivation_message, auto_reactivation_last_run
+        SELECT organization_id, auto_reactivation_days,
+               auto_reactivation_message, auto_reactivation_message_2, auto_reactivation_message_3,
+               auto_reactivation_last_run
         FROM organization_settings
         WHERE COALESCE(auto_reactivation_enabled,0) = 1
       `).all() as any[];
     } catch (e) { return; }
 
+    const DEFAULT_MSG_1 = "Olá {nome}! Sentimos sua falta por aqui 😊 Preparamos novidades que podem te interessar. Posso te mostrar?";
+    const DEFAULT_MSG_2 = "Oi {nome}! Ainda temos condições especiais esperando por você. Quer dar uma olhada?";
+    const DEFAULT_MSG_3 = "Última chamada, {nome}! 🎁 Preparamos algo exclusivo pra você. Me chama se quiser saber mais!";
+
     for (const org of orgs) {
       try {
-        // Trava semanal: só roda se passou ~7 dias do último envio.
         const last = org.auto_reactivation_last_run ? new Date(org.auto_reactivation_last_run).getTime() : 0;
         if (Date.now() - last < 7 * 24 * 60 * 60 * 1000) continue;
 
         const days = org.auto_reactivation_days || 60;
-        const segment = { inactiveDays: days };
-        const targets = CampaignService.resolveSegment(org.organization_id, segment);
-        // Marca o run mesmo sem alvos, para não ficar tentando todo tick.
-        db.prepare(`UPDATE organization_settings SET auto_reactivation_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(org.organization_id);
-        if (targets.length === 0) continue;
+        const messages = [
+          org.auto_reactivation_message || DEFAULT_MSG_1,
+          org.auto_reactivation_message_2 || DEFAULT_MSG_2,
+          org.auto_reactivation_message_3 || DEFAULT_MSG_3,
+        ];
 
-        const message = org.auto_reactivation_message
-          || "Olá {nome}! Sentimos sua falta por aqui 😊 Preparamos novidades que podem te interessar. Posso te mostrar?";
-        const created = CampaignService.createCampaign(org.organization_id, {
-          name: `Reativação automática (${new Date().toLocaleDateString('pt-BR')})`,
-          message, segment, createdBy: 'scheduler',
-        });
-        await CampaignService.startCampaign(org.organization_id, created.id, this.io);
-        console.log(`[Scheduler] Reativação automática disparada para org ${org.organization_id}: ${created.total} contatos.`);
+        const segment = { inactiveDays: days };
+        const allTargets = CampaignService.resolveSegment(org.organization_id, segment);
+        db.prepare(`UPDATE organization_settings SET auto_reactivation_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(org.organization_id);
+        if (allTargets.length === 0) continue;
+
+        const targetIds = new Set(allTargets.map((t: any) => t.id));
+        const contactSteps = db.prepare(
+          `SELECT id, COALESCE(reactivation_step, 0) AS step FROM contacts WHERE organization_id = ? AND id IN (${Array.from(targetIds).map(() => '?').join(',')})`,
+        ).all(org.organization_id, ...targetIds) as any[];
+
+        for (const step of [0, 1, 2]) {
+          const contacts = contactSteps.filter((c: any) => c.step === step);
+          if (contacts.length === 0) continue;
+          if (step >= 3) continue;
+
+          const message = messages[step];
+          const stepContactIds = contacts.map((c: any) => c.id);
+          if (stepContactIds.length === 0) continue;
+
+          const created = CampaignService.createCampaignForContacts(org.organization_id, {
+            name: `Reativação etapa ${step + 1} (${new Date().toLocaleDateString('pt-BR')})`,
+            message, contactIds: stepContactIds, createdBy: 'scheduler',
+          });
+          if (!created.id) continue;
+          await CampaignService.startCampaign(org.organization_id, created.id, this.io);
+
+          const updateStmt = db.prepare(`UPDATE contacts SET reactivation_step = ?, reactivation_last_sent_at = CURRENT_TIMESTAMP WHERE id = ?`);
+          for (const c of contacts) updateStmt.run(step + 1, c.id);
+          console.log(`[Scheduler] Reativação etapa ${step + 1} para org ${org.organization_id}: ${created.total} contatos.`);
+        }
       } catch (e) {
         console.error('[Scheduler] Falha na reativação da org', org.organization_id, e);
       }

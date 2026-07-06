@@ -2528,6 +2528,12 @@ const initDb = () => {
   // Abandoned cart: pre-proposal intent detection
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_intent_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_intent_threshold INTEGER DEFAULT 60`); } catch(e){}
+
+  // Reativação por sequência progressiva: 3 mensagens em vez de 1.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_message_2 TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_message_3 TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN reactivation_step INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN reactivation_last_sent_at DATETIME`); } catch(e){}
 };
 
 initDb();

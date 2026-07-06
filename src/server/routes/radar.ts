@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import db from "../db.js";
 import { RadarService } from "../RadarService.js";
+import { RadarPublicService } from "../RadarPublicService.js";
 import { ConversionVelocityService } from "../ConversionVelocityService.js";
 import { StorageService } from "../StorageService.js";
 
@@ -326,6 +327,24 @@ router.put("/settings", (req: AuthRequest, res): any => {
     ).run(autoSendEnabled ? 1 : 0, channel, orgId);
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/radar/consultation-requests — solicitações de consultoria vindas do
+// diagnóstico público (só a organização de destino do funil enxerga as suas).
+router.get("/consultation-requests", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RadarPublicService.listConsultationRequests(orgId, req.query.status as string | undefined)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /api/radar/consultation-requests/:id — transição de status pelo consultor.
+router.patch("/consultation-requests/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isManager(req)) return res.status(403).json({ error: "Apenas donos/administradores tratam solicitações de consultoria." });
+  try { res.json(RadarPublicService.updateConsultationRequest(orgId, req.params.id, String(req.body?.status || ""), actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

@@ -3,6 +3,8 @@ import db from "./db.js";
 import { logRadarEvent } from "./radarAudit.js";
 import { calculateAndPersist } from "./RadarScoringEngine.js";
 import { ProspectService } from "./ProspectService.js";
+import { TaskService } from "./TaskService.js";
+import { NotificationService } from "./NotificationService.js";
 
 // ZappFlow Radar — Fase 2 (diagnóstico rápido público, landing sem login).
 //
@@ -222,15 +224,30 @@ export class RadarPublicService {
    * organização de destino seria vazar um lead de marketing para o tenant
    * errado. Exige consentimento explícito de 'contato_comercial'.
    */
-  private static maybeCreateLead(sessionId: string): { created: boolean; reason?: string } {
+  /**
+   * Resolve a organização de destino dos leads do Radar (o funil de vendas da
+   * própria ZappFlow), configurada via RADAR_LEADS_ORGANIZATION_ID. Devolve o
+   * id só se a env existir E apontar para uma organização real — caso contrário
+   * null (nunca inventa um tenant de destino, para não vazar lead de marketing
+   * para o tenant errado). Ponto único usado por maybeCreateLead e pela
+   * solicitação de consultoria.
+   */
+  private static leadsOrgId(): string | null {
     const targetOrgId = process.env.RADAR_LEADS_ORGANIZATION_ID;
-    if (!targetOrgId) return { created: false, reason: "RADAR_LEADS_ORGANIZATION_ID não configurada" };
-
+    if (!targetOrgId) return null;
     const orgExists = db.prepare(`SELECT organization_id FROM organization_settings WHERE organization_id = ?`).get(targetOrgId);
     if (!orgExists) {
-      console.error(`[RadarPublicService] RADAR_LEADS_ORGANIZATION_ID='${targetOrgId}' não corresponde a nenhuma organização — lead não criado.`);
-      return { created: false, reason: "organização de destino não encontrada" };
+      console.error(`[RadarPublicService] RADAR_LEADS_ORGANIZATION_ID='${targetOrgId}' não corresponde a nenhuma organização.`);
+      return null;
     }
+    return targetOrgId;
+  }
+
+  private static maybeCreateLead(sessionId: string): { created: boolean; reason?: string } {
+    const envOrgId = process.env.RADAR_LEADS_ORGANIZATION_ID;
+    if (!envOrgId) return { created: false, reason: "RADAR_LEADS_ORGANIZATION_ID não configurada" };
+    const targetOrgId = this.leadsOrgId();
+    if (!targetOrgId) return { created: false, reason: "organização de destino não encontrada" };
 
     const consent = db.prepare(
       `SELECT granted FROM radar_consent_records WHERE session_id = ? AND consent_type = 'contato_comercial' ORDER BY created_at DESC LIMIT 1`
@@ -280,16 +297,82 @@ export class RadarPublicService {
     if (existing) throw new Error("Solicitação de consultoria já registrada para este diagnóstico.");
 
     const id = randomUUID();
+    const targetOrgId = this.leadsOrgId();
+    const scoreLabel = session.overall_maturity_score != null ? Number(session.overall_maturity_score).toFixed(0) : "—";
+
+    // Follow-up acionável: quando há organização de destino (funil de vendas da
+    // ZappFlow), a solicitação vira uma TAREFA para o consultor e uma
+    // NOTIFICAÇÃO em tempo real, com score/maturidade/contato/mensagem já no
+    // corpo — o consultor não precisa caçar nada. Best-effort: se a criação da
+    // tarefa falhar, a solicitação ainda é registrada (não perde o lead).
+    let taskId: string | null = null;
+    if (targetOrgId) {
+      const contactLines = [
+        email ? `E-mail: ${email}` : null,
+        phone ? `Telefone: ${phone}` : null,
+        `Maturidade: ${session.maturity_level || "—"} (score ${scoreLabel}/100)`,
+        session.company_name ? `Empresa: ${session.company_name}` : null,
+        message ? `\nMensagem do lead:\n${message}` : null,
+      ].filter(Boolean).join("\n");
+      try {
+        const task = TaskService.create(targetOrgId, {
+          title: `Consultoria solicitada — ${name} (Radar, score ${scoreLabel})`,
+          description: `Lead concluiu o diagnóstico do Radar de Execução IA e pediu contato de um consultor.\n\n${contactLines}`,
+          priority: "alta",
+          source: "radar",
+          refLabel: "Radar — consultoria",
+        });
+        taskId = task?.id || null;
+      } catch (e: any) {
+        console.error("[RadarPublicService] Falha ao criar tarefa de consultoria:", e);
+      }
+      NotificationService.push({
+        organizationId: targetOrgId,
+        title: "Nova solicitação de consultoria (Radar)",
+        message: `${name} (maturidade ${session.maturity_level || "—"}, score ${scoreLabel}/100) pediu contato de um consultor.`,
+        type: "alert",
+        dedupeKey: `radar_consultation:${id}`,
+      });
+    }
+
     db.prepare(
-      `INSERT INTO radar_consultation_requests (id, session_id, contact_name, contact_email, contact_phone, message, overall_score, maturity_level)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, session.id, name, email || null, phone || null, message || null,
+      `INSERT INTO radar_consultation_requests (id, session_id, organization_id, task_id, contact_name, contact_email, contact_phone, message, overall_score, maturity_level)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, session.id, targetOrgId, taskId, name, email || null, phone || null, message || null,
       session.overall_maturity_score, session.maturity_level);
 
     const leadResult = this.maybeCreateLead(session.id);
 
-    logRadarEvent(null, null, "radar_consultation_requested", { sessionId: session.id, requestId: id });
+    logRadarEvent(targetOrgId, null, "radar_consultation_requested", { sessionId: session.id, requestId: id, taskId });
     return { success: true, requestId: id, lead: leadResult };
+  }
+
+  /**
+   * Lista as solicitações de consultoria de uma organização (o funil de vendas
+   * configurado). Autenticado — filtra por organization_id, então só a
+   * organização de destino enxerga seus próprios pedidos.
+   */
+  static listConsultationRequests(orgId: string, status?: string): any[] {
+    const params: any[] = [orgId];
+    let where = `WHERE organization_id = ?`;
+    if (status && ["pending", "contacted", "closed"].includes(status)) { where += ` AND status = ?`; params.push(status); }
+    return db.prepare(
+      `SELECT id, session_id, contact_name, contact_email, contact_phone, message, overall_score, maturity_level, status, task_id, handled_at, handled_by, created_at
+       FROM radar_consultation_requests ${where} ORDER BY created_at DESC LIMIT 200`
+    ).all(...params) as any[];
+  }
+
+  /** Transição de status (pending → contacted → closed) pelo consultor. */
+  static updateConsultationRequest(orgId: string, id: string, status: string, actorId?: string): any {
+    if (!["pending", "contacted", "closed"].includes(status)) throw new Error("Status inválido.");
+    const row = db.prepare(`SELECT id FROM radar_consultation_requests WHERE id = ? AND organization_id = ?`).get(id, orgId) as any;
+    if (!row) throw new Error("Solicitação não encontrada.");
+    const handledAt = status === "pending" ? null : "CURRENT_TIMESTAMP";
+    db.prepare(
+      `UPDATE radar_consultation_requests SET status = ?, handled_at = ${handledAt === null ? "NULL" : "CURRENT_TIMESTAMP"}, handled_by = ? WHERE id = ? AND organization_id = ?`
+    ).run(status, status === "pending" ? null : (actorId || null), id, orgId);
+    logRadarEvent(orgId, actorId || null, "radar_consultation_updated", { requestId: id, status });
+    return { success: true };
   }
 
   static getResult(rawToken: string, leadResult?: { created: boolean; reason?: string }): any {

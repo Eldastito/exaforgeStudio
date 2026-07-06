@@ -320,6 +320,50 @@ export class GoogleOAuthService {
     }
   }
 
+  // Cria uma planilha já com várias ABAS nomeadas (para um dashboard vivo com
+  // Vendas/Estoque/Resumo separados). Não preenche — quem escreve cada aba é
+  // sheetsReplaceTab. Retorna o id/url ou { error }.
+  static async sheetsCreateWithTabs(orgId: string, title: string, tabTitles: string[]): Promise<{ id: string; url: string } | { error: string }> {
+    const token = await this.getAccessToken(orgId);
+    if (!token) return { error: "Conta Google não conectada." };
+    try {
+      const cr = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: { title }, sheets: tabTitles.map((t) => ({ properties: { title: t } })) }),
+      });
+      const sp: any = await cr.json().catch(() => ({}));
+      if (!cr.ok || !sp.spreadsheetId) { console.error("[Sheets] criar (abas) falhou:", sp); return { error: sp?.error?.message || "Falha ao criar a planilha." }; }
+      return { id: sp.spreadsheetId, url: sp.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sp.spreadsheetId}` };
+    } catch (e: any) {
+      console.error("[Sheets] erro (abas):", e);
+      return { error: "Erro de rede ao criar a planilha." };
+    }
+  }
+
+  // Reescreve o conteúdo de UMA aba: limpa o range e grava os valores por cima
+  // (espelho do estado atual, não append). Se a aba não existir ainda, tenta
+  // criá-la antes de gravar. Best-effort — devolve boolean de sucesso.
+  static async sheetsReplaceTab(orgId: string, sheetId: string, tabTitle: string, values: (string | number)[][]): Promise<boolean> {
+    const token = await this.getAccessToken(orgId);
+    if (!token || !sheetId) return false;
+    const range = `${tabTitle}!A1:ZZ100000`;
+    try {
+      // Garante que a aba existe (idempotente: ignora erro "já existe").
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tabTitle } } }] }),
+      }).catch(() => {});
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}:clear`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}",
+      });
+      const up = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(`${tabTitle}!A1`)}?valueInputOption=RAW`, {
+        method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ values }),
+      });
+      return up.ok;
+    } catch (e) { console.error("[Sheets] reescrever aba falhou:", e); return false; }
+  }
+
   // Acrescenta uma linha ao fim de uma planilha existente.
   static async sheetsAppendRow(orgId: string, sheetId: string, row: (string | number)[]): Promise<boolean> {
     const token = await this.getAccessToken(orgId);

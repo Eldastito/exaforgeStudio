@@ -942,6 +942,33 @@ const initDb = () => {
   // Automações Google: registrar pedidos numa planilha do Sheets.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_log_orders INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_orders_sheet_id TEXT`); } catch(e){}
+  // Google Sheets live sync: um painel vivo (planilha com abas Vendas/Estoque/
+  // Resumo) que o Scheduler reescreve de tempos em tempos — ao contrário do
+  // log append-only acima, reflete o estado ATUAL (status/pagamento de pedidos,
+  // níveis de estoque), então o lojista pode fixar/filtrar/compartilhar a
+  // planilha como dashboard. `google_sync_sheet_id` guarda a planilha viva;
+  // `google_sync_last_run` marca a última reescrita.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_sync_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_sync_sheet_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_sync_last_run DATETIME`); } catch(e){}
+  // SLA de primeira resposta por PRIORIDADE e SEGMENTO (VIP). Estende o SLA por
+  // canal (ADR-026) para uma promessa mais fina: cada ticket herda a meta mais
+  // APERTADA entre a da sua prioridade e — se o contato for VIP (gasto acumulado
+  // >= sla_vip_min_spent) — a meta VIP. O monitor (Scheduler.ticketSlaPass) só
+  // roda quando sla_monitor_enabled = 1; desligado, nada muda no comportamento
+  // atual. Metas em segundos; defaults: alta 30min, média 4h, baixa 24h, VIP 15min.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sla_monitor_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sla_priority_alta_seconds INTEGER DEFAULT 1800`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sla_priority_media_seconds INTEGER DEFAULT 14400`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sla_priority_baixa_seconds INTEGER DEFAULT 86400`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sla_vip_seconds INTEGER DEFAULT 900`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sla_vip_min_spent REAL DEFAULT 1000`); } catch(e){}
+  // Estado de SLA persistido por ticket (reescrito pelo monitor a cada tick).
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN sla_first_response_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN sla_due_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN sla_breached INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN sla_segment TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE tickets ADD COLUMN sla_breach_notified_at DATETIME`); } catch(e){}
   // E-mail do cliente (para confirmações) + interruptores das confirmações.
   try { db.exec(`ALTER TABLE contacts ADD COLUMN email TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN google_email_appointments INTEGER DEFAULT 0`); } catch(e){}
@@ -1864,6 +1891,16 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_radar_consultation_session ON radar_consultation_requests(session_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar radar_consultation_requests', e); }
+  // Ligação com o CRM/consultor: quando há uma organização de destino
+  // (RADAR_LEADS_ORGANIZATION_ID), a solicitação de consultoria vira uma tarefa
+  // de follow-up e passa a ser listável/tratável por essa organização — deixa
+  // de ser uma linha morta que ninguém lê. `status` transiciona pending →
+  // contacted → closed pelo consultor.
+  try { db.exec(`ALTER TABLE radar_consultation_requests ADD COLUMN organization_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE radar_consultation_requests ADD COLUMN task_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE radar_consultation_requests ADD COLUMN handled_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE radar_consultation_requests ADD COLUMN handled_by TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_radar_consultation_org ON radar_consultation_requests(organization_id, status)`); } catch(e){}
 
   // Seed idempotente do template padrão "Diagnóstico Rápido ZappFlow" (PRD §10,
   // adaptado a perguntas de escala 0-4 diretamente pontuáveis) + catálogo inicial

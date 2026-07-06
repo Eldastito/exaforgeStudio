@@ -12,6 +12,8 @@ import { LgpdService } from "./LgpdService.js";
 import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
+import { GoogleAutomationService } from "./GoogleAutomationService.js";
+import { TicketSlaService } from "./TicketSlaService.js";
 import { InstagramService } from "./InstagramService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
@@ -61,6 +63,9 @@ export class Scheduler {
     // ficaram travados por reinício do processo — o caminho normal (setImmediate
     // no enqueue) já resolve o caso comum sem esperar este passe.
     try { JobQueueService.sweepStale(); } catch (e) { console.error('[Scheduler] varredura da fila de jobs falhou', e); }
+    // SLA de primeira resposta: sensível a minutos (uma meta de 30 min não pode
+    // ser vigiada de hora em hora), então mora no passe rápido.
+    try { this.ticketSlaPass(); } catch (e: any) { console.error('[Scheduler] SLA de tickets falhou', e.message); }
   }
 
   static async tick() {
@@ -83,8 +88,46 @@ export class Scheduler {
     await ProspectDiscoveryService.runDue().catch(e => console.error('[Scheduler] descoberta de prospecção falhou', e));
     try { RadarService.reassessmentReminderPass(); } catch (e) { console.error('[Scheduler] lembrete de reavaliação do Radar falhou', e); }
     await this.repurchaseReminderPass().catch(e => console.error('[Scheduler] lembrete de recompra falhou', e));
+    await this.googleSheetsSyncPass().catch(e => console.error('[Scheduler] sync Google Sheets falhou', e));
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
     this.trialPass();
+  }
+
+  /**
+   * Google Sheets live sync (opt-in por org): reescreve a planilha viva de cada
+   * organização com google_sync_enabled = 1 — Vendas/Estoque/Resumo sempre no
+   * estado atual. Roda a cada tick horário; cada org é best-effort e isolada
+   * num try/catch (uma conexão Google expirada não derruba as demais).
+   */
+  static async googleSheetsSyncPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(google_sync_enabled, 0) = 1`).all() as any[];
+    } catch (e) { return; } // coluna ainda não migrada
+    for (const o of orgs) {
+      try {
+        const r = await GoogleAutomationService.syncLiveSheet(o.organization_id);
+        if (r.ok) console.log(`[Scheduler] Google Sheets sincronizado (org ${o.organization_id}): ${r.counts?.vendas || 0} vendas, ${r.counts?.estoque || 0} itens`);
+      } catch (e) { console.error(`[Scheduler] sync Google Sheets org ${o.organization_id} falhou`, e); }
+    }
+  }
+
+  /**
+   * SLA de primeira resposta por prioridade/segmento (opt-in por org): recalcula
+   * o prazo de cada ticket aberto, marca estouros e notifica o responsável no 1º
+   * estouro sem resposta. Cada org isolada num try/catch.
+   */
+  static ticketSlaPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(sla_monitor_enabled, 0) = 1`).all() as any[];
+    } catch (e) { return; } // colunas ainda não migradas
+    for (const o of orgs) {
+      try {
+        const r = TicketSlaService.evaluateOrg(o.organization_id);
+        if (r.notified > 0) console.log(`[Scheduler] SLA (org ${o.organization_id}): ${r.breached} estourado(s), ${r.notified} nova(s) notificação(ões)`);
+      } catch (e) { console.error(`[Scheduler] SLA org ${o.organization_id} falhou`, e); }
+    }
   }
 
   /**

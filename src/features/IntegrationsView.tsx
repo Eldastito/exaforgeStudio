@@ -57,17 +57,32 @@ export function IntegrationsView() {
   const [waWebhook, setWaWebhook] = useState<{ url: string; enforced: boolean; usingEnv: boolean; lastHit?: { at: number; ok: boolean; reason: string } | null } | null>(null);
   const [waCopied, setWaCopied] = useState(false);
 
-  const [auto, setAuto] = useState({ logOrders: false, emailAppointments: false, emailOrders: false });
+  const [auto, setAuto] = useState({ logOrders: false, emailAppointments: false, emailOrders: false, liveSync: false });
+  const [syncLastRun, setSyncLastRun] = useState<string | null>(null);
   const loadGoogleStatus = () => {
     apiFetch('/api/integrations/google/status').then(r => r.json()).then(setGoogleStatus).catch(() => {});
-    apiFetch('/api/integrations/google/automations').then(r => r.json()).then(d => setAuto({ logOrders: !!d.logOrders, emailAppointments: !!d.emailAppointments, emailOrders: !!d.emailOrders })).catch(() => {});
+    apiFetch('/api/integrations/google/automations').then(r => r.json()).then(d => { setAuto({ logOrders: !!d.logOrders, emailAppointments: !!d.emailAppointments, emailOrders: !!d.emailOrders, liveSync: !!d.syncEnabled }); setSyncLastRun(d.syncLastRun || null); }).catch(() => {});
   };
-  const toggleAuto = async (key: 'logOrders' | 'emailAppointments' | 'emailOrders') => {
+  const toggleAuto = async (key: 'logOrders' | 'emailAppointments' | 'emailOrders' | 'liveSync') => {
     const next = { ...auto, [key]: !auto[key] };
     setAuto(next);
     try {
       await apiFetch('/api/integrations/google/automations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: next[key] }) });
     } catch { setAuto(auto); toast.error('Erro ao salvar.'); }
+  };
+  const [syncBusy, setSyncBusy] = useState(false);
+  const syncNow = async () => {
+    setSyncBusy(true);
+    try {
+      const res = await apiFetch('/api/integrations/google/sheets/sync-now', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao sincronizar.'); return; }
+      setAuto((a) => ({ ...a, liveSync: true }));
+      setSyncLastRun(new Date().toISOString());
+      toast.success('Painel sincronizado! Abrindo a planilha...');
+      if (d.sheetUrl) window.open(d.sheetUrl, '_blank');
+    } catch { toast.error('Falha ao sincronizar.'); }
+    finally { setSyncBusy(false); }
   };
   const connectGoogle = async () => {
     setGoogleError(null);
@@ -352,7 +367,7 @@ export function IntegrationsView() {
                      <Button variant="ghost" size="sm" onClick={disconnectGoogle} className="text-rose-400 hover:text-rose-300">Desconectar</Button>
                   </div>
                   <p className="text-xs text-emerald-400/80 text-center">
-                    Conectado com acesso offline — a IA/servidor usa Drive, Agenda e Gmail (e em breve Sheets) mesmo com você offline. Agendamentos viram eventos no Google Calendar.
+                    Conectado com acesso offline — a IA/servidor usa Drive, Agenda, Gmail e Sheets mesmo com você offline. Agendamentos viram eventos no Google Calendar.
                   </p>
                   <div className="flex flex-wrap justify-center gap-2">
                     <Button variant="outline" size="sm" onClick={sendGmailTest} disabled={gmailBusy} className="border-zinc-700 text-zinc-200">
@@ -387,6 +402,23 @@ export function IntegrationsView() {
                       </div>
                     ))}
                     <p className="text-[10px] text-zinc-600">As confirmações por e-mail só são enviadas quando o cliente tem e-mail cadastrado (informado no agendamento ou no checkout da vitrine).</p>
+
+                    <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/10 px-3 py-2 mt-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-200">🔄 Painel vivo no Sheets (Vendas · Estoque · Resumo)</span>
+                        <button onClick={() => toggleAuto('liveSync')}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${auto.liveSync ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${auto.liveSync ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1">
+                        Uma planilha que se atualiza sozinha (de hora em hora): pedidos com status/pagamento atuais, níveis de estoque e um resumo de 30 dias. Fixe, filtre ou compartilhe como dashboard.
+                        {syncLastRun ? ` Última sincronização: ${new Date(syncLastRun).toLocaleString('pt-BR')}.` : ''}
+                      </p>
+                      <Button variant="outline" size="sm" onClick={syncNow} disabled={syncBusy} className="mt-2 border-zinc-700 text-zinc-200">
+                        {syncBusy ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : null} Sincronizar agora e abrir
+                      </Button>
+                    </div>
                   </div>
                </div>
             ) : (

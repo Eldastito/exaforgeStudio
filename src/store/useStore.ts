@@ -60,6 +60,8 @@ export type Ticket = {
   assignedTo?: string;
   handoffReason?: string;
   handoffSummary?: string;
+  slaState?: 'ok' | 'at_risk' | 'breached' | null;
+  slaSegment?: string | null;
 };
 
 export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'vision' | 'radar' | 'radar_consultant';
@@ -301,6 +303,8 @@ export const useStore = create<AppState>((set, get) => ({
           assignedTo: r.assigned_to || undefined,
           handoffSummary: r.handoff_summary || undefined,
           handoffReason: r.handoff_reason || undefined,
+          slaState: r.sla_state ?? null,
+          slaSegment: r.sla_segment || null,
         };
         messages[r.id] = r.last_message
           ? [{ id: `last_${r.id}`, contactId: r.contact_id, text: r.last_message, sender: 'contact', timestamp: toIso(r.last_message_at || r.updated_at) }]

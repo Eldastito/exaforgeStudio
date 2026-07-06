@@ -15,7 +15,7 @@ type Product = {
 };
 
 const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '' };
-const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1' };
+const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1', ean: '' };
 
 export function CatalogView() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -186,6 +186,7 @@ export function CatalogView() {
         price: '',
         stock_control_enabled: true,
         initial_stock: '1',
+        ean: d.extracted.ean || '',
       });
     } catch (e) {
       toast.error('Erro ao enviar a foto.');
@@ -214,6 +215,7 @@ export function CatalogView() {
           description: scanForm.description, price: parseFloat(scanForm.price),
           stock_control_enabled: scanForm.stock_control_enabled,
           initial_stock: parseInt(scanForm.initial_stock || '0', 10),
+          ean: scanForm.ean || null,
         }),
       });
       const created = await res.json().catch(() => ({}));
@@ -646,6 +648,14 @@ export function CatalogView() {
                   <label className="text-sm text-zinc-400 mb-1 block">Descrição</label>
                   <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 h-16 resize-none"
                     value={scanForm.description} onChange={(e) => setScanForm({ ...scanForm, description: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">EAN / GTIN (código de barras)</label>
+                  <input inputMode="numeric" placeholder="lido do código de barras, se legível" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                    value={scanForm.ean} onChange={(e) => setScanForm({ ...scanForm, ean: e.target.value.replace(/\D/g, '').slice(0, 14) })} />
+                  {scanResult.extracted.ean
+                    ? <p className="text-xs text-emerald-400 mt-1">Código de barras identificado na foto e validado. ✓</p>
+                    : <p className="text-xs text-zinc-500 mt-1">Nenhum código de barras legível na foto — preencha manualmente se quiser.</p>}
                 </div>
                 <div className="flex items-center gap-2">
                   <input id="scanstockctl" type="checkbox" checked={scanForm.stock_control_enabled}

@@ -261,7 +261,23 @@ export async function processIncomingMessage(
     }
   } catch (e) { console.error('[Supply] Falha ao processar resposta de fornecedor', e); }
 
-  // 4.5 PESQUISA DE SATISFAÇÃO: se há uma pesquisa aberta e o cliente respondeu
+  // 4.5a CSAT FOLLOW-UP: se uma pesquisa pediu detalhes ao detrator (follow_up_status='asked'),
+  // captura a próxima mensagem como comentário estruturado.
+  try {
+    const followUp = SatisfactionService.pendingFollowUp(orgId, contact.id);
+    if (followUp) {
+      SatisfactionService.captureComment(orgId, followUp.id, payload.text);
+      const sId = uuidv4();
+      const reply = 'Obrigado pelo feedback! Vou repassar para a equipe e vamos trabalhar nisso. 🙏';
+      db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`)
+        .run(sId, orgId, ticket.id, reply);
+      if (io) io.to(`org:${orgId}`).emit("new_message", { id: sId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: reply, sender: "bot", timestamp: new Date().toISOString() });
+      await MessageProviderService.sendMessage(channel.id, payload.senderId, reply);
+      return;
+    }
+  } catch (e) { console.error('[CSAT] Falha ao capturar follow-up', e); }
+
+  // 4.5b PESQUISA DE SATISFAÇÃO: se há uma pesquisa aberta e o cliente respondeu
   // com uma nota (1-5), registra, responde automaticamente (pede desculpas se
   // detrator) e encerra — sem acionar a IA normal nesta mensagem.
   try {
@@ -270,6 +286,9 @@ export async function processIncomingMessage(
       const score = SatisfactionService.parseScore(payload.text);
       if (score !== null) {
         SatisfactionService.record(orgId, pending.id, score, payload.text);
+        if (SatisfactionService.isDetractor(score)) {
+          SatisfactionService.markFollowUpAsked(orgId, pending.id);
+        }
         const first = (contact.name || '').trim().split(/\s+/)[0] || '';
         const reply = SatisfactionService.replyFor(score, first);
         const sId = uuidv4();
@@ -277,8 +296,6 @@ export async function processIncomingMessage(
           .run(sId, orgId, ticket.id, reply);
         if (io) io.to(`org:${orgId}`).emit("new_message", { id: sId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: reply, sender: "bot", timestamp: new Date().toISOString() });
         await MessageProviderService.sendMessage(channel.id, payload.senderId, reply);
-        // Detrator: apenas registra e pede desculpas (a IA segue cuidando da
-        // próxima mensagem do cliente). Sem acionar humano (escolha do produto).
         return;
       }
     }

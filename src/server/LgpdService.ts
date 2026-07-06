@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { v4 as uuidv4 } from "uuid";
 
 /**
  * LGPD — retenção de dados e direitos do titular.
@@ -80,5 +81,66 @@ export class LgpdService {
     });
     tx();
     return true;
+  }
+
+  // ---- Granular consent tracking ----
+
+  static grantConsent(orgId: string, contactId: string, consentType: string, opts: { legalBasis?: string; policyVersion?: string; channel?: string; actorId?: string } = {}): string {
+    const id = uuidv4();
+    const tx = db.transaction(() => {
+      db.prepare(`UPDATE contact_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND contact_id = ? AND consent_type = ? AND granted = 1`)
+        .run(orgId, contactId, consentType);
+      db.prepare(`INSERT INTO contact_consents (id, organization_id, contact_id, consent_type, legal_basis, policy_version, granted, granted_at, channel, actor_id) VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?)`)
+        .run(id, orgId, contactId, consentType, opts.legalBasis || null, opts.policyVersion || '1.0', opts.channel || null, opts.actorId || null);
+    });
+    tx();
+    return id;
+  }
+
+  static revokeConsent(orgId: string, contactId: string, consentType: string, actorId?: string): boolean {
+    const r = db.prepare(`UPDATE contact_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND contact_id = ? AND consent_type = ? AND granted = 1`)
+      .run(orgId, contactId, consentType);
+    return (r.changes || 0) > 0;
+  }
+
+  static getConsentsForContact(orgId: string, contactId: string): any[] {
+    try {
+      return db.prepare(`SELECT * FROM contact_consents WHERE organization_id = ? AND contact_id = ? ORDER BY created_at DESC`).all(orgId, contactId) as any[];
+    } catch { return []; }
+  }
+
+  static hasConsent(orgId: string, contactId: string, consentType: string): boolean {
+    const r = db.prepare(`SELECT 1 FROM contact_consents WHERE organization_id = ? AND contact_id = ? AND consent_type = ? AND granted = 1 LIMIT 1`).get(orgId, contactId, consentType) as any;
+    return !!r;
+  }
+
+  static getConsentConfig(orgId: string): { categories: string[]; bannerText: string; policyVersion: string } {
+    const o = db.prepare(`SELECT consent_categories, consent_banner_text, consent_policy_version FROM organization_settings WHERE organization_id = ?`).get(orgId) as any || {};
+    return {
+      categories: o.consent_categories ? JSON.parse(o.consent_categories) : ['marketing', 'dados_pessoais', 'perfilamento', 'comunicacoes'],
+      bannerText: o.consent_banner_text || '',
+      policyVersion: o.consent_policy_version || '1.0',
+    };
+  }
+
+  static updateConsentConfig(orgId: string, config: { categories?: string[]; bannerText?: string; policyVersion?: string }): void {
+    if (config.categories !== undefined)
+      db.prepare(`UPDATE organization_settings SET consent_categories = ? WHERE organization_id = ?`).run(JSON.stringify(config.categories), orgId);
+    if (config.bannerText !== undefined)
+      db.prepare(`UPDATE organization_settings SET consent_banner_text = ? WHERE organization_id = ?`).run(config.bannerText, orgId);
+    if (config.policyVersion !== undefined)
+      db.prepare(`UPDATE organization_settings SET consent_policy_version = ? WHERE organization_id = ?`).run(config.policyVersion, orgId);
+  }
+
+  static getConsentSummary(orgId: string): { type: string; granted: number; revoked: number }[] {
+    try {
+      return db.prepare(`
+        SELECT consent_type AS type,
+          SUM(CASE WHEN granted = 1 THEN 1 ELSE 0 END) AS granted,
+          SUM(CASE WHEN granted = 0 THEN 1 ELSE 0 END) AS revoked
+        FROM contact_consents WHERE organization_id = ?
+        GROUP BY consent_type ORDER BY consent_type
+      `).all(orgId) as any[];
+    } catch { return []; }
   }
 }

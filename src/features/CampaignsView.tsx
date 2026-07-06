@@ -40,7 +40,7 @@ export function CampaignsView() {
   type Recovery = {
     orderExpiry: { enabled: boolean; hours: number };
     pixReminder: { enabled: boolean; minutes: number; max: number };
-    abandonedCart: { enabled: boolean; hours: number; message: string };
+    abandonedCart: { enabled: boolean; hours: number; message: string; intentEnabled: boolean; intentThreshold: number };
     nps: { enabled: boolean; delayHours: number; message: string };
     referral: { enabled: boolean; rewardPercent: number; welcomePercent: number };
     repurchaseReminder: { enabled: boolean; days: number; message: string };
@@ -196,13 +196,25 @@ export function CampaignsView() {
               <Toggle on={recovery.abandonedCart.enabled} onClick={() => saveRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, enabled: !recovery.abandonedCart.enabled } })} />
             </div>
             {recovery.abandonedCart.enabled && (
-              <textarea
-                className="mt-2 w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-xs text-zinc-100 resize-none"
-                placeholder="Mensagem (use {nome}). Ex.: Oi {nome}! Ainda quer seguir? Posso te ajudar a finalizar."
-                value={recovery.abandonedCart.message}
-                onChange={e => setRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, message: e.target.value } })}
-                onBlur={e => saveRecovery(recovery)}
-              />
+              <>
+                <textarea
+                  className="mt-2 w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-xs text-zinc-100 resize-none"
+                  placeholder="Mensagem (use {nome}). Ex.: Oi {nome}! Ainda quer seguir? Posso te ajudar a finalizar."
+                  value={recovery.abandonedCart.message}
+                  onChange={e => setRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, message: e.target.value } })}
+                  onBlur={e => saveRecovery(recovery)}
+                />
+                <div className="flex items-center justify-between mt-2 pl-4">
+                  <p className="text-xs text-zinc-500 pr-3">
+                    🧠 Detectar intenção pré-proposta — cutucar leads com probabilidade de compra IA &ge;{' '}
+                    <input type="number" min="20" max="100" value={recovery.abandonedCart.intentThreshold || 60}
+                      onChange={e => setRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, intentThreshold: parseInt(e.target.value, 10) || 60 } })}
+                      onBlur={e => saveRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, intentThreshold: parseInt(e.target.value, 10) || 60 } })}
+                      className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 text-center text-zinc-200" />%, mesmo antes de virar proposta.
+                  </p>
+                  <Toggle on={recovery.abandonedCart.intentEnabled || false} onClick={() => saveRecovery({ ...recovery, abandonedCart: { ...recovery.abandonedCart, intentEnabled: !recovery.abandonedCart.intentEnabled } })} />
+                </div>
+              </>
             )}
           </div>
 

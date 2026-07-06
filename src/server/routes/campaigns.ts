@@ -51,6 +51,7 @@ router.get("/recovery", (req: AuthRequest, res): any => {
       SELECT order_expiry_enabled, order_expiry_hours,
              pix_reminder_enabled, pix_reminder_minutes, pix_reminder_max,
              abandoned_cart_enabled, abandoned_cart_hours, abandoned_cart_message,
+             abandoned_cart_intent_enabled, abandoned_cart_intent_threshold,
              nps_enabled, nps_delay_hours, nps_message,
              referral_enabled, referral_reward_percent, referral_welcome_percent,
              repurchase_reminder_enabled, repurchase_reminder_days, repurchase_reminder_message
@@ -59,7 +60,7 @@ router.get("/recovery", (req: AuthRequest, res): any => {
     res.json({
       orderExpiry: { enabled: !!o.order_expiry_enabled, hours: o.order_expiry_hours || 48 },
       pixReminder: { enabled: !!o.pix_reminder_enabled, minutes: o.pix_reminder_minutes || 30, max: o.pix_reminder_max || 3 },
-      abandonedCart: { enabled: !!o.abandoned_cart_enabled, hours: o.abandoned_cart_hours || 4, message: o.abandoned_cart_message || "" },
+      abandonedCart: { enabled: !!o.abandoned_cart_enabled, hours: o.abandoned_cart_hours || 4, message: o.abandoned_cart_message || "", intentEnabled: !!o.abandoned_cart_intent_enabled, intentThreshold: o.abandoned_cart_intent_threshold || 60 },
       nps: { enabled: !!o.nps_enabled, delayHours: o.nps_delay_hours || 24, message: o.nps_message || "" },
       referral: { enabled: !!o.referral_enabled, rewardPercent: o.referral_reward_percent || 10, welcomePercent: o.referral_welcome_percent || 10 },
       repurchaseReminder: { enabled: !!o.repurchase_reminder_enabled, days: o.repurchase_reminder_days || 30, message: o.repurchase_reminder_message || "" },
@@ -80,6 +81,7 @@ router.put("/recovery", (req: AuthRequest, res): any => {
         order_expiry_enabled = ?, order_expiry_hours = ?,
         pix_reminder_enabled = ?, pix_reminder_minutes = ?, pix_reminder_max = ?,
         abandoned_cart_enabled = ?, abandoned_cart_hours = ?, abandoned_cart_message = ?,
+        abandoned_cart_intent_enabled = ?, abandoned_cart_intent_threshold = ?,
         nps_enabled = ?, nps_delay_hours = ?, nps_message = ?,
         referral_enabled = ?, referral_reward_percent = ?, referral_welcome_percent = ?,
         repurchase_reminder_enabled = ?, repurchase_reminder_days = ?, repurchase_reminder_message = ?
@@ -88,6 +90,7 @@ router.put("/recovery", (req: AuthRequest, res): any => {
       orderExpiry?.enabled ? 1 : 0, clampInt(orderExpiry?.hours, 48, 1, 720),
       pixReminder?.enabled ? 1 : 0, clampInt(pixReminder?.minutes, 30, 5, 1440), clampInt(pixReminder?.max, 3, 1, 5),
       abandonedCart?.enabled ? 1 : 0, clampInt(abandonedCart?.hours, 4, 1, 168), abandonedCart?.message || null,
+      abandonedCart?.intentEnabled ? 1 : 0, clampInt(abandonedCart?.intentThreshold, 60, 20, 100),
       nps?.enabled ? 1 : 0, clampInt(nps?.delayHours, 24, 0, 720), nps?.message || null,
       referral?.enabled ? 1 : 0, clampInt(referral?.rewardPercent, 10, 1, 90), clampInt(referral?.welcomePercent, 10, 1, 90),
       repurchaseReminder?.enabled ? 1 : 0, clampInt(repurchaseReminder?.days, 30, 7, 365), repurchaseReminder?.message || null,

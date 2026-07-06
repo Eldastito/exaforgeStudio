@@ -2496,6 +2496,38 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN integration_token_hash TEXT`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_org_webhook_hash ON organization_settings (pay_webhook_secret_hash)`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_org_token_hash ON organization_settings (integration_token_hash)`); } catch(e){}
+
+  // LGPD: granular consent tracking per contact
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS contact_consents (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        consent_type TEXT NOT NULL,
+        legal_basis TEXT,
+        policy_version TEXT DEFAULT '1.0',
+        granted INTEGER DEFAULT 1,
+        granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        revoked_at DATETIME,
+        channel TEXT,
+        actor_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_contact_consents_org_contact ON contact_consents (organization_id, contact_id);
+      CREATE INDEX IF NOT EXISTS idx_contact_consents_type ON contact_consents (organization_id, consent_type);
+    `);
+  } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN consent_categories TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN consent_banner_text TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN consent_policy_version TEXT DEFAULT '1.0'`); } catch(e){}
+
+  // NPS: structured follow-up comments for detractors
+  try { db.exec(`ALTER TABLE satisfaction_surveys ADD COLUMN follow_up_status TEXT DEFAULT 'none'`); } catch(e){}
+
+  // Abandoned cart: pre-proposal intent detection
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_intent_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN abandoned_cart_intent_threshold INTEGER DEFAULT 60`); } catch(e){}
 };
 
 initDb();

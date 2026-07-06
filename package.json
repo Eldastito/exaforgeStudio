@@ -59,7 +59,8 @@
     "test:fashion-wearable": "tsx scripts/test-fashion-wearable.ts",
     "test:jwt-secret-persist": "tsx scripts/test-jwt-secret-persist.ts",
     "test:lgpd-nps-abandoned": "tsx scripts/test-lgpd-nps-abandoned.ts",
-    "test:sales-margin-trend": "tsx scripts/test-sales-margin-trend.ts"
+    "test:sales-margin-trend": "tsx scripts/test-sales-margin-trend.ts",
+    "test:seo-reactivation-categories": "tsx scripts/test-seo-reactivation-categories.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

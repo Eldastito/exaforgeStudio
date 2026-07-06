@@ -1031,12 +1031,71 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
 
-    // SEO por produto (ADR-028): a vitrine continua SPA, mas a URL de produto
-    // (/loja/:slug/produto/:productSlug) recebe o index.html com <title> e
-    // meta/OpenGraph injetados no servidor — é isso que crawlers e prévias de
-    // link (WhatsApp/redes) leem; o React assume normalmente no navegador.
-    // Sem SSR, sem framework novo: substituição de string no template
-    // estático. Qualquer falha cai no catch-all normal da SPA.
+    // ===== SEO: sitemap.xml + robots.txt =====
+    app.get('/sitemap.xml', (_req, res) => {
+      try {
+        const base = (process.env.APP_URL || '').replace(/\/$/, '');
+        if (!base) return res.status(404).end();
+        const stores = db.prepare(`SELECT slug FROM storefront_settings WHERE published = 1`).all() as any[];
+        let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+        for (const s of stores) {
+          const storeUrl = `${base}/loja/${encodeURIComponent(s.slug)}`;
+          xml += `  <url><loc>${storeUrl}</loc><changefreq>weekly</changefreq></url>\n`;
+          const orgId = (db.prepare(`SELECT organization_id FROM storefront_settings WHERE slug = ?`).get(s.slug) as any)?.organization_id;
+          if (!orgId) continue;
+          const products = db.prepare(
+            `SELECT slug FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible,1) = 1 AND slug IS NOT NULL`
+          ).all(orgId) as any[];
+          for (const p of products) {
+            xml += `  <url><loc>${storeUrl}/produto/${encodeURIComponent(p.slug)}</loc><changefreq>weekly</changefreq></url>\n`;
+          }
+        }
+        xml += `</urlset>`;
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        res.send(xml);
+      } catch { res.status(500).end(); }
+    });
+
+    app.get('/robots.txt', (_req, res) => {
+      const base = (process.env.APP_URL || '').replace(/\/$/, '');
+      let txt = `User-agent: *\nAllow: /loja/\nDisallow: /api/\nDisallow: /admin\n`;
+      if (base) txt += `\nSitemap: ${base}/sitemap.xml\n`;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(txt);
+    });
+
+    // SEO: store listing meta tags (/loja/:slug — sem produto)
+    app.get('/loja/:slug', (req, res, next) => {
+      try {
+        const store = db.prepare(
+          `SELECT organization_id, title, subtitle, slug FROM storefront_settings WHERE slug = ? AND published = 1`
+        ).get(req.params.slug) as any;
+        if (!store) return next();
+        const esc = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const title = store.title || 'Loja';
+        const desc = String(store.subtitle || '').slice(0, 160) || `Conheça os produtos de ${title}.`;
+        const base = (process.env.APP_URL || '').replace(/\/$/, '');
+        const pageUrl = base ? `${base}/loja/${encodeURIComponent(store.slug)}` : '';
+        const logo = db.prepare(`SELECT logo_url FROM organization_settings WHERE organization_id = ?`).get(store.organization_id) as any;
+        const imgUrl = logo?.logo_url ? (logo.logo_url.startsWith('http') ? logo.logo_url : (base ? `${base}${logo.logo_url}` : '')) : '';
+
+        let html = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
+        const meta =
+          `<title>${esc(title)}</title>` +
+          `<meta name="description" content="${esc(desc)}">` +
+          `<meta property="og:type" content="website">` +
+          `<meta property="og:title" content="${esc(title)}">` +
+          `<meta property="og:description" content="${esc(desc)}">` +
+          (pageUrl ? `<meta property="og:url" content="${esc(pageUrl)}">` : '') +
+          (pageUrl ? `<link rel="canonical" href="${esc(pageUrl)}">` : '') +
+          (imgUrl ? `<meta property="og:image" content="${esc(imgUrl)}">` : '');
+        html = html.replace(/<title>.*?<\/title>/s, meta);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+      } catch { next(); }
+    });
+
+    // SEO por produto (ADR-028): meta tags + JSON-LD schema.org
     app.get('/loja/:slug/produto/:productSlug', (req, res, next) => {
       try {
         const store = db.prepare(
@@ -1044,30 +1103,53 @@ async function startServer() {
         ).get(req.params.slug) as any;
         if (!store) return next();
         const product = db.prepare(
-          `SELECT id, name, description FROM products_services
+          `SELECT id, name, description, price, currency FROM products_services
            WHERE organization_id = ? AND slug = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1`
         ).get(store.organization_id, req.params.productSlug) as any;
         if (!product) return next();
-        const image = db.prepare(
-          `SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC LIMIT 1`
-        ).get(product.id) as any;
+        const images = db.prepare(
+          `SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC`
+        ).all(product.id) as any[];
 
         const esc = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const escJson = (s: string) => JSON.stringify(String(s || '')).slice(1, -1);
         const title = `${product.name} — ${store.title || 'Loja'}`;
         const desc = String(product.description || '').slice(0, 160) || `Compre ${product.name} na ${store.title || 'nossa loja'}.`;
         const base = (process.env.APP_URL || '').replace(/\/$/, '');
         const pageUrl = base ? `${base}/loja/${encodeURIComponent(store.slug)}/produto/${encodeURIComponent(req.params.productSlug)}` : '';
-        const imgUrl = image?.url ? (image.url.startsWith('http') ? image.url : (base ? `${base}${image.url}` : '')) : '';
+        const resolveImg = (url: string) => url.startsWith('http') ? url : (base ? `${base}${url}` : '');
+        const imgUrl = images[0]?.url ? resolveImg(images[0].url) : '';
+
+        const jsonLd: any = {
+          '@context': 'https://schema.org',
+          '@type': 'Product',
+          name: product.name,
+          description: product.description || desc,
+          ...(imgUrl ? { image: images.map((i: any) => resolveImg(i.url)).filter(Boolean) } : {}),
+          ...(pageUrl ? { url: pageUrl } : {}),
+          offers: {
+            '@type': 'Offer',
+            price: Number(product.price || 0).toFixed(2),
+            priceCurrency: product.currency || 'BRL',
+            availability: 'https://schema.org/InStock',
+          },
+        };
 
         let html = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
         const meta =
           `<title>${esc(title)}</title>` +
           `<meta name="description" content="${esc(desc)}">` +
+          (pageUrl ? `<link rel="canonical" href="${esc(pageUrl)}">` : '') +
           `<meta property="og:type" content="product">` +
           `<meta property="og:title" content="${esc(title)}">` +
           `<meta property="og:description" content="${esc(desc)}">` +
           (pageUrl ? `<meta property="og:url" content="${esc(pageUrl)}">` : '') +
-          (imgUrl ? `<meta property="og:image" content="${esc(imgUrl)}">` : '');
+          (imgUrl ? `<meta property="og:image" content="${esc(imgUrl)}">` : '') +
+          `<meta name="twitter:card" content="summary_large_image">` +
+          `<meta name="twitter:title" content="${esc(title)}">` +
+          `<meta name="twitter:description" content="${esc(desc)}">` +
+          (imgUrl ? `<meta name="twitter:image" content="${esc(imgUrl)}">` : '') +
+          `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`;
         html = html.replace(/<title>.*?<\/title>/s, meta);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(html);

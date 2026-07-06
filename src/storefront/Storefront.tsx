@@ -272,6 +272,20 @@ export function Storefront() {
       .filter((c) => c.items.length > 0);
   }, [data, onlyFavs, productById]);
 
+  // Categorias: agrupa produtos que possuem categoria definida.
+  const categorySections = useMemo(() => {
+    if (onlyFavs || !products.length) return [];
+    const cats = new Map<string, Product[]>();
+    for (const p of products) {
+      if (p.category) {
+        const list = cats.get(p.category) || [];
+        list.push(p);
+        cats.set(p.category, list);
+      }
+    }
+    return Array.from(cats.entries()).map(([cat, items]) => ({ category: cat, items }));
+  }, [products, onlyFavs]);
+
   // Fundo conforme tema.
   const pageBg = night
     ? 'bg-[#070914] text-white'
@@ -356,9 +370,32 @@ export function Storefront() {
               </section>
             ))}
 
+            {/* Categorias */}
+            {categorySections.map((sec) => (
+              <section key={`cat-${sec.category}`} className="mt-8">
+                <h2 className="mb-3 text-lg font-semibold tracking-tight">{sec.category}</h2>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {sec.items.map((p) => (
+                    <ProductCard
+                      key={`cat-${p.id}`}
+                      product={p}
+                      accent={accent}
+                      mode={mode}
+                      isFavorite={favorites.includes(p.id)}
+                      onToggleFavorite={toggleFavorite}
+                      onOpen={openProduct}
+                      canTryOn={!!fashionEligibleIds?.has(p.id)}
+                      isTryOnPicked={tryOnPicks.includes(p.id)}
+                      onToggleTryOn={toggleTryOnPick}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+
             {/* Grid */}
             <div className="mt-8">
-              {collectionSections.length > 0 && products.length > 0 && (
+              {(collectionSections.length > 0 || categorySections.length > 0) && products.length > 0 && (
                 <h2 className="mb-3 text-lg font-semibold tracking-tight">Todos os produtos</h2>
               )}
               {products.length === 0 ? (

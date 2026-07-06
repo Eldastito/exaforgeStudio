@@ -75,6 +75,7 @@ function productPayload(orgId: string, p: any): any {
     currency: p.currency || "BRL",
     sale_mode: p.sale_mode || "unit",
     sale_options: parseJson(p.sale_options_json, {}),
+    category: p.category || null,
     featured: !!p.featured,
     available,
     images: images.map(i => i.url),

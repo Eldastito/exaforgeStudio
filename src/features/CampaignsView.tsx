@@ -35,7 +35,7 @@ export function CampaignsView() {
   const [preview, setPreview] = useState<{ total: number; sample: string[] } | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const [auto, setAuto] = useState<{ enabled: boolean; days: number; message: string } | null>(null);
+  const [auto, setAuto] = useState<{ enabled: boolean; days: number; message: string; message2: string; message3: string } | null>(null);
 
   type Recovery = {
     orderExpiry: { enabled: boolean; hours: number };
@@ -52,8 +52,8 @@ export function CampaignsView() {
   const loadRecovery = () => apiFetch('/api/campaigns/recovery').then(r => r.json()).then(setRecovery).catch(() => {});
   useEffect(() => { load(); loadAuto(); loadRecovery(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
 
-  const saveAuto = async (patch: Partial<{ enabled: boolean; days: number; message: string }>) => {
-    const next = { enabled: auto?.enabled || false, days: auto?.days || 60, message: auto?.message || '', ...patch };
+  const saveAuto = async (patch: Partial<{ enabled: boolean; days: number; message: string; message2: string; message3: string }>) => {
+    const next = { enabled: auto?.enabled || false, days: auto?.days || 60, message: auto?.message || '', message2: auto?.message2 || '', message3: auto?.message3 || '', ...patch };
     setAuto(next);
     await apiFetch('/api/campaigns/settings', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
@@ -150,13 +150,38 @@ export function CampaignsView() {
             </button>
           </div>
           {auto.enabled && (
-            <textarea
-              className="mt-3 w-full h-16 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
-              placeholder="Mensagem (use {nome}). Ex.: Olá {nome}! Sentimos sua falta..."
-              value={auto.message}
-              onChange={e => setAuto({ ...auto, message: e.target.value })}
-              onBlur={e => saveAuto({ message: e.target.value })}
-            />
+            <div className="mt-3 space-y-2">
+              <div>
+                <label className="text-xs text-zinc-500">Etapa 1 — primeiro contato</label>
+                <textarea
+                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+                  placeholder="Olá {nome}! Sentimos sua falta..."
+                  value={auto.message}
+                  onChange={e => setAuto({ ...auto, message: e.target.value })}
+                  onBlur={e => saveAuto({ message: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500">Etapa 2 — reforço (1 semana depois)</label>
+                <textarea
+                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+                  placeholder="Oi {nome}! Ainda temos condições especiais..."
+                  value={auto.message2}
+                  onChange={e => setAuto({ ...auto, message2: e.target.value })}
+                  onBlur={e => saveAuto({ message2: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500">Etapa 3 — última chamada (2 semanas depois)</label>
+                <textarea
+                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none"
+                  placeholder="Última chamada, {nome}! Preparamos algo exclusivo..."
+                  value={auto.message3}
+                  onChange={e => setAuto({ ...auto, message3: e.target.value })}
+                  onBlur={e => saveAuto({ message3: e.target.value })}
+                />
+              </div>
+            </div>
           )}
         </div>
       )}

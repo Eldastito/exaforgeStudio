@@ -17,6 +17,7 @@ export interface Product {
   currency: string;
   sale_mode: SaleMode;
   sale_options: SaleOptions;
+  category: string | null;
   featured: boolean;
   available: boolean;
   images: string[];

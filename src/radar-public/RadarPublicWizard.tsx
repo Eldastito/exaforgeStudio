@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode, ChangeEvent, CSSProperties } from 'react';
+import type { ReactNode, ChangeEvent, CSSProperties, FormEvent } from 'react';
 import {
   Radar, ArrowRight, ArrowLeft, ShieldCheck, Clock, CheckCircle2, Loader2,
   HelpCircle, Sparkles, TrendingUp, Lock,
@@ -161,7 +161,7 @@ export function RadarPublicWizard() {
             }}
           />
         )}
-        {step === 'result' && result && <ResultStep result={result} />}
+        {step === 'result' && result && <ResultStep result={result} token={token} />}
       </main>
       <Footer />
     </div>
@@ -467,7 +467,60 @@ function QuestionsStep({
   );
 }
 
-function ResultStep({ result }: { result: ResultPayload }) {
+function ConsultationForm({ token }: { token: string }) {
+  const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' });
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSending(true); setErr(null);
+    try {
+      await api(`/sessions/${encodeURIComponent(token)}/request-consultation`, {
+        method: 'POST', body: JSON.stringify(form),
+      });
+      setSent(true);
+    } catch (ex: any) { setErr(ex.message || 'Erro ao enviar.'); }
+    finally { setSending(false); }
+  };
+
+  if (sent) {
+    return (
+      <div className="mt-10 rounded-xl border p-6 text-center" style={{ borderColor: 'rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)' }}>
+        <CheckCircle2 size={32} className="mx-auto" style={{ color: teal }} />
+        <div className="mt-3 font-semibold text-lg">Solicitação enviada!</div>
+        <p className="mt-1.5 text-sm text-white/60">Nosso time entrará em contato em breve para aprofundar a análise.</p>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-10 rounded-xl border p-6 space-y-4" style={{ borderColor: 'rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)' }}>
+      <div className="font-semibold text-lg">Quer o diagnóstico completo, com plano de 90 dias?</div>
+      <p className="text-sm text-white/60">Preencha abaixo e nosso time entrará em contato para aprofundar essa análise.</p>
+      <input required placeholder="Seu nome" className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-white/30"
+        value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <input type="email" placeholder="E-mail" className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-white/30"
+          value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+        <input type="tel" placeholder="Telefone / WhatsApp" className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-white/30"
+          value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+      </div>
+      <textarea placeholder="Mensagem (opcional)" rows={3}
+        className="w-full bg-black/30 border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-white/30 resize-none"
+        value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} />
+      {err && <p className="text-sm text-red-400">{err}</p>}
+      <button type="submit" disabled={sending}
+        className="inline-flex items-center gap-2 rounded-lg px-5 py-3 font-semibold text-[#0b0f12] hover:opacity-90 disabled:opacity-40"
+        style={{ background: teal }}>
+        {sending ? <Loader2 className="animate-spin" size={16} /> : <>Solicitar consultoria <ArrowRight size={16} /></>}
+      </button>
+    </form>
+  );
+}
+
+function ResultStep({ result, token }: { result: ResultPayload; token: string | null }) {
   const score = result.session.overallMaturityScore;
   const level = result.session.maturityLevel;
   const sorted = [...result.pillarScores].filter((p) => p.score != null).sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
@@ -528,20 +581,7 @@ function ResultStep({ result }: { result: ResultPayload }) {
         </div>
       )}
 
-      <div className="mt-10 rounded-xl border p-6" style={{ borderColor: 'rgba(20,184,166,0.3)', background: 'rgba(20,184,166,0.06)' }}>
-        <div className="font-semibold text-lg">Quer o diagnóstico completo, com plano de 90 dias?</div>
-        <p className="mt-1.5 text-sm text-white/60">
-          Fale com nosso time para aprofundar essa análise com dados reais da sua operação.
-        </p>
-        <a
-          href="https://wa.me/?text=Quero%20o%20diagn%C3%B3stico%20executivo%20do%20ZappFlow"
-          target="_blank" rel="noopener noreferrer"
-          className="mt-4 inline-flex items-center gap-2 rounded-lg px-5 py-3 font-semibold text-[#0b0f12] hover:opacity-90"
-          style={{ background: teal }}
-        >
-          Falar com o time <ArrowRight size={16} />
-        </a>
-      </div>
+      {token && <ConsultationForm token={token} />}
     </div>
   );
 }

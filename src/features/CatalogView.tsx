@@ -14,7 +14,7 @@ type Product = {
   fashion_wearable?: number | null; fashion_wearable_source?: string | null;
 };
 
-const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '' };
+const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '' };
 const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1' };
 
 export function CatalogView() {
@@ -87,6 +87,7 @@ export function CatalogView() {
       initial_stock: String(p.quantity_available ?? 0),
       min_price: (p as any).min_price != null ? String((p as any).min_price) : '',
       fashion_wearable: p.fashion_wearable,
+      ean: (p as any).ean || '',
     });
     setShowModal(true);
   };
@@ -103,6 +104,7 @@ export function CatalogView() {
             quantity: form.stock_control_enabled ? parseInt(form.initial_stock || '0', 10) : undefined,
             min_price: form.min_price === '' ? null : parseFloat(form.min_price),
             fashion_wearable: form.fashion_wearable,
+            ean: form.ean?.trim() || null,
           }),
         });
       } else {
@@ -111,6 +113,7 @@ export function CatalogView() {
           body: JSON.stringify({
             ...form, price: parseFloat(form.price),
             initial_stock: parseInt(form.initial_stock || '0', 10),
+            ean: form.ean?.trim() || null,
           }),
         });
       }
@@ -463,6 +466,13 @@ export function CatalogView() {
                     value={form.min_price} onChange={(e) => setForm({...form, min_price: e.target.value})} />
                 </div>
               </div>
+              {form.type === 'product' && (
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">EAN / GTIN <span className="text-zinc-600">(código de barras)</span></label>
+                  <input type="text" maxLength={14} placeholder="opcional" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 font-mono"
+                    value={form.ean || ''} onChange={(e) => setForm({...form, ean: e.target.value.replace(/\D/g, '').slice(0, 14)})} />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <input id="stockctl" type="checkbox" checked={form.stock_control_enabled}
                   onChange={(e) => setForm({...form, stock_control_enabled: e.target.checked})} />

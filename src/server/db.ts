@@ -1060,6 +1060,7 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN is_supplier INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN supplier_categories TEXT`); } catch(e){} // CSV de categorias atendidas
   try { db.exec(`ALTER TABLE products_services ADD COLUMN category TEXT`); } catch(e){}    // categoria do produto (casa com a do fornecedor)
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN ean TEXT`); } catch(e){}         // EAN/GTIN do produto (extraído da NF-e ou manual)
   // Smart Inventory — backlog ADR-024: vínculo da entrada de estoque com o
   // fornecedor do CRM (quando o nome da nota casa com um contato is_supplier=1),
   // chave de acesso da NF-e para dedupe de importação, e markup padrão
@@ -1640,11 +1641,11 @@ const initDb = () => {
   // módulo opcional 'radar' (opt-in, ver verticals.ts — mesmo padrão do 'vms':
   // nenhuma vertical liga sozinha). Score é 100% determinístico (motor em
   // RadarService, ver PRD_ZappFlow_Radar_de_Execucao_IA); IA generativa (Fase 4,
-  // ainda não implementada) nunca decide score/prioridade.
+  // RadarNarrativeService.ts) nunca decide score/prioridade.
   //
   // organization_id é NULLABLE em radar_sessions/radar_answers/radar_pillar_scores/
   // radar_recommendations/radar_consent_records de propósito: sessões públicas
-  // pré-conversão (visitante anônimo, Fase 2 — ainda não implementada) não têm
+  // pré-conversão (visitante anônimo, Fase 2 — RadarPublicService.ts) não têm
   // tenant até virarem lead. É a ÚNICA família de tabelas do projeto com essa
   // exceção ao padrão "organization_id NOT NULL" — todo código que lê estas
   // tabelas deve tratar organization_id nulo como "ainda não é de nenhum tenant"
@@ -1845,6 +1846,24 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_radar_consent_session ON radar_consent_records(session_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do Radar de Execução IA', e); }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS radar_consultation_requests (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        contact_name TEXT NOT NULL,
+        contact_email TEXT,
+        contact_phone TEXT,
+        message TEXT,
+        overall_score REAL,
+        maturity_level TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_radar_consultation_session ON radar_consultation_requests(session_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar radar_consultation_requests', e); }
 
   // Seed idempotente do template padrão "Diagnóstico Rápido ZappFlow" (PRD §10,
   // adaptado a perguntas de escala 0-4 diretamente pontuáveis) + catálogo inicial

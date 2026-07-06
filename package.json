@@ -60,7 +60,8 @@
     "test:jwt-secret-persist": "tsx scripts/test-jwt-secret-persist.ts",
     "test:lgpd-nps-abandoned": "tsx scripts/test-lgpd-nps-abandoned.ts",
     "test:sales-margin-trend": "tsx scripts/test-sales-margin-trend.ts",
-    "test:seo-reactivation-categories": "tsx scripts/test-seo-reactivation-categories.ts"
+    "test:seo-reactivation-categories": "tsx scripts/test-seo-reactivation-categories.ts",
+    "test:ean-radar-consultation": "tsx scripts/test-ean-radar-consultation.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

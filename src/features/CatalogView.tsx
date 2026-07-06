@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '@/src/lib/toast';
-import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2, Receipt, BarChart3 } from 'lucide-react';
+import { Package, Plus, X, Pencil, Upload, AlertTriangle, Boxes, Trash2, Sparkles, Camera, Loader2, Receipt, BarChart3, Download, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
@@ -824,12 +824,18 @@ export function CatalogView() {
       {/* Modal Mais/Menos Vendidos (ADR-027) */}
       {showSales && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[640px] max-h-[90vh] overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-xl w-[calc(100%-2rem)] max-w-[720px] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
                 <BarChart3 className="w-5 h-5 text-indigo-400" /> Mais e menos vendidos
               </h3>
-              <button className="text-zinc-400 hover:text-white" onClick={() => setShowSales(false)}><X className="w-5 h-5" /></button>
+              <div className="flex items-center gap-2">
+                <button className="text-xs text-zinc-400 hover:text-indigo-300 flex items-center gap-1 border border-zinc-700 rounded px-2 py-1"
+                  onClick={() => { window.open(`/api/products/sales-analytics/csv?days=${salesDays}`, '_blank'); }}>
+                  <Download className="w-3.5 h-3.5" /> CSV
+                </button>
+                <button className="text-zinc-400 hover:text-white" onClick={() => setShowSales(false)}><X className="w-5 h-5" /></button>
+              </div>
             </div>
 
             <div className="flex items-center gap-2 mb-4">
@@ -845,21 +851,67 @@ export function CatalogView() {
 
             {!salesLoading && salesData && (
               <div className="space-y-5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Unidades</div>
+                    <div className="text-base font-semibold text-zinc-100 tabular-nums">{salesData.totals.unitsSold}</div>
+                  </div>
+                  <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Receita</div>
+                    <div className="text-base font-semibold text-emerald-300 tabular-nums">R$ {Number(salesData.totals.revenue).toFixed(2)}</div>
+                  </div>
+                  <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Custo</div>
+                    <div className="text-base font-semibold text-zinc-300 tabular-nums">R$ {Number(salesData.totals.cost || 0).toFixed(2)}</div>
+                  </div>
+                  <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Lucro</div>
+                    <div className="text-base font-semibold text-indigo-300 tabular-nums">R$ {(Number(salesData.totals.revenue) - Number(salesData.totals.cost || 0)).toFixed(2)}</div>
+                  </div>
+                </div>
                 <p className="text-xs text-zinc-500">
-                  {salesData.totals.unitsSold} unidade(s) vendida(s) · R$ {Number(salesData.totals.revenue).toFixed(2)} em receita ·{' '}
-                  {salesData.totals.productsWithSales} de {salesData.totals.productsActive} produto(s) ativo(s) venderam no período.
+                  {salesData.totals.productsWithSales} de {salesData.totals.productsActive} produto(s) ativo(s) venderam no periodo.
                 </p>
+
+                {salesData.trend && salesData.trend.length > 1 && (() => {
+                  const maxRev = Math.max(...salesData.trend.map((t: any) => t.revenue), 1);
+                  return (
+                    <div>
+                      <h4 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 text-indigo-400" /> Tendencia de receita
+                      </h4>
+                      <div className="flex items-end gap-px h-20 bg-zinc-800/30 rounded-lg p-2">
+                        {salesData.trend.map((t: any, i: number) => (
+                          <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div className="w-full rounded-t bg-emerald-500/70 transition-all"
+                              style={{ height: `${Math.max(2, (t.revenue / maxRev) * 100)}%` }} />
+                            <div className="absolute -top-8 bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-300 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-10 tabular-nums">
+                              R$ {t.revenue.toFixed(0)} | {t.units} un
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-[9px] text-zinc-600">{salesData.trend[0]?.period}</span>
+                        <span className="text-[9px] text-zinc-600">{salesData.trend[salesData.trend.length - 1]?.period}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div>
                   <h4 className="text-sm font-semibold text-emerald-300 mb-2">Mais vendidos</h4>
                   {salesData.top.length === 0 ? (
-                    <p className="text-sm text-zinc-500">Nenhuma venda registrada no período.</p>
+                    <p className="text-sm text-zinc-500">Nenhuma venda registrada no periodo.</p>
                   ) : (
                     <div className="space-y-1">
                       {salesData.top.map((p: any, i: number) => (
                         <div key={p.id} className="flex items-center justify-between text-sm py-1 border-b border-zinc-800/60">
                           <span className="text-zinc-200"><span className="text-zinc-600 mr-2 tabular-nums">{i + 1}.</span>{p.name}</span>
-                          <span className="text-zinc-400 tabular-nums shrink-0">{p.units_sold} un · R$ {Number(p.revenue).toFixed(2)}</span>
+                          <span className="text-zinc-400 tabular-nums shrink-0 flex items-center gap-2">
+                            {p.units_sold} un · R$ {Number(p.revenue).toFixed(2)}
+                            {p.margin_percent != null && <span className={`text-xs px-1.5 py-0.5 rounded ${p.margin_percent >= 30 ? 'bg-emerald-500/15 text-emerald-400' : p.margin_percent >= 10 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'}`}>{p.margin_percent}%</span>}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -867,13 +919,14 @@ export function CatalogView() {
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-semibold text-amber-300 mb-2">Menos vendidos (atenção: parados na vitrine)</h4>
+                  <h4 className="text-sm font-semibold text-amber-300 mb-2">Menos vendidos (atencao: parados na vitrine)</h4>
                   <div className="space-y-1">
                     {salesData.bottom.map((p: any) => (
                       <div key={p.id} className="flex items-center justify-between text-sm py-1 border-b border-zinc-800/60">
                         <span className="text-zinc-200">{p.name}</span>
-                        <span className={`tabular-nums shrink-0 ${p.units_sold === 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                        <span className={`tabular-nums shrink-0 flex items-center gap-2 ${p.units_sold === 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
                           {p.units_sold === 0 ? 'zero vendas' : `${p.units_sold} un · R$ ${Number(p.revenue).toFixed(2)}`}
+                          {p.margin_percent != null && p.units_sold > 0 && <span className={`text-xs px-1.5 py-0.5 rounded ${p.margin_percent >= 30 ? 'bg-emerald-500/15 text-emerald-400' : p.margin_percent >= 10 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'}`}>{p.margin_percent}%</span>}
                         </span>
                       </div>
                     ))}

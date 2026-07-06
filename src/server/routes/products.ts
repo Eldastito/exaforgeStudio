@@ -587,12 +587,16 @@ router.get("/sales-analytics", (req: AuthRequest, res): any => {
   try {
     const rows = db.prepare(`
       SELECT ps.id, ps.name, ps.price,
+        COALESCE(inv.avg_cost, 0) AS avg_cost,
         COALESCE(s.units, 0) AS units_sold,
         COALESCE(s.revenue, 0) AS revenue,
+        COALESCE(s.cost_total, 0) AS cost_total,
         s.last_sale_at AS last_sale_at
       FROM products_services ps
+      LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
       LEFT JOIN (
-        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue, MAX(o.created_at) last_sale_at
+        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue,
+          SUM(oi.unit_cost * oi.quantity) cost_total, MAX(o.created_at) last_sale_at
         FROM order_items oi JOIN orders o ON o.id = oi.order_id
         WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
           AND o.created_at >= datetime('now', ?)
@@ -602,21 +606,83 @@ router.get("/sales-analytics", (req: AuthRequest, res): any => {
       ORDER BY units_sold DESC, revenue DESC
     `).all(orgId, `-${days} days`, orgId) as any[];
 
+    const enrich = (r: any) => {
+      const margin = r.revenue > 0 ? Math.round((r.revenue - r.cost_total) / r.revenue * 1000) / 10 : null;
+      return { ...r, margin_percent: margin };
+    };
     const withSales = rows.filter((r) => r.units_sold > 0);
+
+    const trendRows = db.prepare(`
+      SELECT strftime(?, o.created_at) AS period,
+        SUM(oi.line_total) AS revenue,
+        SUM(oi.unit_cost * oi.quantity) AS cost,
+        SUM(oi.quantity) AS units
+      FROM order_items oi JOIN orders o ON o.id = oi.order_id
+      WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
+        AND o.created_at >= datetime('now', ?)
+      GROUP BY period ORDER BY period
+    `).all(days <= 30 ? '%Y-%m-%d' : '%Y-%W', orgId, `-${days} days`) as any[];
+
     res.json({
       days,
-      top: withSales.slice(0, 10),
-      bottom: rows.slice(-10).reverse(), // os 10 piores (inclui zero-venda), do pior pro "menos pior"
+      top: withSales.slice(0, 10).map(enrich),
+      bottom: rows.slice(-10).reverse().map(enrich),
+      trend: trendRows.map(t => ({
+        period: t.period,
+        revenue: Math.round((t.revenue || 0) * 100) / 100,
+        cost: Math.round((t.cost || 0) * 100) / 100,
+        profit: Math.round(((t.revenue || 0) - (t.cost || 0)) * 100) / 100,
+        units: t.units || 0,
+      })),
       totals: {
         productsActive: rows.length,
         productsWithSales: withSales.length,
         unitsSold: withSales.reduce((s, r) => s + r.units_sold, 0),
         revenue: Math.round(withSales.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+        cost: Math.round(withSales.reduce((s, r) => s + r.cost_total, 0) * 100) / 100,
       },
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/products/sales-analytics/csv — exportação CSV das vendas por produto
+router.get("/sales-analytics/csv", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
+  try {
+    const rows = db.prepare(`
+      SELECT ps.name, ps.price,
+        COALESCE(inv.avg_cost, 0) AS avg_cost,
+        COALESCE(s.units, 0) AS units_sold,
+        COALESCE(s.revenue, 0) AS revenue,
+        COALESCE(s.cost_total, 0) AS cost_total,
+        s.last_sale_at
+      FROM products_services ps
+      LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
+      LEFT JOIN (
+        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue,
+          SUM(oi.unit_cost * oi.quantity) cost_total, MAX(o.created_at) last_sale_at
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
+          AND o.created_at >= datetime('now', ?)
+        GROUP BY oi.product_service_id
+      ) s ON s.product_service_id = ps.id
+      WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
+      ORDER BY units_sold DESC, revenue DESC
+    `).all(orgId, `-${days} days`, orgId) as any[];
+
+    const header = 'Produto;Preço;Custo Médio;Unidades Vendidas;Receita;Custo Total;Margem %;Última Venda\n';
+    const csv = rows.map((r: any) => {
+      const margin = r.revenue > 0 ? Math.round((r.revenue - r.cost_total) / r.revenue * 1000) / 10 : '';
+      return `"${(r.name || '').replace(/"/g, '""')}";${Number(r.price || 0).toFixed(2)};${Number(r.avg_cost).toFixed(2)};${r.units_sold};${Number(r.revenue).toFixed(2)};${Number(r.cost_total).toFixed(2)};${margin};${r.last_sale_at || ''}`;
+    }).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="vendas-${days}d.csv"`);
+    res.send('﻿' + header + csv);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/products — produtos com estoque ao vivo (disponível e vendável)

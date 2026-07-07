@@ -1009,10 +1009,26 @@ function RadarSettingsPanel() {
   const save = async (patch: Partial<RadarAutoSend>) => {
     if (!cfg) return;
     const next = { ...cfg, ...patch };
-    setCfg(next);
-    await apiFetch('/api/radar/settings', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
-    }).catch(() => {});
+    setCfg(next); // otimista
+    try {
+      const res = await apiFetch('/api/radar/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+      });
+      const d = await res.json().catch(() => ({}));
+      // Fonte da verdade é o backend — se o servidor não persistiu, volta pro
+      // estado real (evita "salvou na UI mas não no banco").
+      if (res.ok && (typeof d?.autoSendEnabled === 'boolean' || typeof d?.autoSendChannel === 'string')) {
+        setCfg({
+          autoSendEnabled: !!d.autoSendEnabled,
+          autoSendChannel: (d.autoSendChannel === 'email' ? 'email' : 'whatsapp'),
+        });
+      } else if (!res.ok) {
+        // Reverte o otimismo em erro
+        setCfg(cfg);
+      }
+    } catch {
+      setCfg(cfg);
+    }
   };
 
   const Toggle = ({ on, onClick }: { on: boolean; onClick: () => void }) => (

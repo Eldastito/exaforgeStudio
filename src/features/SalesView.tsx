@@ -153,16 +153,26 @@ export function SalesView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <ShoppingCart className="w-6 h-6 text-indigo-400" /> Vendas
+          <p className="zf-kicker mb-1">Pedidos & Estoque</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <ShoppingCart className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Vendas
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Pedidos, estoque e status de entrega — vendas pelo WhatsApp via IA</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex rounded-lg border border-zinc-800 bg-zinc-900/60 p-1">
+        <div
+          className="flex rounded-lg border p-1"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'rgba(21, 41, 66, 0.6)' }}
+        >
           {PERIODS.map(p => (
             <button key={p.id} onClick={() => setPeriod(p.id)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${period === p.id ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${period === p.id ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+              style={period === p.id ? {
+                background: 'linear-gradient(135deg, var(--color-flow), var(--color-intelligence))',
+                color: '#041310',
+                boxShadow: '0 6px 18px rgba(34, 211, 182, 0.28)',
+              } : undefined}
+            >
               {p.label}
             </button>
           ))}
@@ -405,8 +415,8 @@ function PixModal({ data, onClose }: { data: { qrCode: string; qrCodeBase64: str
 function SummaryCard({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className={`text-xl font-bold mt-1 ${accent}`}>{value}</p>
+      <p className="zf-data-label">{label}</p>
+      <p className={`zf-data-value text-xl mt-1 ${accent}`}>{value}</p>
     </div>
   );
 }

@@ -1,114 +1,173 @@
+/*
+  ZappFlow Design System v1.1 — src/index.css
+  Objetivo: aplicar a identidade visual do ZappFlow sem alterar rotas,
+  estado, permissões, integrações ou regras de negócio.
+
+  Este arquivo é a base v1.1 fornecida no doc "ZappFlow — Implementação
+  do Design System no App" MESCLADA com os tokens do Revenue Intelligence
+  Center (RIC), animações .ric-* e utilitários rounded-ric-* já em uso
+  hoje pelo Diretor IA/RIE — preservar essas telas é inegociável.
+
+  Fontes:
+    npm i @fontsource-variable/manrope @fontsource-variable/sora
+  Imports abaixo são idempotentes; se os pacotes não estiverem, o CSS
+  ainda funciona (cai no fallback Inter/system).
+*/
+
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/sora";
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0f172a;
-  --color-foreground: #f8fafc;
-  --color-card: #1e293b;
-  --color-card-foreground: #f8fafc;
-  --color-popover: #0f172a;
-  --color-popover-foreground: #f8fafc;
-  --color-primary: #4f46e5;
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #1e293b;
-  --color-secondary-foreground: #f8fafc;
-  --color-muted: #1e293b;
-  --color-muted-foreground: #94a3b8;
-  --color-accent: #334155;
-  --color-accent-foreground: #f8fafc;
-  --color-destructive: #ef4444;
-  --color-destructive-foreground: #f8fafc;
-  --color-border: #334155;
-  --color-input: #0f172a;
-  --color-ring: #6366f1;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  /* ==== Base — compatível com a estrutura atual (Tailwind v4) ==== */
+  --color-background: #07111f;
+  --color-foreground: #f5f8fc;
+  --color-card: #0d1a2b;
+  --color-card-foreground: #f5f8fc;
+  --color-popover: #0b1727;
+  --color-popover-foreground: #f5f8fc;
+  --color-primary: #22d3b6;
+  --color-primary-foreground: #041310;
+  --color-secondary: #152942;
+  --color-secondary-foreground: #ecf4fb;
+  --color-muted: #102137;
+  --color-muted-foreground: #9baec1;
+  --color-accent: #1b3552;
+  --color-accent-foreground: #f5f8fc;
+  --color-destructive: #f56c78;
+  --color-destructive-foreground: #fff7f7;
+  --color-border: #243b58;
+  --color-input: #0b1727;
+  --color-ring: #22d3b6;
 
-  /* ===== Revenue Intelligence Center (RIC) — tokens =====
-     Evoluem o dark+indigo do app em direção a uma "cabine de comando", sem
-     virar identidade paralela. Ver docs/PRD-UXUI-REVENUE-INTELLIGENCE-CENTER.md */
-  --color-ric-bg:         #0b1020;  /* fundo da tela RIC (entre o #0f172a atual e o #111633 proposto) */
-  --color-ric-surface:    #111833;  /* card base */
-  --color-ric-surface-2:  #16203f;  /* card elevado / hover */
-  --color-ric-border:     #243152;  /* borda sutil */
-  --color-ric-grid:       #1b2440;  /* linhas de gráfico */
+  /* ==== Identidade ZappFlow — tokens semânticos ==== */
+  --color-flow: #22d3b6;
+  --color-flow-strong: #16bfa6;
+  --color-flow-soft: #153d42;
+  --color-intelligence: #6395ff;
+  --color-intelligence-strong: #4a7eff;
+  --color-intelligence-soft: #1b3158;
+  --color-supply: #f6b84a;
+  --color-supply-strong: #eea82c;
+  --color-supply-soft: #4a3718;
+  --color-success: #43d39e;
+  --color-success-soft: #133a32;
+  --color-warning: #f6b84a;
+  --color-warning-soft: #4a3718;
+  --color-danger: #f56c78;
+  --color-danger-soft: #4a202b;
 
-  --color-ric-primary:    #4f46e5;  /* ação primária — já é o primary do app */
-  --color-ric-primary-2:  #6366f1;  /* hover / ring */
+  /* ==== Superfícies e dados ==== */
+  --color-surface-1: #0d1a2b;
+  --color-surface-2: #102137;
+  --color-surface-3: #152942;
+  --color-surface-overlay: #1b3552;
+  --color-grid: #243b58;
+  --color-text-strong: #f5f8fc;
+  --color-text-muted: #9baec1;
 
-  --color-ric-ai:         #29d3ff;  /* acento EXCLUSIVO da IA (Diretor Executivo) */
+  /* ==== Paleta oficial ZappFlow (Brand Book v1.0) ====
+     Aliases pt-BR usados por landing pública e telas legadas. */
+  --color-zf-midnight: #07111f;
+  --color-zf-navy: #0d1a2b;
+  --color-zf-slate: #152942;
+  --color-zf-teal: #22d3b6;
+  --color-zf-blue: #6395ff;
+  --color-zf-amber: #f6b84a;
+  --color-zf-green: #43d39e;
+  --color-zf-coral: #f56c78;
+  --color-zf-cloud: #f5f8fc;
+  --color-zf-steel: #9baec1;
+  --color-zf-grid: #243b58;
 
-  --color-ric-recovered:  #36e39a;  /* RRI — receita recuperada */
-  --color-ric-recoverable:#ffb648;  /* IRR — recuperável */
-  --color-ric-risk:       #ff8a4c;  /* potencial em risco */
-  --color-ric-critical:   #ff5b5b;  /* crítico */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
 
-  --radius-ric-card: 16px;   /* cards (rounded-2xl) */
-  --radius-ric-hero: 20px;   /* blocos hero / painel IA */
+  --font-sans: "Manrope Variable", "Manrope", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora Variable", "Sora", "Manrope Variable", "Manrope", "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  /* ===== ZappFlow — paleta oficial da marca (Brand Book v1.0) =====
-     ADITIVO: tokens novos (zf-*) para telas/charts adotarem a identidade aos
-     poucos. NÃO substitui nem altera os tokens existentes — nada quebra. */
-  --color-zf-midnight:   #07111F;  /* base de aplicação */
-  --color-zf-navy:       #0D1A2B;  /* superfície (cards/menus) */
-  --color-zf-slate:      #152942;  /* superfície elevada / hover */
-  --color-zf-teal:       #22D3B6;  /* marca/ação e fluxo */
-  --color-zf-blue:       #6395FF;  /* inteligência / IA / análises */
-  --color-zf-amber:      #F6B84A;  /* Supply: compras, cobertura, prioridade */
-  --color-zf-green:      #43D39E;  /* sucesso / aprovado / saudável */
-  --color-zf-coral:      #F56C78;  /* risco / ruptura / destrutivo */
-  --color-zf-cloud:      #F5F8FC;  /* títulos e números */
-  --color-zf-steel:      #9BAEC1;  /* texto secundário */
-  --color-zf-grid:       #243B58;  /* bordas / divisores / inputs */
+  /* ===== Revenue Intelligence Center (RIC) — tokens PRESERVADOS =====
+     Consumidos por src/features/rie/* (Diretor IA, MoneyKpiCard,
+     DirectorPanel). REMOVER quebra a "cabine de comando". */
+  --color-ric-bg: #0b1020;
+  --color-ric-surface: #111833;
+  --color-ric-surface-2: #16203f;
+  --color-ric-border: #243152;
+  --color-ric-grid: #1b2440;
 
-  /* Tokens de identidade usados pelas classes zf-* (kit de componentes).
-     Nomes NOVOS (não colidem com os existentes). Usados na landing e em telas
-     novas que optarem por adotar a marca. */
-  --color-flow:               #22d3b6;
-  --color-flow-strong:        #16bfa6;
-  --color-flow-soft:          #153d42;
-  --color-intelligence:       #6395ff;
-  --color-intelligence-strong:#4a7eff;
-  --color-intelligence-soft:  #1b3158;
-  --color-supply:             #f6b84a;
-  --color-supply-strong:      #eea82c;
-  --color-supply-soft:        #4a3718;
-  --color-success:            #43d39e;
-  --color-success-soft:       #133a32;
-  --color-warning:            #f6b84a;
-  --color-warning-soft:       #4a3718;
-  --color-danger:             #f56c78;
-  --color-danger-soft:        #4a202b;
-  --color-surface-1:          #0d1a2b;
-  --color-surface-2:          #102137;
-  --color-surface-3:          #152942;
-  --color-surface-overlay:    #1b3552;
-  --color-grid:               #243b58;
-  --color-text-strong:        #f5f8fc;
-  --color-text-muted:         #9baec1;
-  --font-display: "Sora", "Manrope", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-ric-primary: #4f46e5;
+  --color-ric-primary-2: #6366f1;
+  --color-ric-ai: #29d3ff;
+
+  --color-ric-recovered: #36e39a;
+  --color-ric-recoverable: #ffb648;
+  --color-ric-risk: #ff8a4c;
+  --color-ric-critical: #ff5b5b;
+
+  --radius-ric-card: 16px;
+  --radius-ric-hero: 20px;
 }
 
 @layer base {
   :root {
     color-scheme: dark;
   }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    background: var(--color-background);
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: var(--font-sans);
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 650;
+    letter-spacing: -0.035em;
+  }
+
+  button, a, input, textarea, select {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--color-muted-foreground);
+  }
+
+  ::selection {
+    color: #041310;
+    background: var(--color-flow);
   }
 
   .custom-scroll::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-  .custom-scroll::-webkit-scrollbar-thumb {
-    background: #475569;
-    border-radius: 10px;
+    width: 6px;
+    height: 6px;
   }
 
-  /* Glow ciano do painel do Diretor IA (RIC). */
+  .custom-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scroll::-webkit-scrollbar-thumb {
+    background: #304967;
+    border-radius: 999px;
+  }
+
+  .custom-scroll::-webkit-scrollbar-thumb:hover {
+    background: #46617f;
+  }
+
+  /* ===== RIC — utilitários PRESERVADOS =====
+     Glow ciano do painel do Diretor IA. */
   .ric-ai-glow {
     box-shadow: 0 0 0 1px rgba(41, 211, 255, 0.25), 0 8px 30px -10px rgba(41, 211, 255, 0.25);
   }
@@ -130,34 +189,239 @@
   .ric-floatup { animation: ric-floatup 1.6s ease-out forwards; }
 }
 
-/* ===== ZappFlow — kit de componentes (classes zf-*) =====
-   ADITIVO: classes novas usadas pela landing pública e por telas que optarem
-   por adotar a marca. Não altera nenhuma tela existente. Fonte: Design System
-   ZappFlow v1.1. (Sora/Manrope caem em Inter até serem instaladas.) */
 @layer components {
-  .zf-panel { border: 1px solid rgba(36,59,88,0.9); border-radius: var(--radius-lg); background: linear-gradient(145deg, rgba(21,41,66,0.88), rgba(13,26,43,0.96)); box-shadow: 0 18px 48px rgba(0,0,0,0.18); }
-  .zf-panel-subtle { border: 1px solid rgba(36,59,88,0.78); border-radius: var(--radius-md); background: rgba(16,33,55,0.72); }
-  .zf-panel-hover { transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
-  .zf-panel-hover:hover { transform: translateY(-2px); border-color: rgba(34,211,182,0.44); box-shadow: 0 22px 56px rgba(0,0,0,0.28); }
+  /* Estrutura */
+  .zf-page-shell {
+    min-height: 100vh;
+    background:
+      radial-gradient(900px 480px at 100% -10%, rgba(99, 149, 255, 0.12), transparent 62%),
+      radial-gradient(820px 460px at -10% 105%, rgba(34, 211, 182, 0.09), transparent 65%),
+      var(--color-background);
+  }
 
-  .zf-kicker { color: var(--color-flow); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
-  .zf-display { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.035em; }
-  .zf-data-value { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
-  .zf-data-label { color: var(--color-text-muted); font-size: 0.75rem; font-weight: 650; letter-spacing: 0.02em; }
+  .zf-panel {
+    border: 1px solid rgba(36, 59, 88, 0.9);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(145deg, rgba(21, 41, 66, 0.88), rgba(13, 26, 43, 0.96));
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+  }
 
-  .zf-button { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: var(--radius-md); padding: 0.58rem 0.95rem; font-size: 0.9rem; font-weight: 750; line-height: 1.2; transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease; }
-  .zf-button:focus-visible, .zf-input:focus-visible { outline: 2px solid var(--color-flow); outline-offset: 2px; }
-  .zf-button:active { transform: translateY(1px); }
-  .zf-button-primary { color: #041310; background: linear-gradient(135deg, var(--color-flow), var(--color-intelligence)); box-shadow: 0 10px 24px rgba(34,211,182,0.16); }
-  .zf-button-primary:hover { box-shadow: 0 14px 30px rgba(34,211,182,0.24); filter: brightness(1.04); }
-  .zf-button-secondary { border: 1px solid var(--color-border); color: var(--color-foreground); background: rgba(21,41,66,0.84); }
-  .zf-button-secondary:hover { border-color: rgba(99,149,255,0.55); background: rgba(27,53,82,0.92); }
-  .zf-button-supply { color: #231704; background: linear-gradient(135deg, var(--color-supply), #ffd17a); box-shadow: 0 10px 24px rgba(246,184,74,0.14); }
+  .zf-panel-subtle {
+    border: 1px solid rgba(36, 59, 88, 0.78);
+    border-radius: var(--radius-md);
+    background: rgba(16, 33, 55, 0.72);
+  }
 
-  .zf-input { width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-foreground); background: rgba(7,17,31,0.68); padding: 0.64rem 0.76rem; transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease; }
-  .zf-input:focus { border-color: var(--color-flow); background: rgba(7,17,31,0.9); box-shadow: 0 0 0 3px rgba(34,211,182,0.12); }
+  .zf-panel-hover {
+    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  }
 
-  .zf-status-flow, .zf-status-intelligence, .zf-status-supply, .zf-status-success, .zf-status-warning, .zf-status-danger { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 999px; padding: 0.28rem 0.62rem; font-size: 0.75rem; font-weight: 750; line-height: 1; }
+  .zf-panel-hover:hover {
+    transform: translateY(-2px);
+    border-color: rgba(34, 211, 182, 0.44);
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.28);
+  }
+
+  /* Tipografia e métricas */
+  .zf-kicker {
+    color: var(--color-flow);
+    font-family: var(--font-display);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .zf-page-title {
+    color: var(--color-text-strong);
+    font-family: var(--font-display);
+    font-size: clamp(1.45rem, 2vw, 2rem);
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .zf-display {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.035em;
+  }
+
+  .zf-data-value {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.04em;
+  }
+
+  .zf-data-label {
+    color: var(--color-muted-foreground);
+    font-size: 0.75rem;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+  }
+
+  /* Navegação */
+  .zf-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.72rem;
+    border-radius: var(--radius-md);
+    color: var(--color-muted-foreground);
+    padding: 0.66rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 650;
+    transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+  }
+
+  .zf-nav-item:hover {
+    color: var(--color-foreground);
+    background: rgba(27, 53, 82, 0.65);
+  }
+
+  .zf-nav-item-active {
+    color: var(--color-flow);
+    background: linear-gradient(90deg, rgba(34, 211, 182, 0.16), rgba(99, 149, 255, 0.1));
+    box-shadow: inset 2px 0 0 var(--color-flow);
+  }
+
+  .zf-nav-item-supply.zf-nav-item-active {
+    color: var(--color-supply);
+    background: linear-gradient(90deg, rgba(246, 184, 74, 0.16), rgba(246, 184, 74, 0.05));
+    box-shadow: inset 2px 0 0 var(--color-supply);
+  }
+
+  /* Botões */
+  .zf-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-md);
+    padding: 0.58rem 0.85rem;
+    font-size: 0.875rem;
+    font-weight: 750;
+    line-height: 1.2;
+    transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease;
+  }
+
+  .zf-button:focus-visible,
+  .zf-input:focus-visible {
+    outline: 2px solid var(--color-flow);
+    outline-offset: 2px;
+  }
+
+  .zf-button:active {
+    transform: translateY(1px);
+  }
+
+  .zf-button-primary {
+    color: #041310;
+    background: linear-gradient(135deg, var(--color-flow), var(--color-intelligence));
+    box-shadow: 0 10px 24px rgba(34, 211, 182, 0.16);
+  }
+
+  .zf-button-primary:hover {
+    box-shadow: 0 14px 30px rgba(34, 211, 182, 0.24);
+    filter: brightness(1.04);
+  }
+
+  .zf-button-secondary {
+    border: 1px solid var(--color-border);
+    color: var(--color-foreground);
+    background: rgba(21, 41, 66, 0.84);
+  }
+
+  .zf-button-secondary:hover {
+    border-color: rgba(99, 149, 255, 0.55);
+    background: rgba(27, 53, 82, 0.92);
+  }
+
+  .zf-button-supply {
+    color: #231704;
+    background: linear-gradient(135deg, var(--color-supply), #ffd17a);
+    box-shadow: 0 10px 24px rgba(246, 184, 74, 0.14);
+  }
+
+  .zf-button-danger {
+    color: #fff7f7;
+    background: rgba(245, 108, 120, 0.16);
+    border: 1px solid rgba(245, 108, 120, 0.48);
+  }
+
+  /* Inputs e tabelas */
+  .zf-input {
+    width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-foreground);
+    background: rgba(7, 17, 31, 0.68);
+    padding: 0.64rem 0.76rem;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  }
+
+  .zf-input:hover {
+    border-color: rgba(99, 149, 255, 0.5);
+  }
+
+  .zf-input:focus {
+    border-color: var(--color-flow);
+    background: rgba(7, 17, 31, 0.9);
+    box-shadow: 0 0 0 3px rgba(34, 211, 182, 0.12);
+  }
+
+  .zf-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    border: 1px solid rgba(36, 59, 88, 0.84);
+    border-radius: var(--radius-md);
+  }
+
+  .zf-table th {
+    color: var(--color-muted-foreground);
+    background: rgba(21, 41, 66, 0.74);
+    font-size: 0.68rem;
+    font-weight: 750;
+    letter-spacing: 0.06em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .zf-table th, .zf-table td {
+    border-bottom: 1px solid rgba(36, 59, 88, 0.72);
+    padding: 0.75rem 0.8rem;
+  }
+
+  .zf-table tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .zf-table tbody tr {
+    background: rgba(13, 26, 43, 0.66);
+    transition: background 150ms ease;
+  }
+
+  .zf-table tbody tr:hover {
+    background: rgba(27, 53, 82, 0.58);
+  }
+
+  /* Status */
+  .zf-status-flow,
+  .zf-status-intelligence,
+  .zf-status-supply,
+  .zf-status-success,
+  .zf-status-warning,
+  .zf-status-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 999px;
+    padding: 0.28rem 0.62rem;
+    font-size: 0.75rem;
+    font-weight: 750;
+    line-height: 1;
+  }
+
   .zf-status-flow { color: var(--color-flow); background: var(--color-flow-soft); }
   .zf-status-intelligence { color: var(--color-intelligence); background: var(--color-intelligence-soft); }
   .zf-status-supply { color: var(--color-supply); background: var(--color-supply-soft); }
@@ -165,5 +429,14 @@
   .zf-status-warning { color: var(--color-warning); background: var(--color-warning-soft); }
   .zf-status-danger { color: var(--color-danger); background: var(--color-danger-soft); }
 
-  .zf-supply-card { border: 1px solid rgba(246,184,74,0.34); border-radius: var(--radius-lg); background: linear-gradient(145deg, rgba(74,55,24,0.56), rgba(13,26,43,0.96)); }
+  /* Supply: atenção, cobertura e aprovação */
+  .zf-supply-card {
+    border: 1px solid rgba(246, 184, 74, 0.34);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(145deg, rgba(74, 55, 24, 0.56), rgba(13, 26, 43, 0.96));
+  }
+
+  .zf-supply-coverage-critical { color: var(--color-danger); }
+  .zf-supply-coverage-low { color: var(--color-supply); }
+  .zf-supply-coverage-healthy { color: var(--color-success); }
 }

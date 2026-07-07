@@ -10,6 +10,7 @@ import ticketsRoutes from "./src/server/routes/tickets.js";
 import productsRoutes from "./src/server/routes/products.js";
 import appointmentsRoutes from "./src/server/routes/appointments.js";
 import integrationsRoutes from "./src/server/routes/integrations.js";
+import metaDebugRoutes from "./src/server/routes/metaDebug.js";
 import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit } from "./src/server/webhookSecurity.js";
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
@@ -59,6 +60,7 @@ import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./sr
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
+import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
 import { setUsageOrg } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
@@ -397,6 +399,7 @@ async function startServer() {
   protectedApi.use("/payments", paymentsRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
+  protectedApi.use("/meta-debug", metaDebugRoutes);
   protectedApi.use("/integrations", instagramOAuthRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
   protectedApi.use("/studio", studioRoutes);
@@ -850,15 +853,29 @@ async function startServer() {
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
+    // Registra o hit ANTES de qualquer decisão — o console de diagnóstico
+    // precisa mostrar até tentativa rejeitada (para o lojista ver a Meta batendo).
+    const hitId = MetaWebhookLogService.record({
+      method: "GET",
+      sourceIp: (req.ip || req.socket?.remoteAddress || "").toString(),
+      userAgent: req.get("user-agent") || null,
+      object: "verify",
+      payload: { mode, token: token ? "<presente>" : "<vazio>", challenge: challenge ? "<presente>" : "<vazio>" },
+      headers: req.headers,
+    });
+
     if (!META_VERIFY_TOKEN) {
       console.warn("[Webhook] META_VERIFY_TOKEN não configurado; verificação rejeitada.");
+      if (hitId) MetaWebhookLogService.markFailed(hitId, "META_VERIFY_TOKEN não configurado no servidor");
       return res.sendStatus(403);
     }
 
     if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
       console.log("[Webhook] Verificado com sucesso pela Meta.");
+      if (hitId) MetaWebhookLogService.markProcessed(hitId);
       res.status(200).send(challenge);
     } else {
+      if (hitId) MetaWebhookLogService.markFailed(hitId, `verify_token não bate (mode=${mode})`);
       res.sendStatus(403);
     }
   });
@@ -919,6 +936,20 @@ async function startServer() {
 
   // RECEBIMENTO DE EVENTOS (POST)
   app.post("/api/webhooks/meta", async (req, res) => {
+    // Registra o hit ANTES de qualquer validação/parse — o console de
+    // diagnóstico precisa mostrar até payload malformado ou de objeto errado
+    // (que a gente hoje devolve 404 e some). Sem isso, um webhook rejeitado
+    // silenciosamente parece que a Meta "não mandou" — histórico do bug do
+    // Instagram DM confirma esse blind spot.
+    const hitId = MetaWebhookLogService.record({
+      method: "POST",
+      sourceIp: (req.ip || req.socket?.remoteAddress || "").toString(),
+      userAgent: req.get("user-agent") || null,
+      object: req.body?.object || null,
+      payload: req.body,
+      headers: req.headers,
+    });
+
     try {
       // A Meta NÃO envia o nosso ?secret= (ela usa X-Hub-Signature). A autenticidade
       // da assinatura do webhook já foi feita no handshake GET (META_VERIFY_TOKEN);
@@ -927,6 +958,7 @@ async function startServer() {
 
       // Validação rápida do formato padrão do Graph API
       if (payload.object !== "whatsapp_business_account" && payload.object !== "instagram" && payload.object !== "page") {
+         if (hitId) MetaWebhookLogService.markFailed(hitId, `payload.object desconhecido: ${payload.object}`);
          return res.sendStatus(404);
       }
 
@@ -1010,9 +1042,11 @@ async function startServer() {
       }
       
       // Importante sempre retornar 200 OK para a Meta
+      if (hitId) MetaWebhookLogService.markProcessed(hitId);
       res.status(200).send("EVENT_RECEIVED");
     } catch (error) {
        console.error("[Webhook] Erro Processando", error);
+       if (hitId) MetaWebhookLogService.markFailed(hitId, String((error as any)?.message || error));
        res.sendStatus(500);
     }
   });

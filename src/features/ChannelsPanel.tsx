@@ -294,6 +294,7 @@ export function ChannelsPanel() {
               )}
             </div>
           </div>
+          <MetaWebhookDiagnostics />
           {/* Card Evolution API */}
           <div className="flex flex-col rounded-xl border border-blue-900/40 bg-slate-900/50 p-6 relative overflow-hidden lg:col-span-2">
              <div className="absolute top-0 right-0 p-4 opacity-[0.03]">
@@ -591,6 +592,114 @@ export function ChannelsPanel() {
 
       {showInstagram && (
         <InstagramConnectModal onClose={() => setShowInstagram(false)} onConnected={fetchChannels} />
+      )}
+    </div>
+  );
+}
+
+// Console de diagnóstico dos webhooks Meta: mostra os últimos hits que a
+// plataforma da Meta bateu no nosso endpoint /api/webhooks/meta — GET (verify)
+// e POST (evento). Serve para responder "a Meta está mandando ou não?" quando
+// uma DM aparentemente não chega. Sem isto, um webhook rejeitado silenciosamente
+// (payload de objeto errado, verify token divergente, etc.) parece que "não
+// veio nada" — foi exatamente o cenário do bug de DM do Instagram.
+function MetaWebhookDiagnostics() {
+  const [hits, setHits] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/meta-debug/hits?limit=50').then(x => x.json());
+      setHits(Array.isArray(r?.hits) ? r.hits : []);
+      setSummary(r?.summary || null);
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const timeAgo = (iso: string) => {
+    try {
+      const t = new Date(iso.replace(' ', 'T') + (iso.includes('Z') ? '' : 'Z')).getTime();
+      const s = Math.round((Date.now() - t) / 1000);
+      if (s < 60) return `${s}s atrás`;
+      if (s < 3600) return `${Math.floor(s / 60)}min atrás`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h atrás`;
+      return `${Math.floor(s / 86400)}d atrás`;
+    } catch { return iso; }
+  };
+
+  return (
+    <div className="flex flex-col rounded-xl border border-emerald-900/40 bg-slate-900/50 p-6 relative overflow-hidden lg:col-span-2 mt-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">🩺 Diagnóstico Webhooks Meta</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            Últimos hits que a Meta bateu em <code className="text-emerald-400">/api/webhooks/meta</code>. Se a lista estiver <b>vazia depois de você enviar DM</b>, a Meta não está enviando (config do app na Meta / conta em "solicitações"). Se aparecer hit mas com erro, o problema está no processamento.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading} className="border-slate-700 text-slate-200">
+          {loading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />} Atualizar
+        </Button>
+      </div>
+
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+          <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
+            <div className="text-xs text-slate-500">Últimas 24h</div>
+            <div className="text-lg font-semibold text-slate-100">{summary.last24h}</div>
+          </div>
+          <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
+            <div className="text-xs text-slate-500">Último hit</div>
+            <div className="text-sm text-slate-100">{summary.lastAt ? timeAgo(summary.lastAt) : '—'}</div>
+          </div>
+          <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
+            <div className="text-xs text-slate-500">Por método</div>
+            <div className="text-xs text-slate-100">{Object.entries(summary.byMethod || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || '—'}</div>
+          </div>
+          <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
+            <div className="text-xs text-slate-500">Por origem</div>
+            <div className="text-xs text-slate-100">{Object.entries(summary.byObject || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || '—'}</div>
+          </div>
+        </div>
+      )}
+
+      {hits.length === 0 ? (
+        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4 text-sm text-yellow-200">
+          Nenhum hit registrado ainda. Isso significa que a Meta <b>não está chamando</b> nosso servidor. Cheque: (1) URL do webhook no painel da Meta = <code>https://SEU_DOMINIO/api/webhooks/meta</code>; (2) app do Instagram com Seção 3 verificada (verde); (3) conta subscrita ao webhook em Seção 2; (4) DM não caiu em "Solicitações de mensagens" na conta do Instagram.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {hits.map((h) => {
+            const isExp = expanded === h.id;
+            let payload: any = {};
+            try { payload = JSON.parse(h.payload_json || '{}'); } catch { payload = { _raw: h.payload_json }; }
+            return (
+              <div key={h.id} className={`rounded-lg border ${h.error ? 'border-red-500/30 bg-red-500/5' : h.processed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-700 bg-slate-950/40'} p-3`}>
+                <button onClick={() => setExpanded(isExp ? null : h.id)} className="w-full text-left flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Badge variant="outline" className={h.method === 'GET' ? 'border-blue-500/30 text-blue-300' : 'border-purple-500/30 text-purple-300'}>{h.method}</Badge>
+                    <span className="text-xs text-slate-400 shrink-0">{timeAgo(h.received_at)}</span>
+                    <span className="text-xs text-slate-300 truncate">object=<code className="text-slate-100">{h.object || '—'}</code></span>
+                    {h.error ? <span className="text-xs text-red-300 truncate">✗ {h.error}</span>
+                      : h.processed ? <span className="text-xs text-emerald-300">✓ processado</span>
+                      : <span className="text-xs text-slate-400">pendente</span>}
+                  </div>
+                  <span className="text-xs text-slate-500 shrink-0">{isExp ? '▲' : '▼'}</span>
+                </button>
+                {isExp && (
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs text-slate-400">Origem: <span className="text-slate-200">{h.source_ip || '—'}</span> · UA: <span className="text-slate-200">{(h.user_agent || '—').slice(0, 80)}</span></div>
+                    <div className="text-xs text-slate-400 mb-1">Payload:</div>
+                    <pre className="text-xs bg-slate-950 border border-slate-800 rounded p-3 overflow-x-auto text-slate-200 max-h-96">{JSON.stringify(payload, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

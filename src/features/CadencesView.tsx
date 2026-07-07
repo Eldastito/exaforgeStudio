@@ -108,14 +108,15 @@ export function CadencesView() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-zinc-100">Cadências de Follow-up</h2>
+            <p className="zf-kicker mb-1">Follow-up Automático</p>
+            <h2 className="zf-page-title text-xl">Cadências de Follow-up</h2>
             <p className="text-sm text-zinc-400 mt-0.5">
               Sequências automáticas enviadas quando o contato não responde após atingir um estágio.
             </p>
           </div>
           <button
             onClick={openNew}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+            className="zf-button zf-button-primary"
           >
             <Plus className="w-4 h-4" /> Nova Cadência
           </button>
@@ -306,7 +307,7 @@ export function CadencesView() {
               <button
                 onClick={save}
                 disabled={saving}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+                className="zf-button zf-button-primary disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
                 {saving ? 'Salvando...' : 'Salvar'}

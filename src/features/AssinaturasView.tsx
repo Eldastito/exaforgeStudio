@@ -63,14 +63,15 @@ export function AssinaturasView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950 relative">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <RefreshCw className="w-6 h-6 text-emerald-400" /> Assinaturas
+          <p className="zf-kicker mb-1">Receita Recorrente</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <RefreshCw className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Assinaturas
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Cobrança recorrente: mensalidades, planos e clubes.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowPlan(true)}><Package className="w-4 h-4 mr-2" /> Novo plano</Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" disabled={plans.length === 0} onClick={() => setShowSub(true)}><Plus className="w-4 h-4 mr-2" /> Nova assinatura</Button>
+          <Button className="zf-button zf-button-primary" disabled={plans.length === 0} onClick={() => setShowSub(true)}><Plus className="w-4 h-4 mr-2" /> Nova assinatura</Button>
         </div>
       </div>
 
@@ -169,7 +170,7 @@ function PlanModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} disabled={saving || !form.name.trim()} className="bg-emerald-600 hover:bg-emerald-700 text-white">{saving ? 'Salvando…' : 'Criar'}</Button>
+          <Button onClick={save} disabled={saving || !form.name.trim()} className="zf-button zf-button-primary">{saving ? 'Salvando…' : 'Criar'}</Button>
         </div>
       </div>
     </Modal>
@@ -203,7 +204,7 @@ function SubModal({ plans, contacts, onClose, onSaved }: { plans: any[]; contact
         <Field label="Início (opcional — padrão hoje)"><input type="date" className={INP} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></Field>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} disabled={saving || !form.planId || !form.contactId} className="bg-emerald-600 hover:bg-emerald-700 text-white">{saving ? 'Salvando…' : 'Assinar'}</Button>
+          <Button onClick={save} disabled={saving || !form.planId || !form.contactId} className="zf-button zf-button-primary">{saving ? 'Salvando…' : 'Assinar'}</Button>
         </div>
       </div>
     </Modal>

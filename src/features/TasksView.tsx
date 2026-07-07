@@ -59,18 +59,19 @@ export function TasksView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <ListChecks className="w-6 h-6 text-indigo-400" /> Tarefas
+          <p className="zf-kicker mb-1">Execução Delegada</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <ListChecks className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Tarefas
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Delegue, acompanhe e entregue — com a IA assessorando a equipe.</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500">
+            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none focus:border-teal-400">
             <option value="">Todos os responsáveis</option>
             {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
           </select>
-          <Button onClick={() => setCreating(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+          <Button onClick={() => setCreating(true)} className="zf-button zf-button-primary">
             <Plus className="w-4 h-4 mr-1" /> Nova tarefa
           </Button>
         </div>
@@ -185,7 +186,7 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
-          <Button onClick={submit} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+          <Button onClick={submit} disabled={busy} className="zf-button zf-button-primary">
             {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}Criar
           </Button>
         </div>

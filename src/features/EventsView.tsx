@@ -38,8 +38,9 @@ export function EventsView() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h2 className="text-2xl font-bold text-zinc-100 flex items-center gap-2 mb-1">
-        <CalendarRange className="h-6 w-6 text-violet-400" /> Eventos & Grupos
+      <p className="zf-kicker mb-1">Pipeline Consultivo</p>
+      <h2 className="zf-page-title flex items-center gap-2 mb-1">
+        <CalendarRange className="h-6 w-6" style={{ color: 'var(--color-flow)' }} /> Eventos & Grupos
       </h2>
       <p className="text-sm text-zinc-400 mb-6">Pipeline de consultas consultivas: convenções, casamentos, day use, eventos corporativos. A IA detecta o pedido na conversa e cria a consulta aqui.</p>
 

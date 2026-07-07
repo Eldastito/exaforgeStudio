@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ZappFlow">
+  <title>ZappFlow</title>
+  <defs>
+    <linearGradient id="zfTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3EE2CC"/>
+      <stop offset="100%" stop-color="#12A891"/>
+    </linearGradient>
+    <linearGradient id="zfMid" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1E40E0"/>
+    </linearGradient>
+    <linearGradient id="zfBot" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2E5CFF"/>
+      <stop offset="100%" stop-color="#1837C8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Plano superior do Z (paralelogramo teal) -->
+  <path d="M 30,26 L 108,22 L 100,44 L 22,48 Z" fill="url(#zfTop)"/>
+
+  <!-- Diagonal (paralelogramo azul, atravessa da parte superior direita à inferior esquerda) -->
+  <path d="M 84,44 L 100,44 L 44,86 L 28,86 Z" fill="url(#zfMid)"/>
+
+  <!-- Plano inferior do Z (paralelogramo azul escuro) -->
+  <path d="M 28,86 L 106,86 L 98,106 L 20,106 Z" fill="url(#zfBot)"/>
+
+  <!-- Traços de flow à esquerda da diagonal (linhas horizontais em cascata) -->
+  <g stroke-linecap="round" fill="none">
+    <line x1="4"  y1="60" x2="18" y2="60" stroke="#3EE2CC" stroke-width="4"/>
+    <line x1="10" y1="68" x2="34" y2="68" stroke="#7C9AFC" stroke-width="4"/>
+    <line x1="20" y1="74" x2="30" y2="74" stroke="#FFB020" stroke-width="4"/>
+    <line x1="4"  y1="78" x2="12" y2="78" stroke="#3EE2CC" stroke-width="4"/>
+    <line x1="14" y1="82" x2="26" y2="82" stroke="#7C9AFC" stroke-width="4"/>
+  </g>
+</svg>

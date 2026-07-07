@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import {
   MessageSquare, Target, CalendarClock, Package, BarChart3, ShieldCheck,
-  ArrowRight, Check, Zap, Brain, ClipboardList, Workflow, ChevronDown,
+  ArrowRight, Check, Brain, ClipboardList, Workflow, ChevronDown,
   Hotel, Store, Briefcase, Lock, Database, KeyRound, History, Plug,
 } from 'lucide-react';
 import { marketingConfig, primaryCtaHref } from '@/src/config/marketing';
+import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 
 const CTA_PRIMARY = 'Agendar diagnóstico operacional';
 const teal = 'var(--color-zf-teal)';
@@ -98,9 +99,8 @@ export function LandingPage() {
       <header className="sticky top-0 z-40 border-b border-[#243B58]/60 backdrop-blur-md bg-[#07111F]/80">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <a href="#topo" className="flex items-center gap-2" aria-label="ZappFlow — início">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--color-zf-teal), var(--color-zf-blue))' }}>
-              <Zap className="h-4 w-4 text-[#041310]" />
-            </span>
+            {/* Marca oficial — usar sempre o componente centralizado, nunca redesenhar. */}
+            <ZappFlowMark size={32} aria-hidden="true" />
             <Wordmark className="text-lg text-zinc-50" />
           </a>
           <nav className="hidden md:flex items-center gap-6" aria-label="Navegação principal">

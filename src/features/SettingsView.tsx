@@ -54,36 +54,36 @@ export function SettingsView() {
     <div className="flex flex-1 overflow-hidden bg-zinc-950">
       {/* Config Sidebar */}
       <div className="w-64 border-r border-zinc-800 bg-zinc-900/30 p-4 overflow-y-auto">
-        <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4 px-3">Configurações</h3>
+        <h3 className="zf-data-label mb-4 px-3">Configurações</h3>
         <nav className="space-y-1">
-          <button onClick={() => setActiveTab('quickstart')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'quickstart' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('quickstart')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'quickstart' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Rocket className="w-4 h-4" /> Quick-Start
           </button>
-          <button onClick={() => setActiveTab('empresa')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'empresa' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('empresa')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'empresa' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Briefcase className="w-4 h-4" /> Empresa
           </button>
-          <button onClick={() => setActiveTab('atendimento')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'atendimento' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('atendimento')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'atendimento' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <BrainCircuit className="w-4 h-4" /> Atendimento (IA)
           </button>
-          <button onClick={() => setActiveTab('usuarios')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'usuarios' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('usuarios')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'usuarios' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Users className="w-4 h-4" /> Usuários e Permissões
           </button>
-  <button onClick={() => setActiveTab('cobranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'cobranca' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+  <button onClick={() => setActiveTab('cobranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'cobranca' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <CreditCard className="w-4 h-4" /> Cobrança e Plano
           </button>
-          <button onClick={() => setActiveTab('modulos')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'modulos' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('modulos')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'modulos' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <LayoutGrid className="w-4 h-4" /> Módulos
           </button>
-          <button onClick={() => setActiveTab('seguranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'seguranca' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('seguranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'seguranca' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <ShieldCheck className="w-4 h-4" /> Segurança (2FA)
           </button>
-          <button onClick={() => setActiveTab('privacidade')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'privacidade' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('privacidade')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'privacidade' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Lock className="w-4 h-4" /> Privacidade (LGPD)
           </button>
-          <button onClick={() => setActiveTab('radar')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'radar' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('radar')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'radar' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Crosshair className="w-4 h-4" /> Radar
           </button>
-          <button onClick={() => setActiveTab('landing')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'landing' ? 'bg-indigo-500/10 text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+          <button onClick={() => setActiveTab('landing')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'landing' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Home className="w-4 h-4" /> Painel Padrão
           </button>
         </nav>
@@ -96,13 +96,13 @@ export function SettingsView() {
             <>
               <div className="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
                 <div>
-                  <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-                    <SettingsIcon className="w-6 h-6 text-indigo-400" />
+                  <h2 className="zf-page-title flex items-center gap-2">
+                    <SettingsIcon className="w-6 h-6 text-teal-300" />
                     Dados da Empresa
                   </h2>
                   <p className="text-zinc-400 text-sm mt-1">Configurações gerais e dados para geração de relatórios.</p>
                 </div>
-                <Button onClick={handleSubmit} disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                <Button onClick={handleSubmit} disabled={loading} className="zf-button zf-button-primary">
                   <Save className="w-4 h-4 mr-2" />
                   {loading ? 'Salvando...' : 'Salvar'}
                 </Button>
@@ -113,12 +113,12 @@ export function SettingsView() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">Nome Fantasia</label>
-                <input required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+                <input required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                   value={form.business_name} onChange={e => setForm({...form, business_name: e.target.value})} />
               </div>
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">Razão Social</label>
-                <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+                <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                   value={form.legal_name} onChange={e => setForm({...form, legal_name: e.target.value})} />
               </div>
             </div>
@@ -126,12 +126,12 @@ export function SettingsView() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">CNPJ / CPF</label>
-                <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+                <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                   value={form.cnpj_cpf} onChange={e => setForm({...form, cnpj_cpf: e.target.value})} />
               </div>
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">Telefone Comercial</label>
-                <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+                <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                   value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
               </div>
             </div>
@@ -139,7 +139,7 @@ export function SettingsView() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-zinc-400 mb-1 block">E-mail</label>
-                <input type="email" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+                <input type="email" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                   value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
               </div>
               <div>
@@ -156,7 +156,7 @@ export function SettingsView() {
             <div>
               <label className="text-sm font-medium text-zinc-400 mb-1 block">Logomarca (URL ou Arquivo)</label>
               <div className="flex items-center gap-4">
-                <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+                <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                   value={form.logo_url} onChange={e => setForm({...form, logo_url: e.target.value})} placeholder="https://..." />
                 
                 <label className="cursor-pointer bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-sm py-2.5 px-4 rounded-lg transition-colors border border-zinc-700 font-medium">
@@ -190,13 +190,13 @@ export function SettingsView() {
 
             <div>
               <label className="text-sm font-medium text-zinc-400 mb-1 block">Endereço Completo</label>
-              <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" 
+              <input className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none" 
                 value={form.address} onChange={e => setForm({...form, address: e.target.value})} />
             </div>
 
             <div>
               <label className="text-sm font-medium text-zinc-400 mb-1 block">Rodapé de Relatórios</label>
-              <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none min-h-[80px]" 
+              <textarea className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none min-h-[80px]" 
                 value={form.report_footer} onChange={e => setForm({...form, report_footer: e.target.value})} placeholder="Ex: Este documento é confidencial..." />
             </div>
 
@@ -473,12 +473,12 @@ function ModulesPanel() {
     <>
       <div className="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <LayoutGrid className="w-6 h-6 text-indigo-400" /> Módulos
+          <h2 className="zf-page-title flex items-center gap-2">
+            <LayoutGrid className="w-6 h-6 text-teal-300" /> Módulos
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Ative só o que faz sentido pro seu negócio. Atendimento, Contatos e Relatórios estão sempre ativos.</p>
         </div>
-        <Button onClick={save} disabled={saving || loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+        <Button onClick={save} disabled={saving || loading} className="zf-button zf-button-primary">
           <Save className="w-4 h-4 mr-2" /> {saving ? 'Salvando...' : 'Salvar'}
         </Button>
       </div>
@@ -543,8 +543,8 @@ function QuickStartPanel() {
   return (
     <>
       <div className="mb-6 border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <Rocket className="w-6 h-6 text-indigo-400" /> Quick-Start
+        <h2 className="zf-page-title flex items-center gap-2">
+          <Rocket className="w-6 h-6 text-teal-300" /> Quick-Start
         </h2>
         <p className="text-zinc-400 text-sm mt-1">
           Aplique um <b>setup pronto</b> da sua vertical em segundos: áreas de atendimento com personas
@@ -575,7 +575,7 @@ function QuickStartPanel() {
             <Button
               disabled={applying != null}
               onClick={() => apply(p.vertical, p.label)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="zf-button zf-button-primary"
             >
               {applying === p.vertical ? 'Aplicando…' : `Aplicar ${p.label}`}
             </Button>
@@ -664,8 +664,8 @@ function SecurityPanel() {
   return (
     <>
       <div className="mb-6 border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <ShieldCheck className="w-6 h-6 text-indigo-400" /> Verificação em duas etapas (2FA)
+        <h2 className="zf-page-title flex items-center gap-2">
+          <ShieldCheck className="w-6 h-6 text-teal-300" /> Verificação em duas etapas (2FA)
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Adicione uma camada extra de segurança ao seu login com um app autenticador (Google Authenticator, Authy, 1Password).</p>
       </div>
@@ -699,7 +699,7 @@ function SecurityPanel() {
         {enabled === false && step === 'idle' && (
           <div>
             <p className="text-sm text-zinc-400 mb-4">Sua conta está protegida apenas por senha. Ative o 2FA para exigir um código a cada login.</p>
-            <Button onClick={startSetup} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white">{busy ? 'Aguarde…' : 'Ativar 2FA'}</Button>
+            <Button onClick={startSetup} disabled={busy} className="zf-button zf-button-primary">{busy ? 'Aguarde…' : 'Ativar 2FA'}</Button>
           </div>
         )}
 
@@ -756,8 +756,8 @@ function LgpdPanel() {
   return (
     <>
       <div className="mb-6 border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <Lock className="w-6 h-6 text-indigo-400" /> Privacidade & LGPD
+        <h2 className="zf-page-title flex items-center gap-2">
+          <Lock className="w-6 h-6 text-teal-300" /> Privacidade & LGPD
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Política de retenção de dados, consentimento granular e direitos do titular.</p>
       </div>
@@ -894,8 +894,8 @@ function AiAttendancePanel() {
   return (
     <>
       <div className="mb-6 border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <BrainCircuit className="w-6 h-6 text-indigo-400" /> Atendimento (IA)
+        <h2 className="zf-page-title flex items-center gap-2">
+          <BrainCircuit className="w-6 h-6 text-teal-300" /> Atendimento (IA)
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Como a IA lembra dos seus clientes e reengaja conversas paradas.</p>
       </div>
@@ -1041,8 +1041,8 @@ function RadarSettingsPanel() {
   return (
     <>
       <div className="mb-6 border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <Crosshair className="w-6 h-6 text-indigo-400" /> Radar
+        <h2 className="zf-page-title flex items-center gap-2">
+          <Crosshair className="w-6 h-6 text-teal-300" /> Radar
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Envio automatico do relatorio de diagnostico quando uma sessao e aprovada.</p>
       </div>
@@ -1133,8 +1133,8 @@ function DefaultLandingPanel() {
   return (
     <>
       <div className="mb-6 border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <Home className="w-6 h-6 text-indigo-400" /> Painel Padrão
+        <h2 className="zf-page-title flex items-center gap-2">
+          <Home className="w-6 h-6 text-teal-300" /> Painel Padrão
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Escolha a tela que abre automaticamente ao entrar no sistema.</p>
       </div>

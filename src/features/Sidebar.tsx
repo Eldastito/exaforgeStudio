@@ -1,6 +1,7 @@
 import React from 'react';
-import { Layers, MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
+import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
@@ -25,15 +26,9 @@ export function Sidebar() {
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}
       >
         <div className="flex items-center gap-2">
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-md shadow-lg"
-            style={{
-              background: 'linear-gradient(135deg, var(--color-flow), var(--color-intelligence))',
-              boxShadow: '0 6px 18px rgba(34, 211, 182, 0.28)',
-            }}
-          >
-            <Layers className="h-5 w-5" style={{ color: '#041310' }} />
-          </div>
+          {/* Marca oficial ZappFlow (Brand Kit) — usa o componente
+              centralizado; nunca redesenhar em CSS/emoji/ícone genérico. */}
+          <ZappFlowMark size={30} aria-hidden="true" />
           <span className="text-lg font-bold text-slate-100 tracking-tight">Zapp<span style={{ color: 'var(--color-zf-teal)' }}>Flow</span><span className="text-slate-500 font-medium">.ai</span></span>
         </div>
       </div>

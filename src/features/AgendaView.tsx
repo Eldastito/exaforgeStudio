@@ -119,13 +119,14 @@ export function AgendaView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950 relative">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <CalendarIcon className="w-6 h-6 text-emerald-400" />
+          <p className="zf-kicker mb-1">Agendamentos & Entregas</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <CalendarIcon className="w-6 h-6" style={{ color: 'var(--color-flow)' }} />
             Agenda Central
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Visão geral de agendamentos e entregas</p>
         </div>
-        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={openNew}>
+        <Button className="zf-button zf-button-primary" onClick={openNew}>
           <Plus className="w-4 h-4 mr-2" />
           Novo Agendamento
         </Button>
@@ -315,7 +316,7 @@ export function AgendaView() {
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="ghost" onClick={() => { setShowModal(false); setEditingId(null); }}>Cancelar</Button>
-                <Button type="submit" variant="default" className="bg-emerald-600 hover:bg-emerald-700 text-white">{editingId ? 'Salvar' : 'Agendar'}</Button>
+                <Button type="submit" variant="default" className="zf-button zf-button-primary">{editingId ? 'Salvar' : 'Agendar'}</Button>
               </div>
             </form>
           </div>

@@ -56,8 +56,9 @@ export function ReservasView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950 relative">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <CalendarCheck className="w-6 h-6 text-emerald-400" /> Reservas
+          <p className="zf-kicker mb-1">Ocupação por Período</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <CalendarCheck className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Reservas
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Reserve quartos, mesas, equipamentos ou espaços por período, com controle de disponibilidade.</p>
         </div>
@@ -68,7 +69,7 @@ export function ReservasView() {
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowResource(true)}>
             <BedDouble className="w-4 h-4 mr-2" /> Recurso reservável
           </Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" disabled={resources.length === 0} onClick={() => setShowRes(true)}>
+          <Button className="zf-button zf-button-primary" disabled={resources.length === 0} onClick={() => setShowRes(true)}>
             <Plus className="w-4 h-4 mr-2" /> Nova reserva
           </Button>
         </div>

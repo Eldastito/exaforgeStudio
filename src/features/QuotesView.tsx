@@ -51,8 +51,9 @@ export function QuotesView() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <h2 className="text-2xl font-bold text-zinc-100 flex items-center gap-2 mb-1">
-        <FileText className="h-6 w-6 text-indigo-400" /> Orçamentos
+      <p className="zf-kicker mb-1">Cotação com Follow-up</p>
+      <h2 className="zf-page-title flex items-center gap-2 mb-1">
+        <FileText className="h-6 w-6" style={{ color: 'var(--color-flow)' }} /> Orçamentos
       </h2>
       <p className="text-sm text-zinc-400 mb-6">A IA monta o orçamento na conversa e ele aparece aqui rastreado. Follow-up automático até X tentativas; expira na validade.</p>
 

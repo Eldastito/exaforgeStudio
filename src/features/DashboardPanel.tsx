@@ -348,27 +348,33 @@ export function DashboardPanel() {
         >
           <div>
             <div className="mb-2 flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-medium text-indigo-300">
+              <span className="zf-status-flow">
                 <Sparkles className="h-3 w-3" /> Relatório Premium
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> Ao vivo
+              <span className="zf-status-success">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: 'var(--color-success)' }} /> Ao vivo
               </span>
             </div>
-            <h2 className="bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-2xl md:text-3xl font-bold tracking-tight text-transparent">
-              Performance de Atendimento
-            </h2>
+            <h2 className="zf-page-title">Performance de Atendimento</h2>
             <p className="mt-1 text-sm text-slate-400">Métricas de SLA, conversão e produtividade da IA em tempo real.</p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex flex-1 sm:flex-none rounded-xl border border-slate-800 bg-slate-900/60 p-1 backdrop-blur">
+            <div
+              className="flex flex-1 sm:flex-none rounded-xl border p-1 backdrop-blur"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'rgba(21, 41, 66, 0.6)' }}
+            >
               {PERIODS.map(p => (
                 <button
                   key={p.id} onClick={() => setPeriod(p.id)}
                   className={`flex-1 sm:flex-none rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-medium transition-all ${
-                    period === p.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:text-slate-200'
+                    period === p.id ? 'text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'
                   }`}
+                  style={period === p.id ? {
+                    background: 'linear-gradient(135deg, var(--color-flow), var(--color-intelligence))',
+                    color: '#041310',
+                    boxShadow: '0 6px 18px rgba(34, 211, 182, 0.28)',
+                  } : undefined}
                 >{p.label}</button>
               ))}
             </div>
@@ -826,8 +832,8 @@ function KpiCard({ index, title, value, delta, caption, icon, accent, series }: 
       <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-10 blur-2xl transition-opacity group-hover:opacity-20" style={{ backgroundColor: accent }} />
       <div className="relative flex items-start justify-between">
         <div>
-          <p className="text-xs font-medium text-slate-400">{title}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight text-white">{value}</p>
+          <p className="zf-data-label">{title}</p>
+          <p className="zf-data-value mt-2 text-3xl font-bold text-white">{value}</p>
         </div>
         <div className="rounded-xl border p-2.5" style={{ borderColor: `${accent}33`, backgroundColor: `${accent}1a`, color: accent }}>
           {icon}

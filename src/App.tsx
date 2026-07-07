@@ -168,7 +168,7 @@ export default function App() {
   if (user.role === 'owner' && user.onboarding_status === 'pending') return <OnboardingView />;
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[#09090b] text-foreground font-sans">
+    <div className="zf-page-shell flex h-screen w-full overflow-hidden text-foreground font-sans">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         {/* Top Navbar */}

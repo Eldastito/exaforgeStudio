@@ -2648,6 +2648,60 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar business_manifesto', e); }
+
+  // Radar de Oportunidades Disfarçadas (Tier 2, Carlos Domingos, ADR-046):
+  // varre reclamações, cancelamentos, faltas de estoque e "buscas por produto
+  // ausente" e agrupa em oportunidades acionáveis para o dono. Cada linha é
+  // uma oportunidade DETECTADA (não implementada) — o dono decide reconhecer,
+  // implementar ou descartar.
+  //
+  // category: cancellation_reason | product_gap | stock_out | service_complaint | delay_pattern
+  // status: new | acknowledged | in_progress | implemented | dismissed
+  // sample_evidences_json: até 5 exemplos concretos (mensagem, contato, data) que sustentam a oportunidade
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS disguised_opportunities (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        suggested_action TEXT,
+        evidence_count INTEGER DEFAULT 0,
+        sample_evidences_json TEXT,
+        status TEXT NOT NULL DEFAULT 'new',
+        first_seen_at DATETIME,
+        last_seen_at DATETIME,
+        acknowledged_at DATETIME,
+        acknowledged_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_opps_org ON disguised_opportunities(organization_id, status, category);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar disguised_opportunities', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN opportunity_radar_last_run DATETIME`); } catch(e){}
+
+  // Journal de Frustrações do Dono (Tier 2, Carlos Domingos, ADR-046):
+  // captura irritações do dono no dia a dia — matéria-bruta de oportunidades
+  // que ele mesmo esqueceria antes de aproveitar. Categorização por IA (best-
+  // effort) agrupa padrões mensais. Um dos "cases" do livro é literalmente
+  // o dono do Nike (Bowerman) irritado com a sola dos tênis; sem esse hábito
+  // de registrar, muitos negócios nunca saem do papel.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS owner_frustrations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT,
+        text TEXT NOT NULL,
+        category TEXT,               -- classificação IA: operacional | ferramenta | pessoas | processo | financeiro | cliente | outro
+        source TEXT DEFAULT 'text',  -- text | voice_transcribed
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_frust_org ON owner_frustrations(organization_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar owner_frustrations', e); }
 };
 
 initDb();

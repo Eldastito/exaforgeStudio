@@ -27,6 +27,7 @@ import { ContactsView } from '@/src/features/ContactsView';
 import { IntegrationsView } from '@/src/features/IntegrationsView';
 import { SettingsView } from '@/src/features/SettingsView';
 import { ManifestoView } from '@/src/features/ManifestoView';
+import { EscutaView } from '@/src/features/EscutaView';
 import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
@@ -187,6 +188,7 @@ export default function App() {
              {viewMode === 'integrations' && 'Integrações'}
              {viewMode === 'settings' && 'Configurações'}
              {viewMode === 'manifesto' && 'Manifesto da Marca'}
+             {viewMode === 'escuta' && 'Escuta Ativa'}
              {viewMode === 'admin' && 'Admin Master'}
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'areas' && 'Áreas de Atendimento'}
@@ -277,6 +279,7 @@ export default function App() {
           {viewMode === 'integrations' && <IntegrationsView />}
           {viewMode === 'settings' && <SettingsView />}
           {viewMode === 'manifesto' && <ManifestoView />}
+          {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}

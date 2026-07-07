@@ -64,7 +64,7 @@ export type Ticket = {
   slaSegment?: string | null;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta';
 
 export type EvolutionConfig = {
   baseUrl: string;

@@ -130,8 +130,9 @@ export function ProspectView() {
           <Target className="w-6 h-6 text-cyan-400" /> Prospect AI
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Encontre contas com aderência, organize evidências e prospecte com método — sem spam.</p>
-        <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-1.5 text-xs text-cyan-200">
-          <Crosshair className="w-3.5 h-3.5" /> Defina o <b>ICP</b>, importe contas, registre <b>evidências</b>, gere hipóteses e <b>abordagens</b> com IA — tudo revisado por um humano antes de sair. Sem scraping, sem spam.
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-1.5 text-xs text-cyan-200">
+          <Crosshair className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span className="leading-relaxed">Defina o <b>ICP</b>, importe contas, registre <b>evidências</b>, gere hipóteses e <b>abordagens</b> com IA — tudo revisado por um humano antes de sair. Sem scraping, sem spam.</span>
         </div>
       </div>
 

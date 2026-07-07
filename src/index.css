@@ -148,6 +148,18 @@
     background: var(--color-flow);
   }
 
+  /* Dropdowns nativos: em Chromium, o popup do <select> ignora o colorScheme
+     por elemento e frequentemente renderiza texto branco em fundo branco (no
+     tema escuro). Forçar aqui bg/cor do popup e das opções resolve TODOS os
+     <select> do app de uma vez, sem precisar ajustar caso a caso. */
+  select {
+    color-scheme: dark;
+  }
+  option, optgroup {
+    background-color: var(--color-card);
+    color: var(--color-foreground);
+  }
+
   .custom-scroll::-webkit-scrollbar {
     width: 6px;
     height: 6px;

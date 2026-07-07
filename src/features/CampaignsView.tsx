@@ -110,12 +110,13 @@ export function CampaignsView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <Megaphone className="w-6 h-6 text-indigo-400" /> Campanhas
+          <p className="zf-kicker mb-1">Disparos & Reativação</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <Megaphone className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Campanhas
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Mensagens ativas: reativação de inativos e ofertas para quem mais compra</p>
         </div>
-        <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setShowModal(true)}>
+        <Button className="zf-button zf-button-primary" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4 mr-2" /> Nova Campanha
         </Button>
       </div>
@@ -401,7 +402,7 @@ export function CampaignsView() {
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="ghost" onClick={() => setShowModal(false)}>Cancelar</Button>
-                <Button onClick={create} disabled={creating || !name.trim() || !message.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                <Button onClick={create} disabled={creating || !name.trim() || !message.trim()} className="zf-button zf-button-primary">
                   <Send className="w-4 h-4 mr-1" /> {creating ? 'Criando...' : 'Criar campanha'}
                 </Button>
               </div>

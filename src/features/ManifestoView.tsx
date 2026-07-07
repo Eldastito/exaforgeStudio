@@ -104,7 +104,8 @@ export function ManifestoView() {
     <div className="flex-1 overflow-auto bg-zinc-950">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         <div className="border-b border-zinc-800 pb-4 mb-2">
-          <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
+          <p className="zf-kicker mb-1">Tier 1 Filosófico</p>
+          <h1 className="zf-page-title flex items-center gap-2">
             📜 Manifesto da Marca
           </h1>
           <p className="text-sm text-zinc-400 mt-2 leading-relaxed">
@@ -153,7 +154,7 @@ export function ManifestoView() {
 
         <div className="sticky bottom-4 flex justify-end pt-2">
           <button onClick={save} disabled={saving}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50 shadow-lg">
+            className="zf-button zf-button-primary disabled:opacity-50 shadow-lg">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar Manifesto
           </button>
         </div>

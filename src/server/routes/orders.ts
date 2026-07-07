@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { OrdersService } from "../OrdersService.js";
+import { RecoveryRadarService } from "../RecoveryRadarService.js";
 
 const router = Router();
 
@@ -175,6 +176,21 @@ router.patch("/:id/status", (req: AuthRequest, res): any => {
   try {
     OrdersService.updateStatus(orgId, req.params.id, status);
     logEvent(orgId, userId, req.params.id, 'ORDER_STATUS_CHANGED', { status });
+    // Recovery Radar (Disney, ADR-047): quando um pedido é cancelado ou
+    // devolvido, dispara evento de recuperação com playbook sugerido — a
+    // recuperação é o momento memorável, não a falha.
+    if (["cancelado", "devolucao", "reembolso"].includes(status)) {
+      try {
+        const order = db.prepare(`SELECT id, contact_id, ticket_id, total_amount, status FROM orders WHERE id = ? AND organization_id = ?`).get(req.params.id, orgId) as any;
+        if (order) {
+          RecoveryRadarService.detect({
+            organizationId: orgId, contactId: order.contact_id, ticketId: order.ticket_id,
+            orderId: order.id, triggerType: "order_cancelled",
+            context: { finalStatus: status, totalAmount: order.total_amount },
+          });
+        }
+      } catch (e) { console.error("[RecoveryRadar] hook cancel falhou", e); }
+    }
     res.json({ success: true });
   } catch (e: any) {
     res.status(400).json({ error: e.message });

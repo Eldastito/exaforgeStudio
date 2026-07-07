@@ -67,7 +67,8 @@
     "test:meta-webhook-debug": "tsx scripts/test-meta-webhook-debug.ts",
     "test:ferrari-philosophy-prompts": "tsx scripts/test-ferrari-philosophy-prompts.ts",
     "test:tier1-manifesto-philosophy": "tsx scripts/test-tier1-manifesto-philosophy.ts",
-    "test:tier2-escuta-ativa": "tsx scripts/test-tier2-escuta-ativa.ts"
+    "test:tier2-escuta-ativa": "tsx scripts/test-tier2-escuta-ativa.ts",
+    "test:tier2-recovery-radar": "tsx scripts/test-tier2-recovery-radar.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

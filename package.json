@@ -65,7 +65,8 @@
     "test:sla-barcode-consult-sheets": "tsx scripts/test-sla-barcode-consult-sheets.ts",
     "test:instagram-fix-vision-batch": "tsx scripts/test-instagram-fix-vision-batch.ts",
     "test:meta-webhook-debug": "tsx scripts/test-meta-webhook-debug.ts",
-    "test:ferrari-philosophy-prompts": "tsx scripts/test-ferrari-philosophy-prompts.ts"
+    "test:ferrari-philosophy-prompts": "tsx scripts/test-ferrari-philosophy-prompts.ts",
+    "test:tier1-manifesto-philosophy": "tsx scripts/test-tier1-manifesto-philosophy.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

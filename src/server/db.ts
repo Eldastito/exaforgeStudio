@@ -2623,6 +2623,31 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_meta_hits_received ON meta_webhook_hits(received_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar meta_webhook_hits', e); }
+
+  // Manifesto do Negócio (Tier 1 filosófico, ADR-045): o "Por Quê" do Sinek +
+  // história fundadora (StorySelling) + promessa de transformação + tom de voz.
+  // É o TOPO de todo prompt de IA — a constituição da marca. 1 linha por org.
+  //
+  // Colunas separadas em vez de JSON blob porque cada campo é editado
+  // independentemente na UI e injetado em contextos diferentes (why_statement
+  // vai em todo prompt; founder_story só entra em conteúdo/campanhas; tone_voice
+  // regula a linguagem de todas as respostas). Fica mais fácil migrar depois se
+  // algum campo virar tabela própria (ex.: histórico de versões).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS business_manifesto (
+        organization_id TEXT PRIMARY KEY,
+        why_statement TEXT,           -- 1-2 frases; o Por Quê declarado (Sinek)
+        how_principles TEXT,          -- JSON array de princípios (o Como)
+        what_summary TEXT,            -- 1 frase resumindo o Que é ofertado
+        founder_story TEXT,           -- história fundadora (StorySelling / narrativa)
+        transformation_promise TEXT,  -- resultado que a marca promete transformar na vida do cliente
+        tone_voice TEXT,              -- registro (formal/casual/próximo/técnico) + palavras-âncora
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar business_manifesto', e); }
 };
 
 initDb();

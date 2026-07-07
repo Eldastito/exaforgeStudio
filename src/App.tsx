@@ -26,6 +26,7 @@ import { CadencesView } from '@/src/features/CadencesView';
 import { ContactsView } from '@/src/features/ContactsView';
 import { IntegrationsView } from '@/src/features/IntegrationsView';
 import { SettingsView } from '@/src/features/SettingsView';
+import { ManifestoView } from '@/src/features/ManifestoView';
 import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
@@ -185,6 +186,7 @@ export default function App() {
              {viewMode === 'contacts' && 'Contatos'}
              {viewMode === 'integrations' && 'Integrações'}
              {viewMode === 'settings' && 'Configurações'}
+             {viewMode === 'manifesto' && 'Manifesto da Marca'}
              {viewMode === 'admin' && 'Admin Master'}
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'areas' && 'Áreas de Atendimento'}
@@ -274,6 +276,7 @@ export default function App() {
           {viewMode === 'contacts' && <ContactsView />}
           {viewMode === 'integrations' && <IntegrationsView />}
           {viewMode === 'settings' && <SettingsView />}
+          {viewMode === 'manifesto' && <ManifestoView />}
           {viewMode === 'admin' && <AdminMasterView />}
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}

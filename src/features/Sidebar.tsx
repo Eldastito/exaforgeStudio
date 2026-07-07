@@ -14,13 +14,25 @@ export function Sidebar() {
     {sidebarOpen && (
       <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />
     )}
-    <div className={`fixed lg:static inset-y-0 left-0 z-40 flex h-full w-[240px] flex-col border-r border-slate-800 bg-slate-950 transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+    <div
+      className={`fixed lg:static inset-y-0 left-0 z-40 flex h-full w-[240px] flex-col border-r transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}
+    >
       {/* Botão fechar (mobile) */}
       <button onClick={() => setSidebarOpen(false)} className="lg:hidden absolute top-4 right-3 text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
-      <div className="flex h-16 items-center px-6 border-b border-slate-800 bg-slate-900/40">
+      <div
+        className="flex h-16 items-center px-6 border-b"
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}
+      >
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-indigo-600 shadow-lg shadow-indigo-600/20">
-            <Layers className="h-5 w-5 text-white" />
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-md shadow-lg"
+            style={{
+              background: 'linear-gradient(135deg, var(--color-flow), var(--color-intelligence))',
+              boxShadow: '0 6px 18px rgba(34, 211, 182, 0.28)',
+            }}
+          >
+            <Layers className="h-5 w-5" style={{ color: '#041310' }} />
           </div>
           <span className="text-lg font-bold text-slate-100 tracking-tight">Zapp<span style={{ color: 'var(--color-zf-teal)' }}>Flow</span><span className="text-slate-500 font-medium">.ai</span></span>
         </div>
@@ -41,7 +53,7 @@ export function Sidebar() {
              {mod('assinaturas') && <NavItem icon={<RefreshCw />} label="Assinaturas" active={viewMode === 'assinaturas'} onClick={() => setViewMode('assinaturas')} />}
              {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}
              {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
-             {mod('compras') && <NavItem icon={<PackageCheck />} label="Compras" active={viewMode === 'compras'} onClick={() => setViewMode('compras')} />}
+             {mod('compras') && <NavItem icon={<PackageCheck />} label="Compras" active={viewMode === 'compras'} onClick={() => setViewMode('compras')} variant="supply" />}
              {mod('orcamentos') && <NavItem icon={<FileText />} label="Orçamentos" active={viewMode === 'orcamentos'} onClick={() => setViewMode('orcamentos')} />}
              {mod('eventos') && <NavItem icon={<CalendarRange />} label="Eventos & Grupos" active={viewMode === 'eventos'} onClick={() => setViewMode('eventos')} />}
              {mod('loja') && <NavItem icon={<Store />} label="Loja Virtual" active={viewMode === 'storefront'} onClick={() => setViewMode('storefront')} />}
@@ -76,7 +88,10 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="border-t border-slate-800 p-4 bg-slate-900/30">
+      <div
+        className="border-t p-4"
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}
+      >
         <div className="flex items-center gap-3 rounded-lg p-2 hover:bg-slate-800 transition-colors cursor-pointer border border-transparent hover:border-slate-700">
           <div className="relative shadow-sm">
              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.name || 'Admin'}`} alt="Operator" className="h-9 w-9 rounded-full bg-slate-800 border border-slate-700" />
@@ -105,9 +120,21 @@ export function Sidebar() {
   );
 }
 
-function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
+function NavItem({ icon, label, active, onClick, variant }: {
+  icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void,
+  /** 'supply' aplica destaque âmbar quando ativo (módulo de Compras/Supply). */
+  variant?: 'supply',
+}) {
+  // Usa as classes zf-nav-item / zf-nav-item-active / zf-nav-item-supply do
+  // Design System v1.1 (src/index.css). Compras/Supply ganha destaque âmbar
+  // quando ativo (regra da paleta: âmbar é reservado a Supply).
+  const cls = [
+    'w-full zf-nav-item',
+    variant === 'supply' ? 'zf-nav-item-supply' : '',
+    active ? 'zf-nav-item-active' : '',
+  ].filter(Boolean).join(' ');
   return (
-    <button onClick={onClick} className={`w-full flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${active ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200 border border-transparent'}`}>
+    <button onClick={onClick} className={cls}>
       {React.cloneElement(icon as React.ReactElement, { className: 'h-4 w-4 text-inherit' })}
       {label}
     </button>

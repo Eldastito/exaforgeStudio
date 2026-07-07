@@ -280,13 +280,13 @@ function SlaConfigPanel({ onClose }: { onClose: () => void }) {
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${cfg.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
               </button>
             </label>
-            <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Meta por prioridade</p>
+            <p className="zf-data-label">Meta por prioridade</p>
             <div className="space-y-2">
               {numField('Alta', toMin(cfg.prioritySeconds.alta), (n) => setCfg({ ...cfg, prioritySeconds: { ...cfg.prioritySeconds, alta: n * 60 } }))}
               {numField('Média', toMin(cfg.prioritySeconds.media), (n) => setCfg({ ...cfg, prioritySeconds: { ...cfg.prioritySeconds, media: n * 60 } }))}
               {numField('Baixa', toMin(cfg.prioritySeconds.baixa), (n) => setCfg({ ...cfg, prioritySeconds: { ...cfg.prioritySeconds, baixa: n * 60 } }))}
             </div>
-            <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Cliente VIP</p>
+            <p className="zf-data-label">Cliente VIP</p>
             <div className="space-y-2">
               {numField('Meta VIP (vale a mais apertada)', toMin(cfg.vipSeconds), (n) => setCfg({ ...cfg, vipSeconds: n * 60 }))}
               <label className="flex items-center justify-between gap-3 text-sm">
@@ -302,8 +302,8 @@ function SlaConfigPanel({ onClose }: { onClose: () => void }) {
             </div>
             {err && <p className="text-xs text-red-400">{err}</p>}
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-lg border border-zinc-800 text-zinc-300">Cancelar</button>
-              <button onClick={save} disabled={saving} className="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white disabled:opacity-60">{saving ? 'Salvando...' : 'Salvar'}</button>
+              <button onClick={onClose} className="zf-button zf-button-secondary">Cancelar</button>
+              <button onClick={save} disabled={saving} className="zf-button zf-button-primary disabled:opacity-60">{saving ? 'Salvando...' : 'Salvar'}</button>
             </div>
           </>
         )}

@@ -39,8 +39,9 @@ export function ReportsPanel() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-emerald-400" />
+          <p className="zf-kicker mb-1">30 Dias × Total</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <BarChart3 className="w-6 h-6" style={{ color: 'var(--color-flow)' }} />
             Relatórios de vendas
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Resumo dos últimos 30 dias comparado com o total geral.</p>

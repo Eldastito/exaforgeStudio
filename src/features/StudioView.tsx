@@ -239,8 +239,9 @@ export function StudioView() {
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="mb-6">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-          <Wand2 className="w-6 h-6 text-fuchsia-400" /> Estúdio de Criação
+        <p className="zf-kicker mb-1">Artes com a Marca</p>
+        <h2 className="zf-page-title flex items-center gap-2">
+          <Wand2 className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Estúdio de Criação
         </h2>
         <p className="text-zinc-400 text-sm mt-1">A IA cria artes de campanha com a cara da sua marca.</p>
       </div>

@@ -168,7 +168,9 @@ export function ProcurementView() {
           { k: 'perfil', label: 'Ser fornecedor', Icon: Store },
         ].map(t => (
           <button key={t.k} onClick={() => setTab(t.k as Tab)}
-            className={`px-4 py-2 text-sm flex items-center gap-2 border-b-2 -mb-px shrink-0 whitespace-nowrap transition-colors ${tab === t.k ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
+            className={`px-4 py-2 text-sm flex items-center gap-2 border-b-2 -mb-px shrink-0 whitespace-nowrap transition-colors ${tab === t.k ? 'text-white' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}
+            style={tab === t.k ? { borderColor: 'var(--color-supply)', color: 'var(--color-supply)' } : undefined}
+          >
             <t.Icon className="w-4 h-4" /> {t.label}
           </button>
         ))}
@@ -229,17 +231,20 @@ export function ProcurementView() {
           <p className="text-xs text-zinc-500 mt-3">Defina o mínimo crítico em <i>Catálogo</i> para a IA monitorar o item.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50">
-          <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+        // zf-supply-card: destaca âmbar o momento de decisão humana. A IA
+        // sugere reposição; o dono aprova. Sinek (visualmente): decisão
+        // humana obrigatória vira sinalização de cor.
+        <div className="zf-supply-card">
+          <div className="flex items-center justify-between p-4" style={{ borderBottom: '1px solid rgba(246,184,74,0.24)' }}>
             <div>
               <p className="text-sm font-medium text-zinc-100 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                <AlertTriangle className="h-4 w-4" style={{ color: 'var(--color-supply)' }} />
                 {items.length > 0
                   ? `${items.length} item(ns) abaixo do mínimo crítico`
                   : `Requisição aprovada — aguardando cotações`}
               </p>
               {items.length > 0 && (
-                <p className="text-xs text-zinc-500 mt-1">Estimativa total: <b className="text-zinc-200">{brl(totalEstimado)}</b> (preço de venda — não custo).</p>
+                <p className="text-xs text-zinc-400 mt-1">Estimativa total: <b className="text-zinc-100">{brl(totalEstimado)}</b> (preço de venda — não custo).</p>
               )}
             </div>
             {draft && (
@@ -247,9 +252,9 @@ export function ProcurementView() {
                 <Button variant="outline" size="sm" className="h-8 bg-zinc-900 border-zinc-700 hover:bg-zinc-800" onClick={dismiss}>
                   <XIcon className="w-3 h-3 mr-2" /> Descartar
                 </Button>
-                <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={approve}>
-                  <Check className="w-3 h-3 mr-2" /> Aprovar e cotar
-                </Button>
+                <button className="zf-button zf-button-supply" onClick={approve}>
+                  <Check className="w-3 h-3" /> Aprovar e cotar
+                </button>
               </div>
             )}
           </div>
@@ -268,7 +273,15 @@ export function ProcurementView() {
                   </div>
                   <div className="col-span-2 text-xs"><p className="text-zinc-400">Em estoque</p><p className="font-mono text-rose-300 font-semibold">{it.current_stock}</p></div>
                   <div className="col-span-2 text-xs"><p className="text-zinc-400">Mínimo</p><p className="font-mono text-zinc-300">{it.threshold}</p></div>
-                  <div className="col-span-1 text-xs"><p className="text-zinc-400">Cobertura</p><p className="font-mono text-amber-300">{it.days_of_cover != null ? `${it.days_of_cover} d` : '—'}</p></div>
+                  <div className="col-span-1 text-xs">
+                    <p className="text-zinc-400">Cobertura</p>
+                    <p className={`font-mono zf-data-value ${
+                      it.days_of_cover == null ? 'text-zinc-500'
+                        : it.days_of_cover <= 2 ? 'zf-supply-coverage-critical'
+                        : it.days_of_cover <= 6 ? 'zf-supply-coverage-low'
+                        : 'zf-supply-coverage-healthy'
+                    }`}>{it.days_of_cover != null ? `${it.days_of_cover} d` : '—'}</p>
+                  </div>
                   <div className="col-span-2 text-right"><p className="text-xs text-zinc-400">Sugerido</p><p className="text-lg font-bold text-emerald-300">{it.suggested_qty}</p></div>
                 </div>
               ))}

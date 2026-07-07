@@ -124,9 +124,10 @@ jobs:
           - { name: 'instagram-fix-vision-batch', script: 'test:instagram-fix-vision-batch' }
           - { name: 'meta-webhook-debug', script: 'test:meta-webhook-debug' }
 
-          # === Fase 2 do plano de produção (ADR-051, ADR-052) ===
+          # === Fase 2 do plano de produção (ADR-051, ADR-052, ADR-053) ===
           - { name: 'phone-match', script: 'test:phone-match' }
           - { name: 'connector-public', script: 'test:connector-public' }
+          - { name: 'ai-orchestrator', script: 'test:ai-orchestrator' }
     env:
       # JWT_SECRET é injetado pra evitar warn no isAIConfigured. Não é
       # segredo de produção — só desbloqueia inicialização dos services.

@@ -314,7 +314,10 @@ router.get("/settings", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/radar/settings — liga/desliga auto-envio do relatório Radar
+// PUT /api/radar/settings — liga/desliga auto-envio do relatório Radar.
+// Robusto contra edge case de organization_settings ausente (upsert) e devolve
+// o estado atual pra o frontend usar como fonte-de-verdade — evita divergência
+// entre otimismo do cliente e persistência real.
 router.put("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -322,10 +325,32 @@ router.put("/settings", (req: AuthRequest, res): any => {
   try {
     const { autoSendEnabled, autoSendChannel } = req.body || {};
     const channel = autoSendChannel === "email" ? "email" : "whatsapp";
-    db.prepare(
+    const enabled = autoSendEnabled ? 1 : 0;
+
+    // Upsert: garante que a linha exista (edge case raro mas letal — sem
+    // esta linha o UPDATE some silenciosamente e o front acredita que salvou).
+    const info = db.prepare(
       `UPDATE organization_settings SET radar_auto_send_enabled = ?, radar_auto_send_channel = ? WHERE organization_id = ?`
-    ).run(autoSendEnabled ? 1 : 0, channel, orgId);
-    res.json({ success: true });
+    ).run(enabled, channel, orgId);
+
+    if (info.changes === 0) {
+      // Cria uma linha mínima. Business_name em branco para o handler de
+      // Empresa preencher depois — não bloqueia por isso.
+      db.prepare(
+        `INSERT INTO organization_settings (id, organization_id, business_name, status, radar_auto_send_enabled, radar_auto_send_channel)
+         VALUES (?, ?, '', 'active', ?, ?)`
+      ).run(orgId, orgId, enabled, channel);
+    }
+
+    // Devolve o estado persistido — evita divergência UI vs banco.
+    const persisted = db.prepare(
+      `SELECT radar_auto_send_enabled, radar_auto_send_channel FROM organization_settings WHERE organization_id = ?`
+    ).get(orgId) as any;
+    res.json({
+      success: true,
+      autoSendEnabled: !!(persisted && persisted.radar_auto_send_enabled),
+      autoSendChannel: persisted?.radar_auto_send_channel || "whatsapp",
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

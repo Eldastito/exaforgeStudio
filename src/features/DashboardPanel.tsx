@@ -15,6 +15,7 @@ import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
 import { CheckCircle2, Circle, ArrowRight, Rocket, X, PartyPopper, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
+import { BigIdeaBar } from '@/src/components/BigIdeaBar';
 
 const C = {
   indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
@@ -438,6 +439,26 @@ export function DashboardPanel() {
                 caption={`${m?.handoffCount ?? 0} handoffs p/ humano`} icon={<CalendarCheck className="h-5 w-5" />} accent={C.amber}
                 series={spark(S?.appointments)} />
             </div>
+
+            {/* BIG IDEA BAR (Knaflic, ADR-048) — IA lê os KPIs e devolve
+                "e daí?" + ação recomendada. Não substitui os gráficos; ancora
+                a interpretação antes deles. Cache por hash no backend. */}
+            {m && (
+              <BigIdeaBar
+                panelKey={`dashboard:${period}`}
+                data={{
+                  period,
+                  totalTickets, sales, conversion,
+                  automation, frt,
+                  newLeads: m.newLeadsCount, appointments: m.appointmentCount, handoffs: m.handoffCount,
+                  deltas: D,
+                  csat: m.csat,
+                  hospitality: m.hospitality,
+                  paidRevenue: m.paidRevenue, aov: m.averageOrderValue,
+                  avgTimeToSaleHours: m.avgTimeToSaleHours,
+                }}
+              />
+            )}
 
             {/* RADAR SCORE (ADR-025) — só aparece quando o módulo Radar está
                 ativo E existe uma sessão com score calculado. */}

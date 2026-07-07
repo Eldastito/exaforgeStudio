@@ -2736,6 +2736,32 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_recovery_org_created ON recovery_events(organization_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar recovery_events', e); }
+
+  // Big Idea Bar (Tier 2, Cole Nussbaumer Knaflic — "Storytelling com Dados",
+  // ADR-048). Cache de "e daí?" gerado por IA para cada painel: uma frase que
+  // resume o dado + a ação recomendada, no lugar do gráfico frio.
+  //
+  // panel_key: identificador do painel (executive_dashboard | rie_dashboard |
+  // sales_analytics | fashion_dashboard | etc.)
+  // data_hash: hash SHA1 do dado bruto — regenera só quando o dado muda
+  // significativamente (evita chamar LLM a cada refresh do painel).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS big_ideas (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        panel_key TEXT NOT NULL,
+        data_hash TEXT NOT NULL,
+        headline TEXT NOT NULL,
+        recommended_action TEXT,
+        confidence INTEGER DEFAULT 80,
+        raw_data_snapshot TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_big_ideas_hit ON big_ideas(organization_id, panel_key, data_hash);
+      CREATE INDEX IF NOT EXISTS idx_big_ideas_org_panel ON big_ideas(organization_id, panel_key, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar big_ideas', e); }
 };
 
 initDb();

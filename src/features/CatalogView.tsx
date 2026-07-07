@@ -349,8 +349,9 @@ export function CatalogView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950 relative">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <Package className="w-6 h-6 text-indigo-400" />
+          <p className="zf-kicker mb-1">Produtos & Estoque</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <Package className="w-6 h-6" style={{ color: 'var(--color-flow)' }} />
             Catálogo &amp; Estoque
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Produtos, serviços e controle de estoque usado pela IA vendedora</p>
@@ -368,7 +369,7 @@ export function CatalogView() {
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowImport(true)}>
             <Upload className="w-4 h-4 mr-2" /> Importar CSV
           </Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={openNew}>
+          <Button className="zf-button zf-button-primary" onClick={openNew}>
             <Plus className="w-4 h-4 mr-2" /> Novo Item
           </Button>
         </div>
@@ -532,7 +533,7 @@ export function CatalogView() {
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="ghost" onClick={() => { setShowModal(false); setEditing(null); }}>Cancelar</Button>
-                <Button type="submit" variant="default" className="bg-indigo-600 hover:bg-indigo-700 text-white">Salvar</Button>
+                <Button type="submit" variant="default" className="zf-button zf-button-primary">Salvar</Button>
               </div>
             </form>
           </div>
@@ -558,7 +559,7 @@ export function CatalogView() {
             />
             <div className="flex justify-end gap-2 pt-3">
               <Button type="button" variant="ghost" onClick={() => setShowImport(false)}>Cancelar</Button>
-              <Button onClick={handleImport} disabled={importing || !csv.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Button onClick={handleImport} disabled={importing || !csv.trim()} className="zf-button zf-button-primary">
                 {importing ? 'Importando...' : 'Importar'}
               </Button>
             </div>
@@ -873,20 +874,20 @@ export function CatalogView() {
               <div className="space-y-5">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Unidades</div>
-                    <div className="text-base font-semibold text-zinc-100 tabular-nums">{salesData.totals.unitsSold}</div>
+                    <div className="zf-data-label">Unidades</div>
+                    <div className="zf-data-value text-base text-zinc-100">{salesData.totals.unitsSold}</div>
                   </div>
                   <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Receita</div>
-                    <div className="text-base font-semibold text-emerald-300 tabular-nums">R$ {Number(salesData.totals.revenue).toFixed(2)}</div>
+                    <div className="zf-data-label">Receita</div>
+                    <div className="zf-data-value text-base tabular-nums" style={{ color: 'var(--color-success)' }}>R$ {Number(salesData.totals.revenue).toFixed(2)}</div>
                   </div>
                   <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Custo</div>
-                    <div className="text-base font-semibold text-zinc-300 tabular-nums">R$ {Number(salesData.totals.cost || 0).toFixed(2)}</div>
+                    <div className="zf-data-label">Custo</div>
+                    <div className="zf-data-value text-base text-zinc-300">R$ {Number(salesData.totals.cost || 0).toFixed(2)}</div>
                   </div>
                   <div className="bg-zinc-800/50 rounded-lg p-2.5 text-center">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Lucro</div>
-                    <div className="text-base font-semibold text-indigo-300 tabular-nums">R$ {(Number(salesData.totals.revenue) - Number(salesData.totals.cost || 0)).toFixed(2)}</div>
+                    <div className="zf-data-label">Lucro</div>
+                    <div className="zf-data-value text-base tabular-nums" style={{ color: 'var(--color-intelligence)' }}>R$ {(Number(salesData.totals.revenue) - Number(salesData.totals.cost || 0)).toFixed(2)}</div>
                   </div>
                 </div>
                 <p className="text-xs text-zinc-500">

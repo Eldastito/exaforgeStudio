@@ -64,7 +64,8 @@
     "test:ean-radar-consultation": "tsx scripts/test-ean-radar-consultation.ts",
     "test:sla-barcode-consult-sheets": "tsx scripts/test-sla-barcode-consult-sheets.ts",
     "test:instagram-fix-vision-batch": "tsx scripts/test-instagram-fix-vision-batch.ts",
-    "test:meta-webhook-debug": "tsx scripts/test-meta-webhook-debug.ts"
+    "test:meta-webhook-debug": "tsx scripts/test-meta-webhook-debug.ts",
+    "test:ferrari-philosophy-prompts": "tsx scripts/test-ferrari-philosophy-prompts.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

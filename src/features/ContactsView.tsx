@@ -95,8 +95,9 @@ export function ContactsView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <Users className="w-6 h-6 text-blue-400" /> Contatos &amp; CRM
+          <p className="zf-kicker mb-1">Base de Clientes</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <Users className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Contatos &amp; CRM
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Base de clientes com temperatura do lead e histórico de compra</p>
         </div>

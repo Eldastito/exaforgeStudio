@@ -50,8 +50,9 @@ export function AreasView() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
           <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-              <Users2 className="w-6 h-6 text-indigo-400" /> Áreas de Atendimento
+            <p className="zf-kicker mb-1">Fila por Área</p>
+            <h2 className="zf-page-title flex items-center gap-2">
+              <Users2 className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Áreas de Atendimento
             </h2>
             <p className="text-zinc-400 text-sm mt-1 max-w-2xl">
               Vários profissionais no mesmo WhatsApp. Com 2 ou mais áreas ativas, a IA dá as boas-vindas, mostra um menu e direciona cada conversa para a área certa — respondendo como aquele profissional e atribuindo ao atendente responsável.
@@ -60,7 +61,7 @@ export function AreasView() {
               💬 Assim que o cliente escolhe a área, ela <span className="text-zinc-300">já assume na hora</span>: envia uma saudação sensível ao horário (bom dia/boa tarde/boa noite), se apresenta e se coloca à disposição — e responde a próxima mensagem como aquela área. A <span className="text-zinc-300">Descrição</span> abaixo é usada nessa saudação, então capriche nela.
             </p>
           </div>
-          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={openNew}>
+          <Button className="zf-button zf-button-primary" onClick={openNew}>
             <Plus className="w-4 h-4 mr-2" /> Nova área
           </Button>
         </div>
@@ -194,7 +195,7 @@ function AreaModal({ area, users, onClose, onSaved }: {
         </div>
         <div className="mt-5 flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={save} disabled={saving}>
+          <Button className="zf-button zf-button-primary" onClick={save} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (area ? 'Salvar' : 'Criar área')}
           </Button>
         </div>

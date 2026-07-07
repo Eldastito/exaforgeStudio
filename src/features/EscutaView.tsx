@@ -176,7 +176,8 @@ export function EscutaView() {
     <div className="flex-1 overflow-auto bg-zinc-950 text-zinc-100">
       <div className="max-w-6xl mx-auto p-6 space-y-6">
         <div className="border-b border-zinc-800 pb-4">
-          <h1 className="text-2xl font-bold flex items-center gap-2">🎧 Escuta Ativa</h1>
+          <p className="zf-kicker mb-1">Tier 2 Filosófico</p>
+          <h1 className="zf-page-title flex items-center gap-2">🎧 Escuta Ativa</h1>
           <p className="text-sm text-zinc-400 mt-2 leading-relaxed">
             Problema é sinal, não fim. Toda reclamação, cancelamento, falta ou irritação é o mercado (e você) gritando o que precisa mudar. Aqui a gente <b>captura, agrupa e transforma</b> essas pistas em oportunidade.
           </p>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 512" role="img" aria-labelledby="title desc">
+  <title id="title">ZappFlow — Da conversa à execução.</title>
+  <desc id="desc">Logo horizontal da marca ZappFlow.</desc>
+  <defs>
+    <linearGradient id="topTeal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#13D8C7"/><stop offset="55%" stop-color="#08BFC3"/><stop offset="100%" stop-color="#009AAE"/>
+    </linearGradient>
+    <linearGradient id="topFold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00A6B6"/><stop offset="100%" stop-color="#006C8A"/>
+    </linearGradient>
+    <linearGradient id="diag" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#0BBFCA"/><stop offset="45%" stop-color="#007FA7"/><stop offset="100%" stop-color="#174FCC"/>
+    </linearGradient>
+    <linearGradient id="bottomBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#143BC4"/><stop offset="52%" stop-color="#2563F3"/><stop offset="100%" stop-color="#4775FF"/>
+    </linearGradient>
+    <linearGradient id="flowTeal" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#00B9C8"/><stop offset="100%" stop-color="#10D6C9"/></linearGradient>
+    <linearGradient id="flowBlue" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#1565FF"/><stop offset="100%" stop-color="#5380FF"/></linearGradient>
+    <linearGradient id="flowGold" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#FFB133"/><stop offset="100%" stop-color="#FFC55A"/></linearGradient>
+  </defs>
+  <g transform="translate(32 0)">
+    <g fill="none" stroke-linecap="round">
+      <path d="M66 287 H85" stroke="url(#flowTeal)" stroke-width="10"/><path d="M101 266 H145" stroke="url(#flowTeal)" stroke-width="10"/>
+      <path d="M102 309 H157" stroke="url(#flowBlue)" stroke-width="10"/><path d="M146 242 H191" stroke="url(#flowBlue)" stroke-width="10"/>
+      <path d="M151 286 H211" stroke="url(#flowBlue)" stroke-width="10"/><path d="M194 266 H248" stroke="url(#flowGold)" stroke-width="10"/>
+      <path d="M205 309 H247" stroke="url(#flowBlue)" stroke-width="10"/>
+    </g>
+    <path d="M186 104 H407 L359 160 H139 Z" fill="url(#topTeal)"/>
+    <path d="M407 104 L359 160 L338 160 L372 123 Z" fill="url(#topFold)" opacity=".92"/>
+    <path d="M359 160 H407 L239 350 H188 Z" fill="url(#diag)"/>
+    <path d="M239 350 H407 L359 408 H188 Z" fill="url(#bottomBlue)"/>
+  </g>
+  <g fill="#F3F6FC" font-family="Sora, Inter, Arial, sans-serif">
+    <text x="500" y="244" font-size="160" font-weight="600" letter-spacing="-8">ZappFlow</text>
+    <text x="506" y="336" fill="#0ED5CD" font-size="52" font-weight="400" letter-spacing="-1">Da conversa à execução.</text>
+  </g>
+</svg>

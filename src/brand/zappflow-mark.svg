@@ -1,35 +1,68 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ZappFlow">
-  <title>ZappFlow</title>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">ZappFlow — símbolo Z</title>
+  <desc id="desc">Z estilizado em camadas com linhas de fluxo em teal, azul e laranja.</desc>
   <defs>
-    <linearGradient id="zfTop" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#3EE2CC"/>
-      <stop offset="100%" stop-color="#12A891"/>
+    <linearGradient id="topTeal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#13D8C7"/>
+      <stop offset="55%" stop-color="#08BFC3"/>
+      <stop offset="100%" stop-color="#009AAE"/>
     </linearGradient>
-    <linearGradient id="zfMid" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#1E40E0"/>
+    <linearGradient id="topFold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00A6B6"/>
+      <stop offset="100%" stop-color="#006C8A"/>
     </linearGradient>
-    <linearGradient id="zfBot" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2E5CFF"/>
-      <stop offset="100%" stop-color="#1837C8"/>
+    <linearGradient id="diag" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="#0BBFCA"/>
+      <stop offset="45%" stop-color="#007FA7"/>
+      <stop offset="100%" stop-color="#174FCC"/>
     </linearGradient>
+    <linearGradient id="bottomBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#143BC4"/>
+      <stop offset="52%" stop-color="#2563F3"/>
+      <stop offset="100%" stop-color="#4775FF"/>
+    </linearGradient>
+    <linearGradient id="flowTeal" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00B9C8"/>
+      <stop offset="100%" stop-color="#10D6C9"/>
+    </linearGradient>
+    <linearGradient id="flowBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1565FF"/>
+      <stop offset="100%" stop-color="#5380FF"/>
+    </linearGradient>
+    <linearGradient id="flowGold" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFB133"/>
+      <stop offset="100%" stop-color="#FFC55A"/>
+    </linearGradient>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#03162B" flood-opacity=".34"/>
+    </filter>
   </defs>
 
-  <!-- Plano superior do Z (paralelogramo teal) -->
-  <path d="M 30,26 L 108,22 L 100,44 L 22,48 Z" fill="url(#zfTop)"/>
+  <!-- Fluxo de entrada: leitura rápida mesmo em tamanhos pequenos -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M66 287 H85" stroke="url(#flowTeal)" stroke-width="10"/>
+    <path d="M101 266 H145" stroke="url(#flowTeal)" stroke-width="10"/>
+    <path d="M102 309 H157" stroke="url(#flowBlue)" stroke-width="10"/>
+    <path d="M146 242 H191" stroke="url(#flowBlue)" stroke-width="10"/>
+    <path d="M151 286 H211" stroke="url(#flowBlue)" stroke-width="10"/>
+    <path d="M194 266 H248" stroke="url(#flowGold)" stroke-width="10"/>
+    <path d="M205 309 H247" stroke="url(#flowBlue)" stroke-width="10"/>
+  </g>
 
-  <!-- Diagonal (paralelogramo azul, atravessa da parte superior direita à inferior esquerda) -->
-  <path d="M 84,44 L 100,44 L 44,86 L 28,86 Z" fill="url(#zfMid)"/>
-
-  <!-- Plano inferior do Z (paralelogramo azul escuro) -->
-  <path d="M 28,86 L 106,86 L 98,106 L 20,106 Z" fill="url(#zfBot)"/>
-
-  <!-- Traços de flow à esquerda da diagonal (linhas horizontais em cascata) -->
-  <g stroke-linecap="round" fill="none">
-    <line x1="4"  y1="60" x2="18" y2="60" stroke="#3EE2CC" stroke-width="4"/>
-    <line x1="10" y1="68" x2="34" y2="68" stroke="#7C9AFC" stroke-width="4"/>
-    <line x1="20" y1="74" x2="30" y2="74" stroke="#FFB020" stroke-width="4"/>
-    <line x1="4"  y1="78" x2="12" y2="78" stroke="#3EE2CC" stroke-width="4"/>
-    <line x1="14" y1="82" x2="26" y2="82" stroke="#7C9AFC" stroke-width="4"/>
+  <!-- Z em três planos -->
+  <g>
+    <!-- faixa superior -->
+    <path d="M186 104 H407 L359 160 H139 Z" fill="url(#topTeal)"/>
+    <!-- dobra que conecta a faixa superior à diagonal -->
+    <path d="M407 104 L359 160 L338 160 L372 123 Z" fill="url(#topFold)" opacity=".92"/>
+    <!-- diagonal -->
+    <path d="M359 160 H407 L239 350 H188 Z" fill="url(#diag)"/>
+    <!-- faixa inferior -->
+    <path d="M239 350 H407 L359 408 H188 Z" fill="url(#bottomBlue)"/>
+    <!-- brilho discreto na aresta superior -->
+    <path d="M186 104 H407 L397 116 H176 Z" fill="#4EF0DF" opacity=".22"/>
+    <!-- detalhe de profundidade no término inferior -->
+    <path d="M239 350 H407 L394 366 H226 Z" fill="#0B31A2" opacity=".28"/>
   </g>
 </svg>

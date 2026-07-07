@@ -16,6 +16,7 @@ import { useStore } from '@/src/store/useStore';
 import { CheckCircle2, Circle, ArrowRight, Rocket, X, PartyPopper, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { BigIdeaBar } from '@/src/components/BigIdeaBar';
+import { RecognitionInbox } from '@/src/components/RecognitionInbox';
 
 const C = {
   indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
@@ -459,6 +460,12 @@ export function DashboardPanel() {
                 }}
               />
             )}
+
+            {/* NOTAS DE RECONHECIMENTO (Hunter, ADR-049) — o Diretor IA
+                puxa da memória do dono momentos que merecem reconhecimento
+                (CSAT 5, cliente recuperado, etc.). Só aparece quando há
+                sugestões abertas. */}
+            <RecognitionInbox />
 
             {/* RADAR SCORE (ADR-025) — só aparece quando o módulo Radar está
                 ativo E existe uma sessão com score calculado. */}

@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ManipulationRadarService } from "./ManipulationRadarService.js";
 // Node 18+/22 já possui fetch global — não usar node-fetch (quebra no bundle CJS).
 
 export class MessageProviderService {
@@ -9,6 +10,21 @@ export class MessageProviderService {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+
+    // Radar de Manipulação (Sinek, ADR-050) — analisa o conteúdo antes do
+    // envio. É best-effort: heurístico e rapidíssimo, nunca bloqueia o
+    // envio. Só cria alerta se detectar tática de manipulação (desconto,
+    // urgência, pressão, escassez, medo).
+    try {
+      if (channel.organization_id) {
+        ManipulationRadarService.scan({
+          organizationId: channel.organization_id,
+          text: content,
+          source: "ai_outbound",
+          ref: `channel:${channelId}`,
+        });
+      }
+    } catch { /* nunca deve quebrar o envio */ }
 
     let metadada: any = {};
     try {

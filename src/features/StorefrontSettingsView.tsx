@@ -416,8 +416,9 @@ export function StorefrontSettingsView() {
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="max-w-5xl mx-auto space-y-8">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-            <Store className="w-6 h-6 text-indigo-400" />
+          <p className="zf-kicker mb-1">Vitrine Pública</p>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <Store className="w-6 h-6" style={{ color: 'var(--color-flow)' }} />
             Loja Virtual
           </h2>
           <p className="text-zinc-400 text-sm mt-1">
@@ -676,7 +677,7 @@ export function StorefrontSettingsView() {
                 <Button
                   onClick={handleSaveSettings}
                   disabled={savingSettings}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  className="zf-button zf-button-primary"
                 >
                   {savingSettings ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                   Salvar
@@ -701,7 +702,7 @@ export function StorefrontSettingsView() {
               <Button variant="outline" className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10" onClick={curateFeatured} disabled={curating}>
                 <Star className="w-4 h-4 mr-2" /> {curating ? 'Curando...' : 'Sugerir destaques (IA)'}
               </Button>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={() => setShowNew(true)}>
+              <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
                 <Plus className="w-4 h-4 mr-2" /> Novo produto
               </Button>
             </div>
@@ -936,7 +937,7 @@ function EditProductModal({ product, onClose, onSaved }: {
         </div>
         <div className="mt-5 flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={save} disabled={saving}>
+          <Button className="zf-button zf-button-primary" onClick={save} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar'}
           </Button>
         </div>
@@ -1001,7 +1002,7 @@ function ManualCollectionModal({ products, editing, onClose, onSaved }: {
         </div>
         <div className="mt-5 flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={save} disabled={saving}>
+          <Button className="zf-button zf-button-primary" onClick={save} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editing ? 'Salvar' : 'Criar coleção')}
           </Button>
         </div>
@@ -1086,7 +1087,7 @@ function NewProductModal({ onClose, onCreated }: { onClose: () => void; onCreate
         </div>
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={create} disabled={saving}>
+          <Button className="zf-button zf-button-primary" onClick={create} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Criar produto'}
           </Button>
         </div>

@@ -156,7 +156,11 @@ export function RevenueIntelligenceView() {
               <Gauge className="h-5 w-5 text-ric-primary-2" />
             </div>
             <div>
-              <h2 className="text-xl font-bold tracking-tight text-slate-100">Revenue Intelligence</h2>
+              {/* Título usa a família Sora (zf-page-title) pra manter a
+                  tipografia consistente com o resto do app; as CORES do
+                  RIE seguem sendo as do Revenue Intelligence Center
+                  (tokens ric-*), preservando a "cabine de comando". */}
+              <h2 className="zf-page-title text-xl">Revenue Intelligence</h2>
               <p className="text-sm text-slate-400">Onde está o dinheiro que sua empresa está deixando na mesa.</p>
             </div>
           </div>

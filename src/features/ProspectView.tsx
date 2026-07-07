@@ -126,7 +126,8 @@ export function ProspectView() {
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="mb-5">
-        <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
+        <p className="zf-kicker mb-1">Prospecção B2B</p>
+        <h2 className="zf-page-title flex items-center gap-2">
           <Target className="w-6 h-6 text-cyan-400" /> Prospect AI
         </h2>
         <p className="text-zinc-400 text-sm mt-1">Encontre contas com aderência, organize evidências e prospecte com método — sem spam.</p>
@@ -139,23 +140,23 @@ export function ProspectView() {
       {/* Receita originada pela prospecção (atribuição) */}
       <div className="mb-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-300/80"><Trophy className="w-3.5 h-3.5" /> Receita originada</div>
-          <div className="text-2xl font-semibold text-emerald-300 mt-1 tabular-nums">{brl(attr?.totalWon || 0)}</div>
+          <div className="zf-data-label flex items-center gap-1.5" style={{ color: 'var(--color-success)' }}><Trophy className="w-3.5 h-3.5" /> Receita originada</div>
+          <div className="zf-data-value text-2xl mt-1" style={{ color: 'var(--color-success)' }}>{brl(attr?.totalWon || 0)}</div>
           <div className="text-[10px] text-zinc-500 mt-0.5">{attr?.wonCount || 0} conta(s) ganha(s)</div>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400"><Building2 className="w-3.5 h-3.5" /> Em pipeline</div>
-          <div className="text-2xl font-semibold text-zinc-100 mt-1 tabular-nums">{attr?.pipelineCount ?? 0}</div>
+          <div className="zf-data-label flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Em pipeline</div>
+          <div className="zf-data-value text-2xl text-zinc-100 mt-1">{attr?.pipelineCount ?? 0}</div>
           <div className="text-[10px] text-zinc-500 mt-0.5">contas em aberto</div>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400"><TrendingUp className="w-3.5 h-3.5" /> Taxa de ganho</div>
-          <div className="text-2xl font-semibold text-zinc-100 mt-1 tabular-nums">{attr?.winRate ?? 0}%</div>
+          <div className="zf-data-label flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5" /> Taxa de ganho</div>
+          <div className="zf-data-value text-2xl text-zinc-100 mt-1">{attr?.winRate ?? 0}%</div>
           <div className="text-[10px] text-zinc-500 mt-0.5">ganhas ÷ (ganhas + perdidas)</div>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400"><Gauge className="w-3.5 h-3.5" /> Ticket médio</div>
-          <div className="text-2xl font-semibold text-zinc-100 mt-1 tabular-nums">{brl(attr?.avgDeal || 0)}</div>
+          <div className="zf-data-label flex items-center gap-1.5"><Gauge className="w-3.5 h-3.5" /> Ticket médio</div>
+          <div className="zf-data-value text-2xl text-zinc-100 mt-1">{brl(attr?.avgDeal || 0)}</div>
           <div className="text-[10px] text-zinc-500 mt-0.5">por conta ganha</div>
         </div>
       </div>

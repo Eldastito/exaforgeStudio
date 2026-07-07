@@ -17,6 +17,7 @@ import { CheckCircle2, Circle, ArrowRight, Rocket, X, PartyPopper, AlertTriangle
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { BigIdeaBar } from '@/src/components/BigIdeaBar';
 import { RecognitionInbox } from '@/src/components/RecognitionInbox';
+import { PhilosophyAudit } from '@/src/components/PhilosophyAudit';
 
 const C = {
   indigo: '#6366f1', violet: '#8b5cf6', emerald: '#10b981',
@@ -466,6 +467,11 @@ export function DashboardPanel() {
                 (CSAT 5, cliente recuperado, etc.). Só aparece quando há
                 sugestões abertas. */}
             <RecognitionInbox />
+
+            {/* AUDITORIA FILOSÓFICA (Sinek/Domingos, ADR-050) — Celery Test,
+                Radar de Manipulação e Checklist de Fundamentos num único
+                card. Só aparece se houver pendências ou histórico. */}
+            <PhilosophyAudit />
 
             {/* RADAR SCORE (ADR-025) — só aparece quando o módulo Radar está
                 ativo E existe uma sessão com score calculado. */}

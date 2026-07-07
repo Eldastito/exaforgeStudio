@@ -2797,6 +2797,86 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_recognition_dedupe ON recognition_notes(organization_id, target_type, target_id, trigger_type, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar recognition_notes', e); }
+
+  // ==== Trio de auditoria filosófica (Tier 2, ADR-050) ====
+
+  // Celery Test (Sinek, "Comece pelo Porquê"). Pergunta semanal do Diretor:
+  // "Se você tivesse que colocar tudo num carrinho, essa nova prática/produto
+  // ficaria com o resto ou pareceria fora de lugar?" Ajuda o dono a decidir
+  // se algo reforça ou dilui o Manifesto.
+  // status: pending (aguardando resposta) | answered
+  // decision: keeps (mantém, coerente) | drops (descartar, dilui)
+  //           | needs_review (na dúvida, revisar depois)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS celery_tests (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT,
+        decision TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        week_of TEXT NOT NULL,
+        answered_at DATETIME,
+        handled_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_celery_org_status ON celery_tests(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_celery_org_week ON celery_tests(organization_id, week_of);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar celery_tests', e); }
+
+  // Radar de Manipulação (Sinek). Detecta táticas de venda que descem para
+  // desconto/urgência/pressão em vez de vender pelo Por Quê. Escaneia
+  // mensagens outbound e sugere reformulação ancorada no Manifesto.
+  // tactics_json: ["discount"|"urgency"|"pressure"|"scarcity"]
+  // status: open (para revisar) | dismissed (dono viu e ignorou)
+  //         | reformulated (dono ajustou a copy)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS manipulation_alerts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        message_source TEXT NOT NULL,
+        message_ref TEXT,
+        sample_text TEXT NOT NULL,
+        tactics_json TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'medium',
+        suggestion TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        handled_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_manip_org_status ON manipulation_alerts(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_manip_org_created ON manipulation_alerts(organization_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar manipulation_alerts', e); }
+
+  // Checklist de Fundamentos (Carlos Domingos — "problema é sinal, não fim").
+  // Antes de subir uma campanha, checa se os fundamentos estão no lugar
+  // (entrega, atendimento, estoque, CSAT, sem reclamações abertas). Se algum
+  // item estiver ruim, a campanha só amplifica o problema — o Diretor
+  // recomenda ARRUMAR primeiro, campanha depois.
+  // items_json: [{ key, label, status: 'ok'|'attention'|'critical', evidence }]
+  // status: passed (tudo ok) | passed_with_warnings | blocked
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fundamentals_checks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        campaign_ref TEXT,
+        items_json TEXT NOT NULL,
+        score INTEGER,
+        status TEXT NOT NULL,
+        recommendation TEXT,
+        handled_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fund_org_created ON fundamentals_checks(organization_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar fundamentals_checks', e); }
 };
 
 initDb();

@@ -17,6 +17,7 @@ import frustrationsRoutes from "./src/server/routes/frustrations.js";
 import recoveryRoutes from "./src/server/routes/recovery.js";
 import bigIdeaRoutes from "./src/server/routes/bigIdea.js";
 import recognitionRoutes from "./src/server/routes/recognition.js";
+import philosophyAuditRoutes from "./src/server/routes/philosophyAudit.js";
 import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit } from "./src/server/webhookSecurity.js";
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
@@ -412,6 +413,7 @@ async function startServer() {
   protectedApi.use("/recovery", recoveryRoutes);
   protectedApi.use("/big-idea", bigIdeaRoutes);
   protectedApi.use("/recognition", recognitionRoutes);
+  protectedApi.use("/philosophy", philosophyAuditRoutes);
   protectedApi.use("/integrations", instagramOAuthRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
   protectedApi.use("/studio", studioRoutes);

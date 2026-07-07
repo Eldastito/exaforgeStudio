@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
-import { Sparkles, Lightbulb, Frown, Send, Trash2, RefreshCw, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Sparkles, Lightbulb, Frown, Send, Trash2, RefreshCw, ChevronDown, ChevronRight, Loader2, Heart, Copy } from 'lucide-react';
 
 // Escuta Ativa = Radar de Oportunidades Disfarçadas (mercado te fala via
 // reclamações/cancelamentos/faltas/gaps) + Journal de Frustrações (você fala
@@ -46,30 +46,77 @@ const FRUST_CATEGORY_LABEL: Record<string, string> = {
   processo: '📋 Processo', financeiro: '💰 Financeiro', cliente: '🙋 Cliente', outro: '❓ Outro',
 };
 
+interface RecoveryEvent {
+  id: string;
+  contactId: string | null;
+  triggerType: string;
+  triggerContext: any;
+  playbookText: string;
+  status: string;
+  createdAt: string;
+}
+const TRIGGER_LABEL: Record<string, { emoji: string; label: string }> = {
+  order_cancelled: { emoji: '↩️', label: 'Pedido cancelado' },
+  pix_expired: { emoji: '⏰', label: 'PIX venceu' },
+  complaint_detected: { emoji: '⚠️', label: 'Reclamação' },
+  delay_detected: { emoji: '⏱️', label: 'Demora mencionada' },
+  delivery_delayed: { emoji: '📦', label: 'Entrega atrasou' },
+};
+const RECOVERY_STATUS: Record<string, { label: string; color: string }> = {
+  triggered: { label: 'Precisa recuperação', color: 'bg-red-500/20 text-red-300 border-red-500/40' },
+  playbook_sent: { label: 'Playbook enviado', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+  resolved_positive: { label: 'Recuperado ✨', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+  resolved_neutral: { label: 'Encerrado neutro', color: 'bg-slate-500/20 text-slate-300 border-slate-500/40' },
+  escalated_human: { label: 'Escalado', color: 'bg-purple-500/20 text-purple-300 border-purple-500/40' },
+  dismissed: { label: 'Descartado', color: 'bg-zinc-700/40 text-zinc-500 border-zinc-600/40' },
+};
+
 export function EscutaView() {
   const [opps, setOpps] = useState<Opportunity[]>([]);
   const [frusts, setFrusts] = useState<Frustration[]>([]);
+  const [recoveries, setRecoveries] = useState<RecoveryEvent[]>([]);
+  const [recoveryMetrics, setRecoveryMetrics] = useState<any>(null);
   const [digest, setDigest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedRecovery, setExpandedRecovery] = useState<string | null>(null);
   const [frustText, setFrustText] = useState('');
   const [saving, setSaving] = useState(false);
   const [filterOpps, setFilterOpps] = useState<'active' | 'all'>('active');
+  const [filterRecovery, setFilterRecovery] = useState<'active' | 'all'>('active');
 
   const load = async () => {
     try {
-      const [o, f] = await Promise.all([
-        apiFetch('/api/opportunities').then((r) => r.json()),
-        apiFetch('/api/frustrations').then((r) => r.json()),
+      const [o, f, r] = await Promise.all([
+        apiFetch('/api/opportunities').then((x) => x.json()),
+        apiFetch('/api/frustrations').then((x) => x.json()),
+        apiFetch(`/api/recovery?status=${filterRecovery}`).then((x) => x.json()),
       ]);
       setOpps(Array.isArray(o?.opportunities) ? o.opportunities : []);
       setFrusts(Array.isArray(f?.frustrations) ? f.frustrations : []);
       setDigest(f?.digest || null);
+      setRecoveries(Array.isArray(r?.events) ? r.events : []);
+      setRecoveryMetrics(r?.metrics || null);
     } catch { /* silent */ }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filterRecovery]);
+
+  const setRecoveryStatus = async (id: string, status: string) => {
+    try {
+      const res = await apiFetch(`/api/recovery/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+      });
+      if (!res.ok) { toast.error('Falha ao atualizar.'); return; }
+      setRecoveries((prev) => prev.map((r) => r.id === id ? { ...r, status } : r));
+      load();
+    } catch { /* silent */ }
+  };
+
+  const copyPlaybook = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); toast.success('Playbook copiado. Ajuste antes de enviar.'); } catch { /* silent */ }
+  };
 
   const runScan = async () => {
     setScanning(true);
@@ -205,6 +252,110 @@ export function EscutaView() {
                           {o.status !== 'in_progress' && <button onClick={() => setStatus(o.id, 'in_progress')} className="text-xs px-2.5 py-1.5 rounded-lg border border-amber-600 text-amber-300 hover:border-amber-400">🔨 Tô em cima</button>}
                           {o.status !== 'implemented' && <button onClick={() => setStatus(o.id, 'implemented')} className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-600 text-emerald-300 hover:border-emerald-400">✅ Implementei</button>}
                           {o.status !== 'dismissed' && <button onClick={() => setStatus(o.id, 'dismissed')} className="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 text-zinc-500 hover:border-zinc-500">✗ Descartar</button>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Radar de Recuperação (Disney) */}
+        <section className="space-y-3 border-t border-zinc-800 pt-6">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Heart className="w-5 h-5 text-pink-400" /> Radar de Recuperação</h2>
+              <p className="text-xs text-zinc-500 mt-1 italic">"A recuperação é o momento memorável — não a falha." — Disney Institute</p>
+            </div>
+            <div className="flex rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5">
+              <button onClick={() => setFilterRecovery('active')} className={`text-xs px-2.5 py-1 rounded ${filterRecovery === 'active' ? 'bg-indigo-600 text-white' : 'text-zinc-400'}`}>Pendentes</button>
+              <button onClick={() => setFilterRecovery('all')} className={`text-xs px-2.5 py-1 rounded ${filterRecovery === 'all' ? 'bg-indigo-600 text-white' : 'text-zinc-400'}`}>Todos</button>
+            </div>
+          </div>
+
+          {recoveryMetrics && recoveryMetrics.total > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="rounded-lg bg-zinc-950/60 border border-zinc-800 p-3">
+                <div className="text-xs text-zinc-500">Eventos (30d)</div>
+                <div className="text-lg font-semibold text-zinc-100">{recoveryMetrics.total}</div>
+              </div>
+              <div className="rounded-lg bg-zinc-950/60 border border-zinc-800 p-3">
+                <div className="text-xs text-zinc-500">Recuperados</div>
+                <div className="text-lg font-semibold text-emerald-300">{recoveryMetrics.recovered}</div>
+              </div>
+              <div className="rounded-lg bg-zinc-950/60 border border-zinc-800 p-3">
+                <div className="text-xs text-zinc-500">Taxa de recuperação</div>
+                <div className="text-lg font-semibold text-zinc-100">{recoveryMetrics.recoveryRate != null ? `${Math.round(recoveryMetrics.recoveryRate * 100)}%` : '—'}</div>
+              </div>
+              <div className="rounded-lg bg-zinc-950/60 border border-zinc-800 p-3">
+                <div className="text-xs text-zinc-500">Tempo médio (h)</div>
+                <div className="text-lg font-semibold text-zinc-100">{recoveryMetrics.avgResolutionHours != null ? recoveryMetrics.avgResolutionHours : '—'}</div>
+              </div>
+            </div>
+          )}
+
+          {recoveries.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center">
+              <p className="text-sm text-zinc-400">Nenhum evento de recuperação pendente. 🎉</p>
+              <p className="text-xs text-zinc-500 mt-1">Quando um pedido cancelar, um PIX vencer ou uma reclamação for detectada, um playbook aparece aqui — pronto para você reagir.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {recoveries.map((r) => {
+                const trig = TRIGGER_LABEL[r.triggerType] || { emoji: '❓', label: r.triggerType };
+                const st = RECOVERY_STATUS[r.status] || RECOVERY_STATUS.triggered;
+                const isExp = expandedRecovery === r.id;
+                const ago = (() => {
+                  try {
+                    const t = new Date(r.createdAt.replace(' ', 'T') + (r.createdAt.includes('Z') ? '' : 'Z')).getTime();
+                    const s = Math.round((Date.now() - t) / 1000);
+                    if (s < 60) return `${s}s atrás`; if (s < 3600) return `${Math.floor(s / 60)}min atrás`;
+                    if (s < 86400) return `${Math.floor(s / 3600)}h atrás`; return `${Math.floor(s / 86400)}d atrás`;
+                  } catch { return r.createdAt; }
+                })();
+                return (
+                  <div key={r.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+                    <button onClick={() => setExpandedRecovery(isExp ? null : r.id)} className="w-full p-4 text-left hover:bg-zinc-900/60 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <div className="text-2xl">{trig.emoji}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="text-xs px-2 py-0.5 rounded-full border border-pink-500/30 bg-pink-500/10 text-pink-300">{trig.label}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${st.color}`}>{st.label}</span>
+                            <span className="text-xs text-zinc-500">{ago}</span>
+                          </div>
+                          <h3 className="font-medium text-zinc-100">{r.triggerContext?.contactName || 'Cliente'}{r.triggerContext?.snippet ? ` — "${String(r.triggerContext.snippet).slice(0, 80)}${r.triggerContext.snippet.length > 80 ? '…' : ''}"` : ''}</h3>
+                        </div>
+                        {isExp ? <ChevronDown className="w-4 h-4 text-zinc-500 mt-1" /> : <ChevronRight className="w-4 h-4 text-zinc-500 mt-1" />}
+                      </div>
+                    </button>
+                    {isExp && (
+                      <div className="border-t border-zinc-800 p-4 space-y-3 bg-zinc-950/40">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs text-pink-400 font-semibold uppercase tracking-wide">💌 Playbook Disney sugerido</p>
+                            <button onClick={() => copyPlaybook(r.playbookText)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100"><Copy className="w-3 h-3" /> Copiar</button>
+                          </div>
+                          <pre className="text-sm bg-zinc-950 border border-zinc-800 rounded p-3 text-zinc-200 whitespace-pre-wrap font-sans max-h-96 overflow-auto">{r.playbookText}</pre>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap pt-1">
+                          {r.status !== 'playbook_sent' && r.status !== 'resolved_positive' && r.status !== 'resolved_neutral' && (
+                            <button onClick={() => setRecoveryStatus(r.id, 'playbook_sent')} className="text-xs px-2.5 py-1.5 rounded-lg border border-amber-600 text-amber-300 hover:border-amber-400">💌 Enviei o playbook</button>
+                          )}
+                          {r.status !== 'resolved_positive' && (
+                            <button onClick={() => setRecoveryStatus(r.id, 'resolved_positive')} className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-600 text-emerald-300 hover:border-emerald-400">✨ Cliente recuperado</button>
+                          )}
+                          {r.status !== 'resolved_neutral' && (
+                            <button onClick={() => setRecoveryStatus(r.id, 'resolved_neutral')} className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-600 text-slate-300 hover:border-slate-400">Encerrar neutro</button>
+                          )}
+                          {r.status !== 'escalated_human' && (
+                            <button onClick={() => setRecoveryStatus(r.id, 'escalated_human')} className="text-xs px-2.5 py-1.5 rounded-lg border border-purple-600 text-purple-300 hover:border-purple-400">⚡ Escalar</button>
+                          )}
+                          {r.status !== 'dismissed' && (
+                            <button onClick={() => setRecoveryStatus(r.id, 'dismissed')} className="text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 text-zinc-500 hover:border-zinc-500">✗ Descartar</button>
+                          )}
                         </div>
                       </div>
                     )}

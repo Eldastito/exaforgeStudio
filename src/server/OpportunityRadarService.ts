@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { RecoveryRadarService } from "./RecoveryRadarService.js";
 
 /**
  * Radar de Oportunidades Disfarçadas — Tier 2 (Carlos Domingos, ADR-046).
@@ -132,7 +133,7 @@ export const OpportunityRadarService = {
     let rows: any[] = [];
     try {
       rows = db.prepare(`
-        SELECT m.id, m.content, m.created_at, m.ticket_id, c.name AS contact_name
+        SELECT m.id, m.content, m.created_at, m.ticket_id, t.contact_id, c.name AS contact_name
           FROM messages m
           JOIN tickets t ON t.id = m.ticket_id
           JOIN contacts c ON c.id = t.contact_id
@@ -147,6 +148,19 @@ export const OpportunityRadarService = {
 
     const complaints = rows.filter((r) => score(r.content, COMPLAINT_KEYWORDS) >= 1);
     if (complaints.length < 3) return;
+
+    // Recovery Radar por CONTATO: cada reclamação individual dispara um
+    // playbook de recuperação para aquele cliente específico. O upsert do
+    // RecoveryRadar evita duplicar caso o cliente reclame várias vezes.
+    for (const c of complaints) {
+      try {
+        RecoveryRadarService.detect({
+          organizationId: orgId, contactId: c.contact_id, ticketId: c.ticket_id,
+          triggerType: "complaint_detected",
+          context: { contactName: c.contact_name, snippet: String(c.content || "").slice(0, 200) },
+        });
+      } catch { /* noop — nunca derruba o scan por falha do radar */ }
+    }
 
     this.upsert(orgId, {
       category: "service_complaint",

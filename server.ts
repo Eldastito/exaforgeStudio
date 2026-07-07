@@ -14,6 +14,7 @@ import metaDebugRoutes from "./src/server/routes/metaDebug.js";
 import manifestoRoutes from "./src/server/routes/manifesto.js";
 import opportunityRadarRoutes from "./src/server/routes/opportunityRadar.js";
 import frustrationsRoutes from "./src/server/routes/frustrations.js";
+import recoveryRoutes from "./src/server/routes/recovery.js";
 import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit } from "./src/server/webhookSecurity.js";
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
@@ -406,6 +407,7 @@ async function startServer() {
   protectedApi.use("/manifesto", manifestoRoutes);
   protectedApi.use("/opportunities", opportunityRadarRoutes);
   protectedApi.use("/frustrations", frustrationsRoutes);
+  protectedApi.use("/recovery", recoveryRoutes);
   protectedApi.use("/integrations", instagramOAuthRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
   protectedApi.use("/studio", studioRoutes);

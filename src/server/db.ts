@@ -2702,6 +2702,40 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_frust_org ON owner_frustrations(organization_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar owner_frustrations', e); }
+
+  // Radar de Recuperação (Tier 2 Disney — "O Jeito Disney de Encantar Clientes",
+  // ADR-047). Quando algo dá errado (cancelamento, PIX expirado, reclamação
+  // detectada), a plataforma detecta e propõe um playbook Disney de recuperação
+  // em 4 passos: (1) reconhecer o problema com empatia real, (2) assumir
+  // responsabilidade, (3) resolver rápido, (4) oferecer algo pessoal (não
+  // desconto — mimo, prioridade, mensagem escrita). O objetivo é MEDIR
+  // "recovery events" — a métrica que os grandes negócios têm e a maioria não.
+  //
+  // trigger_type: order_cancelled | pix_expired | complaint_detected | delay_detected | delivery_delayed
+  // status: triggered | playbook_sent | resolved_positive | resolved_neutral | escalated_human | dismissed
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS recovery_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        ticket_id TEXT,
+        order_id TEXT,
+        trigger_type TEXT NOT NULL,
+        trigger_context_json TEXT,
+        playbook_text TEXT,
+        status TEXT NOT NULL DEFAULT 'triggered',
+        playbook_sent_at DATETIME,
+        resolved_at DATETIME,
+        resolution_notes TEXT,
+        handled_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_recovery_org_status ON recovery_events(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_recovery_org_created ON recovery_events(organization_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar recovery_events', e); }
 };
 
 initDb();

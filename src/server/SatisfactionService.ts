@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
+import { RecognitionNotesService } from "./RecognitionNotesService.js";
 
 /**
  * Pesquisa de satisfação (CSAT 1-5) enviada após a venda. Mede a experiência,
@@ -44,6 +45,23 @@ export class SatisfactionService {
     try {
       db.prepare(`UPDATE satisfaction_surveys SET status = 'answered', score = ?, comment = COALESCE(?, comment), answered_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
         .run(score, comment || null, surveyId, orgId);
+      // Nota máxima → dispara sugestão de reconhecimento pro dono (Hunter, ADR-049).
+      // Não interfere no fluxo se falhar — é enriquecimento, não caminho crítico.
+      if (score === 5) {
+        try {
+          const row = db.prepare(`SELECT contact_id, order_id FROM satisfaction_surveys WHERE id = ? AND organization_id = ?`)
+            .get(surveyId, orgId) as any;
+          if (row?.contact_id) {
+            RecognitionNotesService.detect({
+              organizationId: orgId,
+              targetType: "customer",
+              targetId: row.contact_id,
+              triggerType: "csat_high",
+              context: { surveyId, orderId: row.order_id || null, score, comment: comment || null },
+            });
+          }
+        } catch (e) { console.error("[Recognition] hook csat_high falhou", e); }
+      }
     } catch (e) { console.error("[CSAT] Falha ao registrar nota", e); }
   }
 

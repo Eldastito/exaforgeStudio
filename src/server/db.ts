@@ -2762,6 +2762,41 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_big_ideas_org_panel ON big_ideas(organization_id, panel_key, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar big_ideas', e); }
+
+  // Notas de Reconhecimento (Tier 2, Hunter — "O Monge e o Executivo",
+  // liderança-servidora, ADR-049).
+  //
+  // O Diretor IA detecta esforço/momento notável (CSAT nota máxima,
+  // recompra fiel, ticket alto, cliente recuperado, mensagem carinhosa)
+  // e SUGERE ao dono uma nota curta de reconhecimento. O dono revê e
+  // decide se envia. Automatizar isso 100% mata o valor — o reconhecimento
+  // vale porque VEM DO DONO, não da IA. A IA só puxa a memória do dono.
+  //
+  // target_type: customer | employee | partner (por enquanto só customer)
+  // status: suggested | dismissed | sent (fecha o loop pra métrica)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS recognition_notes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        target_type TEXT NOT NULL DEFAULT 'customer',
+        target_id TEXT,
+        target_name TEXT,
+        trigger_type TEXT NOT NULL,
+        trigger_context_json TEXT,
+        suggested_message TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'suggested',
+        sent_at DATETIME,
+        dismissed_at DATETIME,
+        handled_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_recognition_org_status ON recognition_notes(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_recognition_org_created ON recognition_notes(organization_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_recognition_dedupe ON recognition_notes(organization_id, target_type, target_id, trigger_type, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar recognition_notes', e); }
 };
 
 initDb();

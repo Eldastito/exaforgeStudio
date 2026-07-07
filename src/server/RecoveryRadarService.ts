@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { BusinessManifestoService } from "./BusinessManifestoService.js";
+import { RecognitionNotesService } from "./RecognitionNotesService.js";
 
 /**
  * Radar de Recuperação — Tier 2 (Disney, ADR-047).
@@ -213,6 +214,23 @@ export const RecoveryRadarService = {
     if (opts.handledBy) { sqlParts.push("handled_by = ?"); bindings.push(opts.handledBy); }
     bindings.push(id, orgId);
     db.prepare(`UPDATE recovery_events SET ${sqlParts.join(", ")} WHERE id = ? AND organization_id = ?`).run(...bindings);
+    // Recuperação bem-sucedida → sugere reconhecimento (Hunter, ADR-049).
+    // O cliente que aceitou voltar depois de um problema merece uma nota.
+    if (status === "resolved_positive") {
+      try {
+        const full = db.prepare(`SELECT contact_id, trigger_type FROM recovery_events WHERE id = ? AND organization_id = ?`)
+          .get(id, orgId) as any;
+        if (full?.contact_id) {
+          RecognitionNotesService.detect({
+            organizationId: orgId,
+            targetType: "customer",
+            targetId: full.contact_id,
+            triggerType: "recovered_customer",
+            context: { recoveryEventId: id, originalTrigger: full.trigger_type },
+          });
+        }
+      } catch (e) { console.error("[Recognition] hook recovered_customer falhou", e); }
+    }
     return true;
   },
 

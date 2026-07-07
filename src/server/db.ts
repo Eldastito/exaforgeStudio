@@ -480,6 +480,14 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reactivated_at DATETIME`); } catch(e){}
   // Mídia (imagem/etc) anexada a uma mensagem
   try { db.exec(`ALTER TABLE messages ADD COLUMN media_url TEXT`); } catch(e){}
+  // Status de entrega da resposta enviada ao provedor (WhatsApp/Instagram/etc.).
+  // 'sent' quando a Graph/Evolution API confirmou 2xx; 'failed' quando o envio
+  // quebrou (ex.: token expirado, IG não inscrito no webhook messages, host
+  // errado). Antes disto o erro era engolido no catch do webhookProcessor e a
+  // mensagem aparecia no painel como se tivesse ido — deixando o lojista sem
+  // saber que o cliente não recebeu.
+  try { db.exec(`ALTER TABLE messages ADD COLUMN delivery_status TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE messages ADD COLUMN delivery_error TEXT`); } catch(e){}
   // Metadados da base de conhecimento (RAG)
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN channel_id TEXT DEFAULT 'global'`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}

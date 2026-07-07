@@ -35,7 +35,13 @@ export class MessageProviderService {
            text: { body: content }
          };
        } else if (channel.provider === 'instagram') {
-         endpoint = `https://graph.facebook.com/v19.0/${channel.identifier}/messages`;
+         // Instagram API with Instagram Login (não Facebook Messenger): o token
+         // salvo em token_encrypted (routes/instagramOAuth.ts) é um IG User Token
+         // que só é válido contra graph.instagram.com — o host correto para o
+         // endpoint /me/messages deste produto. Usar graph.facebook.com aqui
+         // rejeita 100% dos envios silenciosamente (bug histórico) e o cliente
+         // no Instagram nunca recebe a resposta da IA.
+         endpoint = `https://graph.instagram.com/v21.0/me/messages`;
          body = {
            recipient: { id: recipientIdentifier },
            message: { text: content }

@@ -273,6 +273,28 @@ export function initVisionDb() {
       last_observed_at DATETIME,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Auditoria de acesso a evidências de vídeo (PRD-VISION-VMS §19.1 — LGPD).
+    -- Toda visualização ao vivo, playback de gravação ou export de trecho gera
+    -- uma linha aqui. Sem isto não há como responder "quem viu essa câmera às
+    -- 14h?" — obrigação básica de compliance quando o gravador contém pessoas
+    -- identificáveis. action ∈ live_view | playback | export | snapshot.
+    CREATE TABLE IF NOT EXISTS vision_access_logs (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT,
+      camera_id TEXT,
+      site_id TEXT,
+      action TEXT NOT NULL,
+      target_ref TEXT,           -- ex.: id do incidente/segmento acessado
+      window_start DATETIME,      -- para playback/export: intervalo requisitado
+      window_end DATETIME,
+      user_agent TEXT,
+      ip_address TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_vision_access_logs_org ON vision_access_logs(organization_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_vision_access_logs_camera ON vision_access_logs(camera_id, created_at);
   `);
 }
 

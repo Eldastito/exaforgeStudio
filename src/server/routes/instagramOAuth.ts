@@ -128,6 +128,25 @@ export async function instagramCallback(req: any, res: any) {
         .run(uuidv4(), orgId, username ? `Instagram @${username}` : 'Instagram Direct', businessId, longToken);
     }
     console.log(`[IG OAuth] Conta conectada via OAuth: @${username || '?'} (id ${businessId}) org ${orgId}`);
+
+    // 5. Inscreve a conta no webhook `messages` do app (subscribed_apps): sem
+    // isso a Meta NUNCA entrega DM ao nosso webhook, e o lojista fica sem saber
+    // por que a IA não responde. Precisa ser feita explicitamente pelo produto
+    // Instagram API with Instagram Login — não vem "por padrão" após o OAuth.
+    // Best-effort: falha aqui só é logada; a chamada pode ser refeita mais tarde
+    // pela UI, e a conexão do canal continua válida para leitura do feed.
+    try {
+      const subRes = await fetch(`https://graph.instagram.com/v21.0/me/subscribed_apps?subscribed_fields=messages&access_token=${encodeURIComponent(longToken)}`, { method: 'POST' });
+      const subBody: any = await subRes.json().catch(() => ({}));
+      if (!subRes.ok || subBody?.error) {
+        console.error('[IG OAuth] Falha em subscribed_apps (webhook messages):', subBody?.error || subBody);
+      } else {
+        console.log('[IG OAuth] Inscrito no webhook messages para @' + (username || '?'));
+      }
+    } catch (e) {
+      console.error('[IG OAuth] Erro em subscribed_apps:', e);
+    }
+
     return res.redirect(`${APP_URL}/?ig=conectado`);
   } catch (e: any) {
     console.error('[IG OAuth] Erro no callback:', e);

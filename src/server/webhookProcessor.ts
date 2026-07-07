@@ -58,8 +58,21 @@ JobQueueService.registerHandler("process_incoming_message", async (p: any) => {
   return { processed: true };
 });
 
+// Regra de default (ADR-011 revisado — Fase 1 do plano de produção):
+// - production: fila LIGADA por padrão (webhook responde 200 na hora,
+//   worker processa em background — protege o SLA da Meta/Evolution).
+// - development: fila DESLIGADA por padrão (inline é mais fácil de
+//   debugar, e dev não sofre com 30s de timeout do provider).
+// - Env `WEBHOOK_QUEUE_ENABLED=true|false` sempre vence.
+function webhookQueueEnabled(): boolean {
+  const explicit = process.env.WEBHOOK_QUEUE_ENABLED;
+  if (explicit === "true") return true;
+  if (explicit === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
 export async function dispatchIncomingMessage(payload: Parameters<typeof processIncomingMessage>[0], io: any) {
-  if (process.env.WEBHOOK_QUEUE_ENABLED === "true") {
+  if (webhookQueueEnabled()) {
     JobQueueService.enqueue("process_incoming_message", payload, { organizationId: payload.organizationId || null, maxAttempts: 1 });
     return;
   }
@@ -802,7 +815,14 @@ export async function processIncomingMessage(
        // background — ver o handler 'generate_manager_pdf' no topo deste arquivo.
        // Desligado por padrão até ser validado com tráfego real de WhatsApp.
        if (aiResult.exportPdf) {
-         if (process.env.PDF_REPORT_ASYNC_ENABLED === "true") {
+         // Regra de default (Fase 1 do plano de produção):
+         // - production: async ligado por padrão (webhook não bloqueia
+         //   30-60s gerando PDF; docs chegam separado segundos depois).
+         // - development: síncrono (fluxo linear, mais fácil debugar).
+         // - Env `PDF_REPORT_ASYNC_ENABLED=true|false` sempre vence.
+         const pdfAsync = process.env.PDF_REPORT_ASYNC_ENABLED === "true"
+           || (process.env.PDF_REPORT_ASYNC_ENABLED !== "false" && process.env.NODE_ENV === "production");
+         if (pdfAsync) {
            JobQueueService.enqueue("generate_manager_pdf", {
              orgId, channelId: channel.id, toIdentifier: payload.senderId,
              title: aiResult.pdfTitle, summary: aiResult.reply, panorama: aiResult.pdfBody,

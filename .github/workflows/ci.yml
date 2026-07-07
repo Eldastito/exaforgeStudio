@@ -1,0 +1,144 @@
+name: CI
+
+# Roda em cada PR pra main + em push direto (proteção final).
+# Objetivo: travar regressões antes de merge. Sem isso, cada PR
+# depende de disciplina manual pra rodar `npm run test:*`.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancela runs anteriores do mesmo PR/branch quando um novo push chega.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Typecheck é sinal, não gate. Há erros pré-existentes em arquivos
+      # legados que preciso corrigir aos poucos — não trava PR novo,
+      # mas continua reportando o número de erros pra pressão descer.
+      - name: Typecheck (soft)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
+
+  test:
+    name: Test — ${{ matrix.suite.name }}
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 15
+    strategy:
+      # fail-fast=false: quero ver TODAS as suítes que falharam num run só,
+      # não parar no primeiro erro. Feedback denso vale mais que rápido.
+      fail-fast: false
+      matrix:
+        suite:
+          # === Tier 2 filosófico (a base sólida do último ciclo) ===
+          - { name: 'tier1-manifesto-philosophy', script: 'test:tier1-manifesto-philosophy' }
+          - { name: 'tier2-escuta-ativa', script: 'test:tier2-escuta-ativa' }
+          - { name: 'tier2-recovery-radar', script: 'test:tier2-recovery-radar' }
+          - { name: 'tier2-big-idea-bar', script: 'test:tier2-big-idea-bar' }
+          - { name: 'tier2-recognition', script: 'test:tier2-recognition' }
+          - { name: 'tier2-philosophy-audit', script: 'test:tier2-philosophy-audit' }
+          - { name: 'ferrari-philosophy-prompts', script: 'test:ferrari-philosophy-prompts' }
+
+          # === Isolamento multi-tenant + RBAC (segurança de base) ===
+          - { name: 'tenant-isolation', script: 'test:isolation' }
+          - { name: 'radar-isolation', script: 'test:radar-isolation' }
+          - { name: 'rbac-audit', script: 'test:rbac-audit' }
+          - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
+
+          # === Radar de Execução IA (Tier 2 do produto) ===
+          - { name: 'radar-public', script: 'test:radar-public' }
+          - { name: 'radar-consultant', script: 'test:radar-consultant' }
+          - { name: 'radar-evidence', script: 'test:radar-evidence' }
+          - { name: 'radar-report-tasks', script: 'test:radar-report-tasks' }
+          - { name: 'radar-send', script: 'test:radar-send' }
+          - { name: 'radar-respondent', script: 'test:radar-respondent' }
+          - { name: 'backlog-radar-panel', script: 'test:backlog-radar-panel' }
+          - { name: 'backlog-radar-infra', script: 'test:backlog-radar-infra' }
+          - { name: 'conversion-velocity', script: 'test:conversion-velocity' }
+
+          # === Smart Inventory (WhatsApp intake) ===
+          - { name: 'whatsapp-inventory-intake', script: 'test:whatsapp-inventory-intake' }
+          - { name: 'whatsapp-inventory-fase-b', script: 'test:whatsapp-inventory-fase-b' }
+          - { name: 'invoice-scan', script: 'test:invoice-scan' }
+          - { name: 'nfe-parser', script: 'test:nfe-parser' }
+          - { name: 'nfe-signature', script: 'test:nfe-signature' }
+          - { name: 'product-smart-scan', script: 'test:product-smart-scan' }
+          - { name: 'pricing', script: 'test:pricing' }
+          - { name: 'backlog-inventory', script: 'test:backlog-inventory' }
+
+          # === Vision VMS ===
+          - { name: 'vision-foundation', script: 'test:vision-foundation' }
+          - { name: 'vision-events', script: 'test:vision-events' }
+          - { name: 'vision-incidents', script: 'test:vision-incidents' }
+          - { name: 'vision-maestro-bridge', script: 'test:vision-maestro-bridge' }
+          - { name: 'vision-webhooks', script: 'test:vision-webhooks' }
+          - { name: 'vision-zone-rules', script: 'test:vision-zone-rules' }
+
+          # === Fashion AI Studio ===
+          - { name: 'fashion-foundation', script: 'test:fashion-foundation' }
+          - { name: 'fashion-avatar', script: 'test:fashion-avatar' }
+          - { name: 'fashion-looks', script: 'test:fashion-looks' }
+          - { name: 'fashion-tryon', script: 'test:fashion-tryon' }
+          - { name: 'fashion-cart', script: 'test:fashion-cart' }
+          - { name: 'fashion-memory', script: 'test:fashion-memory' }
+          - { name: 'fashion-custom-look', script: 'test:fashion-custom-look' }
+          - { name: 'fashion-wearable', script: 'test:fashion-wearable' }
+
+          # === Loja / Vendas / Analytics ===
+          - { name: 'sales-analytics', script: 'test:sales-analytics' }
+          - { name: 'sales-margin-trend', script: 'test:sales-margin-trend' }
+          - { name: 'backlog-loja', script: 'test:backlog-loja' }
+          - { name: 'store-lifecycle', script: 'test:store-lifecycle' }
+          - { name: 'seo-reactivation-categories', script: 'test:seo-reactivation-categories' }
+
+          # === Infra / diversos ===
+          - { name: 'job-queue', script: 'test:job-queue' }
+          - { name: 'storage-service', script: 'test:storage-service' }
+          - { name: 'supervisor', script: 'test:supervisor' }
+          - { name: 'plan-gating-autofill', script: 'test:plan-gating-autofill' }
+          - { name: 'lgpd-nps-abandoned', script: 'test:lgpd-nps-abandoned' }
+          - { name: 'ean-radar-consultation', script: 'test:ean-radar-consultation' }
+          - { name: 'sla-barcode-consult-sheets', script: 'test:sla-barcode-consult-sheets' }
+          - { name: 'instagram-fix-vision-batch', script: 'test:instagram-fix-vision-batch' }
+          - { name: 'meta-webhook-debug', script: 'test:meta-webhook-debug' }
+    env:
+      # JWT_SECRET é injetado pra evitar warn no isAIConfigured. Não é
+      # segredo de produção — só desbloqueia inicialização dos services.
+      JWT_SECRET: 'ci-secret-not-used-in-prod-1234567890abcdef'
+      NODE_ENV: 'production'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run ${{ matrix.suite.script }}
+        run: npm run ${{ matrix.suite.script }}

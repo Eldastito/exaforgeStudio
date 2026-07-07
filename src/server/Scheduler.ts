@@ -14,6 +14,7 @@ import { SatisfactionService } from "./SatisfactionService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { TicketSlaService } from "./TicketSlaService.js";
+import { OpportunityRadarService } from "./OpportunityRadarService.js";
 import { InstagramService } from "./InstagramService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
@@ -89,8 +90,33 @@ export class Scheduler {
     try { RadarService.reassessmentReminderPass(); } catch (e) { console.error('[Scheduler] lembrete de reavaliação do Radar falhou', e); }
     await this.repurchaseReminderPass().catch(e => console.error('[Scheduler] lembrete de recompra falhou', e));
     await this.googleSheetsSyncPass().catch(e => console.error('[Scheduler] sync Google Sheets falhou', e));
+    try { this.opportunityRadarPass(); } catch (e: any) { console.error('[Scheduler] radar de oportunidades falhou', e.message); }
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
     this.trialPass();
+  }
+
+  /**
+   * Radar de Oportunidades Disfarçadas (Tier 2, Carlos Domingos, ADR-046).
+   * Roda uma vez por semana por org (dedupe via opportunity_radar_last_run):
+   * varre reclamações, cancelamentos, faltas de estoque, "não temos" e demora,
+   * e cria/atualiza oportunidades no banco. Best-effort — nunca derruba tick.
+   */
+  static opportunityRadarPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id
+          FROM organization_settings
+         WHERE opportunity_radar_last_run IS NULL
+            OR opportunity_radar_last_run < datetime('now', '-7 days')
+      `).all() as any[];
+    } catch (e) { return; }
+    for (const o of orgs) {
+      try {
+        const found = OpportunityRadarService.scan(o.organization_id);
+        if (found.length > 0) console.log(`[Scheduler] Radar de Oportunidades (org ${o.organization_id}): ${found.length} oportunidades ativas`);
+      } catch (e) { console.error(`[Scheduler] radar oportunidades org ${o.organization_id} falhou`, e); }
+    }
   }
 
   /**

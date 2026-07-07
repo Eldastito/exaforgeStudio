@@ -846,8 +846,32 @@ export async function processIncomingMessage(
           io.to(`org:${orgId}`).emit("new_message", aiMsgPayload);
        }
 
-       // Send AI response back to provider
-       await MessageProviderService.sendMessage(channel.id, payload.senderId, finalReply);
+       // Send AI response back to provider. O envio falha em silêncio quando o
+       // provedor está mal configurado (ex.: Instagram sem inscrição no webhook
+       // `messages`, token expirado, escopo faltando). Antes o erro era engolido
+       // e o painel do lojista mostrava a resposta como se tivesse chegado ao
+       // cliente. Agora marcamos delivery_status na própria mensagem, emitimos
+       // uma atualização para o painel e criamos uma notificação de alerta —
+       // assim o lojista vê que precisa reconectar/reconfigurar.
+       try {
+         await MessageProviderService.sendMessage(channel.id, payload.senderId, finalReply);
+         db.prepare(`UPDATE messages SET delivery_status = 'sent' WHERE id = ?`).run(botMsgId);
+       } catch (sendErr: any) {
+         const errMsg = String(sendErr?.message || sendErr).slice(0, 500);
+         console.error(`[MessageProvider] Envio falhou (${channel.provider}) para ${payload.senderId}:`, errMsg);
+         db.prepare(`UPDATE messages SET delivery_status = 'failed', delivery_error = ? WHERE id = ?`).run(errMsg, botMsgId);
+         if (io) io.to(`org:${orgId}`).emit("message_delivery_failed", { id: botMsgId, ticketId: ticket.id, provider: channel.provider, error: errMsg });
+         try {
+           NotificationService.push({
+             organizationId: orgId,
+             title: `Resposta da IA não chegou ao ${channel.provider === 'instagram' ? 'Instagram' : channel.provider}`,
+             message: `Reconecte o canal ou verifique escopos/inscrição do webhook. Detalhe: ${errMsg.slice(0, 180)}`,
+             type: "alert",
+             dedupeKey: `provider_send_failed:${channel.id}`,
+             dedupeWindowMin: 60,
+           });
+         } catch { /* noop */ }
+       }
 
      } catch (e) {
        console.error("[IA RAG] Falha ao processar e responder:", e);

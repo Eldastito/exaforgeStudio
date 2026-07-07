@@ -92,7 +92,17 @@ router.post("/:id/review", (req: VisionRequest, res) => {
     enqueueWebhookDeliveries(req.organizationId!, "vision.incident.created", incident as any);
   }
 
-  const row = db.prepare(`SELECT * FROM vision_events WHERE id = ?`).get(req.params.id);
+  const row = db.prepare(`SELECT * FROM vision_events WHERE id = ?`).get(req.params.id) as any;
+
+  // Toda transição de revisão (acknowledge/resolve/false_positive/escalate)
+  // vira um webhook `vision.event.reviewed` — assim uma integração externa
+  // (ex.: BI, sistema de rondas, planilha) consegue reconstruir o ciclo de
+  // vida do evento, não só o momento em que foi criado. `escalate` já emite
+  // `vision.incident.created` acima; este webhook aqui é o do próprio evento.
+  enqueueWebhookDeliveries(req.organizationId!, "vision.event.reviewed", {
+    event: row, action, status: newStatus, reviewed_by: req.userId || null,
+  } as any);
+
   res.json({ event: row, incident });
 });
 

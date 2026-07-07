@@ -51,6 +51,7 @@ export function isSafeWebhookUrl(rawUrl: string): boolean {
 
 const EVENT_TOPICS = [
   "vision.event.detected",
+  "vision.event.reviewed",    // ADR-043 batch 2: fired on acknowledge/resolve/false_positive
   "vision.incident.created",
   "vision.incident.resolved",
   "vision.panic.activated",

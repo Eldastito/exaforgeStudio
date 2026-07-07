@@ -4,16 +4,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 import { ModuleService } from "./ModuleService.js";
 import { TaskService } from "./TaskService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
-
-const onlyDigits = (s: string) => String(s || "").replace(/\D/g, "");
-// Compara números de WhatsApp tolerando DDI/9º dígito (casa pelos últimos 10).
-function phoneMatches(a: string, b: string): boolean {
-  const x = onlyDigits(a), y = onlyDigits(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  const k = Math.min(11, Math.max(8, Math.min(x.length, y.length)));
-  return x.slice(-k) === y.slice(-k);
-}
+import { phoneMatches } from "./phoneMatch.js";
 
 const PRIO_EMOJI: Record<string, string> = { alta: "🔴", media: "🟡", baixa: "⚪" };
 

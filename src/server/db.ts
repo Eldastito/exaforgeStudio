@@ -2598,6 +2598,31 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN auto_reactivation_message_3 TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN reactivation_step INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN reactivation_last_sent_at DATETIME`); } catch(e){}
+
+  // Console de diagnóstico de webhooks Meta: registra TODO hit que bate em
+  // /api/webhooks/meta ANTES de qualquer validação/parse, para conseguirmos
+  // enxergar (via UI) o que a Meta está mandando quando algo dá silêncio
+  // suspeito (ex.: DM do Instagram que "não chega"). Sem organization_id de
+  // propósito — é diagnóstico técnico do canal Meta, não dado tenant.
+  // Retenção curta (últimos ~500 hits ou ~48h, o que vier primeiro) para não
+  // encher o disco com payload de webhook em produção.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS meta_webhook_hits (
+        id TEXT PRIMARY KEY,
+        received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        method TEXT NOT NULL,
+        source_ip TEXT,
+        user_agent TEXT,
+        object TEXT,             -- payload.object (whatsapp_business_account | instagram | page | ...)
+        payload_json TEXT,       -- corpo cru (limitado a 10KB)
+        headers_json TEXT,       -- só cabeçalhos relevantes
+        processed INTEGER DEFAULT 0,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_meta_hits_received ON meta_webhook_hits(received_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar meta_webhook_hits', e); }
 };
 
 initDb();

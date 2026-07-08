@@ -134,6 +134,10 @@ jobs:
           - { name: 'totp-service', script: 'test:totp-service' }
           - { name: 'backup-service', script: 'test:backup-service' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }
+
+          # === Fase 4 Wave C (P1 commerce) ===
+          - { name: 'subscription-service', script: 'test:subscription-service' }
+          - { name: 'quote-service', script: 'test:quote-service' }
     env:
       # JWT_SECRET é injetado pra evitar warn no isAIConfigured. Não é
       # segredo de produção — só desbloqueia inicialização dos services.

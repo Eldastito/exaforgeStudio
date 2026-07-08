@@ -78,7 +78,9 @@
     "test:encryption-service": "tsx scripts/test-encryption-service.ts",
     "test:totp-service": "tsx scripts/test-totp-service.ts",
     "test:backup-service": "tsx scripts/test-backup-service.ts",
-    "test:lgpd-service": "tsx scripts/test-lgpd-service.ts"
+    "test:lgpd-service": "tsx scripts/test-lgpd-service.ts",
+    "test:subscription-service": "tsx scripts/test-subscription-service.ts",
+    "test:quote-service": "tsx scripts/test-quote-service.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

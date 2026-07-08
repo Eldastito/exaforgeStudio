@@ -74,7 +74,9 @@
     "test:tier2-philosophy-audit": "tsx scripts/test-tier2-philosophy-audit.ts",
     "test:phone-match": "tsx scripts/test-phone-match.ts",
     "test:connector-public": "tsx scripts/test-connector-public.ts",
-    "test:ai-orchestrator": "tsx scripts/test-ai-orchestrator.ts"
+    "test:ai-orchestrator": "tsx scripts/test-ai-orchestrator.ts",
+    "test:encryption-service": "tsx scripts/test-encryption-service.ts",
+    "test:totp-service": "tsx scripts/test-totp-service.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

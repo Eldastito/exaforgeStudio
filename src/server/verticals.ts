@@ -36,43 +36,48 @@ export const OPTIONAL_MODULES = [
 // existente deve "ganhar" o módulo sozinha num deploy — só ativação explícita
 // via Configurações › Módulos (ou, no piloto, direto no banco/API) por uma
 // organização de cada vez.
-const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar");
+//
+// "prospect" (ZappFlow Prospect AI) está em Fase 0 — CRUD de ICP + rascunho
+// de campanha; descoberta, enriquecimento, scoring e outreach entram nas
+// próximas fases. Enquanto isso, é experimental: novas orgs NÃO recebem
+// automaticamente (ver ADR-077). Ativação explícita apenas.
+const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar" && m !== "prospect");
 
 export const VERTICALS: Vertical[] = [
   {
     key: "varejo", label: "Varejo / Comércio", icon: "🛍️",
     descricao: "Lojas que vendem produtos por unidade (roupas, eletrônicos, pet, etc.).",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao", "prospect"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
     key: "food", label: "Alimentação / Delivery", icon: "🍰",
     descricao: "Bolos, marmitas, pizzas, doces e salgados — inclusive venda por fatia.",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "diretor", "rie", "execucao", "prospect"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "diretor", "rie", "execucao"],
     saleMode: "slice",
   },
   {
     key: "servicos", label: "Prestadores de Serviço", icon: "🛠️",
     descricao: "Serviços com hora marcada e orçamento (oficinas, técnicos, autônomos).",
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas", "diretor", "rie", "execucao", "prospect"],
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
     key: "saude", label: "Saúde / Bem-estar", icon: "💆",
     descricao: "Clínicas, consultórios, estética e terapias — foco em agendamento.",
-    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao", "prospect"],
+    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
     key: "educacao", label: "Escolas / Cursos", icon: "🎓",
     descricao: "Escolas e cursos: secretaria virtual, aulas, turmas e mensalidades.",
-    modules: ["assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "diretor", "rie", "execucao", "prospect"],
+    modules: ["assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
     key: "hospitalidade", label: "Hotéis / Restaurantes", icon: "🏨",
     descricao: "Hospedagem e restaurantes/pensão: reservas, cardápio e atendimento.",
-    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos", "diretor", "rie", "execucao", "prospect"],
+    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

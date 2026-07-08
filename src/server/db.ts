@@ -729,8 +729,8 @@ const initDb = () => {
     if (!row || row.c === 0) {
       const seed = db.prepare(`INSERT INTO plans (id, name, price, features) VALUES (?, ?, ?, ?)`);
       seed.run('starter', 'Starter',  99, JSON.stringify({ ai_monthly_limit: 500, contacts_limit: 1000, channels_limit: 1, users_limit: 2, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","integracoes","rie","execucao"] }));
-      seed.run('pro',     'Pro',     299, JSON.stringify({ ai_monthly_limit: 3000, contacts_limit: 10000, channels_limit: 3, users_limit: 5, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","cadencias","areas","integracoes","reservas","assinaturas","orcamentos","diretor","estudio","rie","execucao","prospect"] }));
-      seed.run('business','Business',799, JSON.stringify({ ai_monthly_limit: 15000, contacts_limit: 50000, channels_limit: 10, users_limit: 20, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","cadencias","areas","integracoes","reservas","assinaturas","compras","orcamentos","eventos","diretor","estudio","rie","execucao","prospect","radar"] }));
+      seed.run('pro',     'Pro',     299, JSON.stringify({ ai_monthly_limit: 3000, contacts_limit: 10000, channels_limit: 3, users_limit: 5, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","cadencias","areas","integracoes","reservas","assinaturas","orcamentos","diretor","estudio","rie","execucao"] }));
+      seed.run('business','Business',799, JSON.stringify({ ai_monthly_limit: 15000, contacts_limit: 50000, channels_limit: 10, users_limit: 20, trial_days: 14, modules: ["catalogo","vendas","loja","pagamentos","agenda","campanhas","cadencias","areas","integracoes","reservas","assinaturas","compras","orcamentos","eventos","diretor","estudio","rie","execucao"] }));
       console.log('[DB] Planos padrão criados (Starter, Pro, Business).');
     }
   } catch (e) { console.error('[DB] Falha ao popular planos', e); }

@@ -79,6 +79,39 @@ Depois do deploy, abra **Admin Master → Auditoria de Segurança** e rode. O `S
 
 Cada PR pra `main` roda automaticamente `.github/workflows/ci.yml`:
 - Build + typecheck (soft — permite erros pré-existentes).
-- Todos os `npm run test:*` catalogados no workflow (Tier 1/2 filosóficos, isolation, RBAC, Radar, Smart Inventory, Vision, Fashion, Loja, infra).
+- Todos os `npm run test:*` catalogados no workflow (Tier 1/2 filosóficos, isolation, RBAC, Radar, Smart Inventory, Vision, Fashion, Loja, infra + P0/P1 de segurança e commerce da Fase 4).
 
 Testes falhando **bloqueiam merge**. Ajustes ao workflow em `.github/workflows/ci.yml`.
+
+## Procedimentos operacionais (ADR-078)
+
+### Rotação de `ENCRYPTION_KEY`
+
+Quando: chave suspeita de vazamento, ciclo anual, ou mudança de operador.
+
+Ferramenta: `scripts/rotate-encryption-key.ts` — decifra cada segredo com a chave antiga e re-cifra com a nova, um a um. Nunca sobrescreve algo que não decifra (aborta com log).
+
+Passo a passo:
+1. Provisiona a nova `ENCRYPTION_KEY` na infra (Coolify/K8s/etc.), MAS não reinicia o app.
+2. Instância de manutenção com acesso ao DB e às duas chaves:
+   ```
+   OLD_ENCRYPTION_KEY=<antiga> ENCRYPTION_KEY=<nova> npm run rotate-encryption-key -- --dry-run
+   ```
+3. Se `0 pulados`, roda sem `--dry-run` para efetivar.
+4. Promove a nova `ENCRYPTION_KEY` em produção (deleta a antiga da infra) e reinicia o app.
+5. Opcional: mantém `OLD_ENCRYPTION_KEY` como rollback por 24-48h, depois remove.
+
+### Migração `disk → S3`
+
+Quando: passar a rodar mais de uma réplica, ou dar portabilidade a backups/PDF.
+
+Ferramenta: `scripts/s3-smoke-test.ts` — HEAD/PUT/GET/DELETE contra o bucket com objeto de teste; aborta se qualquer passo falhar.
+
+Passo a passo:
+1. Cria bucket dedicado (ex.: `zappflow-prod-artifacts`) + IAM com permissão mínima (`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:HeadBucket`).
+2. Em uma instância de teste, define as envs e roda:
+   ```
+   S3_ENABLED=true S3_BUCKET=zappflow-prod-artifacts S3_REGION=us-east-1 \
+   S3_ACCESS_KEY_ID=... S3_SECRET_ACCESS_KEY=... npm run s3-smoke-test
+   ```
+3. Se ✅ verde → promove as envs em produção. O disco continua fonte de verdade; o S3 é espelho best-effort. Reversível a qualquer momento (`S3_ENABLED=false`).

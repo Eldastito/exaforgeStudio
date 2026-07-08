@@ -81,7 +81,9 @@
     "test:lgpd-service": "tsx scripts/test-lgpd-service.ts",
     "test:subscription-service": "tsx scripts/test-subscription-service.ts",
     "test:quote-service": "tsx scripts/test-quote-service.ts",
-    "test:reservation-service": "tsx scripts/test-reservation-service.ts"
+    "test:reservation-service": "tsx scripts/test-reservation-service.ts",
+    "rotate-encryption-key": "tsx scripts/rotate-encryption-key.ts",
+    "s3-smoke-test": "tsx scripts/s3-smoke-test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -2,6 +2,8 @@
 
 Guia curto e prático do que precisa estar configurado antes de subir o ZappFlow em produção. Baseado no levantamento de maturidade (Fase 1 do plano de produção).
 
+**Antes de mexer em produção, leia [`docs/AMBIENTES.md`](AMBIENTES.md)** — descreve o esquema de 3 ambientes (local / staging / produção) e o fluxo de mudança que evita quebrar prod.
+
 ## Regra-mãe
 
 **Rode sempre com `NODE_ENV=production`.** Muitos defaults de segurança e performance chaveiam por esse valor (fila de webhook ligada, PDF async, checks estritos do `SecurityAuditService`).

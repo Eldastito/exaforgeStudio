@@ -5,7 +5,10 @@ coverage/
 .DS_Store
 *.log
 .env*
+# Templates versionados (contêm campos VAZIOS, nunca segredos):
 !.env.example
+!.env.local.example
+!.env.staging.example
 
 # Banco SQLite local (runtime) — não versionar
 zappflow.db

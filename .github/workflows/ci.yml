@@ -129,9 +129,11 @@ jobs:
           - { name: 'connector-public', script: 'test:connector-public' }
           - { name: 'ai-orchestrator', script: 'test:ai-orchestrator' }
 
-          # === Fase 4 do plano de produção (P0 segurança — ADR-054, ADR-055) ===
+          # === Fase 4 do plano de produção (P0 segurança + dados + compliance) ===
           - { name: 'encryption-service', script: 'test:encryption-service' }
           - { name: 'totp-service', script: 'test:totp-service' }
+          - { name: 'backup-service', script: 'test:backup-service' }
+          - { name: 'lgpd-service', script: 'test:lgpd-service' }
     env:
       # JWT_SECRET é injetado pra evitar warn no isAIConfigured. Não é
       # segredo de produção — só desbloqueia inicialização dos services.

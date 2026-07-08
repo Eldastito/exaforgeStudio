@@ -10,8 +10,9 @@
  *   - a importação nunca é bloqueada pela assinatura (campo informativo).
  *
  * Item 04: processamento de webhook atrás de flag
- *   - WEBHOOK_QUEUE_ENABLED=false (padrão): processa inline (caminho antigo);
- *   - =true: enfileira job process_incoming_message com maxAttempts=1 (retry
+ *   - WEBHOOK_QUEUE_ENABLED=false: força o caminho inline (opt-out em produção);
+ *   - =true (ou não-set em produção, ver Fase 1 do plano de produção):
+ *     enfileira job process_incoming_message com maxAttempts=1 (retry
  *     automático duplicaria resposta da IA ao cliente) e o worker da fila
  *     processa com o MESMO handler.
  *
@@ -96,12 +97,14 @@ async function main() {
 
   const fakePayload = { channelId: null, organizationId: null, identifier: "inst1", provider: "evolution" as const, senderId: "5511999999999", text: "oi" };
 
-  // flag desligada (padrão): processa inline — o processador real vai falhar
-  // por não achar canal, mas o que importa é que NÃO enfileirou.
-  delete process.env.WEBHOOK_QUEUE_ENABLED;
+  // flag explicitamente desligada (=false): força inline — o processador real
+  // vai falhar por não achar canal, mas o que importa é que NÃO enfileirou.
+  // (Em NODE_ENV=production, o default agora é enfileirar — ver Fase 1 do plano
+  // de produção. WEBHOOK_QUEUE_ENABLED=false é o opt-out explícito.)
+  process.env.WEBHOOK_QUEUE_ENABLED = "false";
   try { await dispatchIncomingMessage(fakePayload as any, null); inlineCalls++; } catch { inlineCalls++; }
   const jobsAfterInline = db.prepare(`SELECT COUNT(*) AS c FROM background_jobs WHERE type = 'process_incoming_message'`).get() as any;
-  check("Flag desligada (padrão): nada é enfileirado (caminho inline preservado)", jobsAfterInline.c === 0 && inlineCalls === 1);
+  check("Flag =false (opt-out explícito): nada é enfileirado (caminho inline preservado)", jobsAfterInline.c === 0 && inlineCalls === 1);
 
   // flag ligada: enfileira e o worker processa com o handler
   process.env.WEBHOOK_QUEUE_ENABLED = "true";

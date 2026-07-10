@@ -1650,6 +1650,9 @@ const initDb = () => {
   // Chave da Google Places API (New) por organização (premium: telefone + avaliações).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN prospect_places_api_key TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN external_ref TEXT`); } catch(e){} // ex.: osm:node/123 (dedup da descoberta)
+  // Prospect AI (ADR-079, Fase A — conformidade/LGPD): bloqueio de contato no
+  // nível da EMPRESA. Conta bloqueada não recebe abordagem nova nem envio.
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN blocked_at DATETIME`); } catch(e){}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS prospect_discovery_runs (

@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "node:crypto";
 import { chat } from "./llm.js";
+import { logAuthEvent } from "./auditLog.js";
 import { expectedSegments, norm as normCat } from "./prospectCategories.js";
 
 /**
@@ -14,6 +15,9 @@ import { expectedSegments, norm as normCat } from "./prospectCategories.js";
  */
 const OBJECTIVES = ["reuniao", "diagnostico", "evento", "proposta"];
 const APPROVAL = ["manual", "manager", "auto_rules"];
+// LGPD/anti-spam (ADR-079, Fase A): teto de envios por CONTATO. Estourou, o
+// sistema recusa marcar novo envio — insistência vira spam e risco jurídico.
+const MAX_CONTACT_ATTEMPTS = 3;
 
 const onlyDigits = (s: any) => String(s || "").replace(/\D/g, "");
 // Domínio normalizado a partir de site OU e-mail (sem protocolo/www/caminho).
@@ -140,7 +144,7 @@ export class ProspectService {
    * contactName, role, email, phone }. Deduplica conta por domínio (ou nome) e
    * contato por e-mail/telefone. Registra a fonte (origem + política).
    */
-  static importRecords(orgId: string, input: { campaignId?: string; sourceRef?: string; provider?: string; records: any[] }, _actorId?: string):
+  static importRecords(orgId: string, input: { campaignId?: string; sourceRef?: string; provider?: string; records: any[] }, actorId?: string):
     { sourceId: string; accountsCreated: number; accountsMerged: number; contactsCreated: number; contactsSkipped: number; total: number } {
     const records = Array.isArray(input?.records) ? input.records.slice(0, 5000) : [];
     if (!records.length) throw new Error("Nenhum registro para importar.");
@@ -195,6 +199,10 @@ export class ProspectService {
       }
     });
     tx();
+    logAuthEvent(orgId, actorId, null, "PROSPECT_LEADS_IMPORTED", {
+      sourceId, provider, sourceRef: String(input?.sourceRef || ""), campaignId: input?.campaignId || null,
+      accountsCreated, accountsMerged, contactsCreated, contactsSkipped, total: records.length,
+    });
     return { sourceId, accountsCreated, accountsMerged, contactsCreated, contactsSkipped, total: records.length };
   }
 
@@ -347,6 +355,36 @@ Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommend
     return r.changes > 0;
   }
 
+  // ── LGPD: opt-out por contato e bloqueio por conta (ADR-079, Fase A) ─────
+  /** Marca/desmarca opt-out do contato. Contato em opt-out nunca recebe abordagem. */
+  static setContactOptOut(orgId: string, accountId: string, contactId: string, optOut: boolean, actorId?: string): any {
+    const c = db.prepare("SELECT id FROM prospect_contacts WHERE id = ? AND prospect_account_id = ? AND organization_id = ?").get(contactId, accountId, orgId) as any;
+    if (!c) throw new Error("Contato não encontrado.");
+    if (optOut) db.prepare("UPDATE prospect_contacts SET opt_out_at = CURRENT_TIMESTAMP, email_status = 'opted_out', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(contactId);
+    else db.prepare("UPDATE prospect_contacts SET opt_out_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(contactId);
+    logAuthEvent(orgId, actorId, null, optOut ? "PROSPECT_CONTACT_OPTOUT" : "PROSPECT_CONTACT_OPTOUT_REVOKED", { accountId, contactId });
+    return this.getAccount(orgId, accountId);
+  }
+
+  /** Bloqueia/desbloqueia a EMPRESA inteira para contato (pedido do lead, risco, etc.). */
+  static setAccountBlocked(orgId: string, accountId: string, blocked: boolean, actorId?: string): any {
+    const acc = db.prepare("SELECT id FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId);
+    if (!acc) throw new Error("Conta não encontrada.");
+    db.prepare(`UPDATE prospect_accounts SET blocked_at = ${blocked ? "CURRENT_TIMESTAMP" : "NULL"}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(accountId, orgId);
+    logAuthEvent(orgId, actorId, null, blocked ? "PROSPECT_ACCOUNT_BLOCKED" : "PROSPECT_ACCOUNT_UNBLOCKED", { accountId });
+    return this.getAccount(orgId, accountId);
+  }
+
+  /** Guardrail LGPD: recusa abordagem a conta bloqueada ou contato em opt-out. */
+  private static assertContactAllowed(orgId: string, accountId: string, contactId?: string | null): void {
+    const acc = db.prepare("SELECT blocked_at FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId) as any;
+    if (acc?.blocked_at) throw new Error("Conta bloqueada para contato. Desbloqueie antes de abordar.");
+    if (contactId) {
+      const c = db.prepare("SELECT opt_out_at FROM prospect_contacts WHERE id = ? AND prospect_account_id = ? AND organization_id = ?").get(contactId, accountId, orgId) as any;
+      if (c?.opt_out_at) throw new Error("Contato em opt-out — não pode ser abordado.");
+    }
+  }
+
   // ── Composer de abordagem (IA) + fila de aprovação ──────────────────────
   /**
    * Gera um RASCUNHO de abordagem (e-mail/WhatsApp/ligação) a partir das
@@ -354,9 +392,10 @@ Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommend
    * pergunta (não acusação), 1 CTA, sem inventar dado, opt-out no e-mail.
    * Nasce em 'draft'.
    */
-  static async composeOutreach(orgId: string, accountId: string, input: { contactId?: string; channel?: string }): Promise<any> {
+  static async composeOutreach(orgId: string, accountId: string, input: { contactId?: string; channel?: string }, actorId?: string): Promise<any> {
     const acc = db.prepare("SELECT * FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId) as any;
     if (!acc) throw new Error("Conta não encontrada.");
+    this.assertContactAllowed(orgId, accountId, input?.contactId);
     const channel = ["email", "whatsapp", "call", "linkedin_manual"].includes(String(input?.channel)) ? input!.channel! : "email";
     const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const signals = db.prepare("SELECT observation FROM prospect_signals WHERE prospect_account_id = ? AND organization_id = ?").all(accountId, orgId) as any[];
@@ -395,23 +434,28 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
     const id = randomUUID();
     db.prepare("INSERT INTO prospect_outreach (id, organization_id, campaign_id, prospect_account_id, contact_id, channel, subject, body, evidence_snapshot, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')")
       .run(id, orgId, acc.campaign_id || null, accountId, input?.contactId || null, channel, subject, body, JSON.stringify(evidenceSnapshot));
+    logAuthEvent(orgId, actorId, null, "PROSPECT_OUTREACH_COMPOSED", { outreachId: id, accountId, contactId: input?.contactId || null, channel, createdByAi: true });
     return this.getAccount(orgId, accountId);
   }
 
-  static updateOutreach(orgId: string, id: string, patch: { subject?: string; body?: string }): any {
+  static updateOutreach(orgId: string, id: string, patch: { subject?: string; body?: string }, actorId?: string): any {
     const o = db.prepare("SELECT prospect_account_id, status FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!o) throw new Error("Abordagem não encontrada.");
     if (o.status === "sent") throw new Error("Abordagem já enviada não pode ser editada.");
     const fields: string[] = [], params: any[] = [];
     if (patch.subject !== undefined) { fields.push("subject = ?"); params.push(String(patch.subject)); }
     if (patch.body !== undefined) { fields.push("body = ?"); params.push(String(patch.body)); }
-    if (fields.length) { params.push(id, orgId); db.prepare(`UPDATE prospect_outreach SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...params); }
+    if (fields.length) {
+      params.push(id, orgId);
+      db.prepare(`UPDATE prospect_outreach SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...params);
+      logAuthEvent(orgId, actorId, null, "PROSPECT_OUTREACH_EDITED", { outreachId: id, accountId: o.prospect_account_id, fields: fields.map(f => f.split(" ")[0]) });
+    }
     return this.getAccount(orgId, o.prospect_account_id);
   }
 
   /** Transições: draft→pending_approval; pending→approved/rejected/draft; approved→sent/rejected. */
   static setOutreachStatus(orgId: string, id: string, status: string, actorId?: string): any {
-    const o = db.prepare("SELECT prospect_account_id, status FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    const o = db.prepare("SELECT prospect_account_id, contact_id, status FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!o) throw new Error("Abordagem não encontrada.");
     const allowed: Record<string, string[]> = {
       draft: ["pending_approval", "rejected"],
@@ -421,12 +465,23 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
       sent: [],
     };
     if (!(allowed[o.status] || []).includes(status)) throw new Error(`Transição inválida (${o.status} → ${status}).`);
+    // Guardrails LGPD (ADR-079, Fase A): aprovação e envio respeitam bloqueio,
+    // opt-out e o teto de tentativas por contato — mesmo que o rascunho tenha
+    // sido criado antes do bloqueio/opt-out.
+    if (status === "approved" || status === "sent") {
+      this.assertContactAllowed(orgId, o.prospect_account_id, o.contact_id);
+    }
+    if (status === "sent" && o.contact_id) {
+      const n = db.prepare("SELECT COUNT(*) n FROM prospect_outreach WHERE organization_id = ? AND contact_id = ? AND status = 'sent'").get(orgId, o.contact_id) as any;
+      if (Number(n?.n || 0) >= MAX_CONTACT_ATTEMPTS) throw new Error(`Limite de ${MAX_CONTACT_ATTEMPTS} tentativas de contato atingido para este contato.`);
+    }
     const sets = ["status = ?", "updated_at = CURRENT_TIMESTAMP"];
     const params: any[] = [status];
     if (status === "approved") { sets.push("approved_by = ?"); params.push(actorId || null); }
     if (status === "sent") { sets.push("sent_at = CURRENT_TIMESTAMP"); }
     params.push(id, orgId);
     db.prepare(`UPDATE prospect_outreach SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...params);
+    logAuthEvent(orgId, actorId, null, "PROSPECT_OUTREACH_STATUS", { outreachId: id, accountId: o.prospect_account_id, from: o.status, to: status });
     return this.getAccount(orgId, o.prospect_account_id);
   }
 
@@ -449,7 +504,7 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
    * 'won' → converted + won_value/won_at; 'lost' → disqualified + lost_reason;
    * 'reopen' → volta para 'qualified' e limpa o desfecho.
    */
-  static recordOutcome(orgId: string, id: string, input: { outcome: string; wonValue?: number; lostReason?: string }): any {
+  static recordOutcome(orgId: string, id: string, input: { outcome: string; wonValue?: number; lostReason?: string }, actorId?: string): any {
     const acc = db.prepare("SELECT id FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!acc) throw new Error("Conta não encontrada.");
     const outcome = String(input?.outcome || "");
@@ -463,6 +518,7 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
     } else {
       throw new Error("Desfecho inválido (use won, lost ou reopen).");
     }
+    logAuthEvent(orgId, actorId, null, "PROSPECT_OUTCOME_RECORDED", { accountId: id, outcome, wonValue: input?.wonValue || null, lostReason: input?.lostReason || null });
     return this.getAccount(orgId, id);
   }
 

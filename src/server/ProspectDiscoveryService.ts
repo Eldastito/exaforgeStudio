@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "node:crypto";
 import { chat } from "./llm.js";
+import { logAuthEvent } from "./auditLog.js";
 import { ProspectService } from "./ProspectService.js";
 import { DEFAULT_CATS, resolveCategories, resolveGoogleTypes } from "./prospectCategories.js";
 import { GooglePlacesService, type DiscoveryResult } from "./GooglePlacesService.js";
@@ -280,7 +281,9 @@ export class ProspectDiscoveryService {
       if (opts.autodraft && score && score.priority >= 40) {
         try {
           const acc = ProspectService.getAccount(orgId, id);
-          const contact = (acc?.contacts || []).find((c: any) => c.email || c.phone);
+          if (acc?.blocked_at) continue; // conta bloqueada nunca ganha rascunho
+          // Opt-out é inviolável mesmo no fluxo automático (ADR-079, Fase A).
+          const contact = (acc?.contacts || []).find((c: any) => (c.email || c.phone) && !c.opt_out_at);
           if (contact) {
             const channel = contact.email ? "email" : "whatsapp";
             const updated = await ProspectService.composeOutreach(orgId, id, { contactId: contact.id, channel });
@@ -338,9 +341,12 @@ export class ProspectDiscoveryService {
       db.prepare("UPDATE prospect_discovery_runs SET status = 'done', found_count = ?, created_count = ?, skipped_count = ?, summary = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(results.length, created, skipped, summary, runId);
       db.prepare("UPDATE prospect_campaigns SET discovery_last_run = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(campaignId, orgId);
+      // Auditoria da varredura (roda também pelo scheduler, sem ator humano).
+      logAuthEvent(orgId, null, null, "PROSPECT_DISCOVERY_RUN", { runId, campaignId, trigger, provider, area, found: results.length, created, skipped });
       return db.prepare("SELECT * FROM prospect_discovery_runs WHERE id = ?").get(runId);
     } catch (e: any) {
       db.prepare("UPDATE prospect_discovery_runs SET status = 'error', error = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?").run(String(e?.message || e), runId);
+      logAuthEvent(orgId, null, null, "PROSPECT_DISCOVERY_RUN", { runId, campaignId, trigger, status: "error", error: String(e?.message || e) });
       throw e;
     }
   }

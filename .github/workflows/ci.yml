@@ -64,6 +64,7 @@ jobs:
           # === Isolamento multi-tenant + RBAC (segurança de base) ===
           - { name: 'tenant-isolation', script: 'test:isolation' }
           - { name: 'radar-isolation', script: 'test:radar-isolation' }
+          - { name: 'prospect-isolation', script: 'test:prospect-isolation' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

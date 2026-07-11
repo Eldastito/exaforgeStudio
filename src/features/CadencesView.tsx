@@ -23,7 +23,16 @@ const STAGE_LABELS: Record<string, string> = {
   em_atendimento: 'Em Atendimento',
   qualificado: 'Qualificado',
   agendado: 'Agendado',
+  entregue_concluido: 'Entregue / Concluído',
+  pos_venda: 'Pós-venda',
   fechado: 'Fechado',
+  // Gatilhos clínicos (ADR-080). Disparados por eventos do fluxo de convênio/
+  // autorização (fases D–E); expostos aqui para o gestor selecioná-los.
+  documentacao_pendente: 'Documentação pendente (clínica)',
+  autorizacao_pendente: 'Autorização pendente (clínica)',
+  autorizacao_aprovada: 'Autorização aprovada (clínica)',
+  autorizacao_negada: 'Autorização negada (clínica)',
+  retorno_recomendado: 'Retorno recomendado (clínica)',
 };
 
 const STAGES = Object.keys(STAGE_LABELS);

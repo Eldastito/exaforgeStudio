@@ -1263,6 +1263,16 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar reservations', e); }
   // % de sinal cobrado ao reservar (0 = sem sinal; cobra o total ao confirmar).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reservation_deposit_percent INTEGER DEFAULT 0`); } catch(e){}
+
+  // Módulo Clínica (ADR-080, Fase A) — automações do pack Saúde 2.0. Flags em
+  // organization_settings, no mesmo padrão das demais automações. Semeadas pelo
+  // Quick-Start Saúde; a funcionalidade que as consome entra nas fases C–E.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_overrun_alert_enabled INTEGER DEFAULT 1`); } catch(e){}   // alerta de permanência (fim previsto)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_overrun_warning_minutes INTEGER DEFAULT 15`); } catch(e){} // antecedência do alerta amarelo
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_authorization_enabled INTEGER DEFAULT 1`); } catch(e){}     // fluxo de autorização de convênio
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_authorization_followup_hours INTEGER DEFAULT 24`); } catch(e){} // follow-up de protocolo pendente
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_print_agenda_enabled INTEGER DEFAULT 1`); } catch(e){}     // impressão da agenda do dia
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_professional_portal_enabled INTEGER DEFAULT 1`); } catch(e){} // portal do profissional por link
   // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
   try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}

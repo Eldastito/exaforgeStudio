@@ -32,6 +32,10 @@ export type Message = {
   timestamp: string;
   read?: boolean;
   mediaUrl?: string;
+  // Continuity Layer (ADR-082, Fase 0): estado REAL de entrega da mensagem
+  // enviada pelo painel. 'pending' até o servidor confirmar; nunca mostrar
+  // como enviada sem confirmação.
+  deliveryStatus?: 'pending' | 'sent' | 'failed';
 };
 
 export type Stage = 
@@ -479,38 +483,48 @@ export const useStore = create<AppState>((set, get) => ({
     const ticket = state.tickets[ticketId];
     if (!ticket) return;
 
-    if (sender === 'human') {
-       const contact = state.contacts[ticket.contactId];
-       try {
-          await apiFetch('/api/messages/send', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             // O backend localiza o contato pelo identifier (número), não pelo uuid.
-             body: JSON.stringify({ contactId: contact?.number || ticket.contactId, text })
-          });
-       } catch(e) {
-          console.error("Failed to send msg:", e);
-       }
-    }
-
+    const localId = (globalThis.crypto?.randomUUID?.() || Date.now().toString());
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: localId,
       contactId: ticket.contactId,
       text,
       sender,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      // Mensagens do próprio painel nascem 'pending' e só viram 'sent' com a
+      // confirmação do servidor (ADR-082, Fase 0 — corrige a mensagem fantasma).
+      deliveryStatus: sender === 'human' ? 'pending' : undefined,
     };
 
+    // Mostra imediatamente como PENDENTE (não como "enviada") — feedback honesto.
     set((s) => ({
+      messages: { ...s.messages, [ticketId]: [...(s.messages[ticketId] || []), newMessage] },
+      tickets: { ...s.tickets, [ticketId]: { ...s.tickets[ticketId], lastMessageAt: newMessage.timestamp, unreadCount: 0 } },
+    }));
+
+    if (sender !== 'human') return;
+
+    const contact = state.contacts[ticket.contactId];
+    const patch = (status: 'sent' | 'failed') => set((s) => ({
       messages: {
         ...s.messages,
-        [ticketId]: [...(s.messages[ticketId] || []), newMessage]
+        [ticketId]: (s.messages[ticketId] || []).map(m => m.id === localId ? { ...m, deliveryStatus: status } : m),
       },
-      tickets: {
-        ...s.tickets,
-        [ticketId]: { ...s.tickets[ticketId], lastMessageAt: newMessage.timestamp, unreadCount: 0 }
-      }
     }));
+    try {
+      const res = await apiFetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // O backend localiza o contato pelo identifier (número), não pelo uuid.
+        // commandId dá idempotência: reenvio pelo outbox não duplica (ADR-082 D3).
+        body: JSON.stringify({ contactId: contact?.number || ticket.contactId, text, commandId: localId }),
+      });
+      // Só marca "enviado" se o servidor confirmou de fato (2xx). Um 500/502 do
+      // provedor NÃO é sucesso — vira 'failed', nunca some.
+      patch(res.ok ? 'sent' : 'failed');
+    } catch (e) {
+      console.error("Failed to send msg:", e);
+      patch('failed'); // erro de rede (offline) → pendente vira falha visível
+    }
   },
 
   toggleAiPaused: async (ticketId) => {
@@ -520,20 +534,20 @@ export const useStore = create<AppState>((set, get) => ({
     const newPaused = !ticket.aiPaused;
     const contact = state.contacts[ticket.contactId];
 
+    // ADR-082 (Fase 0): a UI só reflete a mudança se o servidor confirmar. Antes,
+    // o set() rodava sempre — a IA "parecia" pausada mesmo com o backend fora.
     try {
-        await apiFetch('/api/messages/toggle-ai', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contactId: contact?.number || ticket.contactId, ai_paused: newPaused })
-        });
-    } catch(e) {}
-
-    set((s) => ({
-      tickets: {
-        ...s.tickets,
-        [ticketId]: { ...ticket, aiPaused: newPaused }
-      }
-    }));
+      const res = await apiFetch('/api/messages/toggle-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId: contact?.number || ticket.contactId, ai_paused: newPaused }),
+      });
+      if (!res.ok) throw new Error(`toggle-ai ${res.status}`);
+      set((s) => ({ tickets: { ...s.tickets, [ticketId]: { ...s.tickets[ticketId], aiPaused: newPaused } } }));
+    } catch (e) {
+      console.error("Failed to toggle AI:", e);
+      // Não altera a UI — evita divergência com o servidor.
+    }
   },
 
   receiveMessage: (contactId, text, sender = 'contact', contactName, contactAvatar, contactNumber, mediaUrl) => set((state) => {

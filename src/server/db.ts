@@ -488,6 +488,11 @@ const initDb = () => {
   // saber que o cliente não recebeu.
   try { db.exec(`ALTER TABLE messages ADD COLUMN delivery_status TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE messages ADD COLUMN delivery_error TEXT`); } catch(e){}
+  // Continuity Layer (ADR-082, Fase 0/D3) — idempotência do envio manual: o
+  // outbox reenvia com o mesmo command_id; o servidor deduplica em vez de
+  // duplicar a mensagem. UNIQUE parcial por organização.
+  try { db.exec(`ALTER TABLE messages ADD COLUMN command_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_command ON messages (organization_id, command_id) WHERE command_id IS NOT NULL`); } catch(e){}
   // Metadados da base de conhecimento (RAG)
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN channel_id TEXT DEFAULT 'global'`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}

@@ -40,15 +40,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // estado "logado mas com 401 em tudo" (Kanban vazio, socket recusado).
       fetch('/api/auth/me', { headers: { Authorization: `Bearer ${storedToken}` } })
         .then(res => {
-          if (!res.ok) throw new Error('invalid token');
+          // ADR-082 (Fase 0, D8): SÓ 401/403 encerram a sessão (token realmente
+          // inválido/expirado). Qualquer outro status (5xx) ou erro de rede/DNS
+          // NÃO desloga — mantém a sessão e entra em modo de contingência. Antes,
+          // qualquer falha apagava as credenciais e caía no login (bug: refresh
+          // durante queda de internet deslogava sessão válida).
+          if (res.status === 401 || res.status === 403) {
+            localStorage.removeItem('zappflow_token');
+            localStorage.removeItem('zappflow_user');
+            setToken(null);
+            setUser(null);
+            return;
+          }
+          // Sucesso OU indisponibilidade temporária → confia na sessão local.
           setToken(storedToken);
           try { setUser(JSON.parse(storedUser)); } catch (e) {}
         })
         .catch(() => {
-          localStorage.removeItem('zappflow_token');
-          localStorage.removeItem('zappflow_user');
-          setToken(null);
-          setUser(null);
+          // Erro de rede (offline/DNS/servidor fora): mantém a sessão. As telas
+          // já lidam com API indisponível; o usuário não deve ser deslogado.
+          setToken(storedToken);
+          try { setUser(JSON.parse(storedUser)); } catch (e) {}
         })
         .finally(() => setLoading(false));
     } else {

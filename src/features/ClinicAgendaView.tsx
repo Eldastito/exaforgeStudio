@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -171,7 +171,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 }
 
 export function ClinicAgendaView() {
-  const [tab, setTab] = useState<'agenda' | 'autorizacoes'>('agenda');
+  const [tab, setTab] = useState<'agenda' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -296,7 +296,7 @@ export function ClinicAgendaView() {
 
       {/* Abas internas */}
       <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden">
-        {([['agenda', 'Agenda'], ['autorizacoes', 'Autorizações']] as const).map(([id, label]) => (
+        {([['agenda', 'Agenda'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
             {label}
@@ -305,6 +305,8 @@ export function ClinicAgendaView() {
       </div>
 
       {tab === 'autorizacoes' && <AuthorizationsTab contacts={contacts} />}
+
+      {tab === 'conexao' && <ConnectionTab />}
 
       {tab === 'agenda' && (<>
       {/* Filtros */}
@@ -1614,6 +1616,476 @@ function ProceduresPanel({ procedures, onChanged }: { procedures: Procedure[]; o
             {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Adicionar
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
+// Aba: Conexão (onboarding aos planos de saúde / TISS — Fase F0.1)
+// ================================================================
+type CertificateType = 'unknown' | 'none' | 'a1' | 'a3';
+type ConnectionProfile = {
+  organization_id?: string;
+  legal_name?: string | null;
+  cnpj?: string | null;
+  cnes?: string | null;
+  certificate_type?: CertificateType;
+  certificate_valid_until?: string | null;
+  responsible_name?: string | null;
+  responsible_registry?: string | null;
+  monthly_authorizations?: number | null;
+  notes?: string | null;
+};
+type ConnectionOperator = {
+  id: string;
+  name: string;
+  ans_registry?: string | null;
+  portal_url?: string | null;
+  active?: boolean | number;
+  credentialed?: boolean | number;
+  provider_code?: string | null;
+  has_homolog_access?: boolean | number;
+  tiss_version?: string | null;
+  accepts_webservice?: boolean | number;
+  monthly_volume?: number | null;
+  unimed_singular?: string | null;
+  connector_type?: string | null;
+};
+type ReadinessStatus = 'blocked_certificate' | 'gathering' | 'ready_to_homologate' | 'connected';
+type ConnectionCeiling = 'manual' | 'signed_xml' | 'webservice';
+type ReadinessOperator = {
+  id: string;
+  name: string;
+  unimed_singular?: string | null;
+  credentialed?: boolean | number;
+  has_homolog_access?: boolean | number;
+  tiss_version?: string | null;
+  accepts_webservice?: boolean | number;
+  connector_type?: string | null;
+  status: ReadinessStatus;
+  connectionCeiling: ConnectionCeiling;
+  missing: string[];
+};
+type Readiness = {
+  profile: ConnectionProfile;
+  orgBlocking: string[];
+  operators: ReadinessOperator[];
+  summary: {
+    operators: number;
+    readyToHomologate: number;
+    blockedByCertificate: number;
+    suggestedPilot: { id: string; name: string; volume?: number } | null;
+  };
+};
+
+// true tanto para boolean quanto para 0/1 vindos do backend.
+const truthy = (v?: boolean | number | null) => v === true || v === 1;
+
+const READINESS_STATUS_META: Record<ReadinessStatus, { label: string; cls: string; dot: string }> = {
+  blocked_certificate: { label: 'Bloqueada — certificado', cls: 'text-red-300 bg-red-500/10 border-red-500/30', dot: 'bg-red-400' },
+  gathering: { label: 'Reunindo dados', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30', dot: 'bg-amber-400' },
+  ready_to_homologate: { label: 'Pronta p/ homologar', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30', dot: 'bg-emerald-400' },
+  connected: { label: 'Conectada', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30', dot: 'bg-sky-400' },
+};
+const readinessStatusMeta = (s: string) => READINESS_STATUS_META[s as ReadinessStatus] || { label: s, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-700', dot: 'bg-zinc-500' };
+
+const CEILING_LABEL: Record<ConnectionCeiling, string> = {
+  manual: 'Manual',
+  signed_xml: 'Guia assinada (Nível 2)',
+  webservice: 'WebService (Nível 3)',
+};
+const ceilingLabel = (c: string) => CEILING_LABEL[c as ConnectionCeiling] || c;
+
+const CERTIFICATE_OPTIONS: { id: CertificateType; label: string }[] = [
+  { id: 'unknown', label: 'Não sei' },
+  { id: 'none', label: 'Não tenho' },
+  { id: 'a1', label: 'A1 (arquivo)' },
+  { id: 'a3', label: 'A3 (token/cartão)' },
+];
+
+function ConnectionTab() {
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [operators, setOperators] = useState<ConnectionOperator[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadReadiness = useCallback(
+    () => apiFetch('/api/clinic/connection/readiness').then(r => r.json()).then(d => setReadiness(d && typeof d === 'object' ? d : null)).catch(() => setReadiness(null)),
+    [],
+  );
+  const loadOperators = useCallback(
+    () => apiFetch('/api/clinic/operators').then(r => r.json()).then(d => setOperators(Array.isArray(d) ? d : [])).catch(() => setOperators([])),
+    [],
+  );
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([loadReadiness(), loadOperators()]).finally(() => setLoading(false));
+  }, [loadReadiness, loadOperators]);
+
+  const profile = readiness?.profile ?? null;
+
+  return (
+    <div>
+      {/* Texto de topo */}
+      <div className="mb-5 flex items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-300">
+        <Plug className="w-4 h-4 mt-0.5 shrink-0 text-emerald-400" />
+        <span className="leading-relaxed">
+          Preencha os dados de conexão aos planos. O sistema valida o que falta e indica por onde começar a integração TISS.
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-500 text-sm py-10"><Loader2 className="w-4 h-4 animate-spin" /> Carregando prontidão…</div>
+      ) : (
+        <>
+          <ReadinessPanel readiness={readiness} />
+          <ProfileForm profile={profile} onSaved={loadReadiness} />
+          <OperatorsReadinessSection operators={operators} onSaved={() => { loadOperators(); loadReadiness(); }} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---- Painel de prontidão (GET /connection/readiness) ----
+function ReadinessPanel({ readiness }: { readiness: Readiness | null }) {
+  if (!readiness) {
+    return (
+      <div className="mb-6 py-10 text-center rounded-xl border border-zinc-800 bg-zinc-900/40">
+        <Gauge className="w-8 h-8 text-emerald-400/70 mx-auto mb-2" />
+        <p className="text-sm text-zinc-300 font-medium">Não foi possível carregar a prontidão</p>
+        <p className="text-[12px] text-zinc-600 mt-1">Preencha o perfil abaixo para começar.</p>
+      </div>
+    );
+  }
+
+  const { summary, orgBlocking, operators } = readiness;
+
+  return (
+    <div className="mb-6 space-y-4">
+      {/* Cards-resumo */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="text-[11px] text-zinc-500 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Operadoras</div>
+          <div className="mt-1 text-2xl font-semibold text-zinc-100">{summary.operators}</div>
+        </div>
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+          <div className="text-[11px] text-emerald-300/90 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Prontas p/ homologar</div>
+          <div className="mt-1 text-2xl font-semibold text-emerald-300">{summary.readyToHomologate}</div>
+        </div>
+        <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
+          <div className="text-[11px] text-red-300/90 flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Bloqueadas por certificado</div>
+          <div className="mt-1 text-2xl font-semibold text-red-300">{summary.blockedByCertificate}</div>
+        </div>
+      </div>
+
+      {/* Operadora sugerida para piloto */}
+      {summary.suggestedPilot && (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 flex items-center gap-2 text-sm text-sky-100">
+          <Award className="w-4 h-4 text-sky-300 shrink-0" />
+          <span>Operadora sugerida para piloto: <b>{summary.suggestedPilot.name}</b>
+            {typeof summary.suggestedPilot.volume === 'number' && summary.suggestedPilot.volume > 0 && (
+              <span className="text-sky-300/80"> · ~{summary.suggestedPilot.volume} autorizações/mês</span>
+            )}
+          </span>
+        </div>
+      )}
+
+      {/* Bloqueios de nível organização */}
+      {orgBlocking && orgBlocking.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+          <p className="text-sm text-amber-200 font-medium flex items-center gap-1.5 mb-1.5"><AlertTriangle className="w-4 h-4" /> Pendências da organização</p>
+          <ul className="space-y-1">
+            {orgBlocking.map((b, i) => (
+              <li key={`${i}-${b}`} className="text-[12px] text-amber-200/90 flex items-start gap-1.5">
+                <span className="mt-1 w-1 h-1 rounded-full bg-amber-400 shrink-0" /> {b}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Lista por operadora */}
+      <div>
+        <h4 className="text-sm font-medium text-zinc-100 mb-2">Prontidão por operadora</h4>
+        {operators.length === 0 ? (
+          <p className="text-[12px] text-zinc-600 rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">Nenhuma operadora cadastrada ainda.</p>
+        ) : (
+          <div className="space-y-2">
+            {operators.map(op => {
+              const meta = readinessStatusMeta(op.status);
+              return (
+                <div key={op.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <ShieldCheck className="w-3.5 h-3.5 text-zinc-500" />
+                        <span className="font-semibold text-zinc-100 truncate">{op.name}</span>
+                        {op.unimed_singular && <span className="text-[11px] text-zinc-500">Singular: {op.unimed_singular}</span>}
+                      </div>
+                      <div className="mt-1.5 text-[12px] text-zinc-400 inline-flex items-center gap-1.5">
+                        <Gauge className="w-3.5 h-3.5 text-zinc-500" /> Teto de automação: <span className="text-zinc-200">{ceilingLabel(op.connectionCeiling)}</span>
+                      </div>
+                      {op.missing && op.missing.length > 0 && (
+                        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5">
+                          <p className="text-[11px] text-amber-200/90 flex items-center gap-1.5 mb-1"><ListChecks className="w-3.5 h-3.5" /> Falta:</p>
+                          <ul className="space-y-0.5">
+                            {op.missing.map((m, i) => (
+                              <li key={`${i}-${m}`} className="text-[11px] text-amber-200/80 flex items-start gap-1.5">
+                                <span className="mt-1 w-1 h-1 rounded-full bg-amber-400 shrink-0" /> {m}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border inline-flex items-center gap-1 shrink-0 ${meta.cls}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} /> {meta.label}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- Formulário: perfil da organização (GET/PUT /connection/profile) ----
+function ProfileForm({ profile, onSaved }: { profile: ConnectionProfile | null; onSaved: () => void }) {
+  const [legalName, setLegalName] = useState('');
+  const [cnpj, setCnpj] = useState('');
+  const [cnes, setCnes] = useState('');
+  const [certificateType, setCertificateType] = useState<CertificateType>('unknown');
+  const [certificateValidUntil, setCertificateValidUntil] = useState('');
+  const [responsibleName, setResponsibleName] = useState('');
+  const [responsibleRegistry, setResponsibleRegistry] = useState('');
+  const [monthlyAuthorizations, setMonthlyAuthorizations] = useState('');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Preenche os campos a partir do perfil carregado (a validade vem ISO → YYYY-MM-DD).
+  useEffect(() => {
+    if (!profile) return;
+    setLegalName(profile.legal_name || '');
+    setCnpj(profile.cnpj || '');
+    setCnes(profile.cnes || '');
+    setCertificateType((profile.certificate_type as CertificateType) || 'unknown');
+    setCertificateValidUntil(profile.certificate_valid_until ? String(profile.certificate_valid_until).slice(0, 10) : '');
+    setResponsibleName(profile.responsible_name || '');
+    setResponsibleRegistry(profile.responsible_registry || '');
+    setMonthlyAuthorizations(profile.monthly_authorizations != null ? String(profile.monthly_authorizations) : '');
+    setNotes(profile.notes || '');
+  }, [profile]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload = {
+        legalName: legalName.trim() || undefined,
+        cnpj: cnpj.trim() || undefined,
+        cnes: cnes.trim() || undefined,
+        certificateType,
+        certificateValidUntil: certificateValidUntil || undefined,
+        responsibleName: responsibleName.trim() || undefined,
+        responsibleRegistry: responsibleRegistry.trim() || undefined,
+        monthlyAuthorizations: monthlyAuthorizations ? parseInt(monthlyAuthorizations, 10) : undefined,
+        notes: notes.trim() || undefined,
+      };
+      const r = await apiFetch('/api/clinic/connection/profile', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível salvar o perfil.');
+      toast.success('Perfil de conexão salvo.');
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao salvar o perfil.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+      <h4 className="text-sm font-medium text-zinc-100 mb-3 flex items-center gap-2"><Building2 className="w-4 h-4 text-emerald-400" /> Perfil da organização</h4>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="sm:col-span-2">
+          <label className="text-[11px] text-zinc-400 mb-1 block">Razão social</label>
+          <input value={legalName} onChange={e => setLegalName(e.target.value)} placeholder="Ex.: Clínica Exemplo Ltda."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">CNPJ</label>
+          <input value={cnpj} onChange={e => setCnpj(e.target.value)} placeholder="00.000.000/0000-00"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">CNES</label>
+          <input value={cnes} onChange={e => setCnes(e.target.value)} placeholder="Código do estabelecimento"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">Tipo de certificado digital</label>
+          <select value={certificateType} onChange={e => setCertificateType(e.target.value as CertificateType)}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500">
+            {CERTIFICATE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">Validade do certificado</label>
+          <input type="date" value={certificateValidUntil} onChange={e => setCertificateValidUntil(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">Responsável</label>
+          <input value={responsibleName} onChange={e => setResponsibleName(e.target.value)} placeholder="Nome do responsável"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">Registro do responsável</label>
+          <input value={responsibleRegistry} onChange={e => setResponsibleRegistry(e.target.value)} placeholder="Ex.: CRM 12345 / SP"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label className="text-[11px] text-zinc-400 mb-1 block">Autorizações por mês</label>
+          <input value={monthlyAuthorizations} onChange={e => setMonthlyAuthorizations(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="ex.: 120"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="text-[11px] text-zinc-400 mb-1 block">Observações</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Notas internas sobre a conexão."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500 resize-y" />
+        </div>
+      </div>
+
+      <p className="mt-3 text-[11px] text-amber-200/90 flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5">
+        <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /> A3 (token/cartão) não é suportado na integração automática — nesses casos, a autorização segue no modo manual.
+      </p>
+
+      <div className="mt-3 flex justify-end">
+        <Button onClick={save} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4 text-sm">
+          {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />} Salvar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Prontidão por operadora (PATCH /operators/:id/readiness) ----
+function OperatorsReadinessSection({ operators, onSaved }: { operators: ConnectionOperator[]; onSaved: () => void }) {
+  return (
+    <div className="mb-6">
+      <h4 className="text-sm font-medium text-zinc-100 mb-2 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-400" /> Prontidão por operadora</h4>
+      {operators.length === 0 ? (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-[12px] text-amber-200 flex items-start gap-2">
+          <Info className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>Nenhuma operadora cadastrada. As operadoras são cadastradas na aba <b>Autorizações</b>, no painel “Operadoras e procedimentos”.</span>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {operators.map(op => <div key={op.id}><OperatorReadinessRow operator={op} onSaved={onSaved} /></div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperatorReadinessRow({ operator, onSaved }: { operator: ConnectionOperator; onSaved: () => void }) {
+  const [credentialed, setCredentialed] = useState(truthy(operator.credentialed));
+  const [providerCode, setProviderCode] = useState(operator.provider_code || '');
+  const [hasHomologAccess, setHasHomologAccess] = useState(truthy(operator.has_homolog_access));
+  const [tissVersion, setTissVersion] = useState(operator.tiss_version || '');
+  const [acceptsWebservice, setAcceptsWebservice] = useState(truthy(operator.accepts_webservice));
+  const [monthlyVolume, setMonthlyVolume] = useState(operator.monthly_volume != null ? String(operator.monthly_volume) : '');
+  const [unimedSingular, setUnimedSingular] = useState(operator.unimed_singular || '');
+  const [busy, setBusy] = useState(false);
+  const isUnimed = /unimed/i.test(operator.name);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload: any = {
+        credentialed,
+        providerCode: providerCode.trim() || undefined,
+        hasHomologAccess,
+        tissVersion: tissVersion.trim() || undefined,
+        acceptsWebservice,
+        monthlyVolume: monthlyVolume ? parseInt(monthlyVolume, 10) : undefined,
+      };
+      if (isUnimed) payload.unimedSingular = unimedSingular.trim() || undefined;
+      const r = await apiFetch(`/api/clinic/operators/${operator.id}/readiness`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível salvar a prontidão.');
+      toast.success('Prontidão da operadora salva.');
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao salvar a prontidão.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <ShieldCheck className="w-3.5 h-3.5 text-zinc-500" />
+        <span className="font-semibold text-zinc-100 truncate">{operator.name}</span>
+        {operator.ans_registry && <span className="text-[11px] text-zinc-500">ANS {operator.ans_registry}</span>}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="flex flex-col justify-end gap-2">
+          <label className="flex items-center gap-2 text-[12px] text-zinc-300 cursor-pointer">
+            <input type="checkbox" checked={credentialed} onChange={e => setCredentialed(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5" />
+            Credenciada
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-zinc-300 cursor-pointer">
+            <input type="checkbox" checked={hasHomologAccess} onChange={e => setHasHomologAccess(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5" />
+            Tem acesso à homologação
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-zinc-300 cursor-pointer">
+            <input type="checkbox" checked={acceptsWebservice} onChange={e => setAcceptsWebservice(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5" />
+            Aceita WebService
+          </label>
+        </div>
+        <div className="space-y-2">
+          <div>
+            <label className="text-[11px] text-zinc-400 mb-1 block">Código do prestador</label>
+            <input value={providerCode} onChange={e => setProviderCode(e.target.value)} placeholder="Ex.: 998877"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <label className="text-[11px] text-zinc-400 mb-1 block">Versão TISS</label>
+              <input value={tissVersion} onChange={e => setTissVersion(e.target.value)} placeholder="Ex.: 4.01.00"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+            </div>
+            <div className="w-28">
+              <label className="text-[11px] text-zinc-400 mb-1 block">Volume/mês</label>
+              <input value={monthlyVolume} onChange={e => setMonthlyVolume(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="ex.: 40"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+            </div>
+          </div>
+          {isUnimed && (
+            <div>
+              <label className="text-[11px] text-zinc-400 mb-1 block">Singular (Unimed)</label>
+              <input value={unimedSingular} onChange={e => setUnimedSingular(e.target.value)} placeholder="Ex.: Unimed Campinas"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <button onClick={save} disabled={busy} className="text-[12px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar
+        </button>
       </div>
     </div>
   );

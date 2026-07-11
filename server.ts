@@ -67,6 +67,7 @@ import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
+import { EdgeInboxProcessor } from "./src/server/EdgeInboxProcessor.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
@@ -1325,6 +1326,10 @@ async function startServer() {
   // só liga o dispatcher com CONTINUITY_DELIVERY_QUEUE_ENABLED. Recupera sozinho
   // as entregas 'queued' pendentes de um reinício ao voltar.
   try { MessageDeliveryService.start(); } catch (e) { console.error('[MsgDelivery] Falha ao iniciar', e); }
+  // Continuity Layer (ADR-082, Fase 4c): processa os comandos empurrados pelos
+  // nós Edge (client_commands 'received') e fecha o loop com um domain_event.
+  // Self-gate na mesma flag do sync do Edge (CONTINUITY_EDGE_SYNC_ENABLED).
+  try { EdgeInboxProcessor.start(); } catch (e) { console.error('[EdgeInbox] Falha ao iniciar', e); }
 
 }
 

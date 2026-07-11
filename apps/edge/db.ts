@@ -56,6 +56,21 @@ export function initEdgeDb() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    -- Projeção local dos agregados (ADR-082, Fase 4c). Cada domain_event puxado
+    -- é dobrado aqui por (aggregate_type, aggregate_id): o nó passa a ter o
+    -- ESTADO ATUAL consultável offline, sem depender da nuvem. Versionamento
+    -- otimista pelo seq monotônico (last-write-wins ordenado) — reaplicar um seq
+    -- <= ao já projetado é no-op (idempotente / à prova de reentrega).
+    CREATE TABLE IF NOT EXISTS edge_aggregates (
+      aggregate_type TEXT NOT NULL,
+      aggregate_id TEXT NOT NULL,
+      last_seq INTEGER NOT NULL DEFAULT 0,
+      last_event_type TEXT,
+      state_json TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (aggregate_type, aggregate_id)
+    );
   `);
 }
 

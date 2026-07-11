@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { PatientService } from "../PatientService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
+import { ClinicPortalService } from "../ClinicPortalService.js";
 
 /**
  * Módulo Clínica (ADR-080) — rotas sob /api/clinic, gated pelo módulo "clinica"
@@ -120,6 +121,40 @@ router.post("/appointments/:id/continuation", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicAgendaService.setContinuation(orgId, req.params.id, String(req.body?.status || ""), actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Portal do profissional (gestão do link) + export ─────────────────────
+router.get("/professionals/:id/portal", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicPortalService.status(orgId, req.params.id));
+});
+
+router.post("/professionals/:id/portal", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { token, expiresAt } = ClinicPortalService.generateToken(orgId, req.params.id, actor(req));
+    // URL relativa: o front monta a absoluta com o próprio origin.
+    res.json({ token, expiresAt, path: `/clinic/professional/${token}` });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete("/professionals/:id/portal", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ClinicPortalService.revoke(orgId, req.params.id, actor(req));
+  res.json({ revoked: ok });
+});
+
+// Exportação CSV da agenda do dia (impressão/planilha da recepção).
+router.get("/agenda/export.csv", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const csv = ClinicPortalService.agendaCsv(orgId, req.query.date as string, { professionalId: req.query.professionalId as string });
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="agenda-${(req.query.date as string) || "hoje"}.csv"`);
+  res.send("﻿" + csv); // BOM para Excel abrir acentos corretamente
 });
 
 export default router;

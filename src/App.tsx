@@ -46,6 +46,19 @@ export default function App() {
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  // Continuity Layer (ADR-082, Fase 0): estado de conectividade real do cliente.
+  // 'online' (rede + socket ok), 'unstable' (rede ok, socket caiu), 'offline'.
+  const [connectivity, setConnectivity] = useState<'online' | 'unstable' | 'offline'>(
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'online'
+  );
+
+  useEffect(() => {
+    const onOnline = () => setConnectivity(c => (c === 'offline' ? 'unstable' : c));
+    const onOffline = () => setConnectivity('offline');
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -95,11 +108,21 @@ export default function App() {
     // Conectar ao Socket.IO do backend (autenticado via JWT no handshake)
     const socket = io(window.location.origin, { auth: { token } });
 
+    let hadDisconnect = false;
     socket.on("connect", () => {
       console.log("Conectado ao servidor via WebSocket", socket.id);
       // O servidor decide a organização a partir do token; não enviamos o id.
       socket.emit("join_org");
+      setConnectivity('online');
+      // ADR-082 (Fase 0): ao RECONECTAR, re-hidrata para recuperar tickets/
+      // mensagens que chegaram durante a queda (antes, só entrava na sala e os
+      // eventos perdidos ficavam faltando até um refresh manual). Paliativo até
+      // o delta sync por domain_events (Fases 1+2).
+      if (hadDisconnect) { hadDisconnect = false; hydrate(); }
     });
+
+    socket.on("disconnect", () => { hadDisconnect = true; setConnectivity(c => (c === 'offline' ? 'offline' : 'unstable')); });
+    socket.on("connect_error", () => setConnectivity(c => (c === 'offline' ? 'offline' : 'unstable')));
 
     socket.on("new_message", (data: { contactId: string, contactName?: string, contactNumber?: string, contactAvatar?: string, provider: string, text: string, sender: string, mediaUrl?: string }) => {
       console.log("Recebido novo evento via WebSocket:", data);
@@ -162,7 +185,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [token, receiveMessage, updateStageByContactId]);
+  }, [token, receiveMessage, updateStageByContactId, hydrate]);
 
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Carregando...</div>;
   if (!user) return <LoginView />;
@@ -211,6 +234,19 @@ export default function App() {
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
+              {connectivity !== 'online' && (
+                <span
+                  title={connectivity === 'offline' ? 'Sem conexão com a internet' : 'Conexão instável — reconectando'}
+                  className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border ${
+                    connectivity === 'offline'
+                      ? 'text-red-300 bg-red-500/10 border-red-500/30'
+                      : 'text-amber-300 bg-amber-500/10 border-amber-500/30'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${connectivity === 'offline' ? 'bg-red-400' : 'bg-amber-400 animate-pulse'}`}></span>
+                  {connectivity === 'offline' ? 'Offline' : 'Instável'}
+                </span>
+              )}
               <GlobalSearch />
               <button
                 onClick={() => setShowNotifications(!showNotifications)} 

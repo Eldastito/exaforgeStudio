@@ -42,17 +42,38 @@ router.post("/send", async (req: AuthRequest, res) => {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(contact.channel_id) as any;
     if (!channel) return res.status(404).json({ error: "Channel not found" });
 
-    await MessageProviderService.sendMessage(channel.id, contact.identifier, text);
+    // ADR-082 (Fase 0) — corrige a "mensagem fantasma": GRAVA PRIMEIRO (pending),
+    // depois envia, e marca sent/failed na própria mensagem. Espelha o fluxo do
+    // bot (webhookProcessor). Assim a mensagem NUNCA some do histórico por falha
+    // no provedor, e o painel sabe o estado REAL de entrega. O commandId (idem-
+    // potência, D3) é aceito quando enviado pelo outbox — se repetido, não
+    // duplica: devolve a mensagem já existente.
+    const commandId = String(req.body?.commandId || "").trim() || null;
+    if (commandId) {
+      const dup = db.prepare("SELECT id, delivery_status FROM messages WHERE organization_id = ? AND command_id = ?").get(orgId, commandId) as any;
+      if (dup) return res.json({ id: dup.id, status: dup.delivery_status || 'pending', deduped: true });
+    }
 
     const msgId = uuidv4();
     db.prepare(`
-      INSERT INTO messages (id, organization_id, ticket_id, sender_type, content)
-      VALUES (?, ?, ?, 'agent', ?)
-    `).run(msgId, orgId, ticket.id, text);
+      INSERT INTO messages (id, organization_id, ticket_id, sender_type, content, delivery_status, command_id)
+      VALUES (?, ?, ?, 'agent', ?, 'pending', ?)
+    `).run(msgId, orgId, ticket.id, text, commandId);
 
-    logAuthEvent(orgId, userId, contactId, 'MESSAGE_SENT', { ticketId: ticket.id });
-
-    res.json({ id: msgId, status: 'sent' });
+    try {
+      await MessageProviderService.sendMessage(channel.id, contact.identifier, text);
+      db.prepare("UPDATE messages SET delivery_status = 'sent' WHERE id = ?").run(msgId);
+      logAuthEvent(orgId, userId, contactId, 'MESSAGE_SENT', { ticketId: ticket.id });
+      res.json({ id: msgId, status: 'sent' });
+    } catch (sendErr: any) {
+      // A mensagem FICA no banco como 'failed' (não some) — o painel mostra o
+      // estado real e permite reenviar. Devolve 502 (falha do provedor, não do
+      // request) com o id, para o front atualizar o balão para "não enviado".
+      const errMsg = String(sendErr?.message || sendErr).slice(0, 500);
+      db.prepare("UPDATE messages SET delivery_status = 'failed', delivery_error = ? WHERE id = ?").run(errMsg, msgId);
+      logAuthEvent(orgId, userId, contactId, 'MESSAGE_SEND_FAILED', { ticketId: ticket.id, error: errMsg });
+      res.status(502).json({ id: msgId, status: 'failed', error: errMsg });
+    }
   } catch (e: any) {
     console.error("Failed to send message:", e);
     res.status(500).json({ error: e.message });

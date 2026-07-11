@@ -1377,6 +1377,85 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_portal_tokens_prof ON professional_portal_tokens (organization_id, professional_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tokens do portal (Clínica)', e); }
+
+  // Módulo Clínica (ADR-080, Fase E) — Convênios e Autorização assistida.
+  // MVP manual: registro + máquina de status + checklist + protocolo. TISS
+  // XML/WebService/API fica para a Fase F (ADR próprio). Credenciais da
+  // operadora cifradas com EncryptionService.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS health_plan_operators (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        ans_registry TEXT,
+        connector_type TEXT DEFAULT 'manual', -- manual | tiss_xml | tiss_webservice | api (só 'manual' no MVP)
+        portal_url TEXT,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_health_operators_org ON health_plan_operators (organization_id, active);
+
+      CREATE TABLE IF NOT EXISTS health_plan_credentials (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        operator_id TEXT NOT NULL,
+        provider_code TEXT,
+        username_encrypted TEXT,   -- EncryptionService.encrypt
+        password_encrypted TEXT,   -- EncryptionService.encrypt
+        certificate_ref TEXT,      -- referência ao certificado (armazenado fora), Fase F
+        config_json TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, operator_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS clinic_procedures (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        tuss_code TEXT,
+        default_duration_minutes INTEGER DEFAULT 60,
+        requires_authorization INTEGER DEFAULT 0,
+        requires_medical_request INTEGER DEFAULT 0,
+        preparation_instructions TEXT,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_procedures_org ON clinic_procedures (organization_id, active);
+
+      CREATE TABLE IF NOT EXISTS procedure_authorization_requests (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        appointment_id TEXT,
+        operator_id TEXT,
+        procedure_id TEXT,
+        tuss_code TEXT,
+        requested_by TEXT,
+        status TEXT DEFAULT 'draft', -- draft|ready_to_submit|submitted|pending_documents|pending_operator|approved|denied|expired|cancelled|manual_required
+        protocol_number TEXT,
+        authorization_number TEXT,
+        denial_reason TEXT,
+        pending_requirements TEXT,   -- checklist do que falta (texto/JSON)
+        plan_snapshot TEXT,          -- plano do paciente CONGELADO no momento (D6)
+        submitted_at DATETIME,
+        approved_at DATETIME,
+        denied_at DATETIME,
+        expires_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_auth_requests_org ON procedure_authorization_requests (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_auth_requests_contact ON procedure_authorization_requests (organization_id, contact_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar Convênios/Autorização (Clínica)', e); }
+  // Vínculo do agendamento com autorização/procedimento + snapshot do plano (D6).
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN authorization_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN procedure_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN patient_plan_snapshot TEXT`); } catch(e){}
   // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
   try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}

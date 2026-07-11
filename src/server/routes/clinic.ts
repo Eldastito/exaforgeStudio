@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { PatientService } from "../PatientService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
+import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
 
 /**
  * Módulo Clínica (ADR-080) — rotas sob /api/clinic, gated pelo módulo "clinica"
@@ -155,6 +156,90 @@ router.get("/agenda/export.csv", (req: AuthRequest, res): any => {
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="agenda-${(req.query.date as string) || "hoje"}.csv"`);
   res.send("﻿" + csv); // BOM para Excel abrir acentos corretamente
+});
+
+// ── Convênios e Autorização assistida (ADR-080, Fase E) ──────────────────
+// Cadastro de operadora/credenciais/procedimento é de gestor. O fluxo da
+// autorização (criar/preparar/enviar/registrar retorno) fica aberto à equipe.
+router.get("/operators", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicAuthorizationService.listOperators(orgId));
+});
+
+router.post("/operators", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.createOperator(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/operators/:id/credentials", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicAuthorizationService.credentialsStatus(orgId, req.params.id));
+});
+
+router.put("/operators/:id/credentials", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.setCredentials(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/procedures", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicAuthorizationService.listProcedures(orgId));
+});
+
+router.post("/procedures", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.createProcedure(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/authorizations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicAuthorizationService.listAuthorizations(orgId, { status: req.query.status as string, contactId: req.query.contactId as string }));
+});
+
+router.get("/authorizations/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const a = ClinicAuthorizationService.getAuthorization(orgId, req.params.id);
+  if (!a) return res.status(404).json({ error: "Solicitação não encontrada." });
+  res.json(a);
+});
+
+router.post("/authorizations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.createAuthorization(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/authorizations/:id/prepare", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.prepare(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/authorizations/:id/submit", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.submit(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.patch("/authorizations/:id/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAuthorizationService.setManualStatus(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

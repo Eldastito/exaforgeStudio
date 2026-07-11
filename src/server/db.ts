@@ -1653,6 +1653,32 @@ const initDb = () => {
   // Prospect AI (ADR-079, Fase A — conformidade/LGPD): bloqueio de contato no
   // nível da EMPRESA. Conta bloqueada não recebe abordagem nova nem envio.
   try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN blocked_at DATETIME`); } catch(e){}
+
+  // Prospect AI (ADR-079, Fase B — execução e medição): envio real, resposta,
+  // reunião e conversão para o CRM. `prospect_events` é a fonte das métricas
+  // dos experimentos (Fase C) — sem medição não há Research Engine.
+  try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN sent_via TEXT`); } catch(e){}              // manual | whatsapp | email
+  try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN provider_message_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN replied_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN meeting_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_accounts ADD COLUMN crm_ticket_id TEXT`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,       -- message.sent | lead.replied | meeting.created | lead.converted
+        campaign_id TEXT,
+        prospect_account_id TEXT,
+        contact_id TEXT,
+        outreach_id TEXT,
+        payload_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_events_org_type ON prospect_events (organization_id, event_type, created_at);
+      CREATE INDEX IF NOT EXISTS idx_prospect_events_acc ON prospect_events (organization_id, prospect_account_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar prospect_events', e); }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS prospect_discovery_runs (

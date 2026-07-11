@@ -375,6 +375,23 @@ Responda em JSON: {"hypotheses":[{"hypothesis":"...","evidence":[1,2],"recommend
     return this.getAccount(orgId, accountId);
   }
 
+  /**
+   * Pré-checagem do ENVIO REAL (ADR-079, Fase B): a abordagem precisa estar
+   * aprovada, respeitar bloqueio/opt-out e o teto de tentativas — checado
+   * ANTES de chamar o provedor externo (depois de enviado não há volta).
+   */
+  static assertOutreachSendable(orgId: string, id: string): any {
+    const o = db.prepare("SELECT * FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    if (!o) throw new Error("Abordagem não encontrada.");
+    if (o.status !== "approved") throw new Error("Somente abordagem APROVADA pode ser enviada.");
+    this.assertContactAllowed(orgId, o.prospect_account_id, o.contact_id);
+    if (o.contact_id) {
+      const n = db.prepare("SELECT COUNT(*) n FROM prospect_outreach WHERE organization_id = ? AND contact_id = ? AND status = 'sent'").get(orgId, o.contact_id) as any;
+      if (Number(n?.n || 0) >= MAX_CONTACT_ATTEMPTS) throw new Error(`Limite de ${MAX_CONTACT_ATTEMPTS} tentativas de contato atingido para este contato.`);
+    }
+    return o;
+  }
+
   /** Guardrail LGPD: recusa abordagem a conta bloqueada ou contato em opt-out. */
   private static assertContactAllowed(orgId: string, accountId: string, contactId?: string | null): void {
     const acc = db.prepare("SELECT blocked_at FROM prospect_accounts WHERE id = ? AND organization_id = ?").get(accountId, orgId) as any;

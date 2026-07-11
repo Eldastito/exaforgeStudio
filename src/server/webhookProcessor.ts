@@ -25,6 +25,7 @@ import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
 import { MaestroService } from "./MaestroService.js";
+import { ProspectExecutionService } from "./ProspectExecutionService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -220,6 +221,11 @@ export async function processIncomingMessage(
 
   // CRM: registra o último contato e recalcula a temperatura do lead.
   CustomerProfileService.touchContact(contact.id);
+
+  // Prospect AI (ADR-079, Fase B): se o remetente é um lead prospectado com
+  // abordagem ENVIADA e ainda sem resposta, registra lead.replied — a métrica
+  // que alimenta o Research Engine. Best-effort: nunca derruba o atendimento.
+  ProspectExecutionService.correlateInboundReply(orgId, contact.identifier);
 
   // Cadência: ao receber mensagem do contato, cancela o follow-up pendente e
   // atualiza o timestamp para que o próximo delay conte a partir de agora.

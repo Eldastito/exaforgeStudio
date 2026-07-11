@@ -4,6 +4,7 @@ import { PatientService } from "../PatientService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
+import { ClinicConnectionService } from "../ClinicConnectionService.js";
 
 /**
  * Módulo Clínica (ADR-080) — rotas sob /api/clinic, gated pelo módulo "clinica"
@@ -240,6 +241,35 @@ router.patch("/authorizations/:id/status", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicAuthorizationService.setManualStatus(orgId, req.params.id, req.body || {}, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Onboarding de Conexão TISS (ADR-081, Fase F0) ────────────────────────
+// Questionário self-service da clínica + mapa de prontidão. Perfil e prontidão
+// são configuração de conexão — restritos a gestor.
+router.get("/connection/profile", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicConnectionService.getProfile(orgId));
+});
+
+router.put("/connection/profile", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicConnectionService.saveProfile(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.patch("/operators/:id/readiness", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicConnectionService.setOperatorReadiness(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/connection/readiness", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicConnectionService.readiness(orgId));
 });
 
 export default router;

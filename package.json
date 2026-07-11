@@ -38,6 +38,7 @@
     "test:edge-runtime": "tsx scripts/test-edge-runtime.ts",
     "test:edge-reconcile": "tsx scripts/test-edge-reconcile.ts",
     "test:edge-send-message": "tsx scripts/test-edge-send-message.ts",
+    "test:edge-commands": "tsx scripts/test-edge-commands.ts",
     "test:bot-outbound": "tsx scripts/test-bot-outbound.ts",
     "test:delivery-receipts": "tsx scripts/test-delivery-receipts.ts",
     "test:continuity-admin-health": "tsx scripts/test-continuity-admin-health.ts",

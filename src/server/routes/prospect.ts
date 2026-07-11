@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { ProspectService } from "../ProspectService.js";
 import { ProspectDiscoveryService } from "../ProspectDiscoveryService.js";
+import { ProspectExecutionService } from "../ProspectExecutionService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -208,6 +209,43 @@ router.post("/outreach/:oid/status", (req: AuthRequest, res): any => {
   }
   try { res.json(ProspectService.setOutreachStatus(orgId, req.params.oid, status, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Execução real (ADR-079, Fase B) ──────────────────────────────────────
+// Envio REAL da abordagem aprovada (WhatsApp/e-mail). Vendedor pode executar:
+// a decisão de conteúdo já passou pela aprovação do gestor.
+router.post("/outreach/:oid/send", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectExecutionService.sendOutreach(orgId, req.params.oid, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/accounts/:id/reply", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectExecutionService.registerReply(orgId, req.params.id, { ...req.body, source: "manual" }, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/accounts/:id/meeting", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectExecutionService.registerMeeting(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/accounts/:id/convert-to-crm", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectExecutionService.convertToCrm(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/accounts/:id/events", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectExecutionService.listEvents(orgId, req.params.id));
 });
 
 router.get("/approval-queue", (req: AuthRequest, res): any => {

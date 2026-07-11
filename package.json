@@ -18,6 +18,7 @@
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",
     "test:prospect-isolation": "tsx scripts/test-prospect-isolation.ts",
+    "test:prospect-execution": "tsx scripts/test-prospect-execution.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

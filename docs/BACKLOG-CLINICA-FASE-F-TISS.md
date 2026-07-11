@@ -91,3 +91,30 @@ Com os dados de autorização fluindo, o **RIC (Revenue Intelligence Center)** e
 - **F1 (genérico, sem operadora):** interface `TissConnector` + `ManualConnector` (default) → `TissXmlConnector` (geração + assinatura A1 do XML numa versão fixada) → importação da tabela TUSS → testes (XML válido contra XSD, assinatura verificável, isolamento, auditoria).
 - **F1 (por operadora):** ligar credenciais/código de prestador da operadora-piloto e **homologar** no ambiente de testes dela.
 - **F2:** conector de WebService/API da operadora específica (transmissão + leitura de retorno), quando houver endpoint documentado.
+
+---
+
+## 5. Fase F0 — Onboarding de Conexão (implementado)
+
+Antes dos conectores, o sistema **recebe as informações da clínica de forma automatizada** e calcula a prontidão. Implementado em `ClinicConnectionService` (rotas `/api/clinic/connection/*` e `/api/clinic/operators/:id/readiness`), com UI no módulo Clínica.
+
+- **Perfil de conexão** (nível da org): certificado (A1/A3/nenhum) + validade, CNES, responsável (conselho/UF), CNPJ, volume mensal.
+- **Prontidão por operadora**: credenciada? código de prestador, acesso à homologação, versão TISS, aceita WebService, volume, singular (Unimed).
+- **Mapa de prontidão** (`GET /connection/readiness`): para cada operadora, lista o que **falta** e o **status** — `blocked_certificate` (A3/nenhum → só manual), `gathering` (falta item), `ready_to_homologate` (pronta) ou `connected`. Sugere a **operadora-piloto** (a pronta de maior volume).
+
+## 6. Até onde dá para automatizar a conexão (teto por etapa)
+
+Resposta honesta ao "como e até onde podemos automatizar". O teto real é ditado **pela operadora** — o que ela expõe (WebService vs. só portal) e se tem homologação.
+
+| Etapa | Automação possível | Depende de |
+|---|---|---|
+| Receber os dados da clínica (questionário) | **Total** — self-service + validação + prontidão (Fase F0, feito) | nada |
+| Ler validade/dados do certificado A1 | **Total** — ao subir o `.pfx` (F1) | certificado A1 |
+| Validar CNES | **Alta** — consulta à base pública CNES (nice-to-have) | — |
+| Gerar + assinar a guia (XML TISS) | **Total** — F1, sem operadora | XSD da versão + A1 |
+| Verificar elegibilidade em tempo real | **Total** onde há WebService (Nível 3); **manual** onde só há portal | operadora expõe WebService |
+| Enviar a solicitação | **Nível 3:** total (WebService). **Nível 2:** semi — gera/assina, humano faz upload no portal | operadora + homologação |
+| Acompanhar status/retorno | **Nível 3:** total (leitura automática). **Nível 2:** registro manual (já existe na Fase E) | operadora |
+| Decisão de enviar/aceitar | **Nunca 100%** — humano no comando é guardrail (ADR-080 D7) | política |
+
+**Teto honesto:** onde a operadora tem WebService homologado, o fluxo vira quase totalmente automático (elegibilidade → envio → retorno). Onde só há portal, automatizamos tudo até a guia assinada e o humano faz o upload — e o retorno é registrado à mão. Onde a clínica só tem certificado A3, permanece o modo manual da Fase E. A promessa comercial reflete exatamente isso (ADR-080 D4): "onde houver integração, enviamos; onde não, deixamos pronto para envio manual".

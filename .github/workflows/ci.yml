@@ -73,6 +73,7 @@ jobs:
           - { name: 'clinic-agenda', script: 'test:clinic-agenda' }
           - { name: 'clinic-portal', script: 'test:clinic-portal' }
           - { name: 'clinic-authorization', script: 'test:clinic-authorization' }
+          - { name: 'clinic-connection', script: 'test:clinic-connection' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

@@ -1456,6 +1456,38 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN authorization_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN procedure_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN patient_plan_snapshot TEXT`); } catch(e){}
+
+  // Módulo Clínica (ADR-081, Fase F0) — Onboarding de Conexão TISS. A clínica
+  // preenche o questionário no próprio sistema (self-service); o backend valida
+  // os itens BLOQUEANTES e calcula a prontidão por operadora. Perfil no nível da
+  // organização (1:1); prontidão por operadora nas colunas de health_plan_operators.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_connection_profile (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL UNIQUE,
+        legal_name TEXT,
+        cnpj TEXT,
+        cnes TEXT,
+        certificate_type TEXT DEFAULT 'unknown', -- unknown | none | a1 | a3
+        certificate_valid_until DATETIME,
+        responsible_name TEXT,
+        responsible_registry TEXT,   -- conselho + número + UF (ex.: CRM 12345/RJ)
+        monthly_authorizations INTEGER,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar perfil de conexão (Clínica)', e); }
+  // Prontidão por operadora (respostas do questionário, nível operadora).
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN credentialed INTEGER DEFAULT 0`); } catch(e){}          // clínica credenciada
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN provider_code TEXT`); } catch(e){}                     // código do prestador
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN has_homolog_access INTEGER DEFAULT 0`); } catch(e){}   // acesso ao ambiente de homologação
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN tiss_version TEXT`); } catch(e){}                      // versão TISS aceita
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN accepts_webservice INTEGER DEFAULT 0`); } catch(e){}   // aceita WebService (Nível 3) vs só portal (Nível 2)
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN monthly_volume INTEGER`); } catch(e){}                 // volume mensal nessa operadora
+  try { db.exec(`ALTER TABLE health_plan_operators ADD COLUMN unimed_singular TEXT`); } catch(e){}                   // qual singular (Unimed é federada)
   // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
   try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}

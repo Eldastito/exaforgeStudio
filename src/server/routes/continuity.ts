@@ -57,6 +57,10 @@ router.get("/status", (req: AuthRequest, res): any => {
         queued: byStatus.queued, sent: byStatus.sent, delivered: byStatus.delivered, failed: byStatus.failed,
         oldestQueuedAt: oldest?.t || null,
       },
+      degradedChannels: MessageDeliveryService.degradedChannels(orgId).map((c) => {
+        const ch = db.prepare(`SELECT name, provider FROM channels WHERE id = ?`).get(c.channelId) as any;
+        return { ...c, channelName: ch?.name || null, provider: ch?.provider || null };
+      }),
       events: { cursor: ContinuityService.cursor(orgId) },
       edge: { devices: Number(edge?.total || 0), active: Number(edge?.active || 0) },
     });

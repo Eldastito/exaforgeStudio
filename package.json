@@ -31,6 +31,7 @@
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",
     "test:continuity-fase3": "tsx scripts/test-continuity-fase3.ts",
+    "test:continuity-edge-sync": "tsx scripts/test-continuity-edge-sync.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

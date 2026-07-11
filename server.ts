@@ -31,6 +31,7 @@ import taskRoutes from "./src/server/routes/tasks.js";
 import prospectRoutes from "./src/server/routes/prospect.js";
 import clinicRoutes from "./src/server/routes/clinic.js";
 import continuityRoutes from "./src/server/routes/continuity.js";
+import { edgeSyncRoutes, edgeDeviceRoutes } from "./src/server/routes/edge.js";
 import managersRoutes from "./src/server/routes/managers.js";
 import areasRoutes from "./src/server/routes/areas.js";
 import aiRoutes from "./src/server/routes/ai.js";
@@ -67,7 +68,7 @@ import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
-import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
+import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
@@ -365,6 +366,13 @@ async function startServer() {
   // antes do catch-all autenticado para sistemas externos empurrarem dados.
   app.use("/api/connector-in", connectorPublicRoutes);
 
+  // Continuity Layer (ADR-082, Fase 4a) — SYNC do Edge, autenticado por API key
+  // de MÁQUINA (X-Edge-Device/X-Edge-Key), não por JWT. Montado aqui, FORA do
+  // protectedApi (como os webhooks), para o requireAuth não interceptar. Só
+  // define /pull|/push|/heartbeat; /api/edge/devices (provisionamento) cai no
+  // protectedApi abaixo.
+  app.use("/api/edge", edgeSyncRoutes);
+
   // Apply Auth Middleware to all subsequent protected API routes
   const protectedApi = express.Router();
   protectedApi.use(requireAuth);
@@ -426,6 +434,10 @@ async function startServer() {
   protectedApi.use("/prospect", prospectRoutes);
   protectedApi.use("/clinic", clinicRoutes);
   protectedApi.use("/continuity", continuityRoutes);
+  // Provisionamento de nós Edge (ADR-082, Fase 4a) — só owner/admin da própria
+  // org emitem/revogam credenciais de máquina. O SYNC em si é machine-authed
+  // (montado acima em /api/edge, fora do protectedApi).
+  protectedApi.use("/edge/devices", requireRole("owner", "admin"), edgeDeviceRoutes);
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
   protectedApi.use("/radar-consultant", requireMasterAdmin, radarConsultantRoutes);

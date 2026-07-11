@@ -562,6 +562,32 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar message_deliveries', e); }
 
+  // Continuity Layer (ADR-082, Fase 4a) — REGISTRO DE NÓS EDGE + protocolo de
+  // sync. Um "ZappFlow Edge" é um processo/instalação local do cliente que
+  // continua operando quando a internet até a nuvem cai. Cada nó pertence a UMA
+  // organização e autentica com uma API key de MÁQUINA (não JWT de usuário) —
+  // generalizando o padrão do gateway do Vision (vgw_*, hash bcrypt, header
+  // próprio). O sync reusa a fundação já pronta: o Edge PUXA `domain_events`
+  // (delta via ContinuityService.since) e EMPURRA comandos idempotentes para
+  // `client_commands`. `cursor` guarda o progresso de leitura do nó.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS edge_devices (
+        id TEXT PRIMARY KEY,               -- edg_<hex> (id público, vai no header)
+        organization_id TEXT NOT NULL,
+        name TEXT,
+        api_key_hash TEXT NOT NULL,        -- bcrypt do segredo (o texto puro só aparece 1x)
+        status TEXT NOT NULL DEFAULT 'active', -- active | revoked
+        cursor INTEGER NOT NULL DEFAULT 0, -- último domain_events.seq confirmado pelo nó
+        agent_version TEXT,
+        last_seen_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_edge_devices_org ON edge_devices (organization_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar edge_devices', e); }
+
   // Metadados da base de conhecimento (RAG)
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN channel_id TEXT DEFAULT 'global'`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}

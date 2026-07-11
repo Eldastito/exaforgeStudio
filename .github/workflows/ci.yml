@@ -77,6 +77,7 @@ jobs:
           - { name: 'continuity-fase0', script: 'test:continuity-fase0' }
           - { name: 'continuity-fase1', script: 'test:continuity-fase1' }
           - { name: 'continuity-outbox', script: 'test:continuity-outbox' }
+          - { name: 'continuity-fase3', script: 'test:continuity-fase3' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

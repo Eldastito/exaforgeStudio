@@ -29,6 +29,7 @@ import ragRoutes from "./src/server/routes/rag.js";
 import studioRoutes from "./src/server/routes/studio.js";
 import taskRoutes from "./src/server/routes/tasks.js";
 import prospectRoutes from "./src/server/routes/prospect.js";
+import clinicRoutes from "./src/server/routes/clinic.js";
 import managersRoutes from "./src/server/routes/managers.js";
 import areasRoutes from "./src/server/routes/areas.js";
 import aiRoutes from "./src/server/routes/ai.js";
@@ -419,6 +420,7 @@ async function startServer() {
   protectedApi.use("/studio", studioRoutes);
   protectedApi.use("/tasks", taskRoutes);
   protectedApi.use("/prospect", prospectRoutes);
+  protectedApi.use("/clinic", clinicRoutes);
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
   protectedApi.use("/radar-consultant", requireMasterAdmin, radarConsultantRoutes);

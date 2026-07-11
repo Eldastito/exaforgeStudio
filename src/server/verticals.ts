@@ -22,7 +22,7 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-  "vms", "radar",
+  "vms", "radar", "clinica",
 ] as const;
 
 // "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de
@@ -41,7 +41,10 @@ export const OPTIONAL_MODULES = [
 // de campanha; descoberta, enriquecimento, scoring e outreach entram nas
 // próximas fases. Enquanto isso, é experimental: novas orgs NÃO recebem
 // automaticamente (ver ADR-077). Ativação explícita apenas.
-const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar" && m !== "prospect");
+// "clinica" (Módulo Clínica, ADR-080) é preset da vertical "saude" (é o módulo
+// que dá corpo à operação de clínica), mas não deve ser ligado por "outro" nem
+// pelas demais verticais — só saúde ou ativação explícita.
+const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar" && m !== "prospect" && m !== "clinica");
 
 export const VERTICALS: Vertical[] = [
   {
@@ -65,7 +68,7 @@ export const VERTICALS: Vertical[] = [
   {
     key: "saude", label: "Saúde / Bem-estar", icon: "💆",
     descricao: "Clínicas, consultórios, estética e terapias — foco em agendamento.",
-    modules: ["agenda", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
+    modules: ["agenda", "clinica", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

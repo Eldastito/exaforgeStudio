@@ -32,6 +32,7 @@ export class ModuleService {
     studio: "estudio",
     tasks: "execucao",
     prospect: "prospect",
+    clinic: "clinica",
     vision: "vms",
     radar: "radar",
   };

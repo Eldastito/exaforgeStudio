@@ -18,6 +18,7 @@ import express from "express";
 import { initEdgeDb } from "./db.js";
 import { EdgeOutbox } from "./EdgeOutbox.js";
 import { EdgeSyncClient, HttpEdgeTransport, getCursor } from "./EdgeSyncClient.js";
+import { registerBuiltinAppliers } from "./EdgeInboxApplicator.js";
 
 const PORT = Number(process.env.EDGE_PORT || 3201);
 const SYNC_INTERVAL_MS = Number(process.env.EDGE_SYNC_INTERVAL_MS || 15_000);
@@ -28,6 +29,7 @@ const DEVICE_ID = process.env.EDGE_DEVICE_ID || "";
 const KEY = process.env.EDGE_KEY || "";
 
 initEdgeDb();
+registerBuiltinAppliers(); // materializadores dedicados (edge_tickets, …)
 
 const app = express();
 app.use(express.json());

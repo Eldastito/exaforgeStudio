@@ -83,6 +83,7 @@ jobs:
           - { name: 'edge-reconcile', script: 'test:edge-reconcile' }
           - { name: 'edge-send-message', script: 'test:edge-send-message' }
           - { name: 'edge-commands', script: 'test:edge-commands' }
+          - { name: 'edge-materialize', script: 'test:edge-materialize' }
           - { name: 'bot-outbound', script: 'test:bot-outbound' }
           - { name: 'delivery-receipts', script: 'test:delivery-receipts' }
           - { name: 'continuity-admin-health', script: 'test:continuity-admin-health' }

@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { ContinuityService } from "../ContinuityService.js";
 import { HandoffSummaryService } from "../HandoffSummaryService.js";
 import { TicketSlaService } from "../TicketSlaService.js";
 
@@ -155,6 +156,9 @@ router.post("/:id/stage", (req: AuthRequest, res) => {
     if ((global as any).io) {
       (global as any).io.to(`org:${orgId}`).emit("ticket_stage_change", { ticketId: ticket.id, contactId: ticket.contact_id, newStage: stage });
     }
+    // Evento GORDO (ADR-082): carrega o novo estágio (e o anterior) para
+    // materializar o ticket em consumidores do delta (edge_tickets no nó Edge).
+    ContinuityService.append(orgId, { aggregateType: 'ticket', aggregateId: ticket.id, eventType: 'ticket.stage_changed', payload: { stage, from: ticket.stage, contactId: ticket.contact_id } });
 
     res.json({ success: true, stage });
   } catch (e: any) {

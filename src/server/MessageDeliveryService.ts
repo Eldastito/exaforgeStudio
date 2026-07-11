@@ -39,6 +39,13 @@ const BACKOFF_SECONDS = (process.env.CONTINUITY_DELIVERY_BACKOFF_SECONDS || "30,
   .split(",")
   .map((s) => Math.max(1, parseInt(s.trim(), 10) || 1));
 
+// Detecção de canal QUEBRADO (reação ao "stuckQueued"): uma entrega está "presa"
+// quando segue 'queued' após já ter tentado STUCK_ATTEMPTS vezes; um canal é
+// "degradado" quando acumula DEGRADED_MIN entregas presas. Assim o operador é
+// avisado NA HORA, sem esperar as tentativas esgotarem (~horas de backoff).
+const STUCK_ATTEMPTS = Math.max(1, Number(process.env.CONTINUITY_DELIVERY_STUCK_ATTEMPTS || 3));
+const DEGRADED_MIN = Math.max(1, Number(process.env.CONTINUITY_DELIVERY_DEGRADED_MIN || 3));
+
 /** Sender injetável — produção usa o provedor real; testes injetam um fake.
  * Devolve o id do provedor (wamid) quando disponível, para correlacionar os
  * recibos de entrega. */
@@ -248,10 +255,53 @@ export class MessageDeliveryService {
     } catch { /* nunca deve quebrar a entrega */ }
   }
 
+  /**
+   * Canais DEGRADADOS: com DEGRADED_MIN+ entregas presas ('queued' após
+   * STUCK_ATTEMPTS+ tentativas). Read-only. `orgId` filtra por organização.
+   * Usado pelos endpoints de status e pela detecção proativa (checkChannelHealth).
+   */
+  static degradedChannels(orgId?: string): Array<{ organizationId: string; channelId: string; stuckCount: number; maxAttempts: number; oldestQueuedAt: string | null }> {
+    const where = orgId ? `AND organization_id = ?` : ``;
+    const rows = db.prepare(
+      `SELECT organization_id, channel_id, COUNT(*) AS c, MAX(attempt_count) AS maxAtt, MIN(next_attempt_at) AS oldest
+         FROM message_deliveries
+        WHERE status = 'queued' AND attempt_count >= ? ${where}
+        GROUP BY organization_id, channel_id
+       HAVING c >= ?`
+    ).all(...(orgId ? [STUCK_ATTEMPTS, orgId, DEGRADED_MIN] : [STUCK_ATTEMPTS, DEGRADED_MIN])) as any[];
+    return rows.map((r) => ({ organizationId: r.organization_id, channelId: r.channel_id, stuckCount: r.c, maxAttempts: r.maxAtt, oldestQueuedAt: r.oldest || null }));
+  }
+
+  /**
+   * Detecção PROATIVA: varre os canais degradados e alerta o operador (deduped
+   * por canal). Chamado no tick do dispatcher — o alerta sai assim que o canal
+   * começa a acumular presos, não quando as tentativas esgotam. Retorna quantos
+   * canais degradados encontrou.
+   */
+  static checkChannelHealth(): number {
+    const degraded = this.degradedChannels();
+    for (const c of degraded) {
+      try {
+        NotificationService.push({
+          organizationId: c.organizationId,
+          title: "Um canal parece indisponível",
+          message: `${c.stuckCount} mensagem(ns) não estão saindo por este canal (até ${c.maxAttempts} tentativas). Verifique a conexão/reconecte o canal.`,
+          type: "alert",
+          dedupeKey: `channel_degraded:${c.channelId}`,
+          dedupeWindowMin: 60,
+        });
+      } catch { /* nunca quebra o tick */ }
+    }
+    return degraded.length;
+  }
+
   /** Inicia o dispatcher (idempotente). Self-gate: não liga com a flag desligada. */
   static start(): void {
     if (timer || !this.enabled()) return;
-    timer = setInterval(() => { this.dispatchDue().catch((e) => console.error("[MsgDelivery] tick falhou", e)); }, DISPATCH_INTERVAL_MS);
+    timer = setInterval(() => {
+      this.dispatchDue().catch((e) => console.error("[MsgDelivery] tick falhou", e));
+      try { this.checkChannelHealth(); } catch (e) { console.error("[MsgDelivery] checkChannelHealth falhou", e); }
+    }, DISPATCH_INTERVAL_MS);
     console.log("[MsgDelivery] fila de entrega ao provedor iniciada (Continuity Fase 3).");
   }
 

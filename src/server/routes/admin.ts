@@ -300,6 +300,11 @@ router.get("/continuity/health", (_req: AuthRequest, res): any => {
     const last24 = (st: string) => (db.prepare(`SELECT COUNT(*) AS c FROM message_deliveries WHERE status = ? AND updated_at >= datetime('now','-1 day')`).get(st) as any).c;
     const ev = db.prepare(`SELECT COUNT(*) AS total, COUNT(DISTINCT organization_id) AS orgs FROM domain_events`).get() as any;
     const edge = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active, MAX(last_seen_at) AS lastSeen FROM edge_devices`).get() as any;
+    // Canais QUEBRADOS detectados (o "stuckQueued" atribuído ao canal), com nome.
+    const degraded = MessageDeliveryService.degradedChannels().map((c) => {
+      const ch = db.prepare(`SELECT name, provider FROM channels WHERE id = ?`).get(c.channelId) as any;
+      return { ...c, channelName: ch?.name || null, provider: ch?.provider || null };
+    });
 
     res.json({
       flags: { events: eventsEnabled(), deliveryQueue: MessageDeliveryService.enabled(), edgeSync: EdgeSyncService.enabled() },
@@ -309,6 +314,7 @@ router.get("/continuity/health", (_req: AuthRequest, res): any => {
         stuckQueued: stuck?.c || 0,                 // fila 'queued' com 3+ tentativas — sinal de canal quebrado
         deliveredLast24h: last24("delivered"), failedLast24h: last24("failed"),
       },
+      degradedChannels: degraded,                    // canais com entregas presas (reagir: reconectar)
       events: { total: Number(ev?.total || 0), orgs: Number(ev?.orgs || 0) },
       edge: { devices: Number(edge?.total || 0), active: Number(edge?.active || 0), lastSeenAt: edge?.lastSeen || null },
     });

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine, Trophy, TrendingUp, Lightbulb, Radar, MapPin, Play } from 'lucide-react';
+import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Building2, Mail, Phone, Sparkles, Check, Gauge, Send, Inbox, PenLine, Trophy, TrendingUp, Lightbulb, Radar, MapPin, Play, FlaskConical, GraduationCap, Ban, CalendarCheck, MessageSquare, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -84,6 +84,7 @@ export function ProspectView() {
   const [attr, setAttr] = useState<any>(null);
   const [discoveryCamp, setDiscoveryCamp] = useState<Campaign | null>(null);
   const [runs, setRuns] = useState<any[]>([]);
+  const [tab, setTab] = useState<'overview' | 'experiments' | 'learnings'>('overview');
 
   const loadAccounts = useCallback(() => apiFetch('/api/prospect/accounts').then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const loadQueue = useCallback(() => apiFetch('/api/prospect/approval-queue').then(r => r.json()).then(d => setQueue(Array.isArray(d) ? d : [])).catch(() => {}), []);
@@ -136,6 +137,15 @@ export function ProspectView() {
           <span className="leading-relaxed">Defina o <b>ICP</b>, importe contas, registre <b>evidências</b>, gere hipóteses e <b>abordagens</b> com IA — tudo revisado por um humano antes de sair. Sem scraping, sem spam.</span>
         </div>
       </div>
+
+      {/* Abas */}
+      <div className="mb-5 flex items-center gap-1 border-b border-zinc-800">
+        {([['overview', 'Visão geral'], ['experiments', 'Experimentos'], ['learnings', 'Aprendizados']] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>{label}</button>
+        ))}
+      </div>
+
+      {tab === 'overview' && <>
 
       {/* Receita originada pela prospecção (atribuição) */}
       <div className="mb-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -319,6 +329,11 @@ export function ProspectView() {
         )}
       </div>
 
+      </>}
+
+      {tab === 'experiments' && <ExperimentsTab campaigns={campaigns} />}
+      {tab === 'learnings' && <LearningsTab campaigns={campaigns} />}
+
       {newIcp && <IcpModal onClose={() => setNewIcp(false)} onSaved={() => { setNewIcp(false); load(); }} />}
       {newCamp && <CampaignModal icps={icps} onClose={() => setNewCamp(false)} onSaved={() => { setNewCamp(false); load(); }} />}
       {discoveryCamp && <DiscoveryModal campaign={discoveryCamp} onClose={() => setDiscoveryCamp(null)} onChanged={() => { loadCampaigns(); loadRuns(); loadAccounts(); }} />}
@@ -466,6 +481,10 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [wonValue, setWonValue] = useState('');
   const [lostReason, setLostReason] = useState('');
   const [outcomeMode, setOutcomeMode] = useState<'' | 'won' | 'lost'>('');
+  const [meetingMode, setMeetingMode] = useState(false);
+  const [meetingNotes, setMeetingNotes] = useState('');
+  const [actBusy, setActBusy] = useState('');
+  const [sendingId, setSendingId] = useState('');
 
   const refresh = () => apiFetch(`/api/prospect/accounts/${id}`).then(r => r.json()).then(d => { if (d && d.id) setAcc(d); }).catch(() => {});
   useEffect(() => { refresh(); }, [id]);
@@ -533,6 +552,44 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
       toast.success(outcome === 'won' ? 'Conta marcada como ganha. 🏆' : outcome === 'lost' ? 'Conta marcada como perdida.' : 'Conta reaberta.');
     } catch (e: any) { toast.error(e.message); }
   };
+  const accountAction = async (key: string, path: string, body: any = {}) => {
+    setActBusy(key);
+    try {
+      const r = await apiFetch(`/api/prospect/accounts/${id}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha na ação.');
+      await refresh(); onChanged();
+      return d;
+    } catch (e: any) { toast.error(e.message); return null; } finally { setActBusy(''); }
+  };
+  const registerReply = async () => { if (await accountAction('reply', 'reply')) toast.success('Resposta registrada. 💬'); };
+  const registerMeeting = async () => {
+    const d = await accountAction('meeting', 'meeting', { notes: meetingNotes });
+    if (d) { toast.success('Reunião registrada. 📅'); setMeetingMode(false); setMeetingNotes(''); }
+  };
+  const convertToCrm = async () => {
+    const d = await accountAction('convert', 'convert-to-crm');
+    if (d) toast.success(d.ticketId ? 'Conta convertida — ticket criado no CRM. 🧩' : 'Conta convertida para o CRM. 🧩');
+  };
+  const toggleBlock = async () => {
+    const blocked = !acc?.blocked_at;
+    const d = await accountAction('block', 'block', { blocked });
+    if (d) toast.success(blocked ? 'Conta bloqueada — nenhuma abordagem será enviada. 🚫' : 'Conta desbloqueada.');
+  };
+  const toggleOptOut = async (cid: string, optOut: boolean) => {
+    const d = await accountAction(`optout-${cid}`, `contacts/${cid}/opt-out`, { optOut });
+    if (d) toast.success(optOut ? 'Contato marcado como opt-out.' : 'Opt-out revertido.');
+  };
+  const sendNow = async (oid: string) => {
+    setSendingId(oid);
+    try {
+      const r = await apiFetch(`/api/prospect/outreach/${oid}/send`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha ao enviar a abordagem.');
+      toast.success('Abordagem enviada. 🚀');
+      await refresh(); onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setSendingId(''); }
+  };
 
   const sc = acc?.score;
   let icpMatch: boolean | null = null;
@@ -564,6 +621,30 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
             <select value={acc.account_status} onChange={e => setStatus(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-cyan-500 mb-3">
               {Object.entries(ACCOUNT_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
+
+            {/* Ações da conta */}
+            {acc.blocked_at && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 mb-3 flex items-center justify-between gap-2">
+                <span className="text-xs text-red-300 inline-flex items-center gap-1"><Ban className="w-3.5 h-3.5" /> Conta bloqueada — nenhuma abordagem sai daqui</span>
+                <button onClick={toggleBlock} disabled={actBusy === 'block'} className="text-[11px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 shrink-0 disabled:opacity-60">{actBusy === 'block' ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Desbloquear'}</button>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+              <button onClick={registerReply} disabled={!!actBusy} className="text-[11px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 inline-flex items-center gap-1 disabled:opacity-60">{actBusy === 'reply' ? <Loader2 className="w-3 h-3 animate-spin" /> : <MessageSquare className="w-3 h-3" />} Registrar resposta</button>
+              <button onClick={() => setMeetingMode(m => !m)} disabled={!!actBusy} className="text-[11px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 inline-flex items-center gap-1 disabled:opacity-60"><CalendarCheck className="w-3 h-3" /> Registrar reunião</button>
+              <button onClick={convertToCrm} disabled={!!actBusy} className="text-[11px] px-2 py-1 rounded-lg bg-cyan-600/90 hover:bg-cyan-600 text-white inline-flex items-center gap-1 disabled:opacity-60">{actBusy === 'convert' ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />} Converter p/ CRM</button>
+              {!acc.blocked_at && <button onClick={toggleBlock} disabled={!!actBusy} className="text-[11px] px-2 py-1 rounded-lg text-zinc-500 hover:text-red-400 inline-flex items-center gap-1 ml-auto disabled:opacity-60"><Ban className="w-3 h-3" /> Bloquear</button>}
+            </div>
+            {meetingMode && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-3 space-y-2">
+                <label className="text-[11px] text-zinc-400 block">Notas da reunião (opcional)</label>
+                <input value={meetingNotes} onChange={e => setMeetingNotes(e.target.value)} placeholder="Ex.: call de diagnóstico dia 15, 10h" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-cyan-500" />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => { setMeetingMode(false); setMeetingNotes(''); }} className="text-[11px] text-zinc-500 hover:text-zinc-300">cancelar</button>
+                  <button onClick={registerMeeting} disabled={!!actBusy} className="text-[11px] px-2 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-60">{actBusy === 'meeting' ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Confirmar reunião'}</button>
+                </div>
+              </div>
+            )}
 
             {/* Desfecho (atribuição de receita) */}
             {acc.account_status === 'converted' ? (
@@ -685,9 +766,23 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               {(acc.contacts || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhum contato.</p>}
               {(acc.contacts || []).map((c: any) => (
                 <div key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
-                  <p className="text-sm text-zinc-200">{c.full_name || '(sem nome)'}{c.role_title ? <span className="text-zinc-500"> · {c.role_title}</span> : ''}</p>
-                  {c.email && <p className="text-[11px] text-zinc-400 inline-flex items-center gap-1 mt-0.5"><Mail className="w-3 h-3" /> {c.email}</p>}
-                  {c.phone && <p className="text-[11px] text-zinc-400 inline-flex items-center gap-1 mt-0.5 ml-3"><Phone className="w-3 h-3" /> {c.phone}</p>}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm text-zinc-200">{c.full_name || '(sem nome)'}{c.role_title ? <span className="text-zinc-500"> · {c.role_title}</span> : ''}</p>
+                      {c.email && <p className="text-[11px] text-zinc-400 inline-flex items-center gap-1 mt-0.5"><Mail className="w-3 h-3" /> {c.email}</p>}
+                      {c.phone && <p className="text-[11px] text-zinc-400 inline-flex items-center gap-1 mt-0.5 ml-3"><Phone className="w-3 h-3" /> {c.phone}</p>}
+                    </div>
+                    <div className="shrink-0 flex flex-col items-end gap-1">
+                      {c.opt_out_at ? (
+                        <>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300">Opt-out</span>
+                          <button onClick={() => toggleOptOut(c.id, false)} disabled={!!actBusy} className="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-60">reverter</button>
+                        </>
+                      ) : (
+                        <button onClick={() => toggleOptOut(c.id, true)} disabled={!!actBusy} title="Não abordar mais este contato" className="text-[10px] text-zinc-600 hover:text-amber-400 disabled:opacity-60">opt-out</button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -712,7 +807,7 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
             <div className="space-y-2">
               {(acc.outreach || []).length === 0 && <p className="text-[11px] text-zinc-600">Nenhuma abordagem ainda. Gere um rascunho acima.</p>}
               {(acc.outreach || []).map((o: any) => (
-                <OutreachCard key={o.id} o={o} onSave={saveOutreach} onStatus={outStatus} />
+                <OutreachCard key={o.id} o={o} onSave={saveOutreach} onStatus={outStatus} onSend={sendNow} sending={sendingId === o.id} />
               ))}
             </div>
           </>
@@ -722,7 +817,7 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   );
 }
 
-function OutreachCard({ o, onSave, onStatus }: { o: any; onSave: (oid: string, patch: { subject?: string; body?: string }) => void; onStatus: (oid: string, status: string) => void }) {
+function OutreachCard({ o, onSave, onStatus, onSend, sending }: { key?: React.Key; o: any; onSave: (oid: string, patch: { subject?: string; body?: string }) => void; onStatus: (oid: string, status: string) => void; onSend?: (oid: string) => void; sending?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [subject, setSubject] = useState(o.subject || '');
   const [body, setBody] = useState(o.body || '');
@@ -764,7 +859,12 @@ function OutreachCard({ o, onSave, onStatus }: { o: any; onSave: (oid: string, p
             <button onClick={() => onStatus(o.id, 'approved')} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center gap-1"><Check className="w-3 h-3" /> Aprovar</button>
             <button onClick={() => onStatus(o.id, 'draft')} className="text-[11px] text-zinc-500 hover:text-zinc-300">voltar p/ rascunho</button>
           </>}
-          {o.status === 'approved' && <button onClick={() => onStatus(o.id, 'sent')} className="text-[11px] px-2 py-1 rounded-lg bg-sky-600/90 hover:bg-sky-600 text-white inline-flex items-center gap-1"><Send className="w-3 h-3" /> Marcar como enviada</button>}
+          {o.status === 'approved' && <>
+            {onSend && (o.channel === 'whatsapp' || o.channel === 'email') && (
+              <button onClick={() => onSend(o.id)} disabled={sending} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center gap-1 disabled:opacity-60">{sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} Enviar agora</button>
+            )}
+            <button onClick={() => onStatus(o.id, 'sent')} className="text-[11px] px-2 py-1 rounded-lg bg-sky-600/90 hover:bg-sky-600 text-white inline-flex items-center gap-1"><Send className="w-3 h-3" /> Marcar como enviada</button>
+          </>}
           {o.status === 'sent' && o.sent_at && <span className="text-[10px] text-zinc-500">enviada</span>}
           {o.status !== 'sent' && <button onClick={() => onStatus(o.id, 'rejected')} className="text-[11px] text-zinc-500 hover:text-red-400 ml-auto">descartar</button>}
         </div>
@@ -1014,6 +1114,408 @@ function DiscoveryModal({ campaign, onClose, onChanged }: { campaign: Campaign; 
                 {r.error && <p className="text-[11px] text-red-400 mt-0.5">{r.error}</p>}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ————— Fase E: Experimentos & Aprendizados —————
+
+const EXP_STATUS: Record<string, { label: string; cls: string }> = {
+  draft: { label: 'Rascunho', cls: 'text-slate-300 bg-slate-500/10 border-slate-500/30' },
+  running: { label: 'Em execução', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  completed: { label: 'Concluído', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+};
+const EXP_DECISION: Record<string, { label: string; cls: string }> = {
+  keep: { label: 'Manter vencedora', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  discard: { label: 'Descartar mensagem', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+  inconclusive: { label: 'Inconclusivo', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+};
+const EXP_METRICS: { id: string; label: string }[] = [
+  { id: 'response_rate', label: 'Taxa de resposta' },
+  { id: 'meeting_rate', label: 'Reuniões marcadas' },
+  { id: 'conversion_rate', label: 'Conversões' },
+];
+const EXP_CHANNELS: { id: string; label: string }[] = [
+  { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'email', label: 'E-mail' },
+];
+const pct = (v: any) => `${(Number(v) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+
+function ExperimentsTab({ campaigns }: { campaigns: Campaign[] }) {
+  const [dash, setDash] = useState<any>(null);
+  const [exps, setExps] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<any>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [actionKey, setActionKey] = useState('');
+  // Formulário de novo experimento
+  const [fName, setFName] = useState('');
+  const [fCamp, setFCamp] = useState(campaigns[0]?.id || '');
+  const [fHyp, setFHyp] = useState('');
+  const [fMetric, setFMetric] = useState('response_rate');
+  const [fSample, setFSample] = useState('20');
+  const [fWindow, setFWindow] = useState('7');
+  const [vaName, setVaName] = useState('Variante A');
+  const [vaBody, setVaBody] = useState('');
+  const [vaChannel, setVaChannel] = useState('whatsapp');
+  const [vbName, setVbName] = useState('Variante B');
+  const [vbBody, setVbBody] = useState('');
+  const [vbChannel, setVbChannel] = useState('whatsapp');
+  const [saving, setSaving] = useState(false);
+
+  const loadExps = useCallback(() => apiFetch('/api/prospect/experiments').then(r => r.json()).then(d => setExps(Array.isArray(d) ? d : [])).catch(() => {}), []);
+  const loadDash = useCallback(() => apiFetch('/api/prospect/dashboard').then(r => r.ok ? r.json() : null).then(d => setDash(d && typeof d === 'object' ? d : null)).catch(() => {}), []);
+  useEffect(() => { setLoading(true); Promise.all([loadExps(), loadDash()]).finally(() => setLoading(false)); }, [loadExps, loadDash]);
+
+  const toggleDetail = async (eid: string) => {
+    if (openId === eid) { setOpenId(null); setDetail(null); return; }
+    setOpenId(eid); setDetail(null); setDetailBusy(true);
+    try {
+      const r = await apiFetch(`/api/prospect/experiments/${eid}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao carregar o experimento.');
+      setDetail(d);
+    } catch (e: any) { toast.error(e.message); setOpenId(null); } finally { setDetailBusy(false); }
+  };
+
+  const act = async (eid: string, action: 'start' | 'complete') => {
+    setActionKey(eid + action);
+    try {
+      const r = await apiFetch(`/api/prospect/experiments/${eid}/${action}`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha na ação.');
+      toast.success(action === 'start' ? 'Experimento iniciado. 🧪' : 'Experimento concluído — veja a decisão.');
+      loadExps(); loadDash();
+      if (openId === eid) { setOpenId(null); setDetail(null); }
+    } catch (e: any) { toast.error(e.message); } finally { setActionKey(''); }
+  };
+
+  const create = async () => {
+    if (!fName.trim()) { toast.error('Dê um nome ao experimento.'); return; }
+    if (!fCamp) { toast.error('Escolha uma campanha.'); return; }
+    if (!fHyp.trim()) { toast.error('Descreva a hipótese que você quer testar.'); return; }
+    const sample = parseInt(fSample, 10);
+    if (!sample || sample < 10) { toast.error('Amostra mínima: 10 envios por variante.'); return; }
+    if (!vaName.trim() || !vaBody.trim() || !vbName.trim() || !vbBody.trim()) { toast.error('Preencha nome e mensagem das duas variantes.'); return; }
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/prospect/experiments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: fCamp, name: fName, hypothesis: fHyp, successMetric: fMetric,
+          sampleSize: sample, windowDays: parseInt(fWindow, 10) || 7,
+          variants: [
+            { name: vaName, body: vaBody, channel: vaChannel },
+            { name: vbName, body: vbBody, channel: vbChannel },
+          ],
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha ao criar o experimento.');
+      toast.success('Experimento criado (rascunho). 🧪');
+      setCreating(false); setFName(''); setFHyp(''); setVaBody(''); setVbBody('');
+      loadExps();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+
+  const inputCls = 'w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-cyan-500';
+
+  return (
+    <div>
+      {/* Dashboard (fallback silencioso se o endpoint falhar) */}
+      {dash && (
+        <div className="mb-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <div className="zf-data-label flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Leads</div>
+            <div className="zf-data-value text-2xl text-zinc-100 mt-1">{dash.leadsTotal ?? 0}</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">{dash.leadsQualified ?? 0} qualificado(s)</div>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <div className="zf-data-label flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> Enviadas</div>
+            <div className="zf-data-value text-2xl text-zinc-100 mt-1">{dash.messagesSent ?? 0}</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">{dash.campaignsActive ?? 0} campanha(s) ativa(s)</div>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <div className="zf-data-label flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5" /> Taxa de resposta</div>
+            <div className="zf-data-value text-2xl text-zinc-100 mt-1">{pct(dash.responseRate)}</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">{dash.responses ?? 0} resposta(s)</div>
+          </div>
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+            <div className="zf-data-label flex items-center gap-1.5" style={{ color: 'var(--color-success)' }}><CalendarCheck className="w-3.5 h-3.5" /> Reuniões</div>
+            <div className="zf-data-value text-2xl mt-1" style={{ color: 'var(--color-success)' }}>{dash.meetings ?? 0}</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">{dash.converted ?? 0} convertida(s) · {brl(dash.potentialRevenue || 0)} em potencial</div>
+          </div>
+        </div>
+      )}
+      {dash?.championMessage && (
+        <div className="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5 mb-1"><Trophy className="w-3.5 h-3.5" /> Mensagem campeã · {dash.championMessage.name}</p>
+          <p className="text-xs text-zinc-300 whitespace-pre-wrap line-clamp-3">{dash.championMessage.message_body}</p>
+        </div>
+      )}
+
+      {/* Experimentos */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><FlaskConical className="w-4 h-4 text-cyan-400" /> Experimentos A/B ({exps.length})</h3>
+          <Button onClick={() => { if (!campaigns.length) { toast.error('Crie uma campanha primeiro.'); return; } setCreating(c => !c); }} className="bg-cyan-600 hover:bg-cyan-700 text-white h-8 px-2.5 text-xs"><Plus className="w-3.5 h-3.5 mr-1" /> Novo experimento</Button>
+        </div>
+        <p className="text-[11px] text-zinc-600 mb-3">Teste duas versões de mensagem com método: hipótese, amostra mínima e janela de avaliação. A decisão só sai depois da amostra completa — sem espiar no meio.</p>
+
+        {creating && (
+          <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-4 mb-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Nome do experimento *</label>
+                <input value={fName} onChange={e => setFName(e.target.value)} placeholder="Ex.: Abertura direta vs. pergunta" className={inputCls} />
+              </div>
+              <div>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Campanha *</label>
+                <select value={fCamp} onChange={e => setFCamp(e.target.value)} className={inputCls}>
+                  {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-400 mb-1 block">Hipótese *</label>
+              <textarea value={fHyp} onChange={e => setFHyp(e.target.value)} placeholder="Ex.: abrir com uma pergunta sobre a dor gera mais respostas do que apresentar a oferta" className="w-full h-16 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 resize-none outline-none focus:border-cyan-500" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Métrica de sucesso</label>
+                <select value={fMetric} onChange={e => setFMetric(e.target.value)} className={inputCls}>
+                  {EXP_METRICS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Amostra/variante (mín. 10)</label>
+                <input value={fSample} onChange={e => setFSample(e.target.value.replace(/\D/g, ''))} inputMode="numeric" className={inputCls} />
+              </div>
+              <div>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Janela (dias)</label>
+                <input value={fWindow} onChange={e => setFWindow(e.target.value.replace(/\D/g, ''))} inputMode="numeric" className={inputCls} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { tag: 'A', name: vaName, setName: setVaName, body: vaBody, setBody: setVaBody, channel: vaChannel, setChannel: setVaChannel },
+                { tag: 'B', name: vbName, setName: setVbName, body: vbBody, setBody: setVbBody, channel: vbChannel, setChannel: setVbChannel },
+              ].map(v => (
+                <div key={v.tag} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-300">Variante {v.tag}</span>
+                    <input value={v.name} onChange={e => v.setName(e.target.value)} placeholder="Nome" className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 outline-none focus:border-cyan-500" />
+                    <select value={v.channel} onChange={e => v.setChannel(e.target.value)} className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 outline-none">
+                      {EXP_CHANNELS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </select>
+                  </div>
+                  <textarea value={v.body} onChange={e => v.setBody(e.target.value)} placeholder="Mensagem desta variante *" className="w-full h-24 bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-100 resize-none outline-none focus:border-cyan-500" />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setCreating(false)} disabled={saving}>Cancelar</Button>
+              <Button onClick={create} disabled={saving} className="bg-cyan-600 hover:bg-cyan-700 text-white">
+                {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FlaskConical className="w-4 h-4 mr-2" />}Criar experimento
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {loading ? <Spinner /> : exps.length === 0 ? (
+          <Empty text="Nenhum experimento ainda. Crie um teste A/B para descobrir qual mensagem funciona melhor — com amostra mínima e sem achismo." />
+        ) : (
+          <div className="space-y-2">
+            {exps.map(e => {
+              const b = EXP_STATUS[e.status] || EXP_STATUS.draft;
+              const dec = e.decision ? EXP_DECISION[e.decision] : null;
+              const open = openId === e.id;
+              return (
+                <div key={e.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.label}</span>
+                    <span className="text-sm font-medium text-zinc-100">{e.name}</span>
+                    {e.campaign_name && <span className="text-[11px] text-zinc-500">· {e.campaign_name}</span>}
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {e.status === 'draft' && (
+                        <button onClick={() => act(e.id, 'start')} disabled={!!actionKey} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center gap-1 disabled:opacity-60">{actionKey === e.id + 'start' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />} Iniciar</button>
+                      )}
+                      {e.status === 'running' && (
+                        <button onClick={() => act(e.id, 'complete')} disabled={!!actionKey} className="text-[11px] px-2 py-1 rounded-lg bg-sky-600/90 hover:bg-sky-600 text-white inline-flex items-center gap-1 disabled:opacity-60">{actionKey === e.id + 'complete' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Concluir</button>
+                      )}
+                      <button onClick={() => toggleDetail(e.id)} className="text-[11px] text-zinc-400 hover:text-cyan-300 inline-flex items-center gap-1">{open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />} Detalhes</button>
+                    </div>
+                  </div>
+                  {e.hypothesis && <p className="text-[11px] text-zinc-400 mt-1">Hipótese: {e.hypothesis}</p>}
+                  <p className="text-[10px] text-zinc-600 mt-0.5">Amostra: {e.sample_size}/variante · janela: {e.window_days} dia(s)</p>
+                  {e.status === 'completed' && dec && (
+                    <div className="mt-1.5">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${dec.cls}`}>{dec.label}</span>
+                      {e.decision_reason && <p className="text-[11px] text-zinc-500 mt-1">{e.decision_reason}</p>}
+                    </div>
+                  )}
+                  {open && (detailBusy ? <Spinner /> : detail && (
+                    <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs whitespace-nowrap">
+                          <thead className="text-zinc-500 border-b border-zinc-800">
+                            <tr><th className="py-1.5 pr-3 font-medium">Variante</th><th className="py-1.5 pr-3 font-medium">Enviadas</th><th className="py-1.5 pr-3 font-medium">Respostas</th><th className="py-1.5 pr-3 font-medium">Taxa</th><th className="py-1.5 font-medium">Reuniões</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-800/50">
+                            {(detail.metrics || []).map((m: any) => {
+                              const winner = detail.winner_variant_id && m.variant_id === detail.winner_variant_id;
+                              return (
+                                <tr key={m.variant_id} className={winner ? 'text-emerald-300' : 'text-zinc-300'}>
+                                  <td className="py-1.5 pr-3">{m.name}{winner ? <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">vencedora 🏆</span> : null}</td>
+                                  <td className="py-1.5 pr-3">{m.messages_sent ?? 0}</td>
+                                  <td className="py-1.5 pr-3">{m.responses_count ?? 0}</td>
+                                  <td className="py-1.5 pr-3">{pct(m.response_rate)}</td>
+                                  <td className="py-1.5">{m.meetings_count ?? 0}</td>
+                                </tr>
+                              );
+                            })}
+                            {(detail.metrics || []).length === 0 && <tr><td colSpan={5} className="py-2 text-zinc-600">Sem métricas ainda — envie os rascunhos das variantes.</td></tr>}
+                          </tbody>
+                        </table>
+                      </div>
+                      {(detail.variants || []).length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {(detail.variants || []).map((v: any) => (
+                            <p key={v.id} className="text-[10px] text-zinc-500 line-clamp-2"><b className="text-zinc-400">{v.name}</b> ({EXP_CHANNELS.find(c => c.id === v.channel)?.label || v.channel}): {v.body}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LearningsTab({ campaigns }: { campaigns: Campaign[] }) {
+  const [learnings, setLearnings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [advice, setAdvice] = useState('');
+  const [adviceBusy, setAdviceBusy] = useState(false);
+  const [hypCamp, setHypCamp] = useState(campaigns[0]?.id || '');
+  const [hyps, setHyps] = useState<any[]>([]);
+  const [hypBusy, setHypBusy] = useState(false);
+
+  const load = useCallback(() => apiFetch('/api/prospect/research/learnings').then(r => r.json()).then(d => setLearnings(Array.isArray(d) ? d : [])).catch(() => {}), []);
+  useEffect(() => { setLoading(true); load().finally(() => setLoading(false)); }, [load]);
+
+  const recommend = async () => {
+    setAdviceBusy(true);
+    try {
+      const r = await apiFetch('/api/prospect/research/recommend-next-action', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao gerar a recomendação.');
+      setAdvice(d.advice || '');
+    } catch (e: any) { toast.error(e.message); } finally { setAdviceBusy(false); }
+  };
+
+  const suggest = async () => {
+    if (!hypCamp) { toast.error('Escolha uma campanha para gerar hipóteses.'); return; }
+    setHypBusy(true);
+    try {
+      const r = await apiFetch('/api/prospect/research/suggest-hypotheses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campaignId: hypCamp }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao sugerir hipóteses.');
+      setHyps(Array.isArray(d.hypotheses) ? d.hypotheses : []);
+      if (!Array.isArray(d.hypotheses) || !d.hypotheses.length) toast.error('Nenhuma hipótese sugerida — envie mais abordagens primeiro.');
+    } catch (e: any) { toast.error(e.message); } finally { setHypBusy(false); }
+  };
+
+  const deprecate = async (lid: string) => {
+    if (!window.confirm('Depreciar este aprendizado? Ele deixa de ser considerado pela IA.')) return;
+    try {
+      const r = await apiFetch(`/api/prospect/research/learnings/${lid}/deprecate`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha ao depreciar.');
+      toast.success('Aprendizado depreciado.');
+      load();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const active = learnings.filter(l => l.status !== 'deprecated');
+
+  return (
+    <div>
+      {/* Copiloto de pesquisa */}
+      <div className="mb-6 rounded-xl border border-violet-500/25 bg-violet-500/5 p-5">
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <h3 className="text-sm font-medium text-violet-300 flex items-center gap-2"><Lightbulb className="w-4 h-4" /> Copiloto de pesquisa</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={recommend} disabled={adviceBusy} className="text-[11px] px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white inline-flex items-center gap-1 disabled:opacity-60">{adviceBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} Recomendar próxima ação</button>
+            <select value={hypCamp} onChange={e => setHypCamp(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 outline-none">
+              {campaigns.length === 0 && <option value="">Sem campanhas</option>}
+              {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button onClick={suggest} disabled={hypBusy} className="text-[11px] px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 inline-flex items-center gap-1 disabled:opacity-60">{hypBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <FlaskConical className="w-3 h-3" />} Sugerir hipóteses</button>
+          </div>
+        </div>
+        {advice
+          ? <p className="text-xs text-zinc-200 whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950 p-3">{advice}</p>
+          : <p className="text-[11px] text-zinc-500">A IA analisa os aprendizados e resultados e sugere o próximo passo — sem inventar dados.</p>}
+        {hyps.length > 0 && (
+          <div className="mt-3 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Hipóteses sugeridas ({hyps.length})</p>
+            {hyps.map((h: any, i: number) => (
+              <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                <p className="text-xs text-zinc-200">{h.hypothesis}</p>
+                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  {h.variable && <span className="text-[9px] px-1.5 py-0.5 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-300">variável: {h.variable}</span>}
+                  {h.metric && <span className="text-[9px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400">métrica: {h.metric}</span>}
+                </div>
+                {(h.variant_a || h.variant_b) && (
+                  <div className="mt-1.5 space-y-0.5">
+                    {h.variant_a && <p className="text-[10px] text-zinc-500 line-clamp-2"><b className="text-zinc-400">A:</b> {h.variant_a}</p>}
+                    {h.variant_b && <p className="text-[10px] text-zinc-500 line-clamp-2"><b className="text-zinc-400">B:</b> {h.variant_b}</p>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Aprendizados ativos */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><GraduationCap className="w-4 h-4 text-cyan-400" /> Aprendizados ativos ({active.length})</h3>
+          <span className="text-[11px] text-zinc-600">O que os experimentos já ensinaram — a IA usa isso nas próximas abordagens.</span>
+        </div>
+        {loading ? <Spinner /> : active.length === 0 ? (
+          <Empty text="Nenhum aprendizado ainda. Conclua experimentos para a IA registrar o que funciona (e o que não funciona)." />
+        ) : (
+          <div className="space-y-2">
+            {active.map((l: any) => {
+              const conf = Math.round(Math.max(0, Math.min(1, Number(l.confidence_score) || 0)) * 100);
+              return (
+                <div key={l.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                  <div className="flex items-start gap-2">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 shrink-0">{l.learning_type}</span>
+                    <p className="flex-1 text-xs text-zinc-200">{l.insight}</p>
+                    <button onClick={() => deprecate(l.id)} className="text-[10px] text-zinc-500 hover:text-red-400 shrink-0">Depreciar</button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className="h-1.5 rounded-full bg-zinc-800 flex-1 max-w-[140px]"><div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${conf}%` }} /></div>
+                    <span className="text-[10px] text-zinc-500">confiança {conf}%</span>
+                    {l.created_at && <span className="ml-auto text-[10px] text-zinc-600">{new Date(l.created_at).toLocaleDateString('pt-BR')}</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

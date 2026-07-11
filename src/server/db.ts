@@ -1315,6 +1315,47 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_patient_plan_history ON patient_plan_history (organization_id, contact_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar Ficha do Paciente (Clínica)', e); }
+
+  // Módulo Clínica (ADR-080, Fase C) — Agenda Clínica. Profissionais como
+  // entidade própria (D2, desacoplada de login, link opcional para user) e
+  // salas. Duração por consulta (sem teto de 150 min), check-in/início/saída e
+  // status de permanência — NUNCA excluir por tempo excedido (D3).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_professionals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        specialty TEXT,
+        color TEXT,                 -- cor na grade da agenda
+        user_id TEXT,               -- link OPCIONAL para users (portal do profissional)
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_org ON clinic_professionals (organization_id, active);
+
+      CREATE TABLE IF NOT EXISTS clinic_rooms (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_rooms_org ON clinic_rooms (organization_id, active);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar profissionais/salas (Clínica)', e); }
+  // Colunas clínicas em appointments (aditivas). professional_id substitui o
+  // assigned_to morto; snapshots preservam nome mesmo se o cadastro mudar.
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN professional_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN professional_name_snapshot TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN room_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN room_name_snapshot TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN expected_duration_minutes INTEGER`); } catch(e){} // duração por consulta (null = usa slot da org)
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN checkin_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
   // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
   try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}

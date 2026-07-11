@@ -70,6 +70,7 @@ jobs:
           - { name: 'prospect-learning', script: 'test:prospect-learning' }
           - { name: 'clinic-quickstart', script: 'test:clinic-quickstart' }
           - { name: 'clinic-patient', script: 'test:clinic-patient' }
+          - { name: 'clinic-agenda', script: 'test:clinic-agenda' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

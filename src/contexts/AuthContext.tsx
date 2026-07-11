@@ -80,6 +80,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem('zappflow_token');
     localStorage.removeItem('zappflow_user');
+    // ADR-082 (D7): apaga o armazenamento local da camada de continuidade
+    // (outbox no IndexedDB). É dado por-usuário e não pode sobreviver ao logout
+    // num dispositivo compartilhado. Best-effort: não bloqueia a saída.
+    import('@/src/lib/continuity/outbox')
+      .then(m => m.clearContinuityStorage())
+      .catch(() => {});
   };
 
   return (

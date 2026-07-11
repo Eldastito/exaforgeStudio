@@ -12,7 +12,7 @@
  *
  * Uso:  npm run test:continuity-outbox
  */
-import { Outbox, MemoryOutboxStore, type CommandSender } from "../src/lib/continuity/outbox.js";
+import { Outbox, MemoryOutboxStore, clearContinuityStorage, CONTINUITY_DB_NAME, type CommandSender } from "../src/lib/continuity/outbox.js";
 
 let failures = 0;
 const results: { name: string; ok: boolean; detail?: string }[] = [];
@@ -96,7 +96,17 @@ async function main() {
     check("Envio em ordem de criação (FIFO)", order.join(",") === "a,b");
   }
 
-  console.log("\n=== Continuity Layer — Fase 1b: outbox do navegador (ADR-082) ===");
+  // ---- 7. logout limpa o storage (Fase 1c / D7) sem quebrar fora do browser ----
+  {
+    check("Nome do banco de continuidade é estável", CONTINUITY_DB_NAME === "zappflow_continuity");
+    // Em Node (sem IndexedDB) a limpeza é no-op à prova de falha: não lança e
+    // resolve — o logout nunca pode travar por causa disso.
+    let threw = false;
+    try { await clearContinuityStorage(); } catch { threw = true; }
+    check("clearContinuityStorage resolve sem lançar (sem IndexedDB)", !threw);
+  }
+
+  console.log("\n=== Continuity Layer — Fase 1b/1c: outbox do navegador (ADR-082) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);
   process.exit(failures ? 1 : 0);

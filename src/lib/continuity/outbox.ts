@@ -43,7 +43,7 @@ export class MemoryOutboxStore implements OutboxStore {
 
 /** Store IndexedDB (browser). Uma object store 'commands' com keyPath commandId. */
 export class IdbOutboxStore implements OutboxStore {
-  private dbName = "zappflow_continuity";
+  private dbName = CONTINUITY_DB_NAME;
   private storeName = "outbox";
   private open(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
@@ -69,6 +69,27 @@ export class IdbOutboxStore implements OutboxStore {
   async get(id: string) { return (await this.tx<OutboxCommand>("readonly", s => s.get(id))) || undefined; }
   async list() { return (await this.tx<OutboxCommand[]>("readonly", s => s.getAll())) || []; }
   async delete(id: string) { await this.tx("readwrite", s => s.delete(id)); }
+}
+
+/** Nome do banco IndexedDB da camada de continuidade (usado pelo outbox). */
+export const CONTINUITY_DB_NAME = "zappflow_continuity";
+
+/**
+ * Apaga TODO o armazenamento local da camada de continuidade (ADR-082, D7).
+ * Chamado no logout: o outbox é dado por-usuário e não pode vazar entre contas
+ * num dispositivo compartilhado. Silencioso e à prova de falha (sem IndexedDB,
+ * SSR ou bloqueio → no-op).
+ */
+export function clearContinuityStorage(): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === "undefined") return resolve();
+      const req = indexedDB.deleteDatabase(CONTINUITY_DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve(); // conexão aberta em outra aba: não trava o logout
+    } catch { resolve(); }
+  });
 }
 
 /** Resultado de uma tentativa de envio de um comando. */

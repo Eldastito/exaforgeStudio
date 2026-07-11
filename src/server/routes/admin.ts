@@ -7,6 +7,9 @@ import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
+import { eventsEnabled } from "../ContinuityService.js";
+import { MessageDeliveryService } from "../MessageDeliveryService.js";
+import { EdgeSyncService } from "../EdgeSyncService.js";
 
 const router = Router();
 
@@ -283,6 +286,33 @@ router.get("/security-check", async (req: AuthRequest, res) => {
 router.get("/queue/health", (_req: AuthRequest, res) => {
   try { res.json(JobQueueService.health()); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Saúde CROSS-TENANT da Continuity Layer (ADR-082) — para o rollout observável
+// das flags em produção (ver docs/RUNBOOK-CONTINUITY-ROLLOUT.md). Master-admin.
+router.get("/continuity/health", (_req: AuthRequest, res): any => {
+  try {
+    const delivRows = db.prepare(`SELECT status, COUNT(*) AS c FROM message_deliveries GROUP BY status`).all() as any[];
+    const deliv: Record<string, number> = { queued: 0, sent: 0, delivered: 0, failed: 0 };
+    for (const r of delivRows) deliv[r.status] = r.c;
+    const oldest = db.prepare(`SELECT MIN(next_attempt_at) AS t FROM message_deliveries WHERE status = 'queued'`).get() as any;
+    const stuck = db.prepare(`SELECT COUNT(*) AS c FROM message_deliveries WHERE status = 'queued' AND attempt_count >= 3`).get() as any;
+    const last24 = (st: string) => (db.prepare(`SELECT COUNT(*) AS c FROM message_deliveries WHERE status = ? AND updated_at >= datetime('now','-1 day')`).get(st) as any).c;
+    const ev = db.prepare(`SELECT COUNT(*) AS total, COUNT(DISTINCT organization_id) AS orgs FROM domain_events`).get() as any;
+    const edge = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active, MAX(last_seen_at) AS lastSeen FROM edge_devices`).get() as any;
+
+    res.json({
+      flags: { events: eventsEnabled(), deliveryQueue: MessageDeliveryService.enabled(), edgeSync: EdgeSyncService.enabled() },
+      delivery: {
+        queued: deliv.queued, sent: deliv.sent, delivered: deliv.delivered, failed: deliv.failed,
+        oldestQueuedAt: oldest?.t || null,
+        stuckQueued: stuck?.c || 0,                 // fila 'queued' com 3+ tentativas — sinal de canal quebrado
+        deliveredLast24h: last24("delivered"), failedLast24h: last24("failed"),
+      },
+      events: { total: Number(ev?.total || 0), orgs: Number(ev?.orgs || 0) },
+      edge: { devices: Number(edge?.total || 0), active: Number(edge?.active || 0), lastSeenAt: edge?.lastSeen || null },
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get("/queue/jobs", (req: AuthRequest, res) => {

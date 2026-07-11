@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chat } from "./llm.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ProspectExecutionService } from "./ProspectExecutionService.js";
+import { ProspectService } from "./ProspectService.js";
 
 /**
  * AutoProspect Research Engine (ADR-079, Fase C).
@@ -246,6 +247,42 @@ export class ProspectResearchService {
     const r = db.prepare("UPDATE prospect_learning_memory SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND status = 'active'").run(id, orgId);
     if (r.changes > 0) logAuthEvent(orgId, actorId, null, "PROSPECT_LEARNING_DEPRECATED", { learningId: id });
     return r.changes > 0;
+  }
+
+  // ── Dashboard e ponte com o RIC (ADR-079, Fase E) ────────────────────────
+  /** Números agregados do funil de prospecção (fonte: dados reais das Fases A–D). */
+  static dashboard(orgId: string): any {
+    const leads = db.prepare("SELECT COUNT(*) total, COUNT(CASE WHEN account_status IN ('qualified','contacted','converted') THEN 1 END) qualified FROM prospect_accounts WHERE organization_id = ?").get(orgId) as any;
+    const camps = db.prepare("SELECT COUNT(*) n FROM prospect_campaigns WHERE organization_id = ? AND status IN ('draft','active')").get(orgId) as any;
+    const funnel = db.prepare("SELECT COUNT(CASE WHEN status='sent' THEN 1 END) sent, COUNT(CASE WHEN replied_at IS NOT NULL THEN 1 END) replied FROM prospect_outreach WHERE organization_id = ?").get(orgId) as any;
+    const meetings = db.prepare("SELECT COUNT(*) n FROM prospect_accounts WHERE organization_id = ? AND meeting_at IS NOT NULL").get(orgId) as any;
+    const attr = ProspectService.attributionSummary(orgId);
+    const champion = db.prepare("SELECT name, message_body FROM prospect_message_variants WHERE organization_id = ? AND is_champion = 1 ORDER BY updated_at DESC LIMIT 1").get(orgId) as any || null;
+    const topSegments = db.prepare(`
+      SELECT COALESCE(a.industry, '(sem segmento)') AS segment,
+             COUNT(CASE WHEN o.status='sent' THEN 1 END) AS sent,
+             COUNT(CASE WHEN o.replied_at IS NOT NULL THEN 1 END) AS responses
+      FROM prospect_outreach o JOIN prospect_accounts a ON a.id = o.prospect_account_id AND a.organization_id = o.organization_id
+      WHERE o.organization_id = ? GROUP BY segment HAVING sent >= 3 ORDER BY (responses * 1.0 / sent) DESC LIMIT 5
+    `).all(orgId).map((s: any) => ({ ...s, rate: s.sent ? s.responses / s.sent : 0 }));
+    return {
+      leadsTotal: Number(leads?.total || 0), leadsQualified: Number(leads?.qualified || 0),
+      campaignsActive: Number(camps?.n || 0), messagesSent: Number(funnel?.sent || 0),
+      responses: Number(funnel?.replied || 0), responseRate: funnel?.sent ? Number(funnel.replied) / Number(funnel.sent) : 0,
+      meetings: Number(meetings?.n || 0), converted: attr.wonCount,
+      potentialRevenue: attr.pipelineCount * attr.avgDeal, wonRevenue: attr.totalWon,
+      championMessage: champion, topSegments,
+    };
+  }
+
+  /** Resumo para o RIC: nichos com maior resposta, mensagens vencedoras, receita. */
+  static ricSummary(orgId: string): any {
+    const d = this.dashboard(orgId);
+    const learnings = this.listLearnings(orgId).slice(0, 5).map(l => ({ type: l.learning_type, insight: l.insight, confidence: l.confidence_score }));
+    return {
+      responseRate: d.responseRate, meetings: d.meetings, potentialRevenue: d.potentialRevenue, wonRevenue: d.wonRevenue,
+      topSegments: d.topSegments, championMessage: d.championMessage ? d.championMessage.name : null, learnings,
+    };
   }
 
   // ── IA: hipóteses testáveis e próxima ação (usa SÓ dados registrados) ───

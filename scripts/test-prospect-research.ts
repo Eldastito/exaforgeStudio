@@ -152,6 +152,15 @@ async function main() {
     check(`Auditoria registrou ${ev}`, audited.includes(ev));
   }
 
+  // ---- 7. Dashboard + ponte com o RIC (Fase E) ----
+  const dash = ProspectResearchService.dashboard(A.orgId);
+  check("Dashboard agrega envios e respostas reais", dash.messagesSent === 40 && dash.responses === 12 && dash.responseRate > 0.29);
+  check("Dashboard expõe mensagem champion", dash.championMessage && dash.championMessage.name.includes("dor específica"));
+  check("Dashboard: leads e campanhas contados", dash.leadsTotal === 44 && dash.campaignsActive >= 1);
+  const ric = ProspectResearchService.ricSummary(A.orgId);
+  check("Resumo do RIC traz champion e taxa", ric.championMessage && ric.responseRate === dash.responseRate);
+  check("Dashboard da org B vem zerado (isolamento)", ProspectResearchService.dashboard(B.orgId).messagesSent === 0);
+
   console.log("\n=== Prospect AI — Research Engine (ADR-079, Fase C) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);

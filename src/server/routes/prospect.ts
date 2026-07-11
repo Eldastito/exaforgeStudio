@@ -294,6 +294,13 @@ router.post("/experiments/:id/complete", managerOnly, async (req: AuthRequest, r
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Dashboard (ADR-079, Fase E) ──────────────────────────────────────────
+router.get("/dashboard", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectResearchService.dashboard(orgId));
+});
+
 // ── Memória de aprendizados + IA (ADR-079, Fase D) ───────────────────────
 router.get("/research/learnings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

@@ -1679,6 +1679,77 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_prospect_events_acc ON prospect_events (organization_id, prospect_account_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar prospect_events', e); }
+
+  // Prospect AI (ADR-079, Fase C — Research Engine): variantes de mensagem,
+  // experimentos com ORÇAMENTO FIXO pré-declarado (amostra + janela, decisão
+  // só no fim — sem "espiar") e snapshot de resultados. Champion/challenger:
+  // a variante vencedora vigente da campanha carrega is_champion = 1.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_message_variants (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        campaign_id TEXT,
+        experiment_id TEXT,
+        name TEXT NOT NULL,
+        hypothesis TEXT,
+        channel TEXT DEFAULT 'whatsapp',  -- whatsapp | email
+        subject TEXT,
+        message_body TEXT NOT NULL,
+        tone TEXT,
+        cta TEXT,
+        is_champion INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',     -- active | retired
+        created_by_ai INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_variants_org ON prospect_message_variants (organization_id, campaign_id, status);
+
+      CREATE TABLE IF NOT EXISTS prospect_experiments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        campaign_id TEXT,
+        name TEXT NOT NULL,
+        hypothesis TEXT,
+        variable_under_test TEXT DEFAULT 'message', -- message | channel | niche | timing (UMA por experimento)
+        success_metric TEXT DEFAULT 'response_rate', -- response_rate | meeting_rate | conversion_rate
+        sample_size INTEGER NOT NULL,                -- orçamento por variante, fixado ANTES de começar
+        window_days INTEGER DEFAULT 14,              -- janela de medição
+        confidence_z REAL DEFAULT 1.96,              -- limiar do teste de duas proporções (95%)
+        status TEXT DEFAULT 'draft',                 -- draft | running | completed
+        decision TEXT,                               -- keep | discard | inconclusive
+        winner_variant_id TEXT,
+        decision_reason TEXT,
+        started_at DATETIME,
+        completed_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_experiments_org ON prospect_experiments (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS prospect_experiment_results (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        experiment_id TEXT NOT NULL,
+        variant_id TEXT NOT NULL,
+        messages_sent INTEGER DEFAULT 0,
+        responses_count INTEGER DEFAULT 0,
+        meetings_count INTEGER DEFAULT 0,
+        converted_count INTEGER DEFAULT 0,
+        response_rate REAL DEFAULT 0,
+        meeting_rate REAL DEFAULT 0,
+        conversion_rate REAL DEFAULT 0,
+        result_status TEXT,               -- keep | discard | inconclusive
+        analysis_summary TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_exp_results ON prospect_experiment_results (organization_id, experiment_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas do Research Engine', e); }
+  try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN variant_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN experiment_id TEXT`); } catch(e){}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS prospect_discovery_runs (

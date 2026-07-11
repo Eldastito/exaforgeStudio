@@ -4,6 +4,7 @@ import { logAuthEvent } from "../auditLog.js";
 import { ProspectService } from "../ProspectService.js";
 import { ProspectDiscoveryService } from "../ProspectDiscoveryService.js";
 import { ProspectExecutionService } from "../ProspectExecutionService.js";
+import { ProspectResearchService } from "../ProspectResearchService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -246,6 +247,51 @@ router.get("/accounts/:id/events", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(ProspectExecutionService.listEvents(orgId, req.params.id));
+});
+
+// ── Research Engine (ADR-079, Fase C) ────────────────────────────────────
+// Criar/iniciar/concluir experimento é decisão de gestor. Alocar lead a uma
+// variante (gera rascunho para aprovação) fica aberto ao vendedor.
+router.post("/experiments", managerOnly, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectResearchService.createExperiment(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/experiments", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectResearchService.listExperiments(orgId));
+});
+
+router.get("/experiments/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const e = ProspectResearchService.getExperiment(orgId, req.params.id);
+  if (!e) return res.status(404).json({ error: "Experimento não encontrado." });
+  res.json(e);
+});
+
+router.post("/experiments/:id/start", managerOnly, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectResearchService.startExperiment(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/experiments/:id/draft", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectResearchService.draftFromVariant(orgId, req.params.id, String(req.body?.accountId || ""), req.body?.contactId, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/experiments/:id/complete", managerOnly, async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectResearchService.completeExperiment(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.get("/approval-queue", (req: AuthRequest, res): any => {

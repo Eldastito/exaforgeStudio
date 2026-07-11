@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -35,6 +35,38 @@ type Appointment = {
   continuation_status?: ContinuationStatus;
 };
 type Conflict = { id: string; title?: string; reason?: string; start?: string };
+
+// ---- Convênios e Autorizações (Fase E1) ----
+type Operator = { id: string; name: string; ans_registry?: string | null; portal_url?: string | null; active?: boolean | number };
+type Procedure = {
+  id: string;
+  name: string;
+  tuss_code?: string | null;
+  default_duration_minutes?: number | null;
+  requires_authorization?: boolean | number;
+  requires_medical_request?: boolean | number;
+};
+type Authorization = {
+  id: string;
+  contact_id: string;
+  contact_name?: string | null;
+  operator_id?: string | null;
+  operator_name?: string | null;
+  procedure_id?: string | null;
+  procedure_name?: string | null;
+  tuss_code?: string | null;
+  status: string;
+  protocol_number?: string | null;
+  authorization_number?: string | null;
+  denial_reason?: string | null;
+  pending_requirements?: string | null;
+  plan_snapshot?: string | null;
+  submitted_at?: string | null;
+  approved_at?: string | null;
+  denied_at?: string | null;
+  expires_at?: string | null;
+  updated_at?: string | null;
+};
 
 // ---- Helpers ----
 const todayISO = () => {
@@ -86,6 +118,46 @@ const STATUS_FILTERS: { id: string; label: string }[] = [
   { id: 'no_show', label: 'Não compareceu' },
 ];
 
+// Chips de status das autorizações (rótulos pt-BR + cores coerentes com o restante da tela).
+const AUTH_STATUS_META: Record<string, { label: string; cls: string }> = {
+  draft: { label: 'Rascunho', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-700' },
+  ready_to_submit: { label: 'Pronta p/ envio', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  submitted: { label: 'Enviada', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  pending_documents: { label: 'Docs pendentes', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  pending_operator: { label: 'Em análise', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  approved: { label: 'Aprovada', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  denied: { label: 'Negada', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  expired: { label: 'Expirada', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  cancelled: { label: 'Cancelada', cls: 'text-zinc-500 bg-zinc-500/10 border-zinc-700' },
+  manual_required: { label: 'Manual', cls: 'text-cyan-300 bg-cyan-500/10 border-cyan-500/30' },
+};
+
+const authStatusMeta = (status: string) => AUTH_STATUS_META[status] || { label: status, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-700' };
+
+const AUTH_STATUS_FILTERS: { id: string; label: string }[] = [
+  { id: '', label: 'Todos os status' },
+  { id: 'draft', label: 'Rascunho' },
+  { id: 'ready_to_submit', label: 'Pronta p/ envio' },
+  { id: 'submitted', label: 'Enviada' },
+  { id: 'pending_documents', label: 'Docs pendentes' },
+  { id: 'pending_operator', label: 'Em análise' },
+  { id: 'approved', label: 'Aprovada' },
+  { id: 'denied', label: 'Negada' },
+  { id: 'expired', label: 'Expirada' },
+  { id: 'cancelled', label: 'Cancelada' },
+  { id: 'manual_required', label: 'Manual' },
+];
+
+// Status de retorno manual do convênio (PATCH /status).
+const RETURN_STATUS_OPTIONS: { id: string; label: string }[] = [
+  { id: 'approved', label: 'Aprovada' },
+  { id: 'denied', label: 'Negada' },
+  { id: 'pending_operator', label: 'Em análise' },
+  { id: 'expired', label: 'Expirada' },
+  { id: 'cancelled', label: 'Cancelada' },
+  { id: 'manual_required', label: 'Manual' },
+];
+
 // Recalcula o estado de permanência no cliente a partir de effective_end + warning_minutes (ADR-080 D3).
 function computeOverrun(a: Appointment, now: number): OverrunState {
   if (a.status === 'completed' || a.overrun_state === 'done' || a.checkout_at) return 'done';
@@ -99,6 +171,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 }
 
 export function ClinicAgendaView() {
+  const [tab, setTab] = useState<'agenda' | 'autorizacoes'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -204,21 +277,36 @@ export function ClinicAgendaView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Fluxo do dia: chegada, atendimento e controle de permanência por paciente.</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap print:hidden">
-          <button onClick={() => window.print()}
-            className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 px-3 text-sm text-zinc-100">
-            <Printer className="w-4 h-4" /> Imprimir
-          </button>
-          <button onClick={exportCsv} disabled={exporting}
-            className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 px-3 text-sm text-zinc-100 disabled:opacity-60">
-            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Exportar CSV
-          </button>
-          <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
-            <Plus className="w-4 h-4 mr-2" /> Novo agendamento
-          </Button>
-        </div>
+        {tab === 'agenda' && (
+          <div className="flex items-center gap-2 flex-wrap print:hidden">
+            <button onClick={() => window.print()}
+              className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 px-3 text-sm text-zinc-100">
+              <Printer className="w-4 h-4" /> Imprimir
+            </button>
+            <button onClick={exportCsv} disabled={exporting}
+              className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 px-3 text-sm text-zinc-100 disabled:opacity-60">
+              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Exportar CSV
+            </button>
+            <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
+              <Plus className="w-4 h-4 mr-2" /> Novo agendamento
+            </Button>
+          </div>
+        )}
       </div>
 
+      {/* Abas internas */}
+      <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden">
+        {([['agenda', 'Agenda'], ['autorizacoes', 'Autorizações']] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'autorizacoes' && <AuthorizationsTab contacts={contacts} />}
+
+      {tab === 'agenda' && (<>
       {/* Filtros */}
       <div className="mb-5 flex items-end gap-3 flex-wrap rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 print:hidden">
         <label className="flex flex-col gap-1">
@@ -308,6 +396,7 @@ export function ClinicAgendaView() {
           onCreated={() => { setShowNew(false); loadAppointments(); }}
         />
       )}
+      </>)}
     </div>
   );
 }
@@ -871,6 +960,660 @@ function RoomsPanel({ rooms, onChanged }: { rooms: Room[]; onChanged: () => void
         <Button onClick={create} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs shrink-0">
           {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Adicionar
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
+// Aba: Convênios e Autorizações (Fase E1)
+// ================================================================
+function AuthorizationsTab({ contacts }: { contacts: ContactLite[] }) {
+  const [status, setStatus] = useState('');
+  const [items, setItems] = useState<Authorization[]>([]);
+  const [operators, setOperators] = useState<Operator[]>([]);
+  const [procedures, setProcedures] = useState<Procedure[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [showCadastro, setShowCadastro] = useState(false);
+
+  const load = useCallback(() => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    setLoading(true);
+    return apiFetch(`/api/clinic/authorizations?${params.toString()}`)
+      .then(r => r.json())
+      .then(d => setItems(Array.isArray(d) ? d : []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }, [status]);
+
+  const loadOperators = useCallback(() => apiFetch('/api/clinic/operators').then(r => r.json()).then(d => setOperators(Array.isArray(d) ? d : [])).catch(() => {}), []);
+  const loadProcedures = useCallback(() => apiFetch('/api/clinic/procedures').then(r => r.json()).then(d => setProcedures(Array.isArray(d) ? d : [])).catch(() => {}), []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadOperators(); loadProcedures(); }, [loadOperators, loadProcedures]);
+
+  return (
+    <div>
+      {/* Aviso de guardrail — a IA nunca promete cobertura, envio é sempre manual. */}
+      <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-2.5 text-xs text-amber-200">
+        <Info className="w-4 h-4 mt-0.5 shrink-0" />
+        <span className="leading-relaxed">
+          A IA <b>nunca promete cobertura</b> nem garante autorização: ela apenas organiza documentos e pendências.
+          O <b>envio ao convênio é sempre manual</b> e o retorno é registrado por um humano.
+        </span>
+      </div>
+
+      {/* Filtro + ação */}
+      <div className="mb-5 flex items-end gap-3 flex-wrap rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <label className="flex flex-col gap-1 min-w-[180px]">
+          <span className="text-[11px] text-zinc-400">Status</span>
+          <select value={status} onChange={e => setStatus(e.target.value)}
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500">
+            {AUTH_STATUS_FILTERS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </label>
+        <span className="text-[11px] text-zinc-600 self-center">{items.length} solicitação(ões)</span>
+        <div className="ml-auto">
+          <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
+            <Plus className="w-4 h-4 mr-2" /> Nova solicitação
+          </Button>
+        </div>
+      </div>
+
+      {/* Lista */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-500 text-sm py-10"><Loader2 className="w-4 h-4 animate-spin" /> Carregando autorizações…</div>
+      ) : items.length === 0 ? (
+        <div className="py-14 text-center rounded-xl border border-zinc-800 bg-zinc-900/40">
+          <FileCheck2 className="w-8 h-8 text-emerald-400/70 mx-auto mb-2" />
+          <p className="text-sm text-zinc-300 font-medium">Nenhuma solicitação de autorização</p>
+          <p className="text-[12px] text-zinc-600 mt-1">Crie uma nova solicitação ou ajuste o filtro de status.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {items.map(a => <div key={a.id}><AuthCard auth={a} onChanged={load} /></div>)}
+        </div>
+      )}
+
+      {/* Painel colapsável — Operadoras e procedimentos */}
+      <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50">
+        <button onClick={() => setShowCadastro(s => !s)} className="w-full flex items-center justify-between px-5 py-3 text-left">
+          <span className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Building2 className="w-4 h-4 text-emerald-400" /> Operadoras e procedimentos</span>
+          {showCadastro ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+        </button>
+        {showCadastro && (
+          <div className="px-5 pb-5 grid grid-cols-1 lg:grid-cols-2 gap-5 border-t border-zinc-800 pt-4">
+            <OperatorsPanel operators={operators} onChanged={loadOperators} />
+            <ProceduresPanel procedures={procedures} onChanged={loadProcedures} />
+          </div>
+        )}
+      </div>
+
+      {showNew && (
+        <NewAuthorizationModal
+          contacts={contacts}
+          operators={operators}
+          procedures={procedures}
+          onClose={() => setShowNew(false)}
+          onCreated={() => { setShowNew(false); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---- Card de autorização ----
+function AuthCard({ auth, onChanged }: { auth: Authorization; onChanged: () => void }) {
+  const [form, setForm] = useState<'' | 'prepare' | 'submit' | 'return'>('');
+  const meta = authStatusMeta(auth.status);
+  const canPrepare = auth.status === 'draft' || auth.status === 'pending_documents';
+  const canSubmit = auth.status === 'ready_to_submit';
+  const canRegisterReturn = auth.status === 'submitted' || auth.status === 'pending_operator';
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <User className="w-3.5 h-3.5 text-zinc-500" />
+            <h3 className="font-semibold text-zinc-100 truncate">{auth.contact_name || 'Paciente'}</h3>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-zinc-400">
+            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-zinc-500" /> {auth.operator_name || 'Sem operadora'}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Stethoscope className="w-3.5 h-3.5 text-zinc-500" /> {auth.procedure_name || 'Sem procedimento'}
+              {auth.tuss_code && <span className="font-mono text-[11px] text-zinc-500">TUSS {auth.tuss_code}</span>}
+            </span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+            {auth.protocol_number && <span>Protocolo: <span className="text-zinc-300 font-mono">{auth.protocol_number}</span></span>}
+            {auth.authorization_number && <span>Nº autorização: <span className="text-emerald-300 font-mono">{auth.authorization_number}</span></span>}
+            {auth.expires_at && <span>Válida até {fmtDateTime(auth.expires_at)}</span>}
+            <span>Atualizada em {fmtDateTime(auth.updated_at)}</span>
+          </div>
+          {auth.pending_requirements && (
+            <p className="mt-2 text-[12px] text-amber-200/90 flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5">
+              <ListChecks className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Pendências: {auth.pending_requirements}
+            </p>
+          )}
+          {auth.denial_reason && (
+            <p className="mt-2 text-[12px] text-red-200/90 flex items-start gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2 py-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Motivo da negativa: {auth.denial_reason}
+            </p>
+          )}
+        </div>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${meta.cls}`}>{meta.label}</span>
+      </div>
+
+      {/* Ações */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {canPrepare && (
+          <button onClick={() => setForm(f => (f === 'prepare' ? '' : 'prepare'))}
+            className="text-[11px] px-2 py-1 rounded-lg bg-sky-600/90 hover:bg-sky-600 text-white inline-flex items-center gap-1">
+            <ListChecks className="w-3 h-3" /> Preparar
+          </button>
+        )}
+        {canSubmit && (
+          <button onClick={() => setForm(f => (f === 'submit' ? '' : 'submit'))}
+            className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white inline-flex items-center gap-1">
+            <Send className="w-3 h-3" /> Enviar ao convênio
+          </button>
+        )}
+        {canRegisterReturn && (
+          <button onClick={() => setForm(f => (f === 'return' ? '' : 'return'))}
+            className="text-[11px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 inline-flex items-center gap-1">
+            <FileCheck2 className="w-3 h-3" /> Registrar retorno
+          </button>
+        )}
+      </div>
+
+      {form === 'prepare' && <PrepareForm auth={auth} onClose={() => setForm('')} onDone={() => { setForm(''); onChanged(); }} />}
+      {form === 'submit' && <SubmitForm auth={auth} onClose={() => setForm('')} onDone={() => { setForm(''); onChanged(); }} />}
+      {form === 'return' && <RegisterReturnForm auth={auth} onClose={() => setForm('')} onDone={() => { setForm(''); onChanged(); }} />}
+    </div>
+  );
+}
+
+// ---- Form inline: Preparar (draft / pending_documents) ----
+function PrepareForm({ auth, onClose, onDone }: { auth: Authorization; onClose: () => void; onDone: () => void }) {
+  const [pending, setPending] = useState(auth.pending_requirements || '');
+  const [ready, setReady] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/authorizations/${auth.id}/prepare`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pendingRequirements: pending.trim() || undefined, ready }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível preparar a solicitação.');
+      toast.success('Solicitação atualizada.');
+      onDone();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao preparar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+      <label className="text-[11px] text-zinc-400 block">Pendências (documentos / requisitos)</label>
+      <textarea value={pending} onChange={e => setPending(e.target.value)} rows={2} placeholder="Ex.: Falta pedido médico assinado e carteirinha."
+        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500 resize-y" />
+      <label className="flex items-center gap-2 text-[12px] text-zinc-300 cursor-pointer">
+        <input type="checkbox" checked={ready} onChange={e => setReady(e.target.checked)}
+          className="accent-emerald-500 w-3.5 h-3.5" />
+        Pronta para envio (sem pendências)
+      </label>
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} disabled={busy} className="text-[11px] text-zinc-500 hover:text-zinc-300">Cancelar</button>
+        <button onClick={submit} disabled={busy} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Form inline: Enviar ao convênio (ready_to_submit) ----
+function SubmitForm({ auth, onClose, onDone }: { auth: Authorization; onClose: () => void; onDone: () => void }) {
+  const [protocol, setProtocol] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/authorizations/${auth.id}/submit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ protocolNumber: protocol.trim() || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível enviar ao convênio.');
+      toast.success('Solicitação enviada ao convênio.');
+      onDone();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao enviar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+      <p className="text-[11px] text-zinc-500">O envio é manual: registre aqui o protocolo devolvido pelo portal do convênio (opcional).</p>
+      <label className="text-[11px] text-zinc-400 block">Nº de protocolo (opcional)</label>
+      <input value={protocol} onChange={e => setProtocol(e.target.value)} placeholder="Ex.: 2026070100123"
+        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} disabled={busy} className="text-[11px] text-zinc-500 hover:text-zinc-300">Cancelar</button>
+        <button onClick={submit} disabled={busy} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} Confirmar envio
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Form inline: Registrar retorno manual (submitted / pending_operator) ----
+function RegisterReturnForm({ auth, onClose, onDone }: { auth: Authorization; onClose: () => void; onDone: () => void }) {
+  const [status, setStatus] = useState('approved');
+  const [authorizationNumber, setAuthorizationNumber] = useState('');
+  const [denialReason, setDenialReason] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [protocol, setProtocol] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (status === 'denied' && !denialReason.trim()) { toast.error('Informe o motivo da negativa.'); return; }
+    setBusy(true);
+    try {
+      const payload: any = { status, protocolNumber: protocol.trim() || undefined };
+      if (status === 'approved') {
+        payload.authorizationNumber = authorizationNumber.trim() || undefined;
+        payload.expiresAt = expiresAt ? new Date(expiresAt).toISOString() : undefined;
+      }
+      if (status === 'denied') payload.denialReason = denialReason.trim() || undefined;
+      const r = await apiFetch(`/api/clinic/authorizations/${auth.id}/status`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível registrar o retorno.');
+      toast.success('Retorno do convênio registrado.');
+      onDone();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao registrar retorno.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+      <label className="text-[11px] text-zinc-400 block">Retorno do convênio</label>
+      <select value={status} onChange={e => setStatus(e.target.value)}
+        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500">
+        {RETURN_STATUS_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+
+      {status === 'approved' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <label className="text-[11px] text-zinc-400 block mb-1">Nº de autorização</label>
+            <input value={authorizationNumber} onChange={e => setAuthorizationNumber(e.target.value)} placeholder="Ex.: AUT-998877"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          </div>
+          <div>
+            <label className="text-[11px] text-zinc-400 block mb-1">Validade</label>
+            <input type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          </div>
+        </div>
+      )}
+
+      {status === 'denied' && (
+        <div>
+          <label className="text-[11px] text-zinc-400 block mb-1">Motivo da negativa</label>
+          <textarea value={denialReason} onChange={e => setDenialReason(e.target.value)} rows={2} placeholder="Ex.: Procedimento fora de cobertura contratual."
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500 resize-y" />
+        </div>
+      )}
+
+      <div>
+        <label className="text-[11px] text-zinc-400 block mb-1">Nº de protocolo (opcional)</label>
+        <input value={protocol} onChange={e => setProtocol(e.target.value)} placeholder="Protocolo do convênio"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} disabled={busy} className="text-[11px] text-zinc-500 hover:text-zinc-300">Cancelar</button>
+        <button onClick={submit} disabled={busy} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Registrar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Modal: Nova solicitação de autorização ----
+function NewAuthorizationModal({ contacts, operators, procedures, onClose, onCreated }: {
+  contacts: ContactLite[];
+  operators: Operator[];
+  procedures: Procedure[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [contactId, setContactId] = useState('');
+  const [operatorId, setOperatorId] = useState('');
+  const [procedureId, setProcedureId] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!contactId) { toast.error('Selecione o paciente.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/clinic/authorizations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactId,
+          operatorId: operatorId || undefined,
+          procedureId: procedureId || undefined,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível criar a solicitação.');
+      toast.success('Solicitação criada.');
+      onCreated();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao criar solicitação.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6 max-h-[90vh] overflow-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><FileCheck2 className="w-5 h-5 text-emerald-400" /> Nova solicitação</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={e => { e.preventDefault(); submit(); }} className="space-y-4">
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">Paciente</label>
+            <select required value={contactId} onChange={e => setContactId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500">
+              <option value="">Selecione um paciente</option>
+              {contacts.map(c => <option key={c.id} value={c.id}>{c.name}{c.identifier ? ` — ${c.identifier}` : ''}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">Operadora <span className="text-zinc-600">(opcional)</span></label>
+            <select value={operatorId} onChange={e => setOperatorId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500">
+              <option value="">—</option>
+              {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">Procedimento <span className="text-zinc-600">(opcional)</span></label>
+            <select value={procedureId} onChange={e => setProcedureId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500">
+              <option value="">—</option>
+              {procedures.map(p => <option key={p.id} value={p.id}>{p.name}{p.tuss_code ? ` — TUSS ${p.tuss_code}` : ''}</option>)}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
+            <Button type="submit" disabled={busy} className="zf-button zf-button-primary">
+              {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null} Criar
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---- Painel: Operadoras + credenciais ----
+function OperatorsPanel({ operators, onChanged }: { operators: Operator[]; onChanged: () => void }) {
+  const [name, setName] = useState('');
+  const [ansRegistry, setAnsRegistry] = useState('');
+  const [portalUrl, setPortalUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    if (!name.trim()) { toast.error('Informe o nome da operadora.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/clinic/operators', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), ansRegistry: ansRegistry.trim() || undefined, portalUrl: portalUrl.trim() || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível cadastrar.');
+      toast.success('Operadora cadastrada.');
+      setName(''); setAnsRegistry(''); setPortalUrl('');
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao cadastrar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <h4 className="text-sm font-medium text-zinc-100 mb-2">Operadoras</h4>
+      <div className="space-y-1.5 mb-3">
+        {operators.length === 0 ? (
+          <p className="text-[11px] text-zinc-600">Nenhuma operadora cadastrada.</p>
+        ) : operators.map(o => (
+          <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <ShieldCheck className="w-3.5 h-3.5 text-zinc-500" />
+              <span className="text-sm text-zinc-200 truncate">{o.name}</span>
+              {o.ans_registry && <span className="text-[11px] text-zinc-500">ANS {o.ans_registry}</span>}
+              {o.portal_url && <a href={o.portal_url} target="_blank" rel="noreferrer" className="text-[11px] text-sky-400 hover:text-sky-300 inline-flex items-center gap-1"><Link2 className="w-3 h-3" /> portal</a>}
+            </div>
+            <OperatorCredentials operatorId={o.id} />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome da operadora"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+        <div className="flex items-center gap-2">
+          <input value={ansRegistry} onChange={e => setAnsRegistry(e.target.value)} placeholder="Registro ANS (opcional)"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          <input value={portalUrl} onChange={e => setPortalUrl(e.target.value)} placeholder="URL do portal (opcional)"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={create} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs">
+            {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Adicionar
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Credenciais da operadora (nunca exibe valores; só status configurado/não) ----
+function OperatorCredentials({ operatorId }: { operatorId: string }) {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [providerCode, setProviderCode] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // Campos de edição (nunca preenchidos com valores existentes por segurança).
+  const [editCode, setEditCode] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/operators/${operatorId}/credentials`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Falha ao consultar credenciais.');
+      setConfigured(!!d.configured);
+      setProviderCode(d.providerCode || '');
+    } catch {
+      setConfigured(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [operatorId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/operators/${operatorId}/credentials`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          providerCode: editCode.trim() || undefined,
+          username: username.trim() || undefined,
+          password: password || undefined,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível salvar as credenciais.');
+      setConfigured(!!d.configured);
+      setEditCode(''); setUsername(''); setPassword('');
+      setOpen(false);
+      toast.success('Credenciais salvas.');
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao salvar credenciais.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 pt-2 border-t border-zinc-800/80">
+      <div className="flex items-center gap-2 flex-wrap text-[11px]">
+        <KeyRound className="w-3.5 h-3.5 text-zinc-500" />
+        <span className="text-zinc-400">Credenciais:</span>
+        {loading ? (
+          <span className="text-zinc-600 inline-flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> …</span>
+        ) : configured ? (
+          <span className="text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10">Configurado</span>
+        ) : (
+          <span className="text-zinc-500 px-1.5 py-0.5 rounded border border-zinc-700">Não configurado</span>
+        )}
+        {providerCode && <span className="text-zinc-600">Cód. prestador: {providerCode}</span>}
+        <button onClick={() => setOpen(o => !o)} className="ml-auto text-[11px] text-zinc-400 hover:text-emerald-300">
+          {open ? 'Fechar' : configured ? 'Atualizar' : 'Configurar'}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-2 space-y-2">
+          <input value={editCode} onChange={e => setEditCode(e.target.value)} placeholder="Código do prestador"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="off" placeholder="Usuário"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" placeholder="Senha"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          <p className="text-[10px] text-zinc-600">As credenciais são armazenadas com segurança e nunca reexibidas — informe novamente para atualizar.</p>
+          <div className="flex justify-end">
+            <button onClick={save} disabled={busy} className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar credenciais
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Painel: Procedimentos ----
+function ProceduresPanel({ procedures, onChanged }: { procedures: Procedure[]; onChanged: () => void }) {
+  const [name, setName] = useState('');
+  const [tussCode, setTussCode] = useState('');
+  const [duration, setDuration] = useState('');
+  const [requiresAuthorization, setRequiresAuthorization] = useState(false);
+  const [requiresMedicalRequest, setRequiresMedicalRequest] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    if (!name.trim()) { toast.error('Informe o nome do procedimento.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/clinic/procedures', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          tussCode: tussCode.trim() || undefined,
+          defaultDurationMinutes: duration ? parseInt(duration, 10) : undefined,
+          requiresAuthorization,
+          requiresMedicalRequest,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível cadastrar.');
+      toast.success('Procedimento cadastrado.');
+      setName(''); setTussCode(''); setDuration(''); setRequiresAuthorization(false); setRequiresMedicalRequest(false);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao cadastrar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <h4 className="text-sm font-medium text-zinc-100 mb-2">Procedimentos</h4>
+      <div className="space-y-1.5 mb-3">
+        {procedures.length === 0 ? (
+          <p className="text-[11px] text-zinc-600">Nenhum procedimento cadastrado.</p>
+        ) : procedures.map(p => (
+          <div key={p.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Stethoscope className="w-3.5 h-3.5 text-zinc-500" />
+              <span className="text-sm text-zinc-200 truncate">{p.name}</span>
+              {p.tuss_code && <span className="text-[11px] text-zinc-500 font-mono">TUSS {p.tuss_code}</span>}
+              {p.default_duration_minutes ? <span className="text-[11px] text-zinc-500 inline-flex items-center gap-1"><Timer className="w-3 h-3" /> {p.default_duration_minutes} min</span> : null}
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+              {(p.requires_authorization === true || p.requires_authorization === 1) && <span className="text-[10px] px-1.5 py-0.5 rounded border text-amber-300 border-amber-500/30 bg-amber-500/10">Requer autorização</span>}
+              {(p.requires_medical_request === true || p.requires_medical_request === 1) && <span className="text-[10px] px-1.5 py-0.5 rounded border text-sky-300 border-sky-500/30 bg-sky-500/10">Requer pedido médico</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome do procedimento"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+        <div className="flex items-center gap-2">
+          <input value={tussCode} onChange={e => setTussCode(e.target.value)} placeholder="Código TUSS (opcional)"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          <input value={duration} onChange={e => setDuration(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="Duração (min)"
+            className="w-32 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+        </div>
+        <label className="flex items-center gap-2 text-[12px] text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={requiresAuthorization} onChange={e => setRequiresAuthorization(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5" />
+          Requer autorização
+        </label>
+        <label className="flex items-center gap-2 text-[12px] text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={requiresMedicalRequest} onChange={e => setRequiresMedicalRequest(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5" />
+          Requer pedido médico
+        </label>
+        <div className="flex justify-end">
+          <Button onClick={create} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs">
+            {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Adicionar
+          </Button>
+        </div>
       </div>
     </div>
   );

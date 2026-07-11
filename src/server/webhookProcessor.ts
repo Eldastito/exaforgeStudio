@@ -7,6 +7,7 @@ import { CustomerProfileService } from "./CustomerProfileService.js";
 import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { setUsageOrg } from "./usageContext.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { deliverBotMessage } from "./botOutbound.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { AttendanceAreaService } from "./AttendanceAreaService.js";
@@ -269,11 +270,8 @@ export async function processIncomingMessage(
         const ok = await SupplierQuoteService.parseSupplierReply(orgId, pendingQuote, payload.text);
         if (ok) {
           // Confirmação curta para o fornecedor (sem prometer nada).
-          const ackId = uuidv4();
           const ack = "Recebido, obrigado! 🙏 Já está com o nosso time de compras para avaliar.";
-          db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`).run(ackId, orgId, ticket.id, ack);
-          if (io) io.to(`org:${orgId}`).emit("new_message", { id: ackId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: ack, sender: "bot", timestamp: new Date().toISOString() });
-          await MessageProviderService.sendMessage(channel.id, payload.senderId, ack);
+          await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: ack, io });
           return;
         }
       }
@@ -286,12 +284,8 @@ export async function processIncomingMessage(
     const followUp = SatisfactionService.pendingFollowUp(orgId, contact.id);
     if (followUp) {
       SatisfactionService.captureComment(orgId, followUp.id, payload.text);
-      const sId = uuidv4();
       const reply = 'Obrigado pelo feedback! Vou repassar para a equipe e vamos trabalhar nisso. 🙏';
-      db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`)
-        .run(sId, orgId, ticket.id, reply);
-      if (io) io.to(`org:${orgId}`).emit("new_message", { id: sId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: reply, sender: "bot", timestamp: new Date().toISOString() });
-      await MessageProviderService.sendMessage(channel.id, payload.senderId, reply);
+      await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: reply, io });
       return;
     }
   } catch (e) { console.error('[CSAT] Falha ao capturar follow-up', e); }
@@ -310,11 +304,7 @@ export async function processIncomingMessage(
         }
         const first = (contact.name || '').trim().split(/\s+/)[0] || '';
         const reply = SatisfactionService.replyFor(score, first);
-        const sId = uuidv4();
-        db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`)
-          .run(sId, orgId, ticket.id, reply);
-        if (io) io.to(`org:${orgId}`).emit("new_message", { id: sId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text: reply, sender: "bot", timestamp: new Date().toISOString() });
-        await MessageProviderService.sendMessage(channel.id, payload.senderId, reply);
+        await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: reply, io });
         return;
       }
     }
@@ -323,13 +313,10 @@ export async function processIncomingMessage(
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {
       try {
-       // Envia uma resposta do bot (persiste + emite + entrega ao provedor).
+       // Envia uma resposta do bot (persiste + emite + entrega — pela fila da
+       // Fase 3 quando ligada, senão inline). Ver botOutbound.ts.
        const sendBotReply = async (text: string) => {
-         const bId = uuidv4();
-         db.prepare(`INSERT INTO messages (id, organization_id, ticket_id, sender_type, content) VALUES (?, ?, ?, 'bot', ?)`)
-           .run(bId, orgId, ticket.id, text);
-         if (io) io.to(`org:${orgId}`).emit("new_message", { id: bId, ticketId: ticket.id, contactId: contact.id, provider: channel.provider, text, sender: "bot", timestamp: new Date().toISOString() });
-         await MessageProviderService.sendMessage(channel.id, payload.senderId, text);
+         await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text, io });
        };
 
        // ÁREAS DE ATENDIMENTO: se a org tem 2+ áreas, roteia ANTES da IA.
@@ -851,53 +838,10 @@ export async function processIncomingMessage(
          }
        }
 
-       // Save AI message
-       const botMsgId = uuidv4();
-       db.prepare(`
-         INSERT INTO messages (id, organization_id, ticket_id, sender_type, content)
-         VALUES (?, ?, ?, 'bot', ?)
-       `).run(botMsgId, orgId, ticket.id, finalReply);
-
-       // Emit AI response to frontend
-       if (io) {
-          const aiMsgPayload = {
-             id: botMsgId,
-             ticketId: ticket.id,
-             contactId: contact.id,
-             provider: channel.provider,
-             text: finalReply,
-             sender: "bot",
-             timestamp: new Date().toISOString()
-          };
-          io.to(`org:${orgId}`).emit("new_message", aiMsgPayload);
-       }
-
-       // Send AI response back to provider. O envio falha em silêncio quando o
-       // provedor está mal configurado (ex.: Instagram sem inscrição no webhook
-       // `messages`, token expirado, escopo faltando). Antes o erro era engolido
-       // e o painel do lojista mostrava a resposta como se tivesse chegado ao
-       // cliente. Agora marcamos delivery_status na própria mensagem, emitimos
-       // uma atualização para o painel e criamos uma notificação de alerta —
-       // assim o lojista vê que precisa reconectar/reconfigurar.
-       try {
-         await MessageProviderService.sendMessage(channel.id, payload.senderId, finalReply);
-         db.prepare(`UPDATE messages SET delivery_status = 'sent' WHERE id = ?`).run(botMsgId);
-       } catch (sendErr: any) {
-         const errMsg = String(sendErr?.message || sendErr).slice(0, 500);
-         console.error(`[MessageProvider] Envio falhou (${channel.provider}) para ${payload.senderId}:`, errMsg);
-         db.prepare(`UPDATE messages SET delivery_status = 'failed', delivery_error = ? WHERE id = ?`).run(errMsg, botMsgId);
-         if (io) io.to(`org:${orgId}`).emit("message_delivery_failed", { id: botMsgId, ticketId: ticket.id, provider: channel.provider, error: errMsg });
-         try {
-           NotificationService.push({
-             organizationId: orgId,
-             title: `Resposta da IA não chegou ao ${channel.provider === 'instagram' ? 'Instagram' : channel.provider}`,
-             message: `Reconecte o canal ou verifique escopos/inscrição do webhook. Detalhe: ${errMsg.slice(0, 180)}`,
-             type: "alert",
-             dedupeKey: `provider_send_failed:${channel.id}`,
-             dedupeWindowMin: 60,
-           });
-         } catch { /* noop */ }
-       }
+       // Salva + emite + ENTREGA a resposta da IA. Pela fila da Fase 3 quando
+       // ligada (retry/backoff, estado real); senão inline com o alerta de falha
+       // de sempre. Ver botOutbound.ts (unifica o padrão antes repetido aqui).
+       await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: finalReply, io });
 
      } catch (e) {
        console.error("[IA RAG] Falha ao processar e responder:", e);

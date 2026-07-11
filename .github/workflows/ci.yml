@@ -82,6 +82,7 @@ jobs:
           - { name: 'edge-runtime', script: 'test:edge-runtime' }
           - { name: 'edge-reconcile', script: 'test:edge-reconcile' }
           - { name: 'edge-send-message', script: 'test:edge-send-message' }
+          - { name: 'bot-outbound', script: 'test:bot-outbound' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

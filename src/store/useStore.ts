@@ -35,7 +35,9 @@ export type Message = {
   // Continuity Layer (ADR-082, Fase 0): estado REAL de entrega da mensagem
   // enviada pelo painel. 'pending' até o servidor confirmar; nunca mostrar
   // como enviada sem confirmação.
-  deliveryStatus?: 'pending' | 'sent' | 'failed';
+  // 'queued'/'delivered' entram com a fila de entrega ao provedor (ADR-082,
+  // Fase 3): queued = na fila do servidor; delivered = confirmado ao destinatário.
+  deliveryStatus?: 'pending' | 'queued' | 'sent' | 'delivered' | 'failed';
 };
 
 export type Stage = 
@@ -504,7 +506,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (sender !== 'human') return;
 
     const contact = state.contacts[ticket.contactId];
-    const patch = (status: 'sent' | 'failed') => set((s) => ({
+    const patch = (status: Message['deliveryStatus']) => set((s) => ({
       messages: {
         ...s.messages,
         [ticketId]: (s.messages[ticketId] || []).map(m => m.id === localId ? { ...m, deliveryStatus: status } : m),
@@ -518,9 +520,18 @@ export const useStore = create<AppState>((set, get) => ({
         // commandId dá idempotência: reenvio pelo outbox não duplica (ADR-082 D3).
         body: JSON.stringify({ contactId: contact?.number || ticket.contactId, text, commandId: localId }),
       });
-      // Só marca "enviado" se o servidor confirmou de fato (2xx). Um 500/502 do
-      // provedor NÃO é sucesso — vira 'failed', nunca some.
-      patch(res.ok ? 'sent' : 'failed');
+      if (res.ok) {
+        // Com a FILA DE ENTREGA ligada (ADR-082, Fase 3) o servidor responde
+        // 'queued': a mensagem entrou na fila, ainda NÃO foi entregue — o balão
+        // segue "na fila" e o socket `message_delivery_status` o promove a
+        // enviada/entregue/falha. Sem a fila, 2xx = 'sent' como antes.
+        let status: Message['deliveryStatus'] = 'sent';
+        try { const body = await res.json(); if (body?.status === 'queued') status = 'queued'; } catch { /* corpo vazio */ }
+        patch(status);
+      } else {
+        // Um 500/502 do provedor NÃO é sucesso — vira 'failed', nunca some.
+        patch('failed');
+      }
     } catch (e) {
       // Erro de REDE (offline): não falha — enfileira no outbox durável
       // (ADR-082, Fase 1b) e deixa 'pending'. O flusher reenvia quando a

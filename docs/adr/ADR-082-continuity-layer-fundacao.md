@@ -84,7 +84,7 @@ Diferente de Prospect/Clínica (aditivos), esta é uma mudança **horizontal**. 
 - **Fase 1+2 (pareadas) — Continuity Cloud + Outbox do navegador:** `domain_events` + delta sync (D4); `client_commands` + idempotency-key nos comandos críticos (D3, D5); IndexedDB + outbox no navegador com os estados de D9.
 - **Fase 1b — Outbox do navegador (entregue):** IndexedDB + fila `pending→syncing→sent|failed` (D9), reenvio idempotente por `commandId`, flusher ao voltar `online`.
 - **Fase 1c — PWA real (entregue):** `vite-plugin-pwa`/Workbox cacheando **só** o app shell (`navigateFallback` para `/index.html`, denylist para `/api` e rotas públicas; sem `runtimeCaching` da API, então dado por-tenant nunca encosta no cache); IndexedDB de continuidade limpo no logout (D7).
-- **Fase 3 — Fila de entrega ao provedor:** separar "salvo no ZappFlow" de "entregue ao WhatsApp" (`queued→sent→delivered/failed`), reusando o dispatcher do Vision (D6).
+- **Fase 3 — Fila de entrega ao provedor (entregue):** `message_deliveries` separa "salvo no ZappFlow" de "entregue ao WhatsApp" — a mensagem grava como `queued` e um dispatcher no core tenta o provedor com retry/backoff exponencial (`30,120,600,1800,7200,21600`s, teto 6), evoluindo `queued→sent→delivered/failed` (mesmo padrão do `webhookDispatcher` do Vision, D6). Atrás da flag `CONTINUITY_DELIVERY_QUEUE_ENABLED` (default OFF → `/send` inline intacto). Painel atualizado ao vivo por `message_delivery_status` (casa pelo `command_id`). `delivered` é gancho pronto (`markDelivered`) para o webhook de status do provedor.
 - **Fase 4 — ZappFlow Edge genérico:** generalizar supervisor + SQLite próprio + outbox + auth de máquina; construir o sync Edge↔Cloud que nem o Vision tem ainda (ADR-007). Por último.
 
 ## Consequências

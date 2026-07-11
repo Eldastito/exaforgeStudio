@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { MessageProviderService } from "../MessageProviderService.js";
+import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { ContinuityService } from "../ContinuityService.js";
 import { AuthRequest } from "../middleware/auth.js";
 
@@ -56,6 +57,28 @@ router.post("/send", async (req: AuthRequest, res) => {
     }
 
     const msgId = uuidv4();
+
+    // Continuity Layer (ADR-082, Fase 3 / D6): com a FILA DE ENTREGA ligada, a
+    // mensagem é gravada como 'queued' e a entrega ao provedor vira um registro
+    // durável que o dispatcher tenta com retry/backoff — o request NÃO bloqueia
+    // no provedor e uma queda momentânea não vira falha permanente. O painel é
+    // atualizado ao vivo pelo socket `message_delivery_status`. Com a flag
+    // desligada, mantém-se o caminho inline de sempre (abaixo).
+    if (MessageDeliveryService.enabled()) {
+      db.prepare(`
+        INSERT INTO messages (id, organization_id, ticket_id, sender_type, content, delivery_status, command_id)
+        VALUES (?, ?, ?, 'agent', ?, 'queued', ?)
+      `).run(msgId, orgId, ticket.id, text, commandId);
+      MessageDeliveryService.enqueue(orgId, {
+        messageId: msgId, channelId: channel.id, recipient: contact.identifier, content: text,
+        ticketId: ticket.id, commandId,
+      });
+      if (commandId) ContinuityService.recordCommand(orgId, commandId, { userId, operationType: 'SEND_MESSAGE', result: { id: msgId, status: 'queued' } });
+      ContinuityService.append(orgId, { aggregateType: 'message', aggregateId: msgId, eventType: 'message.queued', payload: { ticketId: ticket.id, contactId } });
+      logAuthEvent(orgId, userId, contactId, 'MESSAGE_QUEUED', { ticketId: ticket.id });
+      return res.json({ id: msgId, status: 'queued' });
+    }
+
     db.prepare(`
       INSERT INTO messages (id, organization_id, ticket_id, sender_type, content, delivery_status, command_id)
       VALUES (?, ?, ?, 'agent', ?, 'pending', ?)

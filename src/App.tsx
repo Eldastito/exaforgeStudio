@@ -150,6 +150,20 @@ export default function App() {
       receiveMessage(data.contactId, data.text, data.sender as any, data.contactName, data.contactAvatar, data.contactNumber, data.mediaUrl);
     });
 
+    // Fila de entrega ao provedor (ADR-082, Fase 3): o dispatcher promove o
+    // estado da mensagem (queued → sent → delivered | failed) e avisa o painel.
+    // Casa pelo commandId (id local do balão otimista) ou pelo id do servidor.
+    socket.on("message_delivery_status", (data: { id: string; commandId?: string; ticketId?: string; status: 'queued' | 'sent' | 'delivered' | 'failed'; error?: string }) => {
+      const s = useStore.getState();
+      const messages = { ...s.messages };
+      for (const tid of Object.keys(messages)) {
+        const arr = messages[tid];
+        const idx = arr.findIndex(m => (data.commandId && m.id === data.commandId) || m.id === data.id);
+        if (idx >= 0) { messages[tid] = arr.map((m, i) => i === idx ? { ...m, deliveryStatus: data.status } : m); break; }
+      }
+      useStore.setState({ messages });
+    });
+
     socket.on("ticket_stage_change", (data: { contactId: string, newStage: string }) => {
       console.log("Movendo cartão do lead...", data);
       updateStageByContactId(data.contactId, data.newStage as any);

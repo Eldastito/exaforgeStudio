@@ -192,11 +192,17 @@ export function ChatPanel() {
                   {msg.deliveryStatus === 'pending' && (
                     <span className="text-[10px] text-amber-400" title="Aguardando envio">enviando…</span>
                   )}
+                  {msg.deliveryStatus === 'queued' && (
+                    <span className="text-[10px] text-amber-400" title="Na fila de entrega">na fila…</span>
+                  )}
                   {msg.deliveryStatus === 'failed' && (
                     <span className="text-[10px] text-red-400 font-medium" title="A mensagem não foi enviada">não enviada</span>
                   )}
                   {msg.deliveryStatus === 'sent' && (
                     <span className="text-[10px] text-emerald-400" title="Enviada">enviada ✓</span>
+                  )}
+                  {msg.deliveryStatus === 'delivered' && (
+                    <span className="text-[10px] text-emerald-400" title="Entregue ao destinatário">entregue ✓✓</span>
                   )}
                 </div>
                 <div

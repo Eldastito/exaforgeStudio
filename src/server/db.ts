@@ -528,6 +528,40 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar Continuity (domain_events/client_commands)', e); }
+
+  // Continuity Layer (ADR-082, Fase 3 / D6) — FILA DE ENTREGA AO PROVEDOR.
+  // Separa "salvo no ZappFlow" de "entregue ao WhatsApp": a mensagem é gravada
+  // na hora (queued) e um dispatcher tenta o provedor com retry/backoff
+  // exponencial (mesmo padrão do webhookDispatcher do Vision), evoluindo o
+  // status queued → sent → delivered | failed. Assim uma indisponibilidade
+  // momentânea do provedor não vira falha permanente (antes: uma tentativa só).
+  // `command_id` correlaciona com o balão otimista do front (id local da msg).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS message_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        ticket_id TEXT,
+        channel_id TEXT NOT NULL,
+        command_id TEXT,
+        recipient TEXT NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued', -- queued | sent | delivered | failed
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 6,
+        next_attempt_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_error TEXT,
+        sent_at DATETIME,
+        delivered_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_message_deliveries_due ON message_deliveries (status, next_attempt_at);
+      CREATE INDEX IF NOT EXISTS idx_message_deliveries_msg ON message_deliveries (organization_id, message_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar message_deliveries', e); }
+
   // Metadados da base de conhecimento (RAG)
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN channel_id TEXT DEFAULT 'global'`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}

@@ -65,6 +65,7 @@ import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
+import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
@@ -1308,6 +1309,10 @@ async function startServer() {
   Scheduler.start(io);
   // Notificações in-app em tempo real (emite via Socket.io).
   NotificationService.setIo(io);
+  // Continuity Layer (ADR-082, Fase 3): fila de entrega ao provedor. Self-gate —
+  // só liga o dispatcher com CONTINUITY_DELIVERY_QUEUE_ENABLED. Recupera sozinho
+  // as entregas 'queued' pendentes de um reinício ao voltar.
+  try { MessageDeliveryService.start(); } catch (e) { console.error('[MsgDelivery] Falha ao iniciar', e); }
 
 }
 

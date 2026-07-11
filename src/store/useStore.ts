@@ -522,8 +522,17 @@ export const useStore = create<AppState>((set, get) => ({
       // provedor NÃO é sucesso — vira 'failed', nunca some.
       patch(res.ok ? 'sent' : 'failed');
     } catch (e) {
-      console.error("Failed to send msg:", e);
-      patch('failed'); // erro de rede (offline) → pendente vira falha visível
+      // Erro de REDE (offline): não falha — enfileira no outbox durável
+      // (ADR-082, Fase 1b) e deixa 'pending'. O flusher reenvia quando a
+      // conexão voltar, com o mesmo commandId (servidor deduplica).
+      console.warn("Sem conexão ao enviar — enfileirando no outbox:", e);
+      try {
+        const { enqueueMessage } = await import('@/src/lib/continuity/sync');
+        await enqueueMessage(localId, { contactId: contact?.number || ticket.contactId, text });
+        // permanece 'pending' na UI (não vira 'failed')
+      } catch {
+        patch('failed');
+      }
     }
   },
 

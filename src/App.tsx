@@ -60,6 +60,26 @@ export default function App() {
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
   }, []);
 
+  // Outbox durável (ADR-082, Fase 1b): reenvia comandos enfileirados offline e
+  // reflete o resultado no balão da mensagem (id do comando = id local da msg).
+  useEffect(() => {
+    if (!token) return;
+    let stop = () => {};
+    import('@/src/lib/continuity/sync').then(({ startOutboxFlusher }) => {
+      stop = startOutboxFlusher((commandId, status) => {
+        const s = useStore.getState();
+        const messages = { ...s.messages };
+        for (const tid of Object.keys(messages)) {
+          const arr = messages[tid];
+          const idx = arr.findIndex(m => m.id === commandId);
+          if (idx >= 0) { messages[tid] = arr.map((m, i) => i === idx ? { ...m, deliveryStatus: status } : m); break; }
+        }
+        useStore.setState({ messages });
+      });
+    });
+    return () => stop();
+  }, [token]);
+
   useEffect(() => {
     if (!token) return;
     // Carrega os tickets/contatos reais do banco (substitui os dados de exemplo)

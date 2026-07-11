@@ -493,6 +493,41 @@ const initDb = () => {
   // duplicar a mensagem. UNIQUE parcial por organização.
   try { db.exec(`ALTER TABLE messages ADD COLUMN command_id TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_command ON messages (organization_id, command_id) WHERE command_id IS NOT NULL`); } catch(e){}
+
+  // Continuity Layer (ADR-082, Fase 1) — event log com sequência POR organização
+  // (fonte do delta sync na reconexão) + comandos idempotentes (client_commands).
+  // O Socket.IO passa a ser só notificador; o cliente reconcilia pedindo os
+  // eventos após o seu último seq. Gravar eventos é opt-in (flag por env).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS domain_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,           -- monotônico por organização (1,2,3,...)
+        aggregate_type TEXT NOT NULL,   -- ticket | message | order | ...
+        aggregate_id TEXT,
+        event_type TEXT NOT NULL,
+        payload_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_events_seq ON domain_events (organization_id, seq);
+      CREATE INDEX IF NOT EXISTS idx_domain_events_agg ON domain_events (organization_id, aggregate_type, aggregate_id);
+
+      CREATE TABLE IF NOT EXISTS client_commands (
+        organization_id TEXT NOT NULL,
+        command_id TEXT NOT NULL,
+        device_id TEXT,
+        user_id TEXT,
+        operation_type TEXT,
+        status TEXT DEFAULT 'processed', -- processed | failed
+        result_json TEXT,
+        attempts INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        processed_at DATETIME,
+        PRIMARY KEY (organization_id, command_id)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar Continuity (domain_events/client_commands)', e); }
   // Metadados da base de conhecimento (RAG)
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN channel_id TEXT DEFAULT 'global'`); } catch(e){}
   try { db.exec(`ALTER TABLE knowledge_documents ADD COLUMN chunk_count INTEGER DEFAULT 0`); } catch(e){}

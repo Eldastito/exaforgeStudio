@@ -75,6 +75,7 @@ jobs:
           - { name: 'clinic-authorization', script: 'test:clinic-authorization' }
           - { name: 'clinic-connection', script: 'test:clinic-connection' }
           - { name: 'continuity-fase0', script: 'test:continuity-fase0' }
+          - { name: 'continuity-fase1', script: 'test:continuity-fase1' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

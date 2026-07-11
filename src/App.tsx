@@ -15,6 +15,7 @@ import { RevenueIntelligenceView } from '@/src/features/rie/RevenueIntelligenceV
 import { StudioView } from '@/src/features/StudioView';
 import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
+import { ClinicAgendaView } from '@/src/features/ClinicAgendaView';
 import { VisionVmsView } from '@/src/features/VisionVmsView';
 import { RadarView } from '@/src/features/RadarView';
 import { RadarConsultantView } from '@/src/features/RadarConsultantView';
@@ -61,7 +62,7 @@ export default function App() {
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
-      vision: 'vms', radar: 'radar',
+      vision: 'vms', radar: 'radar', clinica: 'clinica', prospect: 'prospect',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
@@ -204,6 +205,7 @@ export default function App() {
              {viewMode === 'studio' && 'Estúdio de Criação'}
              {viewMode === 'tarefas' && 'Tarefas'}
              {viewMode === 'prospect' && 'Prospect AI'}
+             {viewMode === 'clinica' && 'Agenda Clínica'}
              {viewMode === 'vision' && 'Vision VMS'}
              {viewMode === 'radar' && 'Radar de Execução IA'}
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
@@ -295,6 +297,7 @@ export default function App() {
           {viewMode === 'studio' && <StudioView />}
           {viewMode === 'tarefas' && <TasksView />}
           {viewMode === 'prospect' && <ProspectView />}
+          {viewMode === 'clinica' && <ClinicAgendaView />}
           {viewMode === 'vision' && <VisionVmsView />}
           {viewMode === 'radar' && <RadarView />}
           {viewMode === 'radar_consultant' && <RadarConsultantView />}

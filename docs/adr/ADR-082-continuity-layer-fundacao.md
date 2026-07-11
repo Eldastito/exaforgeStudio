@@ -82,7 +82,8 @@ Diferente de Prospect/Clínica (aditivos), esta é uma mudança **horizontal**. 
 
 - **Fase 0 — Integridade (hotfix):** fantasma (rota manual grava-primeiro com `delivery_status` + front só mostra "enviado" após confirmação; idem `toggleAiPaused`); auth distingue 401/403 de rede (D8); badge de conectividade; `hydrate()` na reconexão; estados de envio visíveis.
 - **Fase 1+2 (pareadas) — Continuity Cloud + Outbox do navegador:** `domain_events` + delta sync (D4); `client_commands` + idempotency-key nos comandos críticos (D3, D5); IndexedDB + outbox no navegador com os estados de D9.
-- **Fase 1b — PWA real:** `vite-plugin-pwa`/Workbox cacheando só o shell (D7).
+- **Fase 1b — Outbox do navegador (entregue):** IndexedDB + fila `pending→syncing→sent|failed` (D9), reenvio idempotente por `commandId`, flusher ao voltar `online`.
+- **Fase 1c — PWA real (entregue):** `vite-plugin-pwa`/Workbox cacheando **só** o app shell (`navigateFallback` para `/index.html`, denylist para `/api` e rotas públicas; sem `runtimeCaching` da API, então dado por-tenant nunca encosta no cache); IndexedDB de continuidade limpo no logout (D7).
 - **Fase 3 — Fila de entrega ao provedor:** separar "salvo no ZappFlow" de "entregue ao WhatsApp" (`queued→sent→delivered/failed`), reusando o dispatcher do Vision (D6).
 - **Fase 4 — ZappFlow Edge genérico:** generalizar supervisor + SQLite próprio + outbox + auth de máquina; construir o sync Edge↔Cloud que nem o Vision tem ainda (ADR-007). Por último.
 

@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { MessageProviderService } from "../MessageProviderService.js";
+import { ContinuityService } from "../ContinuityService.js";
 import { AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
@@ -64,6 +65,11 @@ router.post("/send", async (req: AuthRequest, res) => {
       await MessageProviderService.sendMessage(channel.id, contact.identifier, text);
       db.prepare("UPDATE messages SET delivery_status = 'sent' WHERE id = ?").run(msgId);
       logAuthEvent(orgId, userId, contactId, 'MESSAGE_SENT', { ticketId: ticket.id });
+      // Continuity (ADR-082, Fase 1): registra o comando (idempotência durável,
+      // além do índice em messages) e anexa o evento de domínio para o delta
+      // sync. Ambos best-effort / atrás de flag — não afetam a resposta.
+      if (commandId) ContinuityService.recordCommand(orgId, commandId, { userId, operationType: 'SEND_MESSAGE', result: { id: msgId, status: 'sent' } });
+      ContinuityService.append(orgId, { aggregateType: 'message', aggregateId: msgId, eventType: 'message.sent', payload: { ticketId: ticket.id, contactId } });
       res.json({ id: msgId, status: 'sent' });
     } catch (sendErr: any) {
       // A mensagem FICA no banco como 'failed' (não some) — o painel mostra o

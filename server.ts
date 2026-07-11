@@ -1022,6 +1022,25 @@ async function startServer() {
           senderId = message.from; // Número do cliente
           incomingMessageText = message.text?.body || '';
         }
+
+        // Recibos de ENTREGA (ADR-082): o WhatsApp Cloud manda `value.statuses[]`
+        // (wamid + status sent/delivered/read/failed) em payloads SEM `messages`.
+        // Correlacionamos pela fila de entrega (Fase 3, pelo wamid guardado no
+        // envio) e promovemos sent→delivered (✓✓ no painel). Best-effort.
+        const statuses = changes?.statuses;
+        if (Array.isArray(statuses) && statuses.length) {
+          try {
+            const phoneNumberId = changes?.metadata?.phone_number_id;
+            const ch = phoneNumberId
+              ? db.prepare(`SELECT organization_id FROM channels WHERE identifier = ? AND provider = 'whatsapp_cloud'`).get(String(phoneNumberId)) as any
+              : null;
+            if (ch?.organization_id) {
+              for (const st of statuses) {
+                if (st?.id && st?.status) MessageDeliveryService.markProviderStatus(ch.organization_id, String(st.id), String(st.status));
+              }
+            }
+          } catch (e) { console.error("[Webhook] Falha ao processar statuses do WhatsApp", e); }
+        }
       } else if (payload.object === "instagram" || payload.object === "page") {
         provider = 'instagram';
         const entry = payload.entry?.[0];

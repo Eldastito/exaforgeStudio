@@ -38,7 +38,8 @@ async function main() {
   const sends: any[] = [];
   (MessageProviderService as any).sendMessage = async (channelId: string, to: string, content: string) => {
     sends.push({ channelId, to, content });
-    return { messages: [{ id: "wamid.MOCK123" }] };
+    // sendMessage passou a devolver o id do provedor (wamid) como string.
+    return "wamid.MOCK123";
   };
 
   function seedOrg(tag: string) {

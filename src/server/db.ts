@@ -554,6 +554,7 @@ const initDb = () => {
         last_error TEXT,
         sent_at DATETIME,
         delivered_at DATETIME,
+        provider_message_id TEXT,              -- id do provedor (wamid) p/ correlacionar recibos de status
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -561,6 +562,10 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_message_deliveries_msg ON message_deliveries (organization_id, message_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar message_deliveries', e); }
+  // Recibos de entrega (ADR-082, evolução): correlaciona o status do provedor
+  // (WhatsApp Cloud `statuses[]`) com a entrega pelo id do provedor (wamid).
+  try { db.exec(`ALTER TABLE message_deliveries ADD COLUMN provider_message_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_message_deliveries_provider ON message_deliveries (organization_id, provider_message_id)`); } catch(e){}
 
   // Continuity Layer (ADR-082, Fase 4a) — REGISTRO DE NÓS EDGE + protocolo de
   // sync. Um "ZappFlow Edge" é um processo/instalação local do cliente que

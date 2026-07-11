@@ -4,9 +4,11 @@ import { ManipulationRadarService } from "./ManipulationRadarService.js";
 
 export class MessageProviderService {
   /**
-   * Envia uma mensagem para o contato, abstraindo o provedor.
+   * Envia uma mensagem para o contato, abstraindo o provedor. Retorna o id da
+   * mensagem no provedor (wamid no WhatsApp Cloud) quando disponível — usado
+   * para correlacionar os recibos de entrega (delivered/read) do webhook.
    */
-  static async sendMessage(channelId: string, recipientIdentifier: string, content: string) {
+  static async sendMessage(channelId: string, recipientIdentifier: string, content: string): Promise<string | undefined> {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
@@ -76,7 +78,11 @@ export class MessageProviderService {
        if (!response.ok) {
           throw new Error(`Erro na Graph API: ${await response.text()}`);
        }
-       return true;
+       // Devolve o id do provedor (wamid) para correlacionar os recibos de
+       // status (delivered/read) que chegam depois pelo webhook. WhatsApp Cloud:
+       // messages[0].id; Instagram: message_id.
+       const data: any = await response.json().catch(() => null);
+       return data?.messages?.[0]?.id || data?.message_id || undefined;
     } else if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
         // Prioriza a chave do ambiente (fonte da verdade no deploy) e só usa a do
         // canal como fallback — evita um token antigo/errado salvo no banco vencer.
@@ -109,9 +115,10 @@ export class MessageProviderService {
         if (!response.ok) {
            throw new Error(`Erro na Evolution API (${response.status}) em ${endpoint}: ${await response.text()}`);
         }
-        return true;
+        const data: any = await response.json().catch(() => null);
+        return data?.key?.id || data?.id || undefined;
     }
-    
+
     throw new Error("Provedor não suportado");
   }
 

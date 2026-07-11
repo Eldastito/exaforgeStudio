@@ -1356,6 +1356,27 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+
+  // Módulo Clínica (ADR-080, Fase D) — Portal do Profissional por link seguro.
+  // Molde do Radar público: token aleatório forte, guardado só como hash
+  // SHA-256, com expiração. O link dá acesso SOMENTE à agenda do próprio
+  // profissional (sem financeiro, configurações ou outros profissionais).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS professional_portal_tokens (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        expires_at DATETIME,
+        last_access_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_portal_tokens_hash ON professional_portal_tokens (token_hash);
+      CREATE INDEX IF NOT EXISTS idx_portal_tokens_prof ON professional_portal_tokens (organization_id, professional_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tokens do portal (Clínica)', e); }
   // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
   try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}

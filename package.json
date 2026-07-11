@@ -24,6 +24,7 @@
     "test:clinic-quickstart": "tsx scripts/test-clinic-quickstart.ts",
     "test:clinic-patient": "tsx scripts/test-clinic-patient.ts",
     "test:clinic-agenda": "tsx scripts/test-clinic-agenda.ts",
+    "test:clinic-portal": "tsx scripts/test-clinic-portal.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

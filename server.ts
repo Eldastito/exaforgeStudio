@@ -60,6 +60,7 @@ import fashionPublicRoutes from "./src/server/routes/fashionPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
+import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
@@ -346,6 +347,7 @@ async function startServer() {
   // Radar de Execução IA — diagnóstico rápido PÚBLICO (landing sem login,
   // Fase 2/ADR-012). Mesmo motivo de registro cedo: nunca deve exigir JWT.
   app.use("/api/public/radar", radarPublicRoutes);
+  app.use("/api/public/clinic", clinicPublicRoutes);
 
   // LISTA DE PLANOS é PÚBLICA: a tela de cadastro/"começar grátis" precisa
   // carregar os planos SEM login. Registrada antes do protectedApi (senão a

@@ -1750,6 +1750,34 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar tabelas do Research Engine', e); }
   try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN variant_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE prospect_outreach ADD COLUMN experiment_id TEXT`); } catch(e){}
+
+  // Prospect AI (ADR-079, Fase D) — memória de aprendizados. ESTRITAMENTE por
+  // tenant (D4: sem scope global no MVP). Aprendizado novo do mesmo tipo na
+  // mesma campanha SUPERSEDE o anterior (status deprecated) — memória não
+  // vira dogma quando um experimento novo contradiz o antigo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_learning_memory (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        scope TEXT DEFAULT 'campaign',        -- campaign | segment | product
+        campaign_id TEXT,
+        segment TEXT,
+        region TEXT,
+        channel TEXT,
+        learning_type TEXT DEFAULT 'message', -- message | niche | timing | objection | offer
+        insight TEXT NOT NULL,
+        confidence_score REAL DEFAULT 0.5,
+        evidence_json TEXT,
+        source_experiment_id TEXT,
+        status TEXT DEFAULT 'active',         -- active | deprecated
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospect_learning_org ON prospect_learning_memory (organization_id, status, learning_type);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar prospect_learning_memory', e); }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS prospect_discovery_runs (

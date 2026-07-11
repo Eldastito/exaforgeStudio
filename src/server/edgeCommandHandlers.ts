@@ -66,4 +66,61 @@ export function registerBuiltinEdgeCommandHandlers(): void {
       result: { id: msgId, status: "queued" },
     };
   });
+
+  // TOGGLE_AI — payload: { ticketId?, contactId?, aiPaused }. Pausa/retoma a IA
+  // do ticket (espelha /api/messages/toggle-ai). Idempotente (define um valor).
+  EdgeInboxProcessor.registerHandler("TOGGLE_AI", async (ctx) => {
+    const ticket = resolveTicket(ctx.orgId, ctx.payload);
+    const aiPaused = !!ctx.payload?.aiPaused;
+    db.prepare("UPDATE tickets SET ai_paused = ? WHERE id = ? AND organization_id = ?").run(aiPaused ? 1 : 0, ticket.id, ctx.orgId);
+    emitOrg(ctx.orgId, aiPaused ? "ticket_ai_paused" : "ticket_ai_unpaused", { ticketId: ticket.id });
+    return {
+      resultEvent: { aggregateType: "ticket", aggregateId: ticket.id, eventType: "ticket.ai_toggled", payload: { aiPaused } },
+      result: { ticketId: ticket.id, aiPaused },
+    };
+  });
+
+  // UPDATE_TICKET_STAGE — payload: { ticketId, stage }. Move o ticket de estágio
+  // (espelha PUT /api/tickets/:id/stage), com log e emit. Idempotente.
+  EdgeInboxProcessor.registerHandler("UPDATE_TICKET_STAGE", async (ctx) => {
+    const stage = String(ctx.payload?.stage || "").trim();
+    if (!stage) throw new Error("UPDATE_TICKET_STAGE requer stage");
+    const ticket = resolveTicket(ctx.orgId, ctx.payload);
+    if (ticket.stage === stage) {
+      return { resultEvent: { aggregateType: "ticket", aggregateId: ticket.id, eventType: "ticket.stage_changed", payload: { stage, noop: true } }, result: { ticketId: ticket.id, stage } };
+    }
+    db.prepare("UPDATE tickets SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(stage, ticket.id);
+    try {
+      db.prepare("INSERT INTO ticket_stage_logs (id, organization_id, ticket_id, from_stage, to_stage, changed_by) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), ctx.orgId, ticket.id, ticket.stage, stage, ctx.deviceId || "edge");
+    } catch { /* tabela de log é best-effort */ }
+    emitOrg(ctx.orgId, "ticket_stage_change", { ticketId: ticket.id, contactId: ticket.contact_id, newStage: stage });
+    return {
+      resultEvent: { aggregateType: "ticket", aggregateId: ticket.id, eventType: "ticket.stage_changed", payload: { stage, from: ticket.stage } },
+      result: { ticketId: ticket.id, stage },
+    };
+  });
+}
+
+/** Resolve o ticket pelo ticketId (org-escopado) ou pelo contactId (último ticket). */
+function resolveTicket(orgId: string, payload: any): any {
+  const ticketId = String(payload?.ticketId || "").trim();
+  if (ticketId) {
+    const t = db.prepare("SELECT * FROM tickets WHERE id = ? AND organization_id = ?").get(ticketId, orgId) as any;
+    if (t) return t;
+  }
+  const contactId = String(payload?.contactId || "").trim();
+  if (contactId) {
+    const c = db.prepare("SELECT id FROM contacts WHERE identifier = ? AND organization_id = ?").get(contactId, orgId) as any;
+    if (c) {
+      const t = db.prepare("SELECT * FROM tickets WHERE contact_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 1").get(c.id, orgId) as any;
+      if (t) return t;
+    }
+  }
+  throw new Error("Ticket não encontrado (informe ticketId ou contactId)"); // retenta: pode ainda não ter sido reconciliado
+}
+
+/** Emite um evento para a sala da org, se o Socket.IO estiver disponível. */
+function emitOrg(orgId: string, event: string, payload: any): void {
+  try { const io = (global as any).io; if (io) io.to(`org:${orgId}`).emit(event, payload); } catch { /* nunca quebra o handler */ }
 }

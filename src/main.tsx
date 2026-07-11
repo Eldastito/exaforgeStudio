@@ -8,6 +8,7 @@ import { Storefront } from './storefront/Storefront.tsx';
 import { LandingPage } from './landing/LandingPage.tsx';
 import { RadarPublicWizard } from './radar-public/RadarPublicWizard.tsx';
 import { RadarRespondentWizard } from './radar-public/RadarRespondentWizard.tsx';
+import { ClinicPortalPage } from './clinic-public/ClinicPortalPage.tsx';
 
 // Vitrine pública (loja virtual) — renderizada fora do app autenticado.
 // Qualquer URL /loja/:slug abre a landing page Glass Toggle, sem login.
@@ -20,6 +21,9 @@ const isLanding = window.location.pathname === '/lp' || window.location.pathname
 // checagem genérica de /radar-ia/ (que cobre o diagnóstico anônimo, Fase 2).
 const isRadarRespondent = window.location.pathname.startsWith('/radar-ia/respond/');
 const isRadarPublic = !isRadarRespondent && (window.location.pathname === '/radar-ia' || window.location.pathname.startsWith('/radar-ia/'));
+// Portal do Profissional (Clínica, Fase D2) — página pública read-only, sem
+// login. /clinic/professional/:token abre a agenda do dia do profissional.
+const isClinicPortal = window.location.pathname.startsWith('/clinic/professional/');
 
 const originalFetch = window.fetch;
 Object.defineProperty(window, 'fetch', {
@@ -65,6 +69,8 @@ createRoot(rootEl).render(
       <RadarRespondentWizard />
     ) : isRadarPublic ? (
       <RadarPublicWizard />
+    ) : isClinicPortal ? (
+      <ClinicPortalPage />
     ) : (
       <AuthProvider>
         <App />

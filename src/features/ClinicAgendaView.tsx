@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
-import { toast } from '@/src/lib/toast';
+import { toast, confirmDialog } from '@/src/lib/toast';
 
 // ---- Tipos ----
 type Professional = { id: string; name: string; specialty?: string | null; color?: string | null; user_id?: string | null; active?: boolean | number };
@@ -143,6 +143,37 @@ export function ClinicAgendaView() {
 
   const overCount = rows.filter(r => computeOverrun(r, tick) === 'over_time').length;
 
+  // Exporta a agenda do dia (respeitando o filtro de profissional) em CSV.
+  // O download não passa pelo apiFetch se usarmos <a href> direto (rota /api/clinic
+  // exige token), então buscamos via apiFetch e geramos um Blob local.
+  const [exporting, setExporting] = useState(false);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ date });
+      if (filterProfessional) params.set('professionalId', filterProfessional);
+      const r = await apiFetch(`/api/clinic/agenda/export.csv?${params.toString()}`);
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error || 'Não foi possível exportar.');
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `agenda-${date}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('CSV exportado.');
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao exportar CSV.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // Executa uma ação de card (checkin/start-care/complete/continuation) com toast + reload.
   const action = async (key: string, path: string, okMsg: string, body?: any) => {
     setBusyId(key);
@@ -173,13 +204,23 @@ export function ClinicAgendaView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Fluxo do dia: chegada, atendimento e controle de permanência por paciente.</p>
         </div>
-        <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
-          <Plus className="w-4 h-4 mr-2" /> Novo agendamento
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap print:hidden">
+          <button onClick={() => window.print()}
+            className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 px-3 text-sm text-zinc-100">
+            <Printer className="w-4 h-4" /> Imprimir
+          </button>
+          <button onClick={exportCsv} disabled={exporting}
+            className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 px-3 text-sm text-zinc-100 disabled:opacity-60">
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Exportar CSV
+          </button>
+          <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
+            <Plus className="w-4 h-4 mr-2" /> Novo agendamento
+          </Button>
+        </div>
       </div>
 
       {/* Filtros */}
-      <div className="mb-5 flex items-end gap-3 flex-wrap rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="mb-5 flex items-end gap-3 flex-wrap rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 print:hidden">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-zinc-400">Data</span>
           <input type="date" value={date} onChange={e => setDate(e.target.value || todayISO())}
@@ -244,7 +285,7 @@ export function ClinicAgendaView() {
       )}
 
       {/* Painel colapsável — Profissionais e salas */}
-      <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50 print:hidden">
         <button onClick={() => setShowManage(s => !s)} className="w-full flex items-center justify-between px-5 py-3 text-left">
           <span className="text-sm font-medium text-zinc-100 flex items-center gap-2"><User className="w-4 h-4 text-emerald-400" /> Profissionais e salas</span>
           {showManage ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
@@ -330,7 +371,7 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
       </div>
 
       {/* Ações */}
-      <div className="mt-3 flex flex-wrap items-center gap-2 relative">
+      <div className="mt-3 flex flex-wrap items-center gap-2 relative print:hidden">
         {canCheckin && (
           <button onClick={onCheckin} disabled={busy('checkin')} className="text-[11px] px-2 py-1 rounded-lg bg-cyan-600/90 hover:bg-cyan-600 text-white inline-flex items-center gap-1 disabled:opacity-60">
             {busy('checkin') ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />} Check-in
@@ -625,13 +666,16 @@ function ProfessionalsPanel({ professionals, onChanged }: { professionals: Profe
         ) : professionals.map(p => {
           const active = p.active === true || p.active === 1;
           return (
-            <div key={p.id} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
-              <span className="inline-block w-2.5 h-2.5 rounded-full border border-zinc-600" style={{ backgroundColor: p.color || '#71717a' }} />
-              <span className="text-sm text-zinc-200 truncate">{p.name}</span>
-              {p.specialty && <span className="text-[11px] text-zinc-500 truncate">{p.specialty}</span>}
-              <button onClick={() => toggleActive(p)} className={`ml-auto text-[10px] px-1.5 py-0.5 rounded border ${active ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' : 'text-zinc-500 border-zinc-700'}`}>
-                {active ? 'Ativo' : 'Inativo'}
-              </button>
+            <div key={p.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2.5 h-2.5 rounded-full border border-zinc-600" style={{ backgroundColor: p.color || '#71717a' }} />
+                <span className="text-sm text-zinc-200 truncate">{p.name}</span>
+                {p.specialty && <span className="text-[11px] text-zinc-500 truncate">{p.specialty}</span>}
+                <button onClick={() => toggleActive(p)} className={`ml-auto text-[10px] px-1.5 py-0.5 rounded border ${active ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' : 'text-zinc-500 border-zinc-700'}`}>
+                  {active ? 'Ativo' : 'Inativo'}
+                </button>
+              </div>
+              <PortalControl professionalId={p.id} />
             </div>
           );
         })}
@@ -650,6 +694,135 @@ function ProfessionalsPanel({ professionals, onChanged }: { professionals: Profe
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- Controle do Portal do Profissional (Fase D2) ----
+// ISO -> "11/07/2026 14:30" (local).
+const fmtDateTime = (iso?: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+type PortalStatus = { active: boolean; expiresAt: string | null; lastAccessAt: string | null };
+
+function PortalControl({ professionalId }: { professionalId: string }) {
+  const [status, setStatus] = useState<PortalStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [linkUrl, setLinkUrl] = useState<string>(''); // URL absoluta recém-gerada
+  const [copied, setCopied] = useState(false);
+
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/professionals/${professionalId}/portal`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Falha ao consultar o portal.');
+      setStatus({ active: !!d.active, expiresAt: d.expiresAt ?? null, lastAccessAt: d.lastAccessAt ?? null });
+    } catch {
+      setStatus(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [professionalId]);
+
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/professionals/${professionalId}/portal`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível gerar o link.');
+      setLinkUrl(window.location.origin + d.path);
+      setStatus(s => ({ active: true, expiresAt: d.expiresAt ?? null, lastAccessAt: s?.lastAccessAt ?? null }));
+      toast.success('Link do portal gerado.');
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao gerar o link.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(linkUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast.success('Link copiado.');
+    } catch {
+      toast.error('Não foi possível copiar o link.');
+    }
+  };
+
+  const revoke = async () => {
+    const ok = await confirmDialog('Revogar o link de acesso deste profissional? O link atual deixará de funcionar.', {
+      title: 'Revogar acesso', confirmText: 'Revogar', danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/professionals/${professionalId}/portal`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Não foi possível revogar.');
+      setLinkUrl('');
+      setStatus({ active: false, expiresAt: null, lastAccessAt: status?.lastAccessAt ?? null });
+      toast.success('Acesso revogado.');
+    } catch (e: any) {
+      toast.error(e.message || 'Falha ao revogar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 pt-2 border-t border-zinc-800/80">
+      <div className="flex items-center gap-2 flex-wrap text-[11px]">
+        <Link2 className="w-3.5 h-3.5 text-zinc-500" />
+        <span className="text-zinc-400">Portal:</span>
+        {loading ? (
+          <span className="text-zinc-600 inline-flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> …</span>
+        ) : status?.active ? (
+          <span className="text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10">Ativo</span>
+        ) : (
+          <span className="text-zinc-500 px-1.5 py-0.5 rounded border border-zinc-700">Inativo</span>
+        )}
+        {status?.active && status.expiresAt && (
+          <span className="text-zinc-500">Válido até {fmtDateTime(status.expiresAt)}</span>
+        )}
+        {status?.lastAccessAt && (
+          <span className="text-zinc-600">Último acesso: {fmtDateTime(status.lastAccessAt)}</span>
+        )}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <button onClick={generate} disabled={busy}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white disabled:opacity-60">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />} {status?.active ? 'Novo link' : 'Gerar link'}
+          </button>
+          {status?.active && (
+            <button onClick={revoke} disabled={busy}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-60">
+              <Ban className="w-3 h-3" /> Revogar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {linkUrl && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <input readOnly value={linkUrl} onFocus={e => e.currentTarget.select()}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-[11px] text-zinc-200 outline-none focus:border-emerald-500 font-mono" />
+          <button onClick={copy}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-[11px]">
+            {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />} {copied ? 'Copiado' : 'Copiar'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

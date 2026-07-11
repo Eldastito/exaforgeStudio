@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { CampaignService } from "./CampaignService.js";
+import { ProspectResearchService } from "./ProspectResearchService.js";
 
 type Period = "today" | "week" | "month" | "all";
 
@@ -592,6 +593,13 @@ export class RevenueIntelligenceService {
       recoveredSources: recovered.sources,
       attributionWindowDays: recovered.attributionWindowDays,
       config: cfg,
+      // Prospect AI (ADR-079, Fase E): inteligência de prospecção no RIC —
+      // nichos com maior resposta, mensagem champion, aprendizados e receita
+      // potencial/ganha originada pela prospecção. Best-effort: sem dados ou
+      // módulo desativado → null, sem derrubar o snapshot.
+      prospect: (() => {
+        try { return ProspectResearchService.ricSummary(orgId); } catch { return null; }
+      })(),
     };
   }
 

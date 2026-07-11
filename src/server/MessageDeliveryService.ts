@@ -39,10 +39,12 @@ const BACKOFF_SECONDS = (process.env.CONTINUITY_DELIVERY_BACKOFF_SECONDS || "30,
   .split(",")
   .map((s) => Math.max(1, parseInt(s.trim(), 10) || 1));
 
-/** Sender injetável — produção usa o provedor real; testes injetam um fake. */
-export type DeliverySender = (channelId: string, recipient: string, content: string) => Promise<void>;
+/** Sender injetável — produção usa o provedor real; testes injetam um fake.
+ * Devolve o id do provedor (wamid) quando disponível, para correlacionar os
+ * recibos de entrega. */
+export type DeliverySender = (channelId: string, recipient: string, content: string) => Promise<string | void>;
 let sender: DeliverySender = async (channelId, recipient, content) => {
-  await MessageProviderService.sendMessage(channelId, recipient, content);
+  return await MessageProviderService.sendMessage(channelId, recipient, content);
 };
 
 type DeliveryRow = {
@@ -136,8 +138,8 @@ export class MessageDeliveryService {
     ).run(attempt, `+${delaySec} seconds`, d.id);
 
     try {
-      await sender(d.channel_id, d.recipient, d.content);
-      this.markSent(d, attempt);
+      const providerMessageId = await sender(d.channel_id, d.recipient, d.content);
+      this.markSent(d, attempt, typeof providerMessageId === "string" ? providerMessageId : null);
       return "sent";
     } catch (e: any) {
       const errMsg = String(e?.message || e).slice(0, 500);
@@ -151,12 +153,13 @@ export class MessageDeliveryService {
     }
   }
 
-  private static markSent(d: DeliveryRow, attempt: number) {
+  private static markSent(d: DeliveryRow, attempt: number, providerMessageId: string | null = null) {
     db.prepare(
       `UPDATE message_deliveries
-          SET status = 'sent', attempt_count = ?, sent_at = CURRENT_TIMESTAMP, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+          SET status = 'sent', attempt_count = ?, sent_at = CURRENT_TIMESTAMP, last_error = NULL,
+              provider_message_id = COALESCE(?, provider_message_id), updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`
-    ).run(attempt, d.id);
+    ).run(attempt, providerMessageId, d.id);
     try { db.prepare(`UPDATE messages SET delivery_status = 'sent' WHERE id = ?`).run(d.message_id); } catch { /* noop */ }
     try { logAuthEvent(d.organization_id, "system", d.recipient, "MESSAGE_SENT", { ticketId: d.ticket_id, deliveryId: d.id, attempts: attempt }); } catch { /* noop */ }
     ContinuityService.append(d.organization_id, { aggregateType: "message", aggregateId: d.message_id, eventType: "message.sent", payload: { ticketId: d.ticket_id, deliveryId: d.id } });
@@ -201,6 +204,37 @@ export class MessageDeliveryService {
     try { db.prepare(`UPDATE messages SET delivery_status = 'delivered' WHERE id = ?`).run(messageId); } catch { /* noop */ }
     ContinuityService.append(orgId, { aggregateType: "message", aggregateId: messageId, eventType: "message.delivered", payload: { ticketId: d.ticket_id, deliveryId: d.id } });
     this.emit(d, "delivered");
+    return true;
+  }
+
+  /**
+   * Aplica um recibo de status do provedor (webhook do WhatsApp Cloud),
+   * correlacionando pelo id do provedor (wamid): `delivered`/`read` promovem
+   * sent→delivered; `failed` marca falha. Retorna true se achou a entrega.
+   * Idempotente: recibos repetidos (delivered depois read) não duplicam evento.
+   */
+  static markProviderStatus(orgId: string, providerMessageId: string, status: string): boolean {
+    if (!providerMessageId) return false;
+    const d = db.prepare(
+      `SELECT id, organization_id, message_id, ticket_id, channel_id, command_id, recipient, content, attempt_count, max_attempts, status
+         FROM message_deliveries WHERE organization_id = ? AND provider_message_id = ?`
+    ).get(orgId, providerMessageId) as (DeliveryRow & { status: string }) | undefined;
+    if (!d) return false;
+    const s = String(status || "").toLowerCase();
+
+    if (s === "delivered" || s === "read") {
+      if (d.status === "delivered") return true; // já entregue → não reemite
+      return this.markDelivered(orgId, d.message_id);
+    }
+    if (s === "failed") {
+      if (d.status === "failed") return true;
+      db.prepare(`UPDATE message_deliveries SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(d.id);
+      try { db.prepare(`UPDATE messages SET delivery_status = 'failed' WHERE id = ?`).run(d.message_id); } catch { /* noop */ }
+      ContinuityService.append(orgId, { aggregateType: "message", aggregateId: d.message_id, eventType: "message.failed", payload: { ticketId: d.ticket_id, deliveryId: d.id, source: "provider_status" } });
+      this.emit(d, "failed");
+      return true;
+    }
+    // 'sent' e demais: já tratados no envio; nada a fazer.
     return true;
   }
 

@@ -57,8 +57,9 @@ export class ProspectExecutionService {
       const ch = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND provider IN (${WHATSAPP_PROVIDERS.map(() => "?").join(",")}) AND status = 'connected' ORDER BY created_at ASC LIMIT 1`)
         .get(orgId, ...WHATSAPP_PROVIDERS) as any;
       if (!ch) throw new Error("Nenhum canal de WhatsApp conectado. Conecte um canal em Configurações › Canais.");
-      const r: any = await MessageProviderService.sendMessage(ch.id, phone, o.body);
-      providerMessageId = String(r?.messages?.[0]?.id || r?.key?.id || r?.id || "") || null;
+      // sendMessage agora devolve o id do provedor (wamid) como string.
+      const wamid = await MessageProviderService.sendMessage(ch.id, phone, o.body);
+      providerMessageId = (typeof wamid === "string" && wamid) ? wamid : null;
       sentVia = "whatsapp";
     } else if (o.channel === "email") {
       const email = String(contact.email || "").trim();

@@ -122,8 +122,11 @@ router.post("/toggle-ai", async (req: AuthRequest, res) => {
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
 
     db.prepare('UPDATE tickets SET ai_paused = ? WHERE id = ?').run(ai_paused ? 1 : 0, ticket.id);
-    
+
     logAuthEvent(orgId, userId, ticket.id, 'TICKET_AI_TOGGLED', { ai_paused });
+    // Evento GORDO (ADR-082): carrega o novo estado (aiPaused) para materializar
+    // o ticket em consumidores do delta (ex.: edge_tickets no nó Edge).
+    ContinuityService.append(orgId, { aggregateType: 'ticket', aggregateId: ticket.id, eventType: 'ticket.ai_toggled', payload: { aiPaused: !!ai_paused, contactId: contact.identifier } });
 
     res.json({ message: "AI updated" });
   } catch(e) {

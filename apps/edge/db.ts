@@ -71,6 +71,19 @@ export function initEdgeDb() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (aggregate_type, aggregate_id)
     );
+
+    -- Materialização DEDICADA do ticket (ADR-082, eventos "gordos"): o nó tem o
+    -- board consultável offline (estágio + IA pausada), montado a partir dos
+    -- domain_events de ticket. Alimentado pelo materializador 'ticket' do
+    -- EdgeInboxApplicator; a projeção genérica (edge_aggregates) segue existindo.
+    CREATE TABLE IF NOT EXISTS edge_tickets (
+      id TEXT PRIMARY KEY,
+      contact_id TEXT,
+      stage TEXT,
+      ai_paused INTEGER,
+      last_seq INTEGER NOT NULL DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 }
 

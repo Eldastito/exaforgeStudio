@@ -96,3 +96,37 @@ export class EdgeInboxApplicator {
 }
 
 function safeParse(s: any): any { try { return JSON.parse(s ?? "null"); } catch { return null; } }
+
+/**
+ * Materializadores embutidos (ADR-082, eventos "gordos"). Registra a projeção
+ * DEDICADA do ticket em `edge_tickets` — o nó passa a ter o board consultável
+ * offline (estágio + IA pausada), montado a partir dos ticket.* do delta. Além
+ * da projeção genérica em edge_aggregates (que segue existindo).
+ */
+export function registerBuiltinAppliers(): void {
+  EdgeInboxApplicator.registerApplier("ticket", (state, e) => {
+    // `next` acumula o estado (prevState + payload do evento) — sempre o mais recente.
+    const next = { ...state, ...(e.payload || {}), lastEventType: e.eventType };
+    db.prepare(
+      `INSERT INTO edge_tickets (id, contact_id, stage, ai_paused, last_seq, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET
+         contact_id = COALESCE(excluded.contact_id, edge_tickets.contact_id),
+         stage      = COALESCE(excluded.stage, edge_tickets.stage),
+         ai_paused  = COALESCE(excluded.ai_paused, edge_tickets.ai_paused),
+         last_seq   = excluded.last_seq, updated_at = CURRENT_TIMESTAMP`
+    ).run(
+      e.aggregateId,
+      next.contactId ?? null,
+      next.stage ?? null,
+      next.aiPaused === undefined || next.aiPaused === null ? null : (next.aiPaused ? 1 : 0),
+      e.seq
+    );
+    return next;
+  });
+}
+
+/** Lê o ticket materializado localmente (board offline). */
+export function getEdgeTicket(id: string): any | null {
+  return (db.prepare(`SELECT id, contact_id, stage, ai_paused, last_seq, updated_at FROM edge_tickets WHERE id = ?`).get(id) as any) || null;
+}

@@ -92,6 +92,9 @@ Diferente de Prospect/Clínica (aditivos), esta é uma mudança **horizontal**. 
 
 > **Fase 4 completa** — com 4a (protocolo Cloud), 4b (runtime do Edge) e 4c (reconciliação), o ZappFlow Edge genérico existe: um nó on-premise com banco próprio, outbox durável e sync bidirecional idempotente contra a nuvem — o que nem o Vision tinha (ADR-007 saiu do papel, de forma genérica). Encerrada a Fase 4, **toda a Continuity Layer desta ADR está entregue** (Fases 0, 1, 1b, 1c, 3, 4a-c).
 
+**Evoluções pós-fundação (usando os pontos de extensão):**
+- **Handler `SEND_MESSAGE` do Edge** (`edgeCommandHandlers.ts`): o primeiro handler concreto do `EdgeInboxProcessor` — um comando de mensagem feito offline num nó Edge vira, na nuvem, uma mensagem persistida (idempotente pelo `command_id`) + entrega real via a fila do provedor (Fase 3), com `message.queued`/`message.sent` fechando o loop. Registrado no boot. Mostra como comandos concretos entram sem tocar no dispatcher.
+
 ## Consequências
 
 **Positivas:**

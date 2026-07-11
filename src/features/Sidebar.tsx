@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -44,6 +44,7 @@ export function Sidebar() {
              {mod('prospect') && <NavItem icon={<Target />} label="Prospect AI" active={viewMode === 'prospect'} onClick={() => setViewMode('prospect')} />}
              {mod('diretor') && <NavItem icon={<BrainCircuit />} label="Diretor IA" active={viewMode === 'diretor'} onClick={() => setViewMode('diretor')} />}
              {mod('agenda') && <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />}
+             {mod('clinica') && <NavItem icon={<Stethoscope />} label="Agenda Clínica" active={viewMode === 'clinica'} onClick={() => setViewMode('clinica')} />}
              {mod('reservas') && <NavItem icon={<CalendarCheck />} label="Reservas" active={viewMode === 'reservas'} onClick={() => setViewMode('reservas')} />}
              {mod('assinaturas') && <NavItem icon={<RefreshCw />} label="Assinaturas" active={viewMode === 'assinaturas'} onClick={() => setViewMode('assinaturas')} />}
              {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}

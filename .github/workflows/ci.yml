@@ -66,6 +66,7 @@ jobs:
           - { name: 'radar-isolation', script: 'test:radar-isolation' }
           - { name: 'prospect-isolation', script: 'test:prospect-isolation' }
           - { name: 'prospect-execution', script: 'test:prospect-execution' }
+          - { name: 'prospect-research', script: 'test:prospect-research' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

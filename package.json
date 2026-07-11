@@ -36,6 +36,7 @@
     "test:continuity-fase3": "tsx scripts/test-continuity-fase3.ts",
     "test:continuity-edge-sync": "tsx scripts/test-continuity-edge-sync.ts",
     "test:edge-runtime": "tsx scripts/test-edge-runtime.ts",
+    "test:edge-reconcile": "tsx scripts/test-edge-reconcile.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

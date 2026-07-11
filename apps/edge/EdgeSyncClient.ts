@@ -11,6 +11,7 @@
 // in-process que chama o EdgeSyncService real — assim o ciclo é testável offline.
 import db from "./db.js";
 import { EdgeOutbox, type EdgeCommand } from "./EdgeOutbox.js";
+import { EdgeInboxApplicator } from "./EdgeInboxApplicator.js";
 
 export type PullResponse = { events: any[]; cursor: number; hasMore: boolean };
 export type PushResponse = { results: { commandId: string; status: "accepted" | "deduped" | "rejected" }[]; accepted?: number; deduped?: number; rejected?: number };
@@ -57,7 +58,7 @@ export class EdgeSyncClient {
    * isolada; a queda de uma não impede as outras nem derruba o loop.
    */
   static async syncOnce(transport: EdgeTransport, opts: { agentVersion?: string; pullLimit?: number; maxPullPages?: number } = {}): Promise<{
-    heartbeat: boolean; pushed: { sent: number; failed: number; retried: number }; pulled: number; cursor: number;
+    heartbeat: boolean; pushed: { sent: number; failed: number; retried: number }; pulled: number; applied: number; cursor: number;
   }> {
     const pullLimit = opts.pullLimit || 200;
     const maxPullPages = opts.maxPullPages || 20;
@@ -90,6 +91,10 @@ export class EdgeSyncClient {
       setState("last_pull_at", String(Date.now()));
     } catch { /* offline — tenta no próximo ciclo */ }
 
-    return { heartbeat, pushed, pulled, cursor: getCursor() };
+    // 4) Reconciliação local (Fase 4c): aplica o inbox na projeção dos agregados.
+    let applied = 0;
+    try { applied = EdgeInboxApplicator.applyPending().projected; } catch { /* não derruba o loop */ }
+
+    return { heartbeat, pushed, pulled, applied, cursor: getCursor() };
   }
 }

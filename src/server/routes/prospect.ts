@@ -294,6 +294,41 @@ router.post("/experiments/:id/complete", managerOnly, async (req: AuthRequest, r
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Memória de aprendizados + IA (ADR-079, Fase D) ───────────────────────
+router.get("/research/learnings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectResearchService.listLearnings(orgId, { campaignId: req.query.campaignId as string, includeDeprecated: req.query.all === "1" }));
+});
+
+router.post("/research/learnings", managerOnly, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProspectResearchService.recordLearning(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/research/learnings/:id/deprecate", managerOnly, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ProspectResearchService.deprecateLearning(orgId, req.params.id, actor(req));
+  if (!ok) return res.status(400).json({ error: "Aprendizado não encontrado ou já depreciado." });
+  res.json({ success: true });
+});
+
+router.post("/research/suggest-hypotheses", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await ProspectResearchService.suggestHypotheses(orgId, req.body?.campaignId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/research/recommend-next-action", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(await ProspectResearchService.recommendNextAction(orgId));
+});
+
 router.get("/approval-queue", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

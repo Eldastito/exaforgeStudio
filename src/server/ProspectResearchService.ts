@@ -195,6 +195,94 @@ export class ProspectResearchService {
     ProspectExecutionService.emit(orgId, "experiment.completed", { campaignId: e.campaign_id, payload: { experimentId: id, decision, winnerVariantId: winner?.variant_id || null } });
     if (decision === "keep") ProspectExecutionService.emit(orgId, "experiment.winner_found", { campaignId: e.campaign_id, payload: { experimentId: id, winnerVariantId: winner!.variant_id } });
     logAuthEvent(orgId, actorId, null, "PROSPECT_EXPERIMENT_DECISION", { experimentId: id, decision, winnerVariantId: winner?.variant_id || null, z: Number(z.toFixed(3)) });
+
+    // Fase D: vitória com evidência vira MEMÓRIA reutilizável. Confiança
+    // derivada do z (mais separação estatística → mais confiança).
+    if (decision === "keep" && winner) {
+      this.recordLearning(orgId, {
+        campaignId: e.campaign_id, learningType: e.variable_under_test === "message" ? "message" : e.variable_under_test,
+        insight: `Experimento "${e.name}": a variante "${winner.name}" venceu em ${metricKey} (${(winner[metricKey] * 100).toFixed(1)}% vs ${(second[metricKey] * 100).toFixed(1)}%). ${e.hypothesis ? `Hipótese confirmada: ${e.hypothesis}` : ""}`.trim(),
+        confidence: Math.min(0.95, 0.5 + z / 10),
+        evidence: { experimentId: id, metric: metricKey, z: Number(z.toFixed(3)), metrics },
+        sourceExperimentId: id,
+      }, actorId);
+    }
     return this.getExperiment(orgId, id);
+  }
+
+  // ── Memória de aprendizados (ADR-079, Fase D — por tenant, D4) ──────────
+  /**
+   * Grava um aprendizado. Aprendizado ATIVO do mesmo tipo na mesma campanha é
+   * SUPERSEDIDO (deprecated) — evidência nova vence dogma antigo.
+   */
+  static recordLearning(orgId: string, input: {
+    campaignId?: string | null; scope?: string; segment?: string; region?: string; channel?: string;
+    learningType?: string; insight?: string; confidence?: number; evidence?: any; sourceExperimentId?: string;
+  }, actorId?: string): any {
+    const insight = String(input?.insight || "").trim();
+    if (!insight) throw new Error("Descreva o aprendizado.");
+    const learningType = ["message", "niche", "timing", "objection", "offer"].includes(String(input?.learningType)) ? input.learningType : "message";
+    db.prepare("UPDATE prospect_learning_memory SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND status = 'active' AND learning_type = ? AND COALESCE(campaign_id, '') = COALESCE(?, '')")
+      .run(orgId, learningType, input?.campaignId || null);
+    const id = randomUUID();
+    db.prepare(`INSERT INTO prospect_learning_memory (id, organization_id, scope, campaign_id, segment, region, channel, learning_type, insight, confidence_score, evidence_json, source_experiment_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, ["campaign", "segment", "product"].includes(String(input?.scope)) ? input.scope : "campaign",
+        input?.campaignId || null, String(input?.segment || "").trim() || null, String(input?.region || "").trim() || null,
+        String(input?.channel || "").trim() || null, learningType, insight,
+        Math.max(0, Math.min(1, Number(input?.confidence) || 0.5)), JSON.stringify(input?.evidence || {}), input?.sourceExperimentId || null, actorId || null);
+    logAuthEvent(orgId, actorId, null, "PROSPECT_LEARNING_RECORDED", { learningId: id, learningType, campaignId: input?.campaignId || null, sourceExperimentId: input?.sourceExperimentId || null });
+    return db.prepare("SELECT * FROM prospect_learning_memory WHERE id = ?").get(id);
+  }
+
+  static listLearnings(orgId: string, opts: { campaignId?: string; includeDeprecated?: boolean } = {}): any[] {
+    let sql = "SELECT * FROM prospect_learning_memory WHERE organization_id = ?";
+    const params: any[] = [orgId];
+    if (!opts.includeDeprecated) sql += " AND status = 'active'";
+    if (opts.campaignId) { sql += " AND campaign_id = ?"; params.push(opts.campaignId); }
+    return db.prepare(sql + " ORDER BY confidence_score DESC, created_at DESC LIMIT 200").all(...params) as any[];
+  }
+
+  static deprecateLearning(orgId: string, id: string, actorId?: string): boolean {
+    const r = db.prepare("UPDATE prospect_learning_memory SET status = 'deprecated', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND status = 'active'").run(id, orgId);
+    if (r.changes > 0) logAuthEvent(orgId, actorId, null, "PROSPECT_LEARNING_DEPRECATED", { learningId: id });
+    return r.changes > 0;
+  }
+
+  // ── IA: hipóteses testáveis e próxima ação (usa SÓ dados registrados) ───
+  static async suggestHypotheses(orgId: string, campaignId?: string): Promise<any> {
+    const learnings = this.listLearnings(orgId, { campaignId }).slice(0, 8);
+    const champions = db.prepare("SELECT name, channel, message_body FROM prospect_message_variants WHERE organization_id = ? AND is_champion = 1 LIMIT 5").all(orgId) as any[];
+    const stats = db.prepare(`
+      SELECT COUNT(CASE WHEN status='sent' THEN 1 END) sent, COUNT(CASE WHEN replied_at IS NOT NULL THEN 1 END) replied
+      FROM prospect_outreach WHERE organization_id = ?${campaignId ? " AND campaign_id = ?" : ""}
+    `).get(...(campaignId ? [orgId, campaignId] : [orgId])) as any;
+    const prompt = `Você é o AutoProspect Research Engine do ZappFlow OS. Proponha de 1 a 3 HIPÓTESES comerciais TESTÁVEIS (uma variável por experimento), com base SOMENTE nos dados abaixo. Não invente dados. Cada hipótese deve poder virar um A/B com métrica clara.
+DADOS:
+- Envios: ${stats?.sent || 0}; respostas: ${stats?.replied || 0}.
+- Mensagens champion atuais: ${champions.map(c => `"${c.name}" (${c.channel})`).join("; ") || "(nenhuma)"}
+- Aprendizados ativos: ${learnings.map(l => `[${l.learning_type}] ${l.insight} (confiança ${Math.round(l.confidence_score * 100)}%)`).join("\n") || "(nenhum)"}
+Responda em JSON: {"hypotheses":[{"hypothesis":"...","variable":"message|channel|niche|timing","metric":"response_rate|meeting_rate|conversion_rate","variant_a":"...","variant_b":"..."}]}`;
+    try {
+      const j = JSON.parse(await chat(prompt, { temperature: 0.5, json: true }));
+      return { hypotheses: Array.isArray(j?.hypotheses) ? j.hypotheses.slice(0, 3) : [] };
+    } catch (e) {
+      throw new Error("A IA não está disponível agora para sugerir hipóteses. Tente novamente.");
+    }
+  }
+
+  static async recommendNextAction(orgId: string): Promise<{ advice: string }> {
+    const running = db.prepare("SELECT name, sample_size, started_at FROM prospect_experiments WHERE organization_id = ? AND status = 'running'").all(orgId) as any[];
+    const recent = db.prepare("SELECT name, decision, decision_reason FROM prospect_experiments WHERE organization_id = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 3").all(orgId) as any[];
+    const learnings = this.listLearnings(orgId).slice(0, 5);
+    const stats = db.prepare("SELECT COUNT(CASE WHEN status='sent' THEN 1 END) sent, COUNT(CASE WHEN replied_at IS NOT NULL THEN 1 END) replied FROM prospect_outreach WHERE organization_id = ?").get(orgId) as any;
+    const fallback = running.length
+      ? `Há ${running.length} experimento(s) em execução — aguarde o orçamento fechar antes de decidir. Enquanto isso, aloque leads às variantes e mantenha a fila de aprovação em dia.`
+      : "Nenhum experimento em execução. Crie um experimento A/B (uma variável, amostra mínima de 10 por variante) desafiando a mensagem champion atual.";
+    try {
+      const prompt = `Você é o AutoProspect Research Engine. Recomende a PRÓXIMA AÇÃO de prospecção em no máximo 100 palavras, português do Brasil, com base SÓ nisto (não invente):
+Envios: ${stats?.sent || 0}; respostas: ${stats?.replied || 0}. Experimentos rodando: ${running.map(r => r.name).join("; ") || "nenhum"}. Últimas decisões: ${recent.map(r => `${r.name} → ${r.decision}`).join("; ") || "nenhuma"}. Aprendizados: ${learnings.map(l => l.insight).join(" | ") || "nenhum"}.`;
+      const advice = (await chat(prompt, { temperature: 0.4 })).trim();
+      return { advice: advice || fallback };
+    } catch { return { advice: fallback }; }
   }
 }

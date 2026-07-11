@@ -1273,6 +1273,48 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_authorization_followup_hours INTEGER DEFAULT 24`); } catch(e){} // follow-up de protocolo pendente
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_print_agenda_enabled INTEGER DEFAULT 1`); } catch(e){}     // impressão da agenda do dia
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_professional_portal_enabled INTEGER DEFAULT 1`); } catch(e){} // portal do profissional por link
+
+  // Módulo Clínica (ADR-080, Fase B) — Ficha do Paciente. Tabela satélite 1:1
+  // com contacts (dado sensível de saúde separado do CRM). Editar plano NUNCA
+  // apaga o paciente nem o agendamento; a troca fica registrada no histórico.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS patient_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        full_name TEXT,
+        cpf TEXT,
+        birth_date DATETIME,
+        insurance_name TEXT,          -- convênio/operadora
+        current_plan_name TEXT,       -- plano dentro do convênio
+        insurance_card_number TEXT,   -- carteirinha
+        insurance_valid_until DATETIME,
+        administrative_notes TEXT,    -- observações administrativas (não clínicas)
+        status TEXT DEFAULT 'active', -- active | inactive
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, contact_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_patient_profiles_org ON patient_profiles (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS patient_plan_history (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        old_insurance_name TEXT,
+        new_insurance_name TEXT,
+        old_plan_name TEXT,
+        new_plan_name TEXT,
+        old_card_number TEXT,
+        new_card_number TEXT,
+        reason TEXT,
+        changed_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_patient_plan_history ON patient_plan_history (organization_id, contact_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar Ficha do Paciente (Clínica)', e); }
   // Hotelaria — captura estruturada da reserva (adultos/crianças/pet/orçamento/pedidos).
   try { db.exec(`ALTER TABLE reservations ADD COLUMN adults INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE reservations ADD COLUMN children INTEGER`); } catch(e){}

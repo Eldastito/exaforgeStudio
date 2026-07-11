@@ -68,6 +68,7 @@ jobs:
           - { name: 'prospect-execution', script: 'test:prospect-execution' }
           - { name: 'prospect-research', script: 'test:prospect-research' }
           - { name: 'prospect-learning', script: 'test:prospect-learning' }
+          - { name: 'clinic-quickstart', script: 'test:clinic-quickstart' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

@@ -33,6 +33,10 @@ type Automations = {
   reservation_deposit_percent?: number;
   // Orçamentos
   quote_validity_hours?: number; quote_followup_hours?: number; quote_followup_max?: number;
+  // Clínica (ADR-080, Fase A)
+  clinic_overrun_alert_enabled?: number; clinic_overrun_warning_minutes?: number;
+  clinic_authorization_enabled?: number; clinic_authorization_followup_hours?: number;
+  clinic_print_agenda_enabled?: number; clinic_professional_portal_enabled?: number;
 };
 
 type Pack = {
@@ -208,16 +212,34 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
   {
     vertical: "saude",
     label: "Saúde / Clínica",
+    // Pack Saúde 2.0 (ADR-080, Fase A): setup operacional de clínica. As áreas,
+    // cadências e FAQ preparam recepção, convênios, retorno e financeiro; as
+    // flags clinic_* ligam a Agenda Clínica/portal/autorização (fases C–E).
     areas: [
       {
-        name: "Recepção",
-        description: "Agendamento, remarcação, cancelamento, dúvidas de horário e preparo.",
-        persona: "Você é a recepção da clínica. Trate o paciente com acolhimento. Para agendar, peça nome completo, telefone, procedimento desejado e preferência de horário. Confirme disponibilidade somente com base na agenda real. Para preparo de exame, responda APENAS o que está documentado — exames sem instrução documentada vão para confirmação humana.",
+        name: "Recepção Clínica",
+        description: "Agendamento, remarcação, cancelamento, coleta de dados do paciente e confirmação de preparo documentado.",
+        persona: "Você é a recepção da clínica. Trate o paciente com acolhimento. Para agendar, peça nome completo, telefone, procedimento desejado e preferência de horário. Confirme disponibilidade somente com base na agenda real. Para preparo de exame, responda APENAS o que está documentado — exames sem instrução documentada vão para confirmação humana. Você NUNCA dá diagnóstico, conduta clínica ou interpreta exame.",
       },
       {
-        name: "Pós-consulta",
-        description: "Lembrete de retorno, satisfação, fidelização.",
-        persona: "Você é o time de relacionamento da clínica. Após a consulta/procedimento, confirme se o paciente está bem, ofereça ajuda em qualquer dúvida e, quando apropriado, lembre do retorno.",
+        name: "Convênios e Autorizações",
+        description: "Verificar convênio/plano, conferir carteirinha, solicitar documentos, montar pedido de autorização, acompanhar protocolo e avisar pendências.",
+        persona: "Você cuida de convênios e autorizações da clínica. Responda sobre convênio APENAS com base no cadastro da clínica e no status real da autorização. Você pode coletar dados, explicar quais documentos são necessários, apontar pendências e informar que a solicitação está em análise. Você NUNCA promete cobertura ou autorização, NUNCA diz que o plano cobre sem confirmação, NUNCA inventa código TUSS e NUNCA envia uma solicitação sem revisão humana. Quando faltar informação, encaminhe para a recepção.",
+      },
+      {
+        name: "Pós-consulta / Retorno",
+        description: "Satisfação, retorno, orientação administrativa, pedido de avaliação e reagendamento.",
+        persona: "Você é o time de relacionamento da clínica. Após a consulta/procedimento, confirme se o paciente está bem, ofereça ajuda em dúvidas administrativas e, quando apropriado, lembre do retorno/continuidade. Você não dá conduta clínica; dúvidas de saúde vão para o profissional.",
+      },
+      {
+        name: "Financeiro / Particular",
+        description: "Valores particulares, PIX, sinal, pacote de sessões, mensalidade e pendência de pagamento.",
+        persona: "Você cuida do financeiro da clínica para atendimentos particulares. Informe valores, formas de pagamento (PIX/sinal/pacote/mensalidade) e pendências APENAS com base no que está cadastrado — nunca invente preço. Para convênio, encaminhe para a área de Convênios e Autorizações.",
+      },
+      {
+        name: "Coordenação de Agenda",
+        description: "Organiza pacientes, profissionais, salas, horários, permanência e atrasos.",
+        persona: "Você é a coordenação de agenda da clínica. Sua função é organizar pacientes, profissionais, salas, horários, permanência e atrasos. NUNCA apague paciente por tempo excedido. Quando um atendimento estiver próximo do fim previsto ou o exceder, alerte a recepção e pergunte se o paciente continuará, será finalizado ou remarcado. Ao agendar, sempre vincule paciente, profissional, procedimento, plano/convênio, sala quando houver, início e fim previsto.",
       },
     ],
     cadences: [
@@ -225,14 +247,49 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
         name: "Confirmação de consulta",
         triggerStage: "agendado",
         steps: [
-          { delayHours: 24, message: "Oi {nome}! Passando pra confirmar seu agendamento. Responda SIM para confirmar ou se precisar remarcar, é só me dizer." },
+          { delayHours: 24, message: "Oi {nome}! Passando para confirmar seu agendamento em {quando}. Responda SIM para confirmar ou REMARCAR se precisar alterar. 💙" },
+        ],
+      },
+      {
+        name: "Documentos pendentes",
+        triggerStage: "documentacao_pendente",
+        steps: [
+          { delayHours: 2, message: "Oi {nome}! Para avançarmos com seu atendimento, ainda precisamos de: {pendencias}. Pode nos enviar por aqui?" },
+        ],
+      },
+      {
+        name: "Autorização pendente",
+        triggerStage: "autorizacao_pendente",
+        steps: [
+          { delayHours: 24, message: "Oi {nome}! Sua solicitação ao convênio está em análise. Assim que houver retorno, avisamos por aqui." },
+        ],
+      },
+      {
+        name: "Autorização aprovada",
+        triggerStage: "autorizacao_aprovada",
+        steps: [
+          { delayHours: 1, message: "Oi {nome}! Sua autorização foi liberada. Podemos confirmar o procedimento para {quando}?" },
+        ],
+      },
+      {
+        name: "Autorização negada / pendência do plano",
+        triggerStage: "autorizacao_negada",
+        steps: [
+          { delayHours: 1, message: "Oi {nome}, tivemos retorno do convênio e há uma pendência na autorização. Vamos te explicar o próximo passo com cuidado." },
         ],
       },
       {
         name: "Pós-atendimento",
         triggerStage: "entregue_concluido",
         steps: [
-          { delayHours: 24, message: "Oi {nome}! Como foi seu atendimento hoje? Estamos aqui para qualquer dúvida. 💙" },
+          { delayHours: 24, message: "Oi {nome}! Como foi seu atendimento hoje? Estamos à disposição para qualquer dúvida administrativa. 💙" },
+        ],
+      },
+      {
+        name: "Retorno / continuidade",
+        triggerStage: "retorno_recomendado",
+        steps: [
+          { delayHours: 24, message: "Oi {nome}! Está na hora de programar seu retorno/continuidade. Quer que eu veja os próximos horários disponíveis?" },
         ],
       },
     ],
@@ -244,27 +301,48 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
       referral_enabled: 1, referral_reward_percent: 10, referral_welcome_percent: 10,
       procurement_enabled: 0,
       quote_validity_hours: 168, quote_followup_hours: 48, quote_followup_max: 2,
+      // Clínica (ADR-080): alertas de permanência, autorização, impressão e portal.
+      clinic_overrun_alert_enabled: 1, clinic_overrun_warning_minutes: 15,
+      clinic_authorization_enabled: 1, clinic_authorization_followup_hours: 24,
+      clinic_print_agenda_enabled: 1, clinic_professional_portal_enabled: 1,
     },
     faq: [
       {
         title: "FAQ Saúde — base inicial",
         content: `# Perguntas comuns do paciente
 
-## Convênios atendidos
-- Listar os convênios aceitos pela clínica.
+## Convênios aceitos
+- Listar os convênios/planos aceitos pela clínica (preencher com os reais).
 
-## Particulares
-- Indicar tabela de valores básica.
+## Documentos necessários
+- Documento com foto, carteirinha do convênio e, quando o procedimento exigir, pedido médico.
 
-## Preparo de exames
-- Cada exame tem um preparo específico — NÃO inventar. Quando o cliente perguntar, responder apenas se houver instrução documentada.
+## Carteirinha do plano
+- Confirmar número da carteirinha e validade antes do atendimento por convênio.
 
-## Cancelamento / Remarcação
-- Prazo: confirmar com X horas de antecedência.
+## Autorização de procedimento
+- Alguns procedimentos exigem autorização prévia do convênio. A clínica prepara a solicitação; a liberação depende do retorno do plano.
 
-## ⚠️ Saúde é dado SENSÍVEL.
-A IA NUNCA dá diagnóstico, conduta clínica ou interpreta exame. Quando perguntada,
-sugere consulta com o profissional.
+## Prazos de autorização
+- O prazo varia por operadora e procedimento. Avisamos assim que houver retorno — não há garantia de liberação imediata.
+
+## Procedimentos particulares
+- Indicar tabela de valores básica (preencher com os reais).
+
+## Pacotes de sessões
+- Quando houver, descrever pacotes/mensalidades e condições de pagamento.
+
+## Preparo de exames/procedimentos
+- Cada exame tem preparo específico — NÃO inventar. Responder apenas se houver instrução documentada; caso contrário, confirmar com a equipe.
+
+## Cancelamento e remarcação
+- Prazo: confirmar com X horas de antecedência (preencher).
+
+## ⚠️ O que a IA não pode responder
+Saúde é dado SENSÍVEL. A IA NUNCA dá diagnóstico, conduta clínica ou interpreta exame,
+e NUNCA promete cobertura/autorização sem retorno do convênio. Quando perguntada sobre
+saúde, sugere consulta com o profissional; quando perguntada sobre cobertura, informa o
+status real da autorização ou que está em análise.
 `,
       },
     ],

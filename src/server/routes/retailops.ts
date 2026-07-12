@@ -4,13 +4,29 @@
  * lojas. Fases seguintes acrescentam cotas, fechamentos, tarefas, etc.
  */
 import { Router } from "express";
+import multer from "multer";
+import sharp from "sharp";
+import fs from "fs";
+import path from "path";
+import { randomUUID } from "node:crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService } from "../RetailOpsService.js";
+import { isAIConfigured } from "../llm.js";
 
 const router = Router();
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
+const closingUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(png|jpe?g|webp)$/.test(file.mimetype)) return cb(null, true);
+    cb(new Error("Formato de imagem não suportado (use PNG, JPG ou WEBP)."));
+  },
+});
 
 // --- Lojas ---
 router.get("/stores", (req: AuthRequest, res): any => {
@@ -117,6 +133,34 @@ router.post("/closings/:id/reject", requireRole("owner", "admin"), (req: AuthReq
   const c = RetailClosingService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
   if (!c) return res.status(404).json({ error: "closing_not_found" });
   res.json(c);
+});
+
+// Fechamento por FOTO (Fase C): a IA lê a folha e preenche o fechamento do dia
+// da loja, calculando o desvio vs cota. NÃO aprova — baixa confiança vira
+// 'needs_review' para a conferência humana. Body: storeId, date (opcional).
+router.post("/closings/scan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  closingUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
+    const storeId = String(req.body?.storeId || "");
+    const date = String(req.body?.date || new Date().toISOString().slice(0, 10));
+    if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+    if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+    try {
+      const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+      let imageUrl: string | null = null;
+      try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); const name = `${randomUUID()}.jpg`; fs.writeFileSync(path.join(MEDIA_DIR, name), processed); imageUrl = `/media/${name}`; } catch { /* best-effort */ }
+      const out = await RetailClosingService.submitFromImage(orgId, storeId, date, processed.toString("base64"), "image/jpeg", { source: "image_ocr", imageUrl }, req.user?.userId);
+      res.json(out);
+    } catch (e: any) {
+      console.error("[Retail Closing Scan] erro", e);
+      res.status(500).json({ error: "Falha ao ler a folha de fechamento com a IA. Tente uma foto mais nítida ou informe os valores manualmente." });
+    }
+  });
 });
 
 // --- Checklist diário ---

@@ -94,6 +94,7 @@ jobs:
           - { name: 'retail-cobranca', script: 'test:retail-cobranca' }
           - { name: 'retail-stock', script: 'test:retail-stock' }
           - { name: 'retail-commission', script: 'test:retail-commission' }
+          - { name: 'retail-dashboard', script: 'test:retail-dashboard' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

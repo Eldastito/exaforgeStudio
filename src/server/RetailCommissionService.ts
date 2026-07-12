@@ -87,6 +87,24 @@ export class RetailCommissionService {
     return Number((q as any)?.s || 0);
   }
 
+  /** Estimativa da premiação do período SEM persistir (card do dashboard). */
+  static estimateTotal(orgId: string, periodStart: string, periodEnd: string): number {
+    const rules = db.prepare(`SELECT * FROM retail_commission_rules WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const stores = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    let total = 0;
+    for (const rule of rules) {
+      const config = safeParse(rule.config_json);
+      if (rule.scope === "global") {
+        total += computeCommission(rule.calculation_type, config, this.periodSales(orgId, null, periodStart, periodEnd), this.periodQuota(orgId, null, periodStart, periodEnd)).amount;
+      } else {
+        for (const s of stores) {
+          total += computeCommission(rule.calculation_type, config, this.periodSales(orgId, s.id, periodStart, periodEnd), this.periodQuota(orgId, s.id, periodStart, periodEnd)).amount;
+        }
+      }
+    }
+    return total;
+  }
+
   // ── Apuração (prévia) ────────────────────────────────────────────────────────
   static createRun(orgId: string, periodStart: string, periodEnd: string, actorId?: string): any {
     const rules = db.prepare(`SELECT * FROM retail_commission_rules WHERE organization_id = ? AND active = 1`).all(orgId) as any[];

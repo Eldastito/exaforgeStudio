@@ -127,7 +127,47 @@ export class RetailClosingService {
     try { logAuthEvent(orgId, actorId || "system", id, `RETAIL_CLOSING_${status.toUpperCase()}`, {}); } catch { /* noop */ }
     return this.get(orgId, id);
   }
+
+  /**
+   * Fase C — lê a FOTO/documento da folha de fechamento com IA (OCR), preenche o
+   * fechamento do dia da loja e calcula o desvio vs cota. NÃO aprova: baixa
+   * confiança vira 'needs_review' para a conferência humana (a aprovação é
+   * sempre humana, ADR-083 D4). Extrator injetável (teste offline).
+   */
+  static async submitFromImage(orgId: string, storeId: string, date: string, base64: string, mimetype: string, opts: {
+    source?: string; imageUrl?: string | null; submittedByContactId?: string | null; submittedByIdentifier?: string | null;
+  } = {}, actorId?: string): Promise<{ closing: any; extraction: any } | null> {
+    if (!storeId) return null;
+    const closing = this.getOrCreate(orgId, storeId, date);
+    const extractor = _closingExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractClosingFromImage(b, m));
+    let parsed: any = {};
+    try { parsed = JSON.parse((await extractor(base64, mimetype)) || "{}"); } catch { parsed = {}; }
+
+    const methods = ["dinheiro", "pix", "credito", "debito", "voucher", "troca", "outros"];
+    const items = methods.map((m) => ({ paymentMethod: m, informedAmount: Number(parsed?.[m] || 0) })).filter((i) => i.informedAmount > 0);
+    const sumMethods = items.reduce((a, i) => a + i.informedAmount, 0);
+    const informedTotal = Number(parsed?.total ?? 0) || sumMethods; // total escrito na folha; senão soma das formas
+    const confidence = Number(parsed?.confidence ?? 0);
+
+    this.setInformed(orgId, closing.id, {
+      informedTotal, items, extractedJson: parsed, source: opts.source || "image_ocr",
+      imageUrl: opts.imageUrl, submittedByContactId: opts.submittedByContactId, submittedByIdentifier: opts.submittedByIdentifier,
+    }, actorId);
+
+    // Baixa confiança OU total ausente → precisa de conferência humana.
+    const minConf = Number(process.env.RETAIL_CLOSING_MIN_CONFIDENCE || 80);
+    const status = (confidence >= minConf && informedTotal > 0) ? "extracted" : "needs_review";
+    db.prepare(`UPDATE retail_daily_closings SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(status, orgId, closing.id);
+    try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_SCANNED", { informedTotal, confidence, status }); } catch { /* noop */ }
+
+    return { closing: this.get(orgId, closing.id), extraction: { ...parsed, informedTotal, confidence, needsReview: status === "needs_review" } };
+  }
 }
+
+/** Extrator de fechamento injetável (teste offline, sem provedor de visão). */
+type ClosingExtractor = (base64: string, mimetype: string) => Promise<string>;
+let _closingExtractor: ClosingExtractor | null = null;
+export function __setClosingExtractorForTests(fn: ClosingExtractor | null): void { _closingExtractor = fn; }
 
 // ── Checklist diário (fechamento/malote/escala) ──────────────────────────────
 const TASK_FLAG: Record<string, string> = {

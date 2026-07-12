@@ -413,6 +413,37 @@ Regras rígidas: liste TODOS os itens de MERCADORIA visíveis na nota — IGNORE
 }
 
 /**
+ * Retail Ops (ADR-083, Fase C): a partir da FOTO/documento da folha de
+ * fechamento de loja, extrai os valores por forma de pagamento em JSON — mesma
+ * disciplina de "nunca invente valor ilegível" do Smart Inventory. Devolve um
+ * `confidence` para a UI exigir revisão humana quando a leitura for duvidosa.
+ * NUNCA aprova nada: quem confirma os valores é sempre o humano.
+ */
+export async function extractClosingFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const system = `Você é um assistente de leitura de FOLHAS DE FECHAMENTO DE CAIXA de loja no varejo brasileiro. A partir da foto/documento da folha do dia, extraia os valores por forma de pagamento e devolva SOMENTE um JSON:
+{"dinheiro": <número em reais ou null>, "pix": <número ou null>, "credito": <número ou null>, "debito": <número ou null>, "voucher": <número ou null>, "troca": <número ou null>, "outros": <número ou null>, "total": <número, o total informado na folha, ou null se não houver linha de total legível>, "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
+Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente um valor que não esteja legível na folha — use null para o campo que você não conseguir ler com clareza e reflita isso num confidence mais baixo. Não some nem calcule o total por conta própria: só devolva "total" se houver uma linha de total escrita na folha; senão devolva null. Ignore anotações que não sejam valores de fechamento. Responda SOMENTE o JSON, sem texto ao redor.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Leia esta folha de fechamento e devolva o JSON pedido com os valores por forma de pagamento." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0.2,
+    max_tokens: 500,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * Cadastro por foto direto no WhatsApp (canal do gestor/lojista, separado da
  * IA de atendimento ao cliente): classificação BARATA e rápida (sem extrair
  * nada ainda) — só decide se a foto é de UM produto avulso (embalagem/rótulo)

@@ -46,6 +46,7 @@
     "test:channel-health": "tsx scripts/test-channel-health.ts",
     "test:retail-foundation": "tsx scripts/test-retail-foundation.ts",
     "test:retail-closing": "tsx scripts/test-retail-closing.ts",
+    "test:retail-scan": "tsx scripts/test-retail-scan.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

@@ -1535,6 +1535,59 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase F', e); }
 
+  // Retail Ops (ADR-083, Fase G) — PREMIAÇÃO/COMISSÃO. Regras por loja/vendedor/
+  // produto/global; a apuração (run) gera uma PRÉVIA (draft) a partir dos
+  // fechamentos do período; a aprovação é sempre HUMANA (D7) — nunca paga sozinha.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_commission_rules (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        scope TEXT DEFAULT 'store',              -- store | seller | product | global
+        period TEXT DEFAULT 'monthly',           -- daily | weekly | monthly
+        calculation_type TEXT NOT NULL,          -- percent_sales | quota_bonus | tiered | fixed
+        config_json TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_comm_rules ON retail_commission_rules (organization_id, active);
+
+      CREATE TABLE IF NOT EXISTS retail_commission_runs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        status TEXT DEFAULT 'draft',             -- draft | approved | rejected
+        total_sales REAL DEFAULT 0,
+        total_commission REAL DEFAULT 0,
+        divergence_count INTEGER DEFAULT 0,
+        created_by TEXT,
+        approved_by TEXT,
+        approved_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_comm_runs ON retail_commission_runs (organization_id, period_start);
+
+      CREATE TABLE IF NOT EXISTS retail_commission_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        store_id TEXT,
+        seller_user_id TEXT,
+        seller_name TEXT,
+        base_amount REAL DEFAULT 0,
+        commission_amount REAL DEFAULT 0,
+        expected_amount REAL,                    -- premiação informada manualmente (p/ comparar)
+        divergence_amount REAL DEFAULT 0,
+        rule_id TEXT,
+        calculation_details_json TEXT,
+        status TEXT DEFAULT 'calculated'
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_comm_items ON retail_commission_items (run_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase G', e); }
+
   // Módulo Clínica (ADR-080, Fase B) — Ficha do Paciente. Tabela satélite 1:1
   // com contacts (dado sensível de saúde separado do CRM). Editar plano NUNCA
   // apaga o paciente nem o agendamento; a troca fica registrada no histórico.

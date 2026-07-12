@@ -13,6 +13,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
+import { RetailCommissionService } from "../RetailCommissionService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -223,6 +224,78 @@ router.post("/stock/alerts/:id/resolve", requireRole("owner", "admin"), (req: Au
   const a = RetailInventoryService.resolveAlert(orgId, req.params.id, req.body?.note, req.user?.userId);
   if (!a) return res.status(404).json({ error: "alert_not_found" });
   res.json(a);
+});
+
+// --- Premiação / comissão (Fase G) ---
+router.get("/commission/rules", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ rules: RetailCommissionService.listRules(orgId) });
+});
+
+router.post("/commission/rules", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { name, scope, period, calculationType, config } = req.body || {};
+  if (!name || !calculationType) return res.status(400).json({ error: "name e calculationType são obrigatórios" });
+  res.status(201).json(RetailCommissionService.createRule(orgId, { name, scope, period, calculationType, config }, req.user?.userId));
+});
+
+router.patch("/commission/rules/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = RetailCommissionService.setRuleActive(orgId, req.params.id, req.body?.active !== false, req.user?.userId);
+  if (!r) return res.status(404).json({ error: "rule_not_found" });
+  res.json(r);
+});
+
+router.get("/commission/runs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ runs: RetailCommissionService.listRuns(orgId) });
+});
+
+router.get("/commission/runs/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const run = RetailCommissionService.getRun(orgId, req.params.id);
+  if (!run) return res.status(404).json({ error: "run_not_found" });
+  res.json(run);
+});
+
+// Gera a PRÉVIA do período (draft).
+router.post("/commission/runs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { periodStart, periodEnd } = req.body || {};
+  if (!periodStart || !periodEnd) return res.status(400).json({ error: "periodStart e periodEnd são obrigatórios" });
+  res.status(201).json(RetailCommissionService.createRun(orgId, periodStart, periodEnd, req.user?.userId));
+});
+
+// Compara com a premiação informada manualmente (divergências).
+router.post("/commission/runs/:id/compare", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const run = RetailCommissionService.compare(orgId, req.params.id, req.body?.expected || [], req.user?.userId);
+  if (!run) return res.status(404).json({ error: "run_not_found" });
+  res.json(run);
+});
+
+// Aprovação SEMPRE humana (D7).
+router.post("/commission/runs/:id/approve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const run = RetailCommissionService.setStatus(orgId, req.params.id, "approved", req.user?.userId);
+  if (!run) return res.status(404).json({ error: "run_not_found" });
+  res.json(run);
+});
+
+router.post("/commission/runs/:id/reject", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const run = RetailCommissionService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
+  if (!run) return res.status(404).json({ error: "run_not_found" });
+  res.json(run);
 });
 
 export default router;

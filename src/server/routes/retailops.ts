@@ -14,6 +14,7 @@ import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
+import { RetailDashboardService } from "../RetailDashboardService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -296,6 +297,35 @@ router.post("/commission/runs/:id/reject", requireRole("owner", "admin"), (req: 
   const run = RetailCommissionService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
   if (!run) return res.status(404).json({ error: "run_not_found" });
   res.json(run);
+});
+
+// --- Dashboard + acumulado mensal + export (Fase H) ---
+router.get("/dashboard/daily", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailDashboardService.daily(orgId, today(req)));
+});
+
+router.get("/dashboard/monthly", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  res.json(RetailDashboardService.monthly(orgId, month));
+});
+
+// Export do mês: JSON (rows) por padrão, ou CSV com ?format=csv.
+router.get("/dashboard/monthly/export", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  const rows = RetailDashboardService.monthlyClosingRows(orgId, month);
+  if (String(req.query.format) === "csv") {
+    const csv = rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="fechamentos-${month}.csv"`);
+    return res.send(csv);
+  }
+  res.json({ month, rows });
 });
 
 export default router;

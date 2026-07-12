@@ -44,6 +44,7 @@
     "test:delivery-receipts": "tsx scripts/test-delivery-receipts.ts",
     "test:continuity-admin-health": "tsx scripts/test-continuity-admin-health.ts",
     "test:channel-health": "tsx scripts/test-channel-health.ts",
+    "test:retail-foundation": "tsx scripts/test-retail-foundation.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

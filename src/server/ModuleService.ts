@@ -35,6 +35,7 @@ export class ModuleService {
     clinic: "clinica",
     vision: "vms",
     radar: "radar",
+    retailops: "retail",
   };
 
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */

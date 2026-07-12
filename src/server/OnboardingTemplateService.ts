@@ -37,6 +37,10 @@ type Automations = {
   clinic_overrun_alert_enabled?: number; clinic_overrun_warning_minutes?: number;
   clinic_authorization_enabled?: number; clinic_authorization_followup_hours?: number;
   clinic_print_agenda_enabled?: number; clinic_professional_portal_enabled?: number;
+  // Retail Ops (ADR-083) — fechamento diário, malote, cotas, premiação.
+  retail_daily_closing_enabled?: number; retail_daily_closing_due_hour?: number; retail_daily_closing_retry_minutes?: number;
+  retail_malote_enabled?: number; retail_scale_reminder_enabled?: number; retail_quota_enabled?: number;
+  retail_stock_negative_alert_enabled?: number; retail_commission_enabled?: number; retail_monthly_close_enabled?: number;
 };
 
 type Pack = {
@@ -156,6 +160,27 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
         description: "Pedidos, rastreio, troca, devolução.",
         persona: "Você é o suporte da loja. Receba o cliente com paciência. Confirme o pedido com base nos dados reais. Para dúvida de rastreio/entrega, consulte o status. Para troca/devolução, peça os dados e encaminhe para o time quando necessário.",
       },
+      // Retail Ops (ADR-083) — áreas operacionais da rede de lojas.
+      {
+        name: "Fechamento de Loja",
+        description: "Recebe e valida o fechamento diário enviado pela equipe.",
+        persona: "Você é o assistente de fechamento de loja. Sua função é receber o fechamento diário enviado pela equipe, validar se os campos obrigatórios foram preenchidos, extrair valores de texto, foto ou documento, calcular total vendido, comparar com a cota do dia, apontar desvio e registrar divergências. Nunca invente valores. Se não conseguir ler algum campo, peça reenvio ou revisão humana.",
+      },
+      {
+        name: "Malote e Escalas",
+        description: "Cobra o envio de folha de malote, fechamento e escalas no prazo.",
+        persona: "Você é o assistente operacional de malote e escalas. Sua função é cobrar o envio da folha de malote, fechamento e escalas no prazo combinado. Se a loja não enviar, cobre novamente com educação e registre atraso. Quando receber, confirme recebimento e marque a tarefa como concluída.",
+      },
+      {
+        name: "Auditoria de Estoque",
+        description: "Identifica estoque negativo, divergências e produtos sem giro.",
+        persona: "Você é o auditor de estoque da operação. Sua função é identificar produtos com estoque negativo, divergências entre venda e estoque, produtos sem movimentação, produtos mais vendidos e possíveis erros de lançamento. Sempre explique a divergência com base nos dados disponíveis.",
+      },
+      {
+        name: "Premiação e Comissão",
+        description: "Calcula prévia de premiação/comissão; nunca paga sem aprovação.",
+        persona: "Você é o assistente de premiação. Sua função é calcular premiação e comissão com base nas regras cadastradas, fechamento das lojas e metas do período. Nunca altere pagamento automaticamente; gere prévia, destaque divergências e peça aprovação do gestor.",
+      },
     ],
     cadences: [
       {
@@ -182,6 +207,11 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
       referral_enabled: 1, referral_reward_percent: 10, referral_welcome_percent: 10,
       procurement_enabled: 0,
       quote_validity_hours: 48, quote_followup_hours: 12, quote_followup_max: 2,
+      // Retail Ops (ADR-083) — ligadas por padrão no Quick-Start; só têm efeito
+      // com o módulo `retail` e lojas cadastradas (Fases B–D).
+      retail_daily_closing_enabled: 1, retail_daily_closing_due_hour: 21, retail_daily_closing_retry_minutes: 30,
+      retail_malote_enabled: 1, retail_scale_reminder_enabled: 1, retail_quota_enabled: 1,
+      retail_stock_negative_alert_enabled: 1, retail_commission_enabled: 1, retail_monthly_close_enabled: 1,
     },
     faq: [
       {
@@ -201,6 +231,28 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
 - Produto com defeito: trocar dentro de 30 dias (não-durável) ou 90 dias (durável).
 
 ## ⚠️ Substitua estas respostas pelas regras REAIS da sua loja.
+`,
+      },
+      {
+        title: "FAQ Operacional — Retail Ops",
+        content: `# Operação diária das lojas (Retail Ops)
+
+## Fechamento diário
+- Cada loja envia o fechamento do dia por aqui: pode ser **foto/PDF** da folha ou os valores em texto.
+- Informe, no mínimo: dinheiro, pix, crédito, débito e total.
+- A IA lê e mostra os valores para **conferência**; confirme ou corrija antes de encerrar.
+
+## Cota e desvio
+- Cada loja tem uma **cota diária**. Ao fechar, o sistema compara realizado × cota e mostra o desvio.
+
+## Malote e escalas
+- Nos dias combinados, envie a **folha de malote** e a **escala** por aqui.
+- Se não enviar até o horário, o sistema **cobra automaticamente** e, persistindo, avisa o gestor.
+
+## Divergência com o sistema
+- Quando houver a planilha/export do sistema, o fechamento informado é comparado com o do sistema; diferenças viram **divergência** para revisão.
+
+## ⚠️ Ajuste horários, cotas e responsáveis pelas lojas em Configurações › Retail Ops.
 `,
       },
     ],

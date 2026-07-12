@@ -1496,6 +1496,45 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase B', e); }
 
+  // Retail Ops (ADR-083, Fase F) — ESTOQUE POR LOJA + alertas de negativo. A
+  // camada por loja PERMITE quantidade < 0 (sem o MAX(0,…) do core), justamente
+  // para EXPOR a divergência (venda sem baixa, transferência não lançada, etc.)
+  // → retail_stock_alerts. O estoque core (inventory_items) segue clampado e
+  // intocado (ADR-083 D6).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_store_inventory (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        quantity_available INTEGER DEFAULT 0,    -- PODE ser negativo (detecção)
+        quantity_reserved INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, store_id, product_service_id, variant_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_store_inv ON retail_store_inventory (organization_id, store_id);
+      CREATE INDEX IF NOT EXISTS idx_retail_store_inv_neg ON retail_store_inventory (organization_id, quantity_available);
+
+      CREATE TABLE IF NOT EXISTS retail_stock_alerts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT,
+        product_service_id TEXT,
+        variant_id TEXT,
+        alert_type TEXT DEFAULT 'negative_stock',
+        quantity INTEGER,
+        status TEXT DEFAULT 'open',              -- open | resolved
+        detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        resolution_note TEXT,
+        UNIQUE(organization_id, store_id, product_service_id, variant_id, alert_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_stock_alerts ON retail_stock_alerts (organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase F', e); }
+
   // Módulo Clínica (ADR-080, Fase B) — Ficha do Paciente. Tabela satélite 1:1
   // com contacts (dado sensível de saúde separado do CRM). Editar plano NUNCA
   // apaga o paciente nem o agendamento; a troca fica registrada no histórico.

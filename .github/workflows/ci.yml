@@ -88,6 +88,7 @@ jobs:
           - { name: 'delivery-receipts', script: 'test:delivery-receipts' }
           - { name: 'continuity-admin-health', script: 'test:continuity-admin-health' }
           - { name: 'channel-health', script: 'test:channel-health' }
+          - { name: 'retail-foundation', script: 'test:retail-foundation' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

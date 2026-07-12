@@ -22,7 +22,7 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-  "vms", "radar", "clinica",
+  "vms", "radar", "clinica", "retail",
 ] as const;
 
 // "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de
@@ -44,13 +44,17 @@ export const OPTIONAL_MODULES = [
 // "clinica" (Módulo Clínica, ADR-080) é preset da vertical "saude" (é o módulo
 // que dá corpo à operação de clínica), mas não deve ser ligado por "outro" nem
 // pelas demais verticais — só saúde ou ativação explícita.
-const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar" && m !== "prospect" && m !== "clinica");
+// "retail" (Retail Ops, ADR-083) é o preset operacional da vertical "varejo"
+// (fechamento de loja, cotas, malote, premiação) — add-on para redes de lojas,
+// não deve ser ligado por "outro" nem pelas demais verticais. Opt-in explícito
+// ou preset de varejo, como a clínica é preset de saúde.
+const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar" && m !== "prospect" && m !== "clinica" && m !== "retail");
 
 export const VERTICALS: Vertical[] = [
   {
     key: "varejo", label: "Varejo / Comércio", icon: "🛍️",
     descricao: "Lojas que vendem produtos por unidade (roupas, eletrônicos, pet, etc.).",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao", "retail"],
     saleMode: "unit",
   },
   {

@@ -30,6 +30,7 @@ import studioRoutes from "./src/server/routes/studio.js";
 import taskRoutes from "./src/server/routes/tasks.js";
 import prospectRoutes from "./src/server/routes/prospect.js";
 import clinicRoutes from "./src/server/routes/clinic.js";
+import retailOpsRoutes from "./src/server/routes/retailops.js";
 import continuityRoutes from "./src/server/routes/continuity.js";
 import { edgeSyncRoutes, edgeDeviceRoutes } from "./src/server/routes/edge.js";
 import managersRoutes from "./src/server/routes/managers.js";
@@ -435,6 +436,7 @@ async function startServer() {
   protectedApi.use("/tasks", taskRoutes);
   protectedApi.use("/prospect", prospectRoutes);
   protectedApi.use("/clinic", clinicRoutes);
+  protectedApi.use("/retailops", retailOpsRoutes);
   protectedApi.use("/continuity", continuityRoutes);
   // Provisionamento de nós Edge (ADR-082, Fase 4a) — só owner/admin da própria
   // org emitem/revogam credenciais de máquina. O SYNC em si é machine-authed

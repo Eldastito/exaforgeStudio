@@ -1379,6 +1379,44 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_print_agenda_enabled INTEGER DEFAULT 1`); } catch(e){}     // impressão da agenda do dia
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_professional_portal_enabled INTEGER DEFAULT 1`); } catch(e){} // portal do profissional por link
 
+  // Retail Ops (ADR-083, Fase A) — flags de automação da operação de lojas, no
+  // mesmo padrão das demais (colunas em organization_settings). Semeadas pelo
+  // Quick-Start Comércio/Varejo; a funcionalidade que as consome entra nas
+  // fases B–H (só têm efeito com o módulo `retail` e lojas cadastradas).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_daily_closing_enabled INTEGER DEFAULT 0`); } catch(e){}      // fechamento diário de loja
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_daily_closing_due_hour INTEGER DEFAULT 21`); } catch(e){}    // horário limite do fechamento
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_daily_closing_retry_minutes INTEGER DEFAULT 30`); } catch(e){} // intervalo de recobrança
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_malote_enabled INTEGER DEFAULT 0`); } catch(e){}            // cobrança de malote
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_scale_reminder_enabled INTEGER DEFAULT 0`); } catch(e){}    // cobrança de escala
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_quota_enabled INTEGER DEFAULT 0`); } catch(e){}            // cotas por loja
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_stock_negative_alert_enabled INTEGER DEFAULT 0`); } catch(e){} // alerta de estoque negativo
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_commission_enabled INTEGER DEFAULT 0`); } catch(e){}        // premiação/comissão
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_monthly_close_enabled INTEGER DEFAULT 0`); } catch(e){}     // fechamento mensal acumulado
+
+  // Retail Ops (ADR-083, Fase A) — CADASTRO DE LOJAS. Dimensão de loja física
+  // (inexistente até aqui: estoque/pedidos eram só por organização). Cada loja
+  // tem um identificador de WhatsApp para casar o fechamento recebido ao
+  // remetente, e um responsável (usuário e/ou contato). Camada ADITIVA — não
+  // toca orders/inventory do core (ADR-083 D1).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_stores (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,
+        whatsapp_identifier TEXT,        -- número/id do WhatsApp da loja (casa o remetente do fechamento)
+        manager_user_id TEXT,
+        manager_contact_id TEXT,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_stores_org ON retail_stores (organization_id);
+      CREATE INDEX IF NOT EXISTS idx_retail_stores_wa ON retail_stores (organization_id, whatsapp_identifier);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_stores', e); }
+
   // Módulo Clínica (ADR-080, Fase B) — Ficha do Paciente. Tabela satélite 1:1
   // com contacts (dado sensível de saúde separado do CRM). Editar plano NUNCA
   // apaga o paciente nem o agendamento; a troca fica registrada no histórico.

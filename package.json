@@ -48,6 +48,7 @@
     "test:retail-closing": "tsx scripts/test-retail-closing.ts",
     "test:retail-scan": "tsx scripts/test-retail-scan.ts",
     "test:retail-cobranca": "tsx scripts/test-retail-cobranca.ts",
+    "test:retail-stock": "tsx scripts/test-retail-stock.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

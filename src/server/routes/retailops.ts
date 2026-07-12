@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService } from "../RetailOpsService.js";
+import { RetailInventoryService } from "../RetailInventoryService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -183,6 +184,45 @@ router.post("/tasks/:id/mark-submitted", (req: AuthRequest, res): any => {
   const t = RetailTaskService.markSubmitted(orgId, req.params.id, { contactId: req.body?.contactId, attachmentUrl: req.body?.attachmentUrl }, req.user?.userId);
   if (!t) return res.status(404).json({ error: "task_not_found" });
   res.json(t);
+});
+
+// --- Estoque por loja + alertas de negativo (Fase F) ---
+router.get("/stock/negative", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ items: RetailInventoryService.listNegative(orgId) });
+});
+
+router.get("/stock/by-store/:storeId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ items: RetailInventoryService.byStore(orgId, req.params.storeId) });
+});
+
+router.get("/stock/alerts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ alerts: RetailInventoryService.listAlerts(orgId, String(req.query.status || "open")) });
+});
+
+// Ajuste de saldo por loja (permite negativo → gera alerta). owner/admin.
+router.post("/stock/adjust", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, productServiceId, variantId, quantityAvailable, delta } = req.body || {};
+  if (!storeId || !productServiceId) return res.status(400).json({ error: "storeId e productServiceId são obrigatórios" });
+  const row = (delta !== undefined && delta !== null)
+    ? RetailInventoryService.applyMovement(orgId, storeId, productServiceId, variantId, Number(delta), req.user?.userId)
+    : RetailInventoryService.setQuantity(orgId, storeId, productServiceId, variantId, Number(quantityAvailable || 0), 0, req.user?.userId);
+  res.json(row);
+});
+
+router.post("/stock/alerts/:id/resolve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const a = RetailInventoryService.resolveAlert(orgId, req.params.id, req.body?.note, req.user?.userId);
+  if (!a) return res.status(404).json({ error: "alert_not_found" });
+  res.json(a);
 });
 
 export default router;

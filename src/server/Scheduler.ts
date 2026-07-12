@@ -23,6 +23,7 @@ import { RadarService } from "./RadarService.js";
 import { FashionAvatarService } from "./FashionAvatarService.js";
 import { FashionTryOnService } from "./FashionTryOnService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
+import { RetailTaskService } from "./RetailOpsService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -92,7 +93,31 @@ export class Scheduler {
     await this.googleSheetsSyncPass().catch(e => console.error('[Scheduler] sync Google Sheets falhou', e));
     try { this.opportunityRadarPass(); } catch (e: any) { console.error('[Scheduler] radar de oportunidades falhou', e.message); }
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
+    try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     this.trialPass();
+  }
+
+  /**
+   * Retail Ops (ADR-083, Fase B) — gera as pendências operacionais do dia
+   * (fechamento/malote/escala) por loja ativa, para as orgs que ligaram alguma
+   * das automações retail_*. Idempotente (UNIQUE por org/loja/dia/tipo), então
+   * rodar de hora em hora só cria o que faltar. A COBRANÇA por WhatsApp é a
+   * Fase D; aqui só o esqueleto de pendências. Best-effort — nunca derruba tick.
+   */
+  static retailDailyTasksPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT organization_id FROM organization_settings
+          WHERE COALESCE(retail_daily_closing_enabled,0)=1
+             OR COALESCE(retail_malote_enabled,0)=1
+             OR COALESCE(retail_scale_reminder_enabled,0)=1`
+      ).all() as any[];
+    } catch { return; } // colunas ainda não migradas
+    const date = new Date().toISOString().slice(0, 10);
+    for (const o of orgs) {
+      try { RetailTaskService.generateDay(o.organization_id, date); } catch (e) { console.error('[Retail] generateDay falhou', o.organization_id, e); }
+    }
   }
 
   /**

@@ -89,6 +89,7 @@ jobs:
           - { name: 'continuity-admin-health', script: 'test:continuity-admin-health' }
           - { name: 'channel-health', script: 'test:channel-health' }
           - { name: 'retail-foundation', script: 'test:retail-foundation' }
+          - { name: 'retail-closing', script: 'test:retail-closing' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

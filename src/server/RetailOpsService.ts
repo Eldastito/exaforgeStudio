@@ -221,4 +221,63 @@ export class RetailTaskService {
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_TASK_SUBMITTED", { type: t.task_type }); } catch { /* noop */ }
     return db.prepare(`SELECT * FROM retail_store_daily_tasks WHERE id = ?`).get(id);
   }
+
+  /**
+   * COBRANÇA (Fase D) — para as pendências VENCIDAS (due_at <= now) e ainda
+   * 'pending', cobra o responsável da loja pelo WhatsApp e reagenda: respeita o
+   * intervalo de recobrança e, após o teto de tentativas, ESCALA ao gestor e
+   * marca 'late'. `send`/`notify`/`now` são injetáveis (teste offline; o
+   * Scheduler passa o provedor real). Retorna o resumo.
+   */
+  static async runReminders(orgId: string, opts: {
+    send: (target: string, message: string) => Promise<any>;
+    notify?: (info: { store: any; task: any }) => void;
+    now: string;                 // 'YYYY-MM-DD HH:MM:SS'
+    retryMinutes?: number; maxReminders?: number;
+  }): Promise<{ reminded: number; escalated: number }> {
+    const summary = { reminded: 0, escalated: 0 };
+    const nowMs = parseSqlTs(opts.now);
+    let settings: any = {};
+    try { settings = db.prepare(`SELECT retail_daily_closing_retry_minutes FROM organization_settings WHERE organization_id = ?`).get(orgId) || {}; } catch { settings = {}; }
+    const retryMin = Number(opts.retryMinutes ?? settings.retail_daily_closing_retry_minutes ?? 30);
+    const MAX = Number(opts.maxReminders ?? process.env.RETAIL_MAX_REMINDERS ?? 3);
+
+    const due = db.prepare(
+      `SELECT * FROM retail_store_daily_tasks WHERE organization_id = ? AND status = 'pending' AND due_at <= ? ORDER BY due_at ASC`
+    ).all(orgId, opts.now) as any[];
+
+    for (const t of due) {
+      // Ainda dentro do intervalo desde a última cobrança? não repete.
+      if (t.last_reminder_at && nowMs - parseSqlTs(t.last_reminder_at) < retryMin * 60_000) continue;
+      const store = db.prepare(`SELECT * FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, t.store_id) as any;
+      if (!store) continue;
+
+      // Teto de tentativas atingido → escala ao gestor uma vez e marca 'late'.
+      if (Number(t.reminder_count || 0) >= MAX) {
+        try { opts.notify?.({ store, task: t }); } catch { /* noop */ }
+        db.prepare(`UPDATE retail_store_daily_tasks SET status = 'late', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(t.id);
+        try { logAuthEvent(orgId, "system", t.id, "RETAIL_TASK_ESCALATED", { type: t.task_type, store: store.name }); } catch { /* noop */ }
+        summary.escalated++;
+        continue;
+      }
+
+      const target = store.whatsapp_identifier;
+      if (!target) continue; // sem número da loja não há como cobrar por WhatsApp
+      try {
+        await opts.send(target, reminderMessage(t.task_type, store.name, Number(t.reminder_count || 0)));
+        db.prepare(`UPDATE retail_store_daily_tasks SET reminder_count = reminder_count + 1, last_reminder_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(opts.now, t.id);
+        summary.reminded++;
+      } catch (e) { console.error("[Retail] cobrança falhou", t.id, e); }
+    }
+    return summary;
+  }
+}
+
+function parseSqlTs(ts: string): number { return Date.parse(String(ts).replace(" ", "T") + "Z") || 0; }
+
+function reminderMessage(taskType: string, storeName: string, priorCount: number): string {
+  const reforço = priorCount > 0 ? "Reforçando: " : "";
+  if (taskType === "malote") return `${reforço}Oi! Falta enviar a folha de malote da loja ${storeName}. Pode mandar por aqui? 🙏`;
+  if (taskType === "escala") return `${reforço}Oi! A escala da loja ${storeName} ainda não foi enviada. Pode mandar a foto/arquivo ou confirmar que já está atualizada?`;
+  return `${reforço}Oi! Ainda não recebemos o fechamento da loja ${storeName} de hoje. Pode enviar a folha/foto por aqui ou preencher o resumo? 🙏`;
 }

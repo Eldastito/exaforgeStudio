@@ -91,6 +91,7 @@ jobs:
           - { name: 'retail-foundation', script: 'test:retail-foundation' }
           - { name: 'retail-closing', script: 'test:retail-closing' }
           - { name: 'retail-scan', script: 'test:retail-scan' }
+          - { name: 'retail-cobranca', script: 'test:retail-cobranca' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

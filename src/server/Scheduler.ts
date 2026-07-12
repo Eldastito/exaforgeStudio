@@ -68,6 +68,50 @@ export class Scheduler {
     // SLA de primeira resposta: sensível a minutos (uma meta de 30 min não pode
     // ser vigiada de hora em hora), então mora no passe rápido.
     try { this.ticketSlaPass(); } catch (e: any) { console.error('[Scheduler] SLA de tickets falhou', e.message); }
+    // Retail Ops (ADR-083, Fase D): cobrança de fechamento/malote/escala. No
+    // passe rápido porque a recobrança é sensível a minutos (retry_minutes).
+    await this.retailCobrancaPass().catch(e => console.error('[Scheduler] cobrança Retail Ops falhou', e));
+  }
+
+  /**
+   * Retail Ops (ADR-083, Fase D) — cobra as pendências VENCIDAS por WhatsApp
+   * (fechamento/malote/escala), com retry e escalonamento ao gestor após o teto.
+   * Reusa o padrão pixReminderPass (canal de fallback da org). Best-effort.
+   */
+  static async retailCobrancaPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT organization_id FROM organization_settings
+          WHERE COALESCE(retail_daily_closing_enabled,0)=1
+             OR COALESCE(retail_malote_enabled,0)=1
+             OR COALESCE(retail_scale_reminder_enabled,0)=1`
+      ).all() as any[];
+    } catch { return; }
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19); // 'YYYY-MM-DD HH:MM:SS' (UTC)
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        if (!channel) continue; // sem canal não há como cobrar
+        await RetailTaskService.runReminders(orgId, {
+          now,
+          send: (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message),
+          notify: ({ store, task }) => {
+            try {
+              NotificationService.push({
+                organizationId: orgId,
+                title: `Pendência de ${task.task_type} sem resposta`,
+                message: `A loja ${store.name} não enviou o ${task.task_type} de hoje após várias cobranças. Acompanhe com o responsável.`,
+                type: "alert",
+                dedupeKey: `retail_escalate:${task.id}`,
+                dedupeWindowMin: 720,
+              });
+            } catch { /* noop */ }
+          },
+        });
+      } catch (e) { console.error("[Retail] cobrança da org falhou", orgId, e); }
+    }
   }
 
   static async tick() {

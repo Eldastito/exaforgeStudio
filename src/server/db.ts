@@ -1417,6 +1417,85 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_stores', e); }
 
+  // Retail Ops (ADR-083, Fase B) — cotas, fechamentos e checklist diário por
+  // loja. Espinha operacional: o Scheduler gera as pendências do dia; o
+  // fechamento por WhatsApp/IA (Fase C) preenche informed_total e calcula desvio.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_store_quotas (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        quota_date DATE NOT NULL,
+        quota_amount REAL NOT NULL DEFAULT 0,
+        source TEXT DEFAULT 'manual',            -- manual | imported | integration
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, store_id, quota_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_quotas_date ON retail_store_quotas (organization_id, quota_date);
+
+      CREATE TABLE IF NOT EXISTS retail_daily_closings (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        closing_date DATE NOT NULL,
+        status TEXT DEFAULT 'pending',           -- pending|received|extracted|needs_review|reconciled|divergent|approved|rejected
+        source TEXT DEFAULT 'whatsapp',          -- whatsapp | manual | image_ocr | integration
+        submitted_by_contact_id TEXT,
+        submitted_by_identifier TEXT,
+        submitted_at DATETIME,
+        raw_text TEXT,
+        image_url TEXT,
+        extracted_json TEXT,
+        informed_total REAL DEFAULT 0,
+        system_total REAL DEFAULT 0,
+        quota_amount REAL DEFAULT 0,
+        variance_amount REAL DEFAULT 0,          -- realizado - cota
+        variance_percent REAL DEFAULT 0,
+        divergence_status TEXT DEFAULT 'not_checked', -- not_checked | ok | divergent
+        reviewed_by TEXT,
+        reviewed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, store_id, closing_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_closings_date ON retail_daily_closings (organization_id, closing_date);
+
+      CREATE TABLE IF NOT EXISTS retail_daily_closing_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        closing_id TEXT NOT NULL,
+        payment_method TEXT,                     -- dinheiro|pix|credito|debito|voucher|troca|outros
+        informed_amount REAL DEFAULT 0,
+        system_amount REAL DEFAULT 0,
+        difference_amount REAL DEFAULT 0,
+        notes TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_closing_items ON retail_daily_closing_items (closing_id);
+
+      CREATE TABLE IF NOT EXISTS retail_store_daily_tasks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        task_date DATE NOT NULL,
+        task_type TEXT NOT NULL,                 -- fechamento | malote | escala
+        status TEXT DEFAULT 'pending',           -- pending | submitted | done | late
+        due_at DATETIME,
+        last_reminder_at DATETIME,
+        reminder_count INTEGER DEFAULT 0,
+        submitted_by_contact_id TEXT,
+        submitted_at DATETIME,
+        attachment_url TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, store_id, task_date, task_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_tasks_due ON retail_store_daily_tasks (organization_id, status, task_date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase B', e); }
+
   // Módulo Clínica (ADR-080, Fase B) — Ficha do Paciente. Tabela satélite 1:1
   // com contacts (dado sensível de saúde separado do CRM). Editar plano NUNCA
   // apaga o paciente nem o agendamento; a troca fica registrada no histórico.

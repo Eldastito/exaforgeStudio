@@ -17,11 +17,34 @@ import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
 import { RetailImpactService } from "../RetailImpactService.js";
+import { RetailStockModeService } from "../RetailStockModeService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Modo de estoque / fonte da verdade (ADR-084 D4) ---
+router.get("/stock-mode", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailStockModeService.status(orgId));
+});
+
+router.post("/stock-mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ orgMode: RetailStockModeService.setOrgMode(orgId, String(req.body?.mode), req.user?.userId) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/stock-mode/store/:storeId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const mode = req.body?.mode === null || req.body?.mode === undefined ? null : String(req.body.mode);
+  try { res.json({ storeId: req.params.storeId, override: RetailStockModeService.setStoreOverride(orgId, req.params.storeId, mode, req.user?.userId), resolved: RetailStockModeService.resolve(orgId, req.params.storeId) }); }
+  catch (e: any) { res.status(e.message === "store_not_found" ? 404 : 400).json({ error: e.message }); }
+});
 
 // --- Ativação opt-in do Retail Network Ops (ADR-084 D2) ---
 router.get("/activation", (req: AuthRequest, res): any => {

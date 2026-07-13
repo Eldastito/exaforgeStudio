@@ -374,6 +374,13 @@ router.get("/impact", (req: AuthRequest, res): any => {
   res.json(RetailImpactService.monthly(orgId, month));
 });
 
+// Capital parado em estoque + produtos sem giro (fato, não estimativa).
+router.get("/impact/stock-capital", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailImpactService.stockCapital(orgId, Number(req.query.days) || 60));
+});
+
 // Export do mês: JSON (rows) por padrão, ou CSV com ?format=csv.
 router.get("/dashboard/monthly/export", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

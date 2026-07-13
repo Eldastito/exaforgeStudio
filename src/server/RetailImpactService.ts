@@ -7,8 +7,9 @@
  * separa VALOR COMPROVADO (R$ efetivamente apurados) de ATIVIDADE (trabalho
  * automatizado, em contagem) — os dois NUNCA são somados num número só.
  *
- * O "valor estimado" (capital parado, perdas evitadas, tempo devolvido) e o
- * baseline do dia 0 ficam para fatias futuras, pois dependem de premissas/decisão.
+ * As perdas evitadas, o tempo devolvido e o baseline do dia 0 ficam para fatias
+ * futuras (dependem de premissas/decisão). O CAPITAL PARADO já entra aqui como
+ * FATO (não estimativa): é o custo médio × quantidade em estoque no núcleo.
  * Só leitura agregada; isolado por organização.
  */
 import db from "./db.js";
@@ -86,6 +87,60 @@ export class RetailImpactService {
         storesMonitored,
       },
       note: "Valor comprovado = R$ efetivamente apurados. Atividade = trabalho automatizado (contagem) — não somar aos R$. Estimativas e baseline entram em fatia futura (ADR-085).",
+    };
+  }
+
+  /**
+   * Capital PARADO em estoque + produtos SEM GIRO (ADR-085, fatia factual).
+   * Não é estimativa: capital = custo médio × quantidade em estoque no núcleo.
+   * "Sem giro" = tem saldo mas sem SAÍDA (venda) há `slowMoverDays` dias (ou
+   * nunca) — o dinheiro que está parado sem girar. Agregado no nível da org
+   * (o núcleo não tem dimensão de loja; ver ADR-084 D4). Isolado por org.
+   */
+  static stockCapital(orgId: string, slowMoverDays = 60): any {
+    const days = Math.max(1, Math.floor(Number(slowMoverDays) || 60));
+
+    const totals = db.prepare(
+      `SELECT COALESCE(SUM(quantity_available * COALESCE(avg_cost,0)),0) AS cap, COUNT(*) AS n
+         FROM inventory_items WHERE organization_id = ? AND quantity_available > 0`
+    ).get(orgId) as any;
+
+    const rows = db.prepare(
+      `SELECT pid, vid, qty, cost, name, last_out FROM (
+         SELECT ii.product_service_id AS pid, ii.variant_id AS vid, ii.quantity_available AS qty,
+                COALESCE(ii.avg_cost,0) AS cost, ps.name AS name,
+                (SELECT MAX(sm.created_at) FROM stock_movements sm
+                   WHERE sm.organization_id = ii.organization_id
+                     AND sm.product_service_id = ii.product_service_id
+                     AND sm.type = 'saida') AS last_out
+           FROM inventory_items ii
+           LEFT JOIN products_services ps ON ps.id = ii.product_service_id
+          WHERE ii.organization_id = ? AND ii.quantity_available > 0
+       ) WHERE last_out IS NULL OR last_out < datetime('now', ?)
+       ORDER BY (qty * cost) DESC`
+    ).all(orgId, `-${days} days`) as any[];
+
+    const slow = rows.map((r) => ({
+      productId: r.pid,
+      variantId: r.vid || null,
+      name: r.name || null,
+      quantity: num(r.qty),
+      avgCost: money(num(r.cost)),
+      capital: money(num(r.qty) * num(r.cost)),
+      lastSaleAt: r.last_out || null,
+    }));
+    const slowMoverCapital = money(slow.reduce((a, s) => a + s.capital, 0));
+
+    const MAX_LIST = 50;
+    return {
+      totalCapital: money(num(totals?.cap)),
+      itemsInStock: num(totals?.n),
+      slowMoverDays: days,
+      slowMoverCount: slow.length,
+      slowMoverCapital,
+      slowMovers: slow.slice(0, MAX_LIST),
+      slowMoversTruncated: slow.length > MAX_LIST,
+      note: "Capital parado = custo médio × quantidade em estoque (fato, não estimativa). Sem giro = com saldo e sem saída há N dias. Agregado por organização (núcleo sem dimensão de loja).",
     };
   }
 }

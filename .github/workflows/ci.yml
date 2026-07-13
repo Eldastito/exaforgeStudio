@@ -96,6 +96,7 @@ jobs:
           - { name: 'retail-commission', script: 'test:retail-commission' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }
           - { name: 'retail-decouple', script: 'test:retail-decouple' }
+          - { name: 'retail-activation', script: 'test:retail-activation' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

@@ -120,5 +120,23 @@ export class ModuleService {
     return clean;
   }
 
+  /**
+   * Habilita UM módulo opcional para a org (idempotente), sem remover os demais.
+   * Se `enabled_modules` estava nulo (legado = "tudo ligado"), torna o conjunto
+   * EXPLÍCITO a partir do preset da vertical (ou "outro") antes de adicionar —
+   * assim ligar um add-on nunca restringe silenciosamente a org ao módulo novo.
+   * Usado pelo opt-in de add-ons como o Retail Network Ops (ADR-084 D2).
+   */
+  static enableModule(orgId: string, moduleKey: string): string[] {
+    let mods = this.enabledModules(orgId);
+    if (!Array.isArray(mods)) {
+      const o = db.prepare("SELECT vertical FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+      const v = getVertical(o?.vertical) || getVertical("outro");
+      mods = v ? [...v.modules] : [];
+    }
+    if (!mods.includes(moduleKey)) mods = [...mods, moduleKey];
+    return this.setModules(orgId, mods);
+  }
+
   static catalog() { return VERTICALS; }
 }

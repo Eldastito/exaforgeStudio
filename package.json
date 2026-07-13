@@ -53,6 +53,7 @@
     "test:retail-dashboard": "tsx scripts/test-retail-dashboard.ts",
     "test:retail-decouple": "tsx scripts/test-retail-decouple.ts",
     "test:retail-activation": "tsx scripts/test-retail-activation.ts",
+    "test:retail-impact": "tsx scripts/test-retail-impact.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

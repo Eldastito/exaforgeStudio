@@ -19,11 +19,19 @@ import { RetailActivationService } from "../RetailActivationService.js";
 import { RetailImpactService } from "../RetailImpactService.js";
 import { RetailStockModeService } from "../RetailStockModeService.js";
 import { RetailGraduationService } from "../RetailGraduationService.js";
+import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Adoção / uso correto (ADR-085): onde ainda falta configurar ---
+router.get("/adoption", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailAdoptionService.status(orgId));
+});
 
 // --- Modo de estoque / fonte da verdade (ADR-084 D4) ---
 router.get("/stock-mode", (req: AuthRequest, res): any => {

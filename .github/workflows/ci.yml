@@ -102,6 +102,7 @@ jobs:
           - { name: 'retail-graduation', script: 'test:retail-graduation' }
           - { name: 'retail-stock-capital', script: 'test:retail-stock-capital' }
           - { name: 'retail-impact-summary', script: 'test:retail-impact-summary' }
+          - { name: 'retail-adoption', script: 'test:retail-adoption' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

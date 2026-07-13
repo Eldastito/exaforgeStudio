@@ -15,11 +15,31 @@ import { RetailQuotaService, RetailClosingService, RetailTaskService } from "../
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
+import { RetailActivationService } from "../RetailActivationService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Ativação opt-in do Retail Network Ops (ADR-084 D2) ---
+router.get("/activation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailActivationService.status(orgId));
+});
+
+router.post("/activation/activate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailActivationService.activate(orgId, req.user?.userId));
+});
+
+router.post("/activation/deactivate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailActivationService.deactivate(orgId, req.user?.userId));
+});
 
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
 const closingUpload = multer({

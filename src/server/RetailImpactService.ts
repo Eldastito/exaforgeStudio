@@ -91,6 +91,35 @@ export class RetailImpactService {
   }
 
   /**
+   * PAINEL DE VALOR consolidado (ADR-085, factual): junta numa visão só o valor
+   * comprovado (R$), o trabalho automatizado (atividade) e o capital parado, e
+   * acrescenta os atendimentos que a IA fez sozinha no mês (mensagens do bot).
+   * Só composição de leituras factuais — nenhuma estimativa. Isolado por org.
+   */
+  static summary(orgId: string, month: string, slowMoverDays = 60): any {
+    const m = this.monthly(orgId, month);
+    const cap = this.stockCapital(orgId, slowMoverDays);
+    const start = `${month}-01`, end = `${month}-31`;
+    const aiMessagesHandled = num((db.prepare(
+      `SELECT COUNT(*) AS c FROM messages WHERE organization_id = ? AND sender_type = 'bot' AND date(created_at) BETWEEN ? AND ?`
+    ).get(orgId, start, end) as any)?.c);
+
+    return {
+      month,
+      proven: m.proven,
+      activity: { ...m.activity, aiMessagesHandled },
+      stockCapital: {
+        total: cap.totalCapital,
+        itemsInStock: cap.itemsInStock,
+        slowMoverCount: cap.slowMoverCount,
+        slowMoverCapital: cap.slowMoverCapital,
+        topSlowMovers: cap.slowMovers.slice(0, 5),
+      },
+      note: "Painel de valor factual: R$ comprovados, trabalho automatizado e capital parado — sem estimativa. Baseline dia-0 e valor estimado liberado entram em fatia futura (ADR-085).",
+    };
+  }
+
+  /**
    * Capital PARADO em estoque + produtos SEM GIRO (ADR-085, fatia factual).
    * Não é estimativa: capital = custo médio × quantidade em estoque no núcleo.
    * "Sem giro" = tem saldo mas sem SAÍDA (venda) há `slowMoverDays` dias (ou

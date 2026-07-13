@@ -147,6 +147,62 @@ export class RetailImpactService {
     return true;
   }
 
+  /**
+   * Valor ESTIMADO (ADR-085 D4) — separado do comprovado, com a premissa SEMPRE
+   * à vista e NUNCA somado aos R$ comprovados. Categorias:
+   *   - tempo devolvido ao gestor: ações automatizadas × minutos/ação (premissa);
+   *   - ruptura evitada: divergências de estoque negativo corrigidas no mês,
+   *     valoradas por |qtd| × custo médio × margem (premissa).
+   * Premissas conservadoras por padrão, sobrescrevíveis. Isolado por org.
+   */
+  static estimated(orgId: string, month: string, opts: {
+    minutesPerReminder?: number; minutesPerAiMessage?: number; minutesPerClosing?: number; stockMarginPercent?: number;
+  } = {}): any {
+    const premissas = {
+      minutesPerReminder: num(opts.minutesPerReminder) || 3,
+      minutesPerAiMessage: num(opts.minutesPerAiMessage) || 2,
+      minutesPerClosing: num(opts.minutesPerClosing) || 10,
+      stockMarginPercent: opts.stockMarginPercent != null ? Number(opts.stockMarginPercent) : 30,
+    };
+    const start = `${month}-01`, end = `${month}-31`;
+    const m = this.monthly(orgId, month);
+    const reminders = num(m.activity.remindersSent);
+    const closings = num(m.activity.closingsChecked);
+    const aiMessages = num((db.prepare(
+      `SELECT COUNT(*) AS c FROM messages WHERE organization_id = ? AND sender_type = 'bot' AND date(created_at) BETWEEN ? AND ?`
+    ).get(orgId, start, end) as any)?.c);
+
+    const minutes = reminders * premissas.minutesPerReminder + aiMessages * premissas.minutesPerAiMessage + closings * premissas.minutesPerClosing;
+
+    // Ruptura evitada: soma |qtd| × custo médio do produto (subconsulta evita
+    // multiplicar linhas por variação) sobre os alertas resolvidos no mês.
+    const rupt = db.prepare(
+      `SELECT COALESCE(SUM(ABS(a.quantity) * COALESCE(
+                (SELECT ii.avg_cost FROM inventory_items ii
+                  WHERE ii.organization_id = a.organization_id AND ii.product_service_id = a.product_service_id
+                  ORDER BY ii.avg_cost DESC LIMIT 1), 0)),0) AS base,
+              COUNT(*) AS n
+         FROM retail_stock_alerts a
+        WHERE a.organization_id = ? AND a.status = 'resolved' AND date(a.resolved_at) BETWEEN ? AND ?`
+    ).get(orgId, start, end) as any;
+    const rupturaAmount = money(num(rupt?.base) * premissas.stockMarginPercent / 100);
+
+    return {
+      month,
+      premissas,
+      estimated: {
+        tempoDevolvido: {
+          minutes,
+          hours: money(minutes / 60),
+          breakdown: { reminders, aiMessages, closings },
+        },
+        rupturaEvitada: { amount: rupturaAmount, alerts: num(rupt?.n) },
+        totalEstimatedBRL: rupturaAmount, // tempo devolvido não é R$; não entra aqui
+      },
+      disclaimer: "Valores ESTIMADOS, com a premissa à vista. NÃO somar ao valor comprovado — são potenciais/economias sob premissa, não R$ apurados.",
+    };
+  }
+
   /** Série histórica dos últimos N dias (para a tendência do painel de valor). */
   static getTrend(orgId: string, days = 30): any[] {
     return db.prepare(

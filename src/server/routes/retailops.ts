@@ -397,6 +397,20 @@ router.get("/impact/summary", (req: AuthRequest, res): any => {
   res.json(RetailImpactService.summary(orgId, month, Number(req.query.days) || 60));
 });
 
+// Valor ESTIMADO (tempo devolvido + ruptura evitada) — premissa à vista.
+router.get("/impact/estimated", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  const q = req.query;
+  res.json(RetailImpactService.estimated(orgId, month, {
+    minutesPerReminder: q.minReminder != null ? Number(q.minReminder) : undefined,
+    minutesPerAiMessage: q.minAi != null ? Number(q.minAi) : undefined,
+    minutesPerClosing: q.minClosing != null ? Number(q.minClosing) : undefined,
+    stockMarginPercent: q.margin != null ? Number(q.margin) : undefined,
+  }));
+});
+
 // Tendência: série histórica do painel de valor/adoção (últimos N dias).
 router.get("/impact/trend", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

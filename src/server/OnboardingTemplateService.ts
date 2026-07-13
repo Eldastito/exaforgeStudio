@@ -13,7 +13,10 @@ import { processDocument } from "./geminiRAG.js";
  * nome). NÃO altera dados do cliente.
  */
 
-type AreaSeed = { name: string; description: string; persona: string };
+// requiresModule: item do pack que só é semeado se o módulo opcional estiver
+// habilitado para a org (ADR-084 D2 — ex.: áreas de Retail Network Ops só
+// entram quando o add-on `retail` está ligado, nunca para todo varejo).
+type AreaSeed = { name: string; description: string; persona: string; requiresModule?: string };
 type CadenceSeed = {
   name: string;
   triggerStage: string;
@@ -49,7 +52,7 @@ type Pack = {
   areas: AreaSeed[];
   cadences: CadenceSeed[];
   automations: Automations;
-  faq: { title: string; content: string }[];
+  faq: { title: string; content: string; requiresModule?: string }[];
 };
 
 const PACKS: Pack[] = [
@@ -160,26 +163,32 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
         description: "Pedidos, rastreio, troca, devolução.",
         persona: "Você é o suporte da loja. Receba o cliente com paciência. Confirme o pedido com base nos dados reais. Para dúvida de rastreio/entrega, consulte o status. Para troca/devolução, peça os dados e encaminhe para o time quando necessário.",
       },
-      // Retail Ops (ADR-083) — áreas operacionais da rede de lojas.
+      // Retail Ops / Retail Network Ops (ADR-083/084) — áreas de OPERAÇÃO DE REDE.
+      // Só semeadas quando o add-on `retail` está habilitado (ADR-084 D2): uma
+      // loja de varejo comum não recebe as personas de fechamento/malote/etc.
       {
         name: "Fechamento de Loja",
         description: "Recebe e valida o fechamento diário enviado pela equipe.",
         persona: "Você é o assistente de fechamento de loja. Sua função é receber o fechamento diário enviado pela equipe, validar se os campos obrigatórios foram preenchidos, extrair valores de texto, foto ou documento, calcular total vendido, comparar com a cota do dia, apontar desvio e registrar divergências. Nunca invente valores. Se não conseguir ler algum campo, peça reenvio ou revisão humana.",
+        requiresModule: "retail",
       },
       {
         name: "Malote e Escalas",
         description: "Cobra o envio de folha de malote, fechamento e escalas no prazo.",
         persona: "Você é o assistente operacional de malote e escalas. Sua função é cobrar o envio da folha de malote, fechamento e escalas no prazo combinado. Se a loja não enviar, cobre novamente com educação e registre atraso. Quando receber, confirme recebimento e marque a tarefa como concluída.",
+        requiresModule: "retail",
       },
       {
         name: "Auditoria de Estoque",
         description: "Identifica estoque negativo, divergências e produtos sem giro.",
         persona: "Você é o auditor de estoque da operação. Sua função é identificar produtos com estoque negativo, divergências entre venda e estoque, produtos sem movimentação, produtos mais vendidos e possíveis erros de lançamento. Sempre explique a divergência com base nos dados disponíveis.",
+        requiresModule: "retail",
       },
       {
         name: "Premiação e Comissão",
         description: "Calcula prévia de premiação/comissão; nunca paga sem aprovação.",
         persona: "Você é o assistente de premiação. Sua função é calcular premiação e comissão com base nas regras cadastradas, fechamento das lojas e metas do período. Nunca altere pagamento automaticamente; gere prévia, destaque divergências e peça aprovação do gestor.",
+        requiresModule: "retail",
       },
     ],
     cadences: [
@@ -207,11 +216,10 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
       referral_enabled: 1, referral_reward_percent: 10, referral_welcome_percent: 10,
       procurement_enabled: 0,
       quote_validity_hours: 48, quote_followup_hours: 12, quote_followup_max: 2,
-      // Retail Ops (ADR-083) — ligadas por padrão no Quick-Start; só têm efeito
-      // com o módulo `retail` e lojas cadastradas (Fases B–D).
-      retail_daily_closing_enabled: 1, retail_daily_closing_due_hour: 21, retail_daily_closing_retry_minutes: 30,
-      retail_malote_enabled: 1, retail_scale_reminder_enabled: 1, retail_quota_enabled: 1,
-      retail_stock_negative_alert_enabled: 1, retail_commission_enabled: 1, retail_monthly_close_enabled: 1,
+      // ADR-084 D2: as automações `retail_*` (fechamento/malote/escala/cotas/
+      // premiação) NÃO são mais ligadas pelo pack base de varejo — Retail Network
+      // Ops é opt-in. Ficam no default off e são ativadas na configuração do
+      // Retail Ops (ou preservadas em quem já usava, como a TOULON).
     },
     faq: [
       {
@@ -235,6 +243,7 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
       },
       {
         title: "FAQ Operacional — Retail Ops",
+        requiresModule: "retail",
         content: `# Operação diária das lojas (Retail Ops)
 
 ## Fechamento diário
@@ -436,9 +445,11 @@ export class OnboardingTemplateService {
       faq: { created: 0, skipped: 0 },
     };
 
-    // 1) ÁREAS (idempotente por nome).
+    // 1) ÁREAS (idempotente por nome). Itens com requiresModule só entram se o
+    // add-on estiver habilitado para a org (ADR-084 D2).
     const insArea = db.prepare(`INSERT INTO service_areas (id, organization_id, name, description, persona, position, active) VALUES (?, ?, ?, ?, ?, ?, 1)`);
     pack.areas.forEach((a, i) => {
+      if (a.requiresModule && !ModuleService.isEnabled(orgId, a.requiresModule)) { report.areas.skipped++; return; }
       const exists = db.prepare(`SELECT 1 FROM service_areas WHERE organization_id = ? AND lower(name) = lower(?)`).get(orgId, a.name);
       if (exists) { report.areas.skipped++; return; }
       try { insArea.run(uuidv4(), orgId, a.name, a.description, a.persona, i + 1); report.areas.created++; }
@@ -470,6 +481,7 @@ export class OnboardingTemplateService {
     // que faz chunking + embeddings.
     if (!opts.skipFaq) {
       for (const d of pack.faq) {
+        if (d.requiresModule && !ModuleService.isEnabled(orgId, d.requiresModule)) { report.faq.skipped++; continue; }
         const exists = db.prepare(`SELECT 1 FROM knowledge_documents WHERE organization_id = ? AND title = ?`).get(orgId, d.title);
         if (exists) { report.faq.skipped++; continue; }
         try {

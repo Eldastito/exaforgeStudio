@@ -99,6 +99,7 @@ jobs:
           - { name: 'retail-activation', script: 'test:retail-activation' }
           - { name: 'retail-impact', script: 'test:retail-impact' }
           - { name: 'retail-stock-mode', script: 'test:retail-stock-mode' }
+          - { name: 'retail-graduation', script: 'test:retail-graduation' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

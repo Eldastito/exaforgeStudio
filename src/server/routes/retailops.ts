@@ -18,6 +18,7 @@ import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
 import { RetailImpactService } from "../RetailImpactService.js";
 import { RetailStockModeService } from "../RetailStockModeService.js";
+import { RetailGraduationService } from "../RetailGraduationService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -43,6 +44,14 @@ router.post("/stock-mode/store/:storeId", requireRole("owner", "admin"), (req: A
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const mode = req.body?.mode === null || req.body?.mode === undefined ? null : String(req.body.mode);
   try { res.json({ storeId: req.params.storeId, override: RetailStockModeService.setStoreOverride(orgId, req.params.storeId, mode, req.user?.userId), resolved: RetailStockModeService.resolve(orgId, req.params.storeId) }); }
+  catch (e: any) { res.status(e.message === "store_not_found" ? 404 : 400).json({ error: e.message }); }
+});
+
+// Graduação supervisor → nativo (ADR-084 D5): promove a loja e semeia o núcleo.
+router.post("/stock-mode/graduate/:storeId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailGraduationService.graduate(orgId, req.params.storeId, req.user?.userId)); }
   catch (e: any) { res.status(e.message === "store_not_found" ? 404 : 400).json({ error: e.message }); }
 });
 

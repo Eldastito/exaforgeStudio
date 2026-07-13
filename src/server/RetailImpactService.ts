@@ -148,6 +148,53 @@ export class RetailImpactService {
   }
 
   /**
+   * Baseline do DIA 0 (ADR-085): grava o retrato do estado no momento em que o
+   * Retail Ops é ativado, para o "antes → depois". Idempotente — captura só uma
+   * vez por org (não sobrescreve). Retorna true se gravou.
+   */
+  static captureBaseline(orgId: string): boolean {
+    const exists = db.prepare(`SELECT 1 FROM retail_baseline WHERE organization_id = ?`).get(orgId);
+    if (exists) return false;
+    const cap = this.stockCapital(orgId, 60);
+    const openAlerts = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_stock_alerts WHERE organization_id = ? AND status = 'open'`).get(orgId) as any)?.c);
+    let adoption = 0;
+    try { adoption = num(RetailAdoptionService.status(orgId)?.score?.percent); } catch { /* noop */ }
+    db.prepare(
+      `INSERT INTO retail_baseline (organization_id, stock_capital, slow_mover_capital, open_stock_alerts, adoption_percent) VALUES (?, ?, ?, ?, ?)`
+    ).run(orgId, cap.totalCapital, cap.slowMoverCapital, openAlerts, adoption);
+    return true;
+  }
+
+  /** Comparação baseline (dia 0) × agora — o "antes → depois" factual. */
+  static baseline(orgId: string): any {
+    const base = db.prepare(`SELECT captured_at, stock_capital, slow_mover_capital, open_stock_alerts, adoption_percent FROM retail_baseline WHERE organization_id = ?`).get(orgId) as any;
+    const cap = this.stockCapital(orgId, 60);
+    const openAlerts = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_stock_alerts WHERE organization_id = ? AND status = 'open'`).get(orgId) as any)?.c);
+    let adoption = 0;
+    try { adoption = num(RetailAdoptionService.status(orgId)?.score?.percent); } catch { /* noop */ }
+    const current = { stockCapital: cap.totalCapital, slowMoverCapital: cap.slowMoverCapital, openStockAlerts: openAlerts, adoptionPercent: adoption };
+    if (!base) return { captured: false, baseline: null, current, delta: null };
+    const baseline = {
+      capturedAt: base.captured_at,
+      stockCapital: num(base.stock_capital),
+      slowMoverCapital: num(base.slow_mover_capital),
+      openStockAlerts: num(base.open_stock_alerts),
+      adoptionPercent: num(base.adoption_percent),
+    };
+    return {
+      captured: true,
+      baseline,
+      current,
+      delta: {
+        stockCapital: money(current.stockCapital - baseline.stockCapital),
+        slowMoverCapital: money(current.slowMoverCapital - baseline.slowMoverCapital),
+        openStockAlerts: current.openStockAlerts - baseline.openStockAlerts,
+        adoptionPercent: current.adoptionPercent - baseline.adoptionPercent,
+      },
+    };
+  }
+
+  /**
    * Valor ESTIMADO (ADR-085 D4) — separado do comprovado, com a premissa SEMPRE
    * à vista e NUNCA somado aos R$ comprovados. Categorias:
    *   - tempo devolvido ao gestor: ações automatizadas × minutos/ação (premissa);

@@ -16,6 +16,7 @@ import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
+import { RetailImpactService } from "../RetailImpactService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -331,6 +332,14 @@ router.get("/dashboard/monthly", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const month = String(req.query.month || new Date().toISOString().slice(0, 7));
   res.json(RetailDashboardService.monthly(orgId, month));
+});
+
+// Impact Ledger (ADR-085): valor COMPROVADO em R$ + atividade do mês.
+router.get("/impact", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  res.json(RetailImpactService.monthly(orgId, month));
 });
 
 // Export do mês: JSON (rows) por padrão, ou CSV com ?format=csv.

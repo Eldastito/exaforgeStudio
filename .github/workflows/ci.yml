@@ -97,6 +97,7 @@ jobs:
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }
           - { name: 'retail-decouple', script: 'test:retail-decouple' }
           - { name: 'retail-activation', script: 'test:retail-activation' }
+          - { name: 'retail-impact', script: 'test:retail-impact' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

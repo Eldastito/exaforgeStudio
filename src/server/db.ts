@@ -1427,6 +1427,21 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_stores', e); }
 
+  // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
+  // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_baseline (
+        organization_id TEXT PRIMARY KEY,
+        captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        stock_capital REAL DEFAULT 0,
+        slow_mover_capital REAL DEFAULT 0,
+        open_stock_alerts INTEGER DEFAULT 0,
+        adoption_percent INTEGER DEFAULT 0
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_baseline', e); }
+
   // Retail Ops (ADR-085) — snapshot diário do painel de valor/adoção, para a
   // série histórica (tendência). Idempotente por (org, dia).
   try {

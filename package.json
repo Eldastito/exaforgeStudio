@@ -61,6 +61,7 @@
     "test:retail-adoption": "tsx scripts/test-retail-adoption.ts",
     "test:retail-impact-trend": "tsx scripts/test-retail-impact-trend.ts",
     "test:retail-estimated": "tsx scripts/test-retail-estimated.ts",
+    "test:retail-baseline": "tsx scripts/test-retail-baseline.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

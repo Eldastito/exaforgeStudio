@@ -73,7 +73,10 @@ router.get("/activation", (req: AuthRequest, res): any => {
 router.post("/activation/activate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(RetailActivationService.activate(orgId, req.user?.userId));
+  const out = RetailActivationService.activate(orgId, req.user?.userId);
+  // Baseline do dia 0 (ADR-085): captura o "antes" no momento da ativação.
+  try { RetailImpactService.captureBaseline(orgId); } catch { /* best-effort */ }
+  res.json(out);
 });
 
 router.post("/activation/deactivate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
@@ -409,6 +412,20 @@ router.get("/impact/estimated", (req: AuthRequest, res): any => {
     minutesPerClosing: q.minClosing != null ? Number(q.minClosing) : undefined,
     stockMarginPercent: q.margin != null ? Number(q.margin) : undefined,
   }));
+});
+
+// Baseline dia-0: comparação "antes → agora" (capital parado, alertas, adoção).
+router.get("/impact/baseline", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailImpactService.baseline(orgId));
+});
+
+// Captura explícita do baseline (orgs que ativaram antes deste recurso).
+router.post("/impact/baseline/capture", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ captured: RetailImpactService.captureBaseline(orgId), baseline: RetailImpactService.baseline(orgId) });
 });
 
 // Tendência: série histórica do painel de valor/adoção (últimos N dias).

@@ -105,6 +105,7 @@ jobs:
           - { name: 'retail-adoption', script: 'test:retail-adoption' }
           - { name: 'retail-impact-trend', script: 'test:retail-impact-trend' }
           - { name: 'retail-estimated', script: 'test:retail-estimated' }
+          - { name: 'retail-baseline', script: 'test:retail-baseline' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

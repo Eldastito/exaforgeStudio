@@ -381,6 +381,14 @@ router.get("/impact/stock-capital", (req: AuthRequest, res): any => {
   res.json(RetailImpactService.stockCapital(orgId, Number(req.query.days) || 60));
 });
 
+// Painel de valor consolidado (comprovado + atividade + capital parado).
+router.get("/impact/summary", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  res.json(RetailImpactService.summary(orgId, month, Number(req.query.days) || 60));
+});
+
 // Export do mês: JSON (rows) por padrão, ou CSV com ?format=csv.
 router.get("/dashboard/monthly/export", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

@@ -1392,6 +1392,11 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_stock_negative_alert_enabled INTEGER DEFAULT 0`); } catch(e){} // alerta de estoque negativo
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_commission_enabled INTEGER DEFAULT 0`); } catch(e){}        // premiação/comissão
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_monthly_close_enabled INTEGER DEFAULT 0`); } catch(e){}     // fechamento mensal acumulado
+  // ADR-084 D4: modo de estoque / fonte da verdade (native | supervised | hybrid).
+  // Default 'native' = ZappFlow como sistema principal. Invariante: um único ledger
+  // autoritativo por (loja, produto) — o modo decide quem manda.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_stock_source TEXT DEFAULT 'native'`); } catch(e){}
+  // (o override por loja `retail_stores.stock_source` é criado junto da tabela, abaixo)
 
   // Retail Ops (ADR-083, Fase A) — CADASTRO DE LOJAS. Dimensão de loja física
   // (inexistente até aqui: estoque/pedidos eram só por organização). Cada loja
@@ -1409,9 +1414,14 @@ const initDb = () => {
         manager_user_id TEXT,
         manager_contact_id TEXT,
         active INTEGER DEFAULT 1,
+        stock_source TEXT,               -- ADR-084 D4: modo de estoque da loja (null = herda da org)
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+    // ADR-084 D4: garante a coluna em DBs que já tinham retail_stores sem ela.
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN stock_source TEXT`); } catch(e){}
+    db.exec(`
       CREATE INDEX IF NOT EXISTS idx_retail_stores_org ON retail_stores (organization_id);
       CREATE INDEX IF NOT EXISTS idx_retail_stores_wa ON retail_stores (organization_id, whatsapp_identifier);
     `);

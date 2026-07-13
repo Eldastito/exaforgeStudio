@@ -397,6 +397,13 @@ router.get("/impact/summary", (req: AuthRequest, res): any => {
   res.json(RetailImpactService.summary(orgId, month, Number(req.query.days) || 60));
 });
 
+// Tendência: série histórica do painel de valor/adoção (últimos N dias).
+router.get("/impact/trend", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ days: Number(req.query.days) || 30, series: RetailImpactService.getTrend(orgId, Number(req.query.days) || 30) });
+});
+
 // Export do mês: JSON (rows) por padrão, ou CSV com ?format=csv.
 router.get("/dashboard/monthly/export", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

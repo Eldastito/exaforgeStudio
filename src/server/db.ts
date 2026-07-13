@@ -1427,6 +1427,26 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_stores', e); }
 
+  // Retail Ops (ADR-085) — snapshot diário do painel de valor/adoção, para a
+  // série histórica (tendência). Idempotente por (org, dia).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_impact_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        snapshot_date DATE NOT NULL,
+        proven_brl REAL DEFAULT 0,
+        stock_capital REAL DEFAULT 0,
+        slow_mover_capital REAL DEFAULT 0,
+        adoption_percent INTEGER DEFAULT 0,
+        ai_messages INTEGER DEFAULT 0,
+        closings_checked INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, snapshot_date)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_impact_snapshots', e); }
+
   // Retail Ops (ADR-083, Fase B) — cotas, fechamentos e checklist diário por
   // loja. Espinha operacional: o Scheduler gera as pendências do dia; o
   // fechamento por WhatsApp/IA (Fase C) preenche informed_total e calcula desvio.

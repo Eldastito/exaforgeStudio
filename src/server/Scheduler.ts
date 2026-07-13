@@ -24,6 +24,7 @@ import { FashionAvatarService } from "./FashionAvatarService.js";
 import { FashionTryOnService } from "./FashionTryOnService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
+import { RetailImpactService } from "./RetailImpactService.js";
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -137,6 +138,7 @@ export class Scheduler {
     await this.googleSheetsSyncPass().catch(e => console.error('[Scheduler] sync Google Sheets falhou', e));
     try { this.opportunityRadarPass(); } catch (e: any) { console.error('[Scheduler] radar de oportunidades falhou', e.message); }
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
+    try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     this.trialPass();
   }
@@ -350,6 +352,30 @@ export class Scheduler {
     ).all() as any[];
     for (const o of orgs) {
       try { RevenueIntelligenceService.snapshotDaily(o.organization_id); } catch (e) { /* best-effort */ }
+    }
+  }
+
+  /**
+   * Snapshot diário do painel de valor/adoção do Retail Ops (ADR-085), para a
+   * série histórica. Roda 1x/dia; idempotente por (org, dia). Só orgs com alguma
+   * automação retail ligada.
+   */
+  private static retailImpactSnapshotPass() {
+    const today = new Date().toISOString().slice(0, 10);
+    if ((this as any)._lastRetailSnap === today) return;
+    (this as any)._lastRetailSnap = today;
+
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT organization_id FROM organization_settings
+          WHERE COALESCE(retail_daily_closing_enabled,0)=1
+             OR COALESCE(retail_quota_enabled,0)=1
+             OR COALESCE(retail_commission_enabled,0)=1`
+      ).all() as any[];
+    } catch { return; } // colunas ainda não migradas
+    for (const o of orgs) {
+      try { RetailImpactService.snapshotDaily(o.organization_id, today); } catch (e) { /* best-effort */ }
     }
   }
 

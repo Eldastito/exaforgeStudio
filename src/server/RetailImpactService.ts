@@ -12,7 +12,9 @@
  * FATO (não estimativa): é o custo médio × quantidade em estoque no núcleo.
  * Só leitura agregada; isolado por organização.
  */
+import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { RetailAdoptionService } from "./RetailAdoptionService.js";
 
 function num(v: any): number { return Number(v || 0); }
 function money(v: number): number { return Math.round(v * 100) / 100; }
@@ -117,6 +119,42 @@ export class RetailImpactService {
       },
       note: "Painel de valor factual: R$ comprovados, trabalho automatizado e capital parado — sem estimativa. Baseline dia-0 e valor estimado liberado entram em fatia futura (ADR-085).",
     };
+  }
+
+  /**
+   * Snapshot diário do painel de valor/adoção para a série histórica.
+   * Idempotente por (org, dia) — não sobrescreve se já existir hoje.
+   * Chamado pelo Scheduler. Retorna true se gravou.
+   */
+  static snapshotDaily(orgId: string, today?: string): boolean {
+    const date = today || new Date().toISOString().slice(0, 10);
+    const exists = db.prepare(`SELECT 1 FROM retail_impact_snapshots WHERE organization_id = ? AND snapshot_date = ?`).get(orgId, date);
+    if (exists) return false;
+
+    const month = date.slice(0, 7);
+    const m = this.monthly(orgId, month);
+    const cap = this.stockCapital(orgId, 60);
+    let adoption = 0;
+    try { adoption = num(RetailAdoptionService.status(orgId)?.score?.percent); } catch { /* noop */ }
+    const aiMessages = num((db.prepare(
+      `SELECT COUNT(*) AS c FROM messages WHERE organization_id = ? AND sender_type = 'bot' AND date(created_at) BETWEEN ? AND ?`
+    ).get(orgId, `${month}-01`, `${month}-31`) as any)?.c);
+
+    db.prepare(
+      `INSERT INTO retail_impact_snapshots (id, organization_id, snapshot_date, proven_brl, stock_capital, slow_mover_capital, adoption_percent, ai_messages, closings_checked)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(randomUUID(), orgId, date, m.proven.totalProvenBRL, cap.totalCapital, cap.slowMoverCapital, adoption, aiMessages, m.activity.closingsChecked);
+    return true;
+  }
+
+  /** Série histórica dos últimos N dias (para a tendência do painel de valor). */
+  static getTrend(orgId: string, days = 30): any[] {
+    return db.prepare(
+      `SELECT snapshot_date, proven_brl, stock_capital, slow_mover_capital, adoption_percent, ai_messages, closings_checked
+         FROM retail_impact_snapshots
+        WHERE organization_id = ? AND snapshot_date >= date('now', ?)
+        ORDER BY snapshot_date ASC`
+    ).all(orgId, `-${Math.max(1, Math.floor(Number(days) || 30))} days`) as any[];
   }
 
   /**

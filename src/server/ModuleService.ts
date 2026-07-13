@@ -1,5 +1,5 @@
 import db from "./db.js";
-import { VERTICALS, OPTIONAL_MODULES, getVertical } from "./verticals.js";
+import { VERTICALS, OPTIONAL_MODULES, ADDON_MODULES, getVertical } from "./verticals.js";
 import { PlanService } from "./PlanService.js";
 
 // Gating de MÓDULOS por organização. Define quais módulos opcionais cada org
@@ -89,11 +89,25 @@ export class ModuleService {
     return [...new Set(modules.filter((m: any) => typeof m === "string" && allowed.has(m)))];
   }
 
-  /** Aplica o preset de uma vertical: grava vertical + enabled_modules. */
+  /**
+   * Aplica o preset de uma vertical: grava vertical + enabled_modules.
+   *
+   * GRANDFATHER (ADR-084 D2): preserva os add-ons opt-in (ADDON_MODULES —
+   * retail/clinica/vms/radar/prospect) que a org JÁ tinha habilitados, mesmo
+   * que não estejam no preset da vertical. Assim, o corte que tirou `retail` do
+   * preset de "varejo" — ou o backfill — NUNCA remove um add-on de quem já usa
+   * (ex.: a TOULON mantém o Retail Network Ops ao re-aplicar o Quick-Start).
+   */
   static applyVertical(orgId: string, verticalKey: string): void {
     const v = getVertical(verticalKey);
     if (!v) return;
-    const modules = this.sanitize(v.modules);
+    let modules = this.sanitize(v.modules);
+    const current = this.enabledModules(orgId);
+    if (Array.isArray(current)) {
+      const addons = new Set<string>(ADDON_MODULES as readonly string[]);
+      const keep = current.filter((m) => addons.has(m) && !modules.includes(m));
+      if (keep.length) modules = this.sanitize([...modules, ...keep]);
+    }
     db.prepare("UPDATE organization_settings SET vertical = ?, enabled_modules = ? WHERE organization_id = ?")
       .run(v.key, JSON.stringify(modules), orgId);
   }

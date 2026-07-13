@@ -44,17 +44,24 @@ export const OPTIONAL_MODULES = [
 // "clinica" (Módulo Clínica, ADR-080) é preset da vertical "saude" (é o módulo
 // que dá corpo à operação de clínica), mas não deve ser ligado por "outro" nem
 // pelas demais verticais — só saúde ou ativação explícita.
-// "retail" (Retail Ops, ADR-083) é o preset operacional da vertical "varejo"
-// (fechamento de loja, cotas, malote, premiação) — add-on para redes de lojas,
-// não deve ser ligado por "outro" nem pelas demais verticais. Opt-in explícito
-// ou preset de varejo, como a clínica é preset de saúde.
-const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => m !== "vms" && m !== "radar" && m !== "prospect" && m !== "clinica" && m !== "retail");
+// "retail" (Retail Ops / Retail Network Ops, ADR-083/084) é o add-on de
+// OPERAÇÃO DE REDE DE LOJAS (fechamento de loja, cotas, malote, premiação).
+// ADR-084 D2: deixa de ser preset automático de "varejo" e passa a ser opt-in
+// explícito (como vms/radar/prospect), pois "atuar no varejo" ≠ "operar uma
+// rede de lojas a supervisionar". A clínica segue como preset de "saude".
+//
+// ADDON_MODULES: módulos opcionais que NENHUMA vertical liga automaticamente
+// (salvo a clínica, que é o corpo da vertical saúde). São sempre opt-in e, por
+// isso, o ModuleService PRESERVA um add-on já habilitado ao (re)aplicar uma
+// vertical — o corte do ADR-084 nunca REMOVE de quem já usa (grandfather).
+export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail"] as const;
+const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => !(ADDON_MODULES as readonly string[]).includes(m));
 
 export const VERTICALS: Vertical[] = [
   {
     key: "varejo", label: "Varejo / Comércio", icon: "🛍️",
     descricao: "Lojas que vendem produtos por unidade (roupas, eletrônicos, pet, etc.).",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao", "retail"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

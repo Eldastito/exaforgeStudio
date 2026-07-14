@@ -21,11 +21,28 @@ import { RetailStockModeService } from "../RetailStockModeService.js";
 import { RetailGraduationService } from "../RetailGraduationService.js";
 import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
+import { RetailReconciliationService } from "../RetailReconciliationService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
 
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Conciliação de vendas: import do Fechamento de Caixa do Alterdata (Fase E) ---
+router.post("/reconciliation/import", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  csvUpload.single("file")(req, res, (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    const csv = file ? file.buffer.toString("utf-8") : String(req.body?.csv || "");
+    if (!csv.trim()) return res.status(400).json({ error: "Envie o CSV (campo 'file' ou body.csv)." });
+    try { res.json(RetailReconciliationService.importCaixaDiario(orgId, csv, { toleranceBRL: req.body?.toleranceBRL }, req.user?.userId)); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+});
 
 // --- Diagnóstico de onboarding + motor de composição (ADR-084 D3/D6) ---
 router.get("/diagnostic/questions", (_req: AuthRequest, res): any => {

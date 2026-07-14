@@ -109,6 +109,7 @@ jobs:
           - { name: 'retail-adoption-coach', script: 'test:retail-adoption-coach' }
           - { name: 'retail-diagnostic', script: 'test:retail-diagnostic' }
           - { name: 'retail-diagnostic-apply', script: 'test:retail-diagnostic-apply' }
+          - { name: 'retail-reconciliation', script: 'test:retail-reconciliation' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

@@ -20,11 +20,24 @@ import { RetailImpactService } from "../RetailImpactService.js";
 import { RetailStockModeService } from "../RetailStockModeService.js";
 import { RetailGraduationService } from "../RetailGraduationService.js";
 import { RetailAdoptionService } from "../RetailAdoptionService.js";
+import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Diagnóstico de onboarding + motor de composição (ADR-084 D3/D6) ---
+router.get("/diagnostic/questions", (_req: AuthRequest, res): any => {
+  res.json({ questions: RetailDiagnosticService.questions() });
+});
+
+// Prévia (sem aplicar): respostas → recomendação de módulos/estoque/capacidades.
+router.post("/diagnostic/recommend", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailDiagnosticService.recommend(req.body || {}));
+});
 
 // --- Adoção / uso correto (ADR-085): onde ainda falta configurar ---
 router.get("/adoption", (req: AuthRequest, res): any => {

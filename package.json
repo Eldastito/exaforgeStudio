@@ -63,6 +63,7 @@
     "test:retail-estimated": "tsx scripts/test-retail-estimated.ts",
     "test:retail-baseline": "tsx scripts/test-retail-baseline.ts",
     "test:retail-adoption-coach": "tsx scripts/test-retail-adoption-coach.ts",
+    "test:retail-diagnostic": "tsx scripts/test-retail-diagnostic.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

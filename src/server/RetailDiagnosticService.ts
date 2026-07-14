@@ -9,6 +9,10 @@
  *
  * As respostas ativam CAPACIDADES, não "nichos" (ADR-084 D1/D6).
  */
+import { ModuleService } from "./ModuleService.js";
+import { RetailStockModeService } from "./RetailStockModeService.js";
+import { RetailActivationService } from "./RetailActivationService.js";
+import { logAuthEvent } from "./auditLog.js";
 
 export type DiagnosticAnswers = {
   units?: "single" | "multi";
@@ -82,5 +86,34 @@ export class RetailDiagnosticService {
       capabilities,
       notes,
     };
+  }
+
+  /**
+   * Aplica a recomendação (a "confirmação" do fluxo ADR-084 D3): módulos + modo
+   * de estoque + ativação do Retail Network Ops. Reusa os serviços já existentes.
+   * Une os módulos recomendados aos já habilitados (não remove o que a org tem —
+   * grandfather). Auditado. Retorna o que foi aplicado.
+   */
+  static apply(orgId: string, answers: DiagnosticAnswers, actorId?: string): {
+    applied: { modules: string[]; stockMode: "native" | "supervised"; retailActivated: boolean };
+    recommendation: ReturnType<typeof RetailDiagnosticService.recommend>;
+  } {
+    const rec = this.recommend(answers);
+
+    const current = ModuleService.enabledModules(orgId);
+    const merged = [...new Set([...(Array.isArray(current) ? current : []), ...rec.modules])];
+    const modules = ModuleService.setModules(orgId, merged);
+
+    RetailStockModeService.setOrgMode(orgId, rec.stockMode, actorId);
+
+    let retailActivated = false;
+    if (rec.retailNetworkOps) {
+      RetailActivationService.activate(orgId, actorId);
+      retailActivated = true;
+    }
+
+    try { logAuthEvent(orgId, actorId || "system", null, "RETAIL_DIAGNOSTIC_APPLIED", { stockMode: rec.stockMode, retailActivated }); } catch { /* noop */ }
+
+    return { applied: { modules, stockMode: rec.stockMode, retailActivated }, recommendation: rec };
   }
 }

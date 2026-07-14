@@ -122,4 +122,39 @@ export class RetailReconciliationService {
     try { logAuthEvent(orgId, actorId || "system", null, "RETAIL_RECONCILIATION_IMPORTED", { parsed: records.length, matched, divergences }); } catch { /* noop */ }
     return { parsed: records.length, matched, unmatchedCount: unmatched.length, unmatched, divergences, results };
   }
+
+  /**
+   * Painel de conciliação do MÊS ('YYYY-MM'): os fechamentos já conciliados
+   * (com system_total do Alterdata) — informado × sistema × divergência — e um
+   * resumo. `onlyDivergent` filtra só as divergências. Isolado por org.
+   */
+  static report(orgId: string, month: string, onlyDivergent = false): any {
+    const start = `${month}-01`, end = `${month}-31`;
+    const rows = (db.prepare(
+      `SELECT c.store_id, s.name AS store_name, c.closing_date, c.informed_total, c.system_total, c.divergence_status
+         FROM retail_daily_closings c JOIN retail_stores s ON s.id = c.store_id
+        WHERE c.organization_id = ? AND c.closing_date BETWEEN ? AND ? AND COALESCE(c.system_total,0) > 0
+        ORDER BY c.closing_date, s.name`
+    ).all(orgId, start, end) as any[]).map((r) => {
+      const informed = Number(r.informed_total || 0);
+      const system = Number(r.system_total || 0);
+      return {
+        storeId: r.store_id,
+        storeName: r.store_name,
+        date: r.closing_date,
+        informed,
+        system,
+        divergence: informed > 0 ? Math.round((informed - system) * 100) / 100 : null,
+        status: r.divergence_status || (informed > 0 ? "ok" : "pending_informed"),
+      };
+    });
+    const divergent = rows.filter((r) => r.status === "divergent");
+    const summary = {
+      reconciledCount: rows.length,
+      divergentCount: divergent.length,
+      totalDivergenceBRL: Math.round(divergent.reduce((a, r) => a + Math.abs(Number(r.divergence || 0)), 0) * 100) / 100,
+      systemTotalBRL: Math.round(rows.reduce((a, r) => a + r.system, 0) * 100) / 100,
+    };
+    return { month, summary, rows: onlyDivergent ? divergent : rows };
+  }
 }

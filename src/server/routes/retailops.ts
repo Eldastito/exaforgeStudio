@@ -31,6 +31,14 @@ const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
 
 // --- Conciliação de vendas: import do Fechamento de Caixa do Alterdata (Fase E) ---
+// Painel do mês: fechamentos conciliados (informado × sistema) + divergências.
+router.get("/reconciliation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  res.json(RetailReconciliationService.report(orgId, month, String(req.query.onlyDivergent || "") === "1"));
+});
+
 router.post("/reconciliation/import", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

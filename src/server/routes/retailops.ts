@@ -33,6 +33,13 @@ router.get("/adoption", (req: AuthRequest, res): any => {
   res.json(RetailAdoptionService.status(orgId));
 });
 
+// Narrativa da IA de adoção (tom parceiro): orientação amigável do que falta.
+router.get("/adoption/coach", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailAdoptionService.coach(orgId));
+});
+
 // --- Modo de estoque / fonte da verdade (ADR-084 D4) ---
 router.get("/stock-mode", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

@@ -74,4 +74,44 @@ export class RetailAdoptionService {
       blockers,
     };
   }
+
+  /**
+   * Narrativa da IA de adoção (ADR-085 D5) — tom PARCEIRO PRÓXIMO (informal,
+   * empático): transforma os bloqueios factuais em orientação amigável, que
+   * ajuda o lojista a destravar (nunca cobra/audita). Determinística (zero token,
+   * tom consistente); um polimento por LLM é camada opcional futura.
+   */
+  static coach(orgId: string): { allClear: boolean; headline: string; messages: Array<{ key: string; severity: Severity; message: string }> } {
+    const st = this.status(orgId);
+    if (st.blockers.length === 0) {
+      return {
+        allClear: true,
+        headline: "Tudo configurado por aqui! 🎉 Sua operação está pronta pra rodar no automático — pode contar comigo pra cuidar das cobranças, fechamentos e alertas. 🙌",
+        messages: [],
+      };
+    }
+    const messages = st.blockers.map((b) => ({ key: b.key, severity: b.severity, message: coachMessage(b) }));
+    const headline = `Você está a ${st.blockers.length} passo${st.blockers.length > 1 ? "s" : ""} de deixar tudo no automático — vamos destravar juntos? 💪`;
+    return { allClear: false, headline, messages };
+  }
+}
+
+/** Mensagem no tom parceiro-próximo para cada bloqueio de adoção. */
+function coachMessage(b: Step): string {
+  switch (b.key) {
+    case "channel_connected":
+      return "Oi! Pra eu começar a atender e cobrar por você, falta conectar um canal de WhatsApp. Bora ligar isso? 🙌";
+    case "retail_activated":
+      return "Falta só ativar o Retail Ops (o painel das lojas) — é rapidinho e libera as cobranças automáticas, o fechamento diário e os alertas. Quer que eu te mostre onde? 😊";
+    case "stores_registered":
+      return "Ainda não vi nenhuma loja cadastrada por aqui. Cadastra a primeira que a gente já começa a acompanhar ela pra você! 🏪";
+    case "stores_have_whatsapp":
+      return `Oi! ${b.detail} Quer resolver agora? Leva 1 minutinho e destrava as cobranças pra essa(s) loja(s). 🙌`;
+    case "quotas_set":
+      return "Vamos lançar as cotas do mês? Sem elas eu não consigo te mostrar o quanto cada loja está acima ou abaixo da meta. 📈";
+    case "closings_flowing":
+      return "Faz uns dias que não chega fechamento de nenhuma loja por aqui 👀 Vale dar um toque na equipe — quer que eu ajude a cobrar?";
+    default:
+      return b.detail || b.label;
+  }
 }

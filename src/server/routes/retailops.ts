@@ -39,6 +39,16 @@ router.post("/diagnostic/recommend", (req: AuthRequest, res): any => {
   res.json(RetailDiagnosticService.recommend(req.body || {}));
 });
 
+// Confirmação: aplica a recomendação (módulos + modo de estoque + ativação).
+router.post("/diagnostic/apply", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = RetailDiagnosticService.apply(orgId, req.body || {}, req.user?.userId);
+  // Se ativou o Retail Ops, captura o baseline do dia 0 (ADR-085).
+  if (out.applied.retailActivated) { try { RetailImpactService.captureBaseline(orgId); } catch { /* best-effort */ } }
+  res.json(out);
+});
+
 // --- Adoção / uso correto (ADR-085): onde ainda falta configurar ---
 router.get("/adoption", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

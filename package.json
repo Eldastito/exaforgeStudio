@@ -68,6 +68,7 @@
     "test:retail-reconciliation": "tsx scripts/test-retail-reconciliation.ts",
     "test:retail-reconciliation-report": "tsx scripts/test-retail-reconciliation-report.ts",
     "test:retail-scan-barcode": "tsx scripts/test-retail-scan-barcode.ts",
+    "test:retail-receiving": "tsx scripts/test-retail-receiving.ts",
     "test:conversion-velocity": "tsx scripts/test-conversion-velocity.ts",
     "test:rbac-audit": "tsx scripts/test-rbac-audit.ts",
     "test:job-queue": "tsx scripts/test-job-queue.ts",

@@ -23,6 +23,7 @@ import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
 import { RetailReconciliationService } from "../RetailReconciliationService.js";
 import { RetailScanService } from "../RetailScanService.js";
+import { RetailReceivingService } from "../RetailReceivingService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -30,6 +31,41 @@ const router = Router();
 const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Recebimento de mercadoria / pré-estoque (ADR-086) ---
+router.get("/receiving", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ receipts: RetailReceivingService.listReceipts(orgId, req.query.status ? String(req.query.status) : undefined) });
+});
+
+router.get("/receiving/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = RetailReceivingService.getReceipt(orgId, req.params.id);
+  if (!r) return res.status(404).json({ error: "receipt_not_found" });
+  res.json(r);
+});
+
+router.post("/receiving", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.status(201).json(RetailReceivingService.createReceipt(orgId, req.body || {}, req.user?.userId));
+});
+
+router.post("/receiving/:id/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailReceivingService.scanItem(orgId, req.params.id, String(req.body?.ean || ""), Number(req.body?.qty || 1), req.user?.userId)); }
+  catch (e: any) { res.status(e.message === "receipt_not_found" ? 404 : 400).json({ error: e.message }); }
+});
+
+router.post("/receiving/:id/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailReceivingService.confirm(orgId, req.params.id, req.user?.userId)); }
+  catch (e: any) { res.status(e.message === "receipt_not_found" ? 404 : 400).json({ error: e.message }); }
+});
 
 // --- Scan por código de barras (ADR-086, só-catálogo-próprio; zero token) ---
 router.get("/scan/lookup", (req: AuthRequest, res): any => {

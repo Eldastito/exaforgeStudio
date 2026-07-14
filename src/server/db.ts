@@ -1427,6 +1427,35 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_stores', e); }
 
+  // Retail Ops (ADR-086) — recebimento de mercadoria (pré-estoque): documento
+  // aberto onde a equipe BIPA o que chega, confere contra o esperado e, ao
+  // CONFIRMAR, libera para o estoque (no ledger autoritativo do modo).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_goods_receipts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT,
+        status TEXT DEFAULT 'open',      -- open | confirmed | cancelled
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        confirmed_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS retail_goods_receipt_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        receipt_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        ean TEXT,
+        expected_qty INTEGER DEFAULT 0,
+        received_qty INTEGER DEFAULT 0,
+        UNIQUE(receipt_id, product_service_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_receipts_org ON retail_goods_receipts (organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_goods_receipts', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

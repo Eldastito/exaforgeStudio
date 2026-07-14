@@ -111,6 +111,7 @@ jobs:
           - { name: 'retail-diagnostic-apply', script: 'test:retail-diagnostic-apply' }
           - { name: 'retail-reconciliation', script: 'test:retail-reconciliation' }
           - { name: 'retail-reconciliation-report', script: 'test:retail-reconciliation-report' }
+          - { name: 'retail-scan-barcode', script: 'test:retail-scan-barcode' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
 

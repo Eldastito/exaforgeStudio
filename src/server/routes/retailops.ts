@@ -22,6 +22,7 @@ import { RetailGraduationService } from "../RetailGraduationService.js";
 import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
 import { RetailReconciliationService } from "../RetailReconciliationService.js";
+import { RetailScanService } from "../RetailScanService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -29,6 +30,23 @@ const router = Router();
 const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Scan por código de barras (ADR-086, só-catálogo-próprio; zero token) ---
+router.get("/scan/lookup", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailScanService.lookupByEan(orgId, String(req.query.ean || "")));
+});
+
+router.post("/scan/receive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(RetailScanService.scanReceive(orgId, String(req.body?.ean || ""), Number(req.body?.qty || 0), { storeId: req.body?.storeId }, req.user?.userId));
+  } catch (e: any) {
+    res.status(e.message === "store_required" ? 400 : 400).json({ error: e.message });
+  }
+});
 
 // --- Conciliação de vendas: import do Fechamento de Caixa do Alterdata (Fase E) ---
 // Painel do mês: fechamentos conciliados (informado × sistema) + divergências.

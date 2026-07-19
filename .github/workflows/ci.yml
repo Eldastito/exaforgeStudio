@@ -184,6 +184,7 @@ jobs:
           - { name: 'encryption-service', script: 'test:encryption-service' }
           - { name: 'totp-service', script: 'test:totp-service' }
           - { name: 'backup-service', script: 'test:backup-service' }
+          - { name: 'backup-scheduler', script: 'test:backup-scheduler' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }
 
           # === Fase 4 Wave C + D (P1 commerce) ===

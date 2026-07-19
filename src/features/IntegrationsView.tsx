@@ -51,6 +51,8 @@ export function IntegrationsView() {
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [webhookForm, setWebhookForm] = useState({ name: '', url: '', secret: '' });
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [backupCfg, setBackupCfg] = useState<{ enabled: boolean; frequency: string; retention: number; toDrive: boolean; lastRun: string | null }>({ enabled: false, frequency: 'daily', retention: 30, toDrive: true, lastRun: null });
+  const [savingBackupCfg, setSavingBackupCfg] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<{ configured: boolean; connected: boolean; email: string; name: string } | null>(null);
   const [driveBusy, setDriveBusy] = useState<string | null>(null);
@@ -169,6 +171,21 @@ export function IntegrationsView() {
   const loadData = () => {
     apiFetch('/api/integrations/webhooks').then(r => r.json()).then(d => setWebhooks(Array.isArray(d) ? d : [])).catch(console.error);
     apiFetch('/api/integrations/backups').then(r => r.json()).then(d => setBackups(Array.isArray(d) ? d : [])).catch(console.error);
+    apiFetch('/api/integrations/backups/settings').then(r => r.json()).then(d => { if (d && typeof d === 'object' && !d.error) setBackupCfg({ enabled: !!d.enabled, frequency: d.frequency || 'daily', retention: d.retention ?? 30, toDrive: !!d.toDrive, lastRun: d.lastRun || null }); }).catch(console.error);
+  };
+
+  const saveBackupCfg = async (patch: Partial<typeof backupCfg>) => {
+    const next = { ...backupCfg, ...patch };
+    setBackupCfg(next);
+    setSavingBackupCfg(true);
+    try {
+      const r = await apiFetch('/api/integrations/backups/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next.enabled, frequency: next.frequency, retention: next.retention, toDrive: next.toDrive }),
+      });
+      if (!r.ok) toast.error('Não foi possível salvar a configuração de backup.');
+    } catch { toast.error('Não foi possível salvar a configuração de backup.'); }
+    finally { setSavingBackupCfg(false); }
   };
 
   useEffect(() => {
@@ -500,6 +517,50 @@ export function IntegrationsView() {
           <p className="text-xs text-amber-200/80">
             O arquivo contém dados sensíveis do seu negócio (contatos, conversas, pedidos). Guarde em local seguro depois de baixar.
           </p>
+        </div>
+
+        {/* Backup automático (ADR-097) */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 mb-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-zinc-100">🔄 Backup automático</p>
+              <p className="text-xs text-zinc-500 mt-0.5">Gera backups sozinho e envia ao seu Google Drive. Além disso, guardamos uma cópia de redundância na nossa infraestrutura toda semana.</p>
+            </div>
+            <button onClick={() => saveBackupCfg({ enabled: !backupCfg.enabled })} disabled={savingBackupCfg}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${backupCfg.enabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${backupCfg.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {backupCfg.enabled && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+              <label className="text-xs text-zinc-400">Frequência
+                <select value={backupCfg.frequency} onChange={e => saveBackupCfg({ frequency: e.target.value })}
+                  className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100">
+                  <option value="daily">Diário (madrugada)</option>
+                  <option value="2x_week">2x por semana</option>
+                  <option value="weekly">Semanal</option>
+                </select>
+              </label>
+              <label className="text-xs text-zinc-400">Manter últimos (nº)
+                <input type="number" min={1} max={365} defaultValue={backupCfg.retention}
+                  onBlur={e => { const v = Math.min(365, Math.max(1, parseInt(e.target.value, 10) || 30)); if (v !== backupCfg.retention) saveBackupCfg({ retention: v }); }}
+                  className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" />
+              </label>
+              <label className="text-xs text-zinc-400 flex flex-col justify-between">Enviar ao Google Drive
+                <button onClick={() => saveBackupCfg({ toDrive: !backupCfg.toDrive })} disabled={savingBackupCfg}
+                  className={`mt-1 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${backupCfg.toDrive ? 'bg-blue-600' : 'bg-zinc-700'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${backupCfg.toDrive ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </label>
+            </div>
+          )}
+          {backupCfg.enabled && backupCfg.toDrive && !googleStatus?.connected && (
+            <p className="mt-3 text-xs text-amber-400">⚠️ Conecte sua conta Google acima para o envio automático ao Drive funcionar. Sem isso, o backup fica só no servidor.</p>
+          )}
+          {backupCfg.lastRun && (
+            <p className="mt-3 text-[11px] text-zinc-500">Último backup automático: {new Date(backupCfg.lastRun).toLocaleString('pt-BR')}</p>
+          )}
         </div>
 
         <div className="space-y-2">

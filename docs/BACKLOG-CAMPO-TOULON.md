@@ -169,7 +169,20 @@ Ver [`docs/adr/ADR-095-rbac-granular-perfis-customizaveis.md`](adr/ADR-095-rbac-
 - **Faz sentido pedir esses dados de novo no cadastro da loja?** Ou
   reaproveita o que já tem?
 
-**Status:** `[ ] preciso das respostas`
+**Decidido (ADR-096):**
+- Checkout **invisível** pra quem vem do WhatsApp (token `?c=`): só
+  "Confirmar pedido" com itens + total, sem formulário.
+- E-mail vem da **conversa da IA** (customer_email já capturado, grátis),
+  nunca obrigatório na loja.
+- **Sem NF-e eletrônica no piloto** — TOULON usa a impressora fiscal dela
+  (cupom fiscal). Checkout não pede CPF/CNPJ/endereço. Campo "CPF na
+  nota" opcional.
+- Fashion Studio mantém cadastro (LGPD do provador), pré-preenchendo do
+  contato.
+
+Ver [`docs/adr/ADR-096-loja-checkout-sem-atrito.md`](adr/ADR-096-loja-checkout-sem-atrito.md).
+
+**Status:** `[x] decidido — aguardando implementação (item independente)`
 
 ## 7. Integração Alterdata (Toulon)
 

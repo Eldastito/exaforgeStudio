@@ -82,7 +82,19 @@ para a decisão consolidada + roadmap de implementação.
   vertical → módulos hoje?
 - É consistente com o que uma loja de varejo espera?
 
-**Status:** `[ ] preciso das respostas`
+**Decidido (ADR-092):**
+- Modelo **vertical = wishlist, plano = teto**: preset da vertical é a
+  lista completa que faz sentido pro negócio; o plano recorta o que o
+  cliente vê. `applyVertical` liga a interseção.
+- Nova vertical **moda** separada de varejo (Estúdio no preset).
+- Presets revisados (varejo sem cadencias, servicos com reservas opt-in).
+- Verticais futuras mapeadas (automotivo/pet/beleza/cafe) — dependem do
+  Bloco A do ADR-091 (base do Autônomo) antes de virar preset próprio.
+- Implementação vinculada ao Bloco A do ADR-091.
+
+Ver [`docs/adr/ADR-092-distribuicao-por-vertical.md`](adr/ADR-092-distribuicao-por-vertical.md).
+
+**Status:** `[x] decidido — aguardando implementação junto do Bloco A`
 
 ## 3. Informações a atualizar/remover
 

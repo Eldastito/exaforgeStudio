@@ -145,7 +145,20 @@ Ver [`docs/adr/ADR-094-relatorios-vendas-pdf-vertical-filtros.md`](adr/ADR-094-r
 - Também: **níveis de operação** por perfil (só ler, ler+escrever, sem
   editar/excluir).
 
-**Status:** `[ ] preciso das respostas`
+**Decidido (ADR-095):**
+- Nível simplificado: 1 dropdown por módulo com 4 opções (Sem acesso /
+  Ver / Operar / Total). "Operar" = criar+editar sem excluir (resolve o
+  "grava e lê nunca exclui").
+- 6 perfis-template (Dono/Gerente/Vendedor/Estoquista/Financeiro/
+  Atendente) + **dono cria perfis customizados do zero**.
+- Enforcement: `role_profiles` + `role_permissions`, middleware
+  `requirePermission(module, action)` substituindo `requireRole`.
+- Prioridade: entra no piloto (TOULON tem equipe), mas em bloco próprio
+  pós-Bloco A (é refactor grande, ~4-6 dias).
+
+Ver [`docs/adr/ADR-095-rbac-granular-perfis-customizaveis.md`](adr/ADR-095-rbac-granular-perfis-customizaveis.md).
+
+**Status:** `[x] decidido — bloco próprio pós-Bloco A`
 
 ## 6. Loja virtual — dados do cliente ao acessar
 

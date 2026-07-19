@@ -2,6 +2,9 @@ import db from "./db.js";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { v4 as uuidv4 } from "uuid";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
+import { StorageService } from "./StorageService.js";
 
 /**
  * Backup real do banco — gera um JSON com snapshot dos dados da organização
@@ -105,5 +108,66 @@ export class BackupService {
   static checksum(fullPath: string): string {
     const buf = fs.readFileSync(fullPath);
     return crypto.createHash('sha256').update(buf).digest('hex');
+  }
+
+  /**
+   * Gera um backup, registra em backup_jobs, envia ao Drive do dono (opcional) e
+   * espelha no S3 (redundância). Usado pelo Scheduler — tanto para o backup
+   * programado do cliente (type='auto', toDrive) quanto para a redundância da
+   * plataforma (type='platform', só S3). ADR-097.
+   */
+  static async runAndDistribute(orgId: string, type: string, opts: { toDrive?: boolean } = {}): Promise<{ jobId: string; fileName: string } | null> {
+    const jobId = uuidv4();
+    try {
+      db.prepare(`INSERT INTO backup_jobs (id, organization_id, type, status) VALUES (?, ?, ?, 'pending')`).run(jobId, orgId, type);
+      const result = this.run(orgId, jobId, type);
+      db.prepare(`UPDATE backup_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP, file_url = ? WHERE id = ?`).run(result.fileName, jobId);
+
+      // Envio ao Drive do dono (opt-in) — guarda o id p/ a retenção expurgar depois.
+      if (opts.toDrive) {
+        try {
+          if (GoogleOAuthService.getConnection(orgId)) {
+            const full = this.resolveFile(orgId, result.fileName);
+            if (full) {
+              const up = await GoogleOAuthService.driveUpload(orgId, result.fileName, "application/json", fs.readFileSync(full));
+              if (up && "id" in up) db.prepare(`UPDATE backup_jobs SET drive_file_id = ? WHERE id = ?`).run(up.id, jobId);
+            }
+          }
+        } catch (e) { console.error("[Backup] envio ao Drive falhou", orgId, e); }
+      }
+
+      // Espelho no S3 (redundância na infra do operador). Best-effort.
+      try {
+        const full = this.resolveFile(orgId, result.fileName);
+        if (full) await StorageService.mirrorToS3(full, `backups/${result.fileName}`);
+      } catch (e) { /* noop */ }
+
+      return { jobId, fileName: result.fileName };
+    } catch (e) {
+      console.error("[Backup] runAndDistribute falhou", orgId, e);
+      try { db.prepare(`UPDATE backup_jobs SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(jobId); } catch { /* noop */ }
+      return null;
+    }
+  }
+
+  /**
+   * Retenção: mantém os `keep` backups completos mais recentes (por org e tipo) e
+   * expurga os antigos do DISCO, do DRIVE do dono (se enviado) e da tabela.
+   * Retorna quantos foram removidos.
+   */
+  static async applyRetention(orgId: string, keep: number, type: string): Promise<number> {
+    const k = Math.max(1, Math.floor(Number(keep)) || 1);
+    const old = db.prepare(
+      `SELECT id, file_url, drive_file_id FROM backup_jobs
+        WHERE organization_id = ? AND type = ? AND status = 'completed'
+        ORDER BY created_at DESC LIMIT -1 OFFSET ?`
+    ).all(orgId, type, k) as any[];
+    let removed = 0;
+    for (const o of old) {
+      try { if (o.file_url) this.deleteFile(orgId, o.file_url); } catch { /* noop */ }
+      if (o.drive_file_id) { try { await GoogleOAuthService.driveDelete(orgId, o.drive_file_id); } catch { /* noop */ } }
+      try { db.prepare(`DELETE FROM backup_jobs WHERE id = ?`).run(o.id); removed++; } catch { /* noop */ }
+    }
+    return removed;
   }
 }

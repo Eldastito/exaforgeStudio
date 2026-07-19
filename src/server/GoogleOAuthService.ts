@@ -181,6 +181,21 @@ export class GoogleOAuthService {
     }
   }
 
+  // Apaga um arquivo do Drive do dono (usado na retenção de backups — ADR-097).
+  // Best-effort: devolve true se removeu (ou já não existia). O escopo drive.file
+  // só enxerga arquivos criados pelo próprio app, então só apaga os nossos.
+  static async driveDelete(orgId: string, fileId: string): Promise<boolean> {
+    if (!fileId) return false;
+    const token = await this.getAccessToken(orgId);
+    if (!token) return false;
+    try {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.ok || res.status === 404; // 404 = já removido
+    } catch (e) { console.error("[Google Drive] delete erro:", e); return false; }
+  }
+
   // ---- Google Calendar ----
   static async calendarCreateEvent(orgId: string, ev: { summary: string; description?: string; start: string; end: string }): Promise<{ id: string; link: string } | { error: string }> {
     const token = await this.getAccessToken(orgId);

@@ -312,6 +312,39 @@ router.get("/backups", (req: AuthRequest, res) => {
   }
 });
 
+// Config do backup automático (ADR-097). Registrada ANTES das rotas /backups/:id
+// para "settings" não ser capturado como um id.
+router.get("/backups/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const s = db.prepare(`
+      SELECT COALESCE(backup_auto_enabled,0) AS enabled, COALESCE(backup_frequency,'daily') AS frequency,
+             COALESCE(backup_retention,30) AS retention, COALESCE(backup_to_drive,1) AS toDrive,
+             backup_auto_last_run AS lastRun
+      FROM organization_settings WHERE organization_id = ?`).get(orgId) as any || {};
+    res.json({
+      enabled: !!s.enabled, frequency: s.frequency || 'daily',
+      retention: s.retention ?? 30, toDrive: !!s.toDrive, lastRun: s.lastRun || null,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/backups/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { enabled, frequency, retention, toDrive } = req.body || {};
+    const freq = ['daily', '2x_week', 'weekly'].includes(frequency) ? frequency : 'daily';
+    const ret = Math.min(365, Math.max(1, parseInt(String(retention ?? 30), 10) || 30));
+    db.prepare(`
+      UPDATE organization_settings
+         SET backup_auto_enabled = ?, backup_frequency = ?, backup_retention = ?, backup_to_drive = ?
+       WHERE organization_id = ?`).run(enabled ? 1 : 0, freq, ret, toDrive ? 1 : 0, orgId);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/backups", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;

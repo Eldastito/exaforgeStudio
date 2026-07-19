@@ -84,6 +84,12 @@ O backup no boot e no `SIGTERM` são **globais da instância** (varrem as orgs c
 7. **SecurityAudit**: além do alerta de "backup do cliente > 7 dias", alertar se a **redundância da plataforma** não rodou na semana.
 8. **Testes**: `test:backup-scheduler` (agenda, retenção, redundância) e `test:backup-restore` (restore isola por org, backup-guard roda antes, não vaza entre tenants).
 
+## Notas de implementação (jul/26)
+
+- **Fase 1 entregue** (PR de backup automático): `backupPass` no Scheduler (backup do cliente opt-in → Drive + S3, com retenção; e redundância da plataforma semanal na infra do operador, independente do opt-in), colunas em `organization_settings`, `drive_file_id` em `backup_jobs`, `GoogleOAuthService.driveDelete`, config na UI (Integrações) e `test:backup-scheduler`.
+- **SIGTERM NÃO implementado, por decisão de arquitetura:** o supervisor (ADR-008) assume que o core morre imediatamente ao receber o sinal (janela ~10s do Docker/Coolify). Um backup no shutdown estouraria esse orçamento. O gatilho "backup no boot se vencido" é atendido pelo **tick inicial do Scheduler (~30s após boot)**, que já roda o `backupPass` e gera o que estiver vencido.
+- **Restore + backup-guard: em PR próprio (Fase seguinte)** — por ser a parte mais delicada (multi-tenant, sobrescrita), foi separado do backup para revisão focada.
+
 ## Aprovação
 
 Aprovado por Emerson (jul/26): backup automático **diário de madrugada** (retenção **últimos 30**), **backup + restore com backup-guard** antes de sobrescrever, e — pilar reforçado por ele — **redundância da plataforma no mínimo semanal na nossa infra, independente do Drive do cliente** (o backup no Drive do dono não substitui a cópia operacional do operador). Item #8 do backlog marcado `[x] decidido`.

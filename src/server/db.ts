@@ -3423,6 +3423,17 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar disguised_opportunities', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN opportunity_radar_last_run DATETIME`); } catch(e){}
 
+  // Backup automático (ADR-097): backup programado por org (destino Drive do
+  // dono) + redundância da plataforma (nossa infra, independente do cliente).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN backup_auto_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN backup_frequency TEXT DEFAULT 'daily'`); } catch(e){}      // daily | 2x_week | weekly
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN backup_retention INTEGER DEFAULT 30`); } catch(e){}        // nº de backups do cliente a manter
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN backup_to_drive INTEGER DEFAULT 1`); } catch(e){}          // envia ao Google Drive do dono
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN backup_auto_last_run DATETIME`); } catch(e){}              // trava do backup do cliente
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN backup_platform_last_run DATETIME`); } catch(e){}          // trava da redundância semanal do operador
+  // Id do arquivo no Drive (para expurgar da nuvem do dono ao aplicar retenção).
+  try { db.exec(`ALTER TABLE backup_jobs ADD COLUMN drive_file_id TEXT`); } catch(e){}
+
   // Journal de Frustrações do Dono (Tier 2, Carlos Domingos, ADR-046):
   // captura irritações do dono no dia a dia — matéria-bruta de oportunidades
   // que ele mesmo esqueceria antes de aproveitar. Categorização por IA (best-

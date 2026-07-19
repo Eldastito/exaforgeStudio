@@ -21,6 +21,7 @@
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:admin-users": "tsx scripts/test-admin-users.ts",
     "test:instagram-send": "tsx scripts/test-instagram-send.ts",
+    "test:backup-scheduler": "tsx scripts/test-backup-scheduler.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",
     "test:prospect-isolation": "tsx scripts/test-prospect-isolation.ts",
     "test:prospect-execution": "tsx scripts/test-prospect-execution.ts",

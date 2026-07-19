@@ -25,6 +25,10 @@ import { FashionTryOnService } from "./FashionTryOnService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
+import { BackupService } from "./BackupService.js";
+
+// Quantos backups de redundância da plataforma manter por org (semanais).
+const PLATFORM_BACKUP_KEEP = 8;
 
 /**
  * Agendador interno (sem dependência externa de cron). Roda em intervalo e
@@ -136,6 +140,7 @@ export class Scheduler {
     try { RadarService.reassessmentReminderPass(); } catch (e) { console.error('[Scheduler] lembrete de reavaliação do Radar falhou', e); }
     await this.repurchaseReminderPass().catch(e => console.error('[Scheduler] lembrete de recompra falhou', e));
     await this.googleSheetsSyncPass().catch(e => console.error('[Scheduler] sync Google Sheets falhou', e));
+    await this.backupPass().catch(e => console.error('[Scheduler] backup automático falhou', e));
     try { this.opportunityRadarPass(); } catch (e: any) { console.error('[Scheduler] radar de oportunidades falhou', e.message); }
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
     try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
@@ -206,6 +211,69 @@ export class Scheduler {
         const r = await GoogleAutomationService.syncLiveSheet(o.organization_id);
         if (r.ok) console.log(`[Scheduler] Google Sheets sincronizado (org ${o.organization_id}): ${r.counts?.vendas || 0} vendas, ${r.counts?.estoque || 0} itens`);
       } catch (e) { console.error(`[Scheduler] sync Google Sheets org ${o.organization_id} falhou`, e); }
+    }
+  }
+
+  /**
+   * Backup automático (ADR-097). Roda no tick horário — como o primeiro tick é
+   * ~30s após o boot, isto também cobre o "backup no boot se estiver vencido"
+   * (mitigação de queda de luz). NÃO usamos SIGTERM: o supervisor (ADR-008)
+   * assume que o core morre imediatamente ao receber o sinal.
+   *
+   * Dois destinos, dois donos (ADR-097):
+   *  1) BACKUP DO CLIENTE (opt-in) — destino Drive do dono + espelho, com retenção.
+   *  2) REDUNDÂNCIA DA PLATAFORMA — toda org ativa, no mínimo semanal, na NOSSA
+   *     infra (S3), independente do opt-in e da conta Google do cliente.
+   */
+  static async backupPass() {
+    // 1) Backup programado do cliente (opt-in).
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id, COALESCE(backup_frequency,'daily') AS freq,
+               COALESCE(backup_retention,30) AS retention,
+               COALESCE(backup_to_drive,1) AS to_drive, backup_auto_last_run
+        FROM organization_settings
+        WHERE COALESCE(backup_auto_enabled,0) = 1
+      `).all() as any[];
+    } catch (e) { orgs = []; } // colunas ainda não migradas
+
+    const HOUR = 3600 * 1000, DAY = 24 * HOUR;
+    const freqMs: Record<string, number> = { daily: DAY, '2x_week': 3.5 * DAY, weekly: 7 * DAY };
+    for (const o of orgs) {
+      try {
+        const interval = freqMs[o.freq] || DAY;
+        const last = o.backup_auto_last_run ? new Date(o.backup_auto_last_run).getTime() : 0;
+        // Margem de 1h para não escorregar por causa do horário do tick.
+        if (Date.now() - last < interval - HOUR) continue;
+        const r = await BackupService.runAndDistribute(o.organization_id, 'auto', { toDrive: !!o.to_drive });
+        db.prepare(`UPDATE organization_settings SET backup_auto_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(o.organization_id);
+        if (r) {
+          await BackupService.applyRetention(o.organization_id, o.retention, 'auto');
+          console.log(`[Scheduler] Backup automático (org ${o.organization_id}): ${r.fileName}`);
+        }
+      } catch (e) { console.error('[Scheduler] backup automático da org falhou', o.organization_id, e); }
+    }
+
+    // 2) Redundância da plataforma (operador): TODA org ativa, no mínimo semanal,
+    //    na nossa infra (S3). Independe do opt-in do cliente. Sem envio ao Drive.
+    let allOrgs: any[] = [];
+    try {
+      allOrgs = db.prepare(`
+        SELECT organization_id, backup_platform_last_run
+        FROM organization_settings
+        WHERE deleted_at IS NULL
+      `).all() as any[];
+    } catch (e) { allOrgs = []; }
+    const WEEK = 7 * DAY;
+    for (const o of allOrgs) {
+      try {
+        const last = o.backup_platform_last_run ? new Date(o.backup_platform_last_run).getTime() : 0;
+        if (Date.now() - last < WEEK - HOUR) continue;
+        const r = await BackupService.runAndDistribute(o.organization_id, 'platform', { toDrive: false });
+        db.prepare(`UPDATE organization_settings SET backup_platform_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(o.organization_id);
+        if (r) await BackupService.applyRetention(o.organization_id, PLATFORM_BACKUP_KEEP, 'platform');
+      } catch (e) { console.error('[Scheduler] redundância da plataforma falhou', o.organization_id, e); }
     }
   }
 

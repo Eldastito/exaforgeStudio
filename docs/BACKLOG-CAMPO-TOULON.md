@@ -104,7 +104,19 @@ Ver [`docs/adr/ADR-092-distribuicao-por-vertical.md`](adr/ADR-092-distribuicao-p
 - **LGPD** — o dono precisa acessar isso via UI, ou basta a plataforma
   gerar consentimento granular conforme a vertical?
 
-**Status:** `[ ] preciso das respostas`
+**Decidido (ADR-093):**
+- **Quick-Start** sai das abas → vira card de onboarding no Dashboard
+  que some após uso. Lógica de aplicação preservada.
+- **Planos** ficam em "Cobrança e Plano", renomeados p/ grade nova +
+  uso vs limite + checkout ASAAS. Cai no Bloco A.
+- **LGPD** mantém a aba (obrigatório: lojista é controlador dos dados).
+  Melhorias: pré-popular categorias por vertical + modo simples/avançado
+  + linguagem menos jurídica.
+
+Ver [`docs/adr/ADR-093-reorganizacao-configuracoes.md`](adr/ADR-093-reorganizacao-configuracoes.md).
+
+**Status:** `[x] decidido — Planos no Bloco A; Quick-Start + LGPD em item
+separado pós-Bloco A`
 
 ## 4. Relatórios de vendas — impressão + personalização por vertical
 

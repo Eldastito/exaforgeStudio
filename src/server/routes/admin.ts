@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcrypt";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
@@ -7,6 +8,7 @@ import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { eventsEnabled } from "../ContinuityService.js";
 import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { EdgeSyncService } from "../EdgeSyncService.js";
@@ -340,6 +342,94 @@ router.post("/queue/cleanup", (req: AuthRequest, res) => {
   try {
     const deleted = JobQueueService.cleanupCompleted(days);
     res.json({ deleted });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================================
+// Master Admin — Gerenciador de USUÁRIOS (ADR-090)
+// ----------------------------------------------------------------------------
+// Rotas para o master admin listar/resetar/remover usuários de qualquer org.
+// Caso de uso primário: cliente esquece senha com email fictício (não recebe
+// recovery), plataforma trava. Sem o gerenciador, resolver exige SSH na VPS.
+//
+// Todas as rotas assumem `requireMasterAdmin` já aplicado no mount do router.
+// ============================================================================
+
+// GET /api/admin/users — lista usuários paginada com busca por email/nome
+// e nome da org junto.
+router.get("/users", (req: AuthRequest, res) => {
+  try {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || 50), 10) || 50));
+    const offset = Math.max(0, parseInt(String(req.query.offset || 0), 10) || 0);
+    const where: string[] = ["1 = 1"];
+    const args: any[] = [];
+    if (q) {
+      where.push("(lower(u.email) LIKE ? OR lower(u.name) LIKE ? OR lower(os.business_name) LIKE ?)");
+      args.push(`%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    const rows = db.prepare(`
+      SELECT u.id, u.email, u.name, u.phone, u.role, u.global_status,
+             u.organization_id, u.created_at, u.last_login_at,
+             os.business_name AS org_name, os.status AS org_status
+      FROM users u
+      LEFT JOIN organization_settings os ON os.organization_id = u.organization_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...args, limit, offset) as any[];
+    const total = (db.prepare(`
+      SELECT COUNT(*) AS c FROM users u
+      LEFT JOIN organization_settings os ON os.organization_id = u.organization_id
+      WHERE ${where.join(" AND ")}
+    `).get(...args) as any).c;
+    res.json({ users: rows, total, limit, offset });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/users/:id/reset-password — troca a senha por bcrypt hash.
+// Body: { password: "nova-senha" }. Mínimo 8 chars.
+router.post("/users/:id/reset-password", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const id = String(req.params.id || "");
+    const password = String(req.body?.password || "");
+    if (password.length < 8) return res.status(400).json({ error: "senha_muito_curta" });
+    const user = db.prepare(`SELECT id, email FROM users WHERE id = ?`).get(id) as any;
+    if (!user) return res.status(404).json({ error: "user_not_found" });
+    // Trava óbvia: master admin não pode resetar a própria senha por aqui
+    // (evita bug de auto-lockout se ele digitar errado; usa /reset-password normal).
+    if (user.email === MASTER_ADMIN_EMAIL) {
+      return res.status(400).json({ error: "cannot_reset_master_admin_here" });
+    }
+    const hash = await bcrypt.hash(password, 10);
+    db.prepare(`UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(hash, id);
+    try {
+      logAuthEvent("admin_password_reset", req.user?.userId || null, user.email, {
+        by_master: req.user?.email, target_user_id: id,
+      });
+    } catch { /* noop */ }
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/admin/users/:id — soft delete (global_status = 'deleted').
+// O usuário não pode fazer login mais, mas os registros históricos ficam
+// preservados por integridade referencial e LGPD (forget é fluxo separado).
+router.delete("/users/:id", (req: AuthRequest, res): any => {
+  try {
+    const id = String(req.params.id || "");
+    const user = db.prepare(`SELECT id, email FROM users WHERE id = ?`).get(id) as any;
+    if (!user) return res.status(404).json({ error: "user_not_found" });
+    if (user.email === MASTER_ADMIN_EMAIL) {
+      return res.status(400).json({ error: "cannot_delete_master_admin" });
+    }
+    const r = db.prepare(`UPDATE users SET global_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+    try {
+      logAuthEvent("admin_user_soft_deleted", req.user?.userId || null, user.email, {
+        by_master: req.user?.email, target_user_id: id,
+      });
+    } catch { /* noop */ }
+    res.json({ ok: true, changes: r.changes });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

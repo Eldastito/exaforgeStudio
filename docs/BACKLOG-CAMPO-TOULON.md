@@ -202,7 +202,24 @@ Ver [`docs/adr/ADR-096-loja-checkout-sem-atrito.md`](adr/ADR-096-loja-checkout-s
     planejado, restore).
 - Este é o item **MUITO IMPORTANTE**.
 
-**Status:** `[ ] alta prioridade, aguardando escopo`
+**Decidido (ADR-097):**
+- Backup **programado diário** de madrugada (~3h), opt-in por org,
+  destino **Drive do dono** + espelho, **retenção últimos 30**.
+- **Redundância da plataforma** (pilar do Emerson): toda org ativa tem
+  cópia **no mínimo semanal na NOSSA infra** (S3/off-site), independente
+  do opt-in e da conta Google do cliente. Drive do dono não substitui a
+  cópia operacional do operador. Dois destinos, dois donos.
+- **Restore** de volta ao banco (multi-tenant seguro, só tabelas do
+  tenant) com **backup-guard** automático antes de sobrescrever.
+- Gatilhos: backup no boot se vencido (mitiga queda de luz), no `SIGTERM`
+  (shutdown gracioso) e antes de restore (backup-guard).
+- Pré-requisito operacional: habilitar S3 (ou off-site nosso) — sem isso
+  a "redundância" cai no disco local e não é redundância real.
+
+Ver [`docs/adr/ADR-097-backup-automatico-redundancia-restore.md`](adr/ADR-097-backup-automatico-redundancia-restore.md).
+
+**Status:** `[x] decidido — aguardando implementação (item independente,
+alta prioridade)`
 
 ## 9. Canais / IA / Instagram + limpeza do Diagnóstico Meta
 

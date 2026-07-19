@@ -70,8 +70,11 @@ vira `[~] em análise` quando começamos e `[x] fechado` quando resolvido.
 pré-requisito. Se não cobrar em produção, roda como "cortesia interna"
 até fechar TOULON piloto e ter os primeiros CAC/LTV medidos.
 
-**Status:** `[~] em análise — aguardando decisão final de preços/módulos
-por plano; ASAAS integração pendente`
+**Status:** `[x] decidido — ADR-091 aprovado, aguardando implementação
+dos Blocos A/B/C/D`
+
+Ver [`docs/adr/ADR-091-nova-grade-de-planos.md`](adr/ADR-091-nova-grade-de-planos.md)
+para a decisão consolidada + roadmap de implementação.
 
 ## 2. Distribuição por vertical
 

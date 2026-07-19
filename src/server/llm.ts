@@ -555,6 +555,29 @@ export async function analyzeImageForChat(base64: string, mimetype = "image/jpeg
   return describeImage(base64, mimetype, prompt);
 }
 
+/**
+ * Extração estruturada genérica a partir de uma IMAGEM (multimodal, GPT-4o).
+ * Recebe o system prompt (que define o schema/regras) e devolve o JSON cru.
+ * Usado pelo SmartImportService (ADR-101) para "Importar PDF/imagem".
+ */
+export async function extractStructuredFromImage(base64: string, mimetype: string, system: string, userText = "Extraia os dados pedidos e devolva SOMENTE o JSON."): Promise<string> {
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: [
+        { type: "text", text: userText },
+        { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+      ] },
+    ] as any,
+    temperature: 0,
+    max_tokens: 2000,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
 /** Extrai o texto de um PDF (best-effort). Vazio se não conseguir. */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   const mod: any = await import("pdf-parse");

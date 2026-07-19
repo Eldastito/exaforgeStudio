@@ -7,6 +7,7 @@ import { useStore } from '@/src/store/useStore';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { SmartImportModal } from '@/src/components/SmartImportModal';
 
 const INP = 'w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500';
 
@@ -32,6 +33,7 @@ export function ReservasView() {
   const [showRes, setShowRes] = useState(false);
   const [showResource, setShowResource] = useState(false);
   const [showConnector, setShowConnector] = useState(false);
+  const [showSmartImport, setShowSmartImport] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -65,6 +67,9 @@ export function ReservasView() {
         <div className="flex gap-2">
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowConnector(true)}>
             <Plug className="w-4 h-4 mr-2" /> Importar / PMS
+          </Button>
+          <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowSmartImport(true)}>
+            <Upload className="w-4 h-4 mr-2" /> Importar PDF/imagem
           </Button>
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowResource(true)}>
             <BedDouble className="w-4 h-4 mr-2" /> Recurso reservável
@@ -145,6 +150,23 @@ export function ReservasView() {
       {showResource && <ResourceModal onClose={() => setShowResource(false)} onSaved={() => { setShowResource(false); load(); }} />}
       {showRes && <ReservationModal resources={resources} contacts={Object.values(contacts)} onClose={() => setShowRes(false)} onSaved={() => { setShowRes(false); load(); }} />}
       {showConnector && <ConnectorModal onClose={() => setShowConnector(false)} onImported={() => { load(); }} />}
+      {showSmartImport && (
+        <SmartImportModal
+          type="reservas"
+          title="Importar recursos (PDF/imagem)"
+          onClose={() => setShowSmartImport(false)}
+          onCommit={async (rows) => {
+            const clean = rows.filter((r: any) => (r.name || '').trim());
+            if (!clean.length) return { ok: false, message: 'Nenhuma linha válida (informe ao menos o nome do recurso).' };
+            const res = await apiFetch('/api/connector/resources/import', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: clean }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (d?.success) { load(); return { ok: true, message: `Importado: ${d.report?.created ?? clean.length} recurso(s).` }; }
+            return { ok: false, message: d?.error || 'Falha ao importar.' };
+          }}
+        />
+      )}
     </div>
   );
 }

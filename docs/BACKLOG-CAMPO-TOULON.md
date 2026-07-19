@@ -327,7 +327,8 @@ Ver [`docs/adr/ADR-100-pagamento-lojista-stone-pagarme.md`](adr/ADR-100-pagament
 
 Ver [`docs/adr/ADR-101-importar-pdf-imagem-por-ia.md`](adr/ADR-101-importar-pdf-imagem-por-ia.md).
 
-**Status:** `[x] decidido — aguardando implementação (item independente)`
+**Status:** `[x] IMPLEMENTADO — SmartImportService + rota /api/import/extract +
+modal reusável nas 3 telas (Catálogo/Prospecção/Reservas) + test:smart-import`
 
 ## 15. Tarefas — registro por áudio pelo Zapp (gestor)
 

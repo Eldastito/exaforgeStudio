@@ -3,6 +3,7 @@ import { Target, Plus, Loader2, Trash2, Megaphone, Crosshair, X, Upload, Buildin
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { SmartImportModal } from '@/src/components/SmartImportModal';
 
 type Icp = { id: string; name: string; vertical?: string; criteria?: any; created_at: string };
 type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string; discovery_source?: string; discovery_autodraft?: number };
@@ -79,6 +80,7 @@ export function ProspectView() {
   const [newIcp, setNewIcp] = useState(false);
   const [newCamp, setNewCamp] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [smartImport, setSmartImport] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [queue, setQueue] = useState<any[]>([]);
   const [attr, setAttr] = useState<any>(null);
@@ -235,6 +237,7 @@ export function ProspectView() {
           <div className="flex items-center gap-2">
             <Button onClick={openDiscovery} className="bg-violet-600 hover:bg-violet-700 text-white h-8 px-2.5 text-xs"><Radar className="w-3.5 h-3.5 mr-1" /> Descobrir com IA</Button>
             <Button onClick={() => setImporting(true)} variant="ghost" className="text-zinc-300 h-8 px-2.5 text-xs"><Upload className="w-3.5 h-3.5 mr-1" /> Importar CSV</Button>
+            <Button onClick={() => setSmartImport(true)} variant="ghost" className="text-zinc-300 h-8 px-2.5 text-xs"><Upload className="w-3.5 h-3.5 mr-1" /> Importar PDF/imagem</Button>
           </div>
         </div>
         {loading ? <Spinner /> : accounts.length === 0 ? (
@@ -338,6 +341,24 @@ export function ProspectView() {
       {newCamp && <CampaignModal icps={icps} onClose={() => setNewCamp(false)} onSaved={() => { setNewCamp(false); load(); }} />}
       {discoveryCamp && <DiscoveryModal campaign={discoveryCamp} onClose={() => setDiscoveryCamp(null)} onChanged={() => { loadCampaigns(); loadRuns(); loadAccounts(); }} />}
       {importing && <ImportModal campaigns={campaigns} onClose={() => setImporting(false)} onDone={() => { setImporting(false); loadAccounts(); }} />}
+      {smartImport && (
+        <SmartImportModal
+          type="prospect"
+          title="Importar contas (PDF/imagem)"
+          onClose={() => setSmartImport(false)}
+          onCommit={async (rows) => {
+            const records = rows.filter((r: any) => (r.company || '').trim() || (r.email || '').trim());
+            if (!records.length) return { ok: false, message: 'Nenhuma linha válida (informe ao menos empresa ou e-mail).' };
+            const r = await apiFetch('/api/prospect/import', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ records }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (r.ok) { loadAccounts(); return { ok: true, message: `Importado: ${d.accountsCreated || 0} contas, ${d.contactsCreated || 0} contatos.` }; }
+            return { ok: false, message: d.error || 'Falha ao importar.' };
+          }}
+        />
+      )}
       {detailId && <AccountDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={() => { loadAccounts(); loadQueue(); loadAttr(); }} />}
     </div>
   );

@@ -5,6 +5,7 @@ import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { StockModal } from '@/src/features/StockModal';
 import { EmptyState } from '@/src/components/EmptyState';
+import { SmartImportModal } from '@/src/components/SmartImportModal';
 
 type Product = {
   id: string; type: string; name: string; description?: string; price?: number;
@@ -22,6 +23,7 @@ export function CatalogView() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showSmartImport, setShowSmartImport] = useState(false);
   const [csv, setCsv] = useState('');
   const [importing, setImporting] = useState(false);
   const [form, setForm] = useState<any>(emptyForm);
@@ -369,6 +371,9 @@ export function CatalogView() {
           <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowImport(true)}>
             <Upload className="w-4 h-4 mr-2" /> Importar CSV
           </Button>
+          <Button variant="outline" className="border-zinc-700 text-zinc-200" onClick={() => setShowSmartImport(true)}>
+            <Upload className="w-4 h-4 mr-2" /> Importar PDF/imagem
+          </Button>
           <Button className="zf-button zf-button-primary" onClick={openNew}>
             <Plus className="w-4 h-4 mr-2" /> Novo Item
           </Button>
@@ -538,6 +543,27 @@ export function CatalogView() {
             </form>
           </div>
         </div>
+      )}
+
+      {showSmartImport && (
+        <SmartImportModal
+          type="products"
+          title="Importar produtos (PDF/imagem)"
+          onClose={() => setShowSmartImport(false)}
+          onCommit={async (rows) => {
+            // Reusa o import de CSV existente: converte as linhas revisadas em CSV.
+            const esc = (v: any) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+            const header = 'nome,preco,quantidade,descricao,tipo';
+            const body = rows.map(r => [r.nome, r.preco, r.quantidade, r.descricao, r.tipo || 'produto'].map(esc).join(',')).join('\n');
+            const res = await apiFetch('/api/products/import', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ csv: `${header}\n${body}` }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok) { loadProducts(); return { ok: true, message: `Importação concluída: ${d.created || 0} criados, ${d.updated || 0} atualizados.` }; }
+            return { ok: false, message: d.error || 'Erro na importação' };
+          }}
+        />
       )}
 
       {/* Modal Importar CSV */}

@@ -3,6 +3,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { BackupService } from "../BackupService.js";
 import { StorageService } from "../StorageService.js";
 import { NotificationService } from "../NotificationService.js";
@@ -407,6 +408,40 @@ router.get("/backups/:id/download", (req: AuthRequest, res): any => {
     if (!fullPath) return res.status(404).json({ error: "Arquivo não encontrado no disco." });
 
     res.download(fullPath, job.file_url);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/integrations/backups/:id/restore — restaura o backup de volta ao
+// banco (ADR-097). Operação sensível: só dono ou Master Admin, com confirmação
+// (o front exige dupla confirmação) e auditada. Gera um backup-guard antes.
+router.post("/backups/:id/restore", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+
+  // Só o dono da conta ou o Master Admin podem restaurar.
+  const isOwner = req.user?.role === 'owner';
+  const isMaster = req.user?.email === MASTER_ADMIN_EMAIL;
+  if (!isOwner && !isMaster) return res.status(403).json({ error: "Apenas o dono da conta pode restaurar um backup." });
+
+  // Confirmação explícita no corpo (o front pede dupla confirmação).
+  if (req.body?.confirm !== true) return res.status(400).json({ error: "Confirmação necessária para restaurar." });
+
+  try {
+    const job = db.prepare(`SELECT * FROM backup_jobs WHERE id = ? AND organization_id = ?`).get(req.params.id, orgId) as any;
+    if (!job) return res.status(404).json({ error: "Backup não encontrado." });
+    if (job.status !== 'completed' || !job.file_url) return res.status(400).json({ error: "Backup ainda não está pronto." });
+
+    const result = BackupService.restore(orgId, job.file_url);
+    if (!result.ok) {
+      logAuthEvent(orgId, userId, req.params.id, 'BACKUP_RESTORE_FAILED', { error: result.error, guard: result.guardFileName });
+      const msg = result.error === 'falha_no_backup_guard'
+        ? "Não foi possível gerar o backup de segurança — restauração cancelada para proteger seus dados."
+        : "Falha ao restaurar o backup.";
+      return res.status(400).json({ error: msg, code: result.error });
+    }
+    logAuthEvent(orgId, userId, req.params.id, 'BACKUP_RESTORED', { guard: result.guardFileName, restored: result.restored });
+    res.json({ success: true, guardFileName: result.guardFileName, restored: result.restored });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -229,7 +229,19 @@ alta prioridade)`
   dias / expurgar no backup semanal).
 - Sem isso, a lista cresce infinita e vira ruído.
 
-**Status:** `[ ] aguardando escopo de expurgo`
+**Decidido (ADR-098):**
+- **Instagram DM:** o bug do host (`graph.facebook.com` → `graph.instagram.com`)
+  já foi corrigido; adicionar **teste de regressão** (trava o caminho) +
+  **checklist de teste de campo** (a entrega real depende de config Meta).
+- **Diagnóstico Meta:** a auto-purga (500 hits / 48h) já existe. Adicionar
+  **deletar por linha + "Limpar tudo"** mantendo a auto-purga.
+- **Privacidade (achado novo):** o console vazava payload (com PII de lead)
+  entre tenants — restringir a visão a **Master Admin apenas**.
+
+Ver [`docs/adr/ADR-098-instagram-dm-e-diagnostico-meta.md`](adr/ADR-098-instagram-dm-e-diagnostico-meta.md).
+
+**Status:** `[x] decidido — aguardando implementação (item pequeno e
+independente)`
 
 ## 10. Loja virtual — ajustes para moda
 

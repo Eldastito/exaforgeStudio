@@ -98,6 +98,17 @@ export const MetaWebhookLogService = {
     try { db.prepare(`UPDATE meta_webhook_hits SET processed = 0, error = ? WHERE id = ?`).run(String(error).slice(0, 500), id); } catch { /* noop */ }
   },
 
+  /** Apaga um hit específico (deletar por linha no console). Retorna true se removeu. */
+  deleteOne(id: string): boolean {
+    if (!id) return false;
+    try { return db.prepare(`DELETE FROM meta_webhook_hits WHERE id = ?`).run(id).changes > 0; } catch { return false; }
+  },
+
+  /** Apaga TODOS os hits ("Limpar tudo"). Retorna quantos foram removidos. */
+  clearAll(): number {
+    try { return db.prepare(`DELETE FROM meta_webhook_hits`).run().changes || 0; } catch { return 0; }
+  },
+
   list(limit = 50): any[] {
     const n = Math.min(200, Math.max(1, Math.floor(Number(limit) || 50)));
     return db.prepare(

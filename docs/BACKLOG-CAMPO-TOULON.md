@@ -28,7 +28,50 @@ vira `[~] em análise` quando começamos e `[x] fechado` quando resolvido.
   cada um libera?
 - Isso é vendido? Aparece pra o cliente?
 
-**Status:** `[ ] preciso das respostas antes de decidir`
+**Estado atual do código (Claude, jul/26):**
+- 3 planos seed: Starter R$99 / Pro R$299 / Business R$799
+- **ASAAS NÃO está configurado.** Aparece só como menção em ADR-088. Zero
+  integração real. Se for cobrar, precisa implementar gateway do zero.
+- Trial hoje: 14 dias em todos os planos.
+- Distribuição de módulos por plano: ver tabela na resposta do Claude
+  (Starter 9 mods, Pro +8 = 17 mods, Business +2 = 19 mods).
+
+**Decisões consolidadas na conversa Claude + ChatGPT + Emerson (jul/26):**
+- **Vamos redesenhar** os planos. Grade candidata do ChatGPT:
+  Autônomo R$247 / Start R$597 / Growth R$1.797 / Scale R$4.797 /
+  Enterprise a partir de R$8k.
+- **Trial:** 30 dias em Autônomo/Start, 21 dias em Growth+ (Claude
+  recomenda; 14 dias é curto pra ver valor de ZappFlow).
+- **Modelo de receita híbrido:** assinatura base + módulos + consumo
+  excedente + unidades + **2% do ganho incremental comprovado**
+  (opt-in, painel transparente, cálculo contestável).
+- **Performance fee — modo beta (primeiros 6 meses):** calcula e mostra
+  no painel, MAS NÃO cobra. Cliente vê e contesta. Só ativa cobrança
+  depois de calibrar atribuição. Meta inicial: 15% de margem incremental
+  em 3 meses consecutivos.
+- **Comissão comercial:** NÃO desenha 30% pra equipe que não existe.
+  Se contratar SDR/closer no futuro, aí sim escalonado 30/20/10. Por
+  enquanto: 10-15% de indicação por 12 meses pra quem TRAZ cliente
+  ativamente (não recomendação passiva).
+- **CAC/LTV:** meta LTV/CAC ≥ 4. Payback ≤ 5 meses. Não escalar antes
+  disso.
+- **Migração automática Autônomo → Start:** proibida. IA
+  **recomenda** ao cliente com evidências (crescimento de pedidos,
+  contatos, consumo IA), cliente decide. Migração compulsória só em
+  violação objetiva (2º usuário, 2ª unidade).
+- **Cancelamento inadimplência:** régua D-5 → D+15, com modo
+  somente-leitura antes do bloqueio total. Preserva dados, mantém
+  cobrança. Legal (LGPD art. 20 permite — execução de contrato ≠
+  decisão automatizada nociva).
+
+**Módulos por plano — a redefinir junto com os preços novos.**
+
+**Cobrança:** implementar gateway (ASAAS ou Mercado Pago) é
+pré-requisito. Se não cobrar em produção, roda como "cortesia interna"
+até fechar TOULON piloto e ter os primeiros CAC/LTV medidos.
+
+**Status:** `[~] em análise — aguardando decisão final de preços/módulos
+por plano; ASAAS integração pendente`
 
 ## 2. Distribuição por vertical
 
@@ -165,6 +208,20 @@ vira `[~] em análise` quando começamos e `[x] fechado` quando resolvido.
 - Passar depois. Placeholder para não esquecer.
 
 **Status:** `[ ] parking lot`
+
+## 17. Skills externas: 2ª opinião (OpenAI) + geração de mídia (Gemini)
+
+- **2ª opinião OpenAI:** skill que quando invocada envia contexto atual
+  pra OpenAI API e traz "opinião B" pra discutir em plural aqui. Não é
+  ChatGPT me auditando em tempo real (impossível hoje), é consultor
+  invocável sob demanda.
+- **Geração Gemini (imagem/vídeo):** skill que expõe Gemini pra criar
+  arte direto na conversa. Gemini já roda no ZappFlow (Fashion TryOn),
+  reusa a chave.
+- Requer: `OPENAI_API_KEY` (já configurada) e `GEMINI_API_KEY` (já).
+
+**Status:** `[ ] fazer só depois de fechar backlog crítico do TOULON
+(sem prioridade urgente)`
 
 ---
 

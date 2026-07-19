@@ -173,6 +173,7 @@ jobs:
           - { name: 'sla-barcode-consult-sheets', script: 'test:sla-barcode-consult-sheets' }
           - { name: 'instagram-fix-vision-batch', script: 'test:instagram-fix-vision-batch' }
           - { name: 'meta-webhook-debug', script: 'test:meta-webhook-debug' }
+          - { name: 'instagram-send', script: 'test:instagram-send' }
 
           # === Fase 2 do plano de produção (ADR-051, ADR-052, ADR-053) ===
           - { name: 'phone-match', script: 'test:phone-match' }

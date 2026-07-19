@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
-import { Smartphone, Instagram, AlertCircle, CheckCircle2, RefreshCw, UploadCloud, BrainCircuit, FileText, Loader2, Check, X } from 'lucide-react';
+import { Smartphone, Instagram, AlertCircle, CheckCircle2, RefreshCw, UploadCloud, BrainCircuit, FileText, Loader2, Check, X, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { Badge } from '@/src/components/ui/badge';
 import { format } from 'date-fns';
 import { apiFetch } from '@/src/lib/api';
 import { InstagramConnectModal } from '@/src/features/InstagramConnectModal';
+import { useAuth } from '@/src/contexts/AuthContext';
 
 export function ChannelsPanel() {
   const { channels, ragDocuments, addRagDocument, setRagDocumentStatus, removeRagDocument, loadRagDocuments, fetchChannels, updateChannel, removeChannel } = useStore();
@@ -604,6 +605,8 @@ export function ChannelsPanel() {
 // (payload de objeto errado, verify token divergente, etc.) parece que "não
 // veio nada" — foi exatamente o cenário do bug de DM do Instagram.
 function MetaWebhookDiagnostics() {
+  const { user } = useAuth();
+  const isMasterAdmin = user?.email === 'eldastito@gmail.com';
   const [hits, setHits] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -618,7 +621,29 @@ function MetaWebhookDiagnostics() {
     } catch { /* silencioso */ }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (isMasterAdmin) load(); }, [isMasterAdmin]);
+
+  // Diagnóstico técnico da plataforma (payload global, pode ter PII de lead
+  // entre tenants) — só o Master Admin enxerga (ADR-098).
+  if (!isMasterAdmin) return null;
+
+  const deleteOne = async (id: string) => {
+    if (!(await confirmDialog('Apagar este hit do diagnóstico?'))) return;
+    try {
+      const r = await apiFetch(`/api/meta-debug/hits/${id}`, { method: 'DELETE' });
+      if (r.ok) { setHits(hs => hs.filter(h => h.id !== id)); toast.success('Hit removido.'); }
+      else toast.error('Falha ao remover.');
+    } catch { toast.error('Falha ao remover.'); }
+  };
+
+  const clearAll = async () => {
+    if (!(await confirmDialog('Limpar TODOS os hits do diagnóstico? Isso não afeta os webhooks futuros — a lista volta a encher conforme a Meta chama.'))) return;
+    try {
+      const r = await apiFetch('/api/meta-debug/hits', { method: 'DELETE' });
+      if (r.ok) { setHits([]); setSummary(null); toast.success('Diagnóstico limpo.'); }
+      else toast.error('Falha ao limpar.');
+    } catch { toast.error('Falha ao limpar.'); }
+  };
 
   const timeAgo = (iso: string) => {
     try {
@@ -640,9 +665,16 @@ function MetaWebhookDiagnostics() {
             Últimos hits que a Meta bateu em <code className="text-emerald-400">/api/webhooks/meta</code>. Se a lista estiver <b>vazia depois de você enviar DM</b>, a Meta não está enviando (config do app na Meta / conta em "solicitações"). Se aparecer hit mas com erro, o problema está no processamento.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading} className="border-slate-700 text-slate-200">
-          {loading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />} Atualizar
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} className="border-slate-700 text-slate-200">
+            {loading ? <RefreshCw className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />} Atualizar
+          </Button>
+          {hits.length > 0 && (
+            <Button variant="outline" size="sm" onClick={clearAll} className="border-red-800/50 text-red-300 hover:bg-red-500/10">
+              <Trash2 className="w-4 h-4 mr-1" /> Limpar tudo
+            </Button>
+          )}
+        </div>
       </div>
 
       {summary && (
@@ -678,17 +710,22 @@ function MetaWebhookDiagnostics() {
             try { payload = JSON.parse(h.payload_json || '{}'); } catch { payload = { _raw: h.payload_json }; }
             return (
               <div key={h.id} className={`rounded-lg border ${h.error ? 'border-red-500/30 bg-red-500/5' : h.processed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-700 bg-slate-950/40'} p-3`}>
-                <button onClick={() => setExpanded(isExp ? null : h.id)} className="w-full text-left flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <button onClick={() => setExpanded(isExp ? null : h.id)} className="flex-1 min-w-0 text-left flex items-center gap-3">
                     <Badge variant="outline" className={h.method === 'GET' ? 'border-blue-500/30 text-blue-300' : 'border-purple-500/30 text-purple-300'}>{h.method}</Badge>
                     <span className="text-xs text-slate-400 shrink-0">{timeAgo(h.received_at)}</span>
                     <span className="text-xs text-slate-300 truncate">object=<code className="text-slate-100">{h.object || '—'}</code></span>
                     {h.error ? <span className="text-xs text-red-300 truncate">✗ {h.error}</span>
                       : h.processed ? <span className="text-xs text-emerald-300">✓ processado</span>
                       : <span className="text-xs text-slate-400">pendente</span>}
+                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => deleteOne(h.id)} title="Apagar este hit" className="text-slate-500 hover:text-red-400 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setExpanded(isExp ? null : h.id)} className="text-xs text-slate-500">{isExp ? '▲' : '▼'}</button>
                   </div>
-                  <span className="text-xs text-slate-500 shrink-0">{isExp ? '▲' : '▼'}</span>
-                </button>
+                </div>
                 {isExp && (
                   <div className="mt-3 space-y-2">
                     <div className="text-xs text-slate-400">Origem: <span className="text-slate-200">{h.source_ip || '—'}</span> · UA: <span className="text-slate-200">{(h.user_agent || '—').slice(0, 80)}</span></div>

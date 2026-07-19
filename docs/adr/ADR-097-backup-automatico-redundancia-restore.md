@@ -88,7 +88,7 @@ O backup no boot e no `SIGTERM` são **globais da instância** (varrem as orgs c
 
 - **Fase 1 entregue** (PR de backup automático): `backupPass` no Scheduler (backup do cliente opt-in → Drive + S3, com retenção; e redundância da plataforma semanal na infra do operador, independente do opt-in), colunas em `organization_settings`, `drive_file_id` em `backup_jobs`, `GoogleOAuthService.driveDelete`, config na UI (Integrações) e `test:backup-scheduler`.
 - **SIGTERM NÃO implementado, por decisão de arquitetura:** o supervisor (ADR-008) assume que o core morre imediatamente ao receber o sinal (janela ~10s do Docker/Coolify). Um backup no shutdown estouraria esse orçamento. O gatilho "backup no boot se vencido" é atendido pelo **tick inicial do Scheduler (~30s após boot)**, que já roda o `backupPass` e gera o que estiver vencido.
-- **Restore + backup-guard: em PR próprio (Fase seguinte)** — por ser a parte mais delicada (multi-tenant, sobrescrita), foi separado do backup para revisão focada.
+- **Restore + backup-guard: ENTREGUE (Fase 2, PR próprio).** `BackupService.restore(orgId, fileName)` — multi-tenant seguro (valida `organization_id` do snapshot; mexe só nas tabelas do tenant; nunca grava linha de outra org; tolera drift de schema via `PRAGMA table_info`; tudo numa transação). **Backup-guard** gera um backup `pre-restore` do estado atual ANTES de sobrescrever — se o guard falhar, aborta sem tocar em nada. Rota `POST /backups/:id/restore` restrita a dono/Master Admin, com confirmação (dupla confirmação no front) e auditada (`BACKUP_RESTORED`). Botão "Restaurar" na tela de Integrações. Teste `test:backup-restore` (15 checks).
 
 ## Aprovação
 

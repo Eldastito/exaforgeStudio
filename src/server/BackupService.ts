@@ -151,6 +151,77 @@ export class BackupService {
   }
 
   /**
+   * Restaura um backup de volta ao banco (ADR-097). Multi-tenant seguro:
+   *  - só aceita snapshot da PRÓPRIA org (valida organization_id);
+   *  - mexe SÓ nas tabelas do tenant (nunca users/plans/outras orgs);
+   *  - nunca grava uma linha cujo organization_id não seja o da org;
+   *  - **backup-guard**: gera um backup de segurança do estado atual ANTES de
+   *    sobrescrever (se o guard falhar, aborta sem tocar em nada);
+   *  - tudo numa transação (atômico).
+   */
+  static restore(orgId: string, fileName: string): { ok: boolean; error?: string; guardFileName?: string; restored?: Record<string, number> } {
+    const full = this.resolveFile(orgId, fileName);
+    if (!full) return { ok: false, error: 'arquivo_nao_encontrado' };
+
+    let snapshot: any;
+    try { snapshot = JSON.parse(fs.readFileSync(full, 'utf-8')); }
+    catch { return { ok: false, error: 'arquivo_invalido' }; }
+    if (!snapshot || snapshot.organization_id !== orgId || typeof snapshot.tables !== 'object') {
+      return { ok: false, error: 'snapshot_de_outra_org' };
+    }
+
+    // Backup-guard: salva o estado atual antes de sobrescrever. Sem rede de
+    // segurança, não restaura.
+    let guardFileName: string | undefined;
+    try {
+      const guardJobId = uuidv4();
+      db.prepare(`INSERT INTO backup_jobs (id, organization_id, type, status) VALUES (?, ?, 'pre-restore', 'pending')`).run(guardJobId, orgId);
+      const g = this.run(orgId, guardJobId, 'pre-restore');
+      db.prepare(`UPDATE backup_jobs SET status='completed', completed_at=CURRENT_TIMESTAMP, file_url=? WHERE id=?`).run(g.fileName, guardJobId);
+      guardFileName = g.fileName;
+    } catch (e) {
+      console.error('[Backup] backup-guard falhou; restauração abortada', orgId, e);
+      return { ok: false, error: 'falha_no_backup_guard' };
+    }
+
+    const restored: Record<string, number> = {};
+    const apply = db.transaction(() => {
+      for (const table of TENANT_TABLES) {
+        const rows = snapshot.tables[table];
+        if (!Array.isArray(rows)) continue;
+        // Colunas reais da tabela hoje — tolera drift de schema (ignora colunas
+        // que sumiram; não exige colunas novas).
+        let cols: Set<string>;
+        try {
+          const info = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+          cols = new Set(info.map((c: any) => c.name));
+        } catch { continue; }
+        if (!cols.has('organization_id')) continue;
+
+        // Substitui o estado atual DESTA org (não mescla).
+        db.prepare(`DELETE FROM ${table} WHERE organization_id = ?`).run(orgId);
+        let n = 0;
+        for (const row of rows) {
+          if (!row || row.organization_id !== orgId) continue; // nunca escreve linha de outra org
+          const keys = Object.keys(row).filter(k => cols.has(k));
+          if (!keys.length) continue;
+          db.prepare(`INSERT OR REPLACE INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
+            .run(...keys.map(k => row[k]));
+          n++;
+        }
+        restored[table] = n;
+      }
+    });
+
+    try { apply(); }
+    catch (e) {
+      console.error('[Backup] restauração falhou (o backup-guard preserva o estado anterior)', orgId, e);
+      return { ok: false, error: 'falha_na_restauracao', guardFileName };
+    }
+    return { ok: true, guardFileName, restored };
+  }
+
+  /**
    * Retenção: mantém os `keep` backups completos mais recentes (por org e tipo) e
    * expurga os antigos do DISCO, do DRIVE do dono (se enviado) e da tabela.
    * Retorna quantos foram removidos.

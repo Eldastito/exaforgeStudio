@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle, ShieldCheck, Copy, Check } from 'lucide-react';
+import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle, ShieldCheck, Copy, Check, RotateCcw } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -256,6 +256,23 @@ export function IntegrationsView() {
       a.href = url; a.download = `backup-${id}.json`; a.click();
       URL.revokeObjectURL(url);
     } catch (e) { toast.error('Não foi possível baixar o backup.'); }
+  };
+
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const handleRestoreBackup = async (id: string) => {
+    // Dupla confirmação — operação sobrescreve os dados atuais.
+    if (!(await confirmDialog('Restaurar este backup vai SUBSTITUIR seus dados atuais (contatos, conversas, pedidos, catálogo) pelo estado deste arquivo. Antes de sobrescrever, geramos um backup de segurança automático. Deseja continuar?', { danger: true, confirmText: 'Continuar' }))) return;
+    if (!(await confirmDialog('Tem certeza absoluta? Esta ação substitui os dados atuais da sua conta pelo backup selecionado.', { danger: true, confirmText: 'Restaurar agora' }))) return;
+    setRestoringId(id);
+    try {
+      const r = await apiFetch(`/api/integrations/backups/${id}/restore`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { toast.success('Backup restaurado. Recarregue a página para ver os dados restaurados.'); loadData(); }
+      else toast.error(d?.error || 'Falha ao restaurar o backup.');
+    } catch { toast.error('Falha ao restaurar o backup.'); }
+    finally { setRestoringId(null); }
   };
 
   const handleDeleteBackup = async (id: string) => {
@@ -596,6 +613,11 @@ export function IntegrationsView() {
                   {ready && googleStatus?.connected && (
                     <Button variant="ghost" size="sm" onClick={() => sendBackupToDrive(b.id)} disabled={driveBusy === b.id} className="h-7 px-2 text-blue-300 hover:text-blue-200" title="Salvar no Google Drive">
                       {driveBusy === b.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
+                    </Button>
+                  )}
+                  {ready && (
+                    <Button variant="ghost" size="sm" onClick={() => handleRestoreBackup(b.id)} disabled={restoringId === b.id} className="h-7 px-2 text-amber-300 hover:text-amber-200" title="Restaurar (substitui os dados atuais)">
+                      {restoringId === b.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
                     </Button>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => handleDeleteBackup(b.id)} className="h-7 px-2 text-rose-400 hover:text-rose-300" title="Apagar">

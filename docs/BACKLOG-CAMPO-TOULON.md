@@ -259,7 +259,22 @@ independente)`
 - **Falta aba** "Pedido de compra" onde o dono grava lista via áudio no
   Zap ("compra 20 camisas polo brancas"), IA salva.
 
-**Status:** `[ ] preciso das respostas + escopo`
+**Decidido (ADR-099):**
+- **Aba "Ser fornecedor":** adicionar campos de contato (WhatsApp +
+  e-mail) + botão Salvar com feedback + texto de clareza (é o perfil da
+  rede; fornecedores de quem compro ficam em Contatos). O "novo registro"
+  era mismatch de modelo mental, não bug.
+- **Cotação automática:** já existe por WhatsApp; adicionar **e-mail**
+  como canal paralelo. **Compra coletiva + retroalimentação** aprovadas
+  como direção, mas em **bloco próprio depois** (feature de rede madura).
+- **Pedido por áudio:** gestor manda áudio no Zap → transcreve (Whisper
+  já existe) → IA extrai itens → cria **pedido manual** (draft) →
+  confirma. Destrava também o "criar pedido manual" (hoje só automático).
+
+Ver [`docs/adr/ADR-099-compras-fornecedores-contato-e-pedido-por-audio.md`](adr/ADR-099-compras-fornecedores-contato-e-pedido-por-audio.md).
+
+**Status:** `[x] decidido — bloco imediato (contato+e-mail+áudio) +
+bloco futuro (compra coletiva/retroalimentação)`
 
 ## 12. Vendas — API de gateway + relatórios com filtro
 

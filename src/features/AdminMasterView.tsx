@@ -319,7 +319,183 @@ export function AdminMasterView() {
         )}
       </div>
 
+      <UsersManagementPanel />
+
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+// Gerenciador de USUÁRIOS (ADR-090). Master Admin lista, busca, reseta senha e
+// remove usuários de qualquer org — sem precisar de SSH pra resolver conta
+// travada por email fictício sem recuperação de senha.
+function UsersManagementPanel() {
+  const [users, setUsers] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+
+  const load = async (search = q) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '50' });
+      if (search.trim()) params.set('q', search.trim());
+      const r = await fetch(`/api/admin/users?${params.toString()}`);
+      const d = await r.json();
+      setUsers(Array.isArray(d?.users) ? d.users : []);
+      setTotal(Number(d?.total || 0));
+    } catch { setUsers([]); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(''); }, []);
+
+  const handleReset = async (id: string) => {
+    if (newPassword.length < 8) {
+      toast.error('A senha precisa ter pelo menos 8 caracteres.');
+      return;
+    }
+    try {
+      const r = await fetch(`/api/admin/users/${id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        toast.error(d?.error === 'cannot_reset_master_admin_here'
+          ? 'Master admin não pode resetar a própria senha por aqui.'
+          : `Falha: ${d?.error || r.status}`);
+        return;
+      }
+      toast.success('Senha redefinida. Peça pro usuário logar com a nova.');
+      setResettingId(null);
+      setNewPassword('');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao redefinir senha');
+    }
+  };
+
+  const handleDelete = async (u: any) => {
+    if (!(await confirmDialog(
+      `Remover o usuário ${u.email}? Ele não conseguirá mais logar. (Soft delete — histórico preservado.)`,
+      { danger: true, confirmText: 'Remover' }
+    ))) return;
+    try {
+      const r = await fetch(`/api/admin/users/${u.id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        toast.error(d?.error === 'cannot_delete_master_admin'
+          ? 'Master admin não pode ser removido.'
+          : `Falha: ${d?.error || r.status}`);
+        return;
+      }
+      toast.success('Usuário removido.');
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao remover');
+    }
+  };
+
+  return (
+    <div className="mt-8 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+            <UsersIcon className="w-5 h-5 text-sky-400" />
+            Usuários
+          </h3>
+          <p className="text-sm text-zinc-400 mt-1">Busca, reset de senha e soft-delete de qualquer usuário. Usa quando cliente perdeu acesso.</p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+            placeholder="buscar por email, nome ou empresa..."
+            className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none min-w-[280px]"
+          />
+          <Button onClick={() => load()} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-100">Buscar</Button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-zinc-400 border-b border-zinc-800">
+              <th className="px-3 py-2 font-medium">Email</th>
+              <th className="px-3 py-2 font-medium">Nome</th>
+              <th className="px-3 py-2 font-medium">Empresa</th>
+              <th className="px-3 py-2 font-medium">Papel</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-zinc-500">Carregando…</td></tr>
+            ) : users.length === 0 ? (
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-zinc-500">
+                {q ? `Nenhum usuário para "${q}"` : 'Nenhum usuário cadastrado ainda.'}
+              </td></tr>
+            ) : users.map((u) => (
+              <React.Fragment key={u.id}>
+                <tr className="border-b border-zinc-800/70 hover:bg-zinc-800/30">
+                  <td className="px-3 py-2 text-zinc-100 font-mono text-xs">{u.email}</td>
+                  <td className="px-3 py-2 text-zinc-300">{u.name || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-300">{u.org_name || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-400">{u.role || '—'}</td>
+                  <td className="px-3 py-2">
+                    <span className={`px-2 py-0.5 rounded text-xs uppercase tracking-wider ${
+                      u.global_status === 'deleted' ? 'bg-red-500/10 text-red-400' :
+                      u.global_status === 'blocked' ? 'bg-amber-500/10 text-amber-400' :
+                      'bg-emerald-500/10 text-emerald-400'
+                    }`}>{u.global_status || 'active'}</span>
+                  </td>
+                  <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+                    <button
+                      onClick={() => { setResettingId(resettingId === u.id ? null : u.id); setNewPassword(''); }}
+                      className="text-xs px-2 py-1 rounded bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/40"
+                    >
+                      <Lock className="w-3 h-3 inline mr-1" /> Redefinir senha
+                    </button>
+                    {u.global_status !== 'deleted' && (
+                      <button
+                        onClick={() => handleDelete(u)}
+                        className="text-xs px-2 py-1 rounded bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20"
+                      >
+                        <Trash2 className="w-3 h-3 inline mr-1" /> Remover
+                      </button>
+                    )}
+                  </td>
+                </tr>
+                {resettingId === u.id && (
+                  <tr className="bg-zinc-950/60"><td colSpan={6} className="px-3 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-zinc-400">Nova senha p/ {u.email}:</span>
+                      <input
+                        type="text"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="mínimo 8 caracteres"
+                        className="flex-1 max-w-md bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100"
+                      />
+                      <Button onClick={() => handleReset(u.id)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs">Confirmar</Button>
+                      <Button onClick={() => { setResettingId(null); setNewPassword(''); }} variant="outline" className="text-xs border-zinc-700 bg-zinc-800 text-zinc-300">Cancelar</Button>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-1">A senha antiga é descartada. Peça pro usuário logar com a nova imediatamente e trocar em Perfil.</p>
+                  </td></tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {total > users.length && (
+        <p className="text-xs text-zinc-500 mt-2">Mostrando {users.length} de {total}. Use a busca pra afunilar.</p>
+      )}
     </div>
   );
 }

@@ -115,6 +115,7 @@ jobs:
           - { name: 'retail-receiving', script: 'test:retail-receiving' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
+          - { name: 'admin-users', script: 'test:admin-users' }
 
           # === Radar de Execução IA (Tier 2 do produto) ===
           - { name: 'radar-public', script: 'test:radar-public' }

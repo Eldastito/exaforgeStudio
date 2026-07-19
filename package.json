@@ -19,6 +19,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
+    "test:admin-users": "tsx scripts/test-admin-users.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",
     "test:prospect-isolation": "tsx scripts/test-prospect-isolation.ts",
     "test:prospect-execution": "tsx scripts/test-prospect-execution.ts",

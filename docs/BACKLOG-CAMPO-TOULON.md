@@ -284,12 +284,22 @@ bloco futuro (compra coletiva/retroalimentação)`
 **Parcial:** a parte de **relatório com filtros** foi consolidada no
 item #4 (ADR-094) — decidida e aguardando implementação.
 
-**Ainda aberto:** API de meios de pagamento do lojista (conectar
-Cielo/Stone/PagSeguro/etc. para a loja RECEBER dos clientes dela — não
-confundir com ASAAS, que é o ZappFlow cobrando o lojista). Precisa das
-respostas: quais adquirentes? é prioridade pro piloto TOULON ou pós-piloto?
+**Decidido (ADR-100) — parte de pagamento:**
+- Adquirente do piloto = **Stone (via Pagar.me)**. Já existe base plugável
+  (`PaymentService`: `pix_manual` + `mercadopago`); Stone entra como mais
+  um provider.
+- **Fase 1 (imediata):** cartão na loja virtual via **Link de Pagamento**
+  Pagar.me (cartão+PIX+boleto hospedado, webhook confirma, PCI mínimo) —
+  destrava venda com cartão.
+- **Fase 2 (opcional):** checkout transparente (cartão dentro da loja).
+- **Fase 3:** maquininha presencial via **Connect Pagar.me** — conciliação
+  primeiro (canal PDV nos relatórios), acionar a maquininha depois
+  (integração certificada + comercial Stone).
 
-**Status:** `[~] relatórios decididos (ADR-094); API de pagamento aberta`
+Ver [`docs/adr/ADR-100-pagamento-lojista-stone-pagarme.md`](adr/ADR-100-pagamento-lojista-stone-pagarme.md).
+
+**Status:** `[x] decidido — relatórios (ADR-094) + pagamento Stone/Pagar.me
+(ADR-100), aguardando implementação faseada`
 
 ## 13. Catálogo — provador com avatares custom
 

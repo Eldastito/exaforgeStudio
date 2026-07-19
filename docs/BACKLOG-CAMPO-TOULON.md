@@ -315,7 +315,19 @@ Ver [`docs/adr/ADR-100-pagamento-lojista-stone-pagarme.md`](adr/ADR-100-pagament
 - Identificar todas as telas com botão "Importar CSV".
 - Adicionar opção "Importar PDF" (IA extrai dados estruturados).
 
-**Status:** `[ ] mapear inventário de telas`
+**Decidido (ADR-101):**
+- Inventário: 3 telas importam CSV hoje — **Catálogo (produtos),
+  Prospecção (contas), Reservas (recursos)**. (Contatos/Vendas/Agenda só
+  exportam.)
+- Extração por IA **já existe** (`extractPdfText`, `analyzePdfForChat`,
+  GPT-4o multimodal) — falta só ligar num botão de import.
+- Adicionar "Importar PDF/imagem" nas **3 telas de uma vez**, mecanismo
+  reusável (`SmartImportService`), **preview obrigatório** (IA extrai →
+  revisa → salva, reusando o backend do CSV), aceitando **PDF + imagem**.
+
+Ver [`docs/adr/ADR-101-importar-pdf-imagem-por-ia.md`](adr/ADR-101-importar-pdf-imagem-por-ia.md).
+
+**Status:** `[x] decidido — aguardando implementação (item independente)`
 
 ## 15. Tarefas — registro por áudio pelo Zapp (gestor)
 

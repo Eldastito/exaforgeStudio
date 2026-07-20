@@ -204,6 +204,7 @@ jobs:
           - { name: 'rbac-granular', script: 'test:rbac-granular' }
           - { name: 'rbac-profiles-api', script: 'test:rbac-profiles-api' }
           - { name: 'rbac-enforcement', script: 'test:rbac-enforcement' }
+          - { name: 'task-audio-intent', script: 'test:task-audio-intent' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

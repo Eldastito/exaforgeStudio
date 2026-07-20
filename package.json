@@ -39,6 +39,7 @@
     "test:quickstart-onboarding": "tsx scripts/test-quickstart-onboarding.ts",
     "test:lgpd-vertical-consent": "tsx scripts/test-lgpd-vertical-consent.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
+    "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

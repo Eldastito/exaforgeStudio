@@ -236,7 +236,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_SUCCESS', { email });
 
     const token = jwt.sign(
-      { userId: user.id, organizationId: user.organization_id, role: user.role, email: user.email, name: user.name },
+      { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -333,7 +333,7 @@ router.get("/me", (req, res) => {
   const token = authHeader.split(" ")[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
-    const user = db.prepare('SELECT id, organization_id, name, email, role, global_status FROM users WHERE id = ?').get(decoded.userId) as any;
+    const user = db.prepare('SELECT id, organization_id, name, email, role, role_profile_id, global_status FROM users WHERE id = ?').get(decoded.userId) as any;
     
     if (!user) {
       return res.status(404).json({ error: "User not found" });

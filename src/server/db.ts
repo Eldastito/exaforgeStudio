@@ -1247,6 +1247,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN address_lng REAL`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_delivery_radius_km INTEGER DEFAULT 50`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_min_order_amount REAL DEFAULT 0`); } catch(e){}
+  // ADR-099: contato do perfil de rede (quem te acha na rede precisa te chamar).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_contact_whatsapp TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_contact_email TEXT`); } catch(e){}
   // Cotação pode ser endereçada a uma org da rede (em vez de um contato local).
   try { db.exec(`ALTER TABLE purchase_quotes ADD COLUMN network_org_id TEXT`); } catch(e){}
   // Cache de geocoding (cidade/estado → lat/lng) para não martelar Nominatim.

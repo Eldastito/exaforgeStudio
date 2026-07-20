@@ -59,7 +59,8 @@ export class SupplyNetworkService {
     const o = db.prepare(`
       SELECT business_name, is_network_supplier, network_categories,
              address_city, address_state, address_lat, address_lng,
-             network_delivery_radius_km, network_min_order_amount, phone
+             network_delivery_radius_km, network_min_order_amount, phone,
+             network_contact_whatsapp, network_contact_email
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any || {};
     return {
@@ -74,13 +75,33 @@ export class SupplyNetworkService {
       radiusKm: o.network_delivery_radius_km || 50,
       minOrderAmount: o.network_min_order_amount || 0,
       phone: o.phone || "",
+      contactWhatsapp: o.network_contact_whatsapp || "",
+      contactEmail: o.network_contact_email || "",
     };
+  }
+
+  /** Valida e normaliza e-mail (retorna '' se claramente inválido). */
+  private static normEmail(raw: string): string {
+    const e = String(raw || "").trim().toLowerCase();
+    if (!e) return "";
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : "";
+  }
+
+  /** Normaliza WhatsApp para dígitos (com DDI/DDD). '' se curto demais. */
+  private static normWhatsapp(raw: string): string {
+    const d = String(raw || "").replace(/\D/g, "");
+    // BR sem DDI: 10-11 dígitos (DDD + número) → prefixa 55.
+    if (d.length === 10 || d.length === 11) return "55" + d;
+    // Já com DDI: 12-13 dígitos.
+    if (d.length === 12 || d.length === 13) return d;
+    return "";
   }
 
   /** Salva o perfil de rede (geocoda em background se mudou a cidade). */
   static async saveProfile(orgId: string, patch: {
     enabled?: boolean; categories?: string; city?: string; state?: string;
     radiusKm?: number; minOrderAmount?: number;
+    contactWhatsapp?: string; contactEmail?: string;
   }): Promise<void> {
     const cur = this.profile(orgId);
     const enabled = patch.enabled != null ? patch.enabled : cur.enabled;
@@ -89,6 +110,9 @@ export class SupplyNetworkService {
     const state = patch.state != null ? String(patch.state || "").trim() : cur.state;
     const radiusKm = Math.min(2000, Math.max(1, parseInt(String(patch.radiusKm ?? cur.radiusKm), 10) || 50));
     const minOrderAmount = Math.max(0, Number(patch.minOrderAmount ?? cur.minOrderAmount) || 0);
+    // Contato do perfil de rede — validado/normalizado; vazio explícito limpa.
+    const contactWhatsapp = patch.contactWhatsapp != null ? this.normWhatsapp(patch.contactWhatsapp) : this.normWhatsapp(cur.contactWhatsapp);
+    const contactEmail = patch.contactEmail != null ? this.normEmail(patch.contactEmail) : this.normEmail(cur.contactEmail);
 
     // Geocoding quando a cidade muda (ou nunca foi geocodada).
     let lat = cur.lat, lng = cur.lng;
@@ -101,9 +125,10 @@ export class SupplyNetworkService {
       UPDATE organization_settings SET
         is_network_supplier = ?, network_categories = ?,
         address_city = ?, address_state = ?, address_lat = ?, address_lng = ?,
-        network_delivery_radius_km = ?, network_min_order_amount = ?
+        network_delivery_radius_km = ?, network_min_order_amount = ?,
+        network_contact_whatsapp = ?, network_contact_email = ?
       WHERE organization_id = ?
-    `).run(enabled ? 1 : 0, categories || null, city || null, state || null, lat, lng, radiusKm, minOrderAmount, orgId);
+    `).run(enabled ? 1 : 0, categories || null, city || null, state || null, lat, lng, radiusKm, minOrderAmount, contactWhatsapp || null, contactEmail || null, orgId);
   }
 
   /**

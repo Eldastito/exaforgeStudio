@@ -43,7 +43,7 @@ import { Bell, X, Menu } from 'lucide-react';
 import io from 'socket.io-client';
 
 export default function App() {
-  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, isModuleEnabled, setViewMode, enabledModules } = useStore();
+  const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, loadPermissions, isModuleEnabled, canAccessModule, setViewMode, enabledModules } = useStore();
   const { user, token, loading } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -87,7 +87,9 @@ export default function App() {
     hydrate();
     // Carrega a config da org (vertical + módulos habilitados) para o gating da UI.
     loadOrgConfig();
-  }, [token, hydrate, loadOrgConfig]);
+    // RBAC granular (ADR-095): carrega o nível de acesso do usuário por módulo.
+    loadPermissions();
+  }, [token, hydrate, loadOrgConfig, loadPermissions]);
 
   // Se a aba atual aponta para um módulo desligado, volta para o Atendimento.
   useEffect(() => {
@@ -101,8 +103,10 @@ export default function App() {
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
     // para não ricochetear para o Atendimento durante o carregamento inicial.
-    if (enabledModules !== null && mod && !isModuleEnabled(mod)) setViewMode('kanban');
-  }, [viewMode, isModuleEnabled, setViewMode, enabledModules]);
+    // Redireciona se o módulo está desligado na org OU se o perfil do usuário não
+    // tem acesso (RBAC granular, ADR-095) — cobre uma aba salva em módulo oculto.
+    if (enabledModules !== null && mod && (!isModuleEnabled(mod) || !canAccessModule(mod))) setViewMode('kanban');
+  }, [viewMode, isModuleEnabled, canAccessModule, setViewMode, enabledModules]);
 
   useEffect(() => {
     if (!token) return;

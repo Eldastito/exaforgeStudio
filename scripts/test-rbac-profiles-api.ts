@@ -77,6 +77,10 @@ async function main() {
   check("usuário com Caixa: sem acesso a compras", !PermissionService.can(orgId, userObj, "compras", "read"));
   const pm = PermissionService.permissionMap(orgId, userObj);
   check("permissionMap reflete o perfil", pm.vendas === "full" && pm.compras === "none");
+  // hasProfile (opt-in do gating de UI — ADR-095 Bloco 4)
+  check("hasProfile true p/ usuário com perfil", PermissionService.hasProfile(orgId, userObj) === true);
+  const legacyObj = { userId: "u_legacy_none", organizationId: orgId, role: "agent" };
+  check("hasProfile false p/ usuário sem perfil", PermissionService.hasProfile(orgId, legacyObj) === false);
 
   // ===== 6. deleteProfile — Dono e perfil-com-usuários bloqueados; custom livre =====
   const delOwner = PermissionService.deleteProfile(orgId, owner.id);

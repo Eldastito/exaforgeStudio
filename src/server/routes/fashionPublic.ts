@@ -6,6 +6,7 @@ import { FashionCustomerService } from "../FashionCustomerService.js";
 import { FashionAvatarService } from "../FashionAvatarService.js";
 import { FashionLookService } from "../FashionLookService.js";
 import { FashionTryOnService } from "../FashionTryOnService.js";
+import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 
 // ============================================================================
 // PROVADOR VIRTUAL — rotas públicas do cliente final (FAS-1, ADR-035).
@@ -283,9 +284,17 @@ router.get("/shared-looks/:token", (req, res): any => {
 
 // ---- try-on: "look em você" (FAS-3, ADR-037) ----
 
+// GET /api/public/fashion/preset-avatars — avatares da loja p/ o cliente escolher
+// em vez de subir a própria foto (ADR-103).
+router.get("/preset-avatars", requireCustomer, (req: FashionRequest, res): any => {
+  res.json({ avatars: FashionPresetAvatarService.publicList(req.fashionOrgId!) });
+});
+
 // POST /api/public/fashion/looks/:id/generate — cria o job (créditos: limite diário da loja)
+// Aceita presetAvatarId opcional: usa um avatar da loja em vez da foto do cliente.
 router.post("/looks/:id/generate", requireCustomer, (req: FashionRequest, res): any => {
-  const result = FashionTryOnService.requestGeneration(req.fashionOrgId!, req.fashionCustomerId!, req.params.id);
+  const presetAvatarId = req.body?.presetAvatarId ? String(req.body.presetAvatarId) : null;
+  const result = FashionTryOnService.requestGeneration(req.fashionOrgId!, req.fashionCustomerId!, req.params.id, presetAvatarId);
   if (!result.ok) return res.status(400).json({ error: (result as any).error });
   res.status(201).json({ ...result, credits: FashionTryOnService.creditsAvailable(req.fashionOrgId!, req.fashionCustomerId!) });
 });

@@ -206,6 +206,7 @@ jobs:
           - { name: 'rbac-enforcement', script: 'test:rbac-enforcement' }
           - { name: 'task-audio-intent', script: 'test:task-audio-intent' }
           - { name: 'admin-account-activation', script: 'test:admin-account-activation' }
+          - { name: 'fashion-preset-avatars', script: 'test:fashion-preset-avatars' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

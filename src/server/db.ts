@@ -3281,8 +3281,27 @@ const initDb = () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_fashion_events_org_type ON fashion_events(organization_id, event_type, created_at DESC);
+
+      -- Avatares PRESET da loja (ADR-103, item #13): modelos curados pelo
+      -- lojista (por tipo de corpo) que o cliente ESCOLHE em vez de subir a
+      -- própria foto. Por organização, sem customer_id/consentimento/quarentena
+      -- (não é dado pessoal do cliente); imagem pública em /media (curada).
+      CREATE TABLE IF NOT EXISTS fashion_preset_avatars (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        label TEXT,                           -- ex.: "Modelo atlético", "Corpo médio"
+        body_type TEXT,                       -- magro | atletico | medio | plus | outro
+        image_url TEXT NOT NULL,              -- /media/<uuid>.ext (público, curado pela loja)
+        active INTEGER DEFAULT 1,
+        position INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_fashion_preset_avatars_org ON fashion_preset_avatars(organization_id, active, position);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do Fashion AI Studio', e); }
+  // Origem da imagem-modelo do try-on: NULL = foto do cliente (fluxo original);
+  // preenchido = avatar preset da loja escolhido pelo cliente (ADR-103).
+  try { db.exec(`ALTER TABLE fashion_tryon_jobs ADD COLUMN preset_avatar_id TEXT`); } catch(e){}
 
   // ===== Fashion AI Studio — FAS-1: conta de cliente + avatar seguro (ADR-035) =====
   // Conta de cliente do provador — decisão explícita do usuário (ADR-034):

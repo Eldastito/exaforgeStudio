@@ -7,6 +7,7 @@ import { editImagesB64, editImagesGoogleB64, isAIConfigured } from "./llm.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { FashionStudioService } from "./FashionStudioService.js";
 import { FashionAvatarService } from "./FashionAvatarService.js";
+import { FashionPresetAvatarService } from "./FashionPresetAvatarService.js";
 
 /**
  * Orquestrador de try-on (Fashion AI Studio FAS-3, ADR-037) — a prévia
@@ -156,7 +157,7 @@ export class FashionTryOnService {
 
   // ---- criação do job ----
 
-  static requestGeneration(orgId: string, customerId: string, lookId: string):
+  static requestGeneration(orgId: string, customerId: string, lookId: string, presetAvatarId?: string | null):
     { ok: true; jobId: string; status: string; reused: boolean } | { ok: false; error: string } {
     // Look da própria cliente (via request) — ownership igual ao saveLook.
     const look = db.prepare(
@@ -165,10 +166,20 @@ export class FashionTryOnService {
     ).get(lookId, orgId, customerId) as any;
     if (!look) return { ok: false, error: "Look não encontrado." };
 
-    const avatar = db.prepare(
-      `SELECT id, storage_key FROM fashion_avatar_assets WHERE organization_id = ? AND customer_id = ? AND status = 'approved' ORDER BY created_at DESC LIMIT 1`
-    ).get(orgId, customerId) as any;
-    if (!avatar?.storage_key) return { ok: false, error: "Envie e valide sua foto antes de gerar a prévia." };
+    // Origem da imagem-modelo: avatar PRESET da loja (ADR-103) OU a foto do
+    // cliente. Com preset, pula a checagem de foto/consentimento do cliente.
+    let avatarKey: string; // identidade da imagem-modelo para o input_hash
+    if (presetAvatarId) {
+      const url = FashionPresetAvatarService.activeImageUrl(orgId, presetAvatarId);
+      if (!url) return { ok: false, error: "Avatar indisponível. Escolha outro." };
+      avatarKey = `preset:${presetAvatarId}`;
+    } else {
+      const avatar = db.prepare(
+        `SELECT id, storage_key FROM fashion_avatar_assets WHERE organization_id = ? AND customer_id = ? AND status = 'approved' ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId, customerId) as any;
+      if (!avatar?.storage_key) return { ok: false, error: "Envie e valide sua foto — ou escolha um avatar da loja — antes de gerar a prévia." };
+      avatarKey = avatar.id;
+    }
 
     const items = db.prepare(
       `SELECT product_service_id FROM fashion_look_items WHERE look_id = ? AND organization_id = ? ORDER BY product_service_id ASC`
@@ -181,7 +192,7 @@ export class FashionTryOnService {
     // Idempotência/economia: mesmo avatar + mesmas peças + mesmo provedor já
     // gerado com sucesso → devolve pronto, sem crédito nem IA.
     const inputHash = crypto.createHash("sha256")
-      .update(`${avatar.id}:${items.map((i) => i.product_service_id).join(",")}:${provider.key}`).digest("hex");
+      .update(`${avatarKey}:${items.map((i) => i.product_service_id).join(",")}:${provider.key}`).digest("hex");
     const existing = db.prepare(
       `SELECT id, status FROM fashion_tryon_jobs WHERE organization_id = ? AND customer_id = ? AND input_hash = ? AND status IN ('SUCCEEDED', 'QUEUED', 'PROCESSING') ORDER BY created_at DESC LIMIT 1`
     ).get(orgId, customerId, inputHash) as any;
@@ -194,9 +205,9 @@ export class FashionTryOnService {
 
     const jobId = uuidv4();
     db.prepare(
-      `INSERT INTO fashion_tryon_jobs (id, organization_id, customer_id, look_id, provider_key, status, input_hash)
-       VALUES (?, ?, ?, ?, ?, 'QUEUED', ?)`
-    ).run(jobId, orgId, customerId, lookId, provider.key, inputHash);
+      `INSERT INTO fashion_tryon_jobs (id, organization_id, customer_id, look_id, provider_key, status, input_hash, preset_avatar_id)
+       VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?)`
+    ).run(jobId, orgId, customerId, lookId, provider.key, inputHash, presetAvatarId || null);
     FashionStudioService.recordEvent(orgId, "FashionTryOnQueued", { providerKey: provider.key }, customerId, jobId);
 
     // maxAttempts=1: repetir uma geração cara é decisão da CLIENTE (botão),
@@ -219,11 +230,20 @@ export class FashionTryOnService {
     };
 
     try {
-      const avatar = db.prepare(
-        `SELECT storage_key FROM fashion_avatar_assets WHERE organization_id = ? AND customer_id = ? AND status = 'approved' ORDER BY created_at DESC LIMIT 1`
-      ).get(job.organization_id, job.customer_id) as any;
-      const avatarFile = avatar?.storage_key ? path.join(PRIVATE_MEDIA_DIR, path.basename(avatar.storage_key)) : null;
-      if (!avatarFile || !fs.existsSync(avatarFile)) return fail("avatar_missing", "Sua foto não está mais disponível. Envie uma nova.", true);
+      // Imagem-modelo: avatar preset da loja (público /media) ou a foto do
+      // cliente (privado). A origem foi fixada no request (preset_avatar_id).
+      let avatarFile: string | null;
+      if (job.preset_avatar_id) {
+        const url = FashionPresetAvatarService.activeImageUrl(job.organization_id, job.preset_avatar_id);
+        avatarFile = url && url.startsWith("/media/") ? path.join(MEDIA_DIR, path.basename(url)) : null;
+        if (!avatarFile || !fs.existsSync(avatarFile)) return fail("avatar_missing", "O avatar escolhido não está mais disponível. Escolha outro.", true);
+      } else {
+        const avatar = db.prepare(
+          `SELECT storage_key FROM fashion_avatar_assets WHERE organization_id = ? AND customer_id = ? AND status = 'approved' ORDER BY created_at DESC LIMIT 1`
+        ).get(job.organization_id, job.customer_id) as any;
+        avatarFile = avatar?.storage_key ? path.join(PRIVATE_MEDIA_DIR, path.basename(avatar.storage_key)) : null;
+        if (!avatarFile || !fs.existsSync(avatarFile)) return fail("avatar_missing", "Sua foto não está mais disponível. Envie uma nova.", true);
+      }
 
       // Fotos reais das peças (foto de estúdio da ADR-032 tem prioridade — é a
       // versão mais limpa para o provedor compor).

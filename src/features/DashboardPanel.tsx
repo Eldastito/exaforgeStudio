@@ -105,7 +105,7 @@ type Profit = {
   hasCostData: boolean; byProduct: { name: string; qty: number; revenue: number; cost: number; profit: number; margin: number }[];
 };
 
-type ChecklistItem = { key: string; label: string; done: boolean; view: string };
+type ChecklistItem = { key: string; label: string; done: boolean; view: string; tab?: string };
 type Checklist = { items: ChecklistItem[]; completed: number; total: number; pct: number };
 
 const COLLAPSED_KEY = 'zappflow_setup_collapsed';
@@ -171,6 +171,7 @@ function QuickStartCard() {
 
 function SetupChecklist() {
   const setViewMode = useStore(s => s.setViewMode);
+  const setSettingsTab = useStore(s => s.setSettingsTab);
   const [data, setData] = useState<Checklist | null>(null);
   // Recolhido: vira uma pílula discreta, mas continua reabrível.
   const [collapsed, setCollapsed] = useState(() => {
@@ -295,7 +296,7 @@ function SetupChecklist() {
         {data.items.map(it => (
           <button
             key={it.key}
-            onClick={() => !it.done && setViewMode(it.view as any)}
+            onClick={() => { if (it.done) return; if (it.tab) setSettingsTab(it.tab); setViewMode(it.view as any); }}
             className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
               it.done
                 ? 'border-emerald-500/20 bg-emerald-500/5 text-slate-400 cursor-default'

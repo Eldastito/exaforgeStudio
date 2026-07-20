@@ -10,6 +10,7 @@ import ticketsRoutes from "./src/server/routes/tickets.js";
 import productsRoutes from "./src/server/routes/products.js";
 import appointmentsRoutes from "./src/server/routes/appointments.js";
 import integrationsRoutes from "./src/server/routes/integrations.js";
+import importRoutes from "./src/server/routes/import.js";
 import metaDebugRoutes from "./src/server/routes/metaDebug.js";
 import manifestoRoutes from "./src/server/routes/manifesto.js";
 import opportunityRadarRoutes from "./src/server/routes/opportunityRadar.js";
@@ -422,6 +423,7 @@ async function startServer() {
   protectedApi.use("/payments", paymentsRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
+  protectedApi.use("/import", importRoutes);
   protectedApi.use("/meta-debug", metaDebugRoutes);
   protectedApi.use("/manifesto", manifestoRoutes);
   protectedApi.use("/opportunities", opportunityRadarRoutes);

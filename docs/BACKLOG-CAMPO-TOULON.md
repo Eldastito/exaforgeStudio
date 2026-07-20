@@ -70,9 +70,10 @@ vira `[~] em análise` quando começamos e `[x] fechado` quando resolvido.
 pré-requisito. Se não cobrar em produção, roda como "cortesia interna"
 até fechar TOULON piloto e ter os primeiros CAC/LTV medidos.
 
-**Status:** `[~] em implementação — Bloco A em andamento (grade nova de
-planos + limites + migração das orgs: PR A1 ✅). Blocos B (ASAAS)/C
-(performance fee)/D (consumo+add-ons) aguardando.`
+**Status:** `[~] em implementação — Bloco A COMPLETO (A1 grade+limites+
+migração ✅ · A2 vertical×plano+moda ✅ · A3 telas Módulos 3 seções +
+Plano/uso ✅). Blocos B (ASAAS)/C (performance fee)/D (consumo+add-ons)
+aguardando.`
 
 Ver [`docs/adr/ADR-091-nova-grade-de-planos.md`](adr/ADR-091-nova-grade-de-planos.md)
 para a decisão consolidada + roadmap de implementação.
@@ -95,7 +96,8 @@ para a decisão consolidada + roadmap de implementação.
 
 Ver [`docs/adr/ADR-092-distribuicao-por-vertical.md`](adr/ADR-092-distribuicao-por-vertical.md).
 
-**Status:** `[x] decidido — aguardando implementação junto do Bloco A`
+**Status:** `[x] IMPLEMENTADO no Bloco A — vertical moda + presets
+revisados + interseção preset ∩ plano em applyVertical (ADR-092).`
 
 ## 3. Informações a atualizar/remover
 
@@ -116,7 +118,8 @@ Ver [`docs/adr/ADR-092-distribuicao-por-vertical.md`](adr/ADR-092-distribuicao-p
 
 Ver [`docs/adr/ADR-093-reorganizacao-configuracoes.md`](adr/ADR-093-reorganizacao-configuracoes.md).
 
-**Status:** `[x] decidido — Planos no Bloco A; Quick-Start + LGPD em item
+**Status:** `[~] Planos reescritos + uso vs limite + tela de Módulos em
+3 seções IMPLEMENTADOS no Bloco A. Quick-Start→Dashboard + LGPD em item
 separado pós-Bloco A`
 
 ## 4. Relatórios de vendas — impressão + personalização por vertical

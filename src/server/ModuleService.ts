@@ -38,6 +38,56 @@ export class ModuleService {
     retailops: "retail",
   };
 
+  // Rótulos + descrição de cada módulo opcional (fonte única p/ a tela de Módulos).
+  static MODULE_META: Record<string, { label: string; desc: string }> = {
+    agenda: { label: "Agenda", desc: "Agendamentos e horários (Google Calendar)." },
+    catalogo: { label: "Catálogo", desc: "Produtos e serviços." },
+    vendas: { label: "Vendas", desc: "Pedidos e fechamento de vendas." },
+    loja: { label: "Loja Virtual", desc: "Vitrine online para o cliente comprar." },
+    pagamentos: { label: "Pagamentos", desc: "Recebimento por PIX / gateway (cartão, boleto)." },
+    campanhas: { label: "Campanhas", desc: "Disparos segmentados." },
+    cadencias: { label: "Cadências", desc: "Sequências de follow-up automático." },
+    areas: { label: "Áreas de Atendimento", desc: "Vários profissionais num número." },
+    integracoes: { label: "Integrações", desc: "Google Workspace e outras conexões." },
+    reservas: { label: "Reservas", desc: "Reservas por período com controle de disponibilidade (quartos, mesas, aluguéis)." },
+    assinaturas: { label: "Assinaturas", desc: "Cobrança recorrente (mensalidades, planos, clubes)." },
+    compras: { label: "Compras", desc: "Reposição inteligente: a IA detecta estoque crítico e gera lista de compra." },
+    orcamentos: { label: "Orçamentos", desc: "Orçamento como objeto rastreável: enviado/aceito/recusado + follow-up até a validade." },
+    eventos: { label: "Eventos & Grupos", desc: "Pipeline de consultas consultivas (casamento, convenção, corporativo)." },
+    diretor: { label: "Diretor Executivo IA", desc: "Conselheiro de gestão com dados reais + briefing diário." },
+    estudio: { label: "Estúdio de Criação", desc: "IA gera imagens e vídeos de campanha com a identidade da marca." },
+    rie: { label: "Revenue Intelligence", desc: "Onde você perde e recupera receita: índice, drivers e plano de ação." },
+    execucao: { label: "Execução / Tarefas", desc: "Delegação de tarefas com o Coordenador IA e alocação de recursos." },
+    prospect: { label: "Prospect AI", desc: "Prospecção B2B ativa: ICP, evidências, hipóteses de dor, abordagem com IA." },
+    vms: { label: "Vision VMS", desc: "Monitoramento de câmeras (add-on que depende de hardware no site)." },
+    radar: { label: "Radar de Execução IA", desc: "Diagnóstico de maturidade em IA (7 pilares) + Índice de Velocidade de Conversão." },
+    clinica: { label: "Clínica", desc: "Fluxo de saúde: prontuário, agenda clínica, portal do paciente." },
+    retail: { label: "Retail Ops", desc: "Operação de rede de lojas: fechamento, cotas, malote, premiação." },
+  };
+
+  /**
+   * Visão da tela de Módulos (ADR-092/093): agrupa os módulos opcionais em
+   *  - recommended: no preset da vertical E dentro do teto do plano (ligados por padrão)
+   *  - available:   dentro do teto do plano, mas fora do preset (dono liga se quiser)
+   *  - upgrade:     acima do teto do plano (requer plano superior; CTA de upgrade)
+   * `recommended` (flag) marca os que a vertical pressupõe, mesmo na seção upgrade.
+   */
+  static overview(orgId: string) {
+    const o = db.prepare("SELECT vertical, plan_id FROM organization_settings WHERE organization_id = ?").get(orgId) as any || {};
+    const preset = new Set(getVertical(o.vertical)?.modules || []);
+    const planMods = PlanService.modulesForPlan(orgId); // null = sem teto
+    const enabled = this.enabledModules(orgId);         // null = tudo ligado (legado)
+    const items = (OPTIONAL_MODULES as readonly string[]).map((key) => {
+      const meta = this.MODULE_META[key] || { label: key, desc: "" };
+      const inPlan = planMods == null || planMods.includes(key);
+      const inPreset = preset.has(key);
+      const isEnabled = enabled == null ? true : enabled.includes(key);
+      const section = !inPlan ? "upgrade" : (inPreset ? "recommended" : "available");
+      return { key, label: meta.label, desc: meta.desc, section, enabled: isEnabled, recommended: inPreset };
+    });
+    return { vertical: o.vertical || null, planId: o.plan_id || null, items };
+  }
+
   /** Lista de módulos opcionais habilitados; null = todos (legado/sem vertical). */
   static enabledModules(orgId: string): string[] | null {
     try {

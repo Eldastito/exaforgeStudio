@@ -1,6 +1,6 @@
 # ADR-093 — Reorganização de Configurações (Quick-Start, Planos, LGPD)
 
-**Status:** Aprovado (aguardando implementação; parte junto do Bloco A do ADR-091).
+**Status:** §2 (Planos reescritos + uso vs limite) e a tela de Módulos em 3 seções implementados no Bloco A (jul/26). §1 (Quick-Start→Dashboard) e §3 (LGPD simples/avançado + pré-população por vertical) seguem como item separado pós-Bloco A.
 
 **Origem:** Item #3 do `docs/BACKLOG-CAMPO-TOULON.md`. A tela de Configurações acumulou 10 abas; três precisam de revisão de posicionamento e de UX: Quick-Start (poluindo como aba fixa), Planos disponíveis (será reescrito com a grade nova), e LGPD (obrigatória mas com linguagem técnica demais).
 

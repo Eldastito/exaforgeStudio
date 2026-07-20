@@ -1,6 +1,6 @@
 # ADR-092 — Distribuição de módulos por vertical (vertical = wishlist, plano = teto)
 
-**Status:** Aprovado (aguardando implementação junto do Bloco A do ADR-091).
+**Status:** Implementado (jul/26) junto do Bloco A do ADR-091 — vertical moda, presets revisados, interseção preset ∩ plano em `applyVertical`, tela de Módulos em 3 seções.
 
 **Origem:** Item #2 do `docs/BACKLOG-CAMPO-TOULON.md`. As verticais foram desenhadas antes da grade nova de planos (ADR-091). Com a grade nova, um preset de vertical pode "prometer" módulos que o plano do cliente não entrega (ex.: TOULON no Autônomo escolhe varejo e o preset sugere `campanhas`/`diretor`, que só existem no Start/Growth). Precisamos reconciliar vertical × plano de forma transparente.
 

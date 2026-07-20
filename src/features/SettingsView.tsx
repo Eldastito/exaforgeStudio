@@ -208,7 +208,7 @@ export function SettingsView() {
           {activeTab === 'atendimento' && <AiAttendancePanel />}
           {activeTab === 'cobranca' && <BillingPanel />}
 
-          {activeTab === 'modulos' && <ModulesPanel />}
+          {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('cobranca')} />}
           {activeTab === 'quickstart' && <QuickStartPanel />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
@@ -348,6 +348,9 @@ function BillingPanel() {
                   {isCurrent && <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">Atual</span>}
                 </div>
                 <p className="text-2xl font-bold text-white mt-2">R$ {p.price.toFixed(0)}<span className="text-sm font-normal text-zinc-500">/mês</span></p>
+                {p.features?.price_annual_month ? (
+                  <p className="text-[11px] text-emerald-300/80 mt-0.5">ou R$ {Number(p.features.price_annual_month).toFixed(0)}/mês no plano anual</p>
+                ) : null}
                 <ul className="mt-4 space-y-1.5 text-sm text-zinc-400">
                   <li>• <strong className="text-zinc-200">{(p.features?.ai_monthly_limit || 0).toLocaleString('pt-BR')}</strong> respostas de IA / mês</li>
                   <li>• Até <strong className="text-zinc-200">{(p.features?.contacts_limit || 0).toLocaleString('pt-BR')}</strong> contatos</li>
@@ -402,71 +405,67 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
-// Lista de módulos OPCIONAIS (espelha OPTIONAL_MODULES do backend) + rótulos.
-const OPTIONAL_MODULES: { key: string; label: string; desc: string }[] = [
-  { key: 'agenda', label: 'Agenda', desc: 'Agendamentos e horários (Google Calendar).' },
-  { key: 'reservas', label: 'Reservas', desc: 'Reservas por período com controle de disponibilidade (quartos, mesas, aluguéis).' },
-  { key: 'assinaturas', label: 'Assinaturas', desc: 'Cobrança recorrente (mensalidades, planos, clubes).' },
-  { key: 'compras', label: 'Compras', desc: 'Reposição inteligente: a IA detecta estoque crítico e gera lista de compra para aprovação.' },
-  { key: 'orcamentos', label: 'Orçamentos', desc: 'Orçamentos como objeto rastreável: enviado/aceito/recusado + follow-up automático até a validade.' },
-  { key: 'eventos', label: 'Eventos & Grupos', desc: 'Pipeline de consultas consultivas (casamento, convenção, day use, corporativo). A IA detecta na conversa e cria a consulta.' },
-  { key: 'diretor', label: 'Diretor Executivo IA', desc: 'Conselheiro de gestão: pergunte em linguagem natural ("onde estou perdendo dinheiro?") e receba resposta com dados reais + briefing diário.' },
-  { key: 'catalogo', label: 'Catálogo', desc: 'Produtos e serviços.' },
-  { key: 'estudio', label: 'Estúdio de Criação', desc: 'IA gera imagens e vídeos de campanha com a identidade da marca.' },
-  { key: 'rie', label: 'Revenue Intelligence', desc: 'Onde você perde e recupera receita: índice, drivers, plano de ação e auditoria executiva.' },
-  { key: 'prospect', label: 'Prospect AI', desc: 'Prospecção B2B ativa: ICP, importação de contas, evidências, hipóteses de dor, abordagem com IA (com aprovação) e receita originada.' },
-  { key: 'execucao', label: 'Execução / Tarefas', desc: 'Delegação de tarefas com o Coordenador IA e alocação de recursos (pessoas, materiais, financeiro).' },
-  { key: 'vendas', label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
-  { key: 'loja', label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },
-  { key: 'pagamentos', label: 'Pagamentos', desc: 'Recebimento por PIX / gateway.' },
-  { key: 'campanhas', label: 'Campanhas', desc: 'Disparos segmentados.' },
-  { key: 'cadencias', label: 'Cadências', desc: 'Sequências de follow-up automático.' },
-  { key: 'areas', label: 'Áreas de Atendimento', desc: 'Vários profissionais num número.' },
-  { key: 'integracoes', label: 'Integrações', desc: 'Google Workspace e outras conexões.' },
-  { key: 'vms', label: 'Vision VMS', desc: 'Monitoramento de câmeras: sites, gateways, dispositivos, câmeras, eventos e ocorrências. Add-on que depende de hardware no site do cliente — ative só após diagnóstico/piloto.' },
-  { key: 'radar', label: 'Radar de Execução IA', desc: 'Diagnóstico de maturidade em IA (7 pilares, recomendações priorizadas) e Índice de Velocidade de Conversão medido a partir dos próprios atendimentos.' },
-];
+type ModuleOverviewItem = { key: string; label: string; desc: string; section: 'recommended' | 'available' | 'upgrade'; enabled: boolean; recommended: boolean };
 
-function ModulesPanel() {
+function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
   const loadOrgConfig = useStore(s => s.loadOrgConfig);
-  const [enabled, setEnabled] = useState<string[] | null>(null);
+  const [items, setItems] = useState<ModuleOverviewItem[] | null>(null);
+  const [enabled, setEnabled] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/analytics/settings')
+    apiFetch('/api/analytics/modules-overview')
       .then(r => r.json())
-      .then(s => {
-        let mods: string[] | null = null;
-        if (typeof s?.enabled_modules === 'string' && s.enabled_modules) {
-          try { const a = JSON.parse(s.enabled_modules); if (Array.isArray(a)) mods = a; } catch {}
-        } else if (Array.isArray(s?.enabled_modules)) mods = s.enabled_modules;
-        // null (legado) = todos ligados: refletimos isso marcando tudo.
-        setEnabled(mods ?? OPTIONAL_MODULES.map(m => m.key));
+      .then((d: { items?: ModuleOverviewItem[] }) => {
+        const list = Array.isArray(d?.items) ? d.items : [];
+        setItems(list);
+        // Só os módulos DENTRO do teto do plano (recomendados/disponíveis) podem
+        // estar ligados; os de upgrade nunca entram no override.
+        setEnabled(new Set(list.filter(m => m.section !== 'upgrade' && m.enabled).map(m => m.key)));
       })
-      .catch(() => setEnabled(OPTIONAL_MODULES.map(m => m.key)))
+      .catch(() => setItems([]))
       .finally(() => setLoading(false));
   }, []);
 
   const toggle = (key: string) => {
-    setEnabled(prev => {
-      const cur = prev ?? [];
-      return cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
-    });
+    setEnabled(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
   };
 
   const save = async () => {
-    if (!enabled) return;
+    if (!items) return;
     setSaving(true);
     try {
+      // Envia apenas o que está dentro do teto do plano e ligado.
+      const payload = items.filter(m => m.section !== 'upgrade' && enabled.has(m.key)).map(m => m.key);
       await apiFetch('/api/analytics/settings/modules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled_modules: enabled }),
+        body: JSON.stringify({ enabled_modules: payload }),
       });
       await loadOrgConfig(); // atualiza o menu lateral na hora
       toast.success('Módulos atualizados!');
     } catch (e) { toast.error('Falha ao salvar os módulos.'); }
     finally { setSaving(false); }
+  };
+
+  const recommended = (items || []).filter(m => m.section === 'recommended');
+  const available = (items || []).filter(m => m.section === 'available');
+  const upgrade = (items || []).filter(m => m.section === 'upgrade');
+
+  const Row = ({ m }: { m: ModuleOverviewItem }) => {
+    const on = enabled.has(m.key);
+    return (
+      <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div>
+          <p className="text-sm font-medium text-zinc-100">{m.label}</p>
+          <p className="text-xs text-zinc-500">{m.desc}</p>
+        </div>
+        <button onClick={() => toggle(m.key)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -483,25 +482,53 @@ function ModulesPanel() {
         </Button>
       </div>
 
-      {loading || !enabled ? (
+      {loading || !items ? (
         <p className="text-zinc-500 text-sm">Carregando…</p>
       ) : (
-        <div className="space-y-2">
-          {OPTIONAL_MODULES.map(m => {
-            const on = enabled.includes(m.key);
-            return (
-              <div key={m.key} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-                <div>
-                  <p className="text-sm font-medium text-zinc-100">{m.label}</p>
-                  <p className="text-xs text-zinc-500">{m.desc}</p>
-                </div>
-                <button onClick={() => toggle(m.key)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
+        <div className="space-y-6">
+          {/* Recomendados para o seu negócio */}
+          {recommended.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-emerald-300 mb-2">✅ Recomendados para o seu negócio</p>
+              <p className="text-xs text-zinc-500 mb-3">Ligados por padrão conforme a sua categoria. Desligue o que não usar.</p>
+              <div className="space-y-2">{recommended.map(m => <Row key={m.key} m={m} />)}</div>
+            </div>
+          )}
+
+          {/* Disponível no seu plano */}
+          {available.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-zinc-200 mb-2">➕ Disponível no seu plano</p>
+              <p className="text-xs text-zinc-500 mb-3">Não vêm ligados por padrão, mas o seu plano permite. Ligue se quiser.</p>
+              <div className="space-y-2">{available.map(m => <Row key={m.key} m={m} />)}</div>
+            </div>
+          )}
+
+          {/* Requer upgrade (colapsado) */}
+          {upgrade.length > 0 && (
+            <details className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-indigo-300 flex items-center gap-2">
+                <Lock className="w-4 h-4" /> Requer upgrade de plano ({upgrade.length})
+              </summary>
+              <p className="text-xs text-zinc-500 mt-2 mb-3">Disponíveis em planos superiores. {onUpgrade && 'Veja em Cobrança e Plano.'}</p>
+              <div className="space-y-2">
+                {upgrade.map(m => (
+                  <div key={m.key} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 opacity-80">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-300 flex items-center gap-2">{m.label}{m.recommended && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">sugerido p/ você</span>}</p>
+                      <p className="text-xs text-zinc-500">{m.desc}</p>
+                    </div>
+                    <Lock className="w-4 h-4 text-zinc-600 flex-shrink-0" />
+                  </div>
+                ))}
               </div>
-            );
-          })}
+              {onUpgrade && (
+                <button onClick={onUpgrade} className="mt-3 text-xs text-indigo-300 hover:text-indigo-200 font-medium">
+                  Ver planos e fazer upgrade →
+                </button>
+              )}
+            </details>
+          )}
         </div>
       )}
     </>

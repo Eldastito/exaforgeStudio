@@ -85,6 +85,15 @@ async function main() {
   ModuleService.applyVertical(orgGf, "moda"); // re-aplica
   check("add-on 'radar' preservado ao re-aplicar a vertical", enabledOf(orgGf)!.includes("radar"));
 
+  // ===== 8. overview() agrupa em 3 seções (ADR-093) =====
+  const ovAuto = ModuleService.overview(orgModaAuto);
+  const sect = (o: any, key: string) => o.items.find((i: any) => i.key === key);
+  check("overview: catalogo é 'recommended' (moda+autonomo)", sect(ovAuto, "catalogo")?.section === "recommended");
+  check("overview: agenda é 'available' (no plano, fora do preset)", sect(ovAuto, "agenda")?.section === "available");
+  check("overview: estudio é 'upgrade' e marcado sugerido p/ a vertical", sect(ovAuto, "estudio")?.section === "upgrade" && sect(ovAuto, "estudio")?.recommended === true);
+  const ovGrowth = ModuleService.overview(orgModaGrowth);
+  check("overview: estudio vira 'recommended' no growth", sect(ovGrowth, "estudio")?.section === "recommended");
+
   // --- Relatório ---
   console.log("\n=== TEST: Vertical × plano (ADR-092) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}`);

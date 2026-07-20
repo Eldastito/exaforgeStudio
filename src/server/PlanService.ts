@@ -52,7 +52,8 @@ export class PlanService {
   /** Snapshot completo do billing da org: plano + status + uso vs limites. */
   static getBillingSnapshot(orgId: string) {
     const org = db.prepare(`
-      SELECT plan_id, billing_status, status, trial_ends_at, current_period_start, current_period_end
+      SELECT plan_id, billing_status, status, trial_ends_at, current_period_start, current_period_end,
+             payment_provider, external_subscription_id
       FROM organization_settings WHERE organization_id = ?
     `).get(orgId) as any;
 
@@ -73,6 +74,8 @@ export class PlanService {
       trialDaysLeft,
       currentPeriodStart: org?.current_period_start || null,
       currentPeriodEnd: org?.current_period_end || null,
+      paymentProvider: org?.payment_provider || null,
+      hasSubscription: !!org?.external_subscription_id,
       usage,
       limits: plan?.features || {},
     };

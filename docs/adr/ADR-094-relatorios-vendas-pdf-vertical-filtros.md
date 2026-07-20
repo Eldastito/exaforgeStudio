@@ -83,6 +83,12 @@ Item independente (não bloqueia o Bloco A). Sugestão de escopo:
 
 - **API de meios de pagamento do lojista** (conectar Cielo/Stone/PagSeguro pra receber dos clientes da loja) — assunto separado, não é relatório. Continua aberto no item #12.
 
+## Notas de implementação (jul/26)
+
+Entregue (núcleo, foco no piloto): `ReportsService.salesReport(orgId, filtros)` — cards **core** (faturamento/pedidos/ticket/pagos) + cards **por vertical** (varejo/moda: peça mais/menos vendida + categoria que mais vende; serviços: serviço mais pedido + ticket; saúde: consultas + no-show; hospitalidade: ocupação/RevPAR como "—" até haver dado). **Filtros:** período (7/30/90/mês/mês anterior), categoria, canal (derivado de `orders.created_by`: loja/whatsapp/pdv) e vendedor (`created_by`=userId). Rotas `GET /api/analytics/sales-report` e `/sales-report/pdf`. **PDF com marca** via `ReportPdfService.generateSalesReport` (nome do negócio + período + cards + tabela de itens, espelho S3). `ReportsPanel` reescrito com filtros + cards condicionais + "Exportar PDF". Teste `test:sales-report-vertical` (15 checks).
+
+Follow-up: giro de estoque/RevPAR/receita por profissional dependem de dados que nem toda loja preenche (custo, capacidade) — entram quando a vertical correspondente for ativada, mostrando "—" com tooltip até lá.
+
 ## Aprovação
 
 Aprovado por Emerson (jul/26): PDF com marca, cards por vertical, filtros. Itens #4 e #12 (parte relatórios) marcados `[x] decidido`; #12 mantém aberta só a parte de API de pagamento.

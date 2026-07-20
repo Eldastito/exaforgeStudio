@@ -133,7 +133,9 @@ produto/canal). Consolidado com a parte de relatórios do item #12.
 
 Ver [`docs/adr/ADR-094-relatorios-vendas-pdf-vertical-filtros.md`](adr/ADR-094-relatorios-vendas-pdf-vertical-filtros.md).
 
-**Status:** `[x] decidido — aguardando implementação (item independente)`
+**Status:** `[x] IMPLEMENTADO — salesReport (core + cards por vertical) +
+filtros (período/categoria/canal/vendedor) + PDF com marca;
+test:sales-report-vertical`
 
 ## 5. Hierarquia dentro da conta (RBAC granular)
 

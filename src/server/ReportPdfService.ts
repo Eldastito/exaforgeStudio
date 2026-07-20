@@ -22,6 +22,90 @@ export class ReportPdfService {
    * Cria um PDF com o RESUMO (análise da IA) + o PANORAMA do negócio (texto
    * cru do raio-x). Retorna a URL pública para download.
    */
+  /**
+   * PDF do relatório de vendas com a marca da loja (ADR-094). Cabeçalho com o
+   * nome do negócio + período; cards core + cards da vertical; tabela de itens
+   * mais vendidos. Reusa a mesma infra de storage (disco + espelho S3).
+   */
+  static async generateSalesReport(orgId: string, report: any, periodLabel: string): Promise<{ url: string } | null> {
+    try {
+      fs.mkdirSync(REPORTS_DIR, { recursive: true });
+      const id = uuidv4();
+      const filePath = path.join(REPORTS_DIR, `${id}.pdf`);
+      const biz = this.businessName(orgId);
+      const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+      const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
+      const fmt = (c: any) => c.format === "brl" ? brl(c.value) : c.format === "int" ? String(Math.round(Number(c.value) || 0)) : String(c.value);
+
+      await new Promise<void>((resolve, reject) => {
+        const doc = new PDFDocument({ size: "A4", margin: 48 });
+        const stream = fs.createWriteStream(filePath);
+        doc.pipe(stream);
+
+        doc.fillColor("#4f46e5").font("Helvetica-Bold").fontSize(20).text(biz);
+        doc.moveDown(0.2);
+        doc.fillColor("#111827").font("Helvetica-Bold").fontSize(15).text("Relatório de Vendas");
+        doc.fillColor("#6b7280").font("Helvetica").fontSize(9).text(`Período: ${periodLabel} · Gerado em ${now}`);
+        doc.moveTo(48, doc.y + 6).lineTo(547, doc.y + 6).strokeColor("#e5e7eb").stroke();
+        doc.moveDown(1);
+
+        // Cards (core + vertical) em duas colunas.
+        const cards = [...(report.coreCards || []), ...(report.verticalCards || [])];
+        doc.fillColor("#4f46e5").font("Helvetica-Bold").fontSize(12).text("Indicadores");
+        doc.moveDown(0.4);
+        const colW = 250; let col = 0; let rowY = doc.y;
+        for (const c of cards) {
+          const x = 48 + col * colW;
+          doc.fillColor("#6b7280").font("Helvetica").fontSize(9).text(c.label, x, rowY, { width: colW - 10 });
+          doc.fillColor("#111827").font("Helvetica-Bold").fontSize(13).text(fmt(c), x, doc.y, { width: colW - 10 });
+          col++;
+          if (col === 2) { col = 0; rowY = doc.y + 8; doc.y = rowY; } else { doc.y = rowY; }
+        }
+        if (col === 1) doc.moveDown(1.2);
+        doc.moveDown(1);
+
+        // Tabela: itens mais vendidos.
+        const tp = report.topProducts || [];
+        if (tp.length) {
+          doc.fillColor("#4f46e5").font("Helvetica-Bold").fontSize(12).text("Itens mais vendidos");
+          doc.moveDown(0.4);
+          const y0 = doc.y;
+          doc.fillColor("#6b7280").font("Helvetica-Bold").fontSize(9);
+          doc.text("Item", 48, y0, { width: 320 });
+          doc.text("Qtd", 372, y0, { width: 60, align: "right" });
+          doc.text("Total", 440, y0, { width: 107, align: "right" });
+          doc.moveTo(48, doc.y + 3).lineTo(547, doc.y + 3).strokeColor("#e5e7eb").stroke();
+          doc.moveDown(0.5);
+          for (const p of tp) {
+            const y = doc.y;
+            doc.fillColor("#111827").font("Helvetica").fontSize(10);
+            doc.text(String(p.name || "").slice(0, 60), 48, y, { width: 320 });
+            doc.text(String(Math.round(p.qty)), 372, y, { width: 60, align: "right" });
+            doc.text(brl(p.total), 440, y, { width: 107, align: "right" });
+            doc.moveDown(0.3);
+          }
+        }
+
+        doc.moveDown(1);
+        doc.fillColor("#9ca3af").font("Helvetica").fontSize(8).text("Gerado por ZappFlow", { align: "center" });
+        doc.end();
+        stream.on("finish", () => resolve());
+        stream.on("error", reject);
+      });
+
+      const base = (process.env.APP_URL || "").replace(/\/$/, "");
+      const localUrl = `${base}/media/reports/${id}.pdf`;
+      if (StorageService.isS3Enabled()) {
+        const mirror = await StorageService.mirrorToS3(filePath, `reports/${id}.pdf`);
+        if (mirror.stored && mirror.url) return { url: mirror.url };
+      }
+      return { url: localUrl };
+    } catch (e) {
+      console.error("[ReportPdf] Falha ao gerar PDF de vendas:", e);
+      return null;
+    }
+  }
+
   static async generateManagerReport(orgId: string, opts: { title?: string; summary?: string; panorama?: string }): Promise<{ url: string } | null> {
     try {
       fs.mkdirSync(REPORTS_DIR, { recursive: true });

@@ -42,6 +42,7 @@ export function Sidebar() {
              {mod('estudio') && <NavItem icon={<Wand2 />} label="Estúdio de Criação" active={viewMode === 'studio'} onClick={() => setViewMode('studio')} />}
              {mod('execucao') && <NavItem icon={<ListChecks />} label="Tarefas" active={viewMode === 'tarefas'} onClick={() => setViewMode('tarefas')} />}
              {mod('prospect') && <NavItem icon={<Target />} label="Prospect AI" active={viewMode === 'prospect'} onClick={() => setViewMode('prospect')} />}
+             {mod('prospect') && <NavItem icon={<Radar />} label="Radar B2B" active={viewMode === 'radar_b2b'} onClick={() => setViewMode('radar_b2b')} />}
              {mod('diretor') && <NavItem icon={<BrainCircuit />} label="Diretor IA" active={viewMode === 'diretor'} onClick={() => setViewMode('diretor')} />}
              {mod('agenda') && <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />}
              {mod('clinica') && <NavItem icon={<Stethoscope />} label="Agenda Clínica" active={viewMode === 'clinica'} onClick={() => setViewMode('clinica')} />}

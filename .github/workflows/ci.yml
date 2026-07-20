@@ -187,6 +187,7 @@ jobs:
           - { name: 'backup-scheduler', script: 'test:backup-scheduler' }
           - { name: 'backup-restore', script: 'test:backup-restore' }
           - { name: 'smart-import', script: 'test:smart-import' }
+          - { name: 'radar-b2b', script: 'test:radar-b2b' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }
 
           # === Fase 4 Wave C + D (P1 commerce) ===

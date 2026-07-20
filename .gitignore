@@ -27,3 +27,7 @@ scratchpad/
 
 # Segredo de JWT gerado em runtime quando JWT_SECRET não está na env (nunca versionar)
 .jwt_secret
+
+# Radar B2B — base gerada pelo ETL (não versionar)
+data/radar_rio.db
+tools/radar_etl/downloads/

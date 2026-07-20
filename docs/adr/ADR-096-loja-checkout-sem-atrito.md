@@ -59,6 +59,12 @@ Cliente anônimo (sem token) continua preenchendo nome + telefone (mínimo pra c
 5. Fashion Studio: pré-preencher nome/telefone quando houver contactId
 6. Teste: `test:store-checkout-frictionless` — com token pula formulário; anônimo pede mínimo; e-mail nunca obrigatório
 
+## Notas de implementação (jul/26)
+
+Entregue: no fluxo com token (`?c=`) o checkout não pede nome/telefone (já era) **e agora também não pede e-mail** — quem vem do WhatsApp confirma em 1 clique ("Confirmar pedido"). O e-mail só aparece para o cliente **anônimo** (opcional). Campo **"CPF na nota" opcional** (não bloqueante) em ambos os fluxos, gravado nas notas do pedido só com dígitos; sem CPF/CNPJ/endereço fiscal. Teste `test:store-checkout-frictionless` (9 checks).
+
+Follow-up menor: pré-preencher nome/telefone no Fashion Studio a partir do contato quando houver `?c=` (o cadastro do provador continua exigido por LGPD — só reduz digitação). Não bloqueia o piloto.
+
 ## Aprovação
 
 Aprovado por Emerson (jul/26): checkout invisível pra quem vem do WhatsApp; e-mail pela conversa (sem custo); sem NF-e eletrônica no piloto (cupom fiscal da impressora do lojista). Item #6 do backlog marcado `[x] decidido`.

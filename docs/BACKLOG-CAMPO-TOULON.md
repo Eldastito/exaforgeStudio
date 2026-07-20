@@ -133,7 +133,9 @@ produto/canal). Consolidado com a parte de relatórios do item #12.
 
 Ver [`docs/adr/ADR-094-relatorios-vendas-pdf-vertical-filtros.md`](adr/ADR-094-relatorios-vendas-pdf-vertical-filtros.md).
 
-**Status:** `[x] decidido — aguardando implementação (item independente)`
+**Status:** `[x] IMPLEMENTADO — salesReport (core + cards por vertical) +
+filtros (período/categoria/canal/vendedor) + PDF com marca;
+test:sales-report-vertical`
 
 ## 5. Hierarquia dentro da conta (RBAC granular)
 
@@ -182,7 +184,8 @@ Ver [`docs/adr/ADR-095-rbac-granular-perfis-customizaveis.md`](adr/ADR-095-rbac-
 
 Ver [`docs/adr/ADR-096-loja-checkout-sem-atrito.md`](adr/ADR-096-loja-checkout-sem-atrito.md).
 
-**Status:** `[x] decidido — aguardando implementação (item independente)`
+**Status:** `[x] IMPLEMENTADO — checkout com token em 1 clique (sem e-mail no
+fluxo com token), CPF na nota opcional; test:store-checkout-frictionless`
 
 ## 7. Integração Alterdata (Toulon)
 

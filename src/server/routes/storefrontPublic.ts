@@ -376,11 +376,21 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     // no body nunca vira atribuição.
     const fashionLookId = FashionLookService.lookIdForOrder(orgId, body.fashionLookId);
 
+    // Notas do pedido: nome/telefone (se anônimo informou) + "CPF na nota"
+    // (opcional, ADR-096 — nunca bloqueante; a parte fiscal é do cupom da
+    // impressora do lojista, a loja não emite NF-e no piloto).
+    const cpfNota = String(body.customer?.cpf || "").replace(/[^\d]/g, "").slice(0, 14);
+    const noteParts = [
+      body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null,
+      cpfNota ? `CPF na nota: ${cpfNota}` : null,
+    ].filter(Boolean);
+    const orderNotes = noteParts.length ? noteParts.join(" · ") : null;
+
     const tx = db.transaction(() => {
       db.prepare(
         `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id)
          VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?)`
-      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null, fashionLookId);
+      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId);
       if (fashionLookId) {
         FashionStudioService.recordEvent(orgId, "FashionOrderPlaced", { orderId, total }, null, fashionLookId);
       }

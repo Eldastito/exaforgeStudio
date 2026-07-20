@@ -35,6 +35,32 @@ export const RBAC_MODULES = [
 ] as const;
 export type RbacModule = (typeof RBAC_MODULES)[number];
 
+// 1º segmento da rota (/api/<seg>/...) → módulo RBAC. Espelha o
+// ModuleService.MODULE_BY_ROUTE, mas SÓ os segmentos cujo módulo é governado
+// pelo RBAC granular. Add-ons com gating próprio por papel (prospect/clinic/
+// vision/radar/retailops) e rotas administrativas auto-gated (users/permissions)
+// ficam de fora — o enforcement global nunca as bloqueia. Segmentos ausentes
+// deste mapa são tratados como core/infra e passam sem checagem.
+export const ROUTE_MODULE: Record<string, string> = {
+  products: "catalogo",
+  orders: "vendas",
+  storefront: "loja",
+  payments: "pagamentos",
+  appointments: "agenda",
+  campaigns: "campanhas",
+  cadences: "cadencias",
+  areas: "areas",
+  integrations: "integracoes",
+  reservations: "reservas",
+  subscriptions: "assinaturas",
+  procurement: "compras",
+  quotes: "orcamentos",
+  events: "eventos",
+  executive: "diretor",
+  studio: "estudio",
+  tasks: "execucao",
+};
+
 // Rótulos amigáveis para a tela de editor de perfis (Bloco 3).
 export const RBAC_MODULE_LABELS: Record<string, string> = {
   atendimento: "Atendimento", contatos: "Contatos", vendas: "Vendas",
@@ -152,6 +178,12 @@ export class PermissionService {
   /** O usuário tem um perfil RBAC explicitamente atribuído? (opt-in do gating). */
   static hasProfile(orgId: string, user: any): boolean {
     return this.resolveProfileId(orgId, user) != null;
+  }
+
+  /** Módulo RBAC de um 1º segmento de rota, ou null (segmento não gateado). */
+  static moduleForSegment(segment?: string | null): string | null {
+    if (!segment) return null;
+    return ROUTE_MODULE[segment] || null;
   }
 
   /** Mapa módulo → nível para o usuário (consumido por GET /api/permissions/me). */

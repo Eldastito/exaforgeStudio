@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { ConsumptionService } from "./ConsumptionService.js";
+import { AddonService } from "./AddonService.js";
 
 /**
  * Gestão de planos e billing.
@@ -220,7 +221,11 @@ export class PlanService {
   static modulesForPlan(orgId: string): string[] | null {
     const plan = this.getCurrentPlan(orgId);
     if (!plan) return null;
-    return plan.features.modules ?? null;
+    const base = plan.features.modules ?? null;
+    if (base == null) return null;
+    // ADR-091 §5 (Bloco D): add-ons ativos estendem o teto de módulos do plano.
+    const addons = AddonService.activeModules(orgId);
+    return addons.length ? Array.from(new Set([...base, ...addons])) : base;
   }
 
   /**

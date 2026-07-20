@@ -241,6 +241,7 @@ type Snapshot = {
 type Invoice = { id: string; status: string; value: number; dueDate: string; invoiceUrl: string };
 
 function BillingPanel() {
+  const loadOrgConfigForSidebar = useStore(s => s.loadOrgConfig);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [selecting, setSelecting] = useState<string | null>(null);
@@ -252,9 +253,30 @@ function BillingPanel() {
   const [perf, setPerf] = useState<any | null>(null);
   const [consumption, setConsumption] = useState<any | null>(null);
   const [buyingTopup, setBuyingTopup] = useState(false);
+  const [addons, setAddons] = useState<{ available: any[]; active: any[] } | null>(null);
+  const [addonBusy, setAddonBusy] = useState<string | null>(null);
 
   const loadPerf = () => apiFetch('/api/analytics/performance-fee').then(r => r.ok ? r.json() : null).then(d => setPerf(d && !d.error ? d : null)).catch(() => setPerf(null));
   const loadConsumption = () => apiFetch('/api/plans/consumption').then(r => r.json()).then(d => setConsumption(d && !d.error ? d : null)).catch(() => setConsumption(null));
+  const loadAddons = () => apiFetch('/api/plans/addons').then(r => r.json()).then(d => setAddons(d && !d.error ? d : null)).catch(() => setAddons(null));
+
+  const contractAddon = async (key: string) => {
+    setAddonBusy(key);
+    try {
+      const r = await apiFetch('/api/plans/addons/contract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível contratar.'); return; }
+      toast.success('Add-on contratado!'); loadAddons(); loadOrgConfigForSidebar();
+    } catch (e) { toast.error('Erro ao contratar.'); }
+    finally { setAddonBusy(null); }
+  };
+  const cancelAddon = async (key: string) => {
+    if (!(await confirmDialog('Cancelar este add-on? O módulo perde o acesso.', {}))) return;
+    setAddonBusy(key);
+    try { await apiFetch('/api/plans/addons/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) }); loadAddons(); loadOrgConfigForSidebar(); }
+    catch (e) { toast.error('Erro ao cancelar.'); }
+    finally { setAddonBusy(null); }
+  };
 
   const buyTopup = async () => {
     setBuyingTopup(true);
@@ -285,6 +307,7 @@ function BillingPanel() {
     });
     loadPerf();
     loadConsumption();
+    loadAddons();
   };
   useEffect(() => { load(); }, []);
 
@@ -507,6 +530,34 @@ function BillingPanel() {
                 </Button>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* Add-ons (ADR-091 §5, Bloco D) */}
+      {addons && (addons.available.length > 0 || addons.active.length > 0) && (
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-1">Add-ons</h3>
+          <p className="text-sm text-zinc-400 mb-4">Recursos avulsos além do seu plano, cobrados na fatura mensal. Precisa de vários? Considere o plano superior.</p>
+          {addons.active.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {addons.active.map((a: any) => (
+                <div key={a.key} className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+                  <div><p className="text-sm text-zinc-100">{a.label} <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 ml-1">ativo</span></p><p className="text-[11px] text-zinc-500">R$ {Number(a.price).toFixed(0)}/mês</p></div>
+                  <button onClick={() => cancelAddon(a.key)} disabled={addonBusy === a.key} className="text-xs text-red-300/80 hover:text-red-300">{addonBusy === a.key ? '…' : 'Cancelar'}</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {addons.available.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {addons.available.map((a: any) => (
+                <div key={a.key} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                  <div><p className="text-sm text-zinc-200">{a.label}</p><p className="text-[11px] text-zinc-500">R$ {Number(a.price).toFixed(0)}/mês</p></div>
+                  <Button onClick={() => contractAddon(a.key)} disabled={addonBusy === a.key} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 h-auto">{addonBusy === a.key ? '…' : 'Contratar'}</Button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}

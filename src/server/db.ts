@@ -521,6 +521,23 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_ai_topup_org_month ON ai_topup_credits(organization_id, month);
     `);
   } catch (e) { console.error('[DB] Falha ao criar ai_topup_credits', e); }
+  // Add-ons contratáveis (ADR-091 §5, Bloco D): módulos acima do teto do plano
+  // que a org contrata avulso (cobrança mensal). Ativos estendem o teto de
+  // módulos (PlanService.modulesForPlan une os add-ons ativos).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_addons (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        addon_key TEXT NOT NULL,       -- chave do módulo (reservas, compras, vms, ...)
+        price REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active', -- active | cancelled
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        cancelled_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_org_addons ON org_addons(organization_id, status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar org_addons', e); }
   // Mídia (imagem/etc) anexada a uma mensagem
   try { db.exec(`ALTER TABLE messages ADD COLUMN media_url TEXT`); } catch(e){}
   // Status de entrega da resposta enviada ao provedor (WhatsApp/Instagram/etc.).

@@ -3,7 +3,12 @@ import { AuthRequest } from "../middleware/auth.js";
 import { PlanService } from "../PlanService.js";
 import { AsaasService } from "../AsaasService.js";
 import { ConsumptionService } from "../ConsumptionService.js";
+import { AddonService } from "../AddonService.js";
+import { ModuleService } from "../ModuleService.js";
 import db from "../db.js";
+
+const addonLabel = (key: string) => (ModuleService as any).MODULE_META?.[key]?.label || key;
+const addonDesc = (key: string) => (ModuleService as any).MODULE_META?.[key]?.desc || "";
 
 const router = Router();
 
@@ -118,6 +123,42 @@ router.post("/consumption/auto-topup", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ConsumptionService.setAutoTopup(orgId, !!req.body?.enabled)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== Add-ons contratáveis (ADR-091 §5, Bloco D) =====
+
+// GET /api/plans/addons — disponíveis (do plano) + ativos, com rótulos.
+router.get("/addons", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const l = AddonService.list(orgId);
+    res.json({
+      available: l.available.map(a => ({ ...a, label: addonLabel(a.key), desc: addonDesc(a.key) })),
+      active: l.active.map((a: any) => ({ ...a, label: addonLabel(a.key), desc: addonDesc(a.key) })),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/plans/addons/contract { key } — contrata um add-on e liga o módulo.
+router.post("/addons/contract", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const key = String(req.body?.key || "");
+    const r = AddonService.contract(orgId, key);
+    if (!r.ok) return res.status(400).json({ error: r.reason || "Não foi possível contratar." });
+    ModuleService.enableModule(orgId, key); // liga o módulo em enabled_modules
+    res.json({ success: true, price: r.price });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/plans/addons/cancel { key } — cancela o add-on (o módulo perde acesso).
+router.post("/addons/cancel", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(AddonService.cancel(orgId, String(req.body?.key || ""))); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

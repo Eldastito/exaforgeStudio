@@ -1,4 +1,6 @@
 import db from "./db.js";
+import { ConsumptionService } from "./ConsumptionService.js";
+import { AddonService } from "./AddonService.js";
 
 /**
  * Gestão de planos e billing.
@@ -169,15 +171,12 @@ export class PlanService {
       return { allowed: false, reason: 'billing_blocked' };
     }
 
-    // Limite mensal de IA pelo plano.
+    // Limite mensal de IA pelo plano + pacotes extras / recompra automática
+    // (ADR-091 §4, Bloco D). A folga = limite do plano + top-ups do mês; a
+    // recompra automática (opt-in) dispara ao cruzar 90% antes de travar.
     if (org.plan_id) {
-      const plan = db.prepare(`SELECT features FROM plans WHERE id = ?`).get(org.plan_id) as any;
-      const features = this.parseFeatures(plan?.features);
-      const limit = features.ai_monthly_limit || 0;
-      if (limit > 0) {
-        const used = this.getUsage(orgId).ai_this_month;
-        if (used >= limit) return { allowed: false, reason: 'monthly_limit' };
-      }
+      const { used, allowance } = ConsumptionService.enforce(orgId);
+      if (allowance > 0 && used >= allowance) return { allowed: false, reason: 'monthly_limit' };
     }
     return { allowed: true };
   }
@@ -222,7 +221,11 @@ export class PlanService {
   static modulesForPlan(orgId: string): string[] | null {
     const plan = this.getCurrentPlan(orgId);
     if (!plan) return null;
-    return plan.features.modules ?? null;
+    const base = plan.features.modules ?? null;
+    if (base == null) return null;
+    // ADR-091 §5 (Bloco D): add-ons ativos estendem o teto de módulos do plano.
+    const addons = AddonService.activeModules(orgId);
+    return addons.length ? Array.from(new Set([...base, ...addons])) : base;
   }
 
   /**

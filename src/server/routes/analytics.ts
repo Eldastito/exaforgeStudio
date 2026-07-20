@@ -599,14 +599,17 @@ router.get("/setup-checklist", (req, res) => {
     const users = count(`SELECT COUNT(*) as c FROM users WHERE organization_id = ?`);
     const managers = count(`SELECT COUNT(*) as c FROM authorized_managers WHERE organization_id = ?`);
 
+    // `view` = tela de destino ao clicar no passo; `tab` = aba interna quando a
+    // tela é Configurações (deep-link). Gestor e equipe ficam em
+    // Configurações → Usuários (antes o gestor apontava, errado, para Canais).
     const items = [
-      { key: 'business', label: 'Preencher os dados da empresa', done: !!(settings?.business_name && settings?.phone), view: 'settings' },
+      { key: 'business', label: 'Preencher os dados da empresa', done: !!(settings?.business_name && settings?.phone), view: 'settings', tab: 'empresa' },
       { key: 'channel', label: 'Conectar um canal (WhatsApp/Instagram)', done: channels > 0, view: 'channels' },
       { key: 'ai', label: 'Ativar a IA em um canal', done: aiOn > 0, view: 'channels' },
       { key: 'catalog', label: 'Cadastrar produtos/serviços', done: products > 0, view: 'catalog' },
       { key: 'rag', label: 'Adicionar base de conhecimento (RAG)', done: rag > 0, view: 'channels' },
-      { key: 'manager', label: 'Cadastrar um gestor (comandos Zapp)', done: managers > 0, view: 'channels' },
-      { key: 'team', label: 'Convidar a equipe', done: users > 1, view: 'settings' },
+      { key: 'manager', label: 'Cadastrar um gestor (comandos Zapp)', done: managers > 0, view: 'settings', tab: 'usuarios' },
+      { key: 'team', label: 'Convidar a equipe', done: users > 1, view: 'settings', tab: 'usuarios' },
     ];
     const completed = items.filter(i => i.done).length;
     res.json({ items, completed, total: items.length, pct: Math.round((completed / items.length) * 100) });

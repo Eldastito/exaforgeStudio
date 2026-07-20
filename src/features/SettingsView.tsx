@@ -9,6 +9,12 @@ import { UsersSettingsView } from './UsersSettingsView';
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState('empresa');
+  // Deep-link vindo do SetupChecklist (ex.: "Cadastrar gestor" → aba Usuários).
+  const settingsTab = useStore(s => s.settingsTab);
+  const setSettingsTab = useStore(s => s.setSettingsTab);
+  useEffect(() => {
+    if (settingsTab) { setActiveTab(settingsTab); setSettingsTab(null); }
+  }, [settingsTab, setSettingsTab]);
   const [form, setForm] = useState({
     business_name: '',
     legal_name: '',

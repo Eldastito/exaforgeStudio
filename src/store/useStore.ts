@@ -100,6 +100,10 @@ type AppState = {
   viewMode: ViewMode;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  // Deep-link de aba em Configurações (ex.: SetupChecklist → Usuários). A tela
+  // de Settings consome e zera. null = sem destino pendente.
+  settingsTab: string | null;
+  setSettingsTab: (tab: string | null) => void;
   vertical: string | null;
   enabledModules: string[] | null; // null = todos habilitados (legado)
   loadOrgConfig: () => Promise<void>;
@@ -253,6 +257,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   sidebarOpen: false,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  settingsTab: null,
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
   setViewMode: (mode) => { try { localStorage.setItem('zappflow_view', mode); } catch {} set({ viewMode: mode, sidebarOpen: false }); },
 
   vertical: null,

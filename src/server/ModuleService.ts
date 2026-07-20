@@ -101,7 +101,15 @@ export class ModuleService {
   static applyVertical(orgId: string, verticalKey: string): void {
     const v = getVertical(verticalKey);
     if (!v) return;
+    // ADR-092: vertical = wishlist, plano = teto. Liga por padrão só a interseção
+    // (preset ∩ módulos do plano) — os "recomendados". O que a vertical sugere mas
+    // o plano não entrega fica como "requer upgrade" na tela de Módulos (não é
+    // pré-ligado). Sem plano (modulesForPlan == null) = sem teto = preset inteiro.
     let modules = this.sanitize(v.modules);
+    const planModules = PlanService.modulesForPlan(orgId);
+    if (planModules != null) modules = modules.filter((m) => planModules.includes(m));
+    // Grandfather: um add-on JÁ ligado é preservado ao re-aplicar a vertical
+    // (o corte de preset nunca remove de quem já usa — ADR-084).
     const current = this.enabledModules(orgId);
     if (Array.isArray(current)) {
       const addons = new Set<string>(ADDON_MODULES as readonly string[]);

@@ -6,7 +6,7 @@
 // ligados e NÃO entram nesta lista — aqui ficam só os módulos OPCIONAIS.
 
 export type VerticalKey =
-  | "varejo" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "outro";
+  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "outro";
 
 export type Vertical = {
   key: VerticalKey;
@@ -60,8 +60,16 @@ const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => !(ADDON_MODULES as readonly
 export const VERTICALS: Vertical[] = [
   {
     key: "varejo", label: "Varejo / Comércio", icon: "🛍️",
-    descricao: "Lojas que vendem produtos por unidade (roupas, eletrônicos, pet, etc.).",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "cadencias", "integracoes", "diretor", "rie", "execucao"],
+    descricao: "Pet shop, eletrônicos, papelaria, utilidades — venda por unidade.",
+    // ADR-092: varejo genérico sem cadências no preset (moda é vertical própria).
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "diretor", "rie", "execucao"],
+    saleMode: "unit",
+  },
+  {
+    key: "moda", label: "Moda / Vestuário", icon: "👗",
+    descricao: "Roupas, calçados e acessórios — com provador virtual e estúdio de peça.",
+    // ADR-092: moda separada do varejo; Estúdio de Criação já vem no preset.
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
@@ -73,7 +81,8 @@ export const VERTICALS: Vertical[] = [
   {
     key: "servicos", label: "Prestadores de Serviço", icon: "🛠️",
     descricao: "Serviços com hora marcada e orçamento (oficinas, técnicos, autônomos).",
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas", "diretor", "rie", "execucao"],
+    // ADR-092: reservas vira opt-in (nem todo prestador trabalha por período).
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

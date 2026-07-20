@@ -32,6 +32,7 @@
     "test:plans-migration": "tsx scripts/test-plans-migration.ts",
     "test:vertical-plan-intersection": "tsx scripts/test-vertical-plan-intersection.ts",
     "test:asaas-billing": "tsx scripts/test-asaas-billing.ts",
+    "test:billing-dunning": "tsx scripts/test-billing-dunning.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

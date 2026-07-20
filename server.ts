@@ -328,11 +328,13 @@ async function startServer() {
     const orgId = req.headers['x-organization-id'] || 'default_org';
     try {
       const org: any = db.prepare('SELECT status, billing_status FROM organization_settings WHERE organization_id = ?').get(orgId);
-      // If it's blocked, block POST/PUT/DELETE
-      if (org && (org.status === 'blocked' || org.billing_status === 'blocked')) {
+      // Modo somente-leitura (ADR-091 Bloco B): 'blocked' (admin) e 'suspended'
+      // (inadimplência D+10) bloqueiam escrita. GET segue liberado → o lojista
+      // continua VENDO os dados; só não cria/edita até regularizar.
+      if (org && (org.status === 'blocked' || org.billing_status === 'blocked' || org.billing_status === 'suspended')) {
           const method = req.method;
           if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
-             return res.status(403).json({ error: "CONTA BLOQUEADA. Entre em contato com o suporte." });
+             return res.status(403).json({ error: "CONTA EM MODO SOMENTE-LEITURA por pendência de pagamento. Regularize em Configurações → Cobrança para reativar." });
           }
       }
     } catch(e) {}

@@ -3,6 +3,8 @@ import { AnalyticsService } from "../AnalyticsService.js";
 import { ReportsService } from "../ReportsService.js";
 import { ReportPdfService } from "../ReportPdfService.js";
 import { ModuleService } from "../ModuleService.js";
+import { PlanService } from "../PlanService.js";
+import { PerformanceFeeService } from "../PerformanceFeeService.js";
 import { RevenueIntelligenceService } from "../RevenueIntelligenceService.js";
 import { RevenueAuditService } from "../RevenueAuditService.js";
 import { RevenueSimulatorService } from "../RevenueSimulatorService.js";
@@ -531,6 +533,32 @@ router.post("/settings/onboarding", (req, res) => {
 // GET /api/analytics/verticals — catálogo de categorias p/ os cards do onboarding.
 router.get("/verticals", (_req, res) => {
   res.json(ModuleService.catalog());
+});
+
+// ===== Painel de Valor Gerado / Performance fee (ADR-091 Bloco C) — Scale+ =====
+// Gating pelo TETO do plano ('valor' está em Scale/Enterprise). null = sem
+// restrição (cortesia/sem plano) = liberado, como no ModuleService.isEnabled.
+function requireValorModule(req: any, res: any): boolean {
+  const orgId = getOrgId(req);
+  const mods = PlanService.modulesForPlan(orgId);
+  if (mods != null && !mods.includes("valor")) { res.status(403).json({ error: "module_disabled", module: "valor" }); return false; }
+  return true;
+}
+
+// GET /api/analytics/performance-fee?period=month|all — valor gerado + fee (beta).
+router.get("/performance-fee", (req, res) => {
+  if (!requireValorModule(req, res)) return;
+  try {
+    const period = (req.query.period === "all" ? "all" : "month") as "month" | "all";
+    res.json(PerformanceFeeService.compute(getOrgId(req), period));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/analytics/performance-fee/consent { enabled } — opt-in revogável de cobrança.
+router.post("/performance-fee/consent", (req, res) => {
+  if (!requireValorModule(req, res)) return;
+  try { res.json(PerformanceFeeService.setConsent(getOrgId(req), !!req.body?.enabled)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/analytics/modules-overview — módulos agrupados p/ a tela de Módulos

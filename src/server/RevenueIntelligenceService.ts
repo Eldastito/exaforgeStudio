@@ -448,6 +448,15 @@ export class RevenueIntelligenceService {
    * houve uma ação nossa (nudge de abandono, lembrete de PIX, cadência) e o
    * pedido foi PAGO no período de atribuição depois disso, conta como recuperado.
    */
+  /**
+   * Receita recuperada atribuída ao ZappFlow, decomposta por driver (com
+   * atribuição única por pedido). Público para o Painel de Valor Gerado /
+   * performance fee (ADR-091 Bloco C) reutilizar o mesmo motor de atribuição.
+   */
+  static recoveredBreakdown(orgId: string, period: Period = "month") {
+    return this.recoveredRevenue(orgId, period, this.getConfig(orgId));
+  }
+
   private static recoveredRevenue(orgId: string, period: Period, cfg: RicConfig) {
     const dateFilter = periodFilter(period, "o.created_at");
     const window = cfg.attribution_window_days;

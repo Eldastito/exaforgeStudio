@@ -155,4 +155,126 @@ export class PermissionService {
     for (const m of RBAC_MODULES) out[m] = this.levelFor(orgId, user, m);
     return out;
   }
+
+  // ---- Gestão de perfis (ADR-095 Bloco 2) ----
+
+  /** Um nível válido? */
+  private static isLevel(v: any): v is Level {
+    return v === "none" || v === "read" || v === "write" || v === "full";
+  }
+
+  /** Lê o mapa módulo→nível de um perfil (preenche os ausentes com 'none'). */
+  private static permsOf(profileId: string): Record<string, Level> {
+    const rows = db.prepare(`SELECT module, level FROM role_permissions WHERE role_profile_id = ?`).all(profileId) as any[];
+    const map: Record<string, Level> = {};
+    for (const m of RBAC_MODULES) map[m] = "none";
+    for (const r of rows) if (RBAC_MODULES.includes(r.module)) map[r.module] = r.level;
+    return map;
+  }
+
+  /** Um perfil com seu mapa de permissões, ou null. */
+  static getProfile(orgId: string, id: string): any | null {
+    const p = db.prepare(`SELECT id, name, system_key, is_system FROM role_profiles WHERE id = ? AND organization_id = ?`).get(id, orgId) as any;
+    if (!p) return null;
+    return { id: p.id, name: p.name, systemKey: p.system_key || null, isSystem: !!p.is_system, permissions: this.permsOf(p.id) };
+  }
+
+  /** Todos os perfis da org (semeia os templates se ainda não houver nenhum). */
+  static listProfiles(orgId: string): any[] {
+    const count = (db.prepare(`SELECT COUNT(*) c FROM role_profiles WHERE organization_id = ?`).get(orgId) as any).c;
+    if (!count) this.seedSystemProfiles(orgId);
+    const rows = db.prepare(`SELECT id FROM role_profiles WHERE organization_id = ? ORDER BY is_system DESC, name ASC`).all(orgId) as any[];
+    return rows.map((r) => {
+      const prof = this.getProfile(orgId, r.id);
+      const usersCount = (db.prepare(`SELECT COUNT(*) c FROM users WHERE organization_id = ? AND role_profile_id = ?`).get(orgId, r.id) as any).c;
+      return { ...prof, usersCount };
+    });
+  }
+
+  /** Normaliza um mapa de permissões vindo da API (só módulos e níveis válidos). */
+  private static sanitizePerms(perms: any): Record<string, Level> {
+    const out: Record<string, Level> = {};
+    for (const m of RBAC_MODULES) out[m] = "none";
+    if (perms && typeof perms === "object") {
+      for (const [k, v] of Object.entries(perms)) {
+        if (RBAC_MODULES.includes(k as any) && this.isLevel(v)) out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  /** Cria um perfil customizado (is_system=0). Retorna o id. */
+  static createProfile(orgId: string, name: string, perms: any): string {
+    const clean = this.sanitizePerms(perms);
+    const id = uuidv4();
+    const insPerm = db.prepare(`INSERT OR REPLACE INTO role_permissions (role_profile_id, module, level) VALUES (?, ?, ?)`);
+    const tx = db.transaction(() => {
+      db.prepare(`INSERT INTO role_profiles (id, organization_id, name, system_key, is_system) VALUES (?, ?, ?, NULL, 0)`)
+        .run(id, orgId, String(name || "Novo perfil").slice(0, 80));
+      for (const m of RBAC_MODULES) insPerm.run(id, m, clean[m]);
+    });
+    tx();
+    return id;
+  }
+
+  /** Atualiza nome e/ou permissões. O Dono (system_key='owner') é imutável. */
+  static updateProfile(orgId: string, id: string, patch: { name?: string; permissions?: any }): { ok: boolean; error?: string } {
+    const p = db.prepare(`SELECT system_key FROM role_profiles WHERE id = ? AND organization_id = ?`).get(id, orgId) as any;
+    if (!p) return { ok: false, error: "not_found" };
+    if (p.system_key === "owner") return { ok: false, error: "owner_immutable" };
+    const tx = db.transaction(() => {
+      if (patch.name !== undefined)
+        db.prepare(`UPDATE role_profiles SET name = ? WHERE id = ? AND organization_id = ?`).run(String(patch.name).slice(0, 80), id, orgId);
+      if (patch.permissions !== undefined) {
+        const clean = this.sanitizePerms(patch.permissions);
+        const insPerm = db.prepare(`INSERT OR REPLACE INTO role_permissions (role_profile_id, module, level) VALUES (?, ?, ?)`);
+        for (const m of RBAC_MODULES) insPerm.run(id, m, clean[m]);
+      }
+    });
+    tx();
+    return { ok: true };
+  }
+
+  /** Duplica um perfil (novo perfil custom com as mesmas permissões). Retorna o id. */
+  static duplicateProfile(orgId: string, id: string, newName?: string): string | null {
+    const src = this.getProfile(orgId, id);
+    if (!src) return null;
+    return this.createProfile(orgId, newName || `${src.name} (cópia)`, src.permissions);
+  }
+
+  /** Exclui um perfil. Bloqueia o Dono e qualquer perfil com usuários atribuídos. */
+  static deleteProfile(orgId: string, id: string): { ok: boolean; error?: string } {
+    const p = db.prepare(`SELECT system_key FROM role_profiles WHERE id = ? AND organization_id = ?`).get(id, orgId) as any;
+    if (!p) return { ok: false, error: "not_found" };
+    if (p.system_key === "owner") return { ok: false, error: "owner_immutable" };
+    const assigned = (db.prepare(`SELECT COUNT(*) c FROM users WHERE organization_id = ? AND role_profile_id = ?`).get(orgId, id) as any).c;
+    if (assigned > 0) return { ok: false, error: "has_users" };
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM role_permissions WHERE role_profile_id = ?`).run(id);
+      db.prepare(`DELETE FROM role_profiles WHERE id = ? AND organization_id = ?`).run(id, orgId);
+    });
+    tx();
+    return { ok: true };
+  }
+
+  /** Atribui um perfil a um usuário (valida que o perfil é da mesma org). */
+  static assignToUser(orgId: string, userId: string, profileId: string): { ok: boolean; error?: string } {
+    const prof = db.prepare(`SELECT id FROM role_profiles WHERE id = ? AND organization_id = ?`).get(profileId, orgId) as any;
+    if (!prof) return { ok: false, error: "profile_not_found" };
+    const u = db.prepare(`SELECT id FROM users WHERE id = ? AND organization_id = ?`).get(userId, orgId) as any;
+    if (!u) return { ok: false, error: "user_not_found" };
+    db.prepare(`UPDATE users SET role_profile_id = ? WHERE id = ? AND organization_id = ?`).run(profileId, userId, orgId);
+    return { ok: true };
+  }
+
+  /** Semeia os templates para TODAS as orgs (backfill idempotente no boot). */
+  static backfillSystemProfiles(): { orgs: number } {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings`).all() as any[]; }
+    catch { return { orgs: 0 }; }
+    let seeded = 0;
+    for (const o of orgs) { try { if (this.seedSystemProfiles(o.organization_id) > 0) seeded++; } catch { /* noop */ } }
+    if (seeded) console.log(`[RBAC] Backfill: templates semeados em ${seeded} organização(ões).`);
+    return { orgs: orgs.length };
+  }
 }

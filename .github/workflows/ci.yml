@@ -202,6 +202,7 @@ jobs:
           - { name: 'quickstart-onboarding', script: 'test:quickstart-onboarding' }
           - { name: 'lgpd-vertical-consent', script: 'test:lgpd-vertical-consent' }
           - { name: 'rbac-granular', script: 'test:rbac-granular' }
+          - { name: 'rbac-profiles-api', script: 'test:rbac-profiles-api' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

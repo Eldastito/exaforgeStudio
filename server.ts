@@ -25,6 +25,7 @@ import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
 import authRoutes from "./src/server/routes/auth.js";
 import usersRoutes from "./src/server/routes/users.js";
+import permissionsRoutes from "./src/server/routes/permissions.js";
 import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
 import studioRoutes from "./src/server/routes/studio.js";
@@ -76,6 +77,7 @@ import { PaymentService } from "./src/server/PaymentService.js";
 import { AsaasService } from "./src/server/AsaasService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
+import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
@@ -454,6 +456,7 @@ async function startServer() {
   protectedApi.use("/radar-consultant", requireMasterAdmin, radarConsultantRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
+  protectedApi.use("/permissions", permissionsRoutes);
   protectedApi.use("/rag", ragRoutes);
   protectedApi.use("/managers", managersRoutes);
   protectedApi.use("/areas", areasRoutes);
@@ -1374,6 +1377,8 @@ async function startServer() {
   // Backfill: torna explícitos os módulos de orgs que estavam sem config (evita
   // o antigo padrão "mostra tudo"). Idempotente — roda barato a cada boot.
   try { ModuleService.backfillNullModules(); } catch (e) { console.error('[Modules] Falha no backfill', e); }
+  // RBAC granular (ADR-095): garante os 6 perfis de sistema em cada org. Idempotente.
+  try { PermissionService.backfillSystemProfiles(); } catch (e) { console.error('[RBAC] Falha no backfill de perfis', e); }
   // Cifra segredos em repouso (token do gateway de pagamento, tokens Google) que
   // ainda estejam em texto. Idempotente — pula o que já está cifrado.
   try { EncryptionService.backfillExistingSecrets(); } catch (e) { console.error('[Encryption] Falha no backfill', e); }

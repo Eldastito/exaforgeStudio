@@ -2,7 +2,8 @@ import { Router, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { requireRole } from "../middleware/auth.js";
+import { requirePermission } from "../middleware/auth.js";
+import { PermissionService } from "../PermissionService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
@@ -16,11 +17,12 @@ router.get("/", (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const actor = (req as any).user;
   try {
-    const users = db.prepare('SELECT id, name, email, role, phone, avatar_url, global_status, last_login_at, created_at FROM users WHERE organization_id = ?').all(orgId);
+    const users = db.prepare('SELECT id, name, email, role, role_profile_id, phone, avatar_url, global_status, last_login_at, created_at FROM users WHERE organization_id = ?').all(orgId);
 
-    // O token só é exposto para owner/admin — são eles que compartilham o
-    // convite manualmente (o app não envia e-mail). Demais papéis não recebem.
-    const canSeeToken = actor && (actor.role === 'owner' || actor.role === 'admin');
+    // O token só é exposto a quem administra usuários (nível ≥ write no módulo
+    // "usuarios") — são eles que compartilham o convite manualmente (o app não
+    // envia e-mail). RBAC granular (ADR-095): cobre owner/admin legados e perfis.
+    const canSeeToken = actor && PermissionService.can(orgId, actor, 'usuarios', 'write');
     const inviteCols = canSeeToken
       ? 'id, email, role, status, expires_at, created_at, token_hash AS token'
       : 'id, email, role, status, expires_at, created_at';
@@ -33,7 +35,7 @@ router.get("/", (req: Request, res: Response): any => {
 });
 
 // POST /api/users/invite
-router.post("/invite", requireRole("owner", "admin"), (req: Request, res: Response): any => {
+router.post("/invite", requirePermission("usuarios", "write"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const { email, role } = req.body;
   const actor = (req as any).user;
@@ -74,7 +76,7 @@ router.post("/invite", requireRole("owner", "admin"), (req: Request, res: Respon
 });
 
 // PUT /api/users/:id/status
-router.put("/:id/status", requireRole("owner", "admin"), (req: Request, res: Response): any => {
+router.put("/:id/status", requirePermission("usuarios", "write"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const { id } = req.params;
   const { status } = req.body; // active, blocked
@@ -110,7 +112,7 @@ router.put("/:id/phone", (req: Request, res: Response): any => {
 // PUT /api/users/:id/role — troca o papel de um colaborador (ex.: agent -> admin).
 // Mutação sensível (pode dar acesso de administrador a alguém): antes desta
 // mudança não gerava NENHUM registro de auditoria — corrigido abaixo.
-router.put("/:id/role", requireRole("owner", "admin"), (req: Request, res: Response): any => {
+router.put("/:id/role", requirePermission("usuarios", "write"), (req: Request, res: Response): any => {
   const orgId = getOrgId(req);
   const { id } = req.params;
   const { role } = req.body;

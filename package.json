@@ -34,6 +34,7 @@
     "test:asaas-billing": "tsx scripts/test-asaas-billing.ts",
     "test:billing-dunning": "tsx scripts/test-billing-dunning.ts",
     "test:performance-fee": "tsx scripts/test-performance-fee.ts",
+    "test:consumption-topup": "tsx scripts/test-consumption-topup.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

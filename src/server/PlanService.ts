@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ConsumptionService } from "./ConsumptionService.js";
 
 /**
  * Gestão de planos e billing.
@@ -169,15 +170,12 @@ export class PlanService {
       return { allowed: false, reason: 'billing_blocked' };
     }
 
-    // Limite mensal de IA pelo plano.
+    // Limite mensal de IA pelo plano + pacotes extras / recompra automática
+    // (ADR-091 §4, Bloco D). A folga = limite do plano + top-ups do mês; a
+    // recompra automática (opt-in) dispara ao cruzar 90% antes de travar.
     if (org.plan_id) {
-      const plan = db.prepare(`SELECT features FROM plans WHERE id = ?`).get(org.plan_id) as any;
-      const features = this.parseFeatures(plan?.features);
-      const limit = features.ai_monthly_limit || 0;
-      if (limit > 0) {
-        const used = this.getUsage(orgId).ai_this_month;
-        if (used >= limit) return { allowed: false, reason: 'monthly_limit' };
-      }
+      const { used, allowance } = ConsumptionService.enforce(orgId);
+      if (allowance > 0 && used >= allowance) return { allowed: false, reason: 'monthly_limit' };
     }
     return { allowed: true };
   }

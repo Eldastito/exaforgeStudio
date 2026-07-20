@@ -250,8 +250,27 @@ function BillingPanel() {
   const [subscribing, setSubscribing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [perf, setPerf] = useState<any | null>(null);
+  const [consumption, setConsumption] = useState<any | null>(null);
+  const [buyingTopup, setBuyingTopup] = useState(false);
 
   const loadPerf = () => apiFetch('/api/analytics/performance-fee').then(r => r.ok ? r.json() : null).then(d => setPerf(d && !d.error ? d : null)).catch(() => setPerf(null));
+  const loadConsumption = () => apiFetch('/api/plans/consumption').then(r => r.json()).then(d => setConsumption(d && !d.error ? d : null)).catch(() => setConsumption(null));
+
+  const buyTopup = async () => {
+    setBuyingTopup(true);
+    try {
+      const r = await apiFetch('/api/plans/consumption/topup', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível comprar o pacote.'); return; }
+      toast.success('Pacote extra adicionado!');
+      loadConsumption();
+    } catch (e) { toast.error('Erro ao comprar o pacote.'); }
+    finally { setBuyingTopup(false); }
+  };
+  const toggleAutoTopup = async (enabled: boolean) => {
+    try { await apiFetch('/api/plans/consumption/auto-topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }); loadConsumption(); }
+    catch (e) { toast.error('Erro ao salvar a preferência.'); }
+  };
 
   const load = () => {
     Promise.all([
@@ -265,6 +284,7 @@ function BillingPanel() {
       if (sn?.hasSubscription) apiFetch('/api/plans/billing/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d?.invoices) ? d.invoices : [])).catch(() => {});
     });
     loadPerf();
+    loadConsumption();
   };
   useEffect(() => { load(); }, []);
 
@@ -413,6 +433,36 @@ function BillingPanel() {
           </div>
         )}
       </div>
+
+      {/* Consumo excedente de IA (ADR-091 §4, Bloco D) */}
+      {consumption && consumption.allowance > 0 && (
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-1">Consumo de IA no mês</h3>
+          <p className="text-sm text-zinc-400 mb-4">
+            {consumption.used.toLocaleString('pt-BR')} de {consumption.allowance.toLocaleString('pt-BR')} ações
+            {consumption.topupActions > 0 && <span className="text-emerald-300"> (inclui +{consumption.topupActions.toLocaleString('pt-BR')} de pacotes extras)</span>}.
+          </p>
+          <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden mb-4">
+            <div className={`h-full ${consumption.pct >= 100 ? 'bg-red-500' : consumption.pct >= 90 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, consumption.pct)}%` }} />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {consumption.package ? (
+              <Button onClick={buyTopup} disabled={buyingTopup} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                {buyingTopup ? 'Adicionando…' : `Comprar +${consumption.package.actions.toLocaleString('pt-BR')} ações (R$ ${consumption.package.price})`}
+              </Button>
+            ) : <span className="text-xs text-zinc-500">Plano sem pacote extra (Enterprise é negociado).</span>}
+            {consumption.package && (
+              <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+                <span>Recompra automática ao chegar em 90%</span>
+                <button onClick={() => toggleAutoTopup(!consumption.autoTopupEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${consumption.autoTopupEnabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${consumption.autoTopupEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </label>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Assinatura (ASAAS) — só quando há plano escolhido e não é cortesia */}
       {snap?.plan && snap.plan.id !== 'cortesia' && (

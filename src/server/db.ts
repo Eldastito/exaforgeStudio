@@ -503,6 +503,24 @@ const initDb = () => {
       );
     `);
   } catch (e) { console.error('[DB] Falha ao criar asaas_webhook_events', e); }
+  // Consumo excedente de IA (ADR-091 §4, Bloco D): pacote extra comprado por mês
+  // (ledger — soma das ações extras do mês vira folga adicional sobre o limite
+  // do plano) + opt-in de recompra automática ao atingir 90%.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ai_auto_topup_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_topup_credits (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        month TEXT NOT NULL,          -- 'YYYY-MM' (folga vale só no mês da compra)
+        actions INTEGER NOT NULL,     -- ações extras liberadas
+        amount REAL NOT NULL,         -- preço do pacote (R$)
+        source TEXT DEFAULT 'manual', -- manual | auto
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_topup_org_month ON ai_topup_credits(organization_id, month);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar ai_topup_credits', e); }
   // Mídia (imagem/etc) anexada a uma mensagem
   try { db.exec(`ALTER TABLE messages ADD COLUMN media_url TEXT`); } catch(e){}
   // Status de entrega da resposta enviada ao provedor (WhatsApp/Instagram/etc.).

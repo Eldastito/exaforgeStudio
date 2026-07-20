@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { PlanService } from "../PlanService.js";
 import { AsaasService } from "../AsaasService.js";
+import { ConsumptionService } from "../ConsumptionService.js";
 import db from "../db.js";
 
 const router = Router();
@@ -89,6 +90,35 @@ router.post("/billing/cancel", async (req: AuthRequest, res): Promise<any> => {
     const ok = await AsaasService.cancelSubscription(orgId);
     res.json({ success: ok, ...PlanService.getBillingSnapshot(orgId) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== Consumo excedente de IA (ADR-091 §4, Bloco D) =====
+
+// GET /api/plans/consumption — uso vs folga do mês + pacote extra disponível.
+router.get("/consumption", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ConsumptionService.status(orgId)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/plans/consumption/topup — compra 1 pacote extra de ações.
+router.post("/consumption/topup", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const bought = ConsumptionService.buyTopup(orgId, "manual");
+    if (!bought) return res.status(400).json({ error: "Seu plano não tem pacote extra (Enterprise é negociado)." });
+    res.json({ success: true, bought, ...ConsumptionService.status(orgId) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/plans/consumption/auto-topup { enabled } — liga/desliga recompra a 90%.
+router.post("/consumption/auto-topup", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ConsumptionService.setAutoTopup(orgId, !!req.body?.enabled)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

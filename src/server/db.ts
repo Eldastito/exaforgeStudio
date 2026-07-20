@@ -1196,6 +1196,9 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar purchase_requisitions', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN procurement_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN procurement_target_days INTEGER DEFAULT 14`); } catch(e){}
+  // ADR-099: item do gestor (pedido por áudio/texto) vs. item auto de estoque baixo.
+  // 'auto' é reposto/substituído pelo syncDraft; 'manual' é preservado.
+  try { db.exec(`ALTER TABLE purchase_requisition_items ADD COLUMN source TEXT DEFAULT 'auto'`); } catch(e){}
   // Supply (Fase 2) — fornecedores e cotações com fornecedores conhecidos.
   try { db.exec(`ALTER TABLE contacts ADD COLUMN is_supplier INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN supplier_categories TEXT`); } catch(e){} // CSV de categorias atendidas
@@ -1247,6 +1250,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN address_lng REAL`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_delivery_radius_km INTEGER DEFAULT 50`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_min_order_amount REAL DEFAULT 0`); } catch(e){}
+  // ADR-099: contato do perfil de rede (quem te acha na rede precisa te chamar).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_contact_whatsapp TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_contact_email TEXT`); } catch(e){}
   // Cotação pode ser endereçada a uma org da rede (em vez de um contato local).
   try { db.exec(`ALTER TABLE purchase_quotes ADD COLUMN network_org_id TEXT`); } catch(e){}
   // Cache de geocoding (cidade/estado → lat/lng) para não martelar Nominatim.

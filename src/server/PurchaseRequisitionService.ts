@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { NotificationService } from "./NotificationService.js";
+import { chat } from "./llm.js";
 
 /**
  * Reposição inteligente (Fase 1 do "ZappFlow Supply"). Varre o estoque, encontra
@@ -85,33 +86,142 @@ export class PurchaseRequisitionService {
    */
   static syncDraft(orgId: string, targetDays = 14): { id: string; items: number } | null {
     const items = this.itemsBelowThreshold(orgId, targetDays);
+    const cur = this.currentDraft(orgId);
+    // Itens ditados pelo gestor (source='manual') NÃO são tocados aqui — só os
+    // 'auto' (reposição de estoque) são recalculados a cada passada (ADR-099).
+    const manualCount = cur ? (db.prepare(`SELECT COUNT(*) c FROM purchase_requisition_items WHERE requisition_id = ? AND source = 'manual'`).get(cur.id) as any).c : 0;
+
     if (items.length === 0) {
-      // Fechou tudo? Descarta o rascunho vazio.
-      const cur = this.currentDraft(orgId);
+      // Sem itens abaixo do mínimo: limpa só as linhas 'auto'.
       if (cur) {
-        db.prepare(`DELETE FROM purchase_requisition_items WHERE requisition_id = ?`).run(cur.id);
-        db.prepare(`DELETE FROM purchase_requisitions WHERE id = ? AND status = 'draft'`).run(cur.id);
+        db.prepare(`DELETE FROM purchase_requisition_items WHERE requisition_id = ? AND source = 'auto'`).run(cur.id);
+        // Se não sobrou nada (nem manual), descarta o rascunho vazio.
+        if (manualCount === 0) {
+          db.prepare(`DELETE FROM purchase_requisitions WHERE id = ? AND status = 'draft'`).run(cur.id);
+          return null;
+        }
+        return { id: cur.id, items: 0 };
       }
       return null;
     }
 
-    let req = this.currentDraft(orgId);
+    let req = cur;
     if (!req) {
       const id = uuidv4();
       db.prepare(`INSERT INTO purchase_requisitions (id, organization_id, status, created_by) VALUES (?, ?, 'draft', 'ai')`).run(id, orgId);
       req = { id };
     } else {
-      // Substitui os itens — fonte da verdade é o estoque atual.
-      db.prepare(`DELETE FROM purchase_requisition_items WHERE requisition_id = ?`).run(req.id);
+      // Substitui só as linhas 'auto' — fonte da verdade é o estoque atual.
+      db.prepare(`DELETE FROM purchase_requisition_items WHERE requisition_id = ? AND source = 'auto'`).run(req.id);
     }
 
+    // Produtos já ditados manualmente não são duplicados pela reposição automática.
+    const manualProducts = new Set(
+      (db.prepare(`SELECT product_service_id FROM purchase_requisition_items WHERE requisition_id = ? AND source = 'manual'`).all(req.id) as any[]).map(r => r.product_service_id)
+    );
+
     const ins = db.prepare(`INSERT INTO purchase_requisition_items
-      (id, requisition_id, organization_id, product_service_id, variant_id, current_stock, threshold, suggested_qty, avg_daily_consumption, days_of_cover)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (id, requisition_id, organization_id, product_service_id, variant_id, current_stock, threshold, suggested_qty, avg_daily_consumption, days_of_cover, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto')`);
+    let added = 0;
     for (const it of items) {
+      if (manualProducts.has(it.productServiceId)) continue; // gestor já pediu esse
       ins.run(uuidv4(), req.id, orgId, it.productServiceId, it.variantId, it.currentStock, it.threshold, it.suggestedQty, it.avgDailyConsumption, it.daysOfCover);
+      added++;
     }
-    return { id: req.id, items: items.length };
+    return { id: req.id, items: added };
+  }
+
+  /**
+   * Extrai um pedido de compra da fala/mensagem do gestor (ex.: "compra 20
+   * camisas polo brancas e 10 calças pretas"). Usa o LLM com JSON forçado.
+   * Retorna { isOrder:false, items:[] } se não for um pedido ou se a IA falhar
+   * (degradação graciosa — nunca cria nada sem itens).
+   * Método estático para poder ser mockado nos testes (sem chave OpenAI).
+   */
+  static async extractOrderFromText(orgId: string, text: string): Promise<{ isOrder: boolean; items: { name: string; quantity: number; note?: string }[] }> {
+    const catalog = (db.prepare(`SELECT name FROM products_services WHERE organization_id = ? AND active = 1 LIMIT 200`).all(orgId) as any[]).map(r => r.name);
+    const system = [
+      "Você extrai PEDIDOS DE COMPRA (reposição de estoque) que o gestor de uma loja dita por voz ou texto.",
+      "Responda SEMPRE em JSON: { \"isOrder\": boolean, \"items\": [{ \"name\": string, \"quantity\": number, \"note\": string }] }.",
+      "isOrder=true só se a mensagem claramente pede para COMPRAR/REPOR/ENCOMENDAR itens. Conversa fiada, dúvida ou venda ao cliente => isOrder=false, items=[].",
+      "quantity é a quantidade a comprar (inteiro >=1; se não disser, use 1). name é o produto dito, o mais próximo possível do catálogo abaixo.",
+      catalog.length ? `Catálogo (use estes nomes quando casar): ${catalog.slice(0, 120).join("; ")}` : "",
+    ].filter(Boolean).join("\n");
+    try {
+      const raw = await chat(text, { json: true, temperature: 0, system });
+      const parsed = JSON.parse(raw || "{}");
+      const items = Array.isArray(parsed.items) ? parsed.items
+        .map((it: any) => ({ name: String(it.name || "").trim(), quantity: Math.max(1, parseInt(String(it.quantity), 10) || 1), note: it.note ? String(it.note) : undefined }))
+        .filter((it: any) => it.name) : [];
+      return { isOrder: !!parsed.isOrder && items.length > 0, items };
+    } catch (e) {
+      console.warn("[Supply] Falha ao extrair pedido de compra do texto:", e);
+      return { isOrder: false, items: [] };
+    }
+  }
+
+  /**
+   * Casa nomes ditados (ex.: "camisa polo branca") a produtos reais do catálogo.
+   * Heurística simples (normaliza + contém) — suficiente para o piloto; itens sem
+   * correspondência voltam em `unmatched` para o gestor cadastrar antes.
+   */
+  static matchItemsToProducts(orgId: string, items: { name: string; quantity?: number; note?: string }[]) {
+    const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    const products = db.prepare(`SELECT id, name FROM products_services WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const normProducts = products.map(p => ({ id: p.id, name: p.name, norm: norm(p.name) }));
+    const matched: { productServiceId: string; name: string; quantity: number }[] = [];
+    const unmatched: string[] = [];
+    for (const it of items) {
+      const q = norm(it.name);
+      if (!q) continue;
+      // Melhor correspondência: nome do produto contido na fala ou vice-versa;
+      // senão, maior sobreposição de tokens.
+      let best: { id: string; name: string; score: number } | null = null;
+      const qTokens = q.split(" ").filter(Boolean);
+      for (const p of normProducts) {
+        let score = 0;
+        if (p.norm === q) score = 100;
+        else if (p.norm.includes(q) || q.includes(p.norm)) score = 60;
+        else {
+          const pTokens = new Set(p.norm.split(" ").filter(Boolean));
+          const overlap = qTokens.filter(t => pTokens.has(t)).length;
+          score = overlap > 0 ? (overlap / Math.max(qTokens.length, pTokens.size)) * 50 : 0;
+        }
+        if (score > 0 && (!best || score > best.score)) best = { id: p.id, name: p.name, score };
+      }
+      if (best && best.score >= 25) matched.push({ productServiceId: best.id, name: best.name, quantity: Math.max(1, Number(it.quantity) || 1) });
+      else unmatched.push(it.name);
+    }
+    return { matched, unmatched };
+  }
+
+  /**
+   * Adiciona itens ditados pelo gestor ao rascunho corrente (cria se não houver),
+   * marcados source='manual'. Se o produto já está no rascunho, soma a quantidade.
+   * Não mexe na reposição automática (linhas 'auto').
+   */
+  static addManualItems(orgId: string, matched: { productServiceId: string; quantity: number }[], createdBy = "manager"): { id: string; added: number } | null {
+    if (!matched.length) return null;
+    let req = this.currentDraft(orgId);
+    if (!req) {
+      const id = uuidv4();
+      db.prepare(`INSERT INTO purchase_requisitions (id, organization_id, status, created_by) VALUES (?, ?, 'draft', ?)`).run(id, orgId, createdBy);
+      req = { id };
+    }
+    let added = 0;
+    for (const m of matched) {
+      const existing = db.prepare(`SELECT id, suggested_qty FROM purchase_requisition_items WHERE requisition_id = ? AND product_service_id = ? AND source = 'manual' AND variant_id IS NULL`).get(req.id, m.productServiceId) as any;
+      if (existing) {
+        db.prepare(`UPDATE purchase_requisition_items SET suggested_qty = ? WHERE id = ?`).run((existing.suggested_qty || 0) + m.quantity, existing.id);
+      } else {
+        db.prepare(`INSERT INTO purchase_requisition_items
+          (id, requisition_id, organization_id, product_service_id, variant_id, current_stock, threshold, suggested_qty, avg_daily_consumption, days_of_cover, source)
+          VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, 'manual')`).run(uuidv4(), req.id, orgId, m.productServiceId, m.quantity);
+      }
+      added++;
+    }
+    return { id: req.id, added };
   }
 
   /** Aprovação humana: marca a requisição como approved. (Fase 2 transforma em PO.) */

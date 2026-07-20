@@ -189,6 +189,9 @@ jobs:
           - { name: 'smart-import', script: 'test:smart-import' }
           - { name: 'radar-b2b', script: 'test:radar-b2b' }
           - { name: 'stone-payment-link', script: 'test:stone-payment-link' }
+          - { name: 'supplier-profile-contact', script: 'test:supplier-profile-contact' }
+          - { name: 'quote-email-channel', script: 'test:quote-email-channel' }
+          - { name: 'purchase-order-by-audio', script: 'test:purchase-order-by-audio' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

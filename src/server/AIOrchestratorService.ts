@@ -20,6 +20,7 @@ import { QuoteService } from "./QuoteService.js";
 import { getPendingAction as getPendingActionShared, savePendingAction as savePendingActionShared, clearPendingAction as clearPendingActionShared } from "./PendingManagerActions.js";
 import { BusinessManifestoService } from "./BusinessManifestoService.js";
 import { WhatsAppInventoryIntake } from "./WhatsAppInventoryIntake.js";
+import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
 
 export class AIOrchestratorService {
   /**
@@ -74,7 +75,9 @@ export class AIOrchestratorService {
     // a ação, mesmo sem o prefixo "zapp".
     if (isManager) {
       const pending = this.getPendingAction(params.organizationId, params.senderId);
-      if (pending && pending.action_type !== "create_campaign") {
+      // Ações com confirmação SIM/NÃO (campanha, pedido de compra por voz).
+      const CONFIRM_TYPES = ["create_campaign", "purchase_order_audio"];
+      if (pending && !CONFIRM_TYPES.includes(pending.action_type)) {
         const reply = await WhatsAppInventoryIntake.handleReply(params.organizationId, params.senderId, pending, text);
         return { reply, actions: [], needsHuman: false };
       }
@@ -91,7 +94,18 @@ export class AIOrchestratorService {
           return { reply: "Tudo bem, cancelei. 👍 Se quiser, é só pedir de novo quando estiver pronto.", actions: [], needsHuman: false };
         }
         // Resposta ambígua: mantém a ação e pede confirmação explícita.
-        return { reply: "Você tem uma campanha aguardando confirmação. Responda *SIM* para enviar ou *NÃO* para cancelar.", actions: [], needsHuman: false };
+        const what = pending.action_type === "purchase_order_audio" ? "um pedido de compra" : "uma campanha";
+        return { reply: `Você tem ${what} aguardando confirmação. Responda *SIM* para confirmar ou *NÃO* para cancelar.`, actions: [], needsHuman: false };
+      }
+
+      // PEDIDO DE COMPRA POR VOZ/TEXTO (ADR-099): um gestor que dita "compra 20
+      // camisas polo" tem os itens extraídos e montados num rascunho de compra,
+      // confirmado antes de criar. Só dispara com termos de compra (não sequestra
+      // conversa normal) e nunca cria sem confirmação.
+      if (!isOrchestratorCommand && /\b(compr[ae]|comprar|comprei|encomend|repor|reposi[çc]|pedid[oa]\s+de\s+compra|pede\s+(pro|para|ao)\s+fornecedor|faz(er)?\s+(um\s+)?pedido)/i.test(text)) {
+        const reply = await this.handlePurchaseOrderIntent(params.organizationId, params.senderId, text);
+        if (reply) return { reply, actions: [], needsHuman: false };
+        // Não era um pedido de compra de fato → segue o fluxo normal.
       }
     }
 
@@ -913,7 +927,42 @@ export class AIOrchestratorService {
         return `Não consegui criar a campanha: ${e?.message || 'erro'}.`;
       }
     }
+
+    if (pending.action_type === 'purchase_order_audio') {
+      try {
+        const matched: { productServiceId: string; quantity: number }[] = Array.isArray(payload.matched) ? payload.matched : [];
+        const r = PurchaseRequisitionService.addManualItems(orgId, matched, 'manager');
+        if (!r) return "Não consegui montar o pedido. Pode ditar de novo os itens?";
+        const io = (global as any).io;
+        if (io) io.to(`org:${orgId}`).emit("purchase_requisition_updated", { requisitionId: r.id });
+        return `✅ Adicionei *${r.added} item(ns)* ao pedido de compra (rascunho). Abra *Compras* para revisar e, quando quiser, aprovar — aí eu já disparo a cotação aos fornecedores.`;
+      } catch (e: any) {
+        return `Não consegui salvar o pedido de compra: ${e?.message || 'erro'}.`;
+      }
+    }
     return "Ação concluída.";
+  }
+
+  /**
+   * Detecta e monta um pedido de compra a partir da fala/mensagem do gestor.
+   * Retorna a mensagem de confirmação (SIM/NÃO) — ou null se não for um pedido
+   * de compra de verdade (aí o chamador segue o fluxo normal). Nunca cria nada
+   * sem confirmação. ADR-099.
+   */
+  private static async handlePurchaseOrderIntent(orgId: string, identifier: string, text: string): Promise<string | null> {
+    const extracted = await PurchaseRequisitionService.extractOrderFromText(orgId, text);
+    if (!extracted.isOrder || extracted.items.length === 0) return null;
+
+    const { matched, unmatched } = PurchaseRequisitionService.matchItemsToProducts(orgId, extracted.items);
+    if (matched.length === 0) {
+      const miss = unmatched.length ? unmatched.map(n => `• ${n}`).join("\n") : "(nenhum item reconhecido)";
+      return `Entendi que você quer comprar, mas não achei esses itens no seu catálogo:\n${miss}\n\nCadastre o produto primeiro (ou me diga o nome exato) que eu monto o pedido. 🙂`;
+    }
+
+    this.savePendingAction(orgId, identifier, 'purchase_order_audio', { matched, unmatched });
+    const lines = matched.map(m => `• ${m.quantity}× ${m.name}`).join("\n");
+    const missNote = unmatched.length ? `\n\n⚠️ Não reconheci (não estão no catálogo): ${unmatched.join(", ")}.` : "";
+    return `📝 Montei este *pedido de compra*:\n${lines}${missNote}\n\nConfirma? Responda *SIM* para adicionar em Compras ou *NÃO* para cancelar.`;
   }
 
   private static async getProductsContext(orgId: string): Promise<string> {

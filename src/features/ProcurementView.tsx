@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/button';
-import { PackageCheck, Check, X as XIcon, AlertTriangle, Truck, Trophy, Globe, Inbox, Store, Search, MapPin } from 'lucide-react';
+import { useStore } from '@/src/store/useStore';
+import { PackageCheck, Check, X as XIcon, AlertTriangle, Truck, Trophy, Globe, Inbox, Store, Search, MapPin, Save, ArrowRight } from 'lucide-react';
 
 type ReqItem = {
   id: string;
@@ -39,6 +40,7 @@ type NetworkProfile = {
   orgId: string; name: string; enabled: boolean; categories: string;
   city: string; state: string; lat: number | null; lng: number | null;
   radiusKm: number; minOrderAmount: number; phone: string;
+  contactWhatsapp: string; contactEmail: string;
 };
 
 type IncomingQuote = {
@@ -113,7 +115,11 @@ export function ProcurementView() {
   type Tab = 'reposicao' | 'rede' | 'recebidos' | 'perfil';
   const [tab, setTab] = useState<Tab>('reposicao');
   const [profile, setProfile] = useState<NetworkProfile | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [contactForm, setContactForm] = useState({ whatsapp: '', email: '' });
   const [incoming, setIncoming] = useState<IncomingQuote[]>([]);
+  const setViewMode = useStore(s => s.setViewMode);
   const [search, setSearch] = useState<{ q: string; maxKm: string; category: string }>({ q: '', maxKm: '', category: '' });
   const [searchResults, setSearchResults] = useState<NetworkSupplier[]>([]);
 
@@ -125,10 +131,23 @@ export function ProcurementView() {
     if (tab === 'perfil') loadProfile();
   }, [tab]);
 
+  // Sincroniza o formulário de contato quando o perfil (re)carrega ou é salvo
+  // (o backend devolve os valores já normalizados — WhatsApp com DDI, e-mail em minúsculas).
+  useEffect(() => {
+    if (profile) setContactForm({ whatsapp: profile.contactWhatsapp || '', email: profile.contactEmail || '' });
+  }, [profile?.contactWhatsapp, profile?.contactEmail]);
+
   const saveProfile = async (patch: Partial<NetworkProfile>) => {
-    const r = await apiFetch('/api/procurement/network/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
-    const d = await r.json().catch(() => ({}));
-    if (d?.profile) setProfile(d.profile);
+    setProfileSaving(true);
+    try {
+      const r = await apiFetch('/api/procurement/network/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      const d = await r.json().catch(() => ({}));
+      if (d?.profile) setProfile(d.profile);
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 2000);
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   const runSearch = async () => {
@@ -426,6 +445,16 @@ export function ProcurementView() {
             </button>
           </div>
 
+          {/* Clareza: esta aba é o SEU perfil na rede (registro único), não a lista de fornecedores de quem você compra. */}
+          <div className="mb-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3">
+            <p className="text-xs text-zinc-300">Esta é a <strong>sua ficha única</strong> para aparecer na rede — não é uma lista. O que você editar aqui atualiza o mesmo perfil.</p>
+            <p className="text-[11px] text-zinc-500 mt-1">Quer cadastrar os fornecedores <em>de quem você compra</em>? Isso é em Contatos (marque o contato como fornecedor).</p>
+            <button onClick={() => setViewMode('contacts')}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] text-indigo-300 hover:text-indigo-200">
+              Ir para Contatos <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-zinc-400">Cidade
               <input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
@@ -452,6 +481,32 @@ export function ProcurementView() {
                 defaultValue={profile.minOrderAmount}
                 onBlur={e => Number(e.target.value) !== profile.minOrderAmount && saveProfile({ minOrderAmount: Number(e.target.value) })} />
             </label>
+          </div>
+
+          {/* Contato — quem te acha na rede precisa conseguir te chamar (ADR-099). */}
+          <div className="mt-4 pt-4 border-t border-zinc-800">
+            <p className="text-sm font-medium text-zinc-200 mb-1">📇 Contato para receber cotações</p>
+            <p className="text-[11px] text-zinc-500 mb-3">Como as lojas da rede falam com você quando te encontram. Pelo menos um dos dois.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="text-xs text-zinc-400">WhatsApp
+                <input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="(21) 99999-8888"
+                  value={contactForm.whatsapp}
+                  onChange={e => setContactForm(f => ({ ...f, whatsapp: e.target.value }))} />
+              </label>
+              <label className="text-xs text-zinc-400">E-mail
+                <input type="email" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="compras@suaempresa.com.br"
+                  value={contactForm.email}
+                  onChange={e => setContactForm(f => ({ ...f, email: e.target.value }))} />
+              </label>
+            </div>
+            <div className="mt-3 flex items-center gap-3">
+              <Button onClick={() => saveProfile({ contactWhatsapp: contactForm.whatsapp, contactEmail: contactForm.email })}
+                disabled={profileSaving}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1.5">
+                {profileSaved ? <><Check className="w-4 h-4" /> Salvo</> : <><Save className="w-4 h-4" /> {profileSaving ? 'Salvando…' : 'Salvar'}</>}
+              </Button>
+              {profileSaved && <span className="text-xs text-emerald-400">Perfil atualizado ✓</span>}
+            </div>
           </div>
 
           {profile.lat != null && profile.lng != null && (

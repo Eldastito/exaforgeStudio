@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AnalyticsService } from "../AnalyticsService.js";
 import { ReportsService } from "../ReportsService.js";
+import { ReportPdfService } from "../ReportPdfService.js";
 import { ModuleService } from "../ModuleService.js";
 import { RevenueIntelligenceService } from "../RevenueIntelligenceService.js";
 import { RevenueAuditService } from "../RevenueAuditService.js";
@@ -22,6 +23,28 @@ router.get("/sales-summary", (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Relatório de vendas com filtros + cards por vertical (ADR-094).
+const periodLabelOf = (p: string) => ({ "7": "Últimos 7 dias", "30": "Últimos 30 dias", "90": "Últimos 90 dias", month: "Mês corrente", prev_month: "Mês anterior" } as any)[p] || "Últimos 30 dias";
+
+router.get("/sales-report", (req, res) => {
+  const orgId = getOrgId(req);
+  try {
+    const q = req.query as any;
+    res.json(ReportsService.salesReport(orgId, { period: q.period, category: q.category, channel: q.channel, seller: q.seller }));
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+router.get("/sales-report/pdf", async (req, res): Promise<any> => {
+  const orgId = getOrgId(req);
+  try {
+    const q = req.query as any;
+    const report = ReportsService.salesReport(orgId, { period: q.period, category: q.category, channel: q.channel, seller: q.seller });
+    const out = await ReportPdfService.generateSalesReport(orgId, report, periodLabelOf(report.period));
+    if (!out) return res.status(500).json({ error: "Não foi possível gerar o PDF." });
+    res.json(out);
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 router.get("/metrics", (req, res) => {

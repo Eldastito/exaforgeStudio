@@ -71,6 +71,7 @@ export function Storefront() {
   // Só produtos VESTÍVEIS elegíveis ganham o botão "Provar" no card — a lista
   // vem do catálogo elegível do provador (null = módulo desligado nesta loja).
   const [fashionEligibleIds, setFashionEligibleIds] = useState<Set<string> | null>(null);
+  const [looks, setLooks] = useState<{ id: string; title: string; image: string; images: string[]; items: { name: string; slug: string | null; price: number }[] }[]>([]);
   const [tryOnPicks, setTryOnPicks] = useState<string[]>(() => lsGet<string[]>(`fashion_picks_${slug}`, []));
 
   const [activeProduct, setActiveProduct] = useState<Product | null>(null);
@@ -128,6 +129,16 @@ export function Storefront() {
     fetch(`/api/public/store/${encodeURIComponent(slug)}/fashion/eligible`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (alive && d?.items) setFashionEligibleIds(new Set((d.items as { id: string }[]).map((i) => i.id))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [slug]);
+
+  // Lookbook (ADR-104 Bloco 3): looks publicados com a foto do modelo vestindo.
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/looks`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && Array.isArray(d?.looks)) setLooks(d.looks); })
       .catch(() => {});
     return () => { alive = false; };
   }, [slug]);
@@ -392,6 +403,24 @@ export function Storefront() {
                 </div>
               </section>
             ))}
+
+            {/* Lookbook (ADR-104 Bloco 3): looks montados pela loja, com o modelo vestindo. */}
+            {looks.length > 0 && (
+              <section className="mt-8">
+                <h2 className="mb-3 text-lg font-semibold tracking-tight">Looks da vitrine</h2>
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {looks.map((l) => (
+                    <div key={l.id} className="w-56 shrink-0 overflow-hidden rounded-3xl border" style={{ borderColor: hexToRgba(accent, 0.3) }}>
+                      <img src={l.image} alt={l.title} loading="lazy" className="h-72 w-full object-cover" />
+                      <div className="p-3">
+                        <p className="truncate text-sm font-semibold">{l.title}</p>
+                        {l.items.length > 0 && <p className="mt-0.5 line-clamp-2 text-xs opacity-70">{l.items.map((i) => i.name).join(' + ')}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* Grid */}
             <div className="mt-8">

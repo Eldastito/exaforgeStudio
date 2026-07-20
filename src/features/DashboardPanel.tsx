@@ -110,6 +110,64 @@ type Checklist = { items: ChecklistItem[]; completed: number; total: number; pct
 
 const COLLAPSED_KEY = 'zappflow_setup_collapsed';
 const DONE_ACK_KEY = 'zappflow_setup_done_ack';
+const QUICKSTART_DISMISS_KEY = 'zappflow_quickstart_dismissed';
+
+/**
+ * Card de onboarding do Quick-Start no Dashboard (ADR-093 §1). O "empurrão"
+ * opcional pós-cadastro: aplica em 1 clique o pacote da vertical da org (áreas,
+ * cadências, automações, FAQ). Some depois de aplicado ou dispensado.
+ */
+function QuickStartCard() {
+  const setViewMode = useStore(s => s.setViewMode);
+  const [status, setStatus] = useState<any | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(QUICKSTART_DISMISS_KEY) === '1'; } catch { return false; } });
+
+  useEffect(() => {
+    apiFetch('/api/quickstart/status').then(r => r.json()).then(d => { if (d && !d.error) setStatus(d); }).catch(() => {});
+  }, []);
+
+  if (dismissed || !status || status.applied || !status.pack) return null;
+  const s = status.pack.summary || {};
+
+  const dismiss = () => { try { localStorage.setItem(QUICKSTART_DISMISS_KEY, '1'); } catch {} setDismissed(true); };
+  const apply = async () => {
+    setApplying(true);
+    try {
+      const r = await apiFetch('/api/quickstart/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vertical: status.vertical || status.pack.vertical }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível aplicar.'); return; }
+      toast.success('Configuração inicial aplicada! 🚀');
+      setStatus((prev: any) => ({ ...prev, applied: true }));
+    } catch (e) { toast.error('Erro ao aplicar a configuração.'); }
+    finally { setApplying(false); }
+  };
+
+  return (
+    <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/10 to-slate-900/40 p-4 md:p-6 relative">
+      <button onClick={dismiss} className="absolute top-3 right-3 text-zinc-500 hover:text-zinc-300" aria-label="Dispensar"><X className="w-4 h-4" /></button>
+      <div className="flex items-start gap-3">
+        <div className="rounded-xl bg-indigo-500/20 p-2 mt-0.5"><Rocket className="w-5 h-5 text-indigo-300" /></div>
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-semibold text-white">Configure sua conta em 1 clique</p>
+          <p className="text-sm text-zinc-400 mt-0.5">Aplica o pacote do seu segmento (<strong className="text-zinc-200">{status.pack.label}</strong>): áreas de atendimento, cadências de follow-up, automações recomendadas e uma base de FAQ pra IA.</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500 mt-2">
+            {s.areas > 0 && <span>• {s.areas} área(s)</span>}
+            {s.cadences > 0 && <span>• {s.cadences} cadência(s)</span>}
+            {s.automations > 0 && <span>• {s.automations} automação(ões)</span>}
+            {s.faq > 0 && <span>• {s.faq} FAQ</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <button onClick={apply} disabled={applying} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-60">
+              {applying ? 'Aplicando…' : 'Aplicar configuração inicial'}
+            </button>
+            <button onClick={() => setViewMode('settings' as any)} className="text-sm text-zinc-400 hover:text-zinc-200">Prefiro configurar manualmente</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SetupChecklist() {
   const setViewMode = useStore(s => s.setViewMode);
@@ -389,6 +447,7 @@ export function DashboardPanel() {
           </div>
         </motion.div>
 
+        <QuickStartCard />
         <SetupChecklist />
 
         {planAlerts.length > 0 && (

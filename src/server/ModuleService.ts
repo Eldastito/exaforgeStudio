@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { VERTICALS, OPTIONAL_MODULES, ADDON_MODULES, getVertical } from "./verticals.js";
 import { PlanService } from "./PlanService.js";
+import { LgpdService } from "./LgpdService.js";
 
 // Gating de MÓDULOS por organização. Define quais módulos opcionais cada org
 // enxerga/usa, a partir da vertical escolhida (com override manual depois).
@@ -168,6 +169,9 @@ export class ModuleService {
     }
     db.prepare("UPDATE organization_settings SET vertical = ?, enabled_modules = ? WHERE organization_id = ?")
       .run(v.key, JSON.stringify(modules), orgId);
+    // Pré-popula o consentimento LGPD conforme a vertical (ADR-093 §3) — só se
+    // ainda não configurado (não sobrescreve ajuste do dono).
+    try { LgpdService.seedConsentForVertical(orgId, v.key); } catch (e) { /* noop */ }
   }
 
   /** Salva o override manual de módulos (Configurações › Módulos). */

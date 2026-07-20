@@ -56,9 +56,7 @@ export function SettingsView() {
       <div className="w-64 border-r border-zinc-800 bg-zinc-900/30 p-4 overflow-y-auto">
         <h3 className="zf-data-label mb-4 px-3">Configurações</h3>
         <nav className="space-y-1">
-          <button onClick={() => setActiveTab('quickstart')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'quickstart' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
-            <Rocket className="w-4 h-4" /> Quick-Start
-          </button>
+          {/* Quick-Start saiu das abas (ADR-093 §1) — virou card de onboarding no Dashboard. */}
           <button onClick={() => setActiveTab('empresa')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'empresa' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Briefcase className="w-4 h-4" /> Empresa
           </button>
@@ -209,7 +207,6 @@ export function SettingsView() {
           {activeTab === 'cobranca' && <BillingPanel />}
 
           {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('cobranca')} />}
-          {activeTab === 'quickstart' && <QuickStartPanel />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
           {activeTab === 'radar' && <RadarSettingsPanel />}
@@ -984,6 +981,7 @@ function LgpdPanel() {
   const [consentConfig, setConsentConfig] = useState<{ categories: string[]; bannerText: string; policyVersion: string } | null>(null);
   const [consentSummary, setConsentSummary] = useState<{ type: string; granted: number; revoked: number }[]>([]);
   const [newCategory, setNewCategory] = useState('');
+  const [consentMode, setConsentMode] = useState<'simples' | 'avancado'>('simples');
 
   useEffect(() => {
     apiFetch('/api/lgpd/settings').then(r => r.json()).then(setSettings).catch(() => {});
@@ -1005,7 +1003,18 @@ function LgpdPanel() {
 
   const CATEGORY_LABELS: Record<string, string> = {
     marketing: 'Marketing', dados_pessoais: 'Dados pessoais', perfilamento: 'Perfilamento',
-    comunicacoes: 'Comunicações', compartilhamento: 'Compartilhamento',
+    comunicacoes: 'Comunicações', compartilhamento: 'Compartilhamento', dados_sensiveis: 'Dados sensíveis',
+  };
+
+  // Modo simples: 3 chaves em linguagem do dono, mapeadas às categorias.
+  const SIMPLE_TOGGLES: { key: string; label: string; hint: string }[] = [
+    { key: 'dados_pessoais', label: 'Coleto dados pra atender', hint: 'Nome, telefone, endereço etc. — o básico pra vender e entregar.' },
+    { key: 'marketing', label: 'Mando marketing/promoções', hint: 'Campanhas, ofertas e novidades pelos canais do cliente.' },
+    { key: 'perfilamento', label: 'Faço perfilamento de compra', hint: 'Uso o histórico pra recomendar e personalizar (ex.: recompra).' },
+  ];
+  const toggleSimple = (key: string) => {
+    const has = consentConfig!.categories.includes(key);
+    saveConsent({ categories: has ? consentConfig!.categories.filter(c => c !== key) : [...consentConfig!.categories, key] });
   };
 
   return (
@@ -1040,7 +1049,35 @@ function LgpdPanel() {
 
         {consentConfig && (
           <div className="border-t border-zinc-800 pt-4 space-y-3">
-            <p className="text-sm font-medium text-zinc-100">📋 Consentimento granular</p>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-sm font-medium text-zinc-100">📋 Consentimento</p>
+              <div className="inline-flex rounded-lg border border-zinc-800 overflow-hidden text-xs">
+                <button onClick={() => setConsentMode('simples')} className={`px-3 py-1 ${consentMode === 'simples' ? 'bg-teal-500/15 text-teal-300' : 'text-zinc-400 hover:text-zinc-200'}`}>Simples</button>
+                <button onClick={() => setConsentMode('avancado')} className={`px-3 py-1 ${consentMode === 'avancado' ? 'bg-teal-500/15 text-teal-300' : 'text-zinc-400 hover:text-zinc-200'}`}>Avançado</button>
+              </div>
+            </div>
+
+            {consentMode === 'simples' ? (
+              <div className="space-y-2">
+                <p className="text-xs text-zinc-500">Marque o que o seu negócio faz com os dados dos clientes. A gente cuida das categorias por trás.</p>
+                {SIMPLE_TOGGLES.map(t => {
+                  const on = consentConfig.categories.includes(t.key);
+                  return (
+                    <div key={t.key} className="flex items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                      <div><p className="text-sm text-zinc-200">{t.label}</p><p className="text-[11px] text-zinc-500">{t.hint}</p></div>
+                      <button onClick={() => toggleSimple(t.key)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {consentConfig.categories.includes('dados_sensiveis') && (
+                  <p className="text-[11px] text-amber-400/80">⚠️ Seu segmento trata <strong>dados sensíveis</strong> (ex.: saúde) — base legal reforçada. Veja o modo avançado.</p>
+                )}
+                <p className="text-[11px] text-zinc-500">Precisa de banner, versão de política ou mais categorias? Use o modo <strong>Avançado</strong>.</p>
+              </div>
+            ) : (
+            <>
             <p className="text-xs text-zinc-500">Configure as categorias de consentimento rastreadas por contato. Use em Contatos para registrar/revogar.</p>
 
             <div className="flex flex-wrap gap-2">
@@ -1094,6 +1131,8 @@ function LgpdPanel() {
                   ))}
                 </div>
               </div>
+            )}
+            </>
             )}
           </div>
         )}

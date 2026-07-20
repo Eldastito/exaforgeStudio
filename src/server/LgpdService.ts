@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
+import { CONSENT_BY_VERTICAL } from "./verticals.js";
 
 /**
  * LGPD — retenção de dados e direitos do titular.
@@ -130,6 +131,20 @@ export class LgpdService {
       db.prepare(`UPDATE organization_settings SET consent_banner_text = ? WHERE organization_id = ?`).run(config.bannerText, orgId);
     if (config.policyVersion !== undefined)
       db.prepare(`UPDATE organization_settings SET consent_policy_version = ? WHERE organization_id = ?`).run(config.policyVersion, orgId);
+  }
+
+  /**
+   * Pré-popula as categorias de consentimento conforme a vertical (ADR-093 §3).
+   * Só age se a org AINDA NÃO tem consent_categories — nunca sobrescreve uma
+   * config que o dono já ajustou (o controlador dos dados é ele). Chamado ao
+   * definir a vertical (ModuleService.applyVertical).
+   */
+  static seedConsentForVertical(orgId: string, vertical?: string | null): boolean {
+    const o = db.prepare(`SELECT consent_categories FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    if (!o || (o.consent_categories != null && o.consent_categories !== "")) return false; // já configurado — respeita
+    const cats = CONSENT_BY_VERTICAL[vertical || "outro"] || CONSENT_BY_VERTICAL.outro;
+    db.prepare(`UPDATE organization_settings SET consent_categories = ? WHERE organization_id = ?`).run(JSON.stringify(cats), orgId);
+    return true;
   }
 
   static getConsentSummary(orgId: string): { type: string; granted: number; revoked: number }[] {

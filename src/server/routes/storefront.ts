@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { chat, isAIConfigured } from "../llm.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
+import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -505,6 +506,37 @@ router.delete("/products/:id/images/:imageId", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);
   db.prepare("DELETE FROM product_images WHERE id = ? AND organization_id = ? AND product_service_id = ?")
     .run(req.params.imageId, orgId, req.params.id);
+  res.json({ ok: true });
+});
+
+// ============================================================================
+// Avatares PRESET do provador (ADR-103, item #13) — o lojista sobe modelos
+// (por tipo de corpo) que o cliente escolhe em vez de subir a própria foto.
+// A imagem sobe por POST /api/uploads/image (devolve /media/...) e o URL é
+// passado aqui. `rightsConfirmed` registra a responsabilidade sobre a imagem.
+// ============================================================================
+router.get("/fashion/preset-avatars", (req: AuthRequest, res): any => {
+  res.json({ avatars: FashionPresetAvatarService.list(getOrgId(req)) });
+});
+
+router.post("/fashion/preset-avatars", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  if (!b.rightsConfirmed) return res.status(400).json({ error: "Confirme que você tem direitos de uso da imagem." });
+  const r = FashionPresetAvatarService.create(getOrgId(req), { label: b.label, bodyType: b.bodyType, imageUrl: b.imageUrl });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json({ id: r.id });
+});
+
+router.put("/fashion/preset-avatars/:id", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const ok = FashionPresetAvatarService.update(getOrgId(req), req.params.id, { label: b.label, bodyType: b.bodyType, active: b.active, position: b.position });
+  if (!ok) return res.status(404).json({ error: "Avatar não encontrado." });
+  res.json({ ok: true });
+});
+
+router.delete("/fashion/preset-avatars/:id", (req: AuthRequest, res): any => {
+  const ok = FashionPresetAvatarService.remove(getOrgId(req), req.params.id);
+  if (!ok) return res.status(404).json({ error: "Avatar não encontrado." });
   res.json({ ok: true });
 });
 

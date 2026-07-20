@@ -1,10 +1,11 @@
 # ADR-104 — Vitrinista IA: fotos de catálogo tratadas + looks com avatar
 
-**Status:** Aprovado. Blocos 1 e 2 implementados. Bloco 3 **backend** implementado
-(fila de geração das 2 poses do avatar vestindo o look aprovado, escolha do
-avatar por tom de pele, teto de estúdio, publicar × publicar-direto, lookbook
-público); falta o **frontend do Bloco 3** (fiar o Kanban à geração/publicação,
-tom de pele no cadastro de avatar, e renderizar o lookbook na vitrine).
+**Status:** Implementado (Blocos 1, 2 e 3, backend + frontend). Ciclo completo:
+peça chega → IA cadastra (B1) → IA monta looks (B2) → gerente aprova no Kanban →
+IA veste o avatar e gera 2 poses (B3) → publica na galeria de looks da vitrine.
+O Kanban gera/publica os looks (com dropdown de avatar e status de geração), o
+cadastro de avatar tem tom de pele, há toggle "publicar direto", e a vitrine
+pública renderiza o lookbook.
 
 **Refinamentos de campo (Bloco 3):** 2 imagens por look (2 poses do mesmo
 modelo); a IA escolhe o avatar por **tom de pele** (clara/média/escura) que

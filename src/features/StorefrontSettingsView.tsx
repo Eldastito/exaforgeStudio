@@ -23,6 +23,7 @@ type StorefrontSettings = {
   auto_hide_out_of_stock?: boolean;
   fashion_studio_enabled?: boolean;
   fashion_daily_generation_limit?: number | null;
+  vitrine_auto_publish?: boolean;
 };
 
 type SaleMode = 'unit' | 'slice' | 'size' | 'weight' | 'volume';
@@ -329,6 +330,7 @@ export function StorefrontSettingsView() {
           ai_catalog_photos_enabled: !!data.ai_catalog_photos_enabled,
           auto_hide_out_of_stock: !!data.auto_hide_out_of_stock,
           fashion_studio_enabled: !!data.fashion_studio_enabled,
+          vitrine_auto_publish: !!data.vitrine_auto_publish,
           default_mode: (data.default_mode === 'night' ? 'night' : 'day'),
         });
       })
@@ -370,6 +372,7 @@ export function StorefrontSettingsView() {
           auto_hide_out_of_stock: settings.auto_hide_out_of_stock,
           fashion_studio_enabled: settings.fashion_studio_enabled,
           fashion_daily_generation_limit: settings.fashion_daily_generation_limit ?? null,
+          vitrine_auto_publish: settings.vitrine_auto_publish,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -381,6 +384,7 @@ export function StorefrontSettingsView() {
           ai_catalog_photos_enabled: !!data.ai_catalog_photos_enabled,
           auto_hide_out_of_stock: !!data.auto_hide_out_of_stock,
           fashion_studio_enabled: !!data.fashion_studio_enabled,
+          vitrine_auto_publish: !!data.vitrine_auto_publish,
           default_mode: (data.default_mode === 'night' ? 'night' : 'day'),
         });
         toast.success('Configurações da loja salvas.');
@@ -668,6 +672,19 @@ export function StorefrontSettingsView() {
                       />
                       <p className="text-[11px] text-zinc-500 mt-1">Cada imagem do provador custa uma chamada de IA — o limite protege o custo e evita abuso.</p>
                     </Field>
+                    <div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                      <div className="pr-3">
+                        <p className="text-sm font-medium text-zinc-100">Publicar looks direto</p>
+                        <p className="text-[11px] text-zinc-500">Ligado: assim que a IA gera as fotos do look, ele já vai pra vitrine. Desligado (padrão): você revisa e clica em <em>Publicar</em>.</p>
+                      </div>
+                      <button
+                        type="button" role="switch" aria-checked={!!settings.vitrine_auto_publish}
+                        onClick={() => setField('vitrine_auto_publish', !settings.vitrine_auto_publish)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${settings.vitrine_auto_publish ? 'bg-indigo-600' : 'bg-zinc-700'}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.vitrine_auto_publish ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
                     <PresetAvatarsManager />
                     <VitrineLooksKanban />
                     <FashionDashboard />
@@ -1376,6 +1393,7 @@ export async function uploadImageFile(file: File): Promise<string> {
 const BODY_TYPE_LABELS: Record<string, string> = {
   magro: 'Magro', atletico: 'Atlético', medio: 'Médio', plus: 'Plus', outro: 'Outro',
 };
+const SKIN_TONE_LABELS: Record<string, string> = { clara: 'Pele clara', media: 'Pele média', escura: 'Pele escura' };
 
 // Gestão dos avatares PRESET do provador (ADR-103, item #13). O lojista sobe
 // modelos (por tipo de corpo) que o cliente escolhe em vez de subir a própria
@@ -1384,6 +1402,7 @@ function PresetAvatarsManager() {
   const [items, setItems] = useState<any[]>([]);
   const [label, setLabel] = useState('');
   const [bodyType, setBodyType] = useState('medio');
+  const [skinTone, setSkinTone] = useState('media');
   const [rights, setRights] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -1399,7 +1418,7 @@ function PresetAvatarsManager() {
       const url = await uploadImageFile(file);
       const res = await apiFetch('/api/storefront/fashion/preset-avatars', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: label || 'Modelo', bodyType, imageUrl: url, rightsConfirmed: true }),
+        body: JSON.stringify({ label: label || 'Modelo', bodyType, skinTone, imageUrl: url, rightsConfirmed: true }),
       });
       if (res.ok) { toast.success('Avatar adicionado!'); setLabel(''); setRights(false); load(); }
       else { const err = await res.json().catch(() => ({})); toast.error(err.error || 'Falha ao adicionar o avatar.'); }
@@ -1433,7 +1452,7 @@ function PresetAvatarsManager() {
               <div className="mt-1.5 flex items-center justify-between gap-1">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium text-zinc-200">{a.label || 'Modelo'}</p>
-                  <p className="text-[10px] text-zinc-500">{BODY_TYPE_LABELS[a.body_type] || a.body_type}</p>
+                  <p className="text-[10px] text-zinc-500">{BODY_TYPE_LABELS[a.body_type] || a.body_type} · {SKIN_TONE_LABELS[a.skin_tone] || 'Pele média'}</p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => toggleActive(a)} title={a.active ? 'Ocultar da vitrine' : 'Mostrar na vitrine'} className="text-zinc-400 hover:text-zinc-200">
@@ -1458,6 +1477,10 @@ function PresetAvatarsManager() {
             className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
             {Object.entries(BODY_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
+          <select value={skinTone} onChange={e => setSkinTone(e.target.value)} title="Tom de pele — a IA usa para casar o modelo com as cores das roupas"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+            {Object.entries(SKIN_TONE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
         </div>
         <label className="flex items-start gap-2 text-[11px] text-zinc-400">
           <input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)} className="mt-0.5" />
@@ -1480,7 +1503,7 @@ function PresetAvatarsManager() {
 // ============================================================================
 const VITRINE_COLS: { key: string; label: string; hint: string }[] = [
   { key: 'suggested', label: 'Sugeridos pela IA', hint: 'Revise e aprove os que gostou' },
-  { key: 'approved', label: 'Aprovados', hint: 'Prontos para gerar a foto (em breve)' },
+  { key: 'approved', label: 'Aprovados', hint: 'A IA gera 2 fotos do modelo; publique quando ficarem prontas' },
   { key: 'published', label: 'Publicados', hint: 'Já na vitrine com a foto do modelo' },
 ];
 const brl = (n: number) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
@@ -1495,11 +1518,21 @@ function VitrineLooksKanban() {
   const [composing, setComposing] = useState(false);           // criando um look manual
   const [composeIds, setComposeIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
+  const [avatars, setAvatars] = useState<any[]>([]);           // avatares preset (dropdown de escolha)
 
   const load = () => apiFetch('/api/storefront/fashion/vitrine/looks')
     .then(r => r.json()).then(d => setLooks(d.looks || [])).catch(() => {}).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
+  useEffect(() => { apiFetch('/api/storefront/fashion/preset-avatars').then(r => r.json()).then(d => setAvatars(d.avatars || [])).catch(() => {}); }, []);
   const loadProducts = () => { if (products.length) return; apiFetch('/api/storefront/products').then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : [])).catch(() => {}); };
+
+  // Enquanto houver look gerando (fila), atualiza a lista periodicamente para
+  // refletir quando as 2 poses ficam prontas (sem WebSocket — polling simples).
+  useEffect(() => {
+    if (!looks.some(l => ['queued', 'processing'].includes(l.generationStatus))) return;
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [looks]);
 
   const suggest = async () => {
     setSuggesting(true);
@@ -1523,6 +1556,34 @@ function VitrineLooksKanban() {
     await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}`, { method: 'DELETE' });
     load();
   };
+
+  // Aprovar = mover pra "Aprovados" E disparar a geração das fotos (fila).
+  const approve = async (look: any) => {
+    setLooks(prev => prev.map(l => l.id === look.id ? { ...l, status: 'approved', generationStatus: 'queued' } : l));
+    await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'approved' }) });
+    const res = await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}/generate`, { method: 'POST' });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Não consegui iniciar a geração das fotos.'); }
+    load();
+  };
+  const generate = async (look: any) => {
+    setLooks(prev => prev.map(l => l.id === look.id ? { ...l, generationStatus: 'queued' } : l));
+    const res = await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}/generate`, { method: 'POST' });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao gerar as fotos.'); }
+    load();
+  };
+  const publish = async (look: any) => {
+    const res = await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}/publish`, { method: 'POST' });
+    if (res.ok) { toast.success('Look publicado na vitrine!'); load(); }
+    else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao publicar.'); }
+  };
+  const unpublish = async (look: any) => {
+    await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}/unpublish`, { method: 'POST' });
+    load();
+  };
+  const setAvatar = async (look: any, presetAvatarId: string | null) => {
+    setLooks(prev => prev.map(l => l.id === look.id ? { ...l, presetAvatarId } : l));
+    await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ presetAvatarId }) });
+  };
   const startCompose = () => { loadProducts(); setComposeIds([]); setComposing(true); };
   const createManual = async () => {
     if (!composeIds.length) return;
@@ -1542,7 +1603,7 @@ function VitrineLooksKanban() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-zinc-100 flex items-center gap-1.5"><Sparkles className="h-4 w-4 text-indigo-400" /> Vitrinista IA — looks da loja</p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">A IA combina as peças novas em looks. Aprove os que gostar (ou diga <em>“montar vitrine”</em> no WhatsApp). A foto do modelo vestindo cada look aprovado vem no próximo passo.</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">A IA combina as peças novas em looks. Ao <strong>aprovar</strong>, a IA gera 2 fotos do modelo vestindo o look — publique na vitrine com um clique. Você também pode dizer <em>“montar vitrine”</em> no WhatsApp.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={startCompose} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800">
@@ -1586,10 +1647,14 @@ function VitrineLooksKanban() {
                 )}
                 {byStatus(col.key).map(look => (
                   <VitrineLookCard
-                    key={look.id} look={look}
+                    key={look.id} look={look} avatars={avatars}
                     onDragStart={() => setDragId(look.id)} onDragEnd={() => setDragId(null)}
-                    onApprove={col.key === 'suggested' ? () => move(look, 'approved') : undefined}
+                    onApprove={col.key === 'suggested' ? () => approve(look) : undefined}
                     onBack={col.key === 'approved' ? () => move(look, 'suggested') : undefined}
+                    onGenerate={col.key === 'approved' ? () => generate(look) : undefined}
+                    onPublish={col.key === 'approved' ? () => publish(look) : undefined}
+                    onUnpublish={col.key === 'published' ? () => unpublish(look) : undefined}
+                    onSetAvatar={col.key === 'approved' ? (id: string | null) => setAvatar(look, id) : undefined}
                     onRemove={col.key !== 'published' ? () => remove(look) : undefined}
                     onEdit={col.key !== 'published' ? () => { loadProducts(); setEditing(editing === look.id ? null : look.id); } : undefined}
                     editing={editing === look.id}
@@ -1629,7 +1694,8 @@ function ProductPickList({ products, ids, onToggle }: { products: any[]; ids: st
   );
 }
 
-function VitrineLookCard({ look, onApprove, onBack, onRemove, onEdit, onDragStart, onDragEnd, editing, products, onSavedItems }: any) {
+const GEN_LABEL: Record<string, string> = { queued: 'Na fila…', processing: 'Gerando fotos…', failed: 'Falhou', done: 'Fotos prontas' };
+function VitrineLookCard({ look, avatars = [], onApprove, onBack, onGenerate, onPublish, onUnpublish, onSetAvatar, onRemove, onEdit, onDragStart, onDragEnd, editing, products, onSavedItems }: any) {
   const [ids, setIds] = useState<string[]>(look.items.map((i: any) => i.productId));
   const [saving, setSaving] = useState(false);
   useEffect(() => { setIds(look.items.map((i: any) => i.productId)); }, [look.id, editing]);
@@ -1657,8 +1723,13 @@ function VitrineLookCard({ look, onApprove, onBack, onRemove, onEdit, onDragStar
         </div>
       </div>
 
-      {look.publishedImageUrl ? (
-        <img src={look.publishedImageUrl} alt={look.title} className="mt-2 w-full rounded object-cover border border-zinc-800" />
+      {(look.images && look.images.length) ? (
+        // Fotos do modelo vestindo o look (2 poses) — quando publicado, a 1ª é a capa.
+        <div className="mt-2 flex gap-1 overflow-x-auto">
+          {look.images.map((url: string, i: number) => (
+            <img key={i} src={url} alt={`${look.title} pose ${i + 1}`} className="h-28 w-20 shrink-0 rounded object-cover border border-zinc-800 bg-zinc-950" />
+          ))}
+        </div>
       ) : (
         <div className="mt-2 flex gap-1 overflow-x-auto">
           {look.items.map((it: any) => (
@@ -1666,6 +1737,13 @@ function VitrineLookCard({ look, onApprove, onBack, onRemove, onEdit, onDragStar
               className="h-14 w-12 shrink-0 rounded object-cover border border-zinc-800 bg-zinc-950" />
           ))}
         </div>
+      )}
+
+      {['queued', 'processing', 'failed'].includes(look.generationStatus) && (
+        <p className={`mt-1.5 inline-flex items-center gap-1 text-[10px] ${look.generationStatus === 'failed' ? 'text-red-400' : 'text-indigo-300'}`}>
+          {['queued', 'processing'].includes(look.generationStatus) && <Loader2 className="h-3 w-3 animate-spin" />}
+          {GEN_LABEL[look.generationStatus]}
+        </p>
       )}
 
       {editing && (
@@ -1680,12 +1758,35 @@ function VitrineLookCard({ look, onApprove, onBack, onRemove, onEdit, onDragStar
       )}
 
       {!editing && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {onApprove && <button onClick={onApprove} className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-500">Aprovar →</button>}
-          {onBack && <button onClick={onBack} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">← Voltar</button>}
-          {onEdit && <button onClick={onEdit} className="inline-flex items-center gap-1 rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"><Pencil className="h-3 w-3" /> Peças</button>}
-          {onRemove && <button onClick={onRemove} title="Excluir" className="ml-auto text-red-400 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
-        </div>
+        <>
+          {/* Escolha do modelo (só na coluna Aprovados): fixo ou "IA escolhe" pelo tom de pele. */}
+          {onSetAvatar && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500 shrink-0">Modelo:</span>
+              <select value={look.presetAvatarId || ''} onChange={(e) => onSetAvatar(e.target.value || null)}
+                className="min-w-0 flex-1 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-[11px] text-zinc-200">
+                <option value="">IA escolhe (tom de pele)</option>
+                {avatars.map((a: any) => <option key={a.id} value={a.id}>{a.label || 'Modelo'} · {a.skin_tone || 'media'}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {onApprove && <button onClick={onApprove} className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-500">Aprovar + gerar fotos</button>}
+            {onBack && <button onClick={onBack} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">← Voltar</button>}
+            {/* Aprovados: gerar (ou regerar) e publicar quando as fotos estão prontas. */}
+            {onGenerate && !['queued', 'processing'].includes(look.generationStatus) && (
+              <button onClick={onGenerate} className="inline-flex items-center gap-1 rounded border border-indigo-500/50 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/10">
+                <Sparkles className="h-3 w-3" /> {look.images?.length ? 'Gerar de novo' : 'Gerar fotos'}
+              </button>
+            )}
+            {onPublish && look.images?.length > 0 && (
+              <button onClick={onPublish} className="rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-indigo-500">Publicar na vitrine</button>
+            )}
+            {onUnpublish && <button onClick={onUnpublish} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">Despublicar</button>}
+            {onEdit && <button onClick={onEdit} className="inline-flex items-center gap-1 rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"><Pencil className="h-3 w-3" /> Peças</button>}
+            {onRemove && <button onClick={onRemove} title="Excluir" className="ml-auto text-red-400 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
+          </div>
+        </>
       )}
     </div>
   );

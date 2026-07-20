@@ -56,9 +56,7 @@ export function SettingsView() {
       <div className="w-64 border-r border-zinc-800 bg-zinc-900/30 p-4 overflow-y-auto">
         <h3 className="zf-data-label mb-4 px-3">Configurações</h3>
         <nav className="space-y-1">
-          <button onClick={() => setActiveTab('quickstart')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'quickstart' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
-            <Rocket className="w-4 h-4" /> Quick-Start
-          </button>
+          {/* Quick-Start saiu das abas (ADR-093 §1) — virou card de onboarding no Dashboard. */}
           <button onClick={() => setActiveTab('empresa')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'empresa' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Briefcase className="w-4 h-4" /> Empresa
           </button>
@@ -209,7 +207,6 @@ export function SettingsView() {
           {activeTab === 'cobranca' && <BillingPanel />}
 
           {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('cobranca')} />}
-          {activeTab === 'quickstart' && <QuickStartPanel />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
           {activeTab === 'radar' && <RadarSettingsPanel />}

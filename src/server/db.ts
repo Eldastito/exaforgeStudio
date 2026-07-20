@@ -466,6 +466,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE users ADD COLUMN mfa_pending_secret TEXT`); } catch(e){}   // durante o setup, antes de confirmar
   try { db.exec(`ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT`); } catch(e){}     // JSON cifrado de códigos de backup
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN onboarding_status TEXT DEFAULT 'pending'`); } catch(e){}
+  // ADR-093 §1: sinaliza que o Quick-Start já foi aplicado — o card de
+  // onboarding no Dashboard some depois disso (a aba saiu de Configurações).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN quickstart_applied INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN segment TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN size_range TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN billing_status TEXT DEFAULT 'active'`); } catch(e){}

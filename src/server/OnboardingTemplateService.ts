@@ -495,6 +495,9 @@ export class OnboardingTemplateService {
     // org já refinou manualmente).
     try { ModuleService.applyVertical(orgId, pack.vertical); } catch (e) { /* noop */ }
 
+    // 6) Marca o Quick-Start como aplicado (ADR-093 §1) — o card do Dashboard some.
+    try { db.prepare(`UPDATE organization_settings SET quickstart_applied = 1 WHERE organization_id = ?`).run(orgId); } catch (e) { /* noop */ }
+
     return report;
   }
 }

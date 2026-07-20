@@ -5,6 +5,8 @@ import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
 import { PaymentService } from "./PaymentService.js";
+import { PlanService } from "./PlanService.js";
+import { AsaasService } from "./AsaasService.js";
 import { OrdersService } from "./OrdersService.js";
 import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
 import { QuoteService } from "./QuoteService.js";
@@ -146,6 +148,100 @@ export class Scheduler {
     try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     this.trialPass();
+    await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
+  }
+
+  /**
+   * Régua de inadimplência ZappFlow → lojista (ADR-091 §8, Bloco B). Percorre as
+   * orgs com assinatura ASAAS em cobrança e avança o estágio conforme os dias em
+   * relação ao vencimento (current_period_end). Idempotente: só age quando o
+   * estágio MUDA (billing_dunning_stage). Mapeia para o nosso modelo de estados:
+   *  D-5/D-1 → avisos (past_due só a partir do atraso)
+   *  D+1..D+7 → past_due (grace: IA continua respondendo) + avisos escalados
+   *  D+10 → suspended (IA para via aiAllowed + somente-leitura via middleware)
+   *  D+30 → cancelamento contratual (cancela a assinatura no ASAAS)
+   *
+   * MONEY-CRITICAL: antes de suspender/cancelar (D+10+), RE-CONSULTA o ASAAS —
+   * um webhook perdido NUNCA pode bloquear um lojista que de fato pagou.
+   */
+  static async billingDunningPass() {
+    const orgs = db.prepare(`
+      SELECT organization_id, current_period_end, billing_status, billing_dunning_stage
+      FROM organization_settings
+      WHERE payment_provider = 'asaas' AND external_subscription_id IS NOT NULL
+        AND billing_status IN ('active','past_due')
+        AND current_period_end IS NOT NULL AND deleted_at IS NULL`).all() as any[];
+    const DAY = 86400000;
+    for (const o of orgs) {
+      try {
+        const due = new Date(String(o.current_period_end).slice(0, 10) + "T00:00:00Z").getTime();
+        if (isNaN(due)) continue;
+        const daysOverdue = Math.floor((Date.now() - due) / DAY); // <0 = antes do vencimento
+        const stage = this.dunningStage(daysOverdue);
+        if (!stage || stage === o.billing_dunning_stage) continue; // idempotente: só na mudança
+
+        // Antes de qualquer suspensão/cancelamento, confirma no ASAAS que está mesmo em atraso.
+        if (daysOverdue >= 10) {
+          const paid = await this.asaasSaysPaid(o.organization_id, String(o.current_period_end).slice(0, 10)).catch(() => false);
+          if (paid) { PlanService.setBillingStatus(o.organization_id, "active"); this.markDunning(o.organization_id, null); continue; }
+        }
+        await this.applyDunningStage(o.organization_id, daysOverdue, stage);
+        this.markDunning(o.organization_id, stage);
+      } catch (e) { console.error("[Scheduler] dunning de uma org falhou", e); }
+    }
+  }
+
+  /** Rótulo do estágio da régua a partir dos dias de atraso (bandas exclusivas). */
+  private static dunningStage(daysOverdue: number): string | null {
+    if (daysOverdue >= 30) return "D+30";
+    if (daysOverdue >= 10) return "D+10";
+    if (daysOverdue >= 7) return "D+7";
+    if (daysOverdue >= 5) return "D+5";
+    if (daysOverdue >= 3) return "D+3";
+    if (daysOverdue >= 1) return "D+1";
+    if (daysOverdue >= -1) return "D-1";   // véspera / dia do vencimento
+    if (daysOverdue >= -6) return "D-5";   // aviso preventivo
+    return null;
+  }
+
+  /** Aplica o efeito do estágio (transição de billing + notificação in-app deduplicada). */
+  private static async applyDunningStage(orgId: string, daysOverdue: number, stage: string) {
+    if (stage === "D+30") {
+      try { await AsaasService.cancelSubscription(orgId); } catch (e) { PlanService.setBillingStatus(orgId, "cancelled"); }
+      NotificationService.push({ organizationId: orgId, type: "alert", title: "🚫 Assinatura cancelada por falta de pagamento", message: "Sua conta foi cancelada. Seus dados ficam preservados por 30 dias. Regularize em Configurações → Cobrança para reativar.", dedupeKey: "billing:D+30", dedupeWindowMin: 1440 });
+      return;
+    }
+    if (stage === "D+10") {
+      PlanService.setBillingStatus(orgId, "suspended");
+      NotificationService.push({ organizationId: orgId, type: "alert", title: "⛔ Conta suspensa por falta de pagamento", message: "A IA parou de responder e a conta ficou em modo somente-leitura. Seus dados continuam visíveis. Pague a fatura em Configurações → Cobrança para reativar na hora.", dedupeKey: "billing:D+10", dedupeWindowMin: 1440 });
+      return;
+    }
+    // D+1..D+7: entra em atraso (past_due) mas a IA continua; avisos escalados.
+    if (daysOverdue >= 1) PlanService.setBillingStatus(orgId, "past_due");
+    const msgs: Record<string, { t: string; m: string }> = {
+      "D-5": { t: "🔔 Sua fatura vence em breve", m: "Sua mensalidade do ZappFlow vence em alguns dias. Deixe o pagamento em dia para não interromper o atendimento." },
+      "D-1": { t: "🔔 Sua fatura vence amanhã", m: "A mensalidade do ZappFlow vence em 1 dia. Pague em Configurações → Cobrança." },
+      "D+1": { t: "⚠️ Fatura em atraso", m: "Sua mensalidade venceu ontem. Regularize em Configurações → Cobrança para manter o acesso." },
+      "D+3": { t: "⚠️ Fatura ainda em atraso", m: "Sua mensalidade segue em aberto. Evite a suspensão do atendimento automático regularizando agora." },
+      "D+5": { t: "⚠️ Vamos resolver?", m: "Sua fatura está atrasada há 5 dias. Fale com o suporte se precisar de parcelamento ou prorrogação." },
+      "D+7": { t: "⏳ Suspensão próxima", m: "Sua conta será suspensa em breve se a fatura não for paga. Regularize em Configurações → Cobrança." },
+    };
+    const n = msgs[stage];
+    if (n) NotificationService.push({ organizationId: orgId, type: "alert", title: n.t, message: n.m, dedupeKey: `billing:${stage}`, dedupeWindowMin: 1440 });
+  }
+
+  private static markDunning(orgId: string, stage: string | null) {
+    db.prepare(`UPDATE organization_settings SET billing_dunning_stage = ?, billing_dunning_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(stage, orgId);
+  }
+
+  /** Confirma no ASAAS se a fatura do ciclo atual foi paga (guarda anti-bloqueio indevido). */
+  private static async asaasSaysPaid(orgId: string, periodEnd: string): Promise<boolean> {
+    try {
+      const invs = await AsaasService.listInvoices(orgId);
+      const PAID = ["CONFIRMED", "RECEIVED", "RECEIVED_IN_CASH"];
+      // Paga se a fatura do vencimento atual (ou posterior) está confirmada.
+      return invs.some(i => PAID.includes(i.status) && String(i.dueDate).slice(0, 10) >= periodEnd);
+    } catch { return false; }
   }
 
   /**

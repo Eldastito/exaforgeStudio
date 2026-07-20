@@ -233,15 +233,22 @@ type Snapshot = {
   trialDaysLeft: number | null;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
+  paymentProvider?: string | null;
+  hasSubscription?: boolean;
   usage: { ai_this_month: number; contacts: number; channels: number; users: number };
   limits: any;
 };
+type Invoice = { id: string; status: string; value: number; dueDate: string; invoiceUrl: string };
 
 function BillingPanel() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [selecting, setSelecting] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<{ key: string; label: string; used: number; limit: number; pct: number; level: string }[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [cpfCnpj, setCpfCnpj] = useState('');
+  const [subscribing, setSubscribing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = () => {
     Promise.all([
@@ -252,9 +259,32 @@ function BillingPanel() {
       setPlans(Array.isArray(ps) ? ps : []);
       setSnap(sn && !sn.error ? sn : null);
       setAlerts(Array.isArray(al?.alerts) ? al.alerts : []);
+      if (sn?.hasSubscription) apiFetch('/api/plans/billing/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d?.invoices) ? d.invoices : [])).catch(() => {});
     });
   };
   useEffect(() => { load(); }, []);
+
+  const subscribe = async () => {
+    if (!cpfCnpj.trim()) { toast.error('Informe o CPF ou CNPJ do responsável.'); return; }
+    setSubscribing(true);
+    try {
+      const r = await apiFetch('/api/plans/billing/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cpfCnpj: cpfCnpj.trim() }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível ativar a assinatura.'); return; }
+      if (Array.isArray(d.invoices)) setInvoices(d.invoices);
+      toast.success('Assinatura ativada! Veja a fatura abaixo para pagar.');
+      load();
+    } catch (e) { toast.error('Erro ao ativar a assinatura.'); }
+    finally { setSubscribing(false); }
+  };
+
+  const cancelSubscription = async () => {
+    if (!(await confirmDialog('Cancelar assinatura? A conta entra em modo somente-leitura ao fim do período pago.', {}))) return;
+    setCancelling(true);
+    try { await apiFetch('/api/plans/billing/cancel', { method: 'POST' }); load(); toast.success('Assinatura cancelada.'); }
+    catch (e) { toast.error('Erro ao cancelar.'); }
+    finally { setCancelling(false); }
+  };
 
   const choose = async (planId: string) => {
     if (snap?.plan?.id === planId) return;
@@ -333,6 +363,53 @@ function BillingPanel() {
           </div>
         )}
       </div>
+
+      {/* Assinatura (ASAAS) — só quando há plano escolhido e não é cortesia */}
+      {snap?.plan && snap.plan.id !== 'cortesia' && (
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-1">Assinatura</h3>
+          {snap.hasSubscription ? (
+            <>
+              <p className="text-sm text-zinc-400 mb-4">Suas faturas do ZappFlow. O pagamento é confirmado automaticamente.</p>
+              {invoices.length === 0 ? (
+                <p className="text-sm text-zinc-500">Nenhuma fatura ainda.</p>
+              ) : (
+                <div className="space-y-2">
+                  {invoices.map(inv => (
+                    <div key={inv.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-sm">
+                      <div>
+                        <span className="text-zinc-200">R$ {Number(inv.value).toFixed(2)}</span>
+                        <span className="text-zinc-500 ml-2">venc. {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('pt-BR') : '—'}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`text-xs px-2 py-0.5 rounded ${['CONFIRMED','RECEIVED','RECEIVED_IN_CASH'].includes(inv.status) ? 'bg-emerald-500/15 text-emerald-300' : inv.status === 'OVERDUE' ? 'bg-red-500/15 text-red-300' : 'bg-amber-500/15 text-amber-300'}`}>{inv.status}</span>
+                        {inv.invoiceUrl && !['CONFIRMED','RECEIVED','RECEIVED_IN_CASH'].includes(inv.status) && (
+                          <a href={inv.invoiceUrl} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200 text-xs font-medium">Pagar →</a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={cancelSubscription} disabled={cancelling} className="mt-4 text-xs text-red-300/80 hover:text-red-300">
+                {cancelling ? 'Cancelando…' : 'Cancelar assinatura'}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-zinc-400 mb-3">Ative a assinatura recorrente do plano <strong className="text-zinc-200">{snap.plan.name}</strong> (R$ {snap.plan.price.toFixed(2)}/mês) para continuar após o teste. Pagamento por Pix, boleto ou cartão.</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-xs text-zinc-400">CPF ou CNPJ do responsável
+                  <input className="mt-1 block w-64 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Só números" value={cpfCnpj} onChange={e => setCpfCnpj(e.target.value)} />
+                </label>
+                <Button onClick={subscribe} disabled={subscribing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {subscribing ? 'Ativando…' : 'Ativar assinatura'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Planos disponíveis */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">

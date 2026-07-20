@@ -51,8 +51,11 @@ async function main() {
   }
 
   // ---- item 01: toggle do módulo Radar (comprovação de que JÁ existe) ----
-  const settingsViewSrc = fs.readFileSync(path.join(process.cwd(), "src/features/SettingsView.tsx"), "utf-8");
-  check("SettingsView lista o módulo 'radar' em OPTIONAL_MODULES (toggle existe na tela)", /key:\s*'radar'/.test(settingsViewSrc));
+  // A tela de Módulos passou a montar os toggles a partir do backend
+  // (ModuleService.MODULE_META + /modules-overview) em vez de uma lista fixa no
+  // frontend (ADR-092/093 Bloco A). O toggle do Radar existe se o módulo tem
+  // metadados no catálogo do backend.
+  check("Módulo 'radar' tem metadados no catálogo (toggle existe na tela de Módulos)", !!(ModuleService as any).MODULE_META?.radar?.label);
 
   const orgToggle = `org_toggle_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Empresa Toggle', 'active')`).run(randomUUID(), orgToggle);

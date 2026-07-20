@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { PlanService } from "../PlanService.js";
+import { AsaasService } from "../AsaasService.js";
+import db from "../db.js";
 
 const router = Router();
 
@@ -39,6 +41,53 @@ router.post("/select", (req: AuthRequest, res): any => {
     const r = PlanService.selectPlan(orgId, planId);
     if (!r.ok) return res.status(400).json({ error: r.reason || "Erro ao selecionar plano." });
     res.json({ success: true, ...PlanService.getBillingSnapshot(orgId) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== Assinatura ASAAS (ADR-091 Bloco B) — ZappFlow cobra o lojista =====
+
+// GET /api/plans/billing/invoices — faturas da assinatura (ASAAS).
+router.get("/billing/invoices", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ invoices: await AsaasService.listInvoices(orgId) }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/plans/billing/subscribe — ativa a assinatura recorrente do plano
+// atual no ASAAS (checkout ao fim do trial). Precisa do CPF/CNPJ do responsável.
+router.post("/billing/subscribe", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    if (!AsaasService.isConfigured()) return res.status(503).json({ error: "Cobrança online ainda não está configurada. Fale com o suporte." });
+    const { cpfCnpj, name, email } = req.body || {};
+    if (!cpfCnpj) return res.status(400).json({ error: "CPF/CNPJ é obrigatório para ativar a assinatura." });
+
+    const snap = PlanService.getBillingSnapshot(orgId);
+    if (!snap.plan) return res.status(400).json({ error: "Escolha um plano antes de assinar." });
+
+    const org = db.prepare(`SELECT business_name, email, phone FROM organization_settings WHERE organization_id = ?`).get(orgId) as any || {};
+    const nextDueDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10); // amanhã
+    const r = await AsaasService.subscribe(orgId, {
+      customer: { name: name || org.business_name || "Cliente ZappFlow", email: email || org.email || "", cpfCnpj, mobilePhone: org.phone },
+      value: Number(snap.plan.price || 0),
+      description: `ZappFlow ${snap.plan.name}`,
+      nextDueDate,
+    });
+    if (!r) return res.status(502).json({ error: "Não consegui criar a assinatura no gateway. Tente de novo." });
+    const invoices = await AsaasService.listInvoices(orgId);
+    res.json({ success: true, subscriptionId: r.subscriptionId, invoices });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/plans/billing/cancel — cancela a assinatura (aviso: modo somente-leitura).
+router.post("/billing/cancel", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const ok = await AsaasService.cancelSubscription(orgId);
+    res.json({ success: ok, ...PlanService.getBillingSnapshot(orgId) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -5,6 +5,7 @@ import { Button } from '@/src/components/ui/button';
 
 export function AdminMasterView() {
   const [organizations, setOrganizations] = useState<any[]>([]);
+  const [plans, setPlans] = useState<any[]>([]);
   const [overview, setOverview] = useState<any>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [securityIssues, setSecurityIssues] = useState<any[] | null>(null);
@@ -25,6 +26,10 @@ export function AdminMasterView() {
     fetch('/api/admin/overview')
       .then(res => res.json())
       .then(data => setOverview(data && !data.error ? data : null))
+      .catch(console.error);
+    fetch('/api/admin/plans')
+      .then(res => res.json())
+      .then(data => setPlans(Array.isArray(data) ? data : []))
       .catch(console.error);
   };
 
@@ -68,6 +73,24 @@ export function AdminMasterView() {
         body: JSON.stringify({ billing_status })
       });
       loadData();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const handleUpdatePlan = async (id: string, planId: string) => {
+    if (!planId) return;
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId })
+      });
+      if (res.ok) { toast.success('Plano atribuído.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao atribuir plano.'); }
     } catch (e) {
       console.error(e);
     } finally {
@@ -147,6 +170,7 @@ export function AdminMasterView() {
                 <th className="px-6 py-4 font-semibold text-zinc-300">Base / Receita</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Atividade</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Status</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Plano</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Billing Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
               </tr>
@@ -189,7 +213,20 @@ export function AdminMasterView() {
                      </span>
                   </td>
                   <td className="px-6 py-4">
-                      <select 
+                      <select
+                        className="bg-zinc-950 border border-zinc-800 rounded text-xs p-1 text-zinc-300"
+                        value={org.plan_id || ''}
+                        onChange={(e) => handleUpdatePlan(org.organization_id, e.target.value)}
+                        disabled={loadingId === org.organization_id}
+                      >
+                         <option value="" disabled>— sem plano —</option>
+                         {plans.map(p => (
+                           <option key={p.id} value={p.id}>{p.name || p.id}</option>
+                         ))}
+                      </select>
+                  </td>
+                  <td className="px-6 py-4">
+                      <select
                         className="bg-zinc-950 border border-zinc-800 rounded text-xs p-1 text-zinc-300"
                         value={org.billing_status || 'active'}
                         onChange={(e) => handleUpdateBillingStatus(org.organization_id, e.target.value)}
@@ -237,7 +274,7 @@ export function AdminMasterView() {
               ))}
               {organizations.length === 0 && (
                  <tr>
-                    <td colSpan={8} className="px-6 py-8 text-center text-zinc-500">
+                    <td colSpan={9} className="px-6 py-8 text-center text-zinc-500">
                        Nenhuma organização encontrada.
                     </td>
                  </tr>

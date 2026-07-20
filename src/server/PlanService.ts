@@ -129,6 +129,20 @@ export class PlanService {
     return { ok: true };
   }
 
+  /**
+   * Atribui/troca o plano de uma org a partir do painel do Master Admin (ADR-090).
+   * Diferente de selectPlan, NÃO força trial nem mexe no billing_status — o admin
+   * controla o billing separadamente (setBillingStatus). Só valida e grava o
+   * plan_id; o teto de módulos (modulesForPlan) passa a valer na hora (isEnabled
+   * consulta o plano em tempo real). Usado para liberar os módulos de um piloto.
+   */
+  static setPlan(orgId: string, planId: string): { ok: boolean; reason?: string } {
+    const plan = db.prepare(`SELECT id FROM plans WHERE id = ?`).get(planId) as any;
+    if (!plan) return { ok: false, reason: "Plano não encontrado." };
+    const r = db.prepare(`UPDATE organization_settings SET plan_id = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(planId, orgId);
+    return { ok: r.changes > 0, reason: r.changes > 0 ? undefined : "Organização não encontrada." };
+  }
+
   // Estados válidos de billing (dono = gateway/admin). Ver header do serviço.
   static BILLING_STATES = ["trialing", "active", "past_due", "suspended", "blocked", "cancelled"] as const;
 

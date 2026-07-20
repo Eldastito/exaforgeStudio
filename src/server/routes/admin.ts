@@ -99,11 +99,34 @@ router.post("/organizations/:id/billing-status", (req: AuthRequest, res) => {
   const orgId = req.params.id;
   
   try {
-    db.prepare('UPDATE organization_settings SET billing_status = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?').run(billing_status, orgId);
-    
+    // Passa pela porta auditável de billing (ADR-091): valida o estado e — ao
+    // voltar para active/trialing — ZERA a régua de inadimplência
+    // (billing_dunning_stage). O UPDATE cru anterior deixava o dunning preso, o
+    // que podia recolocar a conta em somente-leitura logo após "reativar".
+    const ok = PlanService.setBillingStatus(orgId, billing_status, { reason: 'admin_panel' });
+    if (!ok) return res.status(400).json({ error: "Estado de cobrança inválido ou organização não encontrada." });
+
     logAuthEvent(req.organizationId, adminId, orgId, 'ADMIN_CHANGE_BILLING_STATUS', { billing_status });
-      
+
     res.json({ success: true, billing_status });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Master Admin - Atribui/troca o plano de uma organização (libera o teto de
+// módulos do plano). Preenche o gap de "liberar a conta": até aqui o admin
+// mudava status/billing, mas não conseguia dar um plano a uma org existente.
+router.post("/organizations/:id/plan", (req: AuthRequest, res): any => {
+  const adminId = req.user?.userId;
+  const { planId } = req.body || {};
+  const orgId = req.params.id;
+  if (!planId) return res.status(400).json({ error: "Informe o planId." });
+  try {
+    const r = PlanService.setPlan(orgId, planId);
+    if (!r.ok) return res.status(400).json({ error: r.reason || "Falha ao atribuir plano." });
+    logAuthEvent(req.organizationId, adminId, orgId, 'ADMIN_CHANGE_PLAN', { planId });
+    res.json({ success: true, plan_id: planId });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

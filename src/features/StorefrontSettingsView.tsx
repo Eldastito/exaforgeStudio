@@ -669,6 +669,7 @@ export function StorefrontSettingsView() {
                       <p className="text-[11px] text-zinc-500 mt-1">Cada imagem do provador custa uma chamada de IA — o limite protege o custo e evita abuso.</p>
                     </Field>
                     <PresetAvatarsManager />
+                    <VitrineLooksKanban />
                     <FashionDashboard />
                   </div>
                 )}
@@ -1468,6 +1469,224 @@ function PresetAvatarsManager() {
           <input type="file" accept="image/*" disabled={!rights || busy} onChange={addFromFile} className="hidden" />
         </label>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// VITRINISTA IA — Kanban de looks de vitrine (ADR-104 Bloco 2). A IA combina as
+// peças novas do lote; o lojista cura aqui (arrasta/solta ou botões). "Aprovado"
+// é o insumo do Bloco 3 (gerar a imagem do avatar vestindo e publicar).
+// ============================================================================
+const VITRINE_COLS: { key: string; label: string; hint: string }[] = [
+  { key: 'suggested', label: 'Sugeridos pela IA', hint: 'Revise e aprove os que gostou' },
+  { key: 'approved', label: 'Aprovados', hint: 'Prontos para gerar a foto (em breve)' },
+  { key: 'published', label: 'Publicados', hint: 'Já na vitrine com a foto do modelo' },
+];
+const brl = (n: number) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+
+function VitrineLooksKanban() {
+  const [looks, setLooks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [suggesting, setSuggesting] = useState(false);
+  const [products, setProducts] = useState<any[]>([]);
+  const [editing, setEditing] = useState<string | null>(null); // lookId em edição de peças
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);           // criando um look manual
+  const [composeIds, setComposeIds] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
+
+  const load = () => apiFetch('/api/storefront/fashion/vitrine/looks')
+    .then(r => r.json()).then(d => setLooks(d.looks || [])).catch(() => {}).finally(() => setLoading(false));
+  useEffect(() => { load(); }, []);
+  const loadProducts = () => { if (products.length) return; apiFetch('/api/storefront/products').then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : [])).catch(() => {}); };
+
+  const suggest = async () => {
+    setSuggesting(true);
+    try {
+      const res = await apiFetch('/api/storefront/fashion/vitrine/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`${d.created} look(s) montados com ${d.newPieceCount} peça(s) nova(s)!`); load(); }
+      else toast.error(d.error || 'Não consegui montar os looks agora.');
+    } catch { toast.error('Falha ao montar os looks.'); }
+    finally { setSuggesting(false); }
+  };
+
+  const move = async (look: any, status: string) => {
+    if (look.status === status) return;
+    setLooks(prev => prev.map(l => l.id === look.id ? { ...l, status } : l)); // otimista
+    const res = await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+    if (!res.ok) { toast.error('Não consegui mover o look.'); load(); }
+  };
+  const remove = async (look: any) => {
+    if (!(await confirmDialog(`Excluir o look "${look.title || 'sem título'}"?`, { danger: true, confirmText: 'Excluir' }))) return;
+    await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}`, { method: 'DELETE' });
+    load();
+  };
+  const startCompose = () => { loadProducts(); setComposeIds([]); setComposing(true); };
+  const createManual = async () => {
+    if (!composeIds.length) return;
+    setCreating(true);
+    try {
+      const res = await apiFetch('/api/storefront/fashion/vitrine/looks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Look manual', productIds: composeIds }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success('Look criado!'); setComposing(false); setComposeIds([]); load(); }
+      else toast.error(d.error || 'Selecione ao menos uma peça disponível.');
+    } finally { setCreating(false); }
+  };
+
+  const byStatus = (s: string) => looks.filter(l => l.status === s);
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-zinc-100 flex items-center gap-1.5"><Sparkles className="h-4 w-4 text-indigo-400" /> Vitrinista IA — looks da loja</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">A IA combina as peças novas em looks. Aprove os que gostar (ou diga <em>“montar vitrine”</em> no WhatsApp). A foto do modelo vestindo cada look aprovado vem no próximo passo.</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={startCompose} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800">
+            <Plus className="h-3.5 w-3.5" /> Look manual
+          </button>
+          <button onClick={suggest} disabled={suggesting} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-60">
+            {suggesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {suggesting ? 'Montando…' : 'Montar vitrine'}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-4 flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Carregando looks…</div>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+          {VITRINE_COLS.map(col => (
+            <div
+              key={col.key}
+              onDragOver={(e) => { if (dragId && col.key !== 'published') e.preventDefault(); }}
+              onDrop={() => { const l = looks.find(x => x.id === dragId); if (l && col.key !== 'published') move(l, col.key); setDragId(null); }}
+              className={`rounded-lg border p-2 min-h-[80px] ${dragId && col.key !== 'published' ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-zinc-800 bg-zinc-900/30'}`}
+            >
+              <div className="flex items-center justify-between px-0.5 pb-2">
+                <p className="text-xs font-semibold text-zinc-200">{col.label} <span className="text-zinc-600">({byStatus(col.key).length})</span></p>
+              </div>
+              <p className="text-[10px] text-zinc-600 px-0.5 -mt-1 mb-2">{col.hint}</p>
+              <div className="space-y-2">
+                {col.key === 'suggested' && composing && (
+                  <div className="rounded-lg border border-indigo-500/40 bg-indigo-500/5 p-2">
+                    <p className="text-xs font-medium text-zinc-100 mb-1">Novo look manual</p>
+                    <ProductPickList products={products} ids={composeIds} onToggle={(pid) => setComposeIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid])} />
+                    <div className="mt-2 flex items-center gap-2">
+                      <button onClick={createManual} disabled={creating || !composeIds.length}
+                        className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                        {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Criar look
+                      </button>
+                      <button onClick={() => { setComposing(false); setComposeIds([]); }} className="text-[11px] text-zinc-400 hover:text-zinc-200">Cancelar</button>
+                    </div>
+                  </div>
+                )}
+                {byStatus(col.key).map(look => (
+                  <VitrineLookCard
+                    key={look.id} look={look}
+                    onDragStart={() => setDragId(look.id)} onDragEnd={() => setDragId(null)}
+                    onApprove={col.key === 'suggested' ? () => move(look, 'approved') : undefined}
+                    onBack={col.key === 'approved' ? () => move(look, 'suggested') : undefined}
+                    onRemove={col.key !== 'published' ? () => remove(look) : undefined}
+                    onEdit={col.key !== 'published' ? () => { loadProducts(); setEditing(editing === look.id ? null : look.id); } : undefined}
+                    editing={editing === look.id}
+                    products={products}
+                    onSavedItems={() => { setEditing(null); load(); }}
+                  />
+                ))}
+                {byStatus(col.key).length === 0 && <p className="text-[11px] text-zinc-600 px-1 py-3 text-center">—</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Checklist de produtos da vitrine (até 5) — compartilhado pelo composer de
+// look manual e pela edição de peças de um look.
+function ProductPickList({ products, ids, onToggle }: { products: any[]; ids: string[]; onToggle: (pid: string) => void }) {
+  return (
+    <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+      {products.map((p: any) => {
+        const on = ids.includes(p.id);
+        const full = !on && ids.length >= 5;
+        return (
+          <button key={p.id} onClick={() => { if (!full) onToggle(p.id); }} type="button" disabled={full}
+            className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[11px] ${on ? 'bg-indigo-500/15 text-indigo-200' : full ? 'text-zinc-600' : 'text-zinc-300 hover:bg-zinc-800/60'}`}>
+            <span className={`h-3 w-3 shrink-0 rounded-sm border ${on ? 'border-indigo-400 bg-indigo-500' : 'border-zinc-600'}`} />
+            <img src={(p.images && p.images[0]) || ''} alt="" className="h-6 w-6 rounded object-cover border border-zinc-800 bg-zinc-950" />
+            <span className="truncate">{p.name}</span>
+          </button>
+        );
+      })}
+      {products.length === 0 && <p className="text-[10px] text-zinc-600 py-1">Sem produtos publicados na vitrine.</p>}
+    </div>
+  );
+}
+
+function VitrineLookCard({ look, onApprove, onBack, onRemove, onEdit, onDragStart, onDragEnd, editing, products, onSavedItems }: any) {
+  const [ids, setIds] = useState<string[]>(look.items.map((i: any) => i.productId));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setIds(look.items.map((i: any) => i.productId)); }, [look.id, editing]);
+
+  const toggle = (pid: string) => setIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+  const saveItems = async () => {
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/storefront/fashion/vitrine/looks/${look.id}/items`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productIds: ids }) });
+      if (res.ok) { toast.success('Peças atualizadas.'); onSavedItems(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar as peças.'); }
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div
+      draggable={!editing} onDragStart={onDragStart} onDragEnd={onDragEnd}
+      className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2 cursor-grab active:cursor-grabbing"
+    >
+      <div className="flex items-start gap-1.5">
+        <GripVertical className="h-3.5 w-3.5 text-zinc-600 mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-zinc-100">{look.title || 'Look'}</p>
+          <p className="text-[10px] text-zinc-500">{look.items.length} peça(s) · {brl(look.total)} · {look.origin === 'ai' ? 'IA' : 'manual'}</p>
+        </div>
+      </div>
+
+      {look.publishedImageUrl ? (
+        <img src={look.publishedImageUrl} alt={look.title} className="mt-2 w-full rounded object-cover border border-zinc-800" />
+      ) : (
+        <div className="mt-2 flex gap-1 overflow-x-auto">
+          {look.items.map((it: any) => (
+            <img key={it.productId} src={it.image || ''} alt={it.name} title={it.name}
+              className="h-14 w-12 shrink-0 rounded object-cover border border-zinc-800 bg-zinc-950" />
+          ))}
+        </div>
+      )}
+
+      {editing && (
+        <div className="mt-2 rounded border border-zinc-800 bg-zinc-950/60 p-2">
+          <p className="text-[10px] text-zinc-400 mb-1">Marque as peças do look (até 5):</p>
+          <ProductPickList products={products} ids={ids} onToggle={toggle} />
+          <button onClick={saveItems} disabled={saving || ids.length === 0}
+            className="mt-2 inline-flex items-center gap-1 rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Salvar peças
+          </button>
+        </div>
+      )}
+
+      {!editing && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {onApprove && <button onClick={onApprove} className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-500">Aprovar →</button>}
+          {onBack && <button onClick={onBack} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">← Voltar</button>}
+          {onEdit && <button onClick={onEdit} className="inline-flex items-center gap-1 rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"><Pencil className="h-3 w-3" /> Peças</button>}
+          {onRemove && <button onClick={onRemove} title="Excluir" className="ml-auto text-red-400 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
+        </div>
+      )}
     </div>
   );
 }

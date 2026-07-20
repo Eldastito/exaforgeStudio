@@ -121,9 +121,10 @@ revisados + interseção preset ∩ plano em applyVertical (ADR-092).`
 
 Ver [`docs/adr/ADR-093-reorganizacao-configuracoes.md`](adr/ADR-093-reorganizacao-configuracoes.md).
 
-**Status:** `[~] Planos reescritos + uso vs limite + tela de Módulos em
-3 seções IMPLEMENTADOS no Bloco A. Quick-Start→Dashboard + LGPD em item
-separado pós-Bloco A`
+**Status:** `[x] IMPLEMENTADO — Planos reescritos + uso vs limite + tela de
+Módulos em 3 seções (Bloco A do ADR-091); Quick-Start→card no Dashboard +
+LGPD modo simples/avançado + pré-população de consentimento por vertical
+(ADR-093, PRs #422). test:quickstart-onboarding / test:lgpd-vertical-consent.`
 
 ## 4. Relatórios de vendas — impressão + personalização por vertical
 
@@ -167,7 +168,13 @@ test:sales-report-vertical`
 
 Ver [`docs/adr/ADR-095-rbac-granular-perfis-customizaveis.md`](adr/ADR-095-rbac-granular-perfis-customizaveis.md).
 
-**Status:** `[x] decidido — bloco próprio pós-Bloco A`
+**Status:** `[x] IMPLEMENTADO (ADR-095, Blocos 1–5) — schema + PermissionService
++ 6 templates + editor de perfis (Configurações › Usuários) + atribuição por
+colaborador + gating de menu por perfil + enforcement global na API
+(enforceModulePermission). Opt-in por perfil atribuído (parque legado intacto).
+Testes: rbac-granular / rbac-profiles-api / rbac-enforcement. Resquício
+não-bloqueante: desabilitar botões editar/excluir por nível (servidor já nega
+403 corretamente).`
 
 ## 6. Loja virtual — dados do cliente ao acessar
 
@@ -228,8 +235,12 @@ fluxo com token), CPF na nota opcional; test:store-checkout-frictionless`
 
 Ver [`docs/adr/ADR-097-backup-automatico-redundancia-restore.md`](adr/ADR-097-backup-automatico-redundancia-restore.md).
 
-**Status:** `[x] decidido — aguardando implementação (item independente,
-alta prioridade)`
+**Status:** `[x] IMPLEMENTADO (ADR-097) — backupPass no Scheduler (backup do
+cliente opt-in → Drive + S3 + retenção; redundância semanal da plataforma
+independente do opt-in), colunas em organization_settings, restore multi-tenant
+seguro + backup-guard pre-restore + rota/botão Restaurar. SIGTERM dispensado por
+decisão de arquitetura (supervisor mata em ~10s; coberto pelo tick inicial do
+Scheduler). Testes: test:backup-scheduler (13/13) + test:backup-restore (15/15).`
 
 ## 9. Canais / IA / Instagram + limpeza do Diagnóstico Meta
 
@@ -250,8 +261,10 @@ alta prioridade)`
 
 Ver [`docs/adr/ADR-098-instagram-dm-e-diagnostico-meta.md`](adr/ADR-098-instagram-dm-e-diagnostico-meta.md).
 
-**Status:** `[x] decidido — aguardando implementação (item pequeno e
-independente)`
+**Status:** `[x] IMPLEMENTADO (ADR-098) — console Meta restrito a Master Admin
+(fecha o vazamento cross-tenant) + deletar por linha + "Limpar tudo" mantendo a
+auto-purga + teste de regressão do envio Instagram (host/body). Testes:
+test:meta-webhook-debug (12) + test:instagram-send (8/8).`
 
 ## 10. Loja virtual — ajustes para moda
 
@@ -388,4 +401,16 @@ modal reusável nas 3 telas (Catálogo/Prospecção/Reservas) + test:smart-impor
 
 Nunca ataco 2 itens em paralelo, pra não perder foco.
 
-**Próximo item:** #1 — planos, valores e módulos.
+**Estado (jul/26):** todos os itens **decididos** estão **implementados**
+(#1–#6, #8, #9, #11, #12, #14). Não há mais item decidido aguardando código.
+
+**O que resta:**
+- **Precisa de decisão (parking lot, sem ADR ainda):** #0 UX da tela de Módulos,
+  #10 loja moda, #13 avatares custom no provador, #15 tarefas por áudio, #16
+  estúdio. → definir escopo antes de implementar.
+- **Bloqueado por dependência externa:** #7 Alterdata (aguarda análise da API),
+  #17 skills externas (sem urgência).
+- **Produção do ADR-091 (não-código):** chave sandbox ASAAS + revisão jurídica
+  (cobrança/cancelamento + somente-leitura).
+- **Resquício de UX (não-bloqueante):** desabilitar botões editar/excluir por
+  nível de perfil (ADR-095; servidor já nega 403).

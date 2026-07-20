@@ -226,7 +226,7 @@ router.put("/plans/:id", (req: AuthRequest, res): any => {
     try { cur = plan.features ? JSON.parse(plan.features) : {}; } catch { cur = {}; }
 
     const { name, price, features } = req.body || {};
-    const NUM_KEYS = ["ai_monthly_limit", "contacts_limit", "channels_limit", "users_limit", "trial_days", "studio_images_monthly", "studio_videos_monthly"];
+    const NUM_KEYS = ["ai_monthly_limit", "contacts_limit", "channels_limit", "users_limit", "trial_days", "studio_images_monthly", "studio_videos_monthly", "price_annual_month"];
     const next = { ...cur };
     if (features && typeof features === "object") {
       for (const k of NUM_KEYS) {

@@ -70,8 +70,9 @@ vira `[~] em análise` quando começamos e `[x] fechado` quando resolvido.
 pré-requisito. Se não cobrar em produção, roda como "cortesia interna"
 até fechar TOULON piloto e ter os primeiros CAC/LTV medidos.
 
-**Status:** `[x] decidido — ADR-091 aprovado, aguardando implementação
-dos Blocos A/B/C/D`
+**Status:** `[~] em implementação — Bloco A em andamento (grade nova de
+planos + limites + migração das orgs: PR A1 ✅). Blocos B (ASAAS)/C
+(performance fee)/D (consumo+add-ons) aguardando.`
 
 Ver [`docs/adr/ADR-091-nova-grade-de-planos.md`](adr/ADR-091-nova-grade-de-planos.md)
 para a decisão consolidada + roadmap de implementação.

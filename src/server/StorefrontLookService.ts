@@ -171,18 +171,27 @@ export class StorefrontLookService {
     }));
   }
 
+  private static lookImages(orgId: string, lookId: string): string[] {
+    return (db.prepare(`SELECT url FROM storefront_look_images WHERE look_id = ? AND organization_id = ? ORDER BY position ASC`).all(lookId, orgId) as any[]).map((r) => r.url);
+  }
+
   /** Todos os looks de vitrine (não arquivados) enriquecidos — a fonte do Kanban. */
   static list(orgId: string): any[] {
     const looks = db.prepare(
-      `SELECT id, title, explanation, origin, status, preset_avatar_id, published_image_url, position, created_at
+      `SELECT id, title, explanation, origin, status, generation_status, preset_avatar_id, published_image_url, position, created_at
        FROM storefront_looks WHERE organization_id = ? AND status != 'archived' ORDER BY status ASC, position ASC, created_at ASC`
     ).all(orgId) as any[];
-    return looks.map((l) => ({
-      id: l.id, title: l.title, explanation: l.explanation, origin: l.origin, status: l.status,
-      presetAvatarId: l.preset_avatar_id || null, publishedImageUrl: l.published_image_url || null,
-      position: l.position, createdAt: l.created_at, items: this.enrichItems(orgId, l.id),
-      total: Math.round(this.enrichItems(orgId, l.id).reduce((s, i) => s + (i.price || 0), 0) * 100) / 100,
-    }));
+    return looks.map((l) => {
+      const items = this.enrichItems(orgId, l.id);
+      return {
+        id: l.id, title: l.title, explanation: l.explanation, origin: l.origin, status: l.status,
+        generationStatus: l.generation_status || "idle",
+        presetAvatarId: l.preset_avatar_id || null, publishedImageUrl: l.published_image_url || null,
+        images: this.lookImages(orgId, l.id),
+        position: l.position, createdAt: l.created_at, items,
+        total: Math.round(items.reduce((s, i) => s + (i.price || 0), 0) * 100) / 100,
+      };
+    });
   }
 
   static get(orgId: string, id: string): any | null {
@@ -237,8 +246,12 @@ export class StorefrontLookService {
     return { ok: true };
   }
 
-  /** Move o look entre colunas do Kanban (suggested/approved/archived) e/ou reordena. 'published' é do Bloco 3. */
-  static update(orgId: string, id: string, patch: { status?: string; position?: number; title?: string }): { ok: true } | { ok: false; error: string } {
+  /**
+   * Move o look entre colunas do Kanban (suggested/approved/archived), reordena,
+   * renomeia ou FIXA o avatar (Bloco 3: null volta a "IA escolhe"). 'published' é
+   * definido só pela publicação da imagem (StorefrontLookGenerationService).
+   */
+  static update(orgId: string, id: string, patch: { status?: string; position?: number; title?: string; presetAvatarId?: string | null }): { ok: true } | { ok: false; error: string } {
     const look = db.prepare(`SELECT status FROM storefront_looks WHERE id = ? AND organization_id = ?`).get(id, orgId) as any;
     if (!look) return { ok: false, error: "Look não encontrado." };
     if (patch.status !== undefined && !KANBAN_STATUSES.has(patch.status)) {
@@ -248,6 +261,14 @@ export class StorefrontLookService {
     if (patch.status !== undefined) { sets.push("status = ?"); vals.push(patch.status); }
     if (patch.position !== undefined) { sets.push("position = ?"); vals.push(Math.max(0, Number(patch.position) || 0)); }
     if (patch.title !== undefined) { sets.push("title = ?"); vals.push(String(patch.title).slice(0, 80)); }
+    if (patch.presetAvatarId !== undefined) {
+      // null/"" = IA escolhe; caso contrário precisa ser um avatar da própria org.
+      let avatarId: string | null = patch.presetAvatarId ? String(patch.presetAvatarId) : null;
+      if (avatarId && !db.prepare(`SELECT 1 FROM fashion_preset_avatars WHERE id = ? AND organization_id = ?`).get(avatarId, orgId)) {
+        return { ok: false, error: "Avatar não encontrado." };
+      }
+      sets.push("preset_avatar_id = ?"); vals.push(avatarId);
+    }
     if (!sets.length) return { ok: true };
     sets.push("updated_at = CURRENT_TIMESTAMP");
     vals.push(id, orgId);
@@ -257,7 +278,10 @@ export class StorefrontLookService {
 
   static remove(orgId: string, id: string): boolean {
     const r = db.prepare(`DELETE FROM storefront_looks WHERE id = ? AND organization_id = ?`).run(id, orgId);
-    if (r.changes) db.prepare(`DELETE FROM storefront_look_items WHERE look_id = ? AND organization_id = ?`).run(id, orgId);
+    if (r.changes) {
+      db.prepare(`DELETE FROM storefront_look_items WHERE look_id = ? AND organization_id = ?`).run(id, orgId);
+      db.prepare(`DELETE FROM storefront_look_images WHERE look_id = ? AND organization_id = ?`).run(id, orgId);
+    }
     return (r.changes || 0) > 0;
   }
 }

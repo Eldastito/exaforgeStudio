@@ -6,6 +6,7 @@ import { chat, isAIConfigured } from "../llm.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 import { StorefrontLookService } from "../StorefrontLookService.js";
+import { StorefrontLookGenerationService } from "../StorefrontLookGenerationService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -50,8 +51,8 @@ router.put("/settings", (req: AuthRequest, res): any => {
   ensureSettings(orgId);
   const b = req.body || {};
   const fields: Record<string, any> = {};
-  const boolKeys = new Set(["published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled"]);
-  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled", "catalog_photo_style"]) {
+  const boolKeys = new Set(["published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled", "vitrine_auto_publish"]);
+  for (const k of ["title", "subtitle", "logo_url", "banner_url", "accent_color", "default_mode", "whatsapp_number", "published", "ai_catalog_photos_enabled", "auto_hide_out_of_stock", "fashion_studio_enabled", "vitrine_auto_publish", "catalog_photo_style"]) {
     if (b[k] !== undefined) fields[k] = boolKeys.has(k) ? (b[k] ? 1 : 0) : b[k];
   }
   if (fields.catalog_photo_style && !["marketplace", "premium", "lifestyle", "minimal"].includes(fields.catalog_photo_style)) {
@@ -523,14 +524,14 @@ router.get("/fashion/preset-avatars", (req: AuthRequest, res): any => {
 router.post("/fashion/preset-avatars", (req: AuthRequest, res): any => {
   const b = req.body || {};
   if (!b.rightsConfirmed) return res.status(400).json({ error: "Confirme que você tem direitos de uso da imagem." });
-  const r = FashionPresetAvatarService.create(getOrgId(req), { label: b.label, bodyType: b.bodyType, imageUrl: b.imageUrl });
+  const r = FashionPresetAvatarService.create(getOrgId(req), { label: b.label, bodyType: b.bodyType, skinTone: b.skinTone, imageUrl: b.imageUrl });
   if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
   res.status(201).json({ id: r.id });
 });
 
 router.put("/fashion/preset-avatars/:id", (req: AuthRequest, res): any => {
   const b = req.body || {};
-  const ok = FashionPresetAvatarService.update(getOrgId(req), req.params.id, { label: b.label, bodyType: b.bodyType, active: b.active, position: b.position });
+  const ok = FashionPresetAvatarService.update(getOrgId(req), req.params.id, { label: b.label, bodyType: b.bodyType, skinTone: b.skinTone, active: b.active, position: b.position });
   if (!ok) return res.status(404).json({ error: "Avatar não encontrado." });
   res.json({ ok: true });
 });
@@ -568,8 +569,30 @@ router.post("/fashion/vitrine/looks", (req: AuthRequest, res): any => {
 
 router.put("/fashion/vitrine/looks/:id", (req: AuthRequest, res): any => {
   const b = req.body || {};
-  const r = StorefrontLookService.update(getOrgId(req), req.params.id, { status: b.status, position: b.position, title: b.title });
+  const r = StorefrontLookService.update(getOrgId(req), req.params.id, { status: b.status, position: b.position, title: b.title, presetAvatarId: b.presetAvatarId });
   if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.json({ ok: true });
+});
+
+// Bloco 3: gera as 2 fotos do avatar vestindo o look (fila). O gerente dispara
+// ao aprovar; idempotente (não regera o que já está pronto/na fila).
+router.post("/fashion/vitrine/looks/:id/generate", (req: AuthRequest, res): any => {
+  const r = StorefrontLookGenerationService.requestGeneration(getOrgId(req), req.params.id);
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.json(r);
+});
+
+// Publica na vitrine a foto gerada (quando NÃO é publicar-direto).
+router.post("/fashion/vitrine/looks/:id/publish", (req: AuthRequest, res): any => {
+  const r = StorefrontLookGenerationService.publish(getOrgId(req), req.params.id);
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.json({ ok: true });
+});
+
+// Tira o look da vitrine (volta pra Aprovados, mantém as imagens).
+router.post("/fashion/vitrine/looks/:id/unpublish", (req: AuthRequest, res): any => {
+  const ok = StorefrontLookGenerationService.unpublish(getOrgId(req), req.params.id);
+  if (!ok) return res.status(400).json({ error: "Look não estava publicado." });
   res.json({ ok: true });
 });
 

@@ -1,10 +1,15 @@
 # ADR-104 — Vitrinista IA: fotos de catálogo tratadas + looks com avatar
 
-**Status:** Aprovado. Bloco 1 implementado (2ª foto tratada por peça). Bloco 2
-implementado: backend (motor vitrinista + tabela `storefront_looks` + endpoints +
-gatilho "montar vitrine" no WhatsApp) **e** frontend (Kanban de looks na Loja
-Virtual — arrasta/solta, aprovar, criar/editar peças). Falta o Bloco 3 (gerar a
-imagem do avatar vestindo o look aprovado e publicar).
+**Status:** Aprovado. Blocos 1 e 2 implementados. Bloco 3 **backend** implementado
+(fila de geração das 2 poses do avatar vestindo o look aprovado, escolha do
+avatar por tom de pele, teto de estúdio, publicar × publicar-direto, lookbook
+público); falta o **frontend do Bloco 3** (fiar o Kanban à geração/publicação,
+tom de pele no cadastro de avatar, e renderizar o lookbook na vitrine).
+
+**Refinamentos de campo (Bloco 3):** 2 imagens por look (2 poses do mesmo
+modelo); a IA escolhe o avatar por **tom de pele** (clara/média/escura) que
+combina com as cores das peças, com override manual; galeria/lookbook como
+primeiro lar da foto na vitrine.
 
 **Origem:** Pedido de campo do Emerson (jul/26), evoluindo o item #13. Quando peças
 novas chegam à loja, o gerente cadastra por foto no Zapp; a IA deve tratar as

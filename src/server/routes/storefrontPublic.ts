@@ -148,6 +148,15 @@ router.get("/store/:slug/fashion/eligible", async (req, res): Promise<any> => {
   res.json({ enabled: true, dailyGenerationLimit: FashionStudioService.dailyGenerationLimit(orgId), items });
 });
 
+// GET /api/public/store/:slug/looks -> galeria de looks (lookbook) da vitrine:
+// os looks publicados com a foto do avatar vestindo (ADR-104 Bloco 3).
+router.get("/store/:slug/looks", async (req, res): Promise<any> => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada ou não publicada." });
+  const { StorefrontLookGenerationService } = await import("../StorefrontLookGenerationService.js");
+  res.json({ looks: StorefrontLookGenerationService.publicLookbook(store.organization_id) });
+});
+
 // GET /api/public/store/:slug  -> configurações da loja + produtos visíveis
 router.get("/store/:slug", (req, res): any => {
   const store = resolveStore(req.params.slug);

@@ -27,6 +27,7 @@
     "test:radar-b2b": "tsx scripts/test-radar-b2b.ts",
     "test:stone-payment-link": "tsx scripts/test-stone-payment-link.ts",
     "test:supplier-profile-contact": "tsx scripts/test-supplier-profile-contact.ts",
+    "test:quote-email-channel": "tsx scripts/test-quote-email-channel.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

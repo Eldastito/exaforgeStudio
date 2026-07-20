@@ -4,6 +4,7 @@ import { chat } from "./llm.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { NotificationService } from "./NotificationService.js";
 import { SupplyNetworkService } from "./SupplyNetworkService.js";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 /**
  * Cotação com fornecedores conhecidos (Fase 2 do Supply).
@@ -35,10 +36,13 @@ export class SupplierQuoteService {
     `).all(reqId) as any[];
     const catList = cats.map(c => String(c.cat).toLowerCase().trim()).filter(Boolean);
 
+    // identifier OU email — um fornecedor só de e-mail (sem WhatsApp) também
+    // é elegível (ADR-099: e-mail como canal paralelo).
     const suppliers = db.prepare(`
-      SELECT id, name, identifier, channel_id, supplier_categories
+      SELECT id, name, identifier, email, channel_id, supplier_categories
       FROM contacts
-      WHERE organization_id = ? AND COALESCE(is_supplier,0) = 1 AND identifier IS NOT NULL
+      WHERE organization_id = ? AND COALESCE(is_supplier,0) = 1
+        AND (identifier IS NOT NULL OR (email IS NOT NULL AND TRIM(email) != ''))
     `).all(orgId) as any[];
 
     if (catList.length === 0) return suppliers; // sem categorias → manda pra todos
@@ -64,6 +68,23 @@ export class SupplierQuoteService {
     ].join("\n");
   }
 
+  /** Assunto + corpo do e-mail de cotação (canal paralelo ao WhatsApp, ADR-099). */
+  private static buildQuoteEmail(orgName: string, supplierName: string, items: any[]): { subject: string; body: string } {
+    const first = (supplierName || "").trim().split(/\s+/)[0] || "";
+    const lines = items.map((it, i) => `${i + 1}. ${it.product_name}${it.variant_name ? ` (${it.variant_name})` : ""} — ${it.suggested_qty} un.`).join("\n");
+    const subject = `Cotação de compra — ${orgName || "pedido"}`;
+    const body = [
+      `Olá${first ? `, ${first}` : ""}!`,
+      ``,
+      `Aqui é da equipe de compras do ${orgName || "nosso estabelecimento"}. Gostaríamos de cotar os itens abaixo — por favor, informe preço por unidade, quantidade disponível e prazo de entrega:`,
+      ``,
+      lines,
+      ``,
+      `Pode responder a este e-mail ou pelo WhatsApp. Obrigado!`,
+    ].join("\n");
+    return { subject, body };
+  }
+
   /**
    * Dispara as cotações para fornecedores elegíveis. Cobre os DOIS canais:
    * (1) fornecedores LOCAIS (contato com is_supplier=1) — envia mensagem no
@@ -71,7 +92,7 @@ export class SupplierQuoteService {
    * (2) fornecedores DA REDE ZappFlow — cria a cotação na própria base com
    *     network_org_id; o fornecedor responde direto na UI "Pedidos da Rede".
    */
-  static async sendQuotes(orgId: string, reqId: string, io?: any): Promise<{ sent: number; network: number }> {
+  static async sendQuotes(orgId: string, reqId: string, io?: any): Promise<{ sent: number; network: number; emailed: number }> {
     const items = db.prepare(`
       SELECT ri.product_service_id, ri.variant_id, ri.suggested_qty,
              p.name AS product_name, pv.name AS variant_name, p.category AS category
@@ -86,16 +107,40 @@ export class SupplierQuoteService {
     const o = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
 
+    // E-mail é canal paralelo: só disponível se a org conectou o Google.
+    // Checa uma vez (evita bater no OAuth por fornecedor).
+    const emailAvailable = (() => { try { return !!GoogleOAuthService.status(orgId)?.connected; } catch { return false; } })();
+
     let sent = 0;
+    let emailed = 0;
     for (const s of suppliers) {
       try {
         const channelId = s.channel_id || fallbackChannel?.id;
-        if (!channelId || !s.identifier) continue;
+        const canWhats = !!(channelId && s.identifier);
+        const supplierEmail = String(s.email || "").trim();
+        const canEmail = emailAvailable && !!supplierEmail;
+        // Sem nenhum canal alcançável → não cria cotação órfã.
+        if (!canWhats && !canEmail) continue;
+
         const quoteId = uuidv4();
         db.prepare(`INSERT INTO purchase_quotes (id, organization_id, requisition_id, supplier_contact_id, status) VALUES (?, ?, ?, ?, 'sent')`)
           .run(quoteId, orgId, reqId, s.id);
-        const message = this.buildQuoteMessage(o?.business_name || "", s.name, items);
-        await MessageProviderService.sendMessage(channelId, s.identifier, message);
+
+        // (a) WhatsApp — canal primário.
+        if (canWhats) {
+          const message = this.buildQuoteMessage(o?.business_name || "", s.name, items);
+          await MessageProviderService.sendMessage(channelId, s.identifier, message);
+        }
+        // (b) E-mail — canal paralelo, degrada em silêncio se falhar.
+        if (canEmail) {
+          const { subject, body } = this.buildQuoteEmail(o?.business_name || "", s.name, items);
+          try {
+            const r = await GoogleOAuthService.gmailSend(orgId, supplierEmail, subject, body);
+            if (r && !("error" in r)) emailed++;
+            else console.warn("[Supply] E-mail de cotação não enviado para", s.name, (r as any)?.error);
+          } catch (e) { console.warn("[Supply] Falha ao enviar e-mail de cotação para", s.name, e); }
+        }
+
         sent++;
         if (io) io.to(`org:${orgId}`).emit("supplier_quote_sent", { quoteId, supplierId: s.id });
       } catch (e) { console.error("[Supply] Falha ao enviar cotação para", s.name, e); }
@@ -127,7 +172,7 @@ export class SupplierQuoteService {
       }
     } catch (e) { console.error("[Supply] Falha ao listar fornecedores da rede", e); }
 
-    return { sent, network };
+    return { sent, network, emailed };
   }
 
   /**

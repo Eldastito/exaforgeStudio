@@ -55,6 +55,11 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
   const [error, setError] = useState('');
   const [reasons, setReasons] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Avatares preset da loja (ADR-103): o cliente pode escolher um modelo em vez
+  // de subir a própria foto. presetId persiste na sessão do provador.
+  const [presets, setPresets] = useState<{ id: string; label: string; bodyType: string; imageUrl: string }[]>([]);
+  const [presetId, setPresetId] = useState<string | null>(() => lsGet<string | null>(`fashion_preset_${slug}`, null));
+  useEffect(() => { lsSet(`fashion_preset_${slug}`, presetId); }, [presetId, slug]);
 
   // Probe do FAS-0: 404 = módulo desligado nesta loja, não renderiza nada.
   // Quando o pai já fez a consulta (enabledHint), usamos o resultado dele.
@@ -77,6 +82,16 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
     return r.data;
   }
 
+  // Avatares preset da loja. Se o preset guardado não está mais ativo, limpa.
+  async function loadPresets(tk: string | null = token): Promise<{ id: string }[]> {
+    if (!tk) return [];
+    const r = await api('/preset-avatars', {}, tk);
+    const list = r.ok && Array.isArray(r.data?.avatars) ? r.data.avatars : [];
+    setPresets(list);
+    setPresetId((cur) => (cur && !list.some((p: any) => p.id === cur) ? null : cur));
+    return list;
+  }
+
   async function openStudio() {
     setOpen(true);
     setError('');
@@ -84,13 +99,16 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
     if (!token) { setStep('intro'); return; }
     setBusy(true);
     const m = await loadMe();
+    const presetList = await loadPresets();
     setBusy(false);
     if (!m) { setStep('intro'); return; }
-    if (!m.consents.avatar_processing) { setStep('consent'); return; }
-    if (!m.avatars.length) { setStep('guide'); return; }
-    // Peças marcadas "Provar" na vitrine (ADR-041): com a foto pronta, o
-    // provador abre direto no builder com elas pré-selecionadas.
-    if ((picks?.length ?? 0) > 0 && m.avatars.some((a) => a.status === 'approved')) {
+    const hasPreset = !!presetId && presetList.some((p) => p.id === presetId);
+    if (!m.consents.avatar_processing && !hasPreset) { setStep('consent'); return; }
+    // Sem foto E sem modelo escolhido → guia (que também oferece os modelos da loja).
+    if (!m.avatars.length && !hasPreset) { setStep('guide'); return; }
+    // Peças marcadas "Provar" na vitrine (ADR-041): com a foto pronta OU um
+    // modelo escolhido, abre direto no builder com elas pré-selecionadas.
+    if ((picks?.length ?? 0) > 0 && (m.avatars.some((a) => a.status === 'approved') || hasPreset)) {
       openBuilder(picks);
       return;
     }
@@ -289,7 +307,7 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
   async function generateTryOn(lookId: string) {
     setError('');
     setTryon((t) => ({ ...t, [lookId]: { jobId: '', status: 'QUEUED', url: null, error: null } }));
-    const r = await api(`/looks/${lookId}/generate`, { method: 'POST' }, token);
+    const r = await api(`/looks/${lookId}/generate`, { method: 'POST', body: presetId ? JSON.stringify({ presetAvatarId: presetId }) : undefined }, token);
     if (!r.ok) {
       setTryon((t) => { const { [lookId]: _drop, ...rest } = t; return rest; });
       setError(r.data?.error || 'Não foi possível gerar a prévia agora.');
@@ -544,6 +562,26 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Camera className="h-4 w-4" /> Enviar minha foto</>}
                   </button>
                   {busy && <p className="text-center text-xs opacity-60">Validando sua foto…</p>}
+
+                  {/* Alternativa: escolher um modelo da loja (ADR-103) — sem subir foto. */}
+                  {presets.length > 0 && (
+                    <div className="pt-3">
+                      <div className="mb-2 flex items-center gap-2 text-xs opacity-60">
+                        <span className="h-px flex-1" style={{ background: hexToRgba(accent, 0.25) }} /> ou <span className="h-px flex-1" style={{ background: hexToRgba(accent, 0.25) }} />
+                      </div>
+                      <p className="text-sm font-semibold">Prefere não subir foto? Escolha um modelo:</p>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {presets.map((p) => (
+                          <button key={p.id} type="button" onClick={() => { setPresetId(p.id); setStep('status'); }}
+                            className="overflow-hidden rounded-lg border text-left transition-colors"
+                            style={{ borderColor: presetId === p.id ? accent : hexToRgba(accent, 0.25) }}>
+                            <img src={p.imageUrl} alt={p.label} className="h-24 w-full object-cover" />
+                            <span className="block truncate px-1.5 py-1 text-[10px] opacity-80">{p.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -574,6 +612,25 @@ export function FashionStudio({ slug, accent, mode, onAddLookItems, enabledHint,
                           <Trash2 className="h-4 w-4" /> Apagar
                         </button>
                       </div>
+                    </>
+                  ) : presetId ? (
+                    <>
+                      <p className="flex items-center gap-2 text-sm font-semibold text-emerald-500">
+                        <CheckCircle2 className="h-4 w-4" /> Modelo escolhido!
+                      </p>
+                      {presets.find((p) => p.id === presetId)?.imageUrl && (
+                        <img src={presets.find((p) => p.id === presetId)!.imageUrl} alt="Modelo escolhido" className="mx-auto max-h-64 rounded-2xl object-contain" />
+                      )}
+                      <p className="text-center text-xs opacity-60">As peças serão provadas neste modelo. Você pode trocar quando quiser.</p>
+                      <button type="button" className={primaryBtn} style={{ background: accent }} onClick={openQuiz}>
+                        Montar meu look por ocasião
+                      </button>
+                      <button type="button" className="w-full rounded-xl border px-4 py-2.5 text-sm font-semibold" style={{ borderColor: accent, color: accent }} onClick={() => openBuilder(picks)}>
+                        Escolher peças e ver no modelo{(picks?.length ?? 0) > 0 ? ` (${picks!.length} da vitrine)` : ''}
+                      </button>
+                      <button type="button" className="w-full text-center text-xs opacity-60 underline-offset-2 hover:underline" onClick={() => { setPresetId(null); setStep('guide'); }}>
+                        Trocar modelo ou usar minha própria foto
+                      </button>
                     </>
                   ) : (
                     <>

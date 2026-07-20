@@ -4,7 +4,7 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { Button } from '@/src/components/ui/button';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
-import { toast } from '@/src/lib/toast';
+import { toast, confirmDialog } from '@/src/lib/toast';
 
 type StorefrontSettings = {
   organization_id?: string;
@@ -668,6 +668,7 @@ export function StorefrontSettingsView() {
                       />
                       <p className="text-[11px] text-zinc-500 mt-1">Cada imagem do provador custa uma chamada de IA — o limite protege o custo e evita abuso.</p>
                     </Field>
+                    <PresetAvatarsManager />
                     <FashionDashboard />
                   </div>
                 )}
@@ -1369,6 +1370,106 @@ export async function uploadImageFile(file: File): Promise<string> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Falha no upload da imagem.');
   return data.url as string;
+}
+
+const BODY_TYPE_LABELS: Record<string, string> = {
+  magro: 'Magro', atletico: 'Atlético', medio: 'Médio', plus: 'Plus', outro: 'Outro',
+};
+
+// Gestão dos avatares PRESET do provador (ADR-103, item #13). O lojista sobe
+// modelos (por tipo de corpo) que o cliente escolhe em vez de subir a própria
+// foto. O checkbox de direitos é obrigatório antes do envio.
+function PresetAvatarsManager() {
+  const [items, setItems] = useState<any[]>([]);
+  const [label, setLabel] = useState('');
+  const [bodyType, setBodyType] = useState('medio');
+  const [rights, setRights] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => apiFetch('/api/storefront/fashion/preset-avatars').then(r => r.json()).then(d => setItems(d.avatars || [])).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const addFromFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    if (!rights) { toast.error('Confirme que você tem direitos de uso da imagem antes de enviar.'); return; }
+    setBusy(true);
+    try {
+      const url = await uploadImageFile(file);
+      const res = await apiFetch('/api/storefront/fashion/preset-avatars', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label || 'Modelo', bodyType, imageUrl: url, rightsConfirmed: true }),
+      });
+      if (res.ok) { toast.success('Avatar adicionado!'); setLabel(''); setRights(false); load(); }
+      else { const err = await res.json().catch(() => ({})); toast.error(err.error || 'Falha ao adicionar o avatar.'); }
+    } catch (err: any) { toast.error(err.message || 'Falha no upload.'); }
+    finally { setBusy(false); }
+  };
+
+  const toggleActive = async (a: any) => {
+    await apiFetch(`/api/storefront/fashion/preset-avatars/${a.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: a.active ? false : true }) });
+    load();
+  };
+  const remove = async (a: any) => {
+    if (!(await confirmDialog('Remover este avatar do provador?', { danger: true, confirmText: 'Remover' }))) return;
+    await apiFetch(`/api/storefront/fashion/preset-avatars/${a.id}`, { method: 'DELETE' });
+    load();
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <p className="text-sm font-medium text-zinc-100">Avatares do provador</p>
+      <p className="text-[11px] text-zinc-500 mt-0.5">
+        Modelos que o cliente pode escolher para provar as peças <strong>sem precisar subir a própria foto</strong>. Suba imagens de modelo (rosto/corpo) por tipo de corpo.
+      </p>
+
+      {/* Lista */}
+      {items.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {items.map(a => (
+            <div key={a.id} className={`rounded-lg border p-2 ${a.active ? 'border-zinc-800 bg-zinc-900/50' : 'border-zinc-800/50 bg-zinc-900/20 opacity-60'}`}>
+              <img src={a.image_url} alt={a.label} className="h-24 w-full rounded object-cover border border-zinc-800 bg-zinc-900" />
+              <div className="mt-1.5 flex items-center justify-between gap-1">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-zinc-200">{a.label || 'Modelo'}</p>
+                  <p className="text-[10px] text-zinc-500">{BODY_TYPE_LABELS[a.body_type] || a.body_type}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => toggleActive(a)} title={a.active ? 'Ocultar da vitrine' : 'Mostrar na vitrine'} className="text-zinc-400 hover:text-zinc-200">
+                    {a.active ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  </button>
+                  <button onClick={() => remove(a)} title="Remover" className="text-red-400 hover:text-red-300">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Adicionar */}
+      <div className="mt-3 space-y-2 border-t border-zinc-800 pt-3">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Nome (ex.: Modelo atlético)"
+            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100" />
+          <select value={bodyType} onChange={e => setBodyType(e.target.value)}
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+            {Object.entries(BODY_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <label className="flex items-start gap-2 text-[11px] text-zinc-400">
+          <input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)} className="mt-0.5" />
+          Confirmo que tenho direitos de uso desta imagem (modelo com consentimento/licença).
+        </label>
+        <label className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${rights && !busy ? 'border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10' : 'border-zinc-800 text-zinc-600 cursor-not-allowed'}`}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          {busy ? 'Enviando…' : 'Adicionar avatar'}
+          <input type="file" accept="image/*" disabled={!rights || busy} onChange={addFromFile} className="hidden" />
+        </label>
+      </div>
+    </div>
+  );
 }
 
 // Campo de imagem com upload (botão) + URL manual + preview + dica de dimensões.

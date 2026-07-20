@@ -75,7 +75,7 @@ import { EdgeInboxProcessor } from "./src/server/EdgeInboxProcessor.js";
 import { registerBuiltinEdgeCommandHandlers } from "./src/server/edgeCommandHandlers.js";
 import { PaymentService } from "./src/server/PaymentService.js";
 import { AsaasService } from "./src/server/AsaasService.js";
-import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole } from "./src/server/middleware/auth.js";
+import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
@@ -401,7 +401,12 @@ async function startServer() {
     if (!req.organizationId || ModuleService.isEnabled(req.organizationId, mod)) return next();
     return res.status(403).json({ error: "module_disabled", module: mod });
   });
-  
+
+  // ENFORCEMENT RBAC (ADR-095 Bloco 5): depois do gate de módulo da org, aplica
+  // o nível de acesso do PERFIL do usuário por módulo (rota→módulo→ação). Opt-in:
+  // só afeta usuários com perfil atribuído; o parque legado passa intacto.
+  protectedApi.use(enforceModulePermission);
+
   // ZappFlow Vision Cloud: processo separado do core (docs/adr/ADR-001, adendo
   // "Vision Cloud como terceiro serviço"). NÃO é um router local — é um proxy
   // para http://127.0.0.1:VISION_CLOUD_PORT. O gate de módulo acima já resolveu

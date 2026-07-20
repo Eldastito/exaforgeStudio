@@ -95,3 +95,25 @@ export const requirePermission = (module: string, action?: Action) => (req: Auth
   }
   next();
 };
+
+// RBAC granular (ADR-095 Bloco 5): enforcement GLOBAL por módulo, aplicado uma
+// vez no protectedApi (em vez de rota a rota). Deriva o módulo do 1º segmento da
+// rota (ROUTE_MODULE) e a ação do método HTTP. Só age sobre usuários COM perfil
+// atribuído (opt-in via hasProfile) — o parque legado passa intacto. Segmentos
+// fora do mapa (core/infra, add-ons auto-gated) e o master admin nunca são
+// barrados. As rotas que já têm requirePermission próprio (users/permissions)
+// não estão no mapa, então não há dupla checagem.
+export const enforceModulePermission = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) return next(); // requireAuth já cuidou; aqui é só o gate de módulo
+  if (req.user.email && req.user.email === MASTER_ADMIN_EMAIL) return next();
+  const seg = (req.path || "").split("/").filter(Boolean)[0];
+  const module = PermissionService.moduleForSegment(seg);
+  if (!module) return next(); // segmento não gateado
+  const orgId = req.organizationId || req.user.organizationId;
+  if (!PermissionService.hasProfile(orgId, req.user)) return next(); // legado: sem perfil, sem restrição
+  const act = methodAction(req.method);
+  if (!PermissionService.can(orgId, req.user, module, act)) {
+    return res.status(403).json({ error: `Sem permissão de ${act} em ${module}` });
+  }
+  next();
+};

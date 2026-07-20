@@ -322,10 +322,99 @@ export class PaymentService {
     }
   }
 
+  // ===== Stone (via Pagar.me) — Link de Pagamento: cartão + Pix + boleto =====
+  // ADR-100. O lojista RECEBE dos clientes dele. Reusa payment_charges + o
+  // webhook /api/webhooks/payment (org resolvida pelo secret) + markPaid.
+  private static STONE_API = "https://api.pagar.me/core/v5";
+
+  /**
+   * Cria (ou reaproveita) um Link de Pagamento Pagar.me para uma `reference`
+   * (id de pedido OU "res:<id>"/"sub:<id>"). Persiste em payment_charges
+   * (provider='stone', ticket_url = link). Idempotente enquanto pendente.
+   * A chave secreta do Pagar.me fica em pay_gateway_token (cifrada).
+   */
+  private static async _stoneLink(
+    orgId: string,
+    p: { reference: string; amount: number; description: string }
+  ): Promise<{ id: string; link: string } | null> {
+    const o = this.getSettings(orgId);
+    const token = o.pay_gateway_token as string | undefined; // secret key Pagar.me (sk_...)
+    if (!token) return null;
+
+    const existing = db.prepare(
+      `SELECT id, ticket_url FROM payment_charges
+        WHERE order_id = ? AND organization_id = ? AND status = 'pending'
+        ORDER BY created_at DESC LIMIT 1`
+    ).get(p.reference, orgId) as any;
+    if (existing && existing.ticket_url) return { id: existing.id, link: existing.ticket_url };
+
+    const amountCents = Math.max(1, Math.round(Number(p.amount || 0) * 100));
+    const auth = Buffer.from(`${token}:`).toString("base64");
+    const name = String(p.description || "Pagamento").slice(0, 64);
+    const body = {
+      is_building: false,
+      type: "order",
+      name,
+      // `code` volta no webhook (order.code) — é como casamos o pagamento ao pedido.
+      code: p.reference,
+      payment_settings: { accepted_payment_methods: ["credit_card", "pix", "boleto"] },
+      cart_settings: { items: [{ name, amount: amountCents, default_quantity: 1 }] },
+      metadata: { reference: p.reference },
+    };
+    try {
+      const res = await fetch(`${this.STONE_API}/paymentlinks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+        body: JSON.stringify(body),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      const link = data?.url || data?.payment_url;
+      if (!res.ok || !link) { console.error("[Stone] Falha ao criar link:", res.status, data?.message || data); return null; }
+      const id = String(data.id || `stone_${Date.now()}`);
+      try {
+        db.prepare(
+          `INSERT OR REPLACE INTO payment_charges
+             (id, organization_id, order_id, provider, amount, status, qr_code, qr_code_base64, ticket_url, expires_at, created_at)
+           VALUES (?, ?, ?, 'stone', ?, 'pending', '', '', ?, NULL, CURRENT_TIMESTAMP)`
+        ).run(id, orgId, p.reference, amountCents / 100, link);
+      } catch (e) { /* noop */ }
+      return { id, link };
+    } catch (e) {
+      console.error("[Stone] Erro de rede ao criar link:", e);
+      return null;
+    }
+  }
+
+  /**
+   * Webhook do Pagar.me (evento order.paid/charge.paid). Marca o pedido pago.
+   * A org já foi resolvida pelo secret na URL. Casa pela `code`/metadata que
+   * gravamos ao criar o link (id do pedido ou "res:"/"sub:").
+   */
+  static async syncStonePayment(orgId: string, event: any): Promise<string | null> {
+    try {
+      const type = String(event?.type || "").toLowerCase();
+      const data = event?.data || {};
+      const status = String(data?.status || data?.charges?.[0]?.status || "").toLowerCase();
+      const paid = ["order.paid", "charge.paid"].includes(type) || status === "paid";
+      if (!paid) return null;
+      const ref = data?.code || data?.metadata?.reference || data?.metadata?.orderId;
+      if (!ref) return null;
+      try { db.prepare(`UPDATE payment_charges SET status = 'paid' WHERE order_id = ? AND organization_id = ?`).run(String(ref), orgId); } catch (e) { /* noop */ }
+      if (String(ref).startsWith("res:")) { try { ReservationService.markPaid(orgId, String(ref).slice(4)); } catch (e) { /* noop */ } }
+      else if (String(ref).startsWith("sub:")) { try { SubscriptionService.markInvoicePaid(orgId, String(ref).slice(4)); } catch (e) { /* noop */ } }
+      else this.markPaid(orgId, String(ref), { method: "stone", externalId: String(data?.id || "") });
+      return "paid";
+    } catch (e) {
+      console.error("[Stone] Erro ao sincronizar pagamento:", e);
+      return null;
+    }
+  }
+
   /**
    * Monta a mensagem de cobrança a enviar ao cliente ao fechar um pedido.
    * - pix_manual: chave Pix estática (texto fixo).
    * - mercadopago: cria um PIX dinâmico (copia e cola + link) que confirma sozinho.
+   * - stone: cria um Link de Pagamento Pagar.me (cartão + Pix + boleto).
    * Retorna null se a cobrança não está configurada/possível.
    */
   static async chargeForOrder(
@@ -335,6 +424,14 @@ export class PaymentService {
     const o = this.getSettings(orgId);
     if (!o.pay_enabled) return null;
     const provider = o.pay_provider || "pix_manual";
+
+    if (provider === "stone") {
+      const charge = await this._stoneLink(orgId, { reference: p.orderId, amount: p.amount, description: `Pedido #${String(p.orderId).slice(0, 8)}` });
+      if (!charge) return null;
+      try { db.prepare(`UPDATE orders SET payment_external_id = ?, payment_method = 'stone', payment_link = ? WHERE id = ?`).run(charge.id, charge.link, p.orderId); } catch (e) { /* noop */ }
+      const val = `R$ ${Number(p.amount || 0).toFixed(2)}`;
+      return [`Para concluir, pague com *cartão, Pix ou boleto* (${val}):`, `\n💳 ${charge.link}`, `\nAssim que o pagamento cair, confirmo por aqui automaticamente. ✅`].join("\n");
+    }
 
     if (provider === "mercadopago") {
       const charge = await this.createMercadoPagoPix(orgId, p);

@@ -1,6 +1,6 @@
 # ADR-100 — Meios de pagamento do lojista: Stone (via Pagar.me) na loja virtual + maquininha
 
-**Status:** Aprovado (aguardando implementação — faseado).
+**Status:** Fase 1 implementada (jul/26). Fases 2 e 3 aprovadas, aguardando implementação.
 
 **Origem:** Item #12 do `docs/BACKLOG-CAMPO-TOULON.md` (parte de API de pagamento; a parte de relatórios já foi decidida no ADR-094). A TOULON usa **Stone** (maquininha na loja física) e precisa **receber cartão** também na loja virtual, pra não travar vendas.
 
@@ -59,11 +59,16 @@ Adotar **Stone (via Pagar.me)** como adquirente do lojista no piloto, somando um
 
 ## Implementação
 
-**Fase 1 (imediata):**
-1. `PaymentService`: provider `stone` — `createStoneLink(orgId, {orderId, amount, ...})` (API Pagar.me Link de Pagamento) + persistência em `payment_charges`.
-2. Webhook Pagar.me → reusa `/api/webhooks/payment` (mapear payload Pagar.me → `markPaid`).
-3. UI de pagamento (Configurações da Loja): opção "Stone" + credenciais Pagar.me (cifradas).
-4. Testes: `test:stone-payment-link` (cria link, webhook confirma, idempotência, pedido→pago).
+**Fase 1 (imediata) — ✅ implementada (jul/26):**
+1. `PaymentService` (`src/server/PaymentService.ts`): provider `stone`.
+   - `_stoneLink(orgId, {reference, amount, description})` — POST `api.pagar.me/core/v5/paymentlinks` (Basic auth `base64(sk:)`, valor em centavos, `accepted_payment_methods:[credit_card,pix,boleto]`, `is_building:false`). Persiste em `payment_charges` (provider `stone`, `ticket_url` = link). Idempotente enquanto pendente (reaproveita o link, não recria).
+   - `syncStonePayment(orgId, event)` — mapeia `order.paid`/`charge.paid` (ou `status='paid'`) → `markPaid`, casando pela `code`/`metadata.reference` gravada no link (id do pedido ou `res:`/`sub:`).
+   - `chargeForOrder` ganha o branch `stone`: gera o link e monta a mensagem de cobrança (cartão + Pix + boleto).
+2. Webhook Pagar.me (`server.ts`, `/api/webhooks/payment`): branch `^(order|charge)\.` **antes** do formato genérico → `syncStonePayment` + emit `order_updated`. Org resolvida pelo `secret` da URL (padrão existente).
+3. UI de pagamento (`src/features/PaymentSettingsModal.tsx`): opção "Stone / Pagar.me (cartão + Pix + boleto)" + campo "Chave secreta Pagar.me (sk_…)" (cifrada como `pay_gateway_token`).
+4. Testes: `test:stone-payment-link` (27/27) — contrato da requisição (host/auth/centavos/`code`), persistência em `payment_charges`, idempotência, `order.paid`→pedido pago, eventos não-pagos e sem-ref ignorados. Adicionado à matriz do CI.
+
+> Limite conhecido da Fase 1: sem credenciais reais da Pagar.me, o E2E é mockado (fetch). A validação com chave `sk_live_…` real fica para o smoke de produção.
 
 **Fase 2 (opcional):** checkout transparente Pagar.me (tokenização client-side) no fluxo do ADR-096.
 

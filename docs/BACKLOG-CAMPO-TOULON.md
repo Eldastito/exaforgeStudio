@@ -291,9 +291,11 @@ item #4 (ADR-094) — decidida e aguardando implementação.
 - Adquirente do piloto = **Stone (via Pagar.me)**. Já existe base plugável
   (`PaymentService`: `pix_manual` + `mercadopago`); Stone entra como mais
   um provider.
-- **Fase 1 (imediata):** cartão na loja virtual via **Link de Pagamento**
-  Pagar.me (cartão+PIX+boleto hospedado, webhook confirma, PCI mínimo) —
-  destrava venda com cartão.
+- **Fase 1 (imediata) — ✅ implementada:** cartão na loja virtual via
+  **Link de Pagamento** Pagar.me (cartão+PIX+boleto hospedado, webhook
+  confirma, PCI mínimo). Provider `stone` no `PaymentService`
+  (`_stoneLink`/`syncStonePayment`), webhook `order.paid`/`charge.paid`,
+  opção na UI de pagamento e teste `test:stone-payment-link` (27/27).
 - **Fase 2 (opcional):** checkout transparente (cartão dentro da loja).
 - **Fase 3:** maquininha presencial via **Connect Pagar.me** — conciliação
   primeiro (canal PDV nos relatórios), acionar a maquininha depois
@@ -301,8 +303,9 @@ item #4 (ADR-094) — decidida e aguardando implementação.
 
 Ver [`docs/adr/ADR-100-pagamento-lojista-stone-pagarme.md`](adr/ADR-100-pagamento-lojista-stone-pagarme.md).
 
-**Status:** `[x] decidido — relatórios (ADR-094) + pagamento Stone/Pagar.me
-(ADR-100), aguardando implementação faseada`
+**Status:** `[x] decidido — relatórios (ADR-094, aguardando impl.) +
+pagamento Stone/Pagar.me (ADR-100): Fase 1 implementada; Fases 2/3
+aguardando`
 
 ## 13. Catálogo — provador com avatares custom
 

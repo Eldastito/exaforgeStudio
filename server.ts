@@ -30,6 +30,7 @@ import ragRoutes from "./src/server/routes/rag.js";
 import studioRoutes from "./src/server/routes/studio.js";
 import taskRoutes from "./src/server/routes/tasks.js";
 import prospectRoutes from "./src/server/routes/prospect.js";
+import radarB2BRoutes from "./src/server/routes/radarB2B.js";
 import clinicRoutes from "./src/server/routes/clinic.js";
 import retailOpsRoutes from "./src/server/routes/retailops.js";
 import continuityRoutes from "./src/server/routes/continuity.js";
@@ -437,6 +438,7 @@ async function startServer() {
   protectedApi.use("/studio", studioRoutes);
   protectedApi.use("/tasks", taskRoutes);
   protectedApi.use("/prospect", prospectRoutes);
+  protectedApi.use("/radar-b2b", radarB2BRoutes);
   protectedApi.use("/clinic", clinicRoutes);
   protectedApi.use("/retailops", retailOpsRoutes);
   protectedApi.use("/continuity", continuityRoutes);

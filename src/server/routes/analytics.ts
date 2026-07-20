@@ -533,6 +533,14 @@ router.get("/verticals", (_req, res) => {
   res.json(ModuleService.catalog());
 });
 
+// GET /api/analytics/modules-overview — módulos agrupados p/ a tela de Módulos
+// (recomendados / disponível no plano / requer upgrade). ADR-092/093.
+router.get("/modules-overview", (req, res) => {
+  const orgId = getOrgId(req);
+  try { res.json(ModuleService.overview(orgId)); }
+  catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
 // POST /api/analytics/settings/modules { enabled_modules: string[] }
 // Override manual dos módulos opcionais (Configurações › Módulos).
 router.post("/settings/modules", (req, res) => {

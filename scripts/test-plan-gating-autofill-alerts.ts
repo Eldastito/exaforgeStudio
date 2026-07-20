@@ -47,33 +47,33 @@ async function main() {
   // ==== PART 1: Module gating by plan ====
   console.log('\n=== PART 1: Module gating by plan ===');
 
-  const orgStarter = seedOrg("starter", "starter");
-  const orgBusiness = seedOrg("business", "business");
+  const orgAutonomo = seedOrg("autonomo", "autonomo");
+  const orgScale = seedOrg("scale", "scale");
   const orgNoPlan = seedOrg("noplan");
 
-  const starterPlan = PlanService.getCurrentPlan(orgStarter);
-  check("1.1 Starter plan has modules list", Array.isArray(starterPlan?.features?.modules), JSON.stringify(starterPlan?.features?.modules));
+  const autonomoPlan = PlanService.getCurrentPlan(orgAutonomo);
+  check("1.1 Autônomo plan has modules list", Array.isArray(autonomoPlan?.features?.modules), JSON.stringify(autonomoPlan?.features?.modules));
 
-  const businessPlan = PlanService.getCurrentPlan(orgBusiness);
-  check("1.2 Business plan has modules list", Array.isArray(businessPlan?.features?.modules), JSON.stringify(businessPlan?.features?.modules));
+  const scalePlan = PlanService.getCurrentPlan(orgScale);
+  check("1.2 Scale plan has modules list", Array.isArray(scalePlan?.features?.modules), JSON.stringify(scalePlan?.features?.modules));
 
-  check("1.3 Starter plan has fewer modules than Business",
-    (starterPlan?.features?.modules?.length || 0) < (businessPlan?.features?.modules?.length || 0));
+  check("1.3 Autônomo plan has fewer modules than Scale",
+    (autonomoPlan?.features?.modules?.length || 0) < (scalePlan?.features?.modules?.length || 0));
 
-  check("1.4 Starter does NOT include radar",
-    !(starterPlan?.features?.modules || []).includes("radar"));
+  check("1.4 Autônomo does NOT include radar",
+    !(autonomoPlan?.features?.modules || []).includes("radar"));
 
-  check("1.5 Business includes radar",
-    (businessPlan?.features?.modules || []).includes("radar"));
+  check("1.5 Scale includes radar",
+    (scalePlan?.features?.modules || []).includes("radar"));
 
-  check("1.6 Business org can access radar (vertical + plan both allow)",
-    ModuleService.isEnabled(orgBusiness, "radar"));
+  check("1.6 Scale org can access radar (vertical + plan both allow)",
+    ModuleService.isEnabled(orgScale, "radar"));
 
-  check("1.7 Starter org CANNOT access radar (vertical allows, plan does NOT)",
-    !ModuleService.isEnabled(orgStarter, "radar"));
+  check("1.7 Autônomo org CANNOT access radar (vertical allows, plan does NOT)",
+    !ModuleService.isEnabled(orgAutonomo, "radar"));
 
-  check("1.8 Starter org CAN access catalogo (in both vertical and plan)",
-    ModuleService.isEnabled(orgStarter, "catalogo"));
+  check("1.8 Autônomo org CAN access catalogo (in both vertical and plan)",
+    ModuleService.isEnabled(orgAutonomo, "catalogo"));
 
   const noPlanModules = PlanService.modulesForPlan(orgNoPlan);
   check("1.9 Org without plan: modulesForPlan returns null (no restriction)",
@@ -83,7 +83,7 @@ async function main() {
     ModuleService.isEnabled(orgNoPlan, "radar"));
 
   check("1.11 Core modules always accessible regardless of plan",
-    ModuleService.isEnabled(orgStarter, "atendimento") && ModuleService.isEnabled(orgStarter, "contatos"));
+    ModuleService.isEnabled(orgAutonomo, "atendimento") && ModuleService.isEnabled(orgAutonomo, "contatos"));
 
   // Cortesia plan: no modules key = no restriction
   const orgCortesia = seedOrg("cortesia", "cortesia");
@@ -97,7 +97,7 @@ async function main() {
   // ==== PART 2: Radar auto-fill from measured data ====
   console.log('\n=== PART 2: Radar auto-fill from measured data ===');
 
-  const orgWithData = seedOrg("withdata", "business");
+  const orgWithData = seedOrg("withdata", "scale");
 
   // Create a ConversionVelocity snapshot for the org
   db.prepare(`INSERT INTO radar_velocity_snapshots (id, organization_id, period_start, period_end, ivc_score, ivc_band,
@@ -161,7 +161,7 @@ async function main() {
     `confidence=${q1Answer?.confidence_multiplier}`);
 
   // Test auto-fill on org without measured data
-  const orgNoData = seedOrg("nodata", "business");
+  const orgNoData = seedOrg("nodata", "scale");
   const session2 = RadarService.createSession(orgNoData, "actor", { templateId: template.id, companyName: "Sem dados" });
   const result3 = RadarService.autoFillFromMeasuredData(orgNoData, session2.id, "actor");
   check("2.11 Auto-fill on org without measured data returns empty", result3.filled.length === 0);
@@ -169,9 +169,9 @@ async function main() {
   // ==== PART 3: Plan usage alerts ====
   console.log('\n=== PART 3: Plan usage alerts ===');
 
-  const orgAlerts = seedOrg("alerts", "starter");
-  const starterFeatures = PlanService.getCurrentPlan(orgAlerts)?.features;
-  const aiLimit = starterFeatures?.ai_monthly_limit || 500;
+  const orgAlerts = seedOrg("alerts", "autonomo");
+  const autonomoFeatures = PlanService.getCurrentPlan(orgAlerts)?.features;
+  const aiLimit = autonomoFeatures?.ai_monthly_limit || 500;
 
   // Initially no alerts
   const alerts0 = PlanService.getUsageAlerts(orgAlerts);

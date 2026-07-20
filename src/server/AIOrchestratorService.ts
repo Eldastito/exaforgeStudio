@@ -21,6 +21,8 @@ import { getPendingAction as getPendingActionShared, savePendingAction as savePe
 import { BusinessManifestoService } from "./BusinessManifestoService.js";
 import { WhatsAppInventoryIntake } from "./WhatsAppInventoryIntake.js";
 import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
+import { TaskService } from "./TaskService.js";
+import { TaskAudioService } from "./TaskAudioService.js";
 
 export class AIOrchestratorService {
   /**
@@ -76,7 +78,7 @@ export class AIOrchestratorService {
     if (isManager) {
       const pending = this.getPendingAction(params.organizationId, params.senderId);
       // Ações com confirmação SIM/NÃO (campanha, pedido de compra por voz).
-      const CONFIRM_TYPES = ["create_campaign", "purchase_order_audio"];
+      const CONFIRM_TYPES = ["create_campaign", "purchase_order_audio", "task_create_audio"];
       if (pending && !CONFIRM_TYPES.includes(pending.action_type)) {
         const reply = await WhatsAppInventoryIntake.handleReply(params.organizationId, params.senderId, pending, text);
         return { reply, actions: [], needsHuman: false };
@@ -94,7 +96,9 @@ export class AIOrchestratorService {
           return { reply: "Tudo bem, cancelei. 👍 Se quiser, é só pedir de novo quando estiver pronto.", actions: [], needsHuman: false };
         }
         // Resposta ambígua: mantém a ação e pede confirmação explícita.
-        const what = pending.action_type === "purchase_order_audio" ? "um pedido de compra" : "uma campanha";
+        const what = pending.action_type === "purchase_order_audio" ? "um pedido de compra"
+          : pending.action_type === "task_create_audio" ? "uma tarefa"
+          : "uma campanha";
         return { reply: `Você tem ${what} aguardando confirmação. Responda *SIM* para confirmar ou *NÃO* para cancelar.`, actions: [], needsHuman: false };
       }
 
@@ -106,6 +110,16 @@ export class AIOrchestratorService {
         const reply = await this.handlePurchaseOrderIntent(params.organizationId, params.senderId, text);
         if (reply) return { reply, actions: [], needsHuman: false };
         // Não era um pedido de compra de fato → segue o fluxo normal.
+      }
+
+      // TAREFA POR VOZ/TEXTO (ADR-102): "agenda tarefa X pra Fulano até sexta" →
+      // a IA monta a tarefa (título, responsável, prazo, prioridade) e pede
+      // confirmação antes de criar. Só dispara com termos de tarefa/delegação; a
+      // extração (isTask) e a confirmação são os gates reais (regex frouxa é ok).
+      if (!isOrchestratorCommand && /\btarefa\b|\bdelega/i.test(text)) {
+        const reply = await this.handleTaskOrderIntent(params.organizationId, params.senderId, text);
+        if (reply) return { reply, actions: [], needsHuman: false };
+        // Não era uma tarefa de fato → segue o fluxo normal.
       }
     }
 
@@ -928,6 +942,26 @@ export class AIOrchestratorService {
       }
     }
 
+    if (pending.action_type === 'task_create_audio') {
+      try {
+        const task = TaskService.create(orgId, {
+          title: payload.title, assignedTo: payload.assigneeId || null,
+          dueAt: payload.dueAt || null, priority: payload.priority || 'media', source: 'ia',
+        });
+        if (!payload.assigneeId) {
+          return `✅ Tarefa criada: *${payload.title}*. Ficou *sem responsável* — atribua na aba *Tarefas* quando quiser.`;
+        }
+        const dueLabel = payload.dueAt ? this.fmtDate(payload.dueAt) : undefined;
+        const pinged = await TaskAudioService.pingAssignee(orgId, payload.assigneeId, payload.title, dueLabel);
+        const who = payload.assigneeLabel || 'o responsável';
+        return pinged
+          ? `✅ Tarefa criada e atribuída a *${who}* — já avisei no WhatsApp. 📲`
+          : `✅ Tarefa criada e atribuída a *${who}*. Avisei no painel (ela ainda não tem WhatsApp cadastrado em *Configurações → Usuários*).`;
+      } catch (e: any) {
+        return `Não consegui criar a tarefa: ${e?.message || 'erro'}.`;
+      }
+    }
+
     if (pending.action_type === 'purchase_order_audio') {
       try {
         const matched: { productServiceId: string; quantity: number }[] = Array.isArray(payload.matched) ? payload.matched : [];
@@ -963,6 +997,41 @@ export class AIOrchestratorService {
     const lines = matched.map(m => `• ${m.quantity}× ${m.name}`).join("\n");
     const missNote = unmatched.length ? `\n\n⚠️ Não reconheci (não estão no catálogo): ${unmatched.join(", ")}.` : "";
     return `📝 Montei este *pedido de compra*:\n${lines}${missNote}\n\nConfirma? Responda *SIM* para adicionar em Compras ou *NÃO* para cancelar.`;
+  }
+
+  /**
+   * Detecta e monta uma TAREFA a partir da fala/mensagem do gestor (ADR-102).
+   * Retorna a mensagem de confirmação (SIM/NÃO) — ou null se não for uma tarefa
+   * de verdade (aí o chamador segue o fluxo normal). Nunca cria sem confirmação;
+   * nome de responsável não encontrado vira tarefa sem responsável + aviso.
+   */
+  private static async handleTaskOrderIntent(orgId: string, identifier: string, text: string): Promise<string | null> {
+    const t = await TaskAudioService.extractTaskFromText(orgId, text);
+    if (!t.isTask || !t.title) return null;
+
+    let assigneeId: string | null = null;
+    let assigneeLabel = "";
+    let assignWarn = "";
+    if (t.assignee) {
+      const match = TaskAudioService.matchAssignee(orgId, t.assignee);
+      if (match) { assigneeId = match.id; assigneeLabel = match.name; }
+      else assignWarn = `\n\n⚠️ Não achei *${t.assignee}* na equipe — vou criar sem responsável (você atribui na aba Tarefas).`;
+    }
+
+    const PRIO_LABEL: Record<string, string> = { alta: "Alta 🔴", media: "Média 🟡", baixa: "Baixa ⚪" };
+    this.savePendingAction(orgId, identifier, 'task_create_audio', {
+      title: t.title, assigneeId, assigneeLabel, dueAt: t.dueAt, priority: t.priority,
+    });
+    const respLine = assigneeId ? `\n👤 Responsável: *${assigneeLabel}*` : "";
+    const dueLine = t.dueAt ? `\n🗓️ Prazo: *${this.fmtDate(t.dueAt)}*` : "";
+    const prioLine = `\n⚡ Prioridade: ${PRIO_LABEL[t.priority] || "Média 🟡"}`;
+    return `📋 Montei esta *tarefa*:\n*${t.title}*${respLine}${dueLine}${prioLine}${assignWarn}\n\nConfirma? Responda *SIM* para criar ou *NÃO* para cancelar.`;
+  }
+
+  /** Formata AAAA-MM-DD para DD/MM sem fuso (evita ricochete de timezone). */
+  private static fmtDate(iso: string): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    return m ? `${m[3]}/${m[2]}` : iso;
   }
 
   private static async getProductsContext(orgId: string): Promise<string> {

@@ -149,6 +149,11 @@ export class PermissionService {
     return RANK[level] >= RANK[ACTION_MIN[action]];
   }
 
+  /** O usuário tem um perfil RBAC explicitamente atribuído? (opt-in do gating). */
+  static hasProfile(orgId: string, user: any): boolean {
+    return this.resolveProfileId(orgId, user) != null;
+  }
+
   /** Mapa módulo → nível para o usuário (consumido por GET /api/permissions/me). */
   static permissionMap(orgId: string, user: any): Record<string, Level> {
     const out: Record<string, Level> = {};

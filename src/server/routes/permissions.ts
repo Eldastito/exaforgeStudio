@@ -14,7 +14,10 @@ const orgOf = (req: AuthRequest) => req.organizationId as string;
 
 // GET /api/permissions/me — mapa módulo→nível do próprio usuário (menu/botões).
 router.get("/me", (req: AuthRequest, res: Response): any => {
-  res.json({ permissions: PermissionService.permissionMap(orgOf(req), req.user) });
+  res.json({
+    permissions: PermissionService.permissionMap(orgOf(req), req.user),
+    hasProfile: PermissionService.hasProfile(orgOf(req), req.user),
+  });
 });
 
 // GET /api/permissions/modules — catálogo de módulos + rótulos (editor de perfis).

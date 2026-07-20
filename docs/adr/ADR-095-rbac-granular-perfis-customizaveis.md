@@ -86,6 +86,16 @@ Confirmado relevante para o piloto: TOULON tem no mínimo 2 colaboradores por tu
 6. Frontend: menu + botões respeitam o nível
 7. Teste: `test:rbac-granular` — cada template acessa só o que deve; "write" não exclui; Dono imutável; perfil custom funciona
 
+## Estado da implementação (jul/26)
+
+Entregue em blocos (PRs sequenciais), para reduzir risco num refactor grande:
+
+- **Bloco 1** (#423): schema (`role_profiles`, `role_permissions`, `users.role_profile_id`) + `PermissionService` (níveis + 6 templates + fallback dos papéis legados) + middleware `requirePermission`. Aditivo/não-quebra.
+- **Bloco 2** (#424): API de gestão de perfis (`/api/permissions`), `/me`, backfill no boot, `role_profile_id` no JWT, 1ª migração de rotas (`users.ts`).
+- **Bloco 3** (#425): editor visual de perfis + atribuição de perfil por usuário (Configurações › Usuários).
+- **Bloco 4**: gating de **menu** no app (`canAccessModule` via `/api/permissions/me` + `hasProfile`). Opt-in por perfil atribuído — usuários sem perfil enxergam o app como antes.
+- **Bloco 5 (pendente)**: enforcement **duro na API** para todos os módulos (middleware global por rota→módulo) + botões de editar/excluir refletindo o nível nas telas. Adiado deliberadamente do Bloco 4 (decisão: "menu agora, enforcement depois") para não introduzir 403 em botões ainda visíveis durante o piloto. Enquanto isso, o enforcement de servidor cobre o módulo administrativo `usuarios` (Bloco 2); os demais seguem no gating por papel legado (`requireRole`) até a migração.
+
 ## Aprovação
 
 Aprovado por Emerson (jul/26): simplificar níveis (1 dropdown por módulo com 4 opções), 6 templates + criação de perfis customizados pelo dono, prioridade no piloto (bloco próprio). Item #5 do backlog marcado `[x] decidido`.

@@ -104,6 +104,11 @@ type AppState = {
   enabledModules: string[] | null; // null = todos habilitados (legado)
   loadOrgConfig: () => Promise<void>;
   isModuleEnabled: (moduleKey: string) => boolean;
+  // RBAC granular (ADR-095 Bloco 4): permissões do usuário logado por módulo.
+  permissions: Record<string, string> | null; // null = ainda não carregado
+  hasProfile: boolean;                         // usuário tem perfil atribuído?
+  loadPermissions: () => Promise<void>;
+  canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
   tickets: Record<string, Ticket>;
   messages: Record<string, Message[]>;
@@ -275,6 +280,28 @@ export const useStore = create<AppState>((set, get) => ({
     // por aqui). Evita o "todo mundo vê tudo" enquanto a vertical não é definida.
     if (em == null) return false;
     return em.includes(moduleKey);
+  },
+
+  // RBAC granular (ADR-095 Bloco 4). Carrega o mapa módulo→nível do usuário.
+  permissions: null,
+  hasProfile: false,
+  loadPermissions: async () => {
+    try {
+      const res = await apiFetch('/api/permissions/me');
+      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      set({ permissions: data?.permissions || null, hasProfile: !!data?.hasProfile });
+    } catch (e) { /* mantém null = sem restrição visual */ }
+  },
+  // O usuário pode ver/entrar num módulo? Opt-in: só restringe quem tem perfil
+  // atribuído (hasProfile). Sem perfil ⇒ enxerga como antes. Módulo fora do RBAC
+  // (ex.: canais/infra) nunca é escondido por aqui.
+  canAccessModule: (moduleKey) => {
+    const { permissions, hasProfile } = get();
+    if (!hasProfile || !permissions) return true;
+    const lvl = permissions[moduleKey];
+    if (lvl === undefined) return true;
+    return lvl !== 'none';
   },
   setEvolutionConfig: (config) => set({ evolutionConfig: config }),
   setActiveTicket: (id) => set({ activeTicketId: id }),

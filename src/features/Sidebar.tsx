@@ -5,9 +5,12 @@ import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule } = useStore();
   const { user, logout } = useAuth();
-  const mod = (key: string) => isModuleEnabled(key);
+  // Item visível quando o módulo está habilitado na org (plano/vertical) E o
+  // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
+  // canAccessModule retorna sempre true — o menu fica idêntico ao de hoje.
+  const mod = (key: string) => isModuleEnabled(key) && canAccessModule(key);
 
   return (
     <>

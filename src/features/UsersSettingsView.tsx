@@ -4,10 +4,12 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus, Copy, Check } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
+import { PermissionProfilesPanel } from './PermissionProfilesPanel';
 
 export function UsersSettingsView() {
   const { user } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<any[]>([]);
   const [invites, setInvites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -30,6 +32,28 @@ export function UsersSettingsView() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchProfiles = async () => {
+    try {
+      const res = await apiFetch('/api/permissions/profiles');
+      if (res.ok) { const data = await res.json(); setProfiles(data.profiles || []); }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const assignProfile = async (userId: string, profileId: string) => {
+    if (!profileId) return;
+    try {
+      const res = await apiFetch(`/api/permissions/users/${userId}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId }),
+      });
+      if (res.ok) { toast.success('Perfil de acesso atualizado.'); fetchData(); fetchProfiles(); }
+      else { const err = await res.json().catch(() => ({})); toast.error(err.error || 'Não foi possível atribuir o perfil.'); }
+    } catch { toast.error('Não foi possível atribuir o perfil.'); }
   };
 
   const fetchManagers = async () => {
@@ -74,6 +98,7 @@ export function UsersSettingsView() {
 
   useEffect(() => {
     fetchData();
+    fetchProfiles();
     fetchManagers();
   }, []);
 
@@ -186,7 +211,7 @@ export function UsersSettingsView() {
           <thead className="bg-zinc-950 border-b border-zinc-800 text-zinc-400">
             <tr>
               <th className="px-4 py-3 font-medium">Usuário</th>
-              <th className="px-4 py-3 font-medium">Perfil</th>
+              <th className="px-4 py-3 font-medium">Perfil de Acesso</th>
               <th className="px-4 py-3 font-medium">WhatsApp (Coordenador IA)</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Último Acesso</th>
@@ -200,7 +225,18 @@ export function UsersSettingsView() {
                   <div className="font-medium text-zinc-200">{u.name || 'Sem nome'}</div>
                   <div className="text-xs text-zinc-500">{u.email}</div>
                 </td>
-                <td className="px-4 py-3 capitalize text-zinc-300">{u.role}</td>
+                <td className="px-4 py-3">
+                  <select
+                    value={u.role_profile_id || ''}
+                    onChange={e => assignProfile(u.id, e.target.value)}
+                    className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200 outline-none focus:border-indigo-500"
+                  >
+                    <option value="" disabled>{u.role_profile_id ? '—' : `Papel legado: ${u.role}`}</option>
+                    {profiles.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </td>
                 <td className="px-4 py-3">
                   <input
                     type="text" defaultValue={u.phone || ''} placeholder="5521999998888"
@@ -237,6 +273,9 @@ export function UsersSettingsView() {
           </tbody>
         </table>
       </div>
+
+      {/* Perfis de Acesso (RBAC granular — ADR-095) */}
+      <PermissionProfilesPanel onProfilesChanged={fetchProfiles} />
 
       {/* Gestores do Zapp (IA por WhatsApp) */}
       <div className="bg-zinc-900/50 border border-indigo-800/40 rounded-xl p-6">

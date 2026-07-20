@@ -3261,6 +3261,19 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_storefront_look_items_look ON storefront_look_items(organization_id, look_id);
 
+      -- Imagens do avatar vestindo o look (ADR-104 Bloco 3): 2 poses por look
+      -- aprovado, geradas em fila. Públicas em /media (foto de catálogo, sem
+      -- consentimento). A 1ª vira a capa (published_image_url) ao publicar.
+      CREATE TABLE IF NOT EXISTS storefront_look_images (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        look_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        position INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_look_images_look ON storefront_look_images(organization_id, look_id);
+
       CREATE TABLE IF NOT EXISTS fashion_tryon_jobs (
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL,
@@ -3365,6 +3378,14 @@ const initDb = () => {
   // Vitrinista IA (ADR-104 Bloco 2): marca a última curadoria de vitrine — peças
   // cadastradas DEPOIS dela são as "novas" que a IA usa como base do lote.
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN vitrine_curated_at DATETIME`); } catch(e){}
+  // Bloco 3: publicar a foto do look direto ao gerar (1) ou esperar o OK do
+  // gerente (0, padrão) — o lojista decide (aprovar-antes × publicar-direto).
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN vitrine_auto_publish INTEGER DEFAULT 0`); } catch(e){}
+  // Estado da geração da imagem do look (Bloco 3): idle | queued | processing | done | failed.
+  try { db.exec(`ALTER TABLE storefront_looks ADD COLUMN generation_status TEXT DEFAULT 'idle'`); } catch(e){}
+  // Tom de pele do avatar preset (Bloco 3): a IA escolhe o modelo (clara/media/
+  // escura) que melhor combina com as cores da roupa. clara | media | escura.
+  try { db.exec(`ALTER TABLE fashion_preset_avatars ADD COLUMN skin_tone TEXT DEFAULT 'media'`); } catch(e){}
   // FAS-4 (ADR-038): atribuição comercial pedido<->look (RF-027) — permite
   // medir look->pedido/ticket sem tabela de junção; NULL para pedidos comuns.
   try { db.exec(`ALTER TABLE orders ADD COLUMN fashion_look_id TEXT`); } catch(e){}

@@ -209,6 +209,7 @@ jobs:
           - { name: 'fashion-preset-avatars', script: 'test:fashion-preset-avatars' }
           - { name: 'catalog-second-photo', script: 'test:catalog-second-photo' }
           - { name: 'storefront-looks', script: 'test:storefront-looks' }
+          - { name: 'storefront-look-generation', script: 'test:storefront-look-generation' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

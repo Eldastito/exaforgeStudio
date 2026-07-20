@@ -46,6 +46,7 @@
     "test:fashion-preset-avatars": "tsx scripts/test-fashion-preset-avatars.ts",
     "test:catalog-second-photo": "tsx scripts/test-catalog-second-photo.ts",
     "test:storefront-looks": "tsx scripts/test-storefront-looks.ts",
+    "test:storefront-look-generation": "tsx scripts/test-storefront-look-generation.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

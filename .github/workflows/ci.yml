@@ -194,6 +194,7 @@ jobs:
           - { name: 'purchase-order-by-audio', script: 'test:purchase-order-by-audio' }
           - { name: 'plans-migration', script: 'test:plans-migration' }
           - { name: 'vertical-plan-intersection', script: 'test:vertical-plan-intersection' }
+          - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

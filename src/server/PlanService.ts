@@ -124,6 +124,30 @@ export class PlanService {
     return { ok: true };
   }
 
+  // Estados válidos de billing (dono = gateway/admin). Ver header do serviço.
+  static BILLING_STATES = ["trialing", "active", "past_due", "suspended", "blocked", "cancelled"] as const;
+
+  /**
+   * Transiciona o billing_status da org (setter que faltava — usado pelo gateway
+   * ASAAS via webhook e pela régua de inadimplência). Opcionalmente atualiza o
+   * período de cobrança e limpa/seta o estágio da régua. É a ÚNICA porta de
+   * mudança de billing por código de cobrança (mantém a transição auditável).
+   */
+  static setBillingStatus(orgId: string, status: string, opts: { periodStart?: string | null; periodEnd?: string | null; reason?: string; resetDunning?: boolean } = {}): boolean {
+    if (!(this.BILLING_STATES as readonly string[]).includes(status)) return false;
+    const sets: string[] = ["billing_status = ?", "updated_at = CURRENT_TIMESTAMP"];
+    const vals: any[] = [status];
+    if (opts.periodStart !== undefined) { sets.push("current_period_start = ?"); vals.push(opts.periodStart); }
+    if (opts.periodEnd !== undefined) { sets.push("current_period_end = ?"); vals.push(opts.periodEnd); }
+    // Ao voltar a ficar em dia, zera a régua de inadimplência.
+    if (opts.resetDunning || status === "active" || status === "trialing") {
+      sets.push("billing_dunning_stage = NULL");
+    }
+    vals.push(orgId);
+    const r = db.prepare(`UPDATE organization_settings SET ${sets.join(", ")} WHERE organization_id = ?`).run(...vals);
+    return r.changes > 0;
+  }
+
   /**
    * Enforcement no atendimento da IA: bloqueia respostas se a empresa está
    * bloqueada/cancelada ou excedeu o limite mensal do plano.

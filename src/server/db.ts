@@ -479,6 +479,24 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN blocked_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN blocked_by TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reactivated_at DATETIME`); } catch(e){}
+  // ASAAS (ADR-091 Bloco B): cobrança ZappFlow → lojista. Reusa payment_provider/
+  // external_customer_id/external_subscription_id. Bookkeeping da régua de
+  // inadimplência (D-5→D+30): estágio + última execução (idempotência do Scheduler).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN billing_dunning_stage TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN billing_dunning_last_run DATETIME`); } catch(e){}
+  // Idempotência dos eventos de webhook do ASAAS: cada evento tem id único; um
+  // reenvio (PAYMENT_CONFIRMED redelivered) NÃO deve avançar o billing de novo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS asaas_webhook_events (
+        id TEXT PRIMARY KEY,            -- id do evento no ASAAS (evt_...)
+        organization_id TEXT,
+        event_type TEXT,
+        payment_id TEXT,
+        processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar asaas_webhook_events', e); }
   // Mídia (imagem/etc) anexada a uma mensagem
   try { db.exec(`ALTER TABLE messages ADD COLUMN media_url TEXT`); } catch(e){}
   // Status de entrega da resposta enviada ao provedor (WhatsApp/Instagram/etc.).

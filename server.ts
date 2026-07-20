@@ -73,6 +73,7 @@ import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
 import { EdgeInboxProcessor } from "./src/server/EdgeInboxProcessor.js";
 import { registerBuiltinEdgeCommandHandlers } from "./src/server/edgeCommandHandlers.js";
 import { PaymentService } from "./src/server/PaymentService.js";
+import { AsaasService } from "./src/server/AsaasService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
@@ -984,6 +985,25 @@ async function startServer() {
     } catch (e) {
       console.error("[PayWebhook] erro", e);
       return res.status(200).send("OK"); // não devolve 500 para o gateway não reentregar em loop
+    }
+  });
+
+  // WEBHOOK ASAAS (ADR-091 Bloco B): cobrança ZappFlow → lojista. Autentica pelo
+  // header asaas-access-token, deduplica por id do evento, re-consulta o pagamento
+  // e transiciona o billing_status. SEMPRE 200 (menos unauthorized) pra não travar
+  // a fila de eventos do ASAAS.
+  app.post("/api/webhooks/asaas", async (req, res) => {
+    try {
+      const r = await AsaasService.handleWebhook(req.headers as any, req.body || {});
+      if (r.status === "unauthorized") return res.status(401).send("unauthorized");
+      if (r.status === "ok" && r.billing && r.billing !== "unchanged" && r.orgId && (global as any).io) {
+        (global as any).io.to(`org:${r.orgId}`).emit("billing_updated", { billingStatus: r.billing });
+      }
+      console.log(`[AsaasWebhook] evento '${req.body?.event}' -> ${r.status}${r.billing ? ` (billing '${r.billing}')` : ""}`);
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("[AsaasWebhook] erro", e);
+      return res.status(200).send("OK");
     }
   });
 

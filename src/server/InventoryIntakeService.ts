@@ -46,6 +46,19 @@ export class InventoryIntakeService {
   }
 
   /**
+   * Adiciona uma imagem a um produto na PRÓXIMA posição (não troca a capa).
+   * Usada pela 2ª foto tratada do cadastro por WhatsApp (ADR-104). Publica na
+   * vitrine automaticamente (a vitrine lê todas as linhas de product_images).
+   */
+  static addProductImage(orgId: string, productId: string, url: string): void {
+    const prod = db.prepare("SELECT 1 FROM products_services WHERE id = ? AND organization_id = ?").get(productId, orgId);
+    if (!prod) return;
+    const pos = (db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS p FROM product_images WHERE product_service_id = ?").get(productId) as any).p;
+    db.prepare("INSERT INTO product_images (id, organization_id, product_service_id, url, position) VALUES (?, ?, ?, ?, ?)")
+      .run(uuidv4(), orgId, productId, url, pos);
+  }
+
+  /**
    * Produto SEM preço (lojista recusou informar, ADR-032): entra no estoque
    * para controle de quantidade, mas NUNCA na vitrine — `pricing_declined_at`
    * marca o momento da recusa para a auditoria de produtos incompletos.

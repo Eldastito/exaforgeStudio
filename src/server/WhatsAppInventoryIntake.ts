@@ -10,7 +10,8 @@ import { suggestSalePrice } from "./pricing.js";
 import { orgMarkup } from "./routes/products.js";
 import { InventoryIntakeService } from "./InventoryIntakeService.js";
 import { StudioCatalogPhotoService } from "./StudioCatalogPhotoService.js";
-import { savePendingAction, clearPendingAction } from "./PendingManagerActions.js";
+import { savePendingAction, clearPendingAction, getPendingAction } from "./PendingManagerActions.js";
+import { PlanService } from "./PlanService.js";
 
 // Recusa explícita a informar preço/margem/quantidade (ADR-032) — distinta de
 // uma resposta que só não trouxe NENHUM valor por acaso: só conta como
@@ -44,6 +45,12 @@ try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) { /* noop */ }
 export class WhatsAppInventoryIntake {
   static async handlePhoto(orgId: string, identifier: string, base64: string, mime: string): Promise<string> {
     try {
+      // 2ª foto de uma peça recém-cadastrada (ADR-104): não é um novo cadastro,
+      // é a foto complementar (tecido/detalhe) — trata e publica junto.
+      const pend = getPendingAction(orgId, identifier);
+      if (pend?.action_type === "awaiting_second_photo") {
+        return await this.addSecondPhoto(orgId, identifier, base64, mime, pend);
+      }
       const type = await classifyInventoryPhoto(base64, mime);
       if (type === "unclear") {
         savePendingAction(orgId, identifier, "awaiting_photo_type", { base64, mime });
@@ -103,6 +110,10 @@ export class WhatsAppInventoryIntake {
         // Resposta ambígua: restaura a pendência e pergunta de novo.
         savePendingAction(orgId, identifier, "awaiting_photo_type", payload);
         return "Não entendi — pode responder só *produto* ou *nota fiscal*?";
+      }
+      if (pending.action_type === "awaiting_second_photo") {
+        clearPendingAction(pending.id);
+        return `Perfeito, cadastro de *${payload.name || "a peça"}* finalizado! ✅ Quando chegar a próxima peça, é só mandar a foto.`;
       }
       if (pending.action_type === "product_registration") return (await this.continueProductRegistration(orgId, identifier, pending, payload, text)) + this.maybeNudge(orgId);
       if (pending.action_type === "invoice_registration") return (await this.continueInvoiceRegistration(orgId, identifier, pending, payload, text)) + this.maybeNudge(orgId);
@@ -235,7 +246,47 @@ export class WhatsAppInventoryIntake {
       productId, productName: payload.extracted.name, category: payload.extracted.category,
       costPrice: payload.collected.costPrice ?? null, marginPercent, salePrice: after.salePrice!, source: "whatsapp_manager",
     });
-    return `✅ Produto *${payload.extracted.name}* cadastrado e publicado na vitrine! Preço R$ ${after.salePrice!.toFixed(2)}, ${payload.collected.quantity} unidade(s) em estoque.`;
+    const base = `✅ Produto *${payload.extracted.name}* cadastrado e publicado na vitrine! Preço R$ ${after.salePrice!.toFixed(2)}, ${payload.collected.quantity} unidade(s) em estoque.`;
+    // ADR-104: convida a 2ª foto (peça inteira + tecido ondulado). Só quando a
+    // foto de catálogo por IA está ligada — é ela que trata/limpa as imagens.
+    if (StudioCatalogPhotoService.isEnabled(orgId)) {
+      savePendingAction(orgId, identifier, "awaiting_second_photo", { productId, name: payload.extracted.name });
+      return `${base}\n\n📸 Quer capricho? Mande a *2ª foto* (o tecido ondulado ou um detalhe) que eu trato e publico junto — ou responda *pronto* pra finalizar.`;
+    }
+    return base;
+  }
+
+  /**
+   * 2ª foto de uma peça recém-cadastrada (ADR-104): trata (fundo/estúdio) e
+   * publica como imagem adicional do produto, sem trocar a capa. Respeita o teto
+   * mensal de estúdio do plano; se estourar/desligado, só avisa (não bloqueia).
+   */
+  private static async addSecondPhoto(orgId: string, identifier: string, base64: string, mime: string, pending: any): Promise<string> {
+    let payload: any = {};
+    try { payload = JSON.parse(pending.payload_json || "{}"); } catch { /* noop */ }
+    clearPendingAction(pending.id);
+    const name = payload.name || "a peça";
+    if (!payload.productId) return "Não encontrei o cadastro dessa foto. Mande a foto da peça de novo pra recomeçar. 🙂";
+    if (!PlanService.studioAllowed(orgId, "image").allowed) {
+      return `Recebi a 2ª foto, mas o limite de imagens de estúdio do seu plano foi atingido este mês. A 1ª foto de *${name}* já está publicada. 👍`;
+    }
+    const processed = await sharp(Buffer.from(base64, "base64")).rotate().resize(1600, 1600, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+    const treated = await StudioCatalogPhotoService.generateForNewProduct(orgId, processed.toString("base64"), "image/jpeg");
+    if (!treated) {
+      // Trata falha/limite como não-fatal: publica a foto crua processada.
+      const rawUrl = this.saveMediaJpeg(processed);
+      InventoryIntakeService.addProductImage(orgId, payload.productId, rawUrl);
+      return `📸 Adicionei a 2ª foto de *${name}* à vitrine. (Não consegui o acabamento de estúdio agora, publiquei a foto tratada.)`;
+    }
+    InventoryIntakeService.addProductImage(orgId, payload.productId, treated);
+    return `✨ Prontinho! A 2ª foto de *${name}* foi tratada (fundo limpo, acabamento profissional) e publicada na vitrine.`;
+  }
+
+  /** Salva um JPEG já processado em /media e devolve a URL pública. */
+  private static saveMediaJpeg(buf: Buffer): string {
+    const name = `${uuidv4()}.jpg`;
+    fs.writeFileSync(path.join(MEDIA_DIR, name), buf);
+    return `/media/${name}`;
   }
 
   /** Reposição de um produto já reconhecido no catálogo — só falta a quantidade. */

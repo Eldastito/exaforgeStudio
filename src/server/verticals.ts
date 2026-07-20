@@ -15,6 +15,20 @@ export type Vertical = {
   icon: string;          // emoji para o card do onboarding
   modules: string[];     // módulos OPCIONAIS habilitados por padrão
   saleMode: string;      // sugestão de modo de venda padrão p/ o catálogo
+  consentCategories?: string[]; // categorias de consentimento LGPD pré-populadas (ADR-093 §3)
+};
+
+// Categorias de consentimento LGPD sugeridas por vertical (pré-população —
+// ADR-093 §3). Saúde inclui `dados_sensiveis` (base legal reforçada).
+export const CONSENT_BY_VERTICAL: Record<string, string[]> = {
+  varejo: ["marketing", "dados_pessoais", "perfilamento"],
+  moda: ["marketing", "dados_pessoais", "perfilamento"],
+  food: ["marketing", "dados_pessoais", "comunicacoes"],
+  servicos: ["dados_pessoais", "comunicacoes", "marketing"],
+  saude: ["dados_pessoais", "dados_sensiveis", "comunicacoes"],
+  educacao: ["dados_pessoais", "comunicacoes", "marketing"],
+  hospitalidade: ["dados_pessoais", "marketing", "comunicacoes"],
+  outro: ["marketing", "dados_pessoais", "perfilamento", "comunicacoes"],
 };
 
 // Todos os módulos OPCIONAIS conhecidos (usados por "outro" e validação).

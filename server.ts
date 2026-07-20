@@ -947,6 +947,18 @@ async function startServer() {
         return res.status(200).send("OK");
       }
 
+      // FORMATO PAGAR.ME (Stone, ADR-100): evento order.paid/charge.paid. Casa
+      // pela `code`/metadata que gravamos ao criar o Link de Pagamento.
+      const stoneType = String(body.type || '').toLowerCase();
+      if (/^(order|charge)\./.test(stoneType)) {
+        const status = await PaymentService.syncStonePayment(orgId, body);
+        if (status === 'paid' && (global as any).io) {
+          (global as any).io.to(`org:${orgId}`).emit("order_updated", { status: 'pago', payment_status: 'paid' });
+        }
+        console.log(`[PayWebhook] Pagar.me (Stone) evento '${stoneType}' -> '${status}' (org ${orgId}).`);
+        return res.status(200).send("OK");
+      }
+
       // FORMATO GENÉRICO (gateway 'custom' que posta no nosso formato):
       let orderId: string | undefined = body.orderId || body.order_id;
       let paid = body.status ? ['paid', 'approved', 'pago', 'completed'].includes(String(body.status).toLowerCase()) : true;

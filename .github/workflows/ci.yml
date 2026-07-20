@@ -188,6 +188,7 @@ jobs:
           - { name: 'backup-restore', script: 'test:backup-restore' }
           - { name: 'smart-import', script: 'test:smart-import' }
           - { name: 'radar-b2b', script: 'test:radar-b2b' }
+          - { name: 'stone-payment-link', script: 'test:stone-payment-link' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

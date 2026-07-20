@@ -25,6 +25,7 @@
     "test:backup-restore": "tsx scripts/test-backup-restore.ts",
     "test:smart-import": "tsx scripts/test-smart-import.ts",
     "test:radar-b2b": "tsx scripts/test-radar-b2b.ts",
+    "test:stone-payment-link": "tsx scripts/test-stone-payment-link.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

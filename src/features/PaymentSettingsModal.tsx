@@ -77,6 +77,7 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
           value={s.provider} onChange={e => setS({ ...s, provider: e.target.value })}>
           <option value="pix_manual">Pix manual (minha chave Pix)</option>
           <option value="mercadopago">Mercado Pago (gateway)</option>
+          <option value="stone">Stone / Pagar.me (cartão + Pix + boleto)</option>
           <option value="custom">Outro gateway</option>
         </select>
 
@@ -99,17 +100,24 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
         )}
 
         {/* Gateway */}
-        {(s.provider === 'mercadopago' || s.provider === 'custom') && (
+        {(s.provider === 'mercadopago' || s.provider === 'stone' || s.provider === 'custom') && (
           <div className="space-y-3 mb-4">
             <div>
               <label className="text-sm text-zinc-400 mb-1 block">
-                {s.provider === 'mercadopago' ? 'Access Token de produção (Mercado Pago)' : 'Token / credencial do gateway'}
+                {s.provider === 'mercadopago' ? 'Access Token de produção (Mercado Pago)'
+                  : s.provider === 'stone' ? 'Chave secreta Pagar.me (sk_...)'
+                  : 'Token / credencial do gateway'}
               </label>
               <input type="password" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
-                placeholder={s.hasGatewayToken ? '•••••••• (já configurado — preencha para substituir)' : 'Cole o access token'} value={gatewayToken} onChange={e => setGatewayToken(e.target.value)} />
+                placeholder={s.hasGatewayToken ? '•••••••• (já configurado — preencha para substituir)' : (s.provider === 'stone' ? 'Cole a chave sk_live_... da Pagar.me/Stone' : 'Cole o access token')} value={gatewayToken} onChange={e => setGatewayToken(e.target.value)} />
               {s.provider === 'mercadopago' && (
                 <p className="text-[11px] text-zinc-500 mt-1">
                   Em <strong>Mercado Pago → Seu negócio → Configurações → Credenciais</strong>, copie o <strong>Access Token de produção</strong>. Com ele, a IA gera um <strong>Pix copia-e-cola</strong> a cada pedido e o pagamento é <strong>confirmado automaticamente</strong>.
+                </p>
+              )}
+              {s.provider === 'stone' && (
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  No painel <strong>Stone / Pagar.me → Configurações → Chaves de API</strong>, copie a <strong>Chave secreta (sk_live_…)</strong>. Com ela, a IA gera um <strong>link de pagamento</strong> a cada pedido (cartão, Pix e boleto) e o pedido é <strong>confirmado automaticamente</strong> via webhook.
                 </p>
               )}
             </div>

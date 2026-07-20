@@ -1,6 +1,8 @@
 # ADR-104 — Vitrinista IA: fotos de catálogo tratadas + looks com avatar
 
-**Status:** Aprovado (Bloco 1 em implementação).
+**Status:** Aprovado. Bloco 1 implementado (2ª foto tratada por peça). Bloco 2
+backend implementado (motor vitrinista + tabela `storefront_looks` + endpoints +
+gatilho "montar vitrine" no WhatsApp); Kanban (frontend) num PR próprio.
 
 **Origem:** Pedido de campo do Emerson (jul/26), evoluindo o item #13. Quando peças
 novas chegam à loja, o gerente cadastra por foto no Zapp; a IA deve tratar as
@@ -67,9 +69,14 @@ direto**. Default: aprovar antes (curadoria), com opção de marcar "publicar di
 1. **Cadastro com 2 fotos tratadas por peça** (este bloco): estende o intake para
    2 fotos por peça; cada foto tratada por IA (fundo/estúdio) em fila; publica em
    `product_images`; amarra no teto do plano. Entrega já as fotos profissionais.
-2. **IA vitrinista + Kanban de looks:** cadastro em lote (fotografa todas → lista
-   por categoria); IA sugere combinações (reusa `FashionLookService`); Kanban
-   arrasta/solta para curar/criar looks.
+2. **IA vitrinista + Kanban de looks:** a IA combina as peças NOVAS do lote
+   (novas como base, podendo puxar antigas que combinem) em looks de vitrine,
+   gravados em `storefront_looks` (tabela nova, sem cliente — distinta dos
+   `fashion_looks` da cliente); o lojista dispara por "montar vitrine" no
+   WhatsApp **ou** por botão na tela, e cura num Kanban (arrasta/solta,
+   cria/edita). Motor com a mesma rede anti-injection do look da cliente +
+   fallback determinístico. **Este PR:** backend (motor + tabela + endpoints +
+   gatilho WhatsApp). **PR seguinte:** o Kanban (frontend).
 3. **Geração + publicação dos looks:** looks aprovados → fila gera imagem do
    avatar vestindo o look (IA escolhe o modelo), publica; escolha aprovar × direto.
 

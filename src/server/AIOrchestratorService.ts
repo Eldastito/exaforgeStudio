@@ -20,6 +20,7 @@ import { QuoteService } from "./QuoteService.js";
 import { getPendingAction as getPendingActionShared, savePendingAction as savePendingActionShared, clearPendingAction as clearPendingActionShared } from "./PendingManagerActions.js";
 import { BusinessManifestoService } from "./BusinessManifestoService.js";
 import { WhatsAppInventoryIntake } from "./WhatsAppInventoryIntake.js";
+import { StorefrontLookService } from "./StorefrontLookService.js";
 import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
 import { TaskService } from "./TaskService.js";
 import { TaskAudioService } from "./TaskAudioService.js";
@@ -120,6 +121,15 @@ export class AIOrchestratorService {
         const reply = await this.handleTaskOrderIntent(params.organizationId, params.senderId, text);
         if (reply) return { reply, actions: [], needsHuman: false };
         // Não era uma tarefa de fato → segue o fluxo normal.
+      }
+
+      // MONTAR VITRINE (ADR-104 Bloco 2): o gestor terminou de cadastrar o lote
+      // e pede "montar vitrine/looks" — a IA vitrinista combina as peças novas
+      // e devolve os looks pro Kanban (curadoria na tela). Só dispara com a
+      // intenção explícita de montar looks/vitrine.
+      if (!isOrchestratorCommand && /\bmont(a|ar|e)\b.*\b(vitrine|look|looks|combina)/i.test(text)) {
+        const reply = await this.handleVitrineIntent(params.organizationId);
+        if (reply) return { reply, actions: [], needsHuman: false };
       }
     }
 
@@ -1026,6 +1036,24 @@ export class AIOrchestratorService {
     const dueLine = t.dueAt ? `\n🗓️ Prazo: *${this.fmtDate(t.dueAt)}*` : "";
     const prioLine = `\n⚡ Prioridade: ${PRIO_LABEL[t.priority] || "Média 🟡"}`;
     return `📋 Montei esta *tarefa*:\n*${t.title}*${respLine}${dueLine}${prioLine}${assignWarn}\n\nConfirma? Responda *SIM* para criar ou *NÃO* para cancelar.`;
+  }
+
+  /**
+   * "Montar vitrine" (ADR-104 Bloco 2): a IA vitrinista combina as peças novas
+   * do lote em looks e os deixa no Kanban da Loja Virtual pra curadoria. Não
+   * publica nada sozinha — a imagem do avatar vestindo é gerada só após o
+   * lojista aprovar (Bloco 3). Retorna null se não conseguir (segue fluxo normal).
+   */
+  private static async handleVitrineIntent(orgId: string): Promise<string | null> {
+    try {
+      const r = await StorefrontLookService.suggest(orgId);
+      // (narrowing frouxo do repo: strictNullChecks off não estreita !r.ok)
+      if (!r.ok) return `🧵 ${(r as { error: string }).error}`;
+      return `🧵 Montei *${r.created} look(s)* de vitrine com as ${r.newPieceCount} peça(s) novas! Abra *Loja Virtual › Vitrine* pra revisar, ajustar e aprovar. Depois de aprovar, eu gero as imagens do avatar vestindo cada look. ✨`;
+    } catch (e) {
+      console.error("[AIOrchestrator] handleVitrineIntent falhou", e);
+      return null;
+    }
   }
 
   /** Formata AAAA-MM-DD para DD/MM sem fuso (evita ricochete de timezone). */

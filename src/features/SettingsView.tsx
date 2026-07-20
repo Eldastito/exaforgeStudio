@@ -249,6 +249,9 @@ function BillingPanel() {
   const [cpfCnpj, setCpfCnpj] = useState('');
   const [subscribing, setSubscribing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [perf, setPerf] = useState<any | null>(null);
+
+  const loadPerf = () => apiFetch('/api/analytics/performance-fee').then(r => r.ok ? r.json() : null).then(d => setPerf(d && !d.error ? d : null)).catch(() => setPerf(null));
 
   const load = () => {
     Promise.all([
@@ -261,8 +264,15 @@ function BillingPanel() {
       setAlerts(Array.isArray(al?.alerts) ? al.alerts : []);
       if (sn?.hasSubscription) apiFetch('/api/plans/billing/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d?.invoices) ? d.invoices : [])).catch(() => {});
     });
+    loadPerf();
   };
   useEffect(() => { load(); }, []);
+
+  const togglePerfConsent = async (enabled: boolean) => {
+    try { await apiFetch('/api/analytics/performance-fee/consent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }); loadPerf(); }
+    catch (e) { toast.error('Erro ao salvar a preferência.'); }
+  };
+  const brl = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const subscribe = async () => {
     if (!cpfCnpj.trim()) { toast.error('Informe o CPF ou CNPJ do responsável.'); return; }
@@ -311,6 +321,46 @@ function BillingPanel() {
 
   return (
     <div className="space-y-6">
+      {/* Painel de Valor Gerado (ADR-091 Bloco C, Scale+) — modo beta: mostra, não cobra */}
+      {perf && (
+        <div className="bg-gradient-to-br from-emerald-500/10 to-zinc-900/50 border border-emerald-500/20 rounded-xl p-6">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-xl font-semibold text-white flex items-center gap-2">💚 Valor gerado pelo ZappFlow <span className="text-[11px] text-zinc-400">(este mês)</span></h2>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">MODO BETA — não cobrado</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div><p className="text-xs text-zinc-500">Margem recuperada (comprovada)</p><p className="text-2xl font-bold text-emerald-300">{brl(perf.incrementalGain)}</p></div>
+            <div><p className="text-xs text-zinc-500">Receita recuperada</p><p className="text-2xl font-bold text-zinc-100">{brl(perf.recoveredRevenue)}</p></div>
+            <div><p className="text-xs text-zinc-500">Taxa de sucesso ({perf.feePercent}%)</p><p className="text-2xl font-bold text-zinc-100">{brl(perf.fee)}</p></div>
+          </div>
+          {perf.drivers?.length > 0 && (
+            <div className="mt-4 space-y-1.5">
+              {perf.drivers.map((d: any) => (
+                <div key={d.key} className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-400">{d.label} <span className="text-zinc-600">({d.orders} pedido{d.orders !== 1 ? 's' : ''})</span></span>
+                  <span className="text-zinc-200">{brl(d.recoveredMargin)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-500 mt-3">
+            Ganho medido pela <strong>margem recuperada</strong> diretamente atribuída aos mecanismos do ZappFlow (cada pedido conta uma vez).
+            {!perf.marginProven && ' Margem estimada em 30% (cadastre o custo dos produtos para o cálculo real).'}
+            {perf.estimated?.reposicao > 0 && <> Economia estimada de reposição (à parte, não entra na taxa): <strong>{brl(perf.estimated.reposicao)}</strong>.</>}
+          </p>
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+            <div>
+              <p className="text-sm text-zinc-200">Autorizar a taxa de sucesso de {perf.feePercent}%</p>
+              <p className="text-[11px] text-zinc-500">Opcional e revogável. Enquanto desligado (ou nos 6 primeiros meses), é só demonstrativo — nada é cobrado.</p>
+            </div>
+            <button onClick={() => togglePerfConsent(!perf.consented)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${perf.consented ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${perf.consented ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

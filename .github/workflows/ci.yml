@@ -196,6 +196,7 @@ jobs:
           - { name: 'vertical-plan-intersection', script: 'test:vertical-plan-intersection' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
+          - { name: 'performance-fee', script: 'test:performance-fee' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }
           - { name: 'lgpd-service', script: 'test:lgpd-service' }

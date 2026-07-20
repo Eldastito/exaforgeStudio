@@ -484,6 +484,12 @@ const initDb = () => {
   // inadimplência (D-5→D+30): estágio + última execução (idempotência do Scheduler).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN billing_dunning_stage TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN billing_dunning_last_run DATETIME`); } catch(e){}
+  // Performance fee (ADR-091 §6 / Bloco C): consentimento EXPLÍCITO e revogável
+  // para ATIVAR a cobrança de 2% do ganho incremental. Sem consentimento, o
+  // painel só MOSTRA o valor (modo beta) — nunca cobra.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN performance_fee_billing_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN performance_fee_consented_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN performance_fee_revoked_at DATETIME`); } catch(e){}
   // Idempotência dos eventos de webhook do ASAAS: cada evento tem id único; um
   // reenvio (PAYMENT_CONFIRMED redelivered) NÃO deve avançar o billing de novo.
   try {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { JWT_SECRET, MASTER_ADMIN_EMAIL } from "../config/secret.js";
+import { PermissionService, Action } from "../PermissionService.js";
 
 export interface AuthRequest extends Request {
   user?: any;
@@ -65,6 +66,32 @@ export const requireMasterAdmin = (req: AuthRequest, res: Response, next: NextFu
 export const requireRole = (...roles: string[]) => (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ error: "Forbidden: insufficient role" });
+  }
+  next();
+};
+
+// RBAC granular (ADR-095): autoriza por NÍVEL de acesso do perfil do usuário a um
+// módulo, substituindo o gating binário de requireRole. A ação, quando não
+// informada, é derivada do método HTTP (GET=read; POST/PUT/PATCH=write;
+// DELETE=delete). Enquanto o usuário não tiver perfil atribuído, o
+// PermissionService cai no fallback dos papéis legados — nada muda de imediato.
+//
+// Uso: `router.post("/x", requirePermission("vendas"), handler)` (ação = write,
+// derivada) ou `requirePermission("vendas", "delete")` para fixar a ação.
+const methodAction = (method: string): Action => {
+  const m = (method || "GET").toUpperCase();
+  if (m === "GET" || m === "HEAD" || m === "OPTIONS") return "read";
+  if (m === "DELETE") return "delete";
+  return "write";
+};
+
+export const requirePermission = (module: string, action?: Action) => (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  // Master admin é cross-tenant e nunca é barrado pelo RBAC da org.
+  if (req.user.email && req.user.email === MASTER_ADMIN_EMAIL) return next();
+  const act = action || methodAction(req.method);
+  if (!PermissionService.can(req.organizationId || req.user.organizationId, req.user, module, act)) {
+    return res.status(403).json({ error: `Forbidden: sem permissão de ${act} em ${module}` });
   }
   next();
 };

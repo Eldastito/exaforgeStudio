@@ -3695,6 +3695,32 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_fund_org_created ON fundamentals_checks(organization_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar fundamentals_checks', e); }
+
+  // RBAC granular (ADR-095): perfis de acesso por organização com nível por
+  // módulo. Aditivo e não-quebra — enquanto users.role_profile_id for nulo, o
+  // PermissionService cai no fallback dos papéis legados (owner/admin/agent).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS role_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        system_key TEXT,           -- owner|gerente|vendedor|estoquista|financeiro|atendente (NULL = perfil custom do dono)
+        is_system INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_role_profiles_org ON role_profiles(organization_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_role_profiles_org_system ON role_profiles(organization_id, system_key) WHERE system_key IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS role_permissions (
+        role_profile_id TEXT NOT NULL,
+        module TEXT NOT NULL,
+        level TEXT NOT NULL DEFAULT 'none',   -- none|read|write|full
+        PRIMARY KEY (role_profile_id, module)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de RBAC', e); }
+  try { db.exec(`ALTER TABLE users ADD COLUMN role_profile_id TEXT`); } catch(e){}
 };
 
 initDb();

@@ -5,6 +5,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { chat, isAIConfigured } from "../llm.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
+import { StorefrontLookService } from "../StorefrontLookService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -523,7 +524,7 @@ router.post("/fashion/preset-avatars", (req: AuthRequest, res): any => {
   const b = req.body || {};
   if (!b.rightsConfirmed) return res.status(400).json({ error: "Confirme que você tem direitos de uso da imagem." });
   const r = FashionPresetAvatarService.create(getOrgId(req), { label: b.label, bodyType: b.bodyType, imageUrl: b.imageUrl });
-  if (!r.ok) return res.status(400).json({ error: r.error });
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
   res.status(201).json({ id: r.id });
 });
 
@@ -537,6 +538,50 @@ router.put("/fashion/preset-avatars/:id", (req: AuthRequest, res): any => {
 router.delete("/fashion/preset-avatars/:id", (req: AuthRequest, res): any => {
   const ok = FashionPresetAvatarService.remove(getOrgId(req), req.params.id);
   if (!ok) return res.status(404).json({ error: "Avatar não encontrado." });
+  res.json({ ok: true });
+});
+
+// ============================================================================
+// VITRINISTA IA — looks de merchandising da loja (ADR-104 Bloco 2). A IA
+// combina as peças novas do lote; o lojista cura num Kanban. A geração da
+// imagem do avatar vestindo o look aprovado é o Bloco 3.
+// ============================================================================
+
+// Dispara a sugestão de looks a partir das peças novas (o "botão" da tela; o
+// gatilho por WhatsApp "montar vitrine" chama o mesmo serviço).
+router.post("/fashion/vitrine/suggest", async (req: AuthRequest, res): Promise<any> => {
+  const r = await StorefrontLookService.suggest(getOrgId(req), { maxLooks: Number(req.body?.maxLooks) || undefined });
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.json(r);
+});
+
+router.get("/fashion/vitrine/looks", (req: AuthRequest, res): any => {
+  res.json({ looks: StorefrontLookService.list(getOrgId(req)) });
+});
+
+router.post("/fashion/vitrine/looks", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = StorefrontLookService.createManual(getOrgId(req), b.productIds || [], { title: b.title, status: b.status });
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.status(201).json({ id: r.id, look: StorefrontLookService.get(getOrgId(req), r.id) });
+});
+
+router.put("/fashion/vitrine/looks/:id", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = StorefrontLookService.update(getOrgId(req), req.params.id, { status: b.status, position: b.position, title: b.title });
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.json({ ok: true });
+});
+
+router.put("/fashion/vitrine/looks/:id/items", (req: AuthRequest, res): any => {
+  const r = StorefrontLookService.setItems(getOrgId(req), req.params.id, (req.body || {}).productIds || []);
+  if (!r.ok) return res.status(400).json({ error: (r as { error: string }).error });
+  res.json({ ok: true, look: StorefrontLookService.get(getOrgId(req), req.params.id) });
+});
+
+router.delete("/fashion/vitrine/looks/:id", (req: AuthRequest, res): any => {
+  const ok = StorefrontLookService.remove(getOrgId(req), req.params.id);
+  if (!ok) return res.status(404).json({ error: "Look não encontrado." });
   res.json({ ok: true });
 });
 

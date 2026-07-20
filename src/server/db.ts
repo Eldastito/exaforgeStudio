@@ -3230,6 +3230,37 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_fashion_look_items_look ON fashion_look_items(organization_id, look_id);
 
+      -- LOOKS DE VITRINE (ADR-104 Bloco 2): looks de MERCHANDISING da loja,
+      -- montados pela IA vitrinista a partir das peças novas + curados pelo
+      -- lojista num Kanban. Distintos dos fashion_looks (que são da CLIENTE,
+      -- com consentimento/memória): aqui não há customer_id nem quiz — é
+      -- conteúdo da loja. A imagem do avatar vestindo é gerada no Bloco 3.
+      CREATE TABLE IF NOT EXISTS storefront_looks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        title TEXT,
+        explanation TEXT,
+        origin TEXT DEFAULT 'ai',              -- ai | manual
+        status TEXT DEFAULT 'suggested',       -- suggested | approved | published | archived
+        preset_avatar_id TEXT,                 -- avatar escolhido (Bloco 3); NULL = IA escolhe
+        published_image_url TEXT,              -- imagem do avatar vestindo, publicada (Bloco 3)
+        tryon_job_id TEXT,                     -- job da geração (Bloco 3)
+        position INTEGER DEFAULT 0,            -- ordem dentro da coluna do Kanban
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_looks_org_status ON storefront_looks(organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS storefront_look_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        look_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,      -- FK do catálogo real; nunca duplica catálogo
+        role TEXT DEFAULT 'main',              -- main | bottom | outerwear | shoes | accessory
+        position INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_look_items_look ON storefront_look_items(organization_id, look_id);
+
       CREATE TABLE IF NOT EXISTS fashion_tryon_jobs (
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL,
@@ -3331,6 +3362,9 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar storefront_customers', e); }
   // Retenção do avatar (RF-032/19.4): padrão 30 dias, configurável por loja.
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN fashion_avatar_retention_days INTEGER DEFAULT 30`); } catch(e){}
+  // Vitrinista IA (ADR-104 Bloco 2): marca a última curadoria de vitrine — peças
+  // cadastradas DEPOIS dela são as "novas" que a IA usa como base do lote.
+  try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN vitrine_curated_at DATETIME`); } catch(e){}
   // FAS-4 (ADR-038): atribuição comercial pedido<->look (RF-027) — permite
   // medir look->pedido/ticket sem tabela de junção; NULL para pedidos comuns.
   try { db.exec(`ALTER TABLE orders ADD COLUMN fashion_look_id TEXT`); } catch(e){}

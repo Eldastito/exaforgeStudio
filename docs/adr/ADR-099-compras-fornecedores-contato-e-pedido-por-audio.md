@@ -1,6 +1,6 @@
 # ADR-099 — Compras/Fornecedores: perfil com contato, cotação por e-mail e pedido de compra por áudio
 
-**Status:** Aprovado (aguardando implementação — bloco imediato + bloco futuro de rede).
+**Status:** Bloco imediato implementado (jul/26). Bloco futuro de rede (compra coletiva + retroalimentação) aprovado, aguardando rede madura.
 
 **Origem:** Item #11 do `docs/BACKLOG-CAMPO-TOULON.md`. Três frentes: (a) a aba "Ser fornecedor" não tem campos de contato, botão salvar nem clareza de "novo registro"; (b) automatizar o contato com fornecedores (e-mail + WhatsApp), com "compra coletiva" e "retroalimentação"; (c) falta uma aba de "pedido de compra" onde o gestor grava a lista por **áudio** no Zap e a IA salva.
 
@@ -53,14 +53,16 @@ O domínio Supply/Compras tem 3 fases já implementadas: **Fase 1** reposição 
 
 ## Implementação
 
-**Bloco imediato (#11 core) — item independente:**
-1. Schema: `network_contact_whatsapp`, `network_contact_email` em `organization_settings`; `created_by` já cobre 'manager' em `purchase_requisitions`.
-2. `SupplyNetworkService.saveProfile`: aceitar/persistir contato + validação.
-3. `ProcurementView` aba "Ser fornecedor": campos de contato + botão Salvar com feedback + texto/atalho pra Contatos.
-4. `SupplierQuoteService.sendQuotes`: canal e-mail paralelo (quando houver e-mail + Google conectado).
-5. Pedido por áudio: intent novo em `AIOrchestratorService` → transcrição → extração LLM → requisição manual `draft` → confirmação via `PendingManagerActions`.
-6. Rota/UI de "criar pedido de compra manual".
-7. Testes: `test:supplier-profile-contact`, `test:quote-email-channel`, `test:purchase-order-by-audio`.
+**Bloco imediato (#11 core) — ✅ implementado (jul/26):**
+1. Schema: `network_contact_whatsapp`, `network_contact_email` em `organization_settings`; `source` ('auto'|'manual') em `purchase_requisition_items`.
+2. `SupplyNetworkService.saveProfile`/`profile`: contato persistido + validação (WhatsApp com DDI, e-mail). (PR A)
+3. `ProcurementView` aba "Ser fornecedor": campos de contato + botão Salvar com "Salvo ✓" + texto/atalho pra Contatos. (PR A)
+4. `SupplierQuoteService.sendQuotes`: canal e-mail paralelo via `gmailSend` (quando houver e-mail + Google conectado), degradação graciosa; retorno ganha `emailed`. (PR B)
+5. Pedido por áudio/texto: o áudio já vira texto no `server.ts` (transcrição Whisper existente). `AIOrchestratorService` ganha um gatilho de intenção de compra (por palavra-chave, sem sequestrar conversa) → `PurchaseRequisitionService.extractOrderFromText` (LLM) → `matchItemsToProducts` (casa com o catálogo) → `savePendingAction('purchase_order_audio')` → confirma SIM/NÃO → `addManualItems`. (PR C)
+6. "Criar pedido manual": `addManualItems` mescla os itens ditados no rascunho corrente marcados `source='manual'`; `syncDraft` foi ajustado para **preservar** as linhas manuais (só recalcula as 'auto'). Assim o pedido do gestor aparece e é aprovável na tela de Compras existente, sem UI nova. (PR C)
+7. Testes: `test:supplier-profile-contact` (12/12), `test:quote-email-channel` (10/10), `test:purchase-order-by-audio` (16/16). Todos no CI.
+
+> Escopo do bloco imediato: e-mail é **só de saída** (respostas seguem por WhatsApp/UI; inbound de e-mail = bloco futuro). O gatilho do pedido por voz é por palavra-chave + confirmação obrigatória (nunca cria sem SIM). Itens ditados fora do catálogo são reportados para cadastro, não inventados.
 
 **Bloco futuro (rede madura):**
 8. Compra coletiva: agregação de demanda entre orgs da rede + negociação em volume.

@@ -276,8 +276,10 @@ independente)`
 
 Ver [`docs/adr/ADR-099-compras-fornecedores-contato-e-pedido-por-audio.md`](adr/ADR-099-compras-fornecedores-contato-e-pedido-por-audio.md).
 
-**Status:** `[x] decidido — bloco imediato (contato+e-mail+áudio) +
-bloco futuro (compra coletiva/retroalimentação)`
+**Status:** `[x] bloco imediato IMPLEMENTADO (contato no perfil + e-mail
+na cotação + pedido por áudio/texto com confirmação, mesclado no rascunho
+de Compras). Bloco futuro (compra coletiva/retroalimentação) aguarda rede
+madura.`
 
 ## 12. Vendas — API de gateway + relatórios com filtro
 

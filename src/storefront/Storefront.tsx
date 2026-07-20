@@ -225,10 +225,10 @@ export function Storefront() {
   }, []);
 
   const submitOrder = useCallback(
-    async (extra: { name: string; phone: string; email?: string; coupon?: string }): Promise<OrderResponse | null> => {
+    async (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string }): Promise<OrderResponse | null> => {
       const body = {
         token: token ?? undefined,
-        customer: { name: extra.name, phone: extra.phone, email: extra.email },
+        customer: { name: extra.name, phone: extra.phone, email: extra.email, cpf: extra.cpf },
         coupon: extra.coupon,
         items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })),
         fashionLookId: fashionLookId ?? undefined,

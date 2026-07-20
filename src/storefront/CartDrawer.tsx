@@ -16,7 +16,7 @@ interface Props {
   onClose: () => void;
   onChangeQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onSubmit: (extra: { name: string; phone: string; email?: string; coupon?: string }) => Promise<OrderResponse | null>;
+  onSubmit: (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string }) => Promise<OrderResponse | null>;
   onClear: () => void;
 }
 
@@ -37,6 +37,7 @@ export function CartDrawer({
   const [name, setName] = useState(customer?.name ?? '');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [cpf, setCpf] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OrderResponse | null>(null);
@@ -91,7 +92,7 @@ export function CartDrawer({
     }
     setSubmitting(true);
     try {
-      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), coupon: applied?.code });
+      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), cpf: cpf.trim(), coupon: applied?.code });
       if (res && res.ok) {
         setResult(res);
         onClear();
@@ -346,41 +347,59 @@ export function CartDrawer({
 
                 <footer className="space-y-3 border-t border-white/10 p-4">
                   {customer ? (
-                    // Cliente veio pelo link: já sabemos quem é — não pedimos nada.
+                    // Cliente veio pelo link (WhatsApp): já sabemos quem é — não
+                    // pedimos NADA (nem e-mail: se a IA já capturou na conversa,
+                    // está no contato). Checkout de 1 clique (ADR-096).
                     <p className="text-sm opacity-70">
-                      Comprando como <span className="font-semibold opacity-100">{customer.name || 'cliente'}</span>.
+                      Comprando como <span className="font-semibold opacity-100">{customer.name || 'cliente'}</span>. É só confirmar. 🙌
                     </p>
                   ) : (
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <input
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          placeholder="Seu nome"
+                          className={[
+                            'rounded-xl border px-3 py-2.5 text-sm outline-none',
+                            night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                          ].join(' ')}
+                        />
+                        <input
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="WhatsApp (opcional)"
+                          inputMode="tel"
+                          className={[
+                            'rounded-xl border px-3 py-2.5 text-sm outline-none',
+                            night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                          ].join(' ')}
+                        />
+                      </div>
+
+                      {/* E-mail opcional — SÓ para o cliente anônimo. Quem vem do
+                          WhatsApp não precisa: a IA já capturou na conversa. */}
                       <input
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Seu nome"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="E-mail (opcional — para receber a confirmação)"
+                        inputMode="email"
                         className={[
-                          'rounded-xl border px-3 py-2.5 text-sm outline-none',
+                          'w-full rounded-xl border px-3 py-2.5 text-sm outline-none',
                           night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
                         ].join(' ')}
                       />
-                      <input
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="WhatsApp (opcional)"
-                        inputMode="tel"
-                        className={[
-                          'rounded-xl border px-3 py-2.5 text-sm outline-none',
-                          night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
-                        ].join(' ')}
-                      />
-                    </div>
+                    </>
                   )}
 
-                  {/* E-mail opcional — usado só para enviar a confirmação do pedido. */}
+                  {/* CPF na nota — opcional e não bloqueante (ADR-096). A loja não
+                      emite NF-e no piloto; é só para quem quiser o CPF no cupom. */}
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="E-mail (opcional — para receber a confirmação)"
-                    inputMode="email"
+                    value={cpf}
+                    onChange={(e) => setCpf(e.target.value)}
+                    placeholder="CPF na nota (opcional)"
+                    inputMode="numeric"
                     className={[
                       'w-full rounded-xl border px-3 py-2.5 text-sm outline-none',
                       night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
@@ -443,7 +462,7 @@ export function CartDrawer({
                     style={{ backgroundColor: accent }}
                   >
                     {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-                    {submitting ? 'Enviando...' : 'Finalizar pedido'}
+                    {submitting ? 'Enviando...' : customer ? 'Confirmar pedido' : 'Finalizar pedido'}
                   </button>
                 </footer>
               </>

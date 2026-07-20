@@ -182,7 +182,8 @@ Ver [`docs/adr/ADR-095-rbac-granular-perfis-customizaveis.md`](adr/ADR-095-rbac-
 
 Ver [`docs/adr/ADR-096-loja-checkout-sem-atrito.md`](adr/ADR-096-loja-checkout-sem-atrito.md).
 
-**Status:** `[x] decidido — aguardando implementação (item independente)`
+**Status:** `[x] IMPLEMENTADO — checkout com token em 1 clique (sem e-mail no
+fluxo com token), CPF na nota opcional; test:store-checkout-frictionless`
 
 ## 7. Integração Alterdata (Toulon)
 

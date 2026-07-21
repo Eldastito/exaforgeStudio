@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -30,20 +30,34 @@ function Badge({ map, s }: { map: Record<string, { label: string; cls: string }>
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${it.cls}`}>{it.label}</span>;
 }
 
+type RetailTab = 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe';
+const TABS: { key: RetailTab; label: string; icon: any }[] = [
+  { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
+  { key: 'comissao', label: 'Comissão', icon: Calculator },
+  { key: 'divergencia', label: 'Divergência', icon: Scale },
+  { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
+  { key: 'equipe', label: 'Equipe & cobrança', icon: Users },
+];
+
 export function RetailOpsView() {
-  const [tab, setTab] = useState<'fechamento' | 'comissao'>('fechamento');
+  const [tab, setTab] = useState<RetailTab>('fechamento');
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="mb-4">
         <p className="zf-kicker mb-1">Rede de Lojas</p>
         <h2 className="zf-page-title flex items-center gap-2"><Store className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Operação da Rede</h2>
-        <p className="text-zinc-400 text-sm mt-1">Fechamento de caixa diário e comissão da equipe.</p>
+        <p className="text-zinc-400 text-sm mt-1">Fechamento diário, comissão, conferência com o sistema, estoque e cobrança da equipe.</p>
       </div>
-      <div className="mb-5 flex gap-2">
-        <button onClick={() => setTab('fechamento')} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === 'fechamento' ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><CalendarDays className="w-4 h-4" /> Fechamento diário</button>
-        <button onClick={() => setTab('comissao')} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === 'comissao' ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Calculator className="w-4 h-4" /> Comissão</button>
+      <div className="mb-5 flex flex-wrap gap-2">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button key={key} onClick={() => setTab(key)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>
+        ))}
       </div>
-      {tab === 'fechamento' ? <ClosingsTab /> : <CommissionTab />}
+      {tab === 'fechamento' && <ClosingsTab />}
+      {tab === 'comissao' && <CommissionTab />}
+      {tab === 'divergencia' && <ReconciliationTab />}
+      {tab === 'estoque' && <NegativeStockTab />}
+      {tab === 'equipe' && <ResponsiblesTab />}
     </div>
   );
 }
@@ -325,6 +339,262 @@ function CommissionTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- Conferência de divergência (fechamento × sistema) ----------------------
+const DIV_STATUS: Record<string, { label: string; cls: string }> = {
+  ok: { label: 'Confere', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  divergent: { label: 'Divergente', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  pending_informed: { label: 'Sem fechamento', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+};
+function ReconciliationTab() {
+  const [month, setMonth] = useState(todayStr().slice(0, 7));
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [onlyDiv, setOnlyDiv] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const d = await apiFetch(`/api/retailops/reconciliation?month=${month}${onlyDiv ? '&onlyDivergent=1' : ''}`).then(r => r.json()).catch(() => null);
+      setData(d);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [month, onlyDiv]);
+
+  const onImport = async (file: File) => {
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiFetch('/api/retailops/reconciliation/import', { method: 'POST', body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`Conferidos ${d.matched ?? 0} fechamento(s)${d.divergences ? ` — ${d.divergences} divergente(s)` : ''}.`); load(); }
+      else toast.error(d.error || 'Falha ao importar o CSV.');
+    } finally { setImporting(false); }
+  };
+
+  const s = data?.summary;
+  return (
+    <div>
+      <div className="mb-3 rounded-lg border border-sky-500/25 bg-sky-500/5 p-3 text-[12px] text-sky-200/90">
+        Compara o <strong>fechamento informado</strong> com o total do <strong>sistema/PDV</strong> (export do Alterdata). Enquanto a integração viva não é ligada, importe aqui o CSV de <em>“Fechamento de Caixa — Diário”</em>.
+      </div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label className="text-xs text-zinc-400">Mês
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        </label>
+        <label className="inline-flex items-center gap-1.5 text-xs text-zinc-400"><input type="checkbox" checked={onlyDiv} onChange={e => setOnlyDiv(e.target.checked)} /> Só divergentes</label>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+          {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Importar CSV do sistema
+          <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.currentTarget.value = ''; }} />
+        </label>
+      </div>
+
+      {s && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Conferidos" value={String(s.reconciledCount)} />
+          <Stat label="Divergentes" value={String(s.divergentCount)} tone={s.divergentCount > 0 ? 'red' : 'ok'} />
+          <Stat label="Divergência total" value={brl(s.totalDivergenceBRL)} tone={s.totalDivergenceBRL > 0 ? 'red' : 'ok'} />
+          <Stat label="Total do sistema" value={brl(s.systemTotalBRL)} />
+        </div>
+      )}
+
+      {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+        : !data?.rows?.length ? (
+          <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum fechamento conferido neste mês. Importe o CSV do sistema para comparar.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                <th className="px-3 py-2 text-left font-medium">Data</th>
+                <th className="px-3 py-2 text-left font-medium">Loja</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-right font-medium">Informado</th>
+                <th className="px-3 py-2 text-right font-medium">Sistema</th>
+                <th className="px-3 py-2 text-right font-medium">Diferença</th>
+              </tr></thead>
+              <tbody>
+                {data.rows.map((r: any, i: number) => (
+                  <tr key={`${r.storeId}-${r.date}-${i}`} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-zinc-300">{r.date}</td>
+                    <td className="px-3 py-2 text-zinc-200">{r.storeName}</td>
+                    <td className="px-3 py-2"><Badge map={DIV_STATUS} s={r.status} /></td>
+                    <td className="px-3 py-2 text-right text-zinc-300">{r.informed != null ? brl(r.informed) : '—'}</td>
+                    <td className="px-3 py-2 text-right text-zinc-300">{brl(r.system)}</td>
+                    <td className={`px-3 py-2 text-right ${Number(r.divergence) ? 'text-red-300' : 'text-zinc-500'}`}>{r.divergence != null ? brl(r.divergence) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
+  );
+}
+
+// ---- Estoque negativo -------------------------------------------------------
+function NegativeStockTab() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const d = await apiFetch('/api/retailops/stock/negative').then(r => r.json()).catch(() => ({}));
+      setItems(Array.isArray(d?.items) ? d.items : []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-[12px] text-zinc-400">Itens com saldo <strong className="text-red-300">negativo</strong> por loja — normalmente venda lançada sem entrada correspondente. Corrija a entrada no estoque.</p>
+        <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+      </div>
+      {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+        : items.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-emerald-800/40 bg-emerald-500/5 p-8 text-center text-sm text-emerald-300/80"><Check className="mx-auto mb-2 h-5 w-5" /> Nenhum item com estoque negativo. 🎉</div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                <th className="px-3 py-2 text-left font-medium">Loja</th>
+                <th className="px-3 py-2 text-left font-medium">Produto</th>
+                <th className="px-3 py-2 text-right font-medium">Saldo</th>
+              </tr></thead>
+              <tbody>
+                {items.map((it: any) => (
+                  <tr key={it.id} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-zinc-200">{it.store_name}</td>
+                    <td className="px-3 py-2 text-zinc-300">{it.product_name || it.product_service_id}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-red-300">{Number(it.quantity_available)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
+  );
+}
+
+// ---- Equipe & cobrança (responsáveis por loja) ------------------------------
+const RESP_TYPES = ['fechamento', 'malote', 'escala'];
+function ResponsiblesTab() {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState<string>('');
+  const [list, setList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [wa, setWa] = useState('');
+  const [types, setTypes] = useState<string[]>([]);
+
+  useEffect(() => {
+    apiFetch('/api/retailops/stores').then(r => r.json()).then(d => {
+      const st = Array.isArray(d?.stores) ? d.stores : [];
+      setStores(st);
+      if (st[0]) setStoreId(st[0].id);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const loadList = async (id: string) => {
+    if (!id) { setList([]); return; }
+    const d = await apiFetch(`/api/retailops/stores/${id}/responsibles`).then(r => r.json()).catch(() => ({}));
+    setList(Array.isArray(d?.responsibles) ? d.responsibles : []);
+  };
+  useEffect(() => { loadList(storeId); /* eslint-disable-next-line */ }, [storeId]);
+
+  const add = async () => {
+    if (!wa.trim()) { toast.error('Informe o WhatsApp do responsável.'); return; }
+    setAdding(true);
+    try {
+      const res = await apiFetch(`/api/retailops/stores/${storeId}/responsibles`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, whatsappIdentifier: wa, taskTypes: types.length ? types : undefined }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success('Responsável adicionado.'); setName(''); setWa(''); setTypes([]); loadList(storeId); }
+      else toast.error(d.error || 'Falha ao adicionar.');
+    } finally { setAdding(false); }
+  };
+  const remove = async (rid: string) => {
+    const res = await apiFetch(`/api/retailops/responsibles/${rid}`, { method: 'DELETE' });
+    if (res.ok) { toast.success('Responsável removido.'); loadList(storeId); }
+    else toast.error('Falha ao remover.');
+  };
+  const toggleType = (t: string) => setTypes(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
+
+  if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
+  if (stores.length === 0) return <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Cadastre as lojas da rede para definir os responsáveis pela cobrança.</div>;
+
+  return (
+    <div>
+      <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-[12px] text-zinc-400">
+        Quem recebe a <strong>cobrança pelo WhatsApp</strong> de cada pendência (fechamento/malote/escala) e pode dar baixa respondendo. Sem responsável, a cobrança vai para o número da própria loja.
+      </div>
+      <label className="text-xs text-zinc-400">Loja
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+          {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </label>
+
+      <div className="mt-4 grid gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 sm:grid-cols-[1fr_1fr_auto]">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome (opcional)" className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <input value={wa} onChange={e => setWa(e.target.value)} placeholder="WhatsApp (ex.: 5531988887777)" inputMode="tel" className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <button onClick={add} disabled={adding} className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar</button>
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+          <span className="text-[11px] text-zinc-500">Cobra:</span>
+          {RESP_TYPES.map(t => (
+            <button key={t} onClick={() => toggleType(t)} className={`rounded-full border px-2.5 py-0.5 text-[11px] capitalize ${types.includes(t) ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>{t}</button>
+          ))}
+          <span className="text-[11px] text-zinc-600">{types.length === 0 ? '(vazio = todos)' : ''}</span>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        {list.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">Nenhum responsável nesta loja ainda — a cobrança vai para o número da loja.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                <th className="px-3 py-2 text-left font-medium">Nome</th>
+                <th className="px-3 py-2 text-left font-medium">WhatsApp</th>
+                <th className="px-3 py-2 text-left font-medium">Cobra</th>
+                <th className="px-3 py-2 text-right font-medium">Ações</th>
+              </tr></thead>
+              <tbody>
+                {list.map((r: any) => (
+                  <tr key={r.id} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-zinc-200">{r.name || <span className="text-zinc-500">—</span>}</td>
+                    <td className="px-3 py-2 text-zinc-300">{r.whatsapp_identifier}</td>
+                    <td className="px-3 py-2 text-zinc-400 capitalize">{r.task_types === 'all' ? 'todos' : r.task_types}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => remove(r.id)} title="Remover" className="rounded border border-red-500/40 px-1.5 py-0.5 text-red-300 hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'red' | 'ok' }) {
+  const color = tone === 'red' ? 'text-red-300' : tone === 'ok' ? 'text-emerald-300' : 'text-zinc-100';
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <p className="text-[11px] uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className={`mt-0.5 text-lg font-semibold ${color}`}>{value}</p>
     </div>
   );
 }

@@ -92,6 +92,7 @@ jobs:
           - { name: 'retail-closing', script: 'test:retail-closing' }
           - { name: 'retail-scan', script: 'test:retail-scan' }
           - { name: 'retail-cobranca', script: 'test:retail-cobranca' }
+          - { name: 'retail-whatsapp-closing', script: 'test:retail-whatsapp-closing' }
           - { name: 'retail-stock', script: 'test:retail-stock' }
           - { name: 'retail-commission', script: 'test:retail-commission' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }

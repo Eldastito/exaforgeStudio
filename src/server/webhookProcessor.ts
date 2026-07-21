@@ -27,6 +27,8 @@ import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
 import { MaestroService } from "./MaestroService.js";
 import { ProspectExecutionService } from "./ProspectExecutionService.js";
+import { ModuleService } from "./ModuleService.js";
+import { RetailWhatsAppIntakeService } from "./RetailWhatsAppIntakeService.js";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 
@@ -277,6 +279,28 @@ export async function processIncomingMessage(
       }
     }
   } catch (e) { console.error('[Supply] Falha ao processar resposta de fornecedor', e); }
+
+  // 4.45 RETAIL — FECHAMENTO PELO WHATSAPP DA LOJA (ADR-083, pedido TOULON):
+  // se o remetente é o número de uma LOJA (retail_stores.whatsapp_identifier) e
+  // manda a foto da folha OU o valor total, registra o fechamento do dia,
+  // calcula o desvio vs cota, dá baixa na pendência e confirma — sem rodar a IA
+  // de atendimento. Gated pelo add-on 'retail'; só intercepta com intenção clara
+  // de fechamento (senão devolve null e segue o fluxo normal).
+  try {
+    if (ModuleService.isEnabled(orgId, "retail")) {
+      const store = RetailWhatsAppIntakeService.matchStore(orgId, payload.senderId);
+      if (store) {
+        const handled = await RetailWhatsAppIntakeService.handleInbound(orgId, store, {
+          text: payload.text, imageBase64: payload.imageBase64, imageMime: payload.imageMime,
+          contactId: contact.id, senderId: payload.senderId,
+        });
+        if (handled) {
+          await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: handled.reply, io });
+          return;
+        }
+      }
+    }
+  } catch (e) { console.error('[Retail] Falha ao processar fechamento por WhatsApp', e); }
 
   // 4.5a CSAT FOLLOW-UP: se uma pesquisa pediu detalhes ao detrator (follow_up_status='asked'),
   // captura a próxima mensagem como comentário estruturado.

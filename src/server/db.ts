@@ -1491,6 +1491,24 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_retail_stores_org ON retail_stores (organization_id);
       CREATE INDEX IF NOT EXISTS idx_retail_stores_wa ON retail_stores (organization_id, whatsapp_identifier);
     `);
+    // ADR-108 (Bloco B / pedido TOULON): responsáveis por loja — quem recebe a
+    // cobranca de cada tipo de pendencia (fechamento/malote/escala) e pode dar
+    // baixa respondendo no WhatsApp. task_types = 'all' ou CSV dos tipos.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_store_responsibles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        name TEXT,
+        whatsapp_identifier TEXT NOT NULL,
+        task_types TEXT DEFAULT 'all',          -- 'all' ou CSV: fechamento,malote,escala
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_resp_store ON retail_store_responsibles (organization_id, store_id);
+      CREATE INDEX IF NOT EXISTS idx_retail_resp_wa ON retail_store_responsibles (organization_id, whatsapp_identifier);
+    `);
   } catch(e){ console.error('[DB] Falha ao criar retail_stores', e); }
 
   // Retail Ops (ADR-086) — recebimento de mercadoria (pré-estoque): documento

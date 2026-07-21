@@ -53,6 +53,7 @@ export function Sidebar() {
              {mod('assinaturas') && <NavItem icon={<RefreshCw />} label="Assinaturas" active={viewMode === 'assinaturas'} onClick={() => setViewMode('assinaturas')} />}
              {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}
              {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
+             {mod('retail') && <NavItem icon={<Gauge />} label="Operação da Rede" active={viewMode === 'retailops'} onClick={() => setViewMode('retailops')} />}
              {mod('compras') && <NavItem icon={<PackageCheck />} label="Compras" active={viewMode === 'compras'} onClick={() => setViewMode('compras')} variant="supply" />}
              {mod('orcamentos') && <NavItem icon={<FileText />} label="Orçamentos" active={viewMode === 'orcamentos'} onClick={() => setViewMode('orcamentos')} />}
              {mod('eventos') && <NavItem icon={<CalendarRange />} label="Eventos & Grupos" active={viewMode === 'eventos'} onClick={() => setViewMode('eventos')} />}

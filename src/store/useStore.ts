@@ -111,6 +111,7 @@ type AppState = {
   // RBAC granular (ADR-095 Bloco 4): permissões do usuário logado por módulo.
   permissions: Record<string, string> | null; // null = ainda não carregado
   hasProfile: boolean;                         // usuário tem perfil atribuído?
+  isMasterAdmin: boolean;                      // operador da plataforma (ADR-106) — controla o menu só-plataforma
   loadPermissions: () => Promise<void>;
   canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
@@ -291,12 +292,13 @@ export const useStore = create<AppState>((set, get) => ({
   // RBAC granular (ADR-095 Bloco 4). Carrega o mapa módulo→nível do usuário.
   permissions: null,
   hasProfile: false,
+  isMasterAdmin: false,
   loadPermissions: async () => {
     try {
       const res = await apiFetch('/api/permissions/me');
       if (!res.ok) return;
       const data = await res.json().catch(() => ({}));
-      set({ permissions: data?.permissions || null, hasProfile: !!data?.hasProfile });
+      set({ permissions: data?.permissions || null, hasProfile: !!data?.hasProfile, isMasterAdmin: !!data?.isMasterAdmin });
     } catch (e) { /* mantém null = sem restrição visual */ }
   },
   // O usuário pode ver/entrar num módulo? Opt-in: só restringe quem tem perfil

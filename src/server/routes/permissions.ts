@@ -3,6 +3,7 @@ import { PermissionService, RBAC_MODULES, RBAC_MODULE_LABELS } from "../Permissi
 import { requirePermission, AuthRequest } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
+import { AccountDiagnosticService } from "../AccountDiagnosticService.js";
 
 // RBAC granular (ADR-095 Bloco 2) — API de gestão de perfis de acesso.
 //
@@ -24,6 +25,14 @@ router.get("/me", (req: AuthRequest, res: Response): any => {
     // via requireMasterAdmin; isto é só a coerência do menu.
     isMasterAdmin: !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL),
   });
+});
+
+// GET /api/permissions/account-diagnostic — "está tudo certo?" da conta (go-live).
+// Escopado na PRÓPRIA org; o master admin pode inspecionar outra org via ?orgId=.
+router.get("/account-diagnostic", (req: AuthRequest, res: Response): any => {
+  const isMaster = !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL);
+  const targetOrg = (isMaster && typeof req.query.orgId === "string" && req.query.orgId) ? req.query.orgId : orgOf(req);
+  res.json(AccountDiagnosticService.report(targetOrg, req.user || {}));
 });
 
 // GET /api/permissions/modules — catálogo de módulos + rótulos (editor de perfis).

@@ -48,6 +48,7 @@
     "test:storefront-looks": "tsx scripts/test-storefront-looks.ts",
     "test:storefront-look-generation": "tsx scripts/test-storefront-look-generation.ts",
     "test:alterdata-connector": "tsx scripts/test-alterdata-connector.ts",
+    "test:account-diagnostic": "tsx scripts/test-account-diagnostic.ts",
     "test:store-checkout-frictionless": "tsx scripts/test-store-checkout-frictionless.ts",
     "test:sales-report-vertical": "tsx scripts/test-sales-report-vertical.ts",
     "test:radar-isolation": "tsx scripts/test-radar-isolation.ts",

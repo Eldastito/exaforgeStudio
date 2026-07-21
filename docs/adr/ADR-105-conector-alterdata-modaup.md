@@ -1,7 +1,11 @@
 # ADR-105 — Conector Alterdata/ModaUp (ERP da TOULON)
 
-**Status:** Proposto (design). Implementação **bloqueada** por dependências
-externas da Alterdata (ver "Pendências externas"). Sem código ainda.
+**Status:** Design aprovado. **Fundação implementada** (schema
+`alterdata_integration_settings` + `alterdata_sync_cursors`, `AlterdataConnectorService`
+com credenciais cifradas + resolução de base URL por módulo + cursor store,
+config em `/api/integrations/alterdata/*`, flag desligada por padrão, **sem
+chamadas live**). A **Fase 1** (auth real + jobs de sync) continua **bloqueada**
+pelo token + homologação da Alterdata (ver "Pendências externas").
 
 **Origem:** Piloto TOULON. A TOULON opera no ERP **ModaUp da Alterdata**. Para o
 ZappFlow refletir estoque/produto/preço/vendas reais **sem digitação dupla**,

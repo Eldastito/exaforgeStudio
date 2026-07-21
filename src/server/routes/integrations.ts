@@ -11,6 +11,7 @@ import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateSt
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReportsService } from "../ReportsService.js";
+import { AlterdataConnectorService } from "../AlterdataConnectorService.js";
 
 const router = Router();
 
@@ -459,6 +460,26 @@ router.delete("/backups/:id", (req: AuthRequest, res): any => {
     logAuthEvent(orgId, userId, req.params.id, 'BACKUP_DELETED', {});
     res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== Integração Alterdata/ModaUp (ADR-105) — config por organização =====
+// Fundação: guarda credenciais CIFRADAS + rede/filial + flag. A sincronização
+// real (Fase 1) entra quando a Alterdata fornecer token + homologação.
+router.get("/alterdata/status", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(AlterdataConnectorService.publicSettings(req.organizationId));
+});
+
+router.put("/alterdata/settings", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  AlterdataConnectorService.saveSettings(req.organizationId, {
+    enabled: b.enabled, environment: b.environment, rede: b.rede, filiais: b.filiais,
+    basePattern: b.basePattern, moduleBaseUrls: b.moduleBaseUrls, authConfig: b.authConfig,
+    syncIntervalMinutes: b.syncIntervalMinutes,
+  });
+  logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SETTINGS_UPDATED', { enabled: !!b.enabled, environment: b.environment });
+  res.json(AlterdataConnectorService.publicSettings(req.organizationId));
 });
 
 export default router;

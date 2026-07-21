@@ -3274,6 +3274,40 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_storefront_look_images_look ON storefront_look_images(organization_id, look_id);
 
+      -- INTEGRAÇÃO ALTERDATA/ModaUp (ADR-105): config por organização. Segredos
+      -- (auth_config, access_token) ficam CIFRADOS (EncryptionService). URLs não
+      -- são segredo. Flag enabled desligada por padrao -- nada roda sem config.
+      CREATE TABLE IF NOT EXISTS alterdata_integration_settings (
+        organization_id TEXT PRIMARY KEY,
+        enabled INTEGER DEFAULT 0,
+        environment TEXT DEFAULT 'homolog',   -- homolog | prod
+        rede TEXT,                            -- rede da loja no ERP
+        filiais_json TEXT,                    -- JSON array de filiais
+        base_pattern TEXT,                    -- ex.: 'toulon-{module}.apimodaup.com.br'
+        module_base_urls_json TEXT,           -- override por módulo (JSON), opcional
+        auth_config_enc TEXT,                 -- CIFRADO: client_id/secret ou api key (shape a confirmar)
+        access_token_enc TEXT,                -- CIFRADO: token corrente
+        token_expires_at DATETIME,
+        sync_interval_minutes INTEGER DEFAULT 15,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Cursor do delta-sync por versão (ADR-105): guarda a última "versão" vista
+      -- por (org, módulo, recurso, filial) — a memória do sync incremental.
+      CREATE TABLE IF NOT EXISTS alterdata_sync_cursors (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        module TEXT NOT NULL,                 -- supply | price | crm | sales | ecommerce | ...
+        resource TEXT NOT NULL,               -- ex.: 'Saldo', 'Referencia', 'TabelaPreco'
+        filial TEXT DEFAULT '',               -- '' quando o recurso não é por filial
+        version TEXT DEFAULT '0',             -- cursor (opaco; a Alterdata define o tipo)
+        last_synced_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_alterdata_cursor_uniq
+        ON alterdata_sync_cursors(organization_id, module, resource, filial);
+
       CREATE TABLE IF NOT EXISTS fashion_tryon_jobs (
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL,

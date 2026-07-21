@@ -79,6 +79,8 @@ ZappFlow (`produto → variantes → estoque → preço`).
   - `VendaMalote` → vendas/analytics (fase 2).
 - **Config UI** — tela por org: credenciais, rede/filial, módulos ativos,
   intervalo de sync, status/último cursor, botão "ressincronizar".
+  _(Implementado: card "ERP Alterdata / ModaUp" em Integrações — cola credenciais
+  cifradas + rede/filial + ambiente, com badges de credencial/token.)_
 - **Auditoria** — cada acesso à API e cada import registrado (reusa o padrão de
   audit log / `vision_access_logs`).
 

@@ -317,6 +317,8 @@ export function IntegrationsView() {
         <p className="text-zinc-400 text-sm mt-1">Gerencie integrações com Google e Webhooks</p>
       </div>
 
+      <AlterdataConnectorPanel />
+
       {/* Segurança do Webhook do WhatsApp */}
       {waWebhook && (
         <div className="mb-6 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
@@ -661,6 +663,114 @@ export function IntegrationsView() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Conector Alterdata/ModaUp (ADR-105) — cola credenciais CIFRADAS + rede/filial.
+// A sincronização real (Fase 1) liga quando a Alterdata fornecer token +
+// homologação; aqui é a config, pronta pra plugar. Segredos nunca voltam do
+// servidor (só hasCredentials/hasToken).
+// ============================================================================
+function AlterdataConnectorPanel() {
+  const [st, setSt] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [rede, setRede] = useState('');
+  const [filiais, setFiliais] = useState('');
+  const [environment, setEnvironment] = useState('homolog');
+  const [basePattern, setBasePattern] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+
+  const load = () => apiFetch('/api/integrations/alterdata/status').then(r => r.json()).then((d) => {
+    setSt(d);
+    setRede(d.rede || '');
+    setFiliais(Array.isArray(d.filiais) ? d.filiais.join(', ') : '');
+    setEnvironment(d.environment || 'homolog');
+    setBasePattern(d.basePattern || 'toulon-{module}.apimodaup.com.br');
+  }).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const save = async (patch: any = {}) => {
+    setSaving(true);
+    try {
+      const body: any = {
+        environment, rede: rede.trim() || null,
+        filiais: filiais.split(',').map(s => s.trim()).filter(Boolean),
+        basePattern: basePattern.trim() || null,
+        ...patch,
+      };
+      // Só manda credencial se o lojista digitou algo (não sobrescreve com vazio).
+      if (clientId.trim() || clientSecret.trim()) body.authConfig = { clientId: clientId.trim(), clientSecret: clientSecret.trim() };
+      const res = await apiFetch('/api/integrations/alterdata/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success('Configuração da Alterdata salva.'); setClientId(''); setClientSecret(''); setSt(d); }
+      else toast.error(d.error || 'Falha ao salvar.');
+    } finally { setSaving(false); }
+  };
+
+  const inputCls = 'w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100';
+  const Badge = ({ ok, on, off }: { ok: boolean; on: string; off: string }) => (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'}`}>{ok ? on : off}</span>
+  );
+
+  return (
+    <div className="mb-6 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Link2 className="w-6 h-6 text-indigo-400" />
+          <div>
+            <h3 className="font-semibold text-zinc-100">ERP Alterdata / ModaUp</h3>
+            <p className="text-sm text-zinc-400">Sincroniza produto, estoque e preço do seu ERP (sem digitação dupla).</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge ok={!!st?.hasCredentials} on="Credenciais salvas" off="Sem credenciais" />
+          <Badge ok={!!st?.hasToken} on="Token ativo" off="Aguardando token" />
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] text-amber-200/90">
+        A sincronização liga quando a Alterdata fornecer o <strong>token de acesso</strong> e o <strong>ambiente de homologação</strong>.
+        Aqui você já deixa a <strong>rede/filial</strong> e as <strong>credenciais</strong> (guardadas cifradas) prontas.
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="text-xs text-zinc-400">Rede
+          <input className={inputCls} value={rede} onChange={e => setRede(e.target.value)} placeholder="rede da TOULON no ERP" />
+        </label>
+        <label className="text-xs text-zinc-400">Filiais (separadas por vírgula)
+          <input className={inputCls} value={filiais} onChange={e => setFiliais(e.target.value)} placeholder="ex.: 1, 2" />
+        </label>
+        <label className="text-xs text-zinc-400">Ambiente
+          <select className={inputCls} value={environment} onChange={e => setEnvironment(e.target.value)}>
+            <option value="homolog">Homologação (recomendado no início)</option>
+            <option value="prod">Produção</option>
+          </select>
+        </label>
+        <label className="text-xs text-zinc-400">Padrão de URL dos módulos
+          <input className={inputCls} value={basePattern} onChange={e => setBasePattern(e.target.value)} placeholder="toulon-{module}.apimodaup.com.br" />
+        </label>
+        <label className="text-xs text-zinc-400">Client ID / usuário {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
+          <input className={inputCls} value={clientId} onChange={e => setClientId(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'cole quando a Alterdata enviar'} autoComplete="off" />
+        </label>
+        <label className="text-xs text-zinc-400">Client Secret / senha {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
+          <input type="password" className={inputCls} value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'cole quando a Alterdata enviar'} autoComplete="new-password" />
+        </label>
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 flex-wrap">
+        <Button onClick={() => save()} disabled={saving} className="zf-button zf-button-primary">
+          {saving ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
+          Salvar configuração
+        </Button>
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />
+          Integração ativa
+        </label>
+        {st?.tokenExpiresAt && <span className="text-[11px] text-zinc-500">token expira: {new Date(st.tokenExpiresAt).toLocaleString('pt-BR')}</span>}
+      </div>
     </div>
   );
 }

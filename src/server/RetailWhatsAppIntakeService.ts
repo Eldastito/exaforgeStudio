@@ -15,7 +15,7 @@
  */
 import db from "./db.js";
 import { RetailStoreService } from "./RetailStoreService.js";
-import { RetailClosingService, RetailTaskService } from "./RetailOpsService.js";
+import { RetailClosingService, RetailTaskService, RetailResponsibleService } from "./RetailOpsService.js";
 import { logAuthEvent } from "./auditLog.js";
 
 export interface RetailInboundPayload {
@@ -28,13 +28,17 @@ export interface RetailInboundPayload {
 }
 
 export class RetailWhatsAppIntakeService {
-  /** Casa o remetente com uma loja ativa pelo whatsapp_identifier (tolerante ao 9º dígito). */
+  /**
+   * Casa o remetente com uma loja ativa: primeiro pelo número da loja
+   * (whatsapp_identifier), depois pelo número de um RESPONSÁVEL cadastrado.
+   * Tolerante ao 9º dígito BR.
+   */
   static matchStore(orgId: string, senderId: string): any | null {
     for (const v of phoneVariants(senderId)) {
       const s = RetailStoreService.findByWhatsapp(orgId, v);
       if (s) return s;
     }
-    return null;
+    return RetailResponsibleService.findStoreByResponsible(orgId, senderId);
   }
 
   /**
@@ -44,6 +48,19 @@ export class RetailWhatsAppIntakeService {
    */
   static async handleInbound(orgId: string, store: any, payload: RetailInboundPayload): Promise<{ reply: string } | null> {
     const date = payload.date || new Date().toISOString().slice(0, 10);
+    const text = String(payload.text || "");
+
+    // 0) BAIXA de MALOTE / ESCALA por confirmação (ADR-108): a pessoa responde
+    // "malote enviado" / "escala ok" e a pendência recebe baixa (a cobrança para).
+    // Cobre o caso de foto com legenda (ex.: manda a foto do malote escrevendo
+    // "malote"). Só age se houver a pendência aberta do tipo no dia.
+    const confirmType = detectTaskConfirmation(text);
+    if (confirmType && this.hasOpenTask(orgId, store.id, date, confirmType)) {
+      this.markTaskSubmitted(orgId, store.id, date, confirmType, payload.contactId || null);
+      try { logAuthEvent(orgId, "system", store.id, "RETAIL_TASK_WHATSAPP_SUBMITTED", { date, type: confirmType }); } catch { /* noop */ }
+      const nome = confirmType === "malote" ? "malote" : "escala";
+      return { reply: `✅ Recebido! Dei baixa no *${nome}* da loja *${store.name}* de hoje. Obrigado! 🙌` };
+    }
 
     // 1) FOTO da folha → OCR → registra o fechamento do dia.
     if (payload.imageBase64) {
@@ -52,7 +69,7 @@ export class RetailWhatsAppIntakeService {
         { source: "whatsapp_photo", submittedByContactId: payload.contactId || null, submittedByIdentifier: payload.senderId },
       );
       if (!res) return { reply: "Não consegui registrar o fechamento agora. Pode tentar de novo em instantes? 🙏" };
-      this.markClosingTaskSubmitted(orgId, store.id, date, payload.contactId || null);
+      this.markTaskSubmitted(orgId, store.id, date, "fechamento", payload.contactId || null);
       try { logAuthEvent(orgId, "system", store.id, "RETAIL_CLOSING_WHATSAPP_PHOTO", { date, needsReview: res.extraction?.needsReview }); } catch { /* noop */ }
       return { reply: this.confirmationText(store, res.closing, res.extraction, true) };
     }
@@ -65,13 +82,13 @@ export class RetailWhatsAppIntakeService {
         informedTotal: amount, source: "whatsapp_text",
         submittedByContactId: payload.contactId || null, submittedByIdentifier: payload.senderId,
       });
-      this.markClosingTaskSubmitted(orgId, store.id, date, payload.contactId || null);
+      this.markTaskSubmitted(orgId, store.id, date, "fechamento", payload.contactId || null);
       try { logAuthEvent(orgId, "system", store.id, "RETAIL_CLOSING_WHATSAPP_TEXT", { date, amount }); } catch { /* noop */ }
       return { reply: this.confirmationText(store, updated, { informedTotal: amount }, false) };
     }
 
     // 3) Sem foto nem valor: só orienta SE houver pendência de fechamento aberta hoje.
-    if (this.hasOpenClosingTask(orgId, store.id, date)) {
+    if (this.hasOpenTask(orgId, store.id, date, "fechamento")) {
       return { reply: `Oi! Para registrar o fechamento da loja *${store.name}* de hoje, é só me enviar a *foto da folha* de fechamento ou o *valor total* do dia (ex.: R$ 4.850,00). 🙏` };
     }
 
@@ -79,24 +96,24 @@ export class RetailWhatsAppIntakeService {
     return null;
   }
 
-  /** Dá baixa na pendência 'fechamento' do dia (a cobrança para de insistir). */
-  private static markClosingTaskSubmitted(orgId: string, storeId: string, date: string, contactId: string | null): void {
+  /** Dá baixa na pendência do tipo indicado no dia (a cobrança para de insistir). */
+  private static markTaskSubmitted(orgId: string, storeId: string, date: string, taskType: string, contactId: string | null): void {
     try {
       const task = db.prepare(
         `SELECT id FROM retail_store_daily_tasks
-          WHERE organization_id = ? AND store_id = ? AND task_date = ? AND task_type = 'fechamento' AND status != 'submitted'
+          WHERE organization_id = ? AND store_id = ? AND task_date = ? AND task_type = ? AND status != 'submitted'
           LIMIT 1`
-      ).get(orgId, storeId, date) as any;
+      ).get(orgId, storeId, date, taskType) as any;
       if (task?.id) RetailTaskService.markSubmitted(orgId, task.id, { contactId });
     } catch { /* noop */ }
   }
 
-  private static hasOpenClosingTask(orgId: string, storeId: string, date: string): boolean {
+  private static hasOpenTask(orgId: string, storeId: string, date: string, taskType: string): boolean {
     try {
       const t = db.prepare(
         `SELECT 1 FROM retail_store_daily_tasks
-          WHERE organization_id = ? AND store_id = ? AND task_date = ? AND task_type = 'fechamento' AND status IN ('pending','late') LIMIT 1`
-      ).get(orgId, storeId, date);
+          WHERE organization_id = ? AND store_id = ? AND task_date = ? AND task_type = ? AND status IN ('pending','late') LIMIT 1`
+      ).get(orgId, storeId, date, taskType);
       return !!t;
     } catch { return false; }
   }
@@ -166,6 +183,20 @@ export function parseBrlAmount(text: string): number | null {
   }
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Detecta a confirmação de envio de MALOTE ou ESCALA em texto curto. Exige o
+ * substantivo (malote/escala) — uma palavra de confirmação sozinha não conta,
+ * para não dar baixa por engano. Ex.: "malote enviado", "escala ok", "já mandei
+ * o malote", "escala pronta".
+ */
+export function detectTaskConfirmation(text: string): "malote" | "escala" | null {
+  const t = String(text || "").toLowerCase();
+  const confirms = /(enviad|enviei|mande[i]?|manda[d]?o|ok\b|pront|feito|conclu|j[áa]\s|t[áa]\s+ok|atualizad)/;
+  if (/\bmalote/.test(t) && confirms.test(t)) return "malote";
+  if (/\bescala/.test(t) && confirms.test(t)) return "escala";
+  return null;
 }
 
 function brl(n: number): string {

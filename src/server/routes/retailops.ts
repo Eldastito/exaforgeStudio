@@ -11,7 +11,7 @@ import path from "path";
 import { randomUUID } from "node:crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
-import { RetailQuotaService, RetailClosingService, RetailTaskService } from "../RetailOpsService.js";
+import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
@@ -236,6 +236,37 @@ router.patch("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, re
   const store = RetailStoreService.update(orgId, req.params.id, req.body || {}, req.user?.userId);
   if (!store) return res.status(404).json({ error: "store_not_found" });
   res.json(store);
+});
+
+// --- Responsáveis por loja (cobrança por pessoa, ADR-108) ---
+router.get("/stores/:id/responsibles", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ responsibles: RetailResponsibleService.list(orgId, req.params.id) });
+});
+
+router.post("/stores/:id/responsibles", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = RetailResponsibleService.add(orgId, req.params.id, req.body || {}, req.user?.userId);
+    res.status(201).json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.patch("/responsibles/:rid", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = RetailResponsibleService.update(orgId, req.params.rid, req.body || {}, req.user?.userId);
+  if (!r) return res.status(404).json({ error: "responsible_not_found" });
+  res.json(r);
+});
+
+router.delete("/responsibles/:rid", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = RetailResponsibleService.remove(orgId, req.params.rid, req.user?.userId);
+  res.json({ ok });
 });
 
 // --- Cotas ---

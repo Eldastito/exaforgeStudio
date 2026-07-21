@@ -261,16 +261,130 @@ export class RetailTaskService {
         continue;
       }
 
-      const target = store.whatsapp_identifier;
-      if (!target) continue; // sem número da loja não há como cobrar por WhatsApp
-      try {
-        await opts.send(target, reminderMessage(t.task_type, store.name, Number(t.reminder_count || 0)));
+      // Cobra CADA responsável pelo tipo da pendência (fechamento/malote/escala).
+      // Sem responsáveis cadastrados, cai no número da loja (comportamento antigo).
+      const targets = RetailResponsibleService.targetsForTask(orgId, store.id, t.task_type);
+      if (!targets.length) continue; // sem número não há como cobrar por WhatsApp
+      let sentAny = false;
+      for (const target of targets) {
+        try {
+          await opts.send(target, reminderMessage(t.task_type, store.name, Number(t.reminder_count || 0)));
+          sentAny = true;
+        } catch (e) { console.error("[Retail] cobrança falhou", t.id, target, e); }
+      }
+      if (sentAny) {
         db.prepare(`UPDATE retail_store_daily_tasks SET reminder_count = reminder_count + 1, last_reminder_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(opts.now, t.id);
         summary.reminded++;
-      } catch (e) { console.error("[Retail] cobrança falhou", t.id, e); }
+      }
     }
     return summary;
   }
+}
+
+// ── Responsáveis por loja (cobrança por pessoa, ADR-108) ─────────────────────
+const RESP_TASK_TYPES = ["fechamento", "malote", "escala"];
+
+export class RetailResponsibleService {
+  static list(orgId: string, storeId: string): any[] {
+    return db.prepare(
+      `SELECT * FROM retail_store_responsibles WHERE organization_id = ? AND store_id = ? ORDER BY created_at`
+    ).all(orgId, storeId) as any[];
+  }
+
+  static add(orgId: string, storeId: string, input: { name?: string; whatsappIdentifier: string; taskTypes?: string[] | string }, actorId?: string): any {
+    const wa = String(input.whatsappIdentifier || "").replace(/\D/g, "");
+    if (!wa) throw new Error("WhatsApp do responsável é obrigatório");
+    const types = normalizeTaskTypes(input.taskTypes);
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO retail_store_responsibles (id, organization_id, store_id, name, whatsapp_identifier, task_types, active)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`
+    ).run(id, orgId, storeId, input.name ? String(input.name).trim() : null, wa, types);
+    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_RESPONSIBLE_ADDED", { wa, types }); } catch { /* noop */ }
+    return db.prepare(`SELECT * FROM retail_store_responsibles WHERE id = ?`).get(id);
+  }
+
+  static update(orgId: string, id: string, patch: { name?: string; taskTypes?: string[] | string; active?: boolean }, actorId?: string): any | null {
+    const r = db.prepare(`SELECT * FROM retail_store_responsibles WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!r) return null;
+    db.prepare(
+      `UPDATE retail_store_responsibles SET
+         name = COALESCE(?, name),
+         task_types = COALESCE(?, task_types),
+         active = COALESCE(?, active),
+         updated_at = CURRENT_TIMESTAMP
+       WHERE organization_id = ? AND id = ?`
+    ).run(
+      patch.name !== undefined ? (patch.name ? String(patch.name).trim() : null) : null,
+      patch.taskTypes !== undefined ? normalizeTaskTypes(patch.taskTypes) : null,
+      patch.active !== undefined ? (patch.active ? 1 : 0) : null,
+      orgId, id,
+    );
+    return db.prepare(`SELECT * FROM retail_store_responsibles WHERE id = ?`).get(id);
+  }
+
+  static remove(orgId: string, id: string, actorId?: string): boolean {
+    const r = db.prepare(`DELETE FROM retail_store_responsibles WHERE organization_id = ? AND id = ?`).run(orgId, id);
+    if (r.changes > 0) { try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_RESPONSIBLE_REMOVED", {}); } catch { /* noop */ } }
+    return r.changes > 0;
+  }
+
+  /**
+   * Números a cobrar por um tipo de pendência: responsáveis ativos que cobrem
+   * o tipo ('all' ou que contém o tipo). Sem responsáveis, cai no número da
+   * loja (comportamento antigo — nunca deixa de cobrar).
+   */
+  static targetsForTask(orgId: string, storeId: string, taskType: string): string[] {
+    const rows = db.prepare(
+      `SELECT whatsapp_identifier, task_types FROM retail_store_responsibles
+        WHERE organization_id = ? AND store_id = ? AND active = 1`
+    ).all(orgId, storeId) as any[];
+    const targets = rows
+      .filter((r) => coversType(r.task_types, taskType))
+      .map((r) => String(r.whatsapp_identifier))
+      .filter(Boolean);
+    if (targets.length) return Array.from(new Set(targets));
+    const store = db.prepare(`SELECT whatsapp_identifier FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    return store?.whatsapp_identifier ? [String(store.whatsapp_identifier)] : [];
+  }
+
+  /** Resolve o remetente para a loja pela qual ele é responsável (tolerante ao 9º dígito). */
+  static findStoreByResponsible(orgId: string, identifier: string): any | null {
+    for (const v of brPhoneVariants(identifier)) {
+      const r = db.prepare(
+        `SELECT store_id FROM retail_store_responsibles WHERE organization_id = ? AND whatsapp_identifier = ? AND active = 1 LIMIT 1`
+      ).get(orgId, v) as any;
+      if (r?.store_id) return db.prepare(`SELECT * FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, r.store_id);
+    }
+    return null;
+  }
+}
+
+function normalizeTaskTypes(input?: string[] | string): string {
+  if (!input) return "all";
+  const arr = Array.isArray(input) ? input : String(input).split(/[,\s]+/);
+  const clean = arr.map((t) => String(t || "").trim().toLowerCase()).filter((t) => RESP_TASK_TYPES.includes(t));
+  if (!clean.length || clean.length === RESP_TASK_TYPES.length) return "all";
+  return Array.from(new Set(clean)).join(",");
+}
+
+function coversType(taskTypes: string, taskType: string): boolean {
+  const tt = String(taskTypes || "all").toLowerCase();
+  return tt === "all" || tt.split(",").map((s) => s.trim()).includes(String(taskType).toLowerCase());
+}
+
+/** Variações do número BR (com/sem 9º dígito). Compartilhado com o intake. */
+export function brPhoneVariants(raw: string): string[] {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return [];
+  const variants = new Set<string>([digits]);
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    const ddd = digits.slice(2, 4);
+    const subscriber = digits.slice(4);
+    if (subscriber.length === 9 && subscriber.startsWith("9")) variants.add(`55${ddd}${subscriber.slice(1)}`);
+    else if (subscriber.length === 8) variants.add(`55${ddd}9${subscriber}`);
+  }
+  return Array.from(variants);
 }
 
 function parseSqlTs(ts: string): number { return Date.parse(String(ts).replace(" ", "T") + "Z") || 0; }

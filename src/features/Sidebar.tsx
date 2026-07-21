@@ -5,7 +5,7 @@ import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin } = useStore();
   const { user, logout } = useAuth();
   // Item visível quando o módulo está habilitado na org (plano/vertical) E o
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
@@ -70,10 +70,10 @@ export function Sidebar() {
              <NavItem icon={<ScrollText />} label="Manifesto da Marca" active={viewMode === 'manifesto'} onClick={() => setViewMode('manifesto')} />
              <NavItem icon={<Lightbulb />} label="Escuta Ativa" active={viewMode === 'escuta'} onClick={() => setViewMode('escuta')} />
              <NavItem icon={<Settings />} label="Configurações" active={viewMode === 'settings'} onClick={() => setViewMode('settings')} />
-             {user?.email === 'eldastito@gmail.com' && (
+             {isMasterAdmin && (
                <NavItem icon={<ShieldCheck />} label="Admin Master" active={viewMode === 'admin'} onClick={() => setViewMode('admin')} />
              )}
-             {user?.email === 'eldastito@gmail.com' && (
+             {isMasterAdmin && (
                <NavItem icon={<Radar />} label="Radar — Consultor" active={viewMode === 'radar_consultant'} onClick={() => setViewMode('radar_consultant')} />
              )}
           </nav>

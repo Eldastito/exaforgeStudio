@@ -605,8 +605,9 @@ export function ChannelsPanel() {
 // (payload de objeto errado, verify token divergente, etc.) parece que "não
 // veio nada" — foi exatamente o cenário do bug de DM do Instagram.
 function MetaWebhookDiagnostics() {
-  const { user } = useAuth();
-  const isMasterAdmin = user?.email === 'eldastito@gmail.com';
+  // Fonte única de verdade (ADR-106): flag do servidor, não e-mail hardcoded.
+  // O backend já reforça via requireMasterAdmin; isto só controla a exibição.
+  const isMasterAdmin = useStore((s) => s.isMasterAdmin);
   const [hits, setHits] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(false);

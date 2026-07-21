@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { PermissionService, RBAC_MODULES, RBAC_MODULE_LABELS } from "../PermissionService.js";
 import { requirePermission, AuthRequest } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 
 // RBAC granular (ADR-095 Bloco 2) — API de gestão de perfis de acesso.
 //
@@ -17,6 +18,11 @@ router.get("/me", (req: AuthRequest, res: Response): any => {
   res.json({
     permissions: PermissionService.permissionMap(orgOf(req), req.user),
     hasProfile: PermissionService.hasProfile(orgOf(req), req.user),
+    // Fonte única de verdade do "sou o operador da plataforma?" — o front usa
+    // para mostrar/esconder o Admin Master, o Radar Consultor e o console Meta,
+    // em vez de comparar o e-mail hardcoded (ADR-106). O servidor SEMPRE reforça
+    // via requireMasterAdmin; isto é só a coerência do menu.
+    isMasterAdmin: !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL),
   });
 });
 

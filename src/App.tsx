@@ -33,6 +33,7 @@ import { EscutaView } from '@/src/features/EscutaView';
 import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
+import { RetailOpsView } from '@/src/features/RetailOpsView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
 import { GlobalSearch } from '@/src/features/GlobalSearch';
@@ -99,6 +100,7 @@ export default function App() {
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
       vision: 'vms', radar: 'radar', clinica: 'clinica', prospect: 'prospect', radar_b2b: 'prospect',
+      retailops: 'retail',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
@@ -253,6 +255,7 @@ export default function App() {
              {viewMode === 'manifesto' && 'Manifesto da Marca'}
              {viewMode === 'escuta' && 'Escuta Ativa'}
              {viewMode === 'admin' && 'Admin Master'}
+             {viewMode === 'retailops' && 'Operação da Rede'}
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'areas' && 'Áreas de Atendimento'}
              {viewMode === 'dashboard' && 'Dashboard'}
@@ -359,6 +362,7 @@ export default function App() {
           {viewMode === 'manifesto' && <ManifestoView />}
           {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
+          {viewMode === 'retailops' && <RetailOpsView />}
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}
           {viewMode === 'dashboard' && <DashboardPanel />}

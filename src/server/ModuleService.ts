@@ -37,6 +37,7 @@ export class ModuleService {
     vision: "vms",
     radar: "radar",
     retailops: "retail",
+    comigo: "copiloto",
   };
 
   // Rótulos + descrição de cada módulo opcional (fonte única p/ a tela de Módulos).
@@ -64,6 +65,7 @@ export class ModuleService {
     radar: { label: "Radar de Execução IA", desc: "Diagnóstico de maturidade em IA (7 pilares) + Índice de Velocidade de Conversão." },
     clinica: { label: "Clínica", desc: "Fluxo de saúde: prontuário, agenda clínica, portal do paciente." },
     retail: { label: "Retail Ops", desc: "Operação de rede de lojas: fechamento, cotas, malote, premiação." },
+    copiloto: { label: "Comigo (Copiloto)", desc: "Balcão de vendas por toque + precificação (quanto custa, quanto cobrar, quanto sobra) + fiado com limite e caderneta. Exclusivo do plano Autônomo." },
   };
 
   /**

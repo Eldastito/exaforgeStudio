@@ -196,6 +196,7 @@ jobs:
           - { name: 'purchase-order-by-audio', script: 'test:purchase-order-by-audio' }
           - { name: 'plans-migration', script: 'test:plans-migration' }
           - { name: 'vertical-plan-intersection', script: 'test:vertical-plan-intersection' }
+          - { name: 'comigo-module', script: 'test:comigo-module' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

@@ -3882,6 +3882,140 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de RBAC', e); }
   try { db.exec(`ALTER TABLE users ADD COLUMN role_profile_id TEXT`); } catch(e){}
+
+  // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
+  // Balcão PDV por toque + motor de precificação (ficha técnica viva) + fiado
+  // com limite, lista negra e caderneta. Tudo isolado por organization_id.
+  try {
+    db.exec(`
+      -- Ficha técnica viva (ADR-111 D2): custo unitário nasce do tipo do item.
+      CREATE TABLE IF NOT EXISTS comigo_recipes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_id TEXT,                       -- vínculo opcional com o catálogo
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'revenda',  -- revenda|fabricacao|servico
+        yield_qty REAL,                        -- rendimento (fabricação): denominador
+        labor_minutes REAL,                    -- tempo do atendimento (serviço)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_recipes_org ON comigo_recipes(organization_id);
+
+      -- Itens de custo da ficha (incl. os "custos que se esquece": gás, energia,
+      -- embalagem, transporte, taxa Pix/PSP, aluguel da cadeira).
+      CREATE TABLE IF NOT EXISTS comigo_recipe_costs (
+        id TEXT PRIMARY KEY,
+        recipe_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'insumo',   -- insumo|indireto|tempo
+        amount REAL NOT NULL DEFAULT 0,
+        is_estimate INTEGER DEFAULT 1,         -- 1=chute, 0=realidade
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_recipe_costs_recipe ON comigo_recipe_costs(recipe_id);
+
+      -- Loop estimativa->realidade (ADR-088 D6): cada fechamento recalibra
+      -- rendimento/custo real e registra merma/perda.
+      CREATE TABLE IF NOT EXISTS comigo_calibrations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        recipe_id TEXT NOT NULL,
+        expected_yield REAL,
+        actual_yield REAL,
+        waste_qty REAL DEFAULT 0,
+        note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_calibrations_recipe ON comigo_calibrations(recipe_id);
+
+      -- Fila do Balcão (ADR-111 D4). paid_via='fiado' = recebível em aberto
+      -- (ADR-112 D3: conta como venda, NÃO como caixa até quitar).
+      CREATE TABLE IF NOT EXISTS comigo_orders (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,                       -- obrigatório quando paid_via='fiado'
+        session_alias TEXT,                    -- apelido do cliente (venda à vista, sem login)
+        status TEXT NOT NULL DEFAULT 'open',   -- open|paid|done|canceled
+        consumo TEXT DEFAULT 'local',          -- local|viagem
+        total REAL NOT NULL DEFAULT 0,
+        paid_via TEXT,                         -- pix_manual|pix_dyn|card|cash|fiado
+        over_limit INTEGER DEFAULT 0,          -- 1 = fiado liberado acima do limite (ADR-112 D2)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        paid_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_orders_org ON comigo_orders(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_comigo_orders_contact ON comigo_orders(organization_id, contact_id);
+
+      CREATE TABLE IF NOT EXISTS comigo_order_items (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL,
+        product_id TEXT,
+        name TEXT NOT NULL,
+        qty REAL NOT NULL DEFAULT 1,
+        unit_price REAL NOT NULL DEFAULT 0,
+        unit_cost_snapshot REAL DEFAULT 0,     -- custo no momento da venda (lucro real depois)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_order_items_order ON comigo_order_items(order_id);
+
+      -- Ficha de crédito do cliente (ADR-112 + ADR-113): limite de fiado + lista
+      -- negra. 1:1 com um contato (contacts) por organização.
+      CREATE TABLE IF NOT EXISTS comigo_customer_credit (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        credit_limit REAL NOT NULL DEFAULT 0,
+        blacklisted INTEGER DEFAULT 0,
+        blacklisted_at DATETIME,
+        blacklisted_reason TEXT,
+        blacklist_source TEXT,                 -- manual|suggested
+        block_all_sales INTEGER DEFAULT 0,     -- 1 = suspende até venda à vista (ADR-113 D2)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, contact_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_credit_org ON comigo_customer_credit(organization_id);
+
+      -- Razão do fiado (ADR-112 D4): saldo do cliente = Σ debt − Σ payment.
+      CREATE TABLE IF NOT EXISTS comigo_fiado_ledger (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        order_id TEXT,
+        kind TEXT NOT NULL,                    -- debt|payment
+        amount REAL NOT NULL DEFAULT 0,
+        over_limit INTEGER DEFAULT 0,          -- 1 = dívida liberada acima do limite
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_fiado_ledger_contact ON comigo_fiado_ledger(organization_id, contact_id);
+
+      -- Cobrança amigável e cortês (ADR-113 D3): registro de lembretes enviados.
+      CREATE TABLE IF NOT EXISTS comigo_fiado_reminders (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        order_id TEXT,
+        level INTEGER DEFAULT 1,
+        channel TEXT DEFAULT 'whatsapp',
+        template_key TEXT,
+        body TEXT,
+        status TEXT DEFAULT 'sent',            -- sent|failed
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_fiado_reminders_contact ON comigo_fiado_reminders(organization_id, contact_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas do Comigo (copiloto)', e); }
+  // Configurações do Comigo em organization_settings (ADR-111/112/113).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_hour_value REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_default_indirects TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fiado_default_limit REAL DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fiado_reminder_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fiado_reminder_cadence TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_blacklist_suggest_days INTEGER DEFAULT 20`); } catch(e){}
 };
 
 initDb();

@@ -3331,6 +3331,8 @@ const initDb = () => {
     // product_variants.external_ref = EAN (ou codigo:cor:tamanho) da variante.
     try { db.exec(`ALTER TABLE products_services ADD COLUMN external_ref TEXT`); } catch(e){}
     try { db.exec(`ALTER TABLE product_variants ADD COLUMN external_ref TEXT`); } catch(e){}
+    // ADR-105 Fase 1d: tabela de preço da rede a sincronizar (módulo Price).
+    try { db.exec(`ALTER TABLE alterdata_integration_settings ADD COLUMN price_table TEXT`); } catch(e){}
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_products_external_ref ON products_services(organization_id, external_ref);
       CREATE INDEX IF NOT EXISTS idx_variants_external_ref ON product_variants(organization_id, external_ref);

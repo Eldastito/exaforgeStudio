@@ -15,6 +15,7 @@ import { AlterdataConnectorService } from "./AlterdataConnectorService.js";
 import { AlterdataSyncService } from "./AlterdataSyncService.js";
 import { AlterdataSupplyMapper } from "./AlterdataSupplyMapper.js";
 import { AlterdataStockMapper } from "./AlterdataStockMapper.js";
+import { AlterdataPriceMapper } from "./AlterdataPriceMapper.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { logAuthEvent } from "./auditLog.js";
 
@@ -22,9 +23,12 @@ export interface SyncRunSummary {
   referencias: number;
   variantes: number;
   saldos: { applied: number; skippedNoStore: number; skippedNoProduct: number };
+  precos: { applied: number; skippedNoProduct: number };
   filiais: string[];
   ranAt: string;
 }
+
+function str(v: any): string { return v == null ? "" : String(v).trim(); }
 
 export class AlterdataSyncRunner {
   /** Sincroniza uma org (Supply: Referencia → CodigoDeBarras → Saldo por filial). */
@@ -61,8 +65,24 @@ export class AlterdataSyncRunner {
       });
     }
 
+    // 4) Preço (módulo Price) — só quando a tabela de preço da rede está definida.
+    const precos = { applied: 0, skippedNoProduct: 0 };
+    const rede = str(settings.rede);
+    const table = str(settings.priceTable);
+    if (rede && table) {
+      await AlterdataSyncService.syncResource(orgId, {
+        moduleKey: "price", resource: "Preco", filial: table,
+        buildPath: (c) => `/api/v1/Preco/versao/${rede}/${table}/${c}`,
+        onItems: (items) => {
+          const r = AlterdataPriceMapper.upsertPrecos(orgId, items);
+          precos.applied += r.applied; precos.skippedNoProduct += r.skippedNoProduct;
+          return r.applied;
+        },
+      });
+    }
+
     const summary: SyncRunSummary = {
-      referencias: ref.imported, variantes: bar.imported, saldos, filiais,
+      referencias: ref.imported, variantes: bar.imported, saldos, precos, filiais,
       ranAt: new Date().toISOString(),
     };
     // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'.

@@ -41,6 +41,7 @@ export interface AlterdataSettingsInput {
   moduleBaseUrls?: Record<string, string>;
   authConfig?: Record<string, any> | null; // client_id/secret ou api key — cifrado
   syncIntervalMinutes?: number;
+  priceTable?: string | null;               // nº da tabela de preço da rede (módulo Price)
 }
 
 export class AlterdataConnectorService {
@@ -66,15 +67,16 @@ export class AlterdataConnectorService {
       // Segredo cifrado: só reescreve se veio no input (null explícito limpa).
       auth_config_enc: input.authConfig !== undefined ? (input.authConfig ? EncryptionService.encrypt(JSON.stringify(input.authConfig)) : null) : (cur?.auth_config_enc ?? null),
       sync_interval_minutes: input.syncIntervalMinutes != null ? Math.max(1, Math.floor(input.syncIntervalMinutes)) : (cur?.sync_interval_minutes ?? 15),
+      price_table: input.priceTable !== undefined ? (input.priceTable ? String(input.priceTable).trim() : null) : (cur?.price_table ?? null),
     };
     if (cur) {
       db.prepare(
-        `UPDATE alterdata_integration_settings SET enabled=?, environment=?, rede=?, filiais_json=?, base_pattern=?, module_base_urls_json=?, auth_config_enc=?, sync_interval_minutes=?, updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`
-      ).run(next.enabled, next.environment, next.rede, next.filiais_json, next.base_pattern, next.module_base_urls_json, next.auth_config_enc, next.sync_interval_minutes, orgId);
+        `UPDATE alterdata_integration_settings SET enabled=?, environment=?, rede=?, filiais_json=?, base_pattern=?, module_base_urls_json=?, auth_config_enc=?, sync_interval_minutes=?, price_table=?, updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`
+      ).run(next.enabled, next.environment, next.rede, next.filiais_json, next.base_pattern, next.module_base_urls_json, next.auth_config_enc, next.sync_interval_minutes, next.price_table, orgId);
     } else {
       db.prepare(
-        `INSERT INTO alterdata_integration_settings (organization_id, enabled, environment, rede, filiais_json, base_pattern, module_base_urls_json, auth_config_enc, sync_interval_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(orgId, next.enabled, next.environment, next.rede, next.filiais_json, next.base_pattern, next.module_base_urls_json, next.auth_config_enc, next.sync_interval_minutes);
+        `INSERT INTO alterdata_integration_settings (organization_id, enabled, environment, rede, filiais_json, base_pattern, module_base_urls_json, auth_config_enc, sync_interval_minutes, price_table) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(orgId, next.enabled, next.environment, next.rede, next.filiais_json, next.base_pattern, next.module_base_urls_json, next.auth_config_enc, next.sync_interval_minutes, next.price_table);
     }
   }
 
@@ -93,6 +95,7 @@ export class AlterdataConnectorService {
       rede: r.rede || null,
       filiais,
       basePattern: r.base_pattern || null,
+      priceTable: r.price_table || null,
       hasCredentials: !!r.auth_config_enc,
       hasToken: !!r.access_token_enc,
       tokenExpiresAt: r.token_expires_at || null,

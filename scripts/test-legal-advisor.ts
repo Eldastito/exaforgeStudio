@@ -92,6 +92,35 @@ async function main() {
   const cobAudit = db.prepare("SELECT COUNT(*) c FROM legal_consultations WHERE organization_id=? AND question LIKE '[situação]%'").get(orgId) as any;
   check("dica proativa registrada na auditoria", cobAudit.c >= 2);
 
+  // ===== 11. Base ampliada: súmulas do STJ e PROCON (Fatia 3) =====
+  const aSum = await L.ask(orgId, "preciso notificar o cliente antes de colocar o nome dele no serasa?");
+  check("negativação → recupera a Súmula 359 do STJ", aSum.artigos.some((a: any) => a.fonte === "sumula_stj" && a.numero === "359"));
+  check("citação traz o rótulo (ref) por fonte", aSum.artigos.some((a: any) => /Súmula 359 do STJ/.test(a.ref)));
+
+  const aProcon = await L.ask(orgId, "fui notificado pelo procon, o que eu faço?");
+  check("PROCON → recupera orientação da fonte procon", aProcon.grounded && aProcon.artigos.some((a: any) => a.fonte === "procon"));
+
+  const aCharge = await L.ask(orgId, "o cliente fez chargeback e contestou a compra no cartão");
+  check("chargeback → recupera orientação (grounded)", aCharge.grounded && aCharge.artigos.length >= 1);
+
+  // Súmula 130 (estacionamento) — cobertura da base ampliada.
+  const aEstac = await L.ask(orgId, "responsabilidade por furto de veículo no meu estacionamento");
+  check("furto no estacionamento → Súmula 130 do STJ", aEstac.artigos.some((a: any) => a.numero === "130" && a.fonte === "sumula_stj"));
+
+  // Situações novas (Fatia 3).
+  check("situação reclamacao_procon existe e cita procon", (() => { const s = L.forSituation("reclamacao_procon", orgId); return !!s && s.artigos.some((a: any) => a.fonte === "procon"); })());
+  check("situação chargeback existe", !!L.forSituation("chargeback", orgId));
+  check("base ampliada tem mais normas que só o CDC", (L.baseInfo().normas || 0) > (L.baseInfo().artigos || 0));
+
+  // ===== 12. Histórico por tema (Fatia 3) =====
+  const hist = L.history(orgId);
+  check("histórico conta as consultas reais (exclui situações)", hist.total >= 8);
+  check("histórico agrega temas com contagem", hist.temas.length >= 1 && hist.temas[0].count >= 1);
+  check("histórico traz rótulo legível por tema", typeof hist.temas[0].ref === "string" && hist.temas[0].ref.length > 0);
+  check("histórico separa recusadas (fora do domínio)", hist.recusadas >= 1);
+  const histOther = L.history(other);
+  check("histórico isolado por org", histOther.total === 0);
+
   // --- Relatório ---
   console.log("\n=== TEST: Consultora Jurídica (ADR-115) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}`);

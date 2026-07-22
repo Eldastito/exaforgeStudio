@@ -27,6 +27,13 @@ router.get("/situation/:key", (req: AuthRequest, res): any => {
   res.json(tip);
 });
 
+// GET /api/legal/history — consultas por tema (o que o lojista mais consultou).
+router.get("/history", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LegalAdvisorService.history(orgId));
+});
+
 // POST /api/legal/ask — pergunta do lojista → orientação + artigos + disclaimer.
 router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;

@@ -21,6 +21,7 @@ export interface LegalArticle {
   texto: string;
   orientacao: string;
   termos: string[];
+  fonte?: string; // 'cdc' (padrão) | 'sumula_stj' | 'procon'
 }
 
 export const CDC_ARTICLES: LegalArticle[] = [
@@ -125,7 +126,98 @@ export const CDC_ARTICLES: LegalArticle[] = [
   },
 ];
 
-/** Índice por número do artigo (citação rápida). */
+/**
+ * Base ampliada (ADR-115 Fatia 3): súmulas do STJ e orientações do PROCON que
+ * mais afetam o lojista, além do CDC. Súmulas são texto público do tribunal;
+ * as entradas de PROCON são ORIENTAÇÃO de conduta (como responder), ancoradas
+ * no CDC — não inventam norma. Mesma disciplina de grounding.
+ */
+export const EXTRA_NORMS: LegalArticle[] = [
+  {
+    fonte: "sumula_stj",
+    numero: "359",
+    titulo: "Aviso antes de negativar (Súmula 359 do STJ)",
+    texto:
+      "Cabe ao órgão mantenedor do cadastro de proteção ao crédito a notificação do devedor antes de proceder à inscrição do seu nome. A ausência de notificação prévia gera dever de indenizar.",
+    orientacao:
+      "Confirme que o cliente será notificado por escrito ANTES de o nome entrar no SPC/Serasa. Negativar sem esse aviso prévio gera indenização contra quem inscreveu — não pule essa etapa.",
+    termos: ["negativar", "notificacao previa", "aviso antes de negativar", "spc", "serasa", "inscricao", "sumula 359"],
+  },
+  {
+    fonte: "sumula_stj",
+    numero: "385",
+    titulo: "Negativação preexistente afasta dano moral (Súmula 385 do STJ)",
+    texto:
+      "Da anotação irregular em cadastro de proteção ao crédito não cabe indenização por dano moral quando preexistente legítima inscrição, ressalvado o direito ao cancelamento da anotação irregular.",
+    orientacao:
+      "Se o cliente já tinha outra negativação legítima anterior, ele não costuma ganhar dano moral por uma nova anotação — mas você ainda pode ser obrigado a cancelar a que estiver irregular. Mantenha sua negativação correta e documentada.",
+    termos: ["dano moral", "negativacao anterior", "ja estava negativado", "inscricao preexistente", "sumula 385"],
+  },
+  {
+    fonte: "sumula_stj",
+    numero: "532",
+    titulo: "Envio de produto/cartão não solicitado é abusivo (Súmula 532 do STJ)",
+    texto:
+      "Constitui prática comercial abusiva o envio de cartão de crédito (ou produto) sem prévia e expressa solicitação do consumidor, configurando ato ilícito indenizável e sujeito a sanção administrativa.",
+    orientacao:
+      "Nunca envie produto, brinde cobrado ou 'cortesia' que gere cobrança sem o cliente ter pedido de forma expressa — é prática abusiva que gera multa e indenização. Ofereça e espere o 'sim' antes de mandar e cobrar.",
+    termos: ["produto nao solicitado", "envio sem pedir", "amostra cobrada", "cartao nao solicitado", "sumula 532", "mandar sem pedir"],
+  },
+  {
+    fonte: "sumula_stj",
+    numero: "130",
+    titulo: "Responsabilidade por furto no estacionamento (Súmula 130 do STJ)",
+    texto:
+      "A empresa responde, perante o cliente, pela reparação de dano ou furto de veículo ocorrido em seu estacionamento.",
+    orientacao:
+      "Se você oferece estacionamento (ainda que gratuito) para atrair clientes, pode responder por furto ou dano ao veículo lá dentro. Placa de 'não nos responsabilizamos' não afasta isso. Avalie câmeras, controle de acesso e um seguro.",
+    termos: ["estacionamento", "furto de veiculo", "roubaram o carro", "dano no carro", "responsabilidade estacionamento", "sumula 130"],
+  },
+  {
+    fonte: "procon",
+    numero: "resposta",
+    titulo: "Como responder a uma reclamação no PROCON",
+    texto:
+      "Recebida uma reclamação (PROCON ou consumidor.gov.br), o fornecedor é notificado e tem prazo para se manifestar. A ausência de resposta ou a recusa injustificada pesam contra o fornecedor e podem gerar sanção administrativa.",
+    orientacao:
+      "Não ignore a notificação do PROCON: responda dentro do prazo, de forma educada e documentada, apresentando sua versão e uma proposta de solução (conserto, troca ou reembolso conforme o caso). Guarde comprovantes. Resolver por acordo costuma sair muito mais barato do que a multa e o desgaste.",
+    termos: ["procon", "reclamacao", "consumidor.gov", "notificacao", "reclame aqui", "responder reclamacao", "fui notificado"],
+  },
+  {
+    fonte: "procon",
+    numero: "chargeback",
+    titulo: "Chargeback / contestação de cartão",
+    texto:
+      "No chargeback, o cliente contesta a compra junto à administradora do cartão e o valor pode ser estornado do lojista. A defesa depende de PROVAR a entrega/serviço e a legitimidade da venda; em compras não presenciais, o risco de fraude recai em boa parte sobre o vendedor.",
+    orientacao:
+      "Contra chargeback, sua defesa é a PROVA: guarde comprovante de entrega, conversa com o cliente, nota e dados da venda. Em venda a distância, confira os dados antes de despachar e desconfie de pedidos atípicos. Reúna as evidências e conteste no prazo da adquirente; se foi arrependimento legítimo (7 dias), o reembolso é devido de qualquer forma.",
+    termos: ["chargeback", "contestacao", "estorno de cartao", "cliente contestou", "compra contestada", "fraude no cartao", "adquirente"],
+  },
+];
+
+/** Biblioteca legal completa (recuperação percorre tudo). */
+export const LEGAL_LIBRARY: LegalArticle[] = [...CDC_ARTICLES, ...EXTRA_NORMS];
+
+/** Rótulo legível para citação, conforme a fonte. */
+export function refLabel(a: { fonte?: string; numero: string; titulo?: string }): string {
+  switch (a.fonte) {
+    case "sumula_stj": return `Súmula ${a.numero} do STJ`;
+    case "procon": return "Orientação PROCON";
+    default: return `Art. ${a.numero} do CDC`;
+  }
+}
+
+/** Chave única por norma: `${fonte}:${numero}` (fonte ausente = cdc). */
+export function normKey(a: { fonte?: string; numero: string }): string {
+  return `${a.fonte || "cdc"}:${a.numero}`;
+}
+
+/** Índice por número do artigo do CDC (citação rápida, compatível). */
 export const CDC_BY_NUMERO: Record<string, LegalArticle> = Object.fromEntries(
   CDC_ARTICLES.map((a) => [a.numero, a]),
+);
+
+/** Índice por chave `${fonte}:${numero}` sobre a biblioteca inteira. */
+export const NORM_BY_KEY: Record<string, LegalArticle> = Object.fromEntries(
+  LEGAL_LIBRARY.map((a) => [normKey(a), a]),
 );

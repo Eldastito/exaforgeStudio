@@ -221,6 +221,7 @@ jobs:
           - { name: 'cash-ledger', script: 'test:cash-ledger' }
           - { name: 'cash-forecast', script: 'test:cash-forecast' }
           - { name: 'cash-actions', script: 'test:cash-actions' }
+          - { name: 'business-health', script: 'test:business-health' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

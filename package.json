@@ -193,7 +193,8 @@
     "test:legal-advisor": "tsx scripts/test-legal-advisor.ts",
     "test:cash-ledger": "tsx scripts/test-cash-ledger.ts",
     "test:cash-forecast": "tsx scripts/test-cash-forecast.ts",
-    "test:cash-actions": "tsx scripts/test-cash-actions.ts"
+    "test:cash-actions": "tsx scripts/test-cash-actions.ts",
+    "test:business-health": "tsx scripts/test-business-health.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

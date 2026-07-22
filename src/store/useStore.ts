@@ -70,7 +70,7 @@ export type Ticket = {
   slaSegment?: string | null;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'comigo' | 'juridico' | 'caixa';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'comigo' | 'juridico' | 'caixa' | 'saude';
 
 export type EvolutionConfig = {
   baseUrl: string;

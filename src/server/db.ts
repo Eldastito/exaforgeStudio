@@ -3325,6 +3325,15 @@ const initDb = () => {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_alterdata_cursor_uniq
         ON alterdata_sync_cursors(organization_id, module, resource, filial);
+    `);
+    // ADR-105 Fase 1b: referência externa (ERP) para upsert idempotente do
+    // catálogo importado. products_services.external_ref = Referencia.referenciaId;
+    // product_variants.external_ref = EAN (ou codigo:cor:tamanho) da variante.
+    try { db.exec(`ALTER TABLE products_services ADD COLUMN external_ref TEXT`); } catch(e){}
+    try { db.exec(`ALTER TABLE product_variants ADD COLUMN external_ref TEXT`); } catch(e){}
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_products_external_ref ON products_services(organization_id, external_ref);
+      CREATE INDEX IF NOT EXISTS idx_variants_external_ref ON product_variants(organization_id, external_ref);
 
       CREATE TABLE IF NOT EXISTS fashion_tryon_jobs (
         id TEXT PRIMARY KEY,

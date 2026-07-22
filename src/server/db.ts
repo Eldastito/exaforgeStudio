@@ -4041,6 +4041,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE comigo_orders ADD COLUMN source TEXT DEFAULT 'balcao'`); } catch(e){}
   try { db.exec(`ALTER TABLE comigo_orders ADD COLUMN fulfilled_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mesa_token TEXT`); } catch(e){}
+  // Onboarding por arquétipo (ADR-120): molda o Comigo pelo tipo de negócio.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_archetype TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mode TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mobile INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mesa_enabled INTEGER DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_default_recipe_kind TEXT`); } catch(e){}
 };
 
 initDb();

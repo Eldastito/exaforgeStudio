@@ -477,7 +477,7 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
   AlterdataConnectorService.saveSettings(req.organizationId, {
     enabled: b.enabled, environment: b.environment, rede: b.rede, filiais: b.filiais,
     basePattern: b.basePattern, moduleBaseUrls: b.moduleBaseUrls, authConfig: b.authConfig,
-    syncIntervalMinutes: b.syncIntervalMinutes,
+    syncIntervalMinutes: b.syncIntervalMinutes, priceTable: b.priceTable,
   });
   logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SETTINGS_UPDATED', { enabled: !!b.enabled, environment: b.environment });
   res.json(AlterdataConnectorService.publicSettings(req.organizationId));

@@ -680,6 +680,7 @@ function AlterdataConnectorPanel() {
   const [filiais, setFiliais] = useState('');
   const [environment, setEnvironment] = useState('homolog');
   const [basePattern, setBasePattern] = useState('');
+  const [priceTable, setPriceTable] = useState('');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [testing, setTesting] = useState(false);
@@ -692,7 +693,7 @@ function AlterdataConnectorPanel() {
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
         const s = d.summary || {};
-        toast.success(`Sincronizado: ${s.referencias || 0} produtos, ${s.variantes || 0} variantes, ${s.saldos?.applied || 0} saldos.`);
+        toast.success(`Sincronizado: ${s.referencias || 0} produtos, ${s.variantes || 0} variantes, ${s.saldos?.applied || 0} saldos, ${s.precos?.applied || 0} preços.`);
       } else toast.error(d.error || 'Falha ao sincronizar.');
     } finally { setSyncing(false); }
   };
@@ -713,6 +714,7 @@ function AlterdataConnectorPanel() {
     setFiliais(Array.isArray(d.filiais) ? d.filiais.join(', ') : '');
     setEnvironment(d.environment || 'homolog');
     setBasePattern(d.basePattern || 'toulon-{module}.apimodaup.com.br');
+    setPriceTable(d.priceTable || '');
   }).catch(() => {});
   useEffect(() => { load(); }, []);
 
@@ -723,6 +725,7 @@ function AlterdataConnectorPanel() {
         environment, rede: rede.trim() || null,
         filiais: filiais.split(',').map(s => s.trim()).filter(Boolean),
         basePattern: basePattern.trim() || null,
+        priceTable: priceTable.trim() || null,
         ...patch,
       };
       // Só manda credencial se o lojista digitou algo (não sobrescreve com vazio).
@@ -774,6 +777,9 @@ function AlterdataConnectorPanel() {
         </label>
         <label className="text-xs text-zinc-400">Padrão de URL dos módulos
           <input className={inputCls} value={basePattern} onChange={e => setBasePattern(e.target.value)} placeholder="toulon-{module}.apimodaup.com.br" />
+        </label>
+        <label className="text-xs text-zinc-400">Tabela de preço (módulo Price)
+          <input className={inputCls} value={priceTable} onChange={e => setPriceTable(e.target.value)} placeholder="nº da tabela de preço da rede (ex.: 1)" />
         </label>
         <label className="text-xs text-zinc-400">Client ID — e-mail do usuário {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
           <input className={inputCls} value={clientId} onChange={e => setClientId(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'e-mail do usuário de retaguarda (acesso total)'} autoComplete="off" />

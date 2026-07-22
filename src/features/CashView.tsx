@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Wallet, Loader2, Plus, ArrowDownCircle, ArrowUpCircle, TrendingUp, TrendingDown, Check, AlertTriangle, CalendarClock, Info } from 'lucide-react';
+import { Wallet, Loader2, Plus, ArrowDownCircle, ArrowUpCircle, TrendingUp, TrendingDown, Check, AlertTriangle, CalendarClock, Info, Zap, Target, X } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -12,12 +12,15 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 export function CashView() {
   const [data, setData] = useState<any | null>(null);
   const [fc, setFc] = useState<any | null>(null);
+  const [act, setAct] = useState<any | null>(null);
   const [minCash, setMinCash] = useState('0');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const loadForecast = useCallback((mc: string) => {
-    apiFetch(`/api/cash/forecast?minCash=${Number(mc.replace(',', '.')) || 0}`).then((r) => r.json()).then((d: any) => setFc(d)).catch(() => {});
+    const v = Number(mc.replace(',', '.')) || 0;
+    apiFetch(`/api/cash/forecast?minCash=${v}`).then((r) => r.json()).then((d: any) => setFc(d)).catch(() => {});
+    apiFetch(`/api/cash/actions?minCash=${v}`).then((r) => r.json()).then((d: any) => setAct(d)).catch(() => {});
   }, []);
   const load = useCallback(() => {
     setLoading(true);
@@ -25,6 +28,18 @@ export function CashView() {
     loadForecast(minCash);
   }, [loadForecast, minCash]);
   useEffect(() => { load(); }, [load]);
+
+  const aplicarAcao = async (a: any, shortfall: number) => {
+    const d = await post('/api/cash/actions', { kind: a.kind, title: a.title, rationale: a.rationale, expectedImpact: a.expectedImpact, baselineShortfall: shortfall });
+    if (d) toast.success('Ação no plano. Quando executar, registre o resultado.');
+  };
+  const concluirAcao = async (a: any) => {
+    const v = window.prompt(`Quanto essa ação trouxe de fato para o caixa? (esperado ${brl(a.expected_impact)})`, String(a.expected_impact));
+    if (v == null) return;
+    const d = await post(`/api/cash/actions/${a.id}/complete`, { resultAmount: Number(v.replace(',', '.')) || 0 });
+    if (d) toast.success('Resultado registrado no Impact Ledger.');
+  };
+  const dispensarAcao = async (a: any) => { const d = await post(`/api/cash/actions/${a.id}/dismiss`, {}); if (d) toast.success('Dispensada.'); };
 
   const post = async (url: string, body: any) => {
     setBusy(true);
@@ -148,6 +163,54 @@ export function CashView() {
               <summary className="text-[11px] text-zinc-500 cursor-pointer">Premissas da projeção</summary>
               <ul className="mt-1 space-y-0.5">{fc.assumptions?.map((a: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {a}</li>)}</ul>
             </details>
+          </div>
+        )}
+
+        {/* Plano para o caixa não furar (ADR-125 Fatia 3) */}
+        {act?.suggestions?.actions?.length > 0 && (
+          <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
+            <h3 className="text-sm font-medium text-indigo-100 flex items-center gap-2 mb-1"><Zap className="w-4 h-4 text-indigo-300" /> Plano para cobrir o rombo de {brl(act.suggestions.shortfall)}</h3>
+            <p className="text-[11px] text-zinc-400 mb-2">Sugestões priorizadas — você decide e aplica; nada é executado sozinho. Depois registre quanto trouxe de fato.</p>
+            <div className="space-y-2">
+              {act.suggestions.actions.map((a: any, i: number) => (
+                <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-medium text-zinc-100">{a.title}</span>
+                    <span className="text-[11px] text-indigo-300 shrink-0">≈ {brl(a.expectedImpact)}{!a.grounded && ' (meta)'}</span>
+                  </div>
+                  <p className="mt-0.5 text-[12px] text-zinc-400">{a.rationale}</p>
+                  <button disabled={busy} onClick={() => aplicarAcao(a, act.suggestions.shortfall)} className="mt-1.5 inline-flex items-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] px-2.5 py-1 disabled:opacity-50"><Check className="w-3.5 h-3.5" /> Colocar no plano</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Impact Ledger — esperado × realizado */}
+        {act?.ledger?.items?.length > 0 && (
+          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><Target className="w-4 h-4 text-emerald-300" /> Resultado das ações</h3>
+              <div className="text-[11px] text-zinc-400">esperado <span className="text-zinc-200">{brl(act.ledger.expected)}</span> · realizado <span className="text-emerald-300">{brl(act.ledger.realized)}</span></div>
+            </div>
+            <div className="space-y-1.5">
+              {act.ledger.items.map((a: any) => (
+                <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] text-zinc-100">{a.title}</div>
+                    <div className="text-[11px] text-zinc-500">esperado {brl(a.expected_impact)}{a.status === 'done' ? ` · realizado ${brl(a.result_amount)}` : ''}</div>
+                  </div>
+                  {a.status === 'done' ? (
+                    <span className="shrink-0 text-[11px] rounded-full border border-emerald-500/40 text-emerald-300 px-2 py-0.5">concluída</span>
+                  ) : (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button disabled={busy} onClick={() => concluirAcao(a)} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1"><Check className="w-3 h-3" /> Registrar resultado</button>
+                      <button disabled={busy} onClick={() => dispensarAcao(a)} title="Dispensar" className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-800"><X className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

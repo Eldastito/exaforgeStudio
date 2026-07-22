@@ -1,6 +1,6 @@
 # ADR-125 — Central de Sobrevivência e Decisão + Motor de Caixa (global)
 
-- **Status:** Em implementação. Fatia 1 (livro-caixa) e Fatia 2 (projeção de 13 semanas + alerta de ruptura) entregues. Fatia 3 (alerta → ação → medição) pendente.
+- **Status:** Motor de Caixa implementado (Fatias 1–3). Fatia 1 livro-caixa; Fatia 2 projeção de 13 semanas + alerta de ruptura; Fatia 3 alerta → ação → medição (Impact Ledger: sugestões ancoradas em dado real, aprovação humana, esperado × realizado). Próximos ADRs consomem esta base: Central de Saúde (síntese top-3), Índice de Sobrevivência 0-100, DRE gerencial, Empresa × Proprietário.
 - **Data:** 2026-07
 - **Origem:** PRD "Central de Sobrevivência e Decisão Empresarial". Tese: o ZappFlow deve evoluir de central de execução para um **sistema operacional de sobrevivência**: entender → decidir → executar → medir → aprender. Dados Sebrae: comércio lidera mortalidade (30,2% em 5 anos); **22% dos fechamentos citam falta de capital de giro** e 20% baixo volume de vendas.
 - **Relacionadas:** RIE/IQR (RevenueIntelligenceService — vazamentos e receita recuperada), ADR-114 (margem de perda), ADR-116 (termômetro de saúde do Comigo), Diretor Executivo IA (ExecutiveAdvisorService), Caderneta/fiado (BalcaoService), AnalyticsService (métricas core). ADR-091 §6 (IA sugere, humano decide). ADR-088 D5 (frugalidade de token).

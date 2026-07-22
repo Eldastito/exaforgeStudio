@@ -75,6 +75,17 @@ async function main() {
   check("status SAUDÁVEL sem gatilhos", ovOk.status === "saudavel");
   check("saudável sem prioridades de risco", ovOk.priorities.length === 0);
 
+  // ===== 4b. Aplicar recomendação → Impact Ledger unificado (Fatia 2) =====
+  const p0 = ov.priorities[0];
+  check("prioridade começa fora do plano (inPlan false)", p0.inPlan === false);
+  const ap = H.apply(orgId, { source: p0.source, title: p0.title, impact: p0.impact, rationale: p0.interpretacao }) as any;
+  check("aplicar registra a ação (ok)", ap.ok === true && !ap.deduped);
+  check("aplicar de novo é idempotente (não duplica)", (H.apply(orgId, { source: p0.source, title: p0.title, impact: p0.impact }) as any).deduped === true);
+  const ov2 = H.overview(orgId, 0);
+  check("prioridade aplicada aparece como 'no plano'", ov2.priorities.find((p: any) => p.title === p0.title)?.inPlan === true);
+  check("histórico/Impact Ledger reflete a ação aplicada", ov2.ledger.items.some((it: any) => it.title === p0.title) && ov2.ledger.expected >= p0.impact - 0.01);
+  check("histórico é o Impact Ledger unificado (mesma origem da ADR-125)", typeof ov2.ledger.expected === "number" && typeof ov2.ledger.realized === "number");
+
   // ===== 5. Org vazia: sem falso alarme + isolamento =====
   const empty = mkOrg("Vazia");
   const ovE = H.overview(empty, 0);

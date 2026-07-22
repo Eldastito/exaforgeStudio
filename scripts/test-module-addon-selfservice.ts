@@ -3,8 +3,9 @@
  *
  * Prova que o dono liga um ADD-ON (ex.: Retail Ops) sozinho, independente do
  * teto do plano (billing mockado):
- *   - overview: add-on aparece como 'available' (não 'upgrade') e addon=true,
- *     mesmo quando o plano não o inclui;
+ *   - overview: SÓ o add-on operacional (Retail Ops) aparece como 'available'
+ *     (ligável) mesmo fora do plano; os demais add-ons acima do teto (ex.: radar)
+ *     caem em 'upgrade' (cadeado + CTA), espelhando a trava real do isEnabled;
  *   - setModules com o add-on → isEnabled(add-on) = true apesar do teto do plano;
  *   - módulo COMUM acima do teto continua barrado (regra do plano intacta).
  *
@@ -43,6 +44,10 @@ async function main() {
   check("retail marcado como add-on", retail?.addon === true);
   const diretor = ov.items.find((i: any) => i.key === "diretor");
   check("módulo comum acima do teto continua 'upgrade'", diretor?.section === "upgrade", diretor?.section);
+  // Add-on NÃO-operacional acima do plano: cadeado (upgrade), não toggle enganoso.
+  const radar = ov.items.find((i: any) => i.key === "radar");
+  check("add-on acima do plano (radar) é 'upgrade', não 'available'", radar?.section === "upgrade", radar?.section);
+  check("radar continua marcado como add-on", radar?.addon === true);
 
   // ===== 2. dono liga retail → isEnabled apesar do teto do plano =====
   check("antes: retail desligado", ModuleService.isEnabled(A, "retail") === false);

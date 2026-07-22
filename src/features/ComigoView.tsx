@@ -13,6 +13,7 @@ const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
 
 type Product = { id: string; name: string; price: number; type: string; active: number };
 type OrderItem = { id: string; name: string; qty: number; unit_price: number };
+type SugItem = { product_id: string; name: string; count: number };
 type Overview = { recipes: number; openOrders: number; fiadoReceivable: number; blacklisted: number };
 
 const TABS = [
@@ -105,13 +106,20 @@ function Balcao({ onChange }: { onChange: () => void }) {
   const [total, setTotal] = useState(0);
   const [busy, setBusy] = useState(false);
   const [fiado, setFiado] = useState<{ name: string; phone: string } | null>(null);
+  const [suggest, setSuggest] = useState<{ alsoBought: SugItem[]; top: SugItem[] }>({ alsoBought: [], top: [] });
+
+  const loadSuggest = useCallback((pid?: string) => {
+    apiFetch(`/api/comigo/suggest${pid ? `?productId=${pid}` : ''}`).then((r) => r.json())
+      .then((r: any) => setSuggest({ alsoBought: r?.alsoBought || [], top: r?.top || [] })).catch(() => {});
+  }, []);
 
   useEffect(() => {
     apiFetch('/api/products').then((r) => r.json()).then((rows: any) => {
       const list = Array.isArray(rows) ? rows : (rows?.products || []);
       setProducts(list.filter((p: Product) => p.active !== 0 && p.price != null));
     }).catch(() => {});
-  }, []);
+    loadSuggest();
+  }, [loadSuggest]);
 
   const refresh = useCallback((id: string) => {
     apiFetch(`/api/comigo/orders/${id}`).then((r) => r.json()).then((r: any) => {
@@ -131,11 +139,18 @@ function Balcao({ onChange }: { onChange: () => void }) {
       }
       await apiFetch(`/api/comigo/orders/${id}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: p.id, name: p.name, unitPrice: p.price, qty: 1 }) });
       refresh(id!);
+      loadSuggest(p.id); // "quem levou isso também levou"
     } catch { toast.error('Não consegui adicionar o item.'); }
     finally { setBusy(false); }
   };
 
-  const reset = () => { setOrderId(null); setItems([]); setTotal(0); setFiado(null); onChange(); };
+  // Adiciona a partir de uma sugestão (resolve preço/nome no catálogo carregado).
+  const addByProductId = (pid: string) => {
+    const p = products.find((x) => x.id === pid);
+    if (p) addProduct(p);
+  };
+
+  const reset = () => { setOrderId(null); setItems([]); setTotal(0); setFiado(null); loadSuggest(); onChange(); };
 
   const pay = async (paidVia: 'cash' | 'pix_manual' | 'fiado', override = false) => {
     if (!orderId || busy) return;
@@ -165,6 +180,25 @@ function Balcao({ onChange }: { onChange: () => void }) {
     <div className="grid md:grid-cols-2 gap-4">
       {/* Grade por toque */}
       <div>
+        {/* Sugestão zero-token (ADR-117): combina com o último item, ou mais pedidos */}
+        {(() => {
+          const chips = (items.length > 0 ? suggest.alsoBought : suggest.top)
+            .filter((s) => products.some((p) => p.id === s.product_id)).slice(0, 4);
+          if (chips.length === 0) return null;
+          return (
+            <div className="mb-3">
+              <div className="text-[11px] text-zinc-500 mb-1">{items.length > 0 ? 'Quem levou isso também levou' : 'Mais pedidos'}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((s) => (
+                  <button key={s.product_id} disabled={busy} onClick={() => addByProductId(s.product_id)}
+                    className="text-xs rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 px-2.5 py-1 hover:bg-emerald-500/20 disabled:opacity-40">
+                    + {s.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         <div className="text-xs text-zinc-500 mb-2">Toque para adicionar</div>
         {products.length === 0 ? (
           <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Cadastre produtos no Catálogo para vender aqui.</div>

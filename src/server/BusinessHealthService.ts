@@ -3,6 +3,7 @@ import { CashForecastService } from "./CashForecastService.js";
 import { LossMarginService } from "./LossMarginService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { CashActionService } from "./CashActionService.js";
+import { OwnerDrawService } from "./OwnerDrawService.js";
 import db from "./db.js";
 
 /**
@@ -22,7 +23,7 @@ type StatusLevel = "saudavel" | "atencao" | "risco" | "critico";
 const SEVERITY: Record<StatusLevel, number> = { saudavel: 0, atencao: 1, risco: 2, critico: 3 };
 
 export interface Priority {
-  source: "caixa" | "recebiveis" | "perdas" | "rie";
+  source: "caixa" | "recebiveis" | "perdas" | "rie" | "retiradas";
   title: string;
   impact: number;
   basis: "fato" | "estimativa";
@@ -39,6 +40,7 @@ const HOWTO: Record<Priority["source"], string> = {
   recebiveis: "Na Caderneta, mande o lembrete gentil (a cobrança cortês já vem pronta) e combine o pagamento — sem expor ninguém.",
   perdas: "Nos Relatórios, veja o diagnóstico de perdas: o driver que mais pesa já vem com uma sugestão específica de redução.",
   rie: "No Revenue Intelligence, gere a ação de recuperação (rascunho) para os leads, orçamentos e carrinhos parados.",
+  retiradas: "Em Empresa × Proprietário, veja o pró-labore sustentável sugerido e ajuste as retiradas para não descapitalizar o negócio.",
 };
 
 export class BusinessHealthService {
@@ -66,16 +68,28 @@ export class BusinessHealthService {
     // atenção
     if (fc.survivalDays != null && fc.survivalDays < 30 && !(fc.firstRisk && fc.firstRisk.weeksAhead <= 2)) triggers.push({ level: "atencao", code: "sobrevivencia_curta", label: `~${fc.survivalDays} dias de caixa no ritmo atual.` });
     if (cash.aReceber > 0 && cash.aReceber >= cash.caixaAtual && cash.caixaAtual >= 0) triggers.push({ level: "atencao", code: "receber_alto", label: `Você tem ${brl(cash.aReceber)} a receber — mais que o caixa atual.` });
+    // Retiradas do dono em excesso (ADR-129) — descapitaliza o negócio.
+    const owner = this.ownerSummary(orgId);
+    if (owner && owner.retiradas > 0) {
+      if (owner.alerta?.nivel === "excesso") triggers.push({ level: "risco", code: "retiradas_excesso", label: owner.pctDoResultado != null ? `Retiradas do mês (${brl(owner.retiradas)}) = ${owner.pctDoResultado}% do resultado.` : `Retiradas de ${brl(owner.retiradas)} sem resultado que as cubra.` });
+      else if (owner.alerta?.nivel === "atencao") triggers.push({ level: "atencao", code: "retiradas_altas", label: `Retiradas já são ${owner.pctDoResultado}% do resultado do mês.` });
+    }
 
     const overall = (triggers.reduce<StatusLevel>((acc, t) => (SEVERITY[t.level] > SEVERITY[acc] ? t.level : acc), "saudavel"));
-    return { status: overall, triggers, cash, forecast: fc, loss };
+    return { status: overall, triggers, cash, forecast: fc, loss, owner };
+  }
+
+  /** Resumo Empresa × Proprietário (guardado — pode falhar sem derrubar a síntese). */
+  private static ownerSummary(orgId: string): any | null {
+    try { return OwnerDrawService.summary(orgId); } catch { return null; }
   }
 
   /** Prioridades do dia (máx. 3), priorizadas por impacto em R$. */
-  static priorities(orgId: string, ctx?: { cash?: any; forecast?: any; loss?: any }): Priority[] {
+  static priorities(orgId: string, ctx?: { cash?: any; forecast?: any; loss?: any; owner?: any }): Priority[] {
     const cash = ctx?.cash || FinancialLedgerService.summary(orgId);
     const fc = ctx?.forecast || CashForecastService.forecast(orgId, { minCash: 0 });
     const loss = ctx?.loss || LossMarginService.monthlySummary(orgId);
+    const owner = ctx?.owner !== undefined ? ctx.owner : this.ownerSummary(orgId);
     const rie = this.rie(orgId);
     const cands: Priority[] = [];
 
@@ -114,6 +128,16 @@ export class BusinessHealthService {
         interpretacao: "Leads/orçamentos/carrinhos parados com boa chance de recuperação.",
         risco: "Oportunidade esfria com o tempo — quanto antes, maior a conversão.",
         action: { view: "rie", label: "Abrir recuperação (RIE)" },
+      });
+    }
+
+    if (owner && owner.alerta?.nivel === "excesso" && owner.retiradas > 0) {
+      cands.push({
+        source: "retiradas", title: "Reveja suas retiradas", impact: round2(owner.retiradas), basis: "fato",
+        fato: owner.pctDoResultado != null ? `Retiradas de ${brl(owner.retiradas)} = ${owner.pctDoResultado}% do resultado do mês.` : `Retiradas de ${brl(owner.retiradas)} com resultado do mês zerado/negativo.`,
+        interpretacao: "Tirar mais do que o negócio gerou come o capital de giro.",
+        risco: "Descapitalização silenciosa — o caixa mingua sem a venda cair.",
+        action: { view: "reports", label: "Ver Empresa × Proprietário" },
       });
     }
 
@@ -156,7 +180,7 @@ export class BusinessHealthService {
 
   // Mapeia a ORIGEM da prioridade para o tipo de ação do Impact Ledger (ADR-125).
   private static KIND_BY_SOURCE: Record<Priority["source"], string> = {
-    caixa: "outro", recebiveis: "cobrar_receber", perdas: "reduzir_compra", rie: "campanha",
+    caixa: "outro", recebiveis: "cobrar_receber", perdas: "reduzir_compra", rie: "campanha", retiradas: "outro",
   };
 
   /** Títulos das ações abertas no Impact Ledger (para marcar "já no plano"). */
@@ -185,7 +209,7 @@ export class BusinessHealthService {
   /** Payload da tela: status + gatilhos + frase-síntese + top-3 + Impact Ledger. */
   static overview(orgId: string, minCash = 0) {
     const st = this.status(orgId, minCash);
-    const priorities = this.priorities(orgId, { cash: st.cash, forecast: st.forecast, loss: st.loss });
+    const priorities = this.priorities(orgId, { cash: st.cash, forecast: st.forecast, loss: st.loss, owner: st.owner });
     const open = this.openTitles(orgId);
     const label: Record<StatusLevel, string> = { saudavel: "Saudável", atencao: "Atenção", risco: "Risco", critico: "Crítico" };
     let synthesis: string;

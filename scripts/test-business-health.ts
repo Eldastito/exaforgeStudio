@@ -29,6 +29,7 @@ async function main() {
   const { FinancialLedgerService: F } = await import("../src/server/FinancialLedgerService.js");
   const { LossMarginService: L } = await import("../src/server/LossMarginService.js");
   const { BusinessHealthService: H } = await import("../src/server/BusinessHealthService.js");
+  const { OwnerDrawService: O } = await import("../src/server/OwnerDrawService.js");
 
   const week0 = mondayOf(new Date());
   const inWeek = (w: number) => fmt(addDays(week0, w * 7 + 2));
@@ -91,6 +92,15 @@ async function main() {
   check("checklist de qualidade dos dados presente", Array.isArray(ov2.dataQuality?.items) && ov2.dataQuality.items.length >= 4);
   check("qualidade alta com caixa+pagar+meta+vendas informados", ov2.dataQuality.pct >= 80 && ov2.dataQuality.level === "alta");
   check("narrativa do Diretor preenchida", typeof ov2.narrative === "string" && ov2.narrative.length > 20 && /negócio está/i.test(ov2.narrative));
+
+  // ===== 4d. Retiradas em excesso viram gatilho + prioridade (ADR-129 → Central) =====
+  const ret = mkOrg("Retiradas");
+  F.recordEvent(ret, { direction: "in", amount: 2000 });
+  O.record(ret, { kind: "pro_labore", amount: 500, date: fmt(new Date()) }); // sem faturamento → resultado 0 → excesso
+  const ovRet = H.overview(ret, 0);
+  check("retirada em excesso vira gatilho de risco na Central", ovRet.triggers.some((t: any) => t.code === "retiradas_excesso"));
+  check("retirada em excesso vira prioridade do dia", ovRet.priorities.some((p: any) => p.source === "retiradas" && p.impact >= 500));
+  check("prioridade de retiradas leva ao Empresa × Proprietário", ovRet.priorities.find((p: any) => p.source === "retiradas")?.action.view === "reports");
 
   // ===== 5. Org vazia: sem falso alarme + isolamento =====
   const empty = mkOrg("Vazia");

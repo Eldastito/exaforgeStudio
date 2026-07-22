@@ -4116,6 +4116,75 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_legal_consultations_org ON legal_consultations(organization_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela de consultas jurídicas', e); }
+
+  // Motor de Caixa (ADR-125): livro-caixa global. Venda ≠ lucro ≠ caixa —
+  // recebível NÃO entra no caixa até quitar. Isolado por organization_id.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cash_accounts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT DEFAULT 'caixa',          -- caixa|banco|carteira_digital
+        opening_balance REAL DEFAULT 0,
+        current_balance REAL DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_cash_accounts_org ON cash_accounts(organization_id, active);
+
+      CREATE TABLE IF NOT EXISTS payables (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        description TEXT NOT NULL,
+        category TEXT,
+        supplier_name TEXT,
+        amount REAL NOT NULL DEFAULT 0,
+        due_date TEXT NOT NULL,             -- YYYY-MM-DD
+        recurrence TEXT DEFAULT 'none',     -- none|weekly|monthly
+        status TEXT DEFAULT 'open',         -- open|paid|canceled
+        paid_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_payables_org ON payables(organization_id, status, due_date);
+
+      CREATE TABLE IF NOT EXISTS receivables (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        description TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        due_date TEXT NOT NULL,             -- YYYY-MM-DD
+        probability REAL DEFAULT 1,         -- 0..1 (peso na projeção)
+        status TEXT DEFAULT 'open',         -- open|received|canceled
+        received_at DATETIME,
+        source_type TEXT DEFAULT 'manual',  -- manual|fiado|order|subscription
+        source_id TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_receivables_org ON receivables(organization_id, status, due_date);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_receivables_source ON receivables(organization_id, source_type, source_id);
+
+      CREATE TABLE IF NOT EXISTS cash_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        direction TEXT NOT NULL,            -- in|out
+        amount REAL NOT NULL DEFAULT 0,
+        event_date TEXT NOT NULL,           -- YYYY-MM-DD
+        account_id TEXT,
+        source_type TEXT DEFAULT 'manual',  -- manual|order|comigo_order|payable|receivable
+        source_id TEXT,
+        confidence TEXT DEFAULT 'confirmed',-- confirmed|likely|estimated
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_cash_events_org ON cash_events(organization_id, event_date);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_events_source ON cash_events(organization_id, source_type, source_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas do motor de caixa', e); }
 };
 
 initDb();

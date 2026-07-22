@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -68,6 +68,7 @@ export function Sidebar() {
              <NavItem icon={<Users />} label="Contatos" active={viewMode === 'contacts'} onClick={() => setViewMode('contacts')} />
              {mod('integracoes') && <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />}
              <NavItem icon={<BarChart3 />} label="Dashboard" active={viewMode === 'dashboard'} onClick={() => setViewMode('dashboard')} />
+             <NavItem icon={<Wallet />} label="Caixa" active={viewMode === 'caixa'} onClick={() => setViewMode('caixa')} />
              <NavItem icon={<LineChart />} label="Relatórios" active={viewMode === 'reports'} onClick={() => setViewMode('reports')} />
              <NavItem icon={<Scale />} label="Consultora Jurídica" active={viewMode === 'juridico'} onClick={() => setViewMode('juridico')} />
              <NavItem icon={<ScrollText />} label="Manifesto da Marca" active={viewMode === 'manifesto'} onClick={() => setViewMode('manifesto')} />

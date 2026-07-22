@@ -84,10 +84,14 @@ export class ModuleService {
       const inPreset = preset.has(key);
       const isEnabled = enabled == null ? true : enabled.includes(key);
       const isAddon = (ADDON_MODULES as readonly string[]).includes(key);
-      // Add-ons (retail/clínica/vms/radar/prospect) são OPT-IN do dono: ficam
-      // sempre ligáveis em Configurações › Módulos, independente do teto do plano
-      // (billing mockado). Quando a cobrança entrar, re-gate aqui.
-      const section = isAddon ? "available" : (!inPlan ? "upgrade" : (inPreset ? "recommended" : "available"));
+      const isFreeAddon = (PLAN_FREE_ADDONS as readonly string[]).includes(key);
+      // Só os add-ons OPERACIONAIS (PLAN_FREE_ADDONS — hoje Retail Ops) ficam
+      // sempre ligáveis pelo dono, independente do teto do plano (billing mockado).
+      // Os demais add-ons acima do plano (radar/prospect/clinica/vms) vão para
+      // "upgrade": a tela os mostra com cadeado + CTA, NÃO um toggle que engana —
+      // espelha o gating real do isEnabled (ADR-091). Add-on DENTRO do plano
+      // (ex.: radar no Scale) segue ligável normalmente.
+      const section = isFreeAddon ? "available" : (!inPlan ? "upgrade" : (inPreset ? "recommended" : "available"));
       return { key, label: meta.label, desc: meta.desc, section, enabled: isEnabled, recommended: inPreset, addon: isAddon };
     });
     return { vertical: o.vertical || null, planId: o.plan_id || null, items };

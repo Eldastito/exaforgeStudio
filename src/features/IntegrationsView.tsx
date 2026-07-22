@@ -682,6 +682,17 @@ function AlterdataConnectorPanel() {
   const [basePattern, setBasePattern] = useState('');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  const testToken = async () => {
+    setTesting(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/test-token', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { toast.success(`Conexão OK! Token emitido pelo Guardian (expira ${new Date(d.tokenExpiresAt).toLocaleString('pt-BR')}).`); if (d.status) setSt(d.status); }
+      else toast.error(d.error || 'Falha ao emitir o token no Guardian.');
+    } finally { setTesting(false); }
+  };
 
   const load = () => apiFetch('/api/integrations/alterdata/status').then(r => r.json()).then((d) => {
     setSt(d);
@@ -731,9 +742,8 @@ function AlterdataConnectorPanel() {
         </div>
       </div>
 
-      <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] text-amber-200/90">
-        A sincronização liga quando a Alterdata fornecer o <strong>token de acesso</strong> e o <strong>ambiente de homologação</strong>.
-        Aqui você já deixa a <strong>rede/filial</strong> e as <strong>credenciais</strong> (guardadas cifradas) prontas.
+      <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-[12px] text-sky-200/90">
+        O token é emitido pelo <strong>Guardian da ModaUp</strong>: o <strong>Client ID é o e-mail</strong> e o <strong>Client Secret é a senha</strong> de um usuário de <strong>retaguarda com acesso total</strong>. Salve as credenciais (guardadas cifradas) e clique em <strong>Testar conexão</strong> para validar.
       </div>
 
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -752,11 +762,11 @@ function AlterdataConnectorPanel() {
         <label className="text-xs text-zinc-400">Padrão de URL dos módulos
           <input className={inputCls} value={basePattern} onChange={e => setBasePattern(e.target.value)} placeholder="toulon-{module}.apimodaup.com.br" />
         </label>
-        <label className="text-xs text-zinc-400">Client ID / usuário {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
-          <input className={inputCls} value={clientId} onChange={e => setClientId(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'cole quando a Alterdata enviar'} autoComplete="off" />
+        <label className="text-xs text-zinc-400">Client ID — e-mail do usuário {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
+          <input className={inputCls} value={clientId} onChange={e => setClientId(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'e-mail do usuário de retaguarda (acesso total)'} autoComplete="off" />
         </label>
-        <label className="text-xs text-zinc-400">Client Secret / senha {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
-          <input type="password" className={inputCls} value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'cole quando a Alterdata enviar'} autoComplete="new-password" />
+        <label className="text-xs text-zinc-400">Client Secret — senha {st?.hasCredentials && <span className="text-emerald-400">(já salvo)</span>}
+          <input type="password" className={inputCls} value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder={st?.hasCredentials ? '•••••• (deixe em branco p/ manter)' : 'senha do usuário de retaguarda'} autoComplete="new-password" />
         </label>
       </div>
 
@@ -764,6 +774,10 @@ function AlterdataConnectorPanel() {
         <Button onClick={() => save()} disabled={saving} className="zf-button zf-button-primary">
           {saving ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
           Salvar configuração
+        </Button>
+        <Button onClick={testToken} disabled={testing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais primeiro' : 'Emite um token no Guardian para validar as credenciais'}>
+          {testing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Link2 className="w-4 h-4 mr-2" />}
+          Testar conexão
         </Button>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />

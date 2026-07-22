@@ -4213,6 +4213,19 @@ const initDb = () => {
         resolved_at DATETIME
       );
       CREATE INDEX IF NOT EXISTS idx_cash_actions_org ON cash_actions(organization_id, status, created_at);
+
+      -- Índice de Sobrevivência (ADR-127): snapshot mensal para a tendência.
+      CREATE TABLE IF NOT EXISTS survival_index_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        period TEXT NOT NULL,               -- YYYY-MM
+        score REAL DEFAULT 0,
+        faixa TEXT,
+        confidence TEXT,
+        components TEXT,                     -- JSON
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, period)
+      );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do motor de caixa', e); }
 };

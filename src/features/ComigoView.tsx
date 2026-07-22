@@ -18,6 +18,7 @@ type Overview = { recipes: number; openOrders: number; fiadoReceivable: number; 
 
 const TABS = [
   { key: 'balcao', label: 'Balcão', icon: Store },
+  { key: 'mesa', label: 'Mesa/QR', icon: QrCode },
   { key: 'saude', label: 'Saúde', icon: Activity },
   { key: 'precificacao', label: 'Precificação', icon: Calculator },
   { key: 'caderneta', label: 'Caderneta', icon: NotebookText },
@@ -76,6 +77,7 @@ export function ComigoView() {
 
       <div className="mt-4">
         {tab === 'balcao' && <Balcao onChange={loadOverview} />}
+        {tab === 'mesa' && <Mesa onChange={loadOverview} />}
         {tab === 'saude' && <Saude />}
         {tab === 'precificacao' && (
           <Placeholder icon={Calculator} title="Precificação"
@@ -306,6 +308,77 @@ function Balcao({ onChange }: { onChange: () => void }) {
           <button onClick={reset} className="text-xs text-zinc-500 hover:text-zinc-300 mt-2 inline-flex items-center gap-1 self-center">
             <Trash2 className="w-3 h-3" /> cancelar pedido
           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Mesa/QR: link do cardápio + fila de preparo (pedidos pagos) ──────────────
+type PrepOrder = { id: string; session_alias?: string; consumo: string; total: number; items: { name: string; qty: number }[] };
+
+function Mesa({ onChange }: { onChange: () => void }) {
+  const [link, setLink] = useState<{ token: string; url: string } | null>(null);
+  const [queue, setQueue] = useState<PrepOrder[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const loadQueue = useCallback(() => {
+    apiFetch('/api/comigo/mesa/queue').then((r) => r.json()).then((r: any) => setQueue(r?.orders || [])).catch(() => {});
+  }, []);
+  useEffect(() => {
+    apiFetch('/api/comigo/mesa/link').then((r) => r.json()).then((r: any) => setLink(r)).catch(() => {});
+    loadQueue();
+    const iv = setInterval(loadQueue, 6000); // novos pedidos pagos chegam sozinhos
+    return () => clearInterval(iv);
+  }, [loadQueue]);
+
+  const regenerate = async () => {
+    if (!window.confirm('Gerar um novo QR? O cardápio com o QR antigo para de funcionar.')) return;
+    setBusy(true);
+    try { const r = await apiFetch('/api/comigo/mesa/regenerate', { method: 'POST' }).then((x) => x.json()); setLink(r); }
+    finally { setBusy(false); }
+  };
+  const fulfill = async (id: string) => {
+    await apiFetch(`/api/comigo/orders/${id}/fulfill`, { method: 'POST' });
+    loadQueue(); onChange();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Link do cardápio-QR */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Cardápio da mesa (QR)</div>
+        <p className="text-xs text-zinc-400 mb-2">Compartilhe este link ou gere um QR dele. O cliente pede e paga sozinho pelo Pix — o pedido só cai aqui quando pago.</p>
+        {link ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="text-xs text-sky-300 bg-zinc-900 rounded px-2 py-1 break-all">{link.url}</code>
+            <button onClick={() => { navigator.clipboard?.writeText(link.url); toast.success('Link copiado.'); }} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1">Copiar</button>
+            <a href={link.url} target="_blank" rel="noreferrer" className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1">Abrir</a>
+            <button disabled={busy} onClick={regenerate} className="text-xs rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 px-2.5 py-1">Novo QR</button>
+          </div>
+        ) : <div className="text-sm text-zinc-500">carregando…</div>}
+      </div>
+
+      {/* Fila de preparo */}
+      <div>
+        <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Para preparar ({queue.length})</div>
+        {queue.length === 0 ? (
+          <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Nenhum pedido pago aguardando. Os pedidos da mesa aparecem aqui quando o cliente paga.</div>
+        ) : (
+          <div className="space-y-2">
+            {queue.map((o) => (
+              <div key={o.id} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm text-zinc-100">{o.session_alias || 'Cliente'} · <span className="text-zinc-400">{o.consumo === 'viagem' ? 'viagem' : 'aqui'}</span></div>
+                    <div className="text-xs text-zinc-400 mt-1">{o.items.map((it) => `${it.qty}× ${it.name}`).join(' · ')}</div>
+                  </div>
+                  <div className="text-emerald-300 text-sm font-medium">{brl(o.total)}</div>
+                </div>
+                <button onClick={() => fulfill(o.id)} className="mt-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5">Pronto / entregue</button>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

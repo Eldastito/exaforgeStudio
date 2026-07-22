@@ -9,6 +9,7 @@ import { LandingPage } from './landing/LandingPage.tsx';
 import { RadarPublicWizard } from './radar-public/RadarPublicWizard.tsx';
 import { RadarRespondentWizard } from './radar-public/RadarRespondentWizard.tsx';
 import { ClinicPortalPage } from './clinic-public/ClinicPortalPage.tsx';
+import { ComigoMesaPage } from './comigo-public/ComigoMesaPage.tsx';
 
 // Vitrine pública (loja virtual) — renderizada fora do app autenticado.
 // Qualquer URL /loja/:slug abre a landing page Glass Toggle, sem login.
@@ -24,6 +25,8 @@ const isRadarPublic = !isRadarRespondent && (window.location.pathname === '/rada
 // Portal do Profissional (Clínica, Fase D2) — página pública read-only, sem
 // login. /clinic/professional/:token abre a agenda do dia do profissional.
 const isClinicPortal = window.location.pathname.startsWith('/clinic/professional/');
+// Comigo Mesa/QR (ADR-119) — autoatendimento público sem login (/mesa/:token).
+const isComigoMesa = window.location.pathname.startsWith('/mesa/');
 
 const originalFetch = window.fetch;
 Object.defineProperty(window, 'fetch', {
@@ -71,6 +74,8 @@ createRoot(rootEl).render(
       <RadarPublicWizard />
     ) : isClinicPortal ? (
       <ClinicPortalPage />
+    ) : isComigoMesa ? (
+      <ComigoMesaPage />
     ) : (
       <AuthProvider>
         <App />

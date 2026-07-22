@@ -1,11 +1,29 @@
 # ADR-105 — Conector Alterdata/ModaUp (ERP da TOULON)
 
-**Status:** Design aprovado. **Fundação implementada** (schema
+**Status:** Design aprovado. **Fundação + autenticação implementadas.** Schema
 `alterdata_integration_settings` + `alterdata_sync_cursors`, `AlterdataConnectorService`
 com credenciais cifradas + resolução de base URL por módulo + cursor store,
-config em `/api/integrations/alterdata/*`, flag desligada por padrão, **sem
-chamadas live**). A **Fase 1** (auth real + jobs de sync) continua **bloqueada**
-pelo token + homologação da Alterdata (ver "Pendências externas").
+config em `/api/integrations/alterdata/*`, flag desligada por padrão. **A emissão
+do token pelo Guardian já está implementada** (`acquireToken`, OAuth2
+`client_credentials` → `POST https://guardian.apimodaup.com.br/connect/token`),
+com botão **"Testar conexão"** na UI (`POST /alterdata/test-token`). Faltam para
+a **Fase 1** (jobs de sync): as **base URLs de homologação** + a **rede/filial**
+da TOULON (ver "Pendências externas").
+
+### Contrato do token (Guardian — recebido)
+- **Endpoint:** `POST https://guardian.apimodaup.com.br/connect/token`
+- **Grant:** `client_credentials` (form-urlencoded).
+- **client_id = e-mail** e **client_secret = senha** de um usuário de
+  **retaguarda com acesso total** (o Guardian valida o acesso do usuário à API).
+- **scope:** `APIHumanResourcesModule APILogisticModule APISalesModule
+  APISupplyModule ReportViewModule MaestroServer APIPurchaseModule APICRMModule
+  APIPriceModule APIeCommerceModule APITributaryModule` (sobrescrevível em
+  `auth_config.scope`).
+- **Resposta:** `{ access_token, token_type, expires_in }` → guardado cifrado
+  com validade; `getOrRefreshToken` renova quando expira.
+- **Segurança:** a credencial é senha de um usuário de acesso total → **recomenda-se
+  um usuário de retaguarda DEDICADO à integração** (service account), não um login
+  pessoal, e o escopo mínimo necessário. Guardado cifrado (EncryptionService).
 
 **Origem:** Piloto TOULON. A TOULON opera no ERP **ModaUp da Alterdata**. Para o
 ZappFlow refletir estoque/produto/preço/vendas reais **sem digitação dupla**,
@@ -105,7 +123,8 @@ ZappFlow (`produto → variantes → estoque → preço`).
 4. **Fase 4 — escrita:** criar pré-venda/venda a partir da loja virtual.
 
 ## Pendências externas (bloqueiam o início — pedir à Alterdata)
-1. ⭐ **Emissão/renovação do token** (não está em nenhum spec). Bloqueante.
+1. ✅ **Emissão/renovação do token** — RESOLVIDO. Guardian OAuth2
+   `client_credentials` (ver "Contrato do token" acima); implementado.
 2. **Homologação:** base URLs de sandbox + **credencial de teste** da TOULON.
 3. **Escopo:** credencial **read-only** possível? Quais módulos a TOULON tem
    licenciados?

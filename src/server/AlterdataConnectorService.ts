@@ -159,12 +159,70 @@ export class AlterdataConnectorService {
   }
 
   /**
-   * Emissão/renovação do token — PENDENTE (ADR-105, pergunta A à Alterdata):
-   * nenhum spec documenta como emitir o token. Fica explicitamente não
-   * implementado para não simular uma integração que não existe. Entra na Fase 1
-   * assim que a Alterdata devolver o contrato (endpoint/fluxo).
+   * Emissão/renovação do token pelo GUARDIAN da ModaUp (ADR-105 — contrato
+   * recebido). Fluxo OAuth2 `client_credentials`:
+   *   POST https://guardian.apimodaup.com.br/connect/token
+   *   grant_type=client_credentials, client_id=<e-mail>, client_secret=<senha>,
+   *   scope=<módulos>  (application/x-www-form-urlencoded)
+   * O client_id/secret são o e-mail/senha de um usuário de RETAGUARDA com acesso
+   * total (Cadastros › ...). Grava o access_token cifrado + validade e o devolve.
+   * O cliente HTTP é injetável (teste offline, sem tocar a rede).
    */
-  static async acquireToken(_orgId: string): Promise<never> {
-    throw new Error("Alterdata: emissão de token ainda não definida (ADR-105, pergunta A — aguardando contrato da Alterdata).");
+  static async acquireToken(orgId: string): Promise<{ accessToken: string; expiresAt: string }> {
+    const auth = this.getAuthConfig(orgId);
+    const clientId = auth?.clientId || auth?.client_id;
+    const clientSecret = auth?.clientSecret || auth?.client_secret;
+    if (!clientId || !clientSecret) {
+      throw new Error("Alterdata Guardian: credenciais ausentes. Informe client_id (e-mail) e client_secret (senha) de um usuário de retaguarda com acesso total.");
+    }
+    const tokenUrl = auth?.tokenUrl || auth?.token_url || GUARDIAN_TOKEN_URL;
+    const scope = auth?.scope || GUARDIAN_DEFAULT_SCOPE;
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: String(clientId),
+      client_secret: String(clientSecret),
+      scope: String(scope),
+    }).toString();
+
+    const http: TokenHttp = _tokenHttp || ((url, init) => fetch(url, init) as any);
+    const res = await http(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body,
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Alterdata Guardian: falha ao emitir token (HTTP ${res.status}). ${String(txt).slice(0, 300)}`);
+    }
+    const data: any = await res.json();
+    const accessToken = data?.access_token;
+    if (!accessToken) throw new Error("Alterdata Guardian: resposta sem access_token.");
+    const expiresIn = Number(data?.expires_in || 3600);
+    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+    this.setAccessToken(orgId, accessToken, expiresAt);
+    return { accessToken, expiresAt };
+  }
+
+  /** Token válido, renovando pelo Guardian se ausente/expirado (uso na Fase 1). */
+  static async getOrRefreshToken(orgId: string): Promise<string> {
+    const cached = this.getAccessToken(orgId);
+    if (cached) return cached;
+    const { accessToken } = await this.acquireToken(orgId);
+    return accessToken;
   }
 }
+
+// Endpoint do Guardian (OpenID Connect token endpoint) e escopo padrão com todos
+// os módulos licenciáveis da ModaUp (a TOULON usa um subconjunto; o escopo pode
+// ser sobrescrito em auth_config.scope).
+export const GUARDIAN_TOKEN_URL = "https://guardian.apimodaup.com.br/connect/token";
+export const GUARDIAN_DEFAULT_SCOPE = [
+  "APIHumanResourcesModule", "APILogisticModule", "APISalesModule", "APISupplyModule",
+  "ReportViewModule", "MaestroServer", "APIPurchaseModule", "APICRMModule",
+  "APIPriceModule", "APIeCommerceModule", "APITributaryModule",
+].join(" ");
+
+// Cliente HTTP do token — injetável para testes (sem tocar a rede).
+export type TokenHttp = (url: string, init: any) => Promise<{ ok: boolean; status: number; json: () => Promise<any>; text: () => Promise<string> }>;
+let _tokenHttp: TokenHttp | null = null;
+export function __setAlterdataTokenHttpForTests(fn: TokenHttp | null): void { _tokenHttp = fn; }

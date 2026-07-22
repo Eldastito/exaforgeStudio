@@ -482,4 +482,17 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
   res.json(AlterdataConnectorService.publicSettings(req.organizationId));
 });
 
+// Testa a emissão do token no Guardian com as credenciais gravadas (ADR-105).
+// Responde só com o status público (sem token/segredo). Erro → mensagem amigável.
+router.post("/alterdata/test-token", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { expiresAt } = await AlterdataConnectorService.acquireToken(req.organizationId);
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_TOKEN_ISSUED', { expiresAt });
+    res.json({ ok: true, tokenExpiresAt: expiresAt, status: AlterdataConnectorService.publicSettings(req.organizationId) });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao emitir o token no Guardian." });
+  }
+});
+
 export default router;

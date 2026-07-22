@@ -5,11 +5,11 @@ import { ComigoMesaService } from "../ComigoMesaService.js";
 // tem login. A org é resolvida pelo token do QR; preço vem sempre do servidor.
 const router = Router();
 
-// GET /api/public/comigo/:token/menu — cardápio da mesa.
+// GET /api/public/comigo/:token/menu — cardápio da mesa + marca do dono.
 router.get("/:token/menu", (req, res): any => {
   const orgId = ComigoMesaService.orgByToken(req.params.token);
   if (!orgId) return res.status(404).json({ error: "not_found" });
-  res.json({ items: ComigoMesaService.menu(orgId) });
+  res.json({ items: ComigoMesaService.menu(orgId), brand: ComigoMesaService.brand(orgId) });
 });
 
 // POST /api/public/comigo/:token/fiado-check — o cliente confere se pode fiar

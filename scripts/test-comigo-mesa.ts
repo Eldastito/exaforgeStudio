@@ -80,6 +80,14 @@ async function main() {
   check("cardápio traz a imagem do produto", menuImg?.image === "https://img/galeto.jpg");
   check("produto sem imagem retorna image null", (M.menu(orgId).find((m) => m.id === refri) as any)?.image === null);
 
+  // ===== 7b. Marca do dono (ADR-124): fallback na org, override na loja =====
+  db.prepare("UPDATE organization_settings SET business_name = 'Galeto do Zé', logo_url = 'https://img/logo.png' WHERE organization_id = ?").run(orgId);
+  const b1 = M.brand(orgId);
+  check("brand: nome vem da organização", b1.name === "Galeto do Zé" && b1.logo === "https://img/logo.png");
+  db.prepare("INSERT INTO storefront_settings (organization_id, title, subtitle, logo_url, banner_url, accent_color) VALUES (?, 'Galeto Premium', 'o melhor da praça', 'https://img/sf.png', 'https://img/banner.jpg', '#ec4899')").run(orgId);
+  const b2 = M.brand(orgId);
+  check("brand: loja sobrepõe (título/subtítulo/banner/cor)", b2.name === "Galeto Premium" && b2.subtitle === "o melhor da praça" && b2.banner === "https://img/banner.jpg" && b2.accent === "#ec4899");
+
   // ===== 8. Fiado autorizado (ADR-124): só cadastrado + liberado + no limite =====
   const { BalcaoService: B } = await import("../src/server/BalcaoService.js");
   const cid = B.ensureFiadoContact(orgId, "Cliente Fiel", "5511977776666");

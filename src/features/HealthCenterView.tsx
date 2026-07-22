@@ -22,12 +22,14 @@ export function HealthCenterView() {
   const [loading, setLoading] = useState(true);
   const setViewMode = useStore((s) => s.setViewMode);
 
+  const [idx, setIdx] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'tutor' | 'gestor'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('healthMode') === 'gestor' ? 'gestor' : 'tutor'));
   const setModePersist = (m: 'tutor' | 'gestor') => { setMode(m); try { localStorage.setItem('healthMode', m); } catch { /* noop */ } };
   const load = useCallback(() => {
     setLoading(true);
     apiFetch('/api/health-center').then((r) => r.json()).then((x: any) => setD(x)).catch(() => {}).finally(() => setLoading(false));
+    apiFetch('/api/health-center/survival-index').then((r) => r.json()).then((x: any) => { if (typeof x?.score === 'number') setIdx(x); }).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -82,6 +84,44 @@ export function HealthCenterView() {
             </ul>
           )}
         </div>
+
+        {/* Índice de Sobrevivência (ADR-127) */}
+        {idx && (() => {
+          const f = STATUS_UI[idx.faixa] || STATUS_UI.atencao;
+          const trend = idx.trend === 'subindo' ? '↑ subindo' : idx.trend === 'caindo' ? '↓ caindo' : idx.trend === 'estavel' ? '→ estável' : '';
+          return (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <div className="flex items-center gap-4">
+                <div className="shrink-0 text-center">
+                  <div className={`text-3xl font-bold ${f.cls.split(' ')[0]}`}>{Math.round(idx.score)}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-zinc-500">de 100</div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-zinc-100">Índice de Sobrevivência</span>
+                    <span className={`text-[11px] rounded-full border px-2 py-0.5 ${f.cls}`}>{idx.faixaLabel}</span>
+                    {trend && <span className="text-[11px] text-zinc-400">{trend}</span>}
+                    <span className="text-[11px] text-zinc-500">· confiança {idx.confidence}</span>
+                  </div>
+                  <div className="mt-2 h-2 w-full rounded-full bg-zinc-800 overflow-hidden"><div className={`h-full ${f.bar}`} style={{ width: `${Math.round(idx.score)}%` }} /></div>
+                  {idx.weakest?.length > 0 && <div className="mt-1.5 text-[11px] text-zinc-500">Puxando para baixo: {idx.weakest.join(' · ')}.</div>}
+                  <p className="mt-1 text-[10px] text-zinc-600">Indicador orientativo — aponta fatores de risco, não prevê fechamento.</p>
+                </div>
+              </div>
+              {mode === 'tutor' && (
+                <div className="mt-3 grid sm:grid-cols-2 gap-1.5 border-t border-zinc-800 pt-3">
+                  {idx.components.map((c: any) => (
+                    <div key={c.key} className="flex items-center gap-2 text-[11px]">
+                      <span className="w-28 shrink-0 text-zinc-400 truncate">{c.label}</span>
+                      <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div className={`h-full ${c.hasData ? 'bg-indigo-500/70' : 'bg-zinc-600'}`} style={{ width: `${Math.round(c.score)}%` }} /></div>
+                      <span className={`w-7 text-right ${c.hasData ? 'text-zinc-300' : 'text-zinc-600'}`}>{Math.round(c.score)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Narrativa do Diretor (modo Tutor) */}
         {mode === 'tutor' && d?.narrative && (

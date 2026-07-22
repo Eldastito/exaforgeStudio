@@ -4100,6 +4100,22 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de margem de perda', e); }
+
+  // Consultora Jurídica (ADR-115): auditoria das consultas ancoradas no CDC.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_consultations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        actor_user_id TEXT,
+        question TEXT NOT NULL,
+        articles TEXT,                     -- números dos artigos citados, separados por vírgula
+        grounded INTEGER DEFAULT 0,        -- 1 se houve amparo na base; 0 se foi recusa honesta
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_consultations_org ON legal_consultations(organization_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela de consultas jurídicas', e); }
 };
 
 initDb();

@@ -189,7 +189,8 @@
     "test:comigo-graduation": "tsx scripts/test-comigo-graduation.ts",
     "test:comigo-boosts": "tsx scripts/test-comigo-boosts.ts",
     "test:loss-margin": "tsx scripts/test-loss-margin.ts",
-    "test:loss-hooks": "tsx scripts/test-loss-hooks.ts"
+    "test:loss-hooks": "tsx scripts/test-loss-hooks.ts",
+    "test:legal-advisor": "tsx scripts/test-legal-advisor.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

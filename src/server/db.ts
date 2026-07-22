@@ -4017,6 +4017,26 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fiado_reminder_cadence TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_blacklist_suggest_days INTEGER DEFAULT 20`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fixed_costs_monthly REAL DEFAULT 0`); } catch(e){}
+  // Cobranças Pix dinâmico do Comigo (ADR-118): txid único, conciliado por webhook.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS comigo_pix_charges (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        txid TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',   -- pending|paid|expired|canceled
+        provider TEXT DEFAULT 'mock',
+        qr_payload TEXT,
+        e2e_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        paid_at DATETIME,
+        UNIQUE(organization_id, txid)
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_pix_order ON comigo_pix_charges(organization_id, order_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar comigo_pix_charges', e); }
 };
 
 initDb();

@@ -212,7 +212,7 @@ export class BalcaoService {
    * das vendas do dia (à vista + o que foi anotado no fiado).
    */
   static daySummary(orgId: string, date: string) {
-    const cash = db.prepare("SELECT COALESCE(SUM(total),0) s, COUNT(*) c FROM comigo_orders WHERE organization_id = ? AND status='paid' AND paid_via IN ('cash','pix_manual') AND date(paid_at) = ?").get(orgId, date) as any;
+    const cash = db.prepare("SELECT COALESCE(SUM(total),0) s, COUNT(*) c FROM comigo_orders WHERE organization_id = ? AND status='paid' AND paid_via IN ('cash','pix_manual','pix_dyn') AND date(paid_at) = ?").get(orgId, date) as any;
     const settled = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='payment' AND date(created_at) = ?").get(orgId, date) as any).s;
     const fiado = db.prepare("SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='debt' AND date(created_at) = ?").get(orgId, date) as any;
     const vendasHoje = round2(cash.s + fiado.s);

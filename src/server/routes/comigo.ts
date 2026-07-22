@@ -7,6 +7,7 @@ import { BalcaoService } from "../BalcaoService.js";
 import { ComigoCollectionService } from "../ComigoCollectionService.js";
 import { ComigoHealthService, Period } from "../ComigoHealthService.js";
 import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
+import { ComigoPixService } from "../ComigoPixService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -241,6 +242,23 @@ router.post("/orders/:id/pay", (req: AuthRequest, res): any => {
   } catch (e: any) {
     res.status(e?.message === "order_not_found" ? 404 : 409).json({ error: e?.message || "pay_failed" });
   }
+});
+
+// POST /api/comigo/orders/:id/pix-dynamic — gera a cobrança Pix dinâmica (ADR-118).
+router.post("/orders/:id/pix-dynamic", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ComigoPixService.createCharge(orgId, req.params.id);
+  if (!out.ok) return res.status(out.error === "order_not_found" ? 404 : 409).json(out);
+  audit(orgId, req.user?.userId, req.params.id, "comigo_pix_create", { txid: out.txid });
+  res.json(out);
+});
+
+// GET /api/comigo/orders/:id/pix-status — polling da confirmação do Pix dinâmico.
+router.get("/orders/:id/pix-status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ComigoPixService.statusOf(orgId, req.params.id));
 });
 
 // POST /api/comigo/orders/:id/cancel — cancela o pedido em aberto.

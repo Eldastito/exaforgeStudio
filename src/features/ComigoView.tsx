@@ -107,6 +107,7 @@ function Balcao({ onChange }: { onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const [fiado, setFiado] = useState<{ name: string; phone: string } | null>(null);
   const [suggest, setSuggest] = useState<{ alsoBought: SugItem[]; top: SugItem[] }>({ alsoBought: [], top: [] });
+  const [pix, setPix] = useState<{ txid: string; qrPayload: string } | null>(null);
 
   const loadSuggest = useCallback((pid?: string) => {
     apiFetch(`/api/comigo/suggest${pid ? `?productId=${pid}` : ''}`).then((r) => r.json())
@@ -150,7 +151,32 @@ function Balcao({ onChange }: { onChange: () => void }) {
     if (p) addProduct(p);
   };
 
-  const reset = () => { setOrderId(null); setItems([]); setTotal(0); setFiado(null); loadSuggest(); onChange(); };
+  const reset = () => { setOrderId(null); setItems([]); setTotal(0); setFiado(null); setPix(null); loadSuggest(); onChange(); };
+
+  // Pix dinâmico (ADR-118): gera a cobrança; a confirmação vem do PSP por webhook.
+  const startPix = async () => {
+    if (!orderId || busy) return;
+    setBusy(true);
+    try {
+      const out = await apiFetch(`/api/comigo/orders/${orderId}/pix-dynamic`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json());
+      if (out.ok) setPix({ txid: out.txid, qrPayload: out.qrPayload });
+      else toast.error('Adicione itens antes de gerar o Pix.');
+    } catch { toast.error('Não consegui gerar o Pix.'); }
+    finally { setBusy(false); }
+  };
+
+  // Enquanto há cobrança Pix pendente, faz polling da confirmação automática.
+  useEffect(() => {
+    if (!pix || !orderId) return;
+    const iv = setInterval(async () => {
+      try {
+        const st = await apiFetch(`/api/comigo/orders/${orderId}/pix-status`).then((r) => r.json());
+        if (st?.orderStatus === 'paid') { toast.success('Pix recebido!'); reset(); }
+      } catch { /* segue tentando */ }
+    }, 4000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pix, orderId]);
 
   const pay = async (paidVia: 'cash' | 'pix_manual' | 'fiado', override = false) => {
     if (!orderId || busy) return;
@@ -260,6 +286,22 @@ function Balcao({ onChange }: { onChange: () => void }) {
             <BookUser className="w-4 h-4" /> {fiado === null ? 'Fiado' : 'Confirmar'}
           </button>
         </div>
+        {/* Pix dinâmico (ADR-118): QR com confirmação automática */}
+        {orderId && (
+          pix ? (
+            <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+              <div className="text-xs text-sky-300 flex items-center gap-1"><QrCode className="w-3.5 h-3.5" /> Pix dinâmico — aguardando pagamento…</div>
+              <div className="mt-2 text-[11px] text-zinc-400 break-all bg-zinc-900 rounded p-2 font-mono">{pix.qrPayload}</div>
+              <button onClick={() => { navigator.clipboard?.writeText(pix.qrPayload); toast.success('Código Pix copiado.'); }}
+                className="text-xs text-sky-300 hover:text-sky-200 mt-1">copiar código</button>
+            </div>
+          ) : (
+            <button disabled={busy} onClick={startPix}
+              className="text-xs text-sky-300 hover:text-sky-200 mt-2 inline-flex items-center gap-1 self-center">
+              <QrCode className="w-3 h-3" /> Pix QR (confirmação automática)
+            </button>
+          )
+        )}
         {orderId && (
           <button onClick={reset} className="text-xs text-zinc-500 hover:text-zinc-300 mt-2 inline-flex items-center gap-1 self-center">
             <Trash2 className="w-3 h-3" /> cancelar pedido

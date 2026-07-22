@@ -75,6 +75,7 @@ import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
 import { EdgeInboxProcessor } from "./src/server/EdgeInboxProcessor.js";
 import { registerBuiltinEdgeCommandHandlers } from "./src/server/edgeCommandHandlers.js";
 import { PaymentService } from "./src/server/PaymentService.js";
+import { ComigoPixService } from "./src/server/ComigoPixService.js";
 import { AsaasService } from "./src/server/AsaasService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
@@ -997,6 +998,24 @@ async function startServer() {
     } catch (e) {
       console.error("[PayWebhook] erro", e);
       return res.status(200).send("OK"); // não devolve 500 para o gateway não reentregar em loop
+    }
+  });
+
+  // WEBHOOK PIX DINÂMICO DO COMIGO (ADR-118): o PSP confirma o Pix por txid e o
+  // pedido do Balcão/Mesa libera sozinho. Autentica pelo segredo da org; concilia
+  // por txid; idempotente. Sempre 200 (menos unauthorized) p/ não travar o PSP.
+  app.post("/api/webhooks/comigo-pix", async (req, res) => {
+    try {
+      const secret = (req.query.secret as string) || (req.headers['x-pay-secret'] as string) || '';
+      const r = ComigoPixService.handleWebhook(secret, req.body || {});
+      if (r.status === "unauthorized") return res.status(401).send("unauthorized");
+      if (r.status === "ok" && r.orgId && (global as any).io) {
+        (global as any).io.to(`org:${r.orgId}`).emit("comigo_pix_paid", req.body || {});
+      }
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("[ComigoPixWebhook] erro", e);
+      return res.status(200).send("OK");
     }
   });
 

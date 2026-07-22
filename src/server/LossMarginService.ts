@@ -15,6 +15,27 @@ export const LOSS_DRIVERS = [
   "merma", "quebra", "vencimento", "furto", "desconto", "calote", "divergencia", "retrabalho", "no_show", "outro",
 ] as const;
 
+// Rótulo curto por driver (para as frases do diagnóstico).
+const DRIVER_LABEL: Record<string, string> = {
+  merma: "merma (perda no preparo)", quebra: "quebra", vencimento: "vencimento", furto: "furto/desvio",
+  desconto: "desconto", calote: "calote (fiado não pago)", divergencia: "divergência de caixa",
+  retrabalho: "retrabalho", no_show: "no-show", outro: "outros",
+};
+
+// Sugestão frugal (zero-token) de redução por driver — o "conselho" da IA.
+const DRIVER_SUGGESTION: Record<string, string> = {
+  merma: "Revise as porções da ficha técnica e o rendimento real; a calibração do Comigo ajusta o custo e reduz a sobra do preparo.",
+  quebra: "Produto danificado no manuseio/transporte: reveja embalagem, empilhamento e o treino de quem manuseia.",
+  vencimento: "Gire o estoque pelo PEPS (primeiro a vencer, primeiro a sair), reduza a compra dos itens parados e crie promoção de saída rápida.",
+  furto: "Reforce a conferência de caixa, o controle de acesso ao estoque e a atenção aos pontos críticos.",
+  desconto: "Defina uma alçada de desconto por vendedor e acompanhe quem mais concede — desconto alto some com a margem.",
+  calote: "Aperte o limite de crédito, exija cadastro e cobre os atrasados antes de liberar novo fiado.",
+  divergencia: "Padronize a contagem do fechamento e investigue as lojas com mais diferença entre o informado e o conferido.",
+  retrabalho: "Confira o pedido na entrada e padronize a execução para não precisar refazer.",
+  no_show: "Confirme na véspera, cobre um sinal/antecipação e mantenha lista de espera para reocupar o horário.",
+  outro: "Detalhe a causa no lançamento para a IA conseguir atribuir e sugerir a redução certa.",
+};
+
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const nowPeriod = (iso?: string) => (iso || new Date().toISOString()).slice(0, 7);
 
@@ -111,13 +132,65 @@ export class LossMarginService {
     return round2(hist.reduce((s, h) => s + h.lossPct, 0) / hist.length);
   }
 
-  /** Payload para a tela: config + mês atual + histórico + média + drivers. */
+  /**
+   * Diagnóstico frugal (ADR-114 Fatia 3): a IA atribui ONDE a perda se
+   * concentra e SUGERE como reduzir — sem custo de token. Baseia-se no mês
+   * corrente (onde está) e na média histórica (tendência).
+   */
+  static diagnosis(orgId: string, period = nowPeriod()) {
+    const s = this.monthlySummary(orgId, period);
+    const avg = this.trailingAverage(orgId, 3, period);
+    const total = s.lossAmount;
+
+    // Tendência do indicador contra a própria média (o que a IA "aprendeu").
+    let trend: "piorando" | "melhorando" | "estavel" | "sem_base" = "sem_base";
+    if (avg > 0) {
+      if (s.lossPct > avg + 0.5) trend = "piorando";
+      else if (s.lossPct < avg - 0.5) trend = "melhorando";
+      else trend = "estavel";
+    }
+
+    // Atribuição: top drivers com participação e conselho.
+    const findings = s.byDriver.slice(0, 3).map((d) => ({
+      driver: d.driver,
+      label: DRIVER_LABEL[d.driver] || d.driver,
+      amount: d.amount,
+      share: total > 0 ? round2((d.amount / total) * 100) : 0,
+      suggestion: DRIVER_SUGGESTION[d.driver] || DRIVER_SUGGESTION.outro,
+    }));
+    const dominant = findings[0] || null;
+
+    // Manchete conforme o estado.
+    let headline: string;
+    if (s.acceptablePct <= 0) {
+      headline = "Defina sua margem de perda aceitável para eu comparar o mês com a sua meta.";
+    } else if (total <= 0) {
+      headline = `Nenhuma perda lançada em ${period}. Continue registrando para eu acompanhar.`;
+    } else if (s.status === "dentro") {
+      headline = `Perda de ${s.lossPct}% em ${period} — dentro da sua meta de ${s.acceptablePct}%.`;
+    } else {
+      headline = `Perda de ${s.lossPct}% em ${period} — acima da meta de ${s.acceptablePct}%.`;
+    }
+    if (dominant && total > 0) headline += ` Concentra em ${dominant.label} (${dominant.share}% das perdas).`;
+
+    // Próximos passos: o conselho do maior ofensor + leitura da tendência.
+    const actions: string[] = [];
+    if (dominant) actions.push(dominant.suggestion);
+    if (trend === "piorando") actions.push(`As perdas estão acima da sua média recente (${avg}%). Priorize o item acima nesta semana.`);
+    else if (trend === "melhorando") actions.push(`Você está abaixo da sua média recente (${avg}%). O que mudou está funcionando — mantenha.`);
+    if (s.acceptablePct <= 0) actions.push("Cadastre a margem aceitável (%) para o indicador virar meta.");
+
+    return { period, status: s.status, lossPct: s.lossPct, acceptablePct: s.acceptablePct, lossAmount: total, trailingAverage: avg, trend, headline, dominant, findings, actions };
+  }
+
+  /** Payload para a tela: config + mês atual + histórico + média + drivers + diagnóstico. */
   static overview(orgId: string) {
     return {
       config: this.config(orgId),
       current: this.monthlySummary(orgId),
       history: this.history(orgId, 6),
       trailingAverage: this.trailingAverage(orgId, 3),
+      diagnosis: this.diagnosis(orgId),
       drivers: LOSS_DRIVERS,
     };
   }

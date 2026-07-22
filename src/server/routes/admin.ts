@@ -427,8 +427,8 @@ router.post("/users/:id/reset-password", async (req: AuthRequest, res): Promise<
     const hash = await bcrypt.hash(password, 10);
     db.prepare(`UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(hash, id);
     try {
-      logAuthEvent("admin_password_reset", req.user?.userId || null, user.email, {
-        by_master: req.user?.email, target_user_id: id,
+      logAuthEvent(null, req.user?.userId || null, id, "ADMIN_PASSWORD_RESET", {
+        by_master: req.user?.email, target_email: user.email,
       });
     } catch { /* noop */ }
     res.json({ ok: true });
@@ -448,8 +448,8 @@ router.delete("/users/:id", (req: AuthRequest, res): any => {
     }
     const r = db.prepare(`UPDATE users SET global_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
     try {
-      logAuthEvent("admin_user_soft_deleted", req.user?.userId || null, user.email, {
-        by_master: req.user?.email, target_user_id: id,
+      logAuthEvent(null, req.user?.userId || null, id, "ADMIN_USER_SOFT_DELETED", {
+        by_master: req.user?.email, target_email: user.email,
       });
     } catch { /* noop */ }
     res.json({ ok: true, changes: r.changes });

@@ -1,5 +1,5 @@
 import db from "./db.js";
-import { VERTICALS, OPTIONAL_MODULES, ADDON_MODULES, getVertical } from "./verticals.js";
+import { VERTICALS, OPTIONAL_MODULES, ADDON_MODULES, PLAN_FREE_ADDONS, getVertical } from "./verticals.js";
 import { PlanService } from "./PlanService.js";
 import { LgpdService } from "./LgpdService.js";
 
@@ -108,9 +108,11 @@ export class ModuleService {
     const em = this.enabledModules(orgId);
     if (em == null) return false;
     if (!em.includes(moduleKey)) return false;
-    // Add-on ligado explicitamente vale independente do teto do plano (opt-in do
-    // dono; billing mockado). Módulos comuns continuam presos ao plano.
-    if ((ADDON_MODULES as readonly string[]).includes(moduleKey)) return true;
+    // Add-on OPERACIONAL ligado explicitamente vale independente do teto do plano
+    // (opt-in do dono; billing mockado). Hoje só Retail Ops (PLAN_FREE_ADDONS).
+    // Os demais add-ons (radar/prospect/clinica/vms) continuam presos ao plano —
+    // habilitá-los em enabled_modules não fura o teto (ADR-091 §5; teste 1.7).
+    if ((PLAN_FREE_ADDONS as readonly string[]).includes(moduleKey)) return true;
     const planModules = PlanService.modulesForPlan(orgId);
     if (planModules != null && !planModules.includes(moduleKey)) return false;
     return true;

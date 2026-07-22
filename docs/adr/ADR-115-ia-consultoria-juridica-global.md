@@ -1,6 +1,6 @@
 # ADR-115 — IA de Consultoria Jurídica (consultora do lojista, global)
 
-- **Status:** Proposto (design aprovado na conversa; implementação por PR focado)
+- **Status:** Fundação + Fatia 2 implementadas. Fundação: Q&A ancorado no CDC, disclaimer obrigatório, grounding estrito, rota `/api/legal`, UI "Consultora Jurídica". Fatia 2: ganchos proativos por situação (`forSituation` — cobrança de fiado→art. 42, devolução/troca→art. 18/26/49, arrependimento→art. 49, negativação→art. 43), `GET /api/legal/situation/:key`, componente `LegalTip` embutido na cobrança de fiado (Caderneta do Comigo). `test:legal-advisor` 26/26. Fatia 3 (ampliar base: PROCON/súmulas + histórico por tema, e ganchos de chargeback/PROCON quando houver superfície) pendente.
 - **Data:** 2026-07
 - **Origem:** pedido de campo — "uma IA que recebe o **Código de Defesa do Consumidor** e, com base nas leis e regras, orienta o lojista sobre como proceder — uma **consultora jurídica** para evitar que o lojista se prejudique. Implementação **nível global**, para todas as verticais."
 - **Relacionadas:** RAG existente (`/api/rag`, base de conhecimento), `llm.ts` (LLM frugal), ADR-112/113 (cobrança de fiado — o art. 42 do CDC entra aqui), LGPD (já tratada na plataforma; a consultoria jurídica é complementar, focada em relação de consumo).

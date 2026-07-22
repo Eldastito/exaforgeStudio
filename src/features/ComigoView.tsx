@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { LegalTip } from '@/src/features/LegalAdvisorView';
 
 // ============================================================================
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
@@ -746,6 +747,9 @@ function Caderneta({ onChange }: { onChange: () => void }) {
           <div className="text-lg font-semibold text-zinc-100 mt-1">{summary ? brl(summary.ticketMedio) : '—'}</div>
         </div>
       </div>
+
+      {/* Gancho jurídico proativo (ADR-115 Fatia 2): cobrar sem constranger (art. 42). */}
+      {customers.some((c) => c.balance > 0) && <LegalTip situation="cobranca_fiado" />}
 
       {customers.length === 0 ? (
         <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Ninguém no fiado ainda.</div>

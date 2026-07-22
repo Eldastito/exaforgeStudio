@@ -12,12 +12,23 @@ router.get("/:token/menu", (req, res): any => {
   res.json({ items: ComigoMesaService.menu(orgId) });
 });
 
-// POST /api/public/comigo/:token/order — pay-first: cria pedido + cobrança Pix.
+// POST /api/public/comigo/:token/fiado-check — o cliente confere se pode fiar
+// (só aparece pra quem o dono cadastrou e liberou, dentro do limite — ADR-124).
+router.post("/:token/fiado-check", (req, res): any => {
+  const orgId = ComigoMesaService.orgByToken(req.params.token);
+  if (!orgId) return res.status(404).json({ error: "not_found" });
+  const { phone, cartTotal } = req.body || {};
+  const e = ComigoMesaService.fiadoEligibility(orgId, String(phone || ""), Number(cartTotal) || 0);
+  // Não vaza saldo/limite de terceiros: só devolve o essencial.
+  res.json({ authorized: !!e.authorized, available: e.available ?? 0, fits: e.fits ?? false, name: e.name || null });
+});
+
+// POST /api/public/comigo/:token/order — Pix dinâmico (pay-first) ou fiado autorizado.
 router.post("/:token/order", (req, res): any => {
   const orgId = ComigoMesaService.orgByToken(req.params.token);
   if (!orgId) return res.status(404).json({ error: "not_found" });
-  const { items, sessionAlias, consumo } = req.body || {};
-  const out = ComigoMesaService.placeOrder(orgId, { items, sessionAlias, consumo });
+  const { items, sessionAlias, consumo, payment, customer } = req.body || {};
+  const out = ComigoMesaService.placeOrder(orgId, { items, sessionAlias, consumo, payment, customer });
   if (!out.ok) return res.status(400).json(out);
   res.status(201).json(out);
 });

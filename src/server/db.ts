@@ -4063,6 +4063,8 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_comigo_boost_org ON comigo_boost_log(organization_id, boost_key);
     `);
   } catch(e){ console.error('[DB] Falha ao criar comigo_boost_log', e); }
+  // Fiado autorizado na Mesa/QR (ADR-124): o dono libera o cliente a fiar na loja.
+  try { db.exec(`ALTER TABLE comigo_customer_credit ADD COLUMN store_fiado_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

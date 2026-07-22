@@ -111,7 +111,7 @@ export default function App() {
     // para não ricochetear para o Atendimento durante o carregamento inicial.
     // Redireciona se o módulo está desligado na org OU se o perfil do usuário não
     // tem acesso (RBAC granular, ADR-095) — cobre uma aba salva em módulo oculto.
-    if (enabledModules !== null && mod && (!isModuleEnabled(mod) || !canAccessModule(mod))) setViewMode('kanban');
+    if (enabledModules !== null && mod && (!isModuleEnabled(mod) || !canAccessModule(mod))) setViewMode('saude');
   }, [viewMode, isModuleEnabled, canAccessModule, setViewMode, enabledModules]);
 
   useEffect(() => {

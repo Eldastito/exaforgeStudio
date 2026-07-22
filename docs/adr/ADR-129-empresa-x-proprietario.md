@@ -1,6 +1,6 @@
 # ADR-129 — Empresa × Proprietário (separar o dinheiro do dono do da empresa)
 
-- **Status:** Proposto (design para aprovação; implementação por fatia depois)
+- **Status:** Em implementação. Fatia 1 (retirada tipada + gancho de caixa idempotente, monthlyRetiradas ligando a linha de Retiradas da DRE, summary com % do resultado + alerta de excesso + pró-labore sustentável, rota `/api/owner`, painel na tela de Relatórios) entregue. Fatia 2 (recorrência do pró-labore, devolução de empréstimo, gatilho na Central de Saúde) pendente.
 - **Data:** 2026-07
 - **Origem:** PRD "Central de Sobrevivência e Decisão" — Épico 10. Uma das maiores necessidades educativas do novo empreendedor: **misturar o dinheiro pessoal com o da empresa** descapitaliza o negócio sem ele perceber.
 - **Relacionadas:** ADR-128 (DRE — linha de Retiradas, hoje 0), ADR-125 (Motor de Caixa — a retirada é saída de caixa), ADR-126 (Central de Saúde — pode virar gatilho/prioridade), ADR-088 D5 (frugal), ADR-091 §6 (sugere, humano decide).

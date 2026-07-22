@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
+import { OwnerDrawService } from "./OwnerDrawService.js";
 
 /**
  * DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa em linguagem
@@ -58,7 +59,8 @@ export class ManagerialDreService {
     const margemPct = receitaLiquida > 0 ? round2((margemBruta / receitaLiquida) * 100) : null;
     const despesas = this.despesas(orgId, period);
     const resultadoOperacional = round2(margemBruta - despesas);
-    const retiradas = 0; // ADR Empresa × Proprietário
+    let retiradas = 0;
+    try { retiradas = OwnerDrawService.monthlyRetiradas(orgId, period); } catch { retiradas = 0; } // ADR-129
     const sobra = round2(resultadoOperacional - retiradas);
 
     return {
@@ -80,7 +82,7 @@ export class ManagerialDreService {
         comigo: { revenue: round2(comigo.revenue), cost: round2(comigo.cost) },
       },
       notas: {
-        retiradas: "Cadastre as retiradas dos sócios no Empresa × Proprietário (em breve).",
+        retiradas: "Retiradas dos sócios (pró-labore, distribuição, despesas pessoais) — cadastre no Empresa × Proprietário.",
         despesas: "Despesas por competência do vencimento — a visão de caixa fica no Motor de Caixa.",
       },
       disclaimer: DISCLAIMER,

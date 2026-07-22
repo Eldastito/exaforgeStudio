@@ -4214,6 +4214,19 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_cash_actions_org ON cash_actions(organization_id, status, created_at);
 
+      -- Empresa × Proprietário (ADR-129): retiradas do dono, tipadas.
+      CREATE TABLE IF NOT EXISTS owner_draws (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        kind TEXT NOT NULL,                 -- pro_labore|distribuicao|despesa_pessoal|emprestimo_socio|despesa_empresarial
+        amount REAL NOT NULL DEFAULT 0,
+        draw_date TEXT NOT NULL,            -- YYYY-MM-DD
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_owner_draws_org ON owner_draws(organization_id, draw_date);
+
       -- Índice de Sobrevivência (ADR-127): snapshot mensal para a tendência.
       CREATE TABLE IF NOT EXISTS survival_index_snapshots (
         id TEXT PRIMARY KEY,

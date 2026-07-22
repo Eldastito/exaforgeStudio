@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt } from 'lucide-react';
+import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -156,7 +156,76 @@ export function ReportsPanel() {
       )}
 
       <DreSection />
+      <OwnerSection />
       <LossMarginSection />
+    </div>
+  );
+}
+
+// ── Empresa × Proprietário (ADR-129) — separar o dinheiro do dono ────────────
+const DRAW_LABEL: Record<string, string> = {
+  pro_labore: 'Pró-labore', distribuicao: 'Distribuição de lucro', despesa_pessoal: 'Despesa pessoal',
+  emprestimo_socio: 'Empréstimo ao sócio', despesa_empresarial: 'Despesa da empresa (aporte)',
+};
+const ALERTA_CLS: Record<string, string> = {
+  ok: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/5',
+  atencao: 'text-amber-300 border-amber-500/30 bg-amber-500/5',
+  excesso: 'text-red-300 border-red-500/30 bg-red-500/5',
+};
+function OwnerSection() {
+  const [d, setD] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { apiFetch('/api/owner').then((r) => r.json()).then((x: any) => { if (x?.byKind) setD(x); }).catch(() => {}); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const registrar = async () => {
+    const kinds = Object.keys(DRAW_LABEL);
+    const kind = window.prompt(`Tipo da retirada:\n${kinds.map((k, i) => `${i + 1}) ${DRAW_LABEL[k]}`).join('\n')}\n\nDigite o número (1-5):`);
+    if (kind == null) return;
+    const idx = Number(kind) - 1;
+    if (!(idx >= 0 && idx < kinds.length)) return;
+    const v = window.prompt('Valor (R$):'); if (v == null) return;
+    const amount = Number(v.replace(',', '.')); if (!(amount > 0)) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/owner/draws', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: kinds[idx], amount }) });
+      if (r.ok) { toast.success('Retirada registrada.'); load(); } else toast.error('Não consegui registrar.');
+    } catch { toast.error('Falha ao registrar.'); } finally { setBusy(false); }
+  };
+
+  if (!d) return null;
+  const al = ALERTA_CLS[d.alerta?.nivel] || ALERTA_CLS.ok;
+  return (
+    <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <h3 className="text-zinc-100 font-semibold flex items-center gap-2"><UserCog className="w-5 h-5 text-violet-300" /> Empresa × Proprietário <span className="text-xs font-normal text-zinc-500">· {d.period}</span></h3>
+        <button disabled={busy} onClick={registrar} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-1.5 disabled:opacity-50"><Plus className="w-4 h-4" /> Registrar retirada</button>
+      </div>
+
+      <div className={`rounded-lg border p-3 text-[13px] mb-3 flex items-start gap-2 ${al}`}>
+        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+        <div>
+          {d.alerta?.msg}
+          {d.pctDoResultado != null && <span className="block text-[11px] opacity-80 mt-0.5">Retiradas do mês: {brl(d.retiradas)} · {d.pctDoResultado}% do resultado operacional.</span>}
+        </div>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Retiradas por tipo</div>
+          {Object.keys(DRAW_LABEL).map((k) => (
+            <div key={k} className="flex items-center justify-between py-0.5 text-[13px]">
+              <span className={k === 'despesa_empresarial' ? 'text-emerald-300/80' : 'text-zinc-300'}>{DRAW_LABEL[k]}</span>
+              <span className="text-zinc-200 tabular-nums">{brl(d.byKind[k])}</span>
+            </div>
+          ))}
+        </div>
+        <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-violet-300/80 mb-1">Pró-labore sustentável</div>
+          <div className="text-xl font-semibold text-violet-200">{brl(d.proLaboreSugerido)}<span className="text-[11px] text-zinc-500">/mês</span></div>
+          <ul className="mt-1.5 space-y-0.5">{d.premissas?.map((p: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {p}</li>)}</ul>
+        </div>
+      </div>
     </div>
   );
 }

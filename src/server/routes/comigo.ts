@@ -11,6 +11,7 @@ import { ComigoPixService } from "../ComigoPixService.js";
 import { ComigoMesaService } from "../ComigoMesaService.js";
 import { ComigoArchetypeService } from "../ComigoArchetypeService.js";
 import { ComigoProgressService } from "../ComigoProgressService.js";
+import { ComigoGraduationService } from "../ComigoGraduationService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -303,6 +304,22 @@ router.get("/summary", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));
   res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// GET /api/comigo/graduation — guia de formalização MEI + nota fiscal (ADR-122).
+router.get("/graduation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ComigoGraduationService.status(orgId));
+});
+
+// POST /api/comigo/graduation — o dono declara que formalizou (MEI/ME).
+router.post("/graduation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ComigoGraduationService.declare(orgId, { type: req.body?.type, cnpj: req.body?.cnpj });
+  audit(orgId, req.user?.userId, orgId, "comigo_graduation", { type: out.formalization });
+  res.json(out);
 });
 
 // GET /api/comigo/progress — progressão pedagógica (ADR-121): estágio + próximo passo.

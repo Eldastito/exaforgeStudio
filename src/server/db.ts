@@ -4047,6 +4047,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mobile INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mesa_enabled INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_default_recipe_kind TEXT`); } catch(e){}
+  // Graduação MEI + nota fiscal (ADR-122): estado de formalização do autônomo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_formalization TEXT DEFAULT 'informal'`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_cnpj TEXT`); } catch(e){}
 };
 
 initDb();

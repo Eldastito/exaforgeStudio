@@ -568,6 +568,62 @@ function Saude() {
           {' · '}vs mesmo período anterior: <span className={h.profitDeltaPct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{h.profitDeltaPct >= 0 ? '+' : ''}{h.profitDeltaPct}%</span>
         </div>
       )}
+
+      <Graduacao />
+    </div>
+  );
+}
+
+// ── Graduação: guia de formalização MEI + nota fiscal (ADR-122) ──────────────
+function Graduacao() {
+  const [g, setG] = useState<any | null>(null);
+  const [showSteps, setShowSteps] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    apiFetch('/api/comigo/graduation').then((r) => r.json()).then((r: any) => { if (r?.readiness) setG(r); }).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const declare = async () => {
+    if (!window.confirm('Confirmar que você já é MEI? Vou parar de sugerir a formalização e liberar o guia de nota fiscal.')) return;
+    setBusy(true);
+    try { const r = await apiFetch('/api/comigo/graduation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'mei' }) }).then((x) => x.json()); setG(r); toast.success('Boa! 🎓 Parabéns pela formalização.'); }
+    finally { setBusy(false); }
+  };
+
+  // Enquanto informal e ainda cedo, não incomoda (foco em crescer).
+  if (!g || (!g.formalized && g.readiness === 'cedo')) return null;
+
+  return (
+    <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
+      <div className="text-sm font-semibold text-indigo-200 flex items-center gap-1.5">🎓 {g.formalized ? 'Sua formalização' : 'Hora de graduar?'}</div>
+      <p className="text-xs text-zinc-300 mt-1">{g.recommendation}</p>
+
+      {/* Faturamento projetado × teto MEI */}
+      <div className="mt-3">
+        <div className="flex justify-between text-[11px] text-zinc-400">
+          <span>Projeção anual: {brl(g.projectedAnnual)}</span>
+          <span>teto MEI {brl(g.meiLimit)}</span>
+        </div>
+        <div className="h-2 rounded-full bg-zinc-800 mt-1 overflow-hidden">
+          <div className={`h-full ${g.readiness === 'acima_mei' ? 'bg-red-500' : g.readiness === 'perto_do_teto' ? 'bg-amber-500' : 'bg-indigo-500'}`} style={{ width: `${Math.min(100, g.pctOfMei)}%` }} />
+        </div>
+      </div>
+
+      <p className="text-xs text-zinc-400 mt-3">{g.notaFiscal.text}</p>
+
+      {!g.formalized && g.steps.length > 0 && (
+        <div className="mt-3">
+          <button onClick={() => setShowSteps((s) => !s)} className="text-xs text-indigo-300 hover:text-indigo-200">{showSteps ? 'Ocultar passos' : 'Ver como virar MEI (grátis)'}</button>
+          {showSteps && (
+            <ol className="list-decimal list-inside text-xs text-zinc-300 mt-2 space-y-1">
+              {g.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}
+            </ol>
+          )}
+          <button disabled={busy} onClick={declare} className="mt-3 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5">Já sou MEI</button>
+        </div>
+      )}
     </div>
   );
 }

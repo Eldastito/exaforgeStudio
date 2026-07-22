@@ -2,6 +2,8 @@ import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { CashForecastService } from "./CashForecastService.js";
 import { LossMarginService } from "./LossMarginService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
+import { CashActionService } from "./CashActionService.js";
+import db from "./db.js";
 
 /**
  * Central de Saúde e Decisão (ADR-126 Fatia 1) — camada de SÍNTESE.
@@ -109,10 +111,39 @@ export class BusinessHealthService {
     return cands.sort((a, b) => b.impact - a.impact).slice(0, 3);
   }
 
-  /** Payload da tela: status + gatilhos + frase-síntese + top-3 prioridades. */
+  // Mapeia a ORIGEM da prioridade para o tipo de ação do Impact Ledger (ADR-125).
+  private static KIND_BY_SOURCE: Record<Priority["source"], string> = {
+    caixa: "outro", recebiveis: "cobrar_receber", perdas: "reduzir_compra", rie: "campanha",
+  };
+
+  /** Títulos das ações abertas no Impact Ledger (para marcar "já no plano"). */
+  private static openTitles(orgId: string): Set<string> {
+    const rows = db.prepare("SELECT title FROM cash_actions WHERE organization_id = ? AND status = 'accepted'").all(orgId) as any[];
+    return new Set(rows.map((r) => String(r.title)));
+  }
+
+  /**
+   * "Aplicar recomendação" (ADR-126 Fatia 2): registra a prioridade como ação no
+   * Impact Ledger unificado (ADR-125). Não executa nada — vira intenção medível.
+   * Idempotente por título aberto (não duplica a mesma recomendação).
+   */
+  static apply(orgId: string, input: { source: string; title: string; impact?: number; rationale?: string; baselineShortfall?: number }, actorId?: string) {
+    if (!input.title) return { ok: false as const, error: "title_required" };
+    if (this.openTitles(orgId).has(input.title)) return { ok: true as const, deduped: true };
+    const kind = this.KIND_BY_SOURCE[input.source as Priority["source"]] || "outro";
+    return CashActionService.create(orgId, { kind, title: input.title, rationale: input.rationale, expectedImpact: input.impact, baselineShortfall: input.baselineShortfall, createdBy: actorId });
+  }
+
+  /** Histórico de recomendações = Impact Ledger unificado (esperado × realizado). */
+  static history(orgId: string) {
+    return CashActionService.ledger(orgId);
+  }
+
+  /** Payload da tela: status + gatilhos + frase-síntese + top-3 + Impact Ledger. */
   static overview(orgId: string, minCash = 0) {
     const st = this.status(orgId, minCash);
     const priorities = this.priorities(orgId, { cash: st.cash, forecast: st.forecast, loss: st.loss });
+    const open = this.openTitles(orgId);
     const label: Record<StatusLevel, string> = { saudavel: "Saudável", atencao: "Atenção", risco: "Risco", critico: "Crítico" };
     let synthesis: string;
     if (st.status === "saudavel") synthesis = "Sem alertas hoje. Siga cuidando do caixa e das vendas.";
@@ -123,7 +154,8 @@ export class BusinessHealthService {
       statusLabel: label[st.status],
       triggers: st.triggers,
       synthesis,
-      priorities,
+      priorities: priorities.map((p) => ({ ...p, inPlan: open.has(p.title) })),
+      ledger: this.history(orgId),
       kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },
     };
   }

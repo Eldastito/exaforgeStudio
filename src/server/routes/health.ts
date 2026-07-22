@@ -14,4 +14,14 @@ router.get("/", (req: AuthRequest, res): any => {
   res.json(BusinessHealthService.overview(orgId, minCash));
 });
 
+// POST /api/health-center/apply — aplica uma prioridade → ação no Impact Ledger.
+router.post("/apply", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { source, title, impact, rationale, baselineShortfall } = req.body || {};
+  const out = BusinessHealthService.apply(orgId, { source, title, impact: Number(impact) || 0, rationale, baselineShortfall: Number(baselineShortfall) || 0 }, req.user?.userId);
+  if (!out.ok) return res.status(400).json(out);
+  res.status(201).json(out);
+});
+
 export default router;

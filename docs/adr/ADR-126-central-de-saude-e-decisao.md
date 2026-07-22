@@ -1,6 +1,6 @@
 # ADR-126 — Central de Saúde e Decisão (síntese: status + 3 prioridades do dia)
 
-- **Status:** Em implementação. Fatia 1 (status determinístico + top-3 prioridades, só leitura, tela Central de Saúde) entregue. Fatia 2 (aplicar + histórico) e Fatia 3 (modo Tutor/Gestor + narrativa) pendentes.
+- **Status:** Em implementação. Fatia 1 (status determinístico + top-3 prioridades, só leitura) e Fatia 2 (aplicar recomendação → Impact Ledger unificado da ADR-125 + histórico + marcação "no plano") entregues. Fatia 3 (modo Tutor/Gestor + narrativa via Diretor IA + checklist de qualidade dos dados) pendente.
 - **Data:** 2026-07
 - **Origem:** PRD "Central de Sobrevivência e Decisão" — Épico 1. Princípio: "menos dashboard, mais decisão". O dono tem dados espalhados (RIE, perdas, caixa, recebíveis), mas não uma tela que diga **o que mudou, por que importa e o que fazer primeiro** — e que **meça o resultado**.
 - **Relacionadas:** ADR-125 (Motor de Caixa — ruptura, dias de sobrevivência, Impact Ledger), RIE/IQR (RevenueIntelligenceService — perda estimada, top ações), ADR-114 (margem de perda — diagnóstico por driver), Caderneta/fiado (a receber), Diretor Executivo IA (narrativa opcional), ADR-091 §6 (IA sugere, humano decide), ADR-088 D5 (frugalidade).

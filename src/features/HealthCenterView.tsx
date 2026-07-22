@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle } from 'lucide-react';
+import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
 import type { ViewMode } from '@/src/store/useStore';
 
@@ -21,11 +22,28 @@ export function HealthCenterView() {
   const [loading, setLoading] = useState(true);
   const setViewMode = useStore((s) => s.setViewMode);
 
+  const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
     setLoading(true);
     apiFetch('/api/health-center').then((r) => r.json()).then((x: any) => setD(x)).catch(() => {}).finally(() => setLoading(false));
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const aplicar = async (p: any) => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/health-center/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: p.source, title: p.title, impact: p.impact, rationale: p.interpretacao }) });
+      if (r.ok) { toast.success('No plano. Quando executar, registre o resultado.'); load(); } else toast.error('Não consegui aplicar.');
+    } catch { toast.error('Falha ao aplicar.'); } finally { setBusy(false); }
+  };
+  const concluir = async (a: any) => {
+    const v = window.prompt(`Quanto essa ação trouxe de fato? (esperado ${brl(a.expected_impact)})`, String(a.expected_impact));
+    if (v == null) return;
+    setBusy(true);
+    try { const r = await apiFetch(`/api/cash/actions/${a.id}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resultAmount: Number(v.replace(',', '.')) || 0 }) }); if (r.ok) { toast.success('Resultado registrado.'); load(); } }
+    finally { setBusy(false); }
+  };
+  const dispensar = async (a: any) => { setBusy(true); try { const r = await apiFetch(`/api/cash/actions/${a.id}/dismiss`, { method: 'POST' }); if (r.ok) { toast.success('Dispensada.'); load(); } } finally { setBusy(false); } };
 
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Analisando seu negócio…</div>;
   const st = STATUS_UI[d?.status] || STATUS_UI.saudavel;
@@ -88,14 +106,49 @@ export function HealthCenterView() {
                       <div className={`text-[10px] uppercase tracking-wide ${p.basis === 'fato' ? 'text-emerald-400/70' : 'text-zinc-500'}`}>{p.basis}</div>
                     </div>
                   </div>
-                  <button onClick={() => setViewMode(p.action.view as ViewMode)} className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] px-3 py-1.5">
-                    {p.action.label} <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button onClick={() => setViewMode(p.action.view as ViewMode)} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] px-3 py-1.5">
+                      {p.action.label} <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                    {p.inPlan ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300 border border-emerald-500/40 rounded-lg px-2 py-1"><Check className="w-3.5 h-3.5" /> no plano</span>
+                    ) : (
+                      <button disabled={busy} onClick={() => aplicar(p)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 text-zinc-200 hover:bg-zinc-800 text-[12px] px-3 py-1.5 disabled:opacity-50"><Check className="w-3.5 h-3.5" /> Colocar no plano</button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ol>
           )}
         </div>
+
+        {/* Histórico de recomendações — Impact Ledger unificado (ADR-125/126) */}
+        {d?.ledger?.items?.length > 0 && (
+          <div className="mt-5">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2"><Target className="w-4 h-4 text-emerald-300" /> O que você já colocou no plano</h3>
+              <div className="text-[11px] text-zinc-400">esperado <span className="text-zinc-200">{brl(d.ledger.expected)}</span> · realizado <span className="text-emerald-300">{brl(d.ledger.realized)}</span></div>
+            </div>
+            <div className="space-y-1.5">
+              {d.ledger.items.map((a: any) => (
+                <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] text-zinc-100">{a.title}</div>
+                    <div className="text-[11px] text-zinc-500">esperado {brl(a.expected_impact)}{a.status === 'done' ? ` · realizado ${brl(a.result_amount)}` : ''}</div>
+                  </div>
+                  {a.status === 'done' ? (
+                    <span className="shrink-0 text-[11px] rounded-full border border-emerald-500/40 text-emerald-300 px-2 py-0.5">concluída</span>
+                  ) : (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button disabled={busy} onClick={() => concluir(a)} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1"><Check className="w-3 h-3" /> Registrar resultado</button>
+                      <button disabled={busy} onClick={() => dispensar(a)} title="Dispensar" className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-800"><X className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

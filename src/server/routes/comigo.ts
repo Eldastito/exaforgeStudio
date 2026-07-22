@@ -3,6 +3,7 @@ import db from "../db.js";
 import { randomUUID } from "crypto";
 import { AuthRequest } from "../middleware/auth.js";
 import { ComigoPricingService } from "../ComigoPricingService.js";
+import { BalcaoService } from "../BalcaoService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -173,6 +174,131 @@ router.put("/settings", (req: AuthRequest, res): any => {
   if (!sets.length) return res.json({ ok: true });
   vals.push(orgId);
   db.prepare(`UPDATE organization_settings SET ${sets.join(", ")} WHERE organization_id = ?`).run(...vals);
+  res.json({ ok: true });
+});
+
+// ── Balcão PDV + fiado (ADR-111 D4 / ADR-112 / ADR-113, PR #3) ───────────────
+
+// POST /api/comigo/orders — abre um pedido na fila do Balcão.
+router.post("/orders", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { sessionAlias, contactId, consumo } = req.body || {};
+  const id = BalcaoService.openOrder(orgId, { sessionAlias, contactId, consumo });
+  res.status(201).json({ id });
+});
+
+// GET /api/comigo/orders?status=open — fila do Balcão.
+router.get("/orders", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const status = String(req.query.status || "open");
+  const rows = db.prepare("SELECT * FROM comigo_orders WHERE organization_id = ? AND status = ? ORDER BY created_at ASC").all(orgId, status);
+  res.json({ orders: rows });
+});
+
+// GET /api/comigo/orders/:id — pedido + itens.
+router.get("/orders/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const order = db.prepare("SELECT * FROM comigo_orders WHERE organization_id = ? AND id = ?").get(orgId, req.params.id) as any;
+  if (!order) return res.status(404).json({ error: "not_found" });
+  const items = db.prepare("SELECT * FROM comigo_order_items WHERE order_id = ?").all(req.params.id);
+  res.json({ order, items });
+});
+
+// POST /api/comigo/orders/:id/items — adiciona item (por toque).
+router.post("/orders/:id/items", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { productId, name, qty, unitPrice, unitCostSnapshot } = req.body || {};
+  if (!name || unitPrice == null) return res.status(400).json({ error: "name_and_price_required" });
+  try {
+    const itemId = BalcaoService.addItem(orgId, req.params.id, { productId, name, qty, unitPrice, unitCostSnapshot });
+    res.status(201).json({ id: itemId });
+  } catch (e: any) {
+    res.status(e?.message === "order_not_found" ? 404 : 409).json({ error: e?.message || "add_item_failed" });
+  }
+});
+
+// POST /api/comigo/orders/:id/pay — cobra (dinheiro / Pix "recebi" / fiado).
+// Fiado com estouro de limite ou cliente block_all devolve needsOverride=true.
+router.post("/orders/:id/pay", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { paidVia, customer, override } = req.body || {};
+  if (!["cash", "pix_manual", "fiado"].includes(paidVia)) return res.status(400).json({ error: "invalid_paid_via" });
+  try {
+    const out = BalcaoService.pay(orgId, req.params.id, { paidVia, customer, override: !!override, actorId: req.user?.userId });
+    if (!out.ok) return res.status(out.needsOverride ? 409 : 422).json(out);
+    audit(orgId, req.user?.userId, req.params.id, "comigo_order_pay", { paidVia, override: !!override });
+    res.json(out);
+  } catch (e: any) {
+    res.status(e?.message === "order_not_found" ? 404 : 409).json({ error: e?.message || "pay_failed" });
+  }
+});
+
+// POST /api/comigo/orders/:id/cancel — cancela o pedido em aberto.
+router.post("/orders/:id/cancel", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = db.prepare("UPDATE comigo_orders SET status = 'canceled' WHERE organization_id = ? AND id = ? AND status = 'open'").run(orgId, req.params.id);
+  if (!r.changes) return res.status(404).json({ error: "not_found_or_not_open" });
+  res.json({ ok: true });
+});
+
+// GET /api/comigo/fiado — clientes com saldo/limite/lista negra (base da Caderneta).
+router.get("/fiado", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const rows = db.prepare(`
+    SELECT cc.contact_id, ct.name, ct.identifier AS phone, cc.credit_limit, cc.blacklisted, cc.block_all_sales,
+           COALESCE((SELECT SUM(CASE WHEN kind='debt' THEN amount ELSE -amount END) FROM comigo_fiado_ledger l WHERE l.organization_id = cc.organization_id AND l.contact_id = cc.contact_id), 0) AS balance
+    FROM comigo_customer_credit cc LEFT JOIN contacts ct ON ct.id = cc.contact_id
+    WHERE cc.organization_id = ? ORDER BY balance DESC
+  `).all(orgId);
+  res.json({ customers: rows });
+});
+
+// POST /api/comigo/fiado/:contactId/settle — recebe (total/parcial).
+router.post("/fiado/:contactId/settle", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { amount, note } = req.body || {};
+  try {
+    const out = BalcaoService.settleFiado(orgId, req.params.contactId, Number(amount), note, req.user?.userId);
+    audit(orgId, req.user?.userId, req.params.contactId, "comigo_fiado_settle", { amount });
+    res.json(out);
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "settle_failed" });
+  }
+});
+
+// PUT /api/comigo/fiado/:contactId/credit — define o limite do cliente.
+router.put("/fiado/:contactId/credit", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  BalcaoService.setCreditLimit(orgId, req.params.contactId, Number(req.body?.limit));
+  audit(orgId, req.user?.userId, req.params.contactId, "comigo_fiado_limit", { limit: req.body?.limit });
+  res.json({ ok: true });
+});
+
+// POST /api/comigo/fiado/:contactId/blacklist — marca/desmarca lista negra.
+router.post("/fiado/:contactId/blacklist", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const on = !!req.body?.on;
+  BalcaoService.setBlacklist(orgId, req.params.contactId, on, req.body?.reason);
+  audit(orgId, req.user?.userId, req.params.contactId, on ? "comigo_blacklist_add" : "comigo_blacklist_remove", { reason: req.body?.reason });
+  res.json({ ok: true });
+});
+
+// POST /api/comigo/fiado/:contactId/block-all — suspensão total (inclui à vista).
+router.post("/fiado/:contactId/block-all", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  BalcaoService.setBlockAllSales(orgId, req.params.contactId, !!req.body?.on);
+  audit(orgId, req.user?.userId, req.params.contactId, "comigo_block_all", { on: !!req.body?.on });
   res.json({ ok: true });
 });
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -155,7 +155,46 @@ export function ReportsPanel() {
         </>
       )}
 
+      <DreSection />
       <LossMarginSection />
+    </div>
+  );
+}
+
+// ── DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa ─────────────
+function DreSection() {
+  const [d, setD] = useState<any | null>(null);
+  useEffect(() => { apiFetch('/api/dre').then((r) => r.json()).then((x: any) => { if (x?.linhas) setD(x); }).catch(() => {}); }, []);
+  if (!d) return null;
+  const l = d.linhas;
+  const Row = ({ label, value, op, strong, muted }: { label: string; value: number | null; op?: string; strong?: boolean; muted?: boolean }) => (
+    <div className={`flex items-center justify-between py-1.5 ${strong ? 'border-t border-zinc-800 mt-1 pt-2' : ''}`}>
+      <span className={`text-[13px] ${strong ? 'font-semibold text-zinc-100' : muted ? 'text-zinc-500' : 'text-zinc-300'}`}>{op && <span className="text-zinc-600 mr-1">{op}</span>}{label}</span>
+      <span className={`text-[13px] tabular-nums ${strong ? 'font-semibold text-zinc-100' : muted ? 'text-zinc-500' : 'text-zinc-200'}`}>{value == null ? '—' : brl(value)}</span>
+    </div>
+  );
+  return (
+    <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+        <h3 className="text-zinc-100 font-semibold flex items-center gap-2"><Receipt className="w-5 h-5 text-sky-300" /> DRE gerencial <span className="text-xs font-normal text-zinc-500">· {d.period}</span></h3>
+        {l.margemPct != null && <span className="text-xs rounded-full border border-sky-500/30 bg-sky-500/10 text-sky-300 px-2.5 py-1">margem bruta {l.margemPct}%</span>}
+      </div>
+      <div className="max-w-md">
+        <Row label="Receita bruta" value={l.receitaBruta} />
+        <Row label="Descontos" value={l.descontos} op="(-)" muted />
+        <Row label="Receita líquida" value={l.receitaLiquida} strong />
+        <Row label="Custo dos produtos/serviços (CMV)" value={l.cmv} op="(-)" muted />
+        <Row label="Margem bruta" value={l.margemBruta} strong />
+        <Row label="Despesas" value={l.despesas} op="(-)" muted />
+        <Row label="Resultado operacional" value={l.resultadoOperacional} strong />
+        <Row label="Retiradas dos sócios" value={l.retiradas} op="(-)" muted />
+        <Row label={l.sobra >= 0 ? 'Sobra (reinveste)' : 'Consumo (tira do caixa)'} value={l.sobra} strong />
+      </div>
+      {(d.breakdown?.comigo?.revenue > 0 || d.breakdown?.core?.revenue > 0) && (
+        <p className="mt-2 text-[11px] text-zinc-500">Receita: loja/serviço {brl(d.breakdown.core.revenue)} · Balcão (Comigo) {brl(d.breakdown.comigo.revenue)}.</p>
+      )}
+      <p className="mt-1 text-[11px] text-zinc-500">{d.notas?.despesas}</p>
+      <p className="mt-2 text-[11px] text-amber-200/70 border-t border-zinc-800 pt-2">{d.disclaimer}</p>
     </div>
   );
 }

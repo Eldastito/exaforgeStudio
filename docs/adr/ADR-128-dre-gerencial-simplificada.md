@@ -1,6 +1,6 @@
 # ADR-128 — DRE Gerencial Simplificada (venda × lucro × caixa)
 
-- **Status:** Proposto (design para aprovação; implementação por fatia depois)
+- **Status:** Em implementação. Fatia 1 (DRE mensal: linhas de D1, fontes core + Comigo, descontos das perdas, despesas por competência, disclaimer, rota `/api/dre`, DRE na tela de Relatórios) entregue. Fatia 2 (fixa × variável, devoluções, mês a mês) e o ADR Empresa × Proprietário (retiradas) pendentes.
 - **Data:** 2026-07
 - **Origem:** PRD "Central de Sobrevivência e Decisão" — Épico 3. Traduzir a saúde econômica em linguagem simples, **sem substituir a contabilidade oficial**. Muitos negócios fecham por confundir **faturamento, lucro e caixa**.
 - **Relacionadas:** ADR-125 (Motor de Caixa — o "caixa" do trio), ADR-114 (perdas/descontos), ADR-127 (Índice — consome margem), AnalyticsService.getProfit (receita/CMV do core), ComigoHealthService (lucro do Comigo), Empresa × Proprietário (ADR futuro — retiradas). ADR-088 D5 (frugal), PRD §23 (fora do MVP: substituir contabilidade/tributário).

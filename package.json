@@ -191,7 +191,8 @@
     "test:loss-margin": "tsx scripts/test-loss-margin.ts",
     "test:loss-hooks": "tsx scripts/test-loss-hooks.ts",
     "test:legal-advisor": "tsx scripts/test-legal-advisor.ts",
-    "test:cash-ledger": "tsx scripts/test-cash-ledger.ts"
+    "test:cash-ledger": "tsx scripts/test-cash-ledger.ts",
+    "test:cash-forecast": "tsx scripts/test-cash-forecast.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

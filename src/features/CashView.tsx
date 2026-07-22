@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Wallet, Loader2, Plus, ArrowDownCircle, ArrowUpCircle, TrendingUp, TrendingDown, Check } from 'lucide-react';
+import { Wallet, Loader2, Plus, ArrowDownCircle, ArrowUpCircle, TrendingUp, TrendingDown, Check, AlertTriangle, CalendarClock, Info } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -11,13 +11,19 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export function CashView() {
   const [data, setData] = useState<any | null>(null);
+  const [fc, setFc] = useState<any | null>(null);
+  const [minCash, setMinCash] = useState('0');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  const loadForecast = useCallback((mc: string) => {
+    apiFetch(`/api/cash/forecast?minCash=${Number(mc.replace(',', '.')) || 0}`).then((r) => r.json()).then((d: any) => setFc(d)).catch(() => {});
+  }, []);
   const load = useCallback(() => {
     setLoading(true);
     apiFetch('/api/cash').then((r) => r.json()).then((d: any) => setData(d)).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    loadForecast(minCash);
+  }, [loadForecast, minCash]);
   useEffect(() => { load(); }, [load]);
 
   const post = async (url: string, body: any) => {
@@ -85,6 +91,65 @@ export function CashView() {
           <span className="inline-flex items-center gap-1 text-red-300"><TrendingDown className="w-4 h-4" /> Saiu hoje: {brl(s?.realizadoHoje?.outflow)}</span>
           <span className="text-zinc-500">· 7 dias: líquido {brl(s?.realizado7d?.net)}</span>
         </div>
+
+        {/* Projeção de 13 semanas (ADR-125 Fatia 2) */}
+        {fc && (
+          <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><CalendarClock className="w-4 h-4 text-indigo-300" /> Projeção de caixa · 13 semanas</h3>
+              <label className="text-[11px] text-zinc-400 flex items-center gap-1">Caixa mínimo
+                <input value={minCash} onChange={(e) => setMinCash(e.target.value)} onBlur={() => loadForecast(minCash)} onKeyDown={(e) => { if (e.key === 'Enter') loadForecast(minCash); }} inputMode="decimal" className="w-20 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-100" />
+              </label>
+            </div>
+
+            {/* Alerta de ruptura */}
+            {fc.firstRisk ? (
+              <div className={`mb-3 flex items-start gap-2 rounded-lg border p-3 text-[13px] ${fc.firstRisk.risk === 'negative' ? 'border-red-500/40 bg-red-500/5 text-red-200' : 'border-amber-500/40 bg-amber-500/5 text-amber-200'}`}>
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  {fc.firstRisk.weeksAhead === 0 ? 'Seu caixa já está abaixo do mínimo' : `Seu caixa ${fc.firstRisk.risk === 'negative' ? 'fica NEGATIVO' : 'fura o mínimo'} em ${fc.firstRisk.weeksAhead} semana(s)`} — a partir de {fc.firstRisk.weekStart} (saldo projetado {brl(fc.firstRisk.ending)}).
+                  {fc.survivalDays != null && <span className="block text-[11px] opacity-80 mt-0.5">Dias de sobrevivência no ritmo atual: ~{fc.survivalDays}.</span>}
+                </div>
+              </div>
+            ) : (
+              <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5 text-[13px] text-emerald-200"><Check className="w-4 h-4" /> Sem ruptura de caixa prevista nas próximas 13 semanas.</div>
+            )}
+
+            {/* Barras semanais (ending) */}
+            {(() => {
+              const maxAbs = Math.max(1, ...fc.weeks.map((w: any) => Math.abs(w.ending)));
+              return (
+                <div className="flex items-end gap-1 h-24">
+                  {fc.weeks.map((w: any, i: number) => {
+                    const h = Math.round((Math.abs(w.ending) / maxAbs) * 100);
+                    const cls = w.risk === 'negative' ? 'bg-red-500/70' : w.risk === 'tight' ? 'bg-amber-500/70' : 'bg-emerald-500/60';
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${w.weekStart}: saldo ${brl(w.ending)} (entra ${brl(w.inflow)}, sai ${brl(w.outflow)})`}>
+                        <div className={`w-full rounded-t ${cls}`} style={{ height: `${Math.max(3, h)}%` }} />
+                        <span className="text-[8px] text-zinc-600 mt-0.5">{i + 1}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Cenários + confiança */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-400">
+              <span>Pior saldo — pessimista: <span className="text-red-300">{brl(fc.scenarios?.pessimista?.minEnding)}</span></span>
+              <span>provável: <span className="text-zinc-200">{brl(fc.scenarios?.provavel?.minEnding)}</span></span>
+              <span>otimista: <span className="text-emerald-300">{brl(fc.scenarios?.otimista?.minEnding)}</span></span>
+              <span className={`ml-auto rounded-full border px-2 py-0.5 ${fc.confidence === 'alta' ? 'border-emerald-500/40 text-emerald-300' : fc.confidence === 'media' ? 'border-amber-500/40 text-amber-300' : 'border-zinc-600 text-zinc-400'}`}>confiança {fc.confidence}</span>
+            </div>
+            {fc.missing?.length > 0 && (
+              <div className="mt-2 text-[11px] text-amber-200/80 flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" /> Para melhorar a previsão, informe: {fc.missing.join(' · ')}.</div>
+            )}
+            <details className="mt-2">
+              <summary className="text-[11px] text-zinc-500 cursor-pointer">Premissas da projeção</summary>
+              <ul className="mt-1 space-y-0.5">{fc.assumptions?.map((a: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {a}</li>)}</ul>
+            </details>
+          </div>
+        )}
 
         {/* Ações rápidas */}
         <div className="mt-4 flex flex-wrap gap-2">

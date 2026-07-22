@@ -4183,6 +4183,19 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_cash_events_org ON cash_events(organization_id, event_date);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_events_source ON cash_events(organization_id, source_type, source_id);
+
+      CREATE TABLE IF NOT EXISTS cash_forecast_weeks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        week_start TEXT NOT NULL,           -- YYYY-MM-DD (segunda-feira)
+        opening REAL DEFAULT 0,
+        inflow REAL DEFAULT 0,
+        outflow REAL DEFAULT 0,
+        ending REAL DEFAULT 0,
+        risk_level TEXT DEFAULT 'ok',       -- ok|tight|negative
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, week_start)
+      );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do motor de caixa', e); }
 };

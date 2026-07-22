@@ -12,6 +12,7 @@ import { ComigoMesaService } from "../ComigoMesaService.js";
 import { ComigoArchetypeService } from "../ComigoArchetypeService.js";
 import { ComigoProgressService } from "../ComigoProgressService.js";
 import { ComigoGraduationService } from "../ComigoGraduationService.js";
+import { ComigoBoostService } from "../ComigoBoostService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -304,6 +305,22 @@ router.get("/summary", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));
   res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// GET /api/comigo/boosts — impulsos de divulgação prontos (ADR-123).
+router.get("/boosts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ComigoBoostService.list(orgId));
+});
+
+// POST /api/comigo/boosts/:key/use — registra o uso do boost.
+router.post("/boosts/:key/use", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ComigoBoostService.use(orgId, req.params.key, req.user?.userId);
+  if (!out.ok) return res.status(400).json(out);
+  res.json(out);
 });
 
 // GET /api/comigo/graduation — guia de formalização MEI + nota fiscal (ADR-122).

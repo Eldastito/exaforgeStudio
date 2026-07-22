@@ -32,7 +32,7 @@ export function LegalTip({ situation, className = '' }: { situation: string; cla
           {tip.artigos?.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {tip.artigos.map((a: any) => (
-                <span key={a.numero} title={a.texto} className="rounded-full border border-zinc-700 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">CDC art. {a.numero}</span>
+                <span key={a.ref || a.numero} title={a.texto} className="rounded-full border border-zinc-700 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">{a.ref || `Art. ${a.numero}`}</span>
               ))}
             </div>
           )}
@@ -46,7 +46,7 @@ export function LegalTip({ situation, className = '' }: { situation: string; cla
 // Consultora Jurídica (ADR-115) — Q&A ancorado no CDC. Global (todas as verticais).
 // A IA orienta o lojista a NÃO se prejudicar; disclaimer sempre visível.
 
-interface Artigo { numero: string; titulo: string; texto: string }
+interface Artigo { numero: string; titulo: string; texto: string; fonte?: string; ref?: string }
 interface Answer {
   grounded: boolean;
   orientacao: string;
@@ -59,17 +59,20 @@ interface Answer {
 
 export function LegalAdvisorView() {
   const [topics, setTopics] = useState<{ label: string; question: string }[]>([]);
-  const [base, setBase] = useState<{ fonte: string; versao: string; artigos: number } | null>(null);
+  const [base, setBase] = useState<{ fonte: string; versao: string; artigos: number; normas?: number } | null>(null);
+  const [themes, setThemes] = useState<{ total: number; temas: { ref: string; titulo: string; count: number }[] } | null>(null);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<Answer[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
 
+  const loadThemes = () => apiFetch('/api/legal/history').then((r) => r.json()).then((d: any) => { if (d && typeof d.total === 'number') setThemes(d); }).catch(() => {});
   useEffect(() => {
     apiFetch('/api/legal').then((r) => r.json()).then((d: any) => {
       if (Array.isArray(d?.topics)) setTopics(d.topics);
       if (d?.base) setBase(d.base);
     }).catch(() => {});
+    loadThemes();
   }, []);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history, busy]);
 
@@ -83,7 +86,7 @@ export function LegalAdvisorView() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: text }),
       });
       const d = await res.json().catch(() => ({}));
-      if (res.ok) setHistory((h) => [...h, { ...d, question: text }]);
+      if (res.ok) { setHistory((h) => [...h, { ...d, question: text }]); loadThemes(); }
       else toast.error(d.error || 'Não consegui responder.');
     } catch { toast.error('Falha na consulta.'); }
     finally { setBusy(false); }
@@ -96,7 +99,7 @@ export function LegalAdvisorView() {
           <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/30 p-2.5"><Scale className="w-6 h-6 text-indigo-300" /></div>
           <div>
             <h2 className="text-lg font-semibold text-zinc-100">Consultora Jurídica</h2>
-            <p className="text-sm text-zinc-400">Orientação prática ancorada no <strong>Código de Defesa do Consumidor</strong> para você não se prejudicar. {base && <span className="text-zinc-500">Base: CDC · {base.artigos} artigos · v{base.versao}</span>}</p>
+            <p className="text-sm text-zinc-400">Orientação prática ancorada no <strong>Código de Defesa do Consumidor</strong>, súmulas do STJ e PROCON para você não se prejudicar. {base && <span className="text-zinc-500">Base: {base.normas || base.artigos} normas · v{base.versao}</span>}</p>
           </div>
         </div>
 
@@ -121,6 +124,21 @@ export function LegalAdvisorView() {
           </div>
         )}
 
+        {/* Consultas por tema (ADR-115 Fatia 3): onde o lojista mais tem dúvida/risco */}
+        {history.length === 0 && themes && themes.total > 0 && themes.temas.length > 0 && (
+          <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-zinc-500 mb-2"><BookOpen className="w-3.5 h-3.5" /> O que você mais consultou ({themes.total})</div>
+            <div className="space-y-1.5">
+              {themes.temas.map((t) => (
+                <div key={t.ref} className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-[13px] text-zinc-200">{t.titulo}</span>
+                  <span className="shrink-0 text-[11px] text-zinc-500">{t.ref} · {t.count}×</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Histórico de consultas */}
         <div className="mt-5 space-y-4">
           {history.map((a, i) => (
@@ -136,11 +154,11 @@ export function LegalAdvisorView() {
 
                 {a.artigos.length > 0 && (
                   <div className="mt-3 border-t border-zinc-800 pt-3">
-                    <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-zinc-500 mb-2"><BookOpen className="w-3.5 h-3.5" /> Base legal (CDC)</div>
+                    <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-zinc-500 mb-2"><BookOpen className="w-3.5 h-3.5" /> Base legal</div>
                     <div className="space-y-2">
                       {a.artigos.map((art) => (
-                        <div key={art.numero} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
-                          <div className="text-[13px] font-medium text-zinc-200">Art. {art.numero} — {art.titulo}</div>
+                        <div key={art.ref || art.numero} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
+                          <div className="text-[13px] font-medium text-zinc-200">{art.ref || `Art. ${art.numero}`} — {art.titulo}</div>
                           <p className="mt-0.5 text-[12px] text-zinc-400">{art.texto}</p>
                         </div>
                       ))}

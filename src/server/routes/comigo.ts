@@ -10,6 +10,7 @@ import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
 import { ComigoPixService } from "../ComigoPixService.js";
 import { ComigoMesaService } from "../ComigoMesaService.js";
 import { ComigoArchetypeService } from "../ComigoArchetypeService.js";
+import { ComigoProgressService } from "../ComigoProgressService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -302,6 +303,13 @@ router.get("/summary", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));
   res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// GET /api/comigo/progress — progressão pedagógica (ADR-121): estágio + próximo passo.
+router.get("/progress", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ComigoProgressService.status(orgId));
 });
 
 // ── Onboarding por arquétipo (ADR-120) ──────────────────────────────────────

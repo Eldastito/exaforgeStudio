@@ -28,11 +28,13 @@ export function ComigoView() {
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('balcao');
   const [ov, setOv] = useState<Overview | null>(null);
   const [arch, setArch] = useState<any | null>(null);
+  const [prog, setProg] = useState<any | null>(null);
 
   const loadOverview = useCallback(() => {
     apiFetch('/api/comigo/overview').then((r) => r.json()).then((r: any) => {
       if (r && typeof r.recipes === 'number') setOv(r);
     }).catch(() => {});
+    apiFetch('/api/comigo/progress').then((r) => r.json()).then((r: any) => { if (r?.stage) setProg(r); }).catch(() => {});
   }, []);
   const loadArch = useCallback(() => {
     apiFetch('/api/comigo/archetype').then((r) => r.json()).then((r: any) => setArch(r?.config || null)).catch(() => setArch({ configured: true, mesaEnabled: true }));
@@ -86,14 +88,30 @@ export function ComigoView() {
         </div>
       )}
 
+      {/* Próximo passo (ADR-121): guia pedagógico, não bloqueia */}
+      {prog && (prog.done ? (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 mb-3 text-sm text-emerald-200">{prog.doneMessage}</div>
+      ) : prog.next ? (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 mb-3">
+          <div className="text-xs text-sky-300 font-medium">💡 Próximo passo: {prog.next.label}</div>
+          <p className="text-xs text-zinc-300 mt-0.5">{prog.next.hint}</p>
+          <div className="flex gap-1 mt-2">
+            {Array.from({ length: prog.totalStages }).map((_, i) => (
+              <span key={i} className={`h-1 flex-1 rounded-full ${i <= prog.stageIndex ? 'bg-emerald-500' : 'bg-zinc-800'}`} />
+            ))}
+          </div>
+        </div>
+      ) : null)}
+
       <div className="flex gap-2 border-b border-zinc-800 flex-wrap">
         {visibleTabs.map((t) => {
           const Icon = t.icon;
+          const locked = prog && t.key in prog.unlocked && prog.unlocked[t.key] === false;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button key={t.key} onClick={() => setTab(t.key)} title={locked ? 'Desbloqueia conforme você avança' : undefined}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
                 activeTab === t.key ? 'border-emerald-400 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'
-              }`}>
+              } ${locked ? 'opacity-50' : ''}`}>
               <Icon className="w-4 h-4" /> {t.label}
             </button>
           );

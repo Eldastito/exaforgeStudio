@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -17,6 +17,7 @@ type Overview = { recipes: number; openOrders: number; fiadoReceivable: number; 
 
 const TABS = [
   { key: 'balcao', label: 'Balcão', icon: Store },
+  { key: 'saude', label: 'Saúde', icon: Activity },
   { key: 'precificacao', label: 'Precificação', icon: Calculator },
   { key: 'caderneta', label: 'Caderneta', icon: NotebookText },
 ] as const;
@@ -74,6 +75,7 @@ export function ComigoView() {
 
       <div className="mt-4">
         {tab === 'balcao' && <Balcao onChange={loadOverview} />}
+        {tab === 'saude' && <Saude />}
         {tab === 'precificacao' && (
           <Placeholder icon={Calculator} title="Precificação"
             desc="O motor já calcula custo, preço sugerido e recalibra pelo real (API pronta no PR #2). O formulário da ficha entra no próximo incremento." />
@@ -230,6 +232,90 @@ function Balcao({ onChange }: { onChange: () => void }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Saúde: termômetro (subindo/estável/caindo) + ponto de equilíbrio ─────────
+type Health = {
+  period: string; signal: 'subindo' | 'estavel' | 'caindo';
+  profit: number; profitDeltaPct: number; vendasDeltaPct: number; insight: string;
+  breakEven: { hasFixedCosts: boolean; breakEvenRevenue: number; breakEvenUnits: number; achievedRevenue: number; achievedUnits: number; progress: number };
+};
+const PERIODS = [{ k: 'dia', l: 'Dia' }, { k: 'semana', l: 'Semana' }, { k: 'mes', l: 'Mês' }] as const;
+const SIGNAL: Record<string, { icon: any; cls: string; label: string }> = {
+  subindo: { icon: TrendingUp, cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10', label: 'Subindo' },
+  estavel: { icon: Minus, cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10', label: 'Estável' },
+  caindo: { icon: TrendingDown, cls: 'text-red-300 border-red-500/40 bg-red-500/10', label: 'Caindo' },
+};
+
+function Saude() {
+  const [period, setPeriod] = useState<'dia' | 'semana' | 'mes'>('dia');
+  const [h, setH] = useState<Health | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback((p: string) => {
+    apiFetch(`/api/comigo/health?period=${p}`).then((r) => r.json()).then((r: any) => setH(r)).catch(() => {});
+  }, []);
+  useEffect(() => { load(period); }, [period, load]);
+
+  const setFixed = async () => {
+    const v = window.prompt('Seus custos fixos por mês (aluguel, luz, etc.) — pra saber quanto precisa vender pra empatar:', '0');
+    if (v == null) return;
+    setBusy(true);
+    try { await apiFetch('/api/comigo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixedCostsMonthly: Number(v.replace(',', '.')) || 0 }) }); load(period); }
+    finally { setBusy(false); }
+  };
+
+  const sig = SIGNAL[h?.signal || 'estavel'];
+  const SigIcon = sig.icon;
+  const be = h?.breakEven;
+
+  return (
+    <div className="space-y-4">
+      {/* Toggle de período */}
+      <div className="inline-flex rounded-lg border border-zinc-800 overflow-hidden">
+        {PERIODS.map((p) => (
+          <button key={p.k} onClick={() => setPeriod(p.k)}
+            className={`px-3 py-1.5 text-sm ${period === p.k ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>{p.l}</button>
+        ))}
+      </div>
+
+      {/* Sinal + frase */}
+      <div className={`rounded-xl border p-4 flex items-start gap-3 ${sig.cls}`}>
+        <SigIcon className="w-8 h-8 shrink-0" />
+        <div>
+          <div className="text-lg font-semibold">{sig.label}</div>
+          <p className="text-sm opacity-90 mt-0.5">{h?.insight || 'Registre vendas no Balcão para o termômetro ganhar vida.'}</p>
+        </div>
+      </div>
+
+      {/* Ponto de equilíbrio / meta ao vivo */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Meta do dia — ponto de equilíbrio</div>
+        {be?.hasFixedCosts ? (
+          <>
+            <div className="text-sm text-zinc-200">
+              Você já fez <span className="text-emerald-300 font-medium">{brl(be.achievedRevenue)}</span> de {brl(be.breakEvenRevenue)} pra empatar hoje
+              {be.breakEvenUnits > 0 && <> — <span className="font-medium">{be.achievedUnits} de {be.breakEvenUnits}</span> unidades.</>}
+            </div>
+            <div className="h-2 rounded-full bg-zinc-800 mt-2 overflow-hidden">
+              <div className="h-full bg-emerald-500" style={{ width: `${Math.round((be.progress || 0) * 100)}%` }} />
+            </div>
+          </>
+        ) : (
+          <button disabled={busy} onClick={setFixed} className="text-sm text-sky-300 hover:text-sky-200 underline underline-offset-2">
+            Informe seus custos fixos do mês pra ver quanto precisa vender pra empatar →
+          </button>
+        )}
+      </div>
+
+      {h && (
+        <div className="text-xs text-zinc-500">
+          Lucro no {period === 'mes' ? 'mês' : period}: <span className="text-zinc-300">{brl(h.profit)}</span>
+          {' · '}vs mesmo período anterior: <span className={h.profitDeltaPct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{h.profitDeltaPct >= 0 ? '+' : ''}{h.profitDeltaPct}%</span>
+        </div>
+      )}
     </div>
   );
 }

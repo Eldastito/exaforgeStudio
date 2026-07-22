@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { FinancialLedgerService } from "../FinancialLedgerService.js";
+import { CashForecastService } from "../CashForecastService.js";
 
 // Motor de Caixa (ADR-125) — livro-caixa global. Rota core (não é módulo
 // opcional): disponível em todas as verticais.
@@ -11,6 +12,21 @@ router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(FinancialLedgerService.overview(orgId));
+});
+
+// GET /api/cash/forecast — projeção de 13 semanas + ruptura + confiança.
+router.get("/forecast", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const minCash = Number(req.query?.minCash) || 0;
+  res.json(CashForecastService.forecast(orgId, { minCash }));
+});
+
+// POST /api/cash/forecast/snapshot — persiste o snapshot do cenário provável.
+router.post("/forecast/snapshot", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(CashForecastService.snapshot(orgId, Number(req.body?.minCash) || 0));
 });
 
 // POST /api/cash/accounts — cria uma conta/carteira.

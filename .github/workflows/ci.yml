@@ -219,6 +219,7 @@ jobs:
           - { name: 'loss-hooks', script: 'test:loss-hooks' }
           - { name: 'legal-advisor', script: 'test:legal-advisor' }
           - { name: 'cash-ledger', script: 'test:cash-ledger' }
+          - { name: 'cash-forecast', script: 'test:cash-forecast' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

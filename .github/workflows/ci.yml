@@ -214,6 +214,7 @@ jobs:
           - { name: 'comigo-archetype', script: 'test:comigo-archetype' }
           - { name: 'comigo-progress', script: 'test:comigo-progress' }
           - { name: 'comigo-graduation', script: 'test:comigo-graduation' }
+          - { name: 'comigo-boosts', script: 'test:comigo-boosts' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

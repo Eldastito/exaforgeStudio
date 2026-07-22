@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -22,6 +22,7 @@ const TABS = [
   { key: 'saude', label: 'Saúde', icon: Activity },
   { key: 'precificacao', label: 'Precificação', icon: Calculator },
   { key: 'caderneta', label: 'Caderneta', icon: NotebookText },
+  { key: 'divulgar', label: 'Divulgar', icon: Megaphone },
 ] as const;
 
 export function ComigoView() {
@@ -127,6 +128,46 @@ export function ComigoView() {
             desc="O motor já calcula custo, preço sugerido e recalibra pelo real (API pronta no PR #2). O formulário da ficha entra no próximo incremento." />
         )}
         {activeTab === 'caderneta' && <Caderneta onChange={loadOverview} />}
+        {activeTab === 'divulgar' && <Divulgar />}
+      </div>
+    </div>
+  );
+}
+
+// ── Divulgar: boosts de divulgação zero-token (ADR-123) ──────────────────────
+function Divulgar() {
+  const [boosts, setBoosts] = useState<{ post?: { caption: string }; catalogo?: { link: string; text: string } } | null>(null);
+
+  useEffect(() => {
+    apiFetch('/api/comigo/boosts').then((r) => r.json()).then((r: any) => setBoosts(r)).catch(() => {});
+  }, []);
+
+  const use = (key: string, text: string) => {
+    navigator.clipboard?.writeText(text);
+    apiFetch(`/api/comigo/boosts/${key}/use`, { method: 'POST' }).catch(() => {});
+    toast.success('Copiado! Cole no WhatsApp ou no seu status 📲');
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-400">Impulsos prontos pra atrair cliente. Cada link e post que você manda é propaganda do seu corre. 📣</p>
+
+      {/* Post do dia */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="text-sm font-medium text-zinc-100 flex items-center gap-1.5"><Megaphone className="w-4 h-4 text-emerald-300" /> Post do dia</div>
+        <pre className="text-xs text-zinc-300 whitespace-pre-wrap font-sans bg-zinc-900 rounded-lg p-2 mt-2">{boosts?.post?.caption || '…'}</pre>
+        <button disabled={!boosts?.post} onClick={() => use('post', boosts!.post!.caption)} className="mt-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 disabled:opacity-40">Copiar legenda</button>
+      </div>
+
+      {/* Compartilhar cardápio */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="text-sm font-medium text-zinc-100 flex items-center gap-1.5"><QrCode className="w-4 h-4 text-sky-300" /> Compartilhar cardápio</div>
+        <p className="text-xs text-zinc-400 mt-1">O cliente escolhe, pede e paga pelo próprio link — sem você digitar nada.</p>
+        {boosts?.catalogo && <code className="block text-xs text-sky-300 bg-zinc-900 rounded px-2 py-1 mt-2 break-all">{boosts.catalogo.link}</code>}
+        <div className="flex gap-2 mt-2">
+          <button disabled={!boosts?.catalogo} onClick={() => use('catalogo', boosts!.catalogo!.text)} className="text-xs rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 disabled:opacity-40">Copiar convite</button>
+          {boosts?.catalogo && <a href={boosts.catalogo.link} target="_blank" rel="noreferrer" className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-3 py-1.5">Abrir</a>}
+        </div>
       </div>
     </div>
   );

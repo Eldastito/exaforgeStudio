@@ -186,7 +186,8 @@
     "test:comigo-mesa": "tsx scripts/test-comigo-mesa.ts",
     "test:comigo-archetype": "tsx scripts/test-comigo-archetype.ts",
     "test:comigo-progress": "tsx scripts/test-comigo-progress.ts",
-    "test:comigo-graduation": "tsx scripts/test-comigo-graduation.ts"
+    "test:comigo-graduation": "tsx scripts/test-comigo-graduation.ts",
+    "test:comigo-boosts": "tsx scripts/test-comigo-boosts.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

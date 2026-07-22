@@ -4050,6 +4050,19 @@ const initDb = () => {
   // Graduação MEI + nota fiscal (ADR-122): estado de formalização do autônomo.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_formalization TEXT DEFAULT 'informal'`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_cnpj TEXT`); } catch(e){}
+  // Boosts de divulgação (ADR-123): log de uso (base do paywall futuro).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS comigo_boost_log (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        boost_key TEXT NOT NULL,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_comigo_boost_org ON comigo_boost_log(organization_id, boost_key);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar comigo_boost_log', e); }
 };
 
 initDb();

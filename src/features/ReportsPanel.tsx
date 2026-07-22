@@ -236,9 +236,15 @@ function DreSection() {
   useEffect(() => { apiFetch('/api/dre').then((r) => r.json()).then((x: any) => { if (x?.linhas) setD(x); }).catch(() => {}); }, []);
   if (!d) return null;
   const l = d.linhas;
-  const Row = ({ label, value, op, strong, muted }: { label: string; value: number | null; op?: string; strong?: boolean; muted?: boolean }) => (
+  const cmp = d.comparacao || {};
+  const Delta = ({ k }: { k: string }) => {
+    const c = cmp[k]; if (!c || !c.anterior) return null;
+    const up = c.delta >= 0;
+    return <span className={`ml-2 text-[10px] ${up ? 'text-emerald-400/80' : 'text-red-400/80'}`}>{up ? '▲' : '▼'} {brl(Math.abs(c.delta))} vs mês ant.</span>;
+  };
+  const Row = ({ label, value, op, strong, muted, deltaKey }: { label: string; value: number | null; op?: string; strong?: boolean; muted?: boolean; deltaKey?: string }) => (
     <div className={`flex items-center justify-between py-1.5 ${strong ? 'border-t border-zinc-800 mt-1 pt-2' : ''}`}>
-      <span className={`text-[13px] ${strong ? 'font-semibold text-zinc-100' : muted ? 'text-zinc-500' : 'text-zinc-300'}`}>{op && <span className="text-zinc-600 mr-1">{op}</span>}{label}</span>
+      <span className={`text-[13px] ${strong ? 'font-semibold text-zinc-100' : muted ? 'text-zinc-500' : 'text-zinc-300'}`}>{op && <span className="text-zinc-600 mr-1">{op}</span>}{label}{deltaKey && <Delta k={deltaKey} />}</span>
       <span className={`text-[13px] tabular-nums ${strong ? 'font-semibold text-zinc-100' : muted ? 'text-zinc-500' : 'text-zinc-200'}`}>{value == null ? '—' : brl(value)}</span>
     </div>
   );
@@ -249,15 +255,19 @@ function DreSection() {
         {l.margemPct != null && <span className="text-xs rounded-full border border-sky-500/30 bg-sky-500/10 text-sky-300 px-2.5 py-1">margem bruta {l.margemPct}%</span>}
       </div>
       <div className="max-w-md">
-        <Row label="Receita bruta" value={l.receitaBruta} />
+        <Row label="Receita bruta" value={l.receitaBruta} deltaKey="receitaBruta" />
         <Row label="Descontos" value={l.descontos} op="(-)" muted />
-        <Row label="Receita líquida" value={l.receitaLiquida} strong />
+        {l.devolucoes > 0 && <Row label="Devoluções" value={l.devolucoes} op="(-)" muted />}
+        <Row label="Receita líquida" value={l.receitaLiquida} strong deltaKey="receitaLiquida" />
         <Row label="Custo dos produtos/serviços (CMV)" value={l.cmv} op="(-)" muted />
-        <Row label="Margem bruta" value={l.margemBruta} strong />
-        <Row label="Despesas" value={l.despesas} op="(-)" muted />
-        <Row label="Resultado operacional" value={l.resultadoOperacional} strong />
+        <Row label="Margem bruta" value={l.margemBruta} strong deltaKey="margemBruta" />
+        <Row label="Despesas" value={l.despesas} op="(-)" muted deltaKey="despesas" />
+        <div className="flex items-center justify-between py-0.5 pl-4 text-[11px] text-zinc-600">
+          <span>fixas {brl(l.despesasFixas)} · variáveis {brl(l.despesasVariaveis)}</span>
+        </div>
+        <Row label="Resultado operacional" value={l.resultadoOperacional} strong deltaKey="resultadoOperacional" />
         <Row label="Retiradas dos sócios" value={l.retiradas} op="(-)" muted />
-        <Row label={l.sobra >= 0 ? 'Sobra (reinveste)' : 'Consumo (tira do caixa)'} value={l.sobra} strong />
+        <Row label={l.sobra >= 0 ? 'Sobra (reinveste)' : 'Consumo (tira do caixa)'} value={l.sobra} strong deltaKey="sobra" />
       </div>
       {(d.breakdown?.comigo?.revenue > 0 || d.breakdown?.core?.revenue > 0) && (
         <p className="mt-2 text-[11px] text-zinc-500">Receita: loja/serviço {brl(d.breakdown.core.revenue)} · Balcão (Comigo) {brl(d.breakdown.comigo.revenue)}.</p>
@@ -271,7 +281,7 @@ function DreSection() {
 // ── Margem de perda aceitável (ADR-114) — indicador global de perdas ─────────
 const DRIVER_LABEL: Record<string, string> = {
   merma: 'Merma', quebra: 'Quebra', vencimento: 'Vencimento', furto: 'Furto', desconto: 'Desconto',
-  calote: 'Calote', divergencia: 'Divergência', retrabalho: 'Retrabalho', no_show: 'No-show', outro: 'Outro',
+  devolucao: 'Devolução', calote: 'Calote', divergencia: 'Divergência', retrabalho: 'Retrabalho', no_show: 'No-show', outro: 'Outro',
 };
 const LOSS_STATUS: Record<string, { label: string; cls: string }> = {
   dentro: { label: 'Dentro da meta', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },

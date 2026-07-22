@@ -12,13 +12,13 @@ import { randomUUID } from "crypto";
  */
 
 export const LOSS_DRIVERS = [
-  "merma", "quebra", "vencimento", "furto", "desconto", "calote", "divergencia", "retrabalho", "no_show", "outro",
+  "merma", "quebra", "vencimento", "furto", "desconto", "devolucao", "calote", "divergencia", "retrabalho", "no_show", "outro",
 ] as const;
 
 // Rótulo curto por driver (para as frases do diagnóstico).
 const DRIVER_LABEL: Record<string, string> = {
   merma: "merma (perda no preparo)", quebra: "quebra", vencimento: "vencimento", furto: "furto/desvio",
-  desconto: "desconto", calote: "calote (fiado não pago)", divergencia: "divergência de caixa",
+  desconto: "desconto", devolucao: "devolução", calote: "calote (fiado não pago)", divergencia: "divergência de caixa",
   retrabalho: "retrabalho", no_show: "no-show", outro: "outros",
 };
 
@@ -29,6 +29,7 @@ const DRIVER_SUGGESTION: Record<string, string> = {
   vencimento: "Gire o estoque pelo PEPS (primeiro a vencer, primeiro a sair), reduza a compra dos itens parados e crie promoção de saída rápida.",
   furto: "Reforce a conferência de caixa, o controle de acesso ao estoque e a atenção aos pontos críticos.",
   desconto: "Defina uma alçada de desconto por vendedor e acompanhe quem mais concede — desconto alto some com a margem.",
+  devolucao: "Investigue o motivo das devoluções (defeito, tamanho, expectativa) e ajuste descrição/qualidade — devolução é venda que virou custo.",
   calote: "Aperte o limite de crédito, exija cadastro e cobre os atrasados antes de liberar novo fiado.",
   divergencia: "Padronize a contagem do fechamento e investigue as lojas com mais diferença entre o informado e o conferido.",
   retrabalho: "Confira o pedido na entrada e padronize a execução para não precisar refazer.",

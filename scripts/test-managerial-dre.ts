@@ -69,6 +69,29 @@ async function main() {
   check("sobra = resultado - retiradas = 300", near(l.sobra, 300));
   check("identidade: sobra = receitaLiq - CMV - despesas - retiradas", near(l.sobra, l.receitaLiquida - l.cmv - l.despesas - l.retiradas));
 
+  // ===== 4b. Despesas fixas × variáveis + comparação mês a mês (Fatia 2) =====
+  check("despesa avulsa entra como variável (300) e fixa 0", near(l.despesasVariaveis, 300) && near(l.despesasFixas, 0));
+  check("comparação mês a mês presente (sem mês anterior → delta = atual)", dre.comparacao && near(dre.comparacao.receitaBruta.atual, 1500) && near(dre.comparacao.receitaBruta.anterior, 0) && near(dre.comparacao.receitaBruta.delta, 1500));
+
+  // Split fixa × variável num org dedicado.
+  const split = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'S', 'active')`).run(randomUUID(), split);
+  db.prepare(`INSERT INTO payables (id, organization_id, description, amount, due_date, recurrence, status) VALUES (?, ?, 'Aluguel', 200, ?, 'monthly', 'open')`).run(randomUUID(), split, today);
+  db.prepare(`INSERT INTO payables (id, organization_id, description, amount, due_date, recurrence, status) VALUES (?, ?, 'Compra avulsa', 300, ?, 'none', 'open')`).run(randomUUID(), split, today);
+  const ds = D.monthly(split, period).linhas;
+  check("recorrente = fixa (200), avulsa = variável (300)", near(ds.despesasFixas, 200) && near(ds.despesasVariaveis, 300) && near(ds.despesas, 500));
+
+  // Devolução (driver próprio) abate a receita, num org dedicado.
+  const dev = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'D', 'active')`).run(randomUUID(), dev);
+  const doid = randomUUID();
+  db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 1000)`).run(doid, dev);
+  db.prepare(`INSERT INTO order_items (id, order_id, organization_id, name_snapshot, unit_price, quantity, line_total, unit_cost) VALUES (?, ?, ?, 'P', 10, 100, 1000, 5)`).run(randomUUID(), doid, dev);
+  L.recordLoss(dev, { driver: "devolucao", amount: 150 });
+  const dd = D.monthly(dev, period).linhas;
+  check("devolução vira linha própria (150)", near(dd.devolucoes, 150));
+  check("devolução abate a receita líquida (1000 - 150 = 850)", near(dd.receitaLiquida, 850));
+
   // ===== 5. Disclaimer obrigatório =====
   check("disclaimer 'não substitui a contabilidade' presente", /não substitui a contabilidade/i.test(dre.disclaimer));
 

@@ -60,6 +60,13 @@ export class LossMarginService {
     return { ok: true, id, period, driver, amount };
   }
 
+  /** Lançamento automático idempotente por `source` (ganchos — ADR-114 Fatia 2). */
+  static recordLossUnique(orgId: string, source: string, p: { driver: string; amount: number; period?: string; note?: string }) {
+    const exists = db.prepare("SELECT 1 FROM loss_events WHERE organization_id = ? AND source = ? LIMIT 1").get(orgId, source);
+    if (exists) return { ok: true, deduped: true };
+    return this.recordLoss(orgId, { ...p, source, isEstimate: false });
+  }
+
   static lossesByDriver(orgId: string, period: string) {
     const rows = db.prepare("SELECT driver, COALESCE(SUM(amount),0) amount FROM loss_events WHERE organization_id = ? AND period = ? GROUP BY driver ORDER BY amount DESC").all(orgId, period) as any[];
     const byDriver = rows.map((r) => ({ driver: r.driver, amount: round2(r.amount) }));

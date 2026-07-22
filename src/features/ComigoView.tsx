@@ -724,6 +724,10 @@ function Caderneta({ onChange }: { onChange: () => void }) {
   };
   const toggleBlockAll = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: !c.block_all_sales });
   const toggleStoreFiado = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/store-fiado`, { on: !c.store_fiado_enabled });
+  const writeOff = (c: FiadoCustomer) => {
+    if (!window.confirm(`Dar baixa em ${brl(c.balance)} de ${c.name} como calote? Isso zera a dívida e lança a perda no relatório. Não dá pra desfazer.`)) return;
+    act(`/api/comigo/fiado/${c.contact_id}/writeoff`).then((o) => o?.ok && toast.success('Baixado como calote e lançado nas perdas.'));
+  };
 
   return (
     <div className="space-y-4">
@@ -763,6 +767,7 @@ function Caderneta({ onChange }: { onChange: () => void }) {
               <div className="flex flex-wrap gap-1.5 mt-2">
                 <button disabled={busy || c.balance <= 0} onClick={() => receber(c)} className="text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 disabled:opacity-40">Receber</button>
                 <button disabled={busy || c.balance <= 0} onClick={() => lembrar(c)} className="text-xs rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 disabled:opacity-40 inline-flex items-center gap-1"><MessageCircle className="w-3 h-3" /> Lembrete gentil</button>
+                <button disabled={busy || c.balance <= 0} onClick={() => writeOff(c)} title="Perda irrecuperável: zera a dívida e lança nas perdas (calote)" className="text-xs rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 px-2.5 py-1 disabled:opacity-40">Baixar (calote)</button>
                 <button disabled={busy} onClick={() => setLimite(c)} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1">Limite</button>
                 <button disabled={busy || !!c.blacklisted} onClick={() => toggleStoreFiado(c)} title="Deixar este cliente comprar fiado pelo cardápio/QR, dentro do limite"
                   className={`text-xs rounded-lg px-2.5 py-1 border ${c.store_fiado_enabled ? 'border-amber-500/40 text-amber-300 hover:bg-amber-500/10' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'} disabled:opacity-40`}>

@@ -443,6 +443,16 @@ router.post("/fiado/:contactId/settle", (req: AuthRequest, res): any => {
   }
 });
 
+// POST /api/comigo/fiado/:contactId/writeoff — baixa o fiado como calote (perda).
+router.post("/fiado/:contactId/writeoff", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = BalcaoService.writeOffFiado(orgId, req.params.contactId, req.body?.note, req.user?.userId);
+  if (!out.ok) return res.status(400).json(out);
+  audit(orgId, req.user?.userId, req.params.contactId, "comigo_fiado_writeoff", { amount: out.amount });
+  res.json(out);
+});
+
 // PUT /api/comigo/fiado/:contactId/credit — define o limite do cliente.
 router.put("/fiado/:contactId/credit", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

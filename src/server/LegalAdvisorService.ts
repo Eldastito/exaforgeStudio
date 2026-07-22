@@ -1,7 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { chat, isAIConfigured } from "./llm.js";
-import { CDC_ARTICLES, CDC_VERSION, LEGAL_SOURCE, LegalArticle } from "./data/cdc.js";
+import { CDC_ARTICLES, CDC_BY_NUMERO, CDC_VERSION, LEGAL_SOURCE, LegalArticle } from "./data/cdc.js";
 
 /**
  * Consultora Jurídica (ADR-115) — orienta o lojista ANCORADA no Código de
@@ -128,6 +128,50 @@ export class LegalAdvisorService {
       { label: "Errei o preço no anúncio", question: "Anunciei um produto com o preço errado, sou obrigado a vender por aquele valor?" },
       { label: "Posso negativar o cliente?", question: "Posso colocar o nome do cliente no SPC/Serasa por causa de uma dívida?" },
     ];
+  }
+
+  // ── Ganchos proativos por situação (ADR-115 Fatia 2) ────────────────────────
+  // Mapeia um MOMENTO do negócio → dica protetiva + artigos do CDC que a
+  // sustentam. Determinístico (zero-token) e sempre grounded na base curada: a
+  // IA SUGERE a conduta no momento certo; o lojista decide (ADR-091 §6).
+  private static SITUATIONS: Record<string, { titulo: string; dica: string; artigos: string[] }> = {
+    cobranca_fiado: {
+      titulo: "Cobrando quem te deve",
+      dica: "Pode cobrar — inclusive o fiado — mas sempre em PARTICULAR e com cortesia. Nunca exponha, avise terceiros, publique o nome ou ameace: isso é constrangimento proibido e pode virar dano moral contra você. Confira o valor certo e ofereça parcelar. É por isso que o lembrete daqui é gentil.",
+      artigos: ["42", "43"],
+    },
+    devolucao_troca: {
+      titulo: "Cliente quer trocar ou devolver",
+      dica: "Se for DEFEITO, você tem até 30 dias para consertar ou trocar antes de devolver o dinheiro — ofereça o reparo primeiro. Confira também o prazo do cliente para reclamar (30 dias não durável / 90 durável). Troca por gosto, sem defeito, em compra feita na loja física, é cortesia sua — não obrigação.",
+      artigos: ["18", "26", "49"],
+    },
+    arrependimento: {
+      titulo: "Compra feita fora da loja (internet/WhatsApp)",
+      dica: "Venda por internet, WhatsApp ou telefone dá ao cliente 7 dias corridos para se arrepender, mesmo sem defeito, com devolução do valor corrigido (frete incluído). Compra presencial na loja NÃO tem esse direito. Deixe sua política de troca visível para evitar mal-entendido.",
+      artigos: ["49", "18"],
+    },
+    negativacao: {
+      titulo: "Antes de negativar (SPC/Serasa)",
+      dica: "Negativar sem avisar antes, ou com valor errado, gera dano moral contra você. Confira se a dívida existe e está correta, envie o aviso por escrito com antecedência e só então registre. A negativação não pode passar de 5 anos. Muitas vezes um acordo de parcelamento resolve sem chegar a isso.",
+      artigos: ["43", "42"],
+    },
+  };
+
+  /** Dica proativa para um momento do negócio (ou null se a chave não existe). */
+  static forSituation(key: string, orgId?: string, actorId?: string) {
+    const s = this.SITUATIONS[key];
+    if (!s) return null;
+    const artigos = s.artigos
+      .map((n) => CDC_BY_NUMERO[n])
+      .filter(Boolean)
+      .map((a) => ({ numero: a.numero, titulo: a.titulo, texto: a.texto }));
+    if (orgId) this.audit(orgId, actorId, `[situação] ${key}`, artigos.map((a) => a.numero), true);
+    return { key, titulo: s.titulo, dica: s.dica, artigos, disclaimer: DISCLAIMER, fonte: LEGAL_SOURCE, versao: CDC_VERSION };
+  }
+
+  /** Lista das situações disponíveis (para a UI oferecer a dica no lugar certo). */
+  static situations(): { key: string; titulo: string }[] {
+    return Object.entries(this.SITUATIONS).map(([key, v]) => ({ key, titulo: v.titulo }));
   }
 
   /** Metadados da base legal (para a UI mostrar fonte/versão). */

@@ -1,7 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
-import { Scale, Loader2, Send, BookOpen, ShieldAlert, Sparkles } from 'lucide-react';
+import { Scale, Loader2, Send, BookOpen, ShieldAlert, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+
+/**
+ * Dica jurídica proativa (ADR-115 Fatia 2) — reutilizável: mostra, no momento
+ * certo (ex.: cobrança de fiado), a orientação ancorada no CDC + artigos, com
+ * disclaimer. A IA sugere; o lojista decide. Colapsável para não atrapalhar.
+ */
+export function LegalTip({ situation, className = '' }: { situation: string; className?: string }) {
+  const [tip, setTip] = useState<any | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/legal/situation/${situation}`).then((r) => r.json()).then((d: any) => { if (alive && d?.dica) setTip(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [situation]);
+
+  if (!tip) return null;
+  return (
+    <div className={`rounded-xl border border-indigo-500/25 bg-indigo-500/5 ${className}`}>
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+        <Scale className="w-4 h-4 text-indigo-300 shrink-0" />
+        <span className="flex-1 text-[12px] text-indigo-100"><strong>Dica jurídica:</strong> {tip.titulo}</span>
+        {open ? <ChevronUp className="w-4 h-4 text-indigo-300" /> : <ChevronDown className="w-4 h-4 text-indigo-300" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <p className="text-[12px] text-zinc-200">{tip.dica}</p>
+          {tip.artigos?.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {tip.artigos.map((a: any) => (
+                <span key={a.numero} title={a.texto} className="rounded-full border border-zinc-700 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">CDC art. {a.numero}</span>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-[10px] text-amber-200/70">{tip.disclaimer}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Consultora Jurídica (ADR-115) — Q&A ancorado no CDC. Global (todas as verticais).
 // A IA orienta o lojista a NÃO se prejudicar; disclaimer sempre visível.

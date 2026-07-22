@@ -6,11 +6,25 @@ import { LegalAdvisorService } from "../LegalAdvisorService.js";
 // módulo opcional): capacidade GLOBAL, disponível em todas as verticais.
 const router = Router();
 
-// GET /api/legal — metadados da base + perguntas sugeridas (para a UI abrir).
+// GET /api/legal — metadados da base + perguntas sugeridas + situações (para a UI).
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ base: LegalAdvisorService.baseInfo(), topics: LegalAdvisorService.suggestedTopics() });
+  res.json({
+    base: LegalAdvisorService.baseInfo(),
+    topics: LegalAdvisorService.suggestedTopics(),
+    situations: LegalAdvisorService.situations(),
+  });
+});
+
+// GET /api/legal/situation/:key — dica proativa ancorada no CDC para um momento
+// do negócio (cobrança de fiado, devolução/troca, arrependimento, negativação).
+router.get("/situation/:key", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const tip = LegalAdvisorService.forSituation(String(req.params.key), orgId, req.user?.userId);
+  if (!tip) return res.status(404).json({ error: "situation_not_found" });
+  res.json(tip);
 });
 
 // POST /api/legal/ask — pergunta do lojista → orientação + artigos + disclaimer.

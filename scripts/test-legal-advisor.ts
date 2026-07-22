@@ -76,6 +76,22 @@ async function main() {
   // ===== 9. Perguntas sugeridas disponíveis =====
   check("há perguntas sugeridas para a UI", L.suggestedTopics().length >= 4);
 
+  // ===== 10. Ganchos proativos por situação (Fatia 2) =====
+  const cob = L.forSituation("cobranca_fiado", orgId);
+  check("situação cobranca_fiado existe", !!cob);
+  check("cobrança proativa cita o art. 42", !!cob && cob.artigos.some((a) => a.numero === "42"));
+  check("cobrança proativa orienta não constranger", !!cob && /particular|constrang|expor|ameac/i.test(cob.dica));
+  check("cobrança proativa traz disclaimer", !!cob && /não substitui um advogado/i.test(cob.disclaimer));
+
+  const dev = L.forSituation("devolucao_troca", orgId);
+  check("situação devolucao_troca cita art. 18 e 49", !!dev && dev.artigos.some((a) => a.numero === "18") && dev.artigos.some((a) => a.numero === "49"));
+
+  check("situação inexistente retorna null", L.forSituation("inexistente_xyz", orgId) === null);
+  check("lista de situações disponível para a UI", L.situations().length >= 3 && L.situations().some((s) => s.key === "cobranca_fiado"));
+  // A dica proativa também é auditada (grounded=1).
+  const cobAudit = db.prepare("SELECT COUNT(*) c FROM legal_consultations WHERE organization_id=? AND question LIKE '[situação]%'").get(orgId) as any;
+  check("dica proativa registrada na auditoria", cobAudit.c >= 2);
+
   // --- Relatório ---
   console.log("\n=== TEST: Consultora Jurídica (ADR-115) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}`);

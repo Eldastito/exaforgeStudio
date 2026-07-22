@@ -135,7 +135,12 @@ async function main() {
   const exp = parsed.searchParams.get("exp")!;
   const sig = parsed.searchParams.get("sig")!;
   check("URL assinada válida resolve o arquivo", FashionAvatarService.resolveSignedFile(key, exp, sig) !== null);
-  check("Assinatura adulterada é recusada", FashionAvatarService.resolveSignedFile(key, exp, sig.slice(0, -2) + "ff") === null);
+  // Adultera de forma DETERMINÍSTICA: troca os 2 últimos chars por um valor
+  // garantidamente diferente (se já terminar em "ff", usa "00"). Evita o flake
+  // de ~0,39% quando o HMAC válido por acaso termina em "ff" (o "adulterado"
+  // ficaria idêntico ao válido e o teste falharia sem bug real).
+  const tamperedSig = (sig.slice(-2).toLowerCase() === "ff" ? sig.slice(0, -2) + "00" : sig.slice(0, -2) + "ff");
+  check("Assinatura adulterada é recusada", FashionAvatarService.resolveSignedFile(key, exp, tamperedSig) === null);
   check("URL expirada é recusada", FashionAvatarService.resolveSignedFile(key, String(Date.now() - 1000), sig) === null);
   const escapeUrl = FashionAvatarService.signedUrl("../zappflow.db");
   const escParsed = new URL(`http://x${escapeUrl}`);

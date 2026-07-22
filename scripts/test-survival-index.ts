@@ -74,6 +74,31 @@ async function main() {
   const snaps = (db.prepare("SELECT COUNT(*) c FROM survival_index_snapshots WHERE organization_id = ?").get(orgId) as any).c;
   check("snapshot do mês idempotente (1 linha)", snaps === 1);
 
+  // ===== 5b. Estoque/capital parado vira componente com dado (Fatia 2) =====
+  const orgEstoque = mkOrg("Estoque");
+  F.recordEvent(orgEstoque, { direction: "in", amount: 5000 });
+  // Faturamento do mês (para o ratio parado/receita).
+  db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 2000)`).run(randomUUID(), orgEstoque);
+  // Muito capital parado (8000) para pouca venda (2000) → componente pontua baixo.
+  db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'p1', 100, 80)`).run(randomUUID(), orgEstoque);
+  const sEstoque = S.score(orgEstoque);
+  const compEstoque = sEstoque.components.find((c: any) => c.key === "estoque");
+  check("estoque deixa de ser neutro: tem dado", compEstoque.hasData === true);
+  check("muito capital parado vs venda → componente baixo", compEstoque.score < 50);
+
+  // Estoque enxuto (pouco parado) pontua alto.
+  const orgEstoqueOk = mkOrg("EstoqueOk");
+  F.recordEvent(orgEstoqueOk, { direction: "in", amount: 5000 });
+  db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 5000)`).run(randomUUID(), orgEstoqueOk);
+  db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'p1', 10, 50)`).run(randomUUID(), orgEstoqueOk);
+  check("estoque enxuto pontua alto", (S.score(orgEstoqueOk).components.find((c: any) => c.key === "estoque")?.score ?? 0) >= 80);
+
+  // ===== 5c. Histórico do placar =====
+  S.snapshot(orgEstoque, "2026-05"); S.snapshot(orgEstoque, "2026-06");
+  const withHist = S.scoreWithHistory(orgEstoque);
+  check("scoreWithHistory devolve placar + histórico", typeof withHist.score === "number" && Array.isArray(withHist.history) && withHist.history.length >= 2);
+  check("histórico ordenado por período (asc)", withHist.history[0].period <= withHist.history[withHist.history.length - 1].period);
+
   // ===== 6. Isolamento =====
   const empty = mkOrg("Vazia");
   const se = S.score(empty);

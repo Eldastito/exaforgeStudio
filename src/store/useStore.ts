@@ -180,7 +180,8 @@ const initialRagDocuments: RagDocument[] = [];
 
 export const useStore = create<AppState>((set, get) => ({
   viewMode: ((): ViewMode => {
-    try { return (localStorage.getItem('zappflow_view') as ViewMode) || 'kanban'; } catch { return 'kanban'; }
+    // Home padrão: Central de Saúde (ADR-126) — a tela-síntese de sobrevivência.
+    try { return (localStorage.getItem('zappflow_view') as ViewMode) || 'saude'; } catch { return 'saude'; }
   })(),
   contacts: initialContacts,
   tickets: initialTickets,

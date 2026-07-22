@@ -113,9 +113,24 @@ ZappFlow (`produto → variantes → estoque → preço`).
   sincronizado.
 
 ### Faseamento
-1. **Fase 1 — catálogo vivo (maior ganho, sem PII):** leitura de **produto+grade+
-   EAN (Supply)** + **estoque (Saldo)** + **preço (Price)** → alimenta a vitrine
-   e o atendimento por IA. Começa em **homologação**, 1 filial.
+1. **Fase 1 — catálogo vivo (maior ganho, sem PII): IMPLEMENTADA (atrás de flag).**
+   - **1a — transporte:** `AlterdataSyncService` (GET autenticado por módulo,
+     paginação por header, retry/backoff, 401→refresh, loop de versão via
+     `controleVersao`). ✅
+   - **1b — mapper Supply:** `AlterdataSupplyMapper` — `Referencia`→produto,
+     `CodigoDeBarras`→variante (cor/tamanho/EAN), upsert por `external_ref`. ✅
+   - **1c — estoque + orquestração:** `AlterdataStockMapper` (`Saldo`→estoque por
+     loja, filial→`retail_stores.code`) + `AlterdataSyncRunner.runOrg`
+     (Referencia→CodigoDeBarras→Saldo) + Scheduler (`alterdataSyncPass`, por
+     intervalo) + JobQueue (`alterdata_sync`) + rota `POST /alterdata/sync` e
+     botão **"Sincronizar agora"**. ✅
+   - Preço-base vem de `Referencia.preco`. **Preço por filial (`TabelaPreco`,
+     módulo Price) e o significado exato de `Saldo.produto`** (referência × EAN)
+     ficam para **confirmar/ajustar na homologação** — o resolver de estoque já
+     é tolerante (casa por variante/EAN, senão por referência).
+   - **Para ligar:** usuário de retaguarda dedicado + base URLs de homologação +
+     rede/filial → salvar em Integrações, "Testar conexão", ativar, "Sincronizar
+     agora". Começa em **homologação**, 1 filial.
 2. **Fase 2 — cliente & vendas:** **CRM** (com base legal) + **Vendas (Sales)** →
    dashboards reais + contexto de atendimento.
 3. **Fase 3 — financeiro/fiscal:** pagamento/`ParcelaCartao`/conciliação +

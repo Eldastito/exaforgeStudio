@@ -684,6 +684,19 @@ function AlterdataConnectorPanel() {
   const [clientSecret, setClientSecret] = useState('');
   const [testing, setTesting] = useState(false);
 
+  const [syncing, setSyncing] = useState(false);
+  const runSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/sync', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        const s = d.summary || {};
+        toast.success(`Sincronizado: ${s.referencias || 0} produtos, ${s.variantes || 0} variantes, ${s.saldos?.applied || 0} saldos.`);
+      } else toast.error(d.error || 'Falha ao sincronizar.');
+    } finally { setSyncing(false); }
+  };
+
   const testToken = async () => {
     setTesting(true);
     try {
@@ -778,6 +791,10 @@ function AlterdataConnectorPanel() {
         <Button onClick={testToken} disabled={testing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais primeiro' : 'Emite um token no Guardian para validar as credenciais'}>
           {testing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Link2 className="w-4 h-4 mr-2" />}
           Testar conexão
+        </Button>
+        <Button onClick={runSync} disabled={syncing || !st?.enabled || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.enabled ? 'Ative a integração primeiro' : 'Puxa produtos, variantes e estoque da Alterdata agora'}>
+          {syncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          Sincronizar agora
         </Button>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />

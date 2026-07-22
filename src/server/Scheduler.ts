@@ -27,6 +27,7 @@ import { FashionTryOnService } from "./FashionTryOnService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
+import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
 import { BackupService } from "./BackupService.js";
 
 // Quantos backups de redundância da plataforma manter por org (semanais).
@@ -147,6 +148,7 @@ export class Scheduler {
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
     try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
+    try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     this.trialPass();
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }

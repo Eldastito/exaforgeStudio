@@ -180,7 +180,8 @@
     "test:comigo-pricing": "tsx scripts/test-comigo-pricing.ts",
     "test:comigo-balcao": "tsx scripts/test-comigo-balcao.ts",
     "test:comigo-caderneta": "tsx scripts/test-comigo-caderneta.ts",
-    "test:comigo-health": "tsx scripts/test-comigo-health.ts"
+    "test:comigo-health": "tsx scripts/test-comigo-health.ts",
+    "test:comigo-suggest": "tsx scripts/test-comigo-suggest.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -6,6 +6,7 @@ import { ComigoPricingService } from "../ComigoPricingService.js";
 import { BalcaoService } from "../BalcaoService.js";
 import { ComigoCollectionService } from "../ComigoCollectionService.js";
 import { ComigoHealthService, Period } from "../ComigoHealthService.js";
+import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -281,6 +282,15 @@ router.get("/summary", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));
   res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// GET /api/comigo/suggest?productId= — sugestão zero-token (ADR-117): co-ocorrência
+// do item atual + mais pedidos (upsell no Balcão). Sem productId, só os mais pedidos.
+router.get("/suggest", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const productId = req.query.productId ? String(req.query.productId) : undefined;
+  res.json(ComigoSuggestionService.forBalcao(orgId, productId));
 });
 
 // GET /api/comigo/health?period=dia|semana|mes — termômetro de saúde (ADR-116).

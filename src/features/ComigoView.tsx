@@ -672,7 +672,7 @@ function Graduacao() {
 // ── Caderneta: quem me deve, receber, lista negra, cobrança cortês ───────────
 type FiadoCustomer = {
   contact_id: string; name: string; phone: string; balance: number; credit_limit: number;
-  blacklisted: number; block_all_sales: number; blacklistSuggested: boolean; daysOverdue: number; reminders: number;
+  blacklisted: number; block_all_sales: number; store_fiado_enabled: number; blacklistSuggested: boolean; daysOverdue: number; reminders: number;
 };
 type Summary = { caixaHoje: number; aReceber: number; ticketMedio: number; pedidosHoje: number };
 
@@ -719,6 +719,7 @@ function Caderneta({ onChange }: { onChange: () => void }) {
     act(`/api/comigo/fiado/${c.contact_id}/blacklist`, { on: !c.blacklisted, reason: 'definido pelo dono' });
   };
   const toggleBlockAll = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: !c.block_all_sales });
+  const toggleStoreFiado = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/store-fiado`, { on: !c.store_fiado_enabled });
 
   return (
     <div className="space-y-4">
@@ -759,6 +760,10 @@ function Caderneta({ onChange }: { onChange: () => void }) {
                 <button disabled={busy || c.balance <= 0} onClick={() => receber(c)} className="text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 disabled:opacity-40">Receber</button>
                 <button disabled={busy || c.balance <= 0} onClick={() => lembrar(c)} className="text-xs rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 disabled:opacity-40 inline-flex items-center gap-1"><MessageCircle className="w-3 h-3" /> Lembrete gentil</button>
                 <button disabled={busy} onClick={() => setLimite(c)} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1">Limite</button>
+                <button disabled={busy || !!c.blacklisted} onClick={() => toggleStoreFiado(c)} title="Deixar este cliente comprar fiado pelo cardápio/QR, dentro do limite"
+                  className={`text-xs rounded-lg px-2.5 py-1 border ${c.store_fiado_enabled ? 'border-amber-500/40 text-amber-300 hover:bg-amber-500/10' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'} disabled:opacity-40`}>
+                  {c.store_fiado_enabled ? 'Fiado na loja ✓' : 'Liberar fiado na loja'}
+                </button>
                 <button disabled={busy} onClick={() => toggleBlacklist(c)} className={`text-xs rounded-lg px-2.5 py-1 border ${c.blacklisted ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800' : 'border-red-500/40 text-red-300 hover:bg-red-500/10'}`}>{c.blacklisted ? 'Tirar da lista' : 'Lista negra'}</button>
                 {!!c.blacklisted && (
                   <button disabled={busy} onClick={() => toggleBlockAll(c)} className={`text-xs rounded-lg px-2.5 py-1 border ${c.block_all_sales ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800' : 'border-red-500/40 text-red-300 hover:bg-red-500/10'}`}>{c.block_all_sales ? 'Liberar à vista' : 'Suspender à vista'}</button>

@@ -199,6 +199,11 @@ export class BalcaoService {
     this.upsertCredit(orgId, contactId, { block_all_sales: on ? 1 : 0 });
   }
 
+  /** Libera/bloqueia o cliente para comprar fiado na loja (Mesa/QR, ADR-124). */
+  static setStoreFiado(orgId: string, contactId: string, on: boolean) {
+    this.upsertCredit(orgId, contactId, { store_fiado_enabled: on ? 1 : 0 });
+  }
+
   // ── Resumo do dia: caixa × a receber (ADR-112 D3) ───────────────────────────
   static totalReceivable(orgId: string): number {
     const debt = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='debt'").get(orgId) as any).s;

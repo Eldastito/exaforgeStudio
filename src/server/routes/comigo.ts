@@ -283,7 +283,7 @@ router.get("/fiado", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const suggestDays = Number((db.prepare("SELECT comigo_blacklist_suggest_days FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.comigo_blacklist_suggest_days) || 20;
   const rows = db.prepare(`
-    SELECT cc.contact_id, ct.name, ct.identifier AS phone, cc.credit_limit, cc.blacklisted, cc.block_all_sales,
+    SELECT cc.contact_id, ct.name, ct.identifier AS phone, cc.credit_limit, cc.blacklisted, cc.block_all_sales, cc.store_fiado_enabled,
            COALESCE((SELECT SUM(CASE WHEN kind='debt' THEN amount ELSE -amount END) FROM comigo_fiado_ledger l WHERE l.organization_id = cc.organization_id AND l.contact_id = cc.contact_id), 0) AS balance,
            (SELECT MIN(created_at) FROM comigo_fiado_ledger l WHERE l.organization_id = cc.organization_id AND l.contact_id = cc.contact_id AND l.kind='debt') AS oldest_debt,
            (SELECT COUNT(*) FROM comigo_fiado_reminders r WHERE r.organization_id = cc.organization_id AND r.contact_id = cc.contact_id) AS reminders
@@ -459,6 +459,15 @@ router.post("/fiado/:contactId/blacklist", (req: AuthRequest, res): any => {
   const on = !!req.body?.on;
   BalcaoService.setBlacklist(orgId, req.params.contactId, on, req.body?.reason);
   audit(orgId, req.user?.userId, req.params.contactId, on ? "comigo_blacklist_add" : "comigo_blacklist_remove", { reason: req.body?.reason });
+  res.json({ ok: true });
+});
+
+// POST /api/comigo/fiado/:contactId/store-fiado — libera o cliente a fiar na loja (ADR-124).
+router.post("/fiado/:contactId/store-fiado", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  BalcaoService.setStoreFiado(orgId, req.params.contactId, !!req.body?.on);
+  audit(orgId, req.user?.userId, req.params.contactId, "comigo_store_fiado", { on: !!req.body?.on });
   res.json({ ok: true });
 });
 

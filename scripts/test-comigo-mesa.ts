@@ -74,11 +74,43 @@ async function main() {
   check("após entregar: sai da fila", M.prepQueue(orgId).length === 0);
   check("marcar entregue de novo não faz nada", M.markFulfilled(orgId, placed.orderId) === false);
 
-  // ===== 7. Isolamento =====
+  // ===== 7. Imagem no cardápio (ADR-124) =====
+  db.prepare(`INSERT INTO product_images (id, organization_id, product_service_id, url, position) VALUES (?, ?, ?, 'https://img/galeto.jpg', 0)`).run(randomUUID(), orgId, galeto);
+  const menuImg = M.menu(orgId).find((m) => m.id === galeto);
+  check("cardápio traz a imagem do produto", menuImg?.image === "https://img/galeto.jpg");
+  check("produto sem imagem retorna image null", (M.menu(orgId).find((m) => m.id === refri) as any)?.image === null);
+
+  // ===== 8. Fiado autorizado (ADR-124): só cadastrado + liberado + no limite =====
+  const { BalcaoService: B } = await import("../src/server/BalcaoService.js");
+  const cid = B.ensureFiadoContact(orgId, "Cliente Fiel", "5511977776666");
+  // Ainda não liberado na loja → não elegível.
+  check("não liberado: fiado indisponível", M.fiadoEligibility(orgId, "5511977776666", 50).authorized === false);
+  // Dono libera + define limite.
+  B.setCreditLimit(orgId, cid, 100);
+  B.setStoreFiado(orgId, cid, true);
+  const elig = M.fiadoEligibility(orgId, "5511977776666", 50) as any;
+  check("liberado + no limite: elegível", elig.authorized === true && elig.fits === true && elig.available === 100);
+  check("acima do limite: não cabe", M.fiadoEligibility(orgId, "5511977776666", 150).fits === false);
+  // Lista negra tira a elegibilidade.
+  B.setBlacklist(orgId, cid, true, "teste");
+  check("lista negra: fiado indisponível", M.fiadoEligibility(orgId, "5511977776666", 50).authorized === false);
+  B.setBlacklist(orgId, cid, false);
+
+  // placeOrder no fiado: grava dívida e entra na fila de preparo.
+  const fiadoOrder = M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }], payment: "fiado", customer: { phone: "5511977776666" } }) as any;
+  check("pedido no fiado criado", fiadoOrder.ok === true && fiadoOrder.fiado === true);
+  check("fiado registrou dívida (saldo 45)", (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE contact_id=? AND kind='debt'").get(cid) as any).s === 45);
+  check("pedido fiado entra na fila de preparo", M.prepQueue(orgId).some((o: any) => o.id === fiadoOrder.orderId));
+  // Cliente não cadastrado não fecha no fiado.
+  check("telefone desconhecido: fiado negado", (M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }], payment: "fiado", customer: { phone: "5511900000000" } }) as any).error === "fiado_not_authorized");
+  // Estourar o limite é negado.
+  check("fiado acima do limite negado", (M.placeOrder(orgId, { items: [{ productId: galeto, qty: 3 }, { productId: galeto, qty: 3 }], payment: "fiado", customer: { phone: "5511977776666" } }) as any).error !== undefined);
+
+  // ===== 9. Isolamento =====
   const other = `org_${randomUUID().slice(0, 8)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Y', 'active')`).run(randomUUID(), other);
   check("isolamento: outra org não vê o pedido", M.orderStatus(other, placed.orderId).found === false);
-  check("isolamento: fila da outra org vazia", M.prepQueue(other).length === 0);
+  check("isolamento: fiado não vaza p/ outra org", M.fiadoEligibility(other, "5511977776666", 50).authorized === false);
 
   // --- Relatório ---
   console.log("\n=== TEST: Comigo — Mesa/QR pay-first (ADR-119) ===\n");

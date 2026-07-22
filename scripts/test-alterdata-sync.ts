@@ -102,6 +102,15 @@ async function main() {
   });
   check("retry em 503 e depois sucesso", n === 2 && r4.imported === 1, `n=${n}`);
 
+  // ===== 3b. versão via `controleVersao` (campo real do spec Supply) =====
+  __setAlterdataSyncHttpForTests(async () => resp(200, [{ referenciaId: "R50", controleVersao: 123 }], {}));
+  const r4b = await AlterdataSyncService.syncResource(orgId, {
+    moduleKey: "supply", resource: "ReferenciaCv",
+    buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
+    onItems: async (i) => i.length,
+  });
+  check("cursor avança pelo campo controleVersao", r4b.toVersion === "123", r4b.toVersion);
+
   // ===== 4. base URL ausente → erro claro =====
   const orgNoBase = `org_${randomUUID().slice(0, 8)}`;
   AlterdataConnectorService.saveSettings(orgNoBase, { enabled: true, authConfig: { clientId: "a", clientSecret: "b" } });

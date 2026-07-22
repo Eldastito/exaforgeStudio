@@ -127,7 +127,9 @@ export class AlterdataSyncService {
       if (items.length) imported += await spec.onItems(items);
       if (version != null && gt(version, maxVersion)) maxVersion = String(version);
       for (const it of items) {
-        const v = it?.versao ?? it?.version;
+        // No spec Supply da ModaUp, a versão do item é `controleVersao`
+        // (fallback tolerante para `versao`/`version` em outros módulos).
+        const v = it?.controleVersao ?? it?.versao ?? it?.version;
         if (v != null && gt(v, maxVersion)) maxVersion = String(v);
       }
       if (!totalPages || page >= totalPages || items.length === 0) break;

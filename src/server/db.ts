@@ -4016,6 +4016,7 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fiado_reminder_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fiado_reminder_cadence TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_blacklist_suggest_days INTEGER DEFAULT 20`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_fixed_costs_monthly REAL DEFAULT 0`); } catch(e){}
 };
 
 initDb();

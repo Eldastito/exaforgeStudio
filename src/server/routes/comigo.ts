@@ -5,6 +5,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { ComigoPricingService } from "../ComigoPricingService.js";
 import { BalcaoService } from "../BalcaoService.js";
 import { ComigoCollectionService } from "../ComigoCollectionService.js";
+import { ComigoHealthService, Period } from "../ComigoHealthService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -155,11 +156,12 @@ router.post("/recipes/:id/calibrate", (req: AuthRequest, res): any => {
 router.get("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const o = db.prepare("SELECT comigo_hour_value, comigo_fiado_default_limit, comigo_fiado_reminder_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any || {};
+  const o = db.prepare("SELECT comigo_hour_value, comigo_fiado_default_limit, comigo_fiado_reminder_enabled, comigo_fixed_costs_monthly FROM organization_settings WHERE organization_id = ?").get(orgId) as any || {};
   res.json({
     hourValue: Number(o.comigo_hour_value) || 0,
     fiadoDefaultLimit: Number(o.comigo_fiado_default_limit) || 0,
     fiadoReminderEnabled: !!o.comigo_fiado_reminder_enabled,
+    fixedCostsMonthly: Number(o.comigo_fixed_costs_monthly) || 0,
   });
 });
 
@@ -167,11 +169,12 @@ router.get("/settings", (req: AuthRequest, res): any => {
 router.put("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { hourValue, fiadoDefaultLimit, fiadoReminderEnabled } = req.body || {};
+  const { hourValue, fiadoDefaultLimit, fiadoReminderEnabled, fixedCostsMonthly } = req.body || {};
   const sets: string[] = []; const vals: any[] = [];
   if (hourValue !== undefined) { sets.push("comigo_hour_value = ?"); vals.push(Number(hourValue) || 0); }
   if (fiadoDefaultLimit !== undefined) { sets.push("comigo_fiado_default_limit = ?"); vals.push(Number(fiadoDefaultLimit) || 0); }
   if (fiadoReminderEnabled !== undefined) { sets.push("comigo_fiado_reminder_enabled = ?"); vals.push(fiadoReminderEnabled ? 1 : 0); }
+  if (fixedCostsMonthly !== undefined) { sets.push("comigo_fixed_costs_monthly = ?"); vals.push(Number(fixedCostsMonthly) || 0); }
   if (!sets.length) return res.json({ ok: true });
   vals.push(orgId);
   db.prepare(`UPDATE organization_settings SET ${sets.join(", ")} WHERE organization_id = ?`).run(...vals);
@@ -278,6 +281,15 @@ router.get("/summary", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));
   res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// GET /api/comigo/health?period=dia|semana|mes — termômetro de saúde (ADR-116).
+router.get("/health", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const p = String(req.query.period || "dia");
+  const period: Period = (["dia", "semana", "mes"].includes(p) ? p : "dia") as Period;
+  res.json(ComigoHealthService.overview(orgId, period));
 });
 
 // POST /api/comigo/fiado/:contactId/remind — cobrança amigável (texto + wa.me).

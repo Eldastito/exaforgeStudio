@@ -4065,6 +4065,41 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar comigo_boost_log', e); }
   // Fiado autorizado na Mesa/QR (ADR-124): o dono libera o cliente a fiar na loja.
   try { db.exec(`ALTER TABLE comigo_customer_credit ADD COLUMN store_fiado_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // Margem de perda aceitável (ADR-114): indicador GLOBAL de perdas por driver.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN acceptable_loss_pct REAL DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN acceptable_loss_basis TEXT DEFAULT 'faturamento'`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loss_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        period TEXT NOT NULL,              -- YYYY-MM
+        driver TEXT NOT NULL,              -- merma|quebra|vencimento|furto|desconto|calote|divergencia|retrabalho|no_show|outro
+        amount REAL NOT NULL DEFAULT 0,
+        source TEXT DEFAULT 'manual',
+        is_estimate INTEGER DEFAULT 0,
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_loss_events_org_period ON loss_events(organization_id, period);
+
+      CREATE TABLE IF NOT EXISTS loss_monthly_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        period TEXT NOT NULL,
+        loss_amount REAL DEFAULT 0,
+        base_amount REAL DEFAULT 0,
+        loss_pct REAL DEFAULT 0,
+        acceptable_pct REAL DEFAULT 0,
+        status TEXT,
+        by_driver TEXT,                    -- JSON
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, period)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de margem de perda', e); }
 };
 
 initDb();

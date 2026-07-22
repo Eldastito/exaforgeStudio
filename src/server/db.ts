@@ -4196,6 +4196,23 @@ const initDb = () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(organization_id, week_start)
       );
+
+      -- Impact Ledger (ADR-125 Fatia 3): alerta → ação (aprovação humana) → medição.
+      CREATE TABLE IF NOT EXISTS cash_actions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        kind TEXT NOT NULL,                 -- cobrar_receber|postergar_pagar|reduzir_compra|campanha|outro
+        title TEXT NOT NULL,
+        rationale TEXT,
+        expected_impact REAL DEFAULT 0,
+        baseline_shortfall REAL DEFAULT 0,  -- rombo previsto no momento da criação
+        status TEXT DEFAULT 'accepted',     -- accepted|done|dismissed
+        result_amount REAL,                 -- impacto medido ao concluir
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_cash_actions_org ON cash_actions(organization_id, status, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do motor de caixa', e); }
 };

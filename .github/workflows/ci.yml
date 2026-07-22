@@ -220,6 +220,7 @@ jobs:
           - { name: 'legal-advisor', script: 'test:legal-advisor' }
           - { name: 'cash-ledger', script: 'test:cash-ledger' }
           - { name: 'cash-forecast', script: 'test:cash-forecast' }
+          - { name: 'cash-actions', script: 'test:cash-actions' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus } from 'lucide-react';
+import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -170,6 +170,12 @@ const LOSS_STATUS: Record<string, { label: string; cls: string }> = {
   acima: { label: 'Acima da meta', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
   sem_meta: { label: 'Sem meta definida', cls: 'text-zinc-300 bg-zinc-500/10 border-zinc-500/30' },
 };
+const TREND_UI: Record<string, { label: string; cls: string; Icon: any }> = {
+  piorando: { label: 'piorando', cls: 'text-red-300', Icon: ArrowUpRight },
+  melhorando: { label: 'melhorando', cls: 'text-emerald-300', Icon: ArrowDownRight },
+  estavel: { label: 'estável', cls: 'text-zinc-300', Icon: Minus },
+  sem_base: { label: 'sem base ainda', cls: 'text-zinc-500', Icon: Minus },
+};
 
 function LossMarginSection() {
   const [d, setD] = useState<any | null>(null);
@@ -239,6 +245,45 @@ function LossMarginSection() {
           </div>
         ))}
       </div>
+
+      {/* Diagnóstico da IA (ADR-114 Fatia 3) — atribui onde perde e sugere reduzir */}
+      {d.diagnosis && (
+        <div className="mt-4 rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-4">
+          <div className="flex items-start gap-2">
+            <Sparkles className="w-4 h-4 text-indigo-300 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm text-zinc-100">{d.diagnosis.headline}</div>
+              {d.diagnosis.trend !== 'sem_base' && (() => { const t = TREND_UI[d.diagnosis.trend] || TREND_UI.estavel; const TI = t.Icon; return (
+                <div className={`mt-1 inline-flex items-center gap-1 text-[11px] ${t.cls}`}><TI className="w-3.5 h-3.5" /> tendência {t.label} · média {d.diagnosis.trailingAverage}%</div>
+              ); })()}
+            </div>
+          </div>
+          {d.diagnosis.findings?.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {d.diagnosis.findings.map((f: any) => (
+                <li key={f.driver} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-medium text-zinc-100">{DRIVER_LABEL[f.driver] || f.driver}</span>
+                    <span className="text-[11px] text-zinc-400">{brl(f.amount)} · {f.share}%</span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden"><div className="h-full bg-indigo-500/70 rounded-full" style={{ width: `${Math.min(100, f.share)}%` }} /></div>
+                  <p className="mt-1.5 text-[12px] text-zinc-400">{f.suggestion}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {d.diagnosis.actions?.length > 0 && (
+            <div className="mt-3 border-t border-indigo-500/15 pt-2.5">
+              <div className="text-[11px] uppercase tracking-wide text-indigo-300/80">Próximos passos</div>
+              <ul className="mt-1 space-y-1">
+                {d.diagnosis.actions.map((a: string, i: number) => (
+                  <li key={i} className="flex items-start gap-1.5 text-[12px] text-zinc-300"><span className="text-indigo-400 mt-px">→</span><span>{a}</span></li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Lançar perda */}
       <div className="flex flex-wrap items-end gap-2 mt-4 border-t border-zinc-800 pt-4">

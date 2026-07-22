@@ -71,11 +71,29 @@ async function main() {
   check("média histórica ≈ 3.5 (só o mês corrente tem faturamento)", near(avg, 3.5));
   check("histórico traz 6 meses", L.history(orgId, 6).length === 6);
 
-  // ===== 7. Isolamento =====
+  // ===== 7. Diagnóstico frugal (Fatia 3): atribui e sugere =====
+  const dg = L.diagnosis(orgId, period);
+  check("diagnóstico: driver dominante é merma", dg.dominant?.driver === "merma");
+  check("diagnóstico: participação da merma ≈ 34.29%", near(dg.dominant?.share ?? 0, 34.29, 0.1));
+  check("diagnóstico: traz sugestão pro dominante", typeof dg.dominant?.suggestion === "string" && dg.dominant!.suggestion.length > 10);
+  check("diagnóstico: manchete cita 'acima'", /acima/.test(dg.headline));
+  check("diagnóstico: manchete aponta onde concentra", /Concentra em/.test(dg.headline));
+  check("diagnóstico: findings limitados ao top 3", dg.findings.length === 3);
+  check("diagnóstico: gera próximos passos", dg.actions.length >= 1);
+  check("diagnóstico: tendência estável vs média própria", dg.trend === "estavel");
+  check("overview embute o diagnóstico", typeof L.overview(orgId).diagnosis?.headline === "string");
+  // Sem meta: manchete pede pra cadastrar a margem.
+  L.setConfig(orgId, 0, "faturamento");
+  check("diagnóstico sem meta pede a margem", /margem de perda aceitável/i.test(L.diagnosis(orgId, period).headline));
+  L.setConfig(orgId, 3, "faturamento");
+
+  // ===== 8. Isolamento =====
   const other = `org_${randomUUID().slice(0, 8)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Y', 'active')`).run(randomUUID(), other);
   const so = L.monthlySummary(other, period);
   check("isolamento: outra org sem perdas/faturamento", so.lossAmount === 0 && so.base === 0);
+  const dgo = L.diagnosis(other, period);
+  check("diagnóstico de org vazia: sem dominante", dgo.dominant === null);
 
   // --- Relatório ---
   console.log("\n=== TEST: Margem de perda aceitável (ADR-114) ===\n");

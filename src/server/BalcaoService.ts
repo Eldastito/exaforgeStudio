@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { ComigoPricingService } from "./ComigoPricingService.js";
+import { LossMarginService } from "./LossMarginService.js";
 
 /**
  * ZappFlow Comigo — Balcão PDV (ADR-111 D4) + fiado com limite e lista negra
@@ -157,6 +158,20 @@ export class BalcaoService {
     db.prepare("UPDATE comigo_orders SET status = 'paid', paid_via = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?")
       .run(opts.paidVia === "cash" ? "cash" : "pix_manual", orderId);
     return { ok: true, paidVia: opts.paidVia, receivable: false };
+  }
+
+  /**
+   * Baixa o fiado como CALOTE (perda irrecuperável, ADR-114 Fatia 2): zera o
+   * saldo com um pagamento de baixa e lança a perda (driver=calote). Decisão do
+   * dono, auditada.
+   */
+  static writeOffFiado(orgId: string, contactId: string, note?: string, actorId?: string) {
+    const balance = this.balanceOf(orgId, contactId);
+    if (!(balance > 0)) return { ok: false, error: "no_balance" };
+    db.prepare(`INSERT INTO comigo_fiado_ledger (id, organization_id, contact_id, kind, amount, note, created_by) VALUES (?, ?, ?, 'payment', ?, ?, ?)`)
+      .run(randomUUID(), orgId, contactId, balance, note || "baixa (calote)", actorId || null);
+    try { LossMarginService.recordLoss(orgId, { driver: "calote", amount: balance, source: "fiado_writeoff", note: note || "fiado não recuperado", createdBy: actorId }); } catch { /* noop */ }
+    return { ok: true, amount: balance, balance: this.balanceOf(orgId, contactId) };
   }
 
   /** Recebimento do fiado (total ou parcial) — abate o saldo do cliente. */

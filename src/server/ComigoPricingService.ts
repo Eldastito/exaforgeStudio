@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
+import { LossMarginService } from "./LossMarginService.js";
 
 /**
  * ZappFlow Comigo — Motor de Precificação (ADR-111 D3 / ADR-088 D6).
@@ -169,7 +170,14 @@ export class ComigoPricingService {
         .run(Number(actualYield), orgId, recipeId);
     }
     // Recalcula com o rendimento recalibrado.
-    return this.computeForRecipe(orgId, recipeId);
+    const out = this.computeForRecipe(orgId, recipeId);
+    // GANCHO de perda (ADR-114 Fatia 2): a merma vira lançamento automático,
+    // valorada pelo custo unitário — sem digitação dupla.
+    const waste = Number(wasteQty) || 0;
+    if (waste > 0 && out?.breakdown?.unitCost > 0) {
+      try { LossMarginService.recordLoss(orgId, { driver: "merma", amount: waste * out.breakdown.unitCost, source: "comigo_calibration", note: note || `merma de ${found.recipe.name}`, createdBy }); } catch { /* noop */ }
+    }
+    return out;
   }
 }
 

@@ -10,6 +10,7 @@
 import db from "./db.js";
 import { RetailClosingService } from "./RetailOpsService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { LossMarginService } from "./LossMarginService.js";
 
 // "R$ 2.253,33" → 2253.33  (remove R$/espaços, ponto de milhar, vírgula decimal)
 function parseMoney(s: any): number {
@@ -116,6 +117,12 @@ export class RetailReconciliationService {
       db.prepare(
         `UPDATE retail_daily_closings SET system_total = ?, divergence_status = COALESCE(?, divergence_status), updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
       ).run(rec.systemTotal, status, orgId, closing.id);
+      // GANCHO de perda (ADR-114 Fatia 2): FALTA de caixa (informado < sistema)
+      // vira lançamento automático de divergência. Sobra não é perda. Idempotente
+      // por fechamento (reimportar não duplica).
+      if (status === "divergent" && divergence !== null && divergence < 0) {
+        try { LossMarginService.recordLossUnique(orgId, `retail_closing:${closing.id}`, { driver: "divergencia", amount: Math.abs(divergence), period: String(rec.date).slice(0, 7), note: `falta no fechamento — ${store.name} ${rec.date}` }); } catch { /* noop */ }
+      }
       results.push({ storeId: store.id, storeName: store.name, date: rec.date, systemTotal: rec.systemTotal, informed, divergence, status, matched: true });
     }
 

@@ -69,6 +69,14 @@ export const OPTIONAL_MODULES = [
 // isso, o ModuleService PRESERVA um add-on já habilitado ao (re)aplicar uma
 // vertical — o corte do ADR-084 nunca REMOVE de quem já usa (grandfather).
 export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail"] as const;
+
+// PLAN_FREE_ADDONS: subconjunto dos add-ons que o DONO pode ligar em
+// Configurações › Módulos independentemente do teto do plano (billing mockado).
+// Hoje só o Retail Ops — operacional da vertical moda, pedido explicitamente
+// como ligável. Os demais add-ons (radar/prospect/clinica/vms) continuam presos
+// ao plano (ADR-091): habilitá-los em enabled_modules NÃO fura o teto; para valer
+// exigem que o plano os inclua ou uma assinatura de add-on (org_addons).
+export const PLAN_FREE_ADDONS = ["retail"] as const;
 const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => !(ADDON_MODULES as readonly string[]).includes(m));
 
 export const VERTICALS: Vertical[] = [

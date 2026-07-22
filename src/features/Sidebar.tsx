@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -51,6 +51,7 @@ export function Sidebar() {
              {mod('clinica') && <NavItem icon={<Stethoscope />} label="Agenda Clínica" active={viewMode === 'clinica'} onClick={() => setViewMode('clinica')} />}
              {mod('reservas') && <NavItem icon={<CalendarCheck />} label="Reservas" active={viewMode === 'reservas'} onClick={() => setViewMode('reservas')} />}
              {mod('assinaturas') && <NavItem icon={<RefreshCw />} label="Assinaturas" active={viewMode === 'assinaturas'} onClick={() => setViewMode('assinaturas')} />}
+             {mod('copiloto') && <NavItem icon={<HandCoins />} label="Comigo" active={viewMode === 'comigo'} onClick={() => setViewMode('comigo')} />}
              {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}
              {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
              {mod('retail') && <NavItem icon={<Gauge />} label="Operação da Rede" active={viewMode === 'retailops'} onClick={() => setViewMode('retailops')} />}

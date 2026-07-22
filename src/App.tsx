@@ -34,6 +34,7 @@ import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
+import { ComigoView } from '@/src/features/ComigoView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
 import { GlobalSearch } from '@/src/features/GlobalSearch';
@@ -100,7 +101,7 @@ export default function App() {
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
       vision: 'vms', radar: 'radar', clinica: 'clinica', prospect: 'prospect', radar_b2b: 'prospect',
-      retailops: 'retail',
+      retailops: 'retail', comigo: 'copiloto',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
@@ -275,6 +276,7 @@ export default function App() {
              {viewMode === 'vision' && 'Vision VMS'}
              {viewMode === 'radar' && 'Radar de Execução IA'}
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
+             {viewMode === 'comigo' && 'Comigo'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               {connectivity !== 'online' && (
@@ -363,6 +365,7 @@ export default function App() {
           {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
           {viewMode === 'retailops' && <RetailOpsView />}
+          {viewMode === 'comigo' && <ComigoView />}
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}
           {viewMode === 'dashboard' && <DashboardPanel />}

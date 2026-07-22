@@ -31,6 +31,7 @@
     "test:purchase-order-by-audio": "tsx scripts/test-purchase-order-by-audio.ts",
     "test:plans-migration": "tsx scripts/test-plans-migration.ts",
     "test:vertical-plan-intersection": "tsx scripts/test-vertical-plan-intersection.ts",
+    "test:comigo-module": "tsx scripts/test-comigo-module.ts",
     "test:asaas-billing": "tsx scripts/test-asaas-billing.ts",
     "test:billing-dunning": "tsx scripts/test-billing-dunning.ts",
     "test:performance-fee": "tsx scripts/test-performance-fee.ts",

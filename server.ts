@@ -553,7 +553,7 @@ async function startServer() {
            const data = await fetchAll.json();
            const inst = data.data?.find((i: any) => (i.name === finalInstance || i.instanceName === finalInstance));
            if (inst) {
-                console.log("[Evolution] Instância existente encontrada com token:", inst.token);
+                console.log("[Evolution] Instância existente encontrada (token:", (inst.token ? String(inst.token).slice(0, 5) + "…" : "—") + ")");
                 hasInstance = true;
                 instanceToken = inst.token || inst.apikey;
            }

@@ -119,7 +119,17 @@ router.put("/:id/role", requirePermission("usuarios", "write"), (req: Request, r
   const actor = (req as any).user;
 
   try {
+     if (!role || typeof role !== 'string') return res.status(400).json({ error: 'invalid_role' });
      const before = db.prepare('SELECT role FROM users WHERE id = ? AND organization_id = ?').get(id, orgId) as any;
+     if (!before) return res.status(404).json({ error: 'user_not_found' });
+     // Anti-escalonamento (auditoria 2026): conceder OU alterar o papel `owner`
+     // (o topo da organização) exige que o ATOR seja owner. Sem isso, qualquer
+     // perfil com usuarios:write poderia se promover a owner.
+     const actorRow = db.prepare('SELECT role FROM users WHERE id = ? AND organization_id = ?').get(actor.userId, orgId) as any;
+     const actorIsOwner = actorRow?.role === 'owner';
+     if ((role === 'owner' || before.role === 'owner') && !actorIsOwner) {
+       return res.status(403).json({ error: 'only_owner_can_manage_owner_role' });
+     }
      db.prepare('UPDATE users SET role = ? WHERE id = ? AND organization_id = ?').run(role, id, orgId);
      logAuthEvent(orgId, actor.userId, id, 'USER_ROLE_CHANGED', { from: before?.role ?? null, to: role });
      res.json({ success: true });

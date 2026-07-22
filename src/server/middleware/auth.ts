@@ -42,7 +42,17 @@ export const requireOrganizationAccess = (req: AuthRequest, res: Response, next:
     if (org.status === 'blocked') {
        return res.status(403).json({ error: "CONTA BLOQUEADA. Entre em contato com o suporte." });
     }
-    
+
+    // Revogação em tempo real (auditoria 2026): sem isto, um usuário bloqueado/
+    // removido continuava com acesso até o token de 24h expirar. Rechecamos o
+    // global_status do usuário do JWT a cada requisição protegida (lookup por PK).
+    if (req.user?.userId) {
+      const u: any = db.prepare('SELECT global_status FROM users WHERE id = ?').get(req.user.userId);
+      if (u && (u.global_status === 'blocked' || u.global_status === 'deleted')) {
+        return res.status(403).json({ error: "Acesso revogado. Faça login novamente." });
+      }
+    }
+
     next();
   } catch (e) {
     return res.status(500).json({ error: "Internal server error checking organization" });

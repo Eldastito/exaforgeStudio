@@ -8,6 +8,7 @@ import { ComigoCollectionService } from "../ComigoCollectionService.js";
 import { ComigoHealthService, Period } from "../ComigoHealthService.js";
 import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
 import { ComigoPixService } from "../ComigoPixService.js";
+import { ComigoMesaService } from "../ComigoMesaService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -300,6 +301,43 @@ router.get("/summary", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));
   res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// ── Mesa/QR (ADR-119) — lado autenticado (dono/operador) ─────────────────────
+
+// GET /api/comigo/mesa/link — token + URL do QR da mesa.
+router.get("/mesa/link", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const token = ComigoMesaService.ensureToken(orgId);
+  const base = (process.env.APP_URL || "").replace(/\/$/, "");
+  res.json({ token, url: base ? `${base}/mesa/${token}` : `/mesa/${token}` });
+});
+
+// POST /api/comigo/mesa/regenerate — gera um novo token (invalida o QR antigo).
+router.post("/mesa/regenerate", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const token = ComigoMesaService.regenerate(orgId);
+  audit(orgId, req.user?.userId, orgId, "comigo_mesa_regenerate", {});
+  const base = (process.env.APP_URL || "").replace(/\/$/, "");
+  res.json({ token, url: base ? `${base}/mesa/${token}` : `/mesa/${token}` });
+});
+
+// GET /api/comigo/mesa/queue — fila de preparo (pedidos de mesa pagos).
+router.get("/mesa/queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ orders: ComigoMesaService.prepQueue(orgId) });
+});
+
+// POST /api/comigo/orders/:id/fulfill — marca o pedido de mesa como entregue.
+router.post("/orders/:id/fulfill", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ComigoMesaService.markFulfilled(orgId, req.params.id);
+  if (!ok) return res.status(404).json({ error: "not_found_or_not_ready" });
+  res.json({ ok: true });
 });
 
 // GET /api/comigo/suggest?productId= — sugestão zero-token (ADR-117): co-ocorrência

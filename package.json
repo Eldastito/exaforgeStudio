@@ -182,7 +182,8 @@
     "test:comigo-caderneta": "tsx scripts/test-comigo-caderneta.ts",
     "test:comigo-health": "tsx scripts/test-comigo-health.ts",
     "test:comigo-suggest": "tsx scripts/test-comigo-suggest.ts",
-    "test:comigo-pix": "tsx scripts/test-comigo-pix.ts"
+    "test:comigo-pix": "tsx scripts/test-comigo-pix.ts",
+    "test:comigo-mesa": "tsx scripts/test-comigo-mesa.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

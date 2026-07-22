@@ -62,6 +62,7 @@ import storefrontRoutes from "./src/server/routes/storefront.js";
 import reservationsRoutes from "./src/server/routes/reservations.js";
 import subscriptionsRoutes from "./src/server/routes/subscriptions.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
+import comigoPublicRoutes from "./src/server/routes/comigoPublic.js";
 import subscriptionPublicRoutes from "./src/server/routes/subscriptionPublic.js";
 import fashionPublicRoutes from "./src/server/routes/fashionPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
@@ -351,6 +352,10 @@ async function startServer() {
   // final (JWT com segredo derivado, ver FashionCustomerService). Registrado
   // antes do mount genérico /api/public por especificidade.
   app.use("/api/public/fashion", fashionPublicRoutes);
+
+  // Comigo Mesa/QR PÚBLICO (autoatendimento sem login, ADR-119). Antes do mount
+  // genérico /api/public por especificidade.
+  app.use("/api/public/comigo", comigoPublicRoutes);
 
   // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
   // autenticado para que /api/public/* nunca exija JWT.

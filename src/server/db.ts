@@ -4037,6 +4037,10 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_comigo_pix_order ON comigo_pix_charges(organization_id, order_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar comigo_pix_charges', e); }
+  // Mesa/QR pay-first (ADR-119): origem do pedido + marca de entrega + token do QR.
+  try { db.exec(`ALTER TABLE comigo_orders ADD COLUMN source TEXT DEFAULT 'balcao'`); } catch(e){}
+  try { db.exec(`ALTER TABLE comigo_orders ADD COLUMN fulfilled_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_mesa_token TEXT`); } catch(e){}
 };
 
 initDb();

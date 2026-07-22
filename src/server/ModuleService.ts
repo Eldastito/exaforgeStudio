@@ -83,8 +83,12 @@ export class ModuleService {
       const inPlan = planMods == null || planMods.includes(key);
       const inPreset = preset.has(key);
       const isEnabled = enabled == null ? true : enabled.includes(key);
-      const section = !inPlan ? "upgrade" : (inPreset ? "recommended" : "available");
-      return { key, label: meta.label, desc: meta.desc, section, enabled: isEnabled, recommended: inPreset };
+      const isAddon = (ADDON_MODULES as readonly string[]).includes(key);
+      // Add-ons (retail/clínica/vms/radar/prospect) são OPT-IN do dono: ficam
+      // sempre ligáveis em Configurações › Módulos, independente do teto do plano
+      // (billing mockado). Quando a cobrança entrar, re-gate aqui.
+      const section = isAddon ? "available" : (!inPlan ? "upgrade" : (inPreset ? "recommended" : "available"));
+      return { key, label: meta.label, desc: meta.desc, section, enabled: isEnabled, recommended: inPreset, addon: isAddon };
     });
     return { vertical: o.vertical || null, planId: o.plan_id || null, items };
   }
@@ -104,6 +108,9 @@ export class ModuleService {
     const em = this.enabledModules(orgId);
     if (em == null) return false;
     if (!em.includes(moduleKey)) return false;
+    // Add-on ligado explicitamente vale independente do teto do plano (opt-in do
+    // dono; billing mockado). Módulos comuns continuam presos ao plano.
+    if ((ADDON_MODULES as readonly string[]).includes(moduleKey)) return true;
     const planModules = PlanService.modulesForPlan(orgId);
     if (planModules != null && !planModules.includes(moduleKey)) return false;
     return true;

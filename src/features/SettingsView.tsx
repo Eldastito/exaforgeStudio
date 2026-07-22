@@ -636,7 +636,7 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
-type ModuleOverviewItem = { key: string; label: string; desc: string; section: 'recommended' | 'available' | 'upgrade'; enabled: boolean; recommended: boolean };
+type ModuleOverviewItem = { key: string; label: string; desc: string; section: 'recommended' | 'available' | 'upgrade'; enabled: boolean; recommended: boolean; addon?: boolean };
 
 function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
   const loadOrgConfig = useStore(s => s.loadOrgConfig);
@@ -688,7 +688,7 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
     return (
       <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
         <div>
-          <p className="text-sm font-medium text-zinc-100">{m.label}</p>
+          <p className="text-sm font-medium text-zinc-100 flex items-center gap-2">{m.label}{m.addon && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">add-on</span>}</p>
           <p className="text-xs text-zinc-500">{m.desc}</p>
         </div>
         <button onClick={() => toggle(m.key)}

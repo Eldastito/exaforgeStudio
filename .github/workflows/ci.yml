@@ -217,6 +217,7 @@ jobs:
           - { name: 'alterdata-supply-mapper', script: 'test:alterdata-supply-mapper' }
           - { name: 'alterdata-sync-runner', script: 'test:alterdata-sync-runner' }
           - { name: 'alterdata-price-mapper', script: 'test:alterdata-price-mapper' }
+          - { name: 'module-addon-selfservice', script: 'test:module-addon-selfservice' }
           - { name: 'account-diagnostic', script: 'test:account-diagnostic' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }

@@ -86,6 +86,7 @@
     "test:alterdata-supply-mapper": "tsx scripts/test-alterdata-supply-mapper.ts",
     "test:alterdata-sync-runner": "tsx scripts/test-alterdata-sync-runner.ts",
     "test:alterdata-price-mapper": "tsx scripts/test-alterdata-price-mapper.ts",
+    "test:module-addon-selfservice": "tsx scripts/test-module-addon-selfservice.ts",
     "test:retail-stock": "tsx scripts/test-retail-stock.ts",
     "test:retail-commission": "tsx scripts/test-retail-commission.ts",
     "test:retail-dashboard": "tsx scripts/test-retail-dashboard.ts",

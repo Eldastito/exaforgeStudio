@@ -36,6 +36,7 @@ import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
 import { LegalAdvisorView } from '@/src/features/LegalAdvisorView';
 import { CashView } from '@/src/features/CashView';
+import { HealthCenterView } from '@/src/features/HealthCenterView';
 import { ComigoView } from '@/src/features/ComigoView';
 import { LoginView } from '@/src/features/LoginView';
 import { OnboardingView } from '@/src/features/OnboardingView';
@@ -265,6 +266,7 @@ export default function App() {
              {viewMode === 'reports' && 'Relatórios'}
              {viewMode === 'juridico' && 'Consultora Jurídica'}
              {viewMode === 'caixa' && 'Caixa'}
+             {viewMode === 'saude' && 'Central de Saúde'}
              {viewMode === 'reservas' && 'Reservas'}
              {viewMode === 'assinaturas' && 'Assinaturas'}
              {viewMode === 'compras' && 'Compras'}
@@ -376,6 +378,7 @@ export default function App() {
           {viewMode === 'reports' && <ReportsPanel />}
           {viewMode === 'juridico' && <LegalAdvisorView />}
           {viewMode === 'caixa' && <CashView />}
+          {viewMode === 'saude' && <HealthCenterView />}
           {viewMode === 'reservas' && <ReservasView />}
           {viewMode === 'assinaturas' && <AssinaturasView />}
           {viewMode === 'compras' && <ProcurementView />}

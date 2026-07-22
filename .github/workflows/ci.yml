@@ -199,6 +199,7 @@ jobs:
           - { name: 'comigo-module', script: 'test:comigo-module' }
           - { name: 'comigo-pricing', script: 'test:comigo-pricing' }
           - { name: 'comigo-balcao', script: 'test:comigo-balcao' }
+          - { name: 'comigo-caderneta', script: 'test:comigo-caderneta' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

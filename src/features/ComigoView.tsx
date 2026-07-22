@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -78,10 +78,7 @@ export function ComigoView() {
           <Placeholder icon={Calculator} title="Precificação"
             desc="O motor já calcula custo, preço sugerido e recalibra pelo real (API pronta no PR #2). O formulário da ficha entra no próximo incremento." />
         )}
-        {tab === 'caderneta' && (
-          <Placeholder icon={BookUser} title="Caderneta"
-            desc="Quem te deve, limite de cada um, lista negra e cobrança amigável. Chega no PR #4 — o saldo já é rastreado pelo Balcão." />
-        )}
+        {tab === 'caderneta' && <Caderneta onChange={loadOverview} />}
       </div>
     </div>
   );
@@ -233,6 +230,109 @@ function Balcao({ onChange }: { onChange: () => void }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Caderneta: quem me deve, receber, lista negra, cobrança cortês ───────────
+type FiadoCustomer = {
+  contact_id: string; name: string; phone: string; balance: number; credit_limit: number;
+  blacklisted: number; block_all_sales: number; blacklistSuggested: boolean; daysOverdue: number; reminders: number;
+};
+type Summary = { caixaHoje: number; aReceber: number; ticketMedio: number; pedidosHoje: number };
+
+function Caderneta({ onChange }: { onChange: () => void }) {
+  const [customers, setCustomers] = useState<FiadoCustomer[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    apiFetch('/api/comigo/fiado').then((r) => r.json()).then((r: any) => setCustomers(r?.customers || [])).catch(() => {});
+    apiFetch('/api/comigo/summary').then((r) => r.json()).then((r: any) => setSummary(r)).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (url: string, body?: any, method = 'POST') => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      const out = await r.json().catch(() => ({}));
+      load(); onChange();
+      return out;
+    } catch { toast.error('Não consegui concluir.'); return null; }
+    finally { setBusy(false); }
+  };
+
+  const receber = (c: FiadoCustomer) => {
+    const v = window.prompt(`Receber de ${c.name} (saldo ${brl(c.balance)}). Quanto?`, String(c.balance));
+    if (v == null) return;
+    const amount = Number(v.replace(',', '.'));
+    if (!(amount > 0)) return;
+    act(`/api/comigo/fiado/${c.contact_id}/settle`, { amount }).then((o) => o && toast.success('Recebimento anotado.'));
+  };
+  const lembrar = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/remind`).then((o) => {
+    if (o?.waLink) window.open(o.waLink, '_blank');
+    else if (o?.text) { navigator.clipboard?.writeText(o.text); toast.success('Mensagem copiada (sem telefone p/ link).'); }
+  });
+  const setLimite = (c: FiadoCustomer) => {
+    const v = window.prompt(`Limite de fiado de ${c.name}:`, String(c.credit_limit || 0));
+    if (v == null) return;
+    act(`/api/comigo/fiado/${c.contact_id}/credit`, { limit: Number(v.replace(',', '.')) || 0 }, 'PUT');
+  };
+  const toggleBlacklist = (c: FiadoCustomer) => {
+    if (!c.blacklisted && !window.confirm(`Colocar ${c.name} na lista negra? Para de dar fiado (mas segue vendendo à vista).`)) return;
+    act(`/api/comigo/fiado/${c.contact_id}/blacklist`, { on: !c.blacklisted, reason: 'definido pelo dono' });
+  };
+  const toggleBlockAll = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: !c.block_all_sales });
+
+  return (
+    <div className="space-y-4">
+      {/* Caixa × a receber (ADR-112 D3) */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-emerald-400/80">Caixa hoje</div>
+          <div className="text-lg font-semibold text-emerald-200 mt-1">{summary ? brl(summary.caixaHoje) : '—'}</div>
+        </div>
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-amber-400/80">A receber (fiado)</div>
+          <div className="text-lg font-semibold text-amber-200 mt-1">{summary ? brl(summary.aReceber) : '—'}</div>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500">Ticket médio</div>
+          <div className="text-lg font-semibold text-zinc-100 mt-1">{summary ? brl(summary.ticketMedio) : '—'}</div>
+        </div>
+      </div>
+
+      {customers.length === 0 ? (
+        <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Ninguém no fiado ainda.</div>
+      ) : (
+        <div className="space-y-2">
+          {customers.map((c) => (
+            <div key={c.contact_id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-sm text-zinc-100 flex items-center gap-2 flex-wrap">
+                    {c.name || 'Cliente'}
+                    {!!c.blacklisted && <span className="text-[10px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5 py-0.5">lista negra</span>}
+                    {!!c.block_all_sales && <span className="text-[10px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5 py-0.5">venda suspensa</span>}
+                    {c.blacklistSuggested && <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5">sugerido p/ lista negra ({c.daysOverdue}d)</span>}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-0.5">Deve <span className="text-amber-300 font-medium">{brl(c.balance)}</span> · limite {brl(c.credit_limit)}{c.reminders > 0 ? ` · ${c.reminders} lembrete(s)` : ''}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <button disabled={busy || c.balance <= 0} onClick={() => receber(c)} className="text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 disabled:opacity-40">Receber</button>
+                <button disabled={busy || c.balance <= 0} onClick={() => lembrar(c)} className="text-xs rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 disabled:opacity-40 inline-flex items-center gap-1"><MessageCircle className="w-3 h-3" /> Lembrete gentil</button>
+                <button disabled={busy} onClick={() => setLimite(c)} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1">Limite</button>
+                <button disabled={busy} onClick={() => toggleBlacklist(c)} className={`text-xs rounded-lg px-2.5 py-1 border ${c.blacklisted ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800' : 'border-red-500/40 text-red-300 hover:bg-red-500/10'}`}>{c.blacklisted ? 'Tirar da lista' : 'Lista negra'}</button>
+                {!!c.blacklisted && (
+                  <button disabled={busy} onClick={() => toggleBlockAll(c)} className={`text-xs rounded-lg px-2.5 py-1 border ${c.block_all_sales ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800' : 'border-red-500/40 text-red-300 hover:bg-red-500/10'}`}>{c.block_all_sales ? 'Liberar à vista' : 'Suspender à vista'}</button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

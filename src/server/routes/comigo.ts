@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { AuthRequest } from "../middleware/auth.js";
 import { ComigoPricingService } from "../ComigoPricingService.js";
 import { BalcaoService } from "../BalcaoService.js";
+import { ComigoCollectionService } from "../ComigoCollectionService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -247,17 +248,45 @@ router.post("/orders/:id/cancel", (req: AuthRequest, res): any => {
   res.json({ ok: true });
 });
 
-// GET /api/comigo/fiado — clientes com saldo/limite/lista negra (base da Caderneta).
+// GET /api/comigo/fiado — clientes com saldo/limite/lista negra (a Caderneta).
+// Inclui `blacklistSuggested` (ADR-113 D1): a IA SUGERE após N dias de dívida
+// vencida; quem marca é o dono. `daysOverdue` = idade da dívida mais antiga.
 router.get("/fiado", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const suggestDays = Number((db.prepare("SELECT comigo_blacklist_suggest_days FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.comigo_blacklist_suggest_days) || 20;
   const rows = db.prepare(`
     SELECT cc.contact_id, ct.name, ct.identifier AS phone, cc.credit_limit, cc.blacklisted, cc.block_all_sales,
-           COALESCE((SELECT SUM(CASE WHEN kind='debt' THEN amount ELSE -amount END) FROM comigo_fiado_ledger l WHERE l.organization_id = cc.organization_id AND l.contact_id = cc.contact_id), 0) AS balance
+           COALESCE((SELECT SUM(CASE WHEN kind='debt' THEN amount ELSE -amount END) FROM comigo_fiado_ledger l WHERE l.organization_id = cc.organization_id AND l.contact_id = cc.contact_id), 0) AS balance,
+           (SELECT MIN(created_at) FROM comigo_fiado_ledger l WHERE l.organization_id = cc.organization_id AND l.contact_id = cc.contact_id AND l.kind='debt') AS oldest_debt,
+           (SELECT COUNT(*) FROM comigo_fiado_reminders r WHERE r.organization_id = cc.organization_id AND r.contact_id = cc.contact_id) AS reminders
     FROM comigo_customer_credit cc LEFT JOIN contacts ct ON ct.id = cc.contact_id
     WHERE cc.organization_id = ? ORDER BY balance DESC
-  `).all(orgId);
-  res.json({ customers: rows });
+  `).all(orgId) as any[];
+  const customers = rows.map((r) => {
+    const daysOverdue = r.oldest_debt ? Math.floor((Date.now() - new Date(r.oldest_debt + "Z").getTime()) / 86400000) : 0;
+    return { ...r, daysOverdue, blacklistSuggested: !r.blacklisted && r.balance > 0 && daysOverdue >= suggestDays };
+  });
+  res.json({ customers, suggestDays });
+});
+
+// GET /api/comigo/summary?date=YYYY-MM-DD — caixa × a receber (ADR-112 D3).
+// Caixa = só o RECEBIDO (à vista + fiado quitado). Fiado em aberto é a receber,
+// não infla o caixa. Deriva ticket médio das vendas do dia.
+router.get("/summary", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+  res.json(BalcaoService.daySummary(orgId, date));
+});
+
+// POST /api/comigo/fiado/:contactId/remind — cobrança amigável (texto + wa.me).
+router.post("/fiado/:contactId/remind", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const built = ComigoCollectionService.record(orgId, req.params.contactId, req.body?.level, req.user?.userId);
+  audit(orgId, req.user?.userId, req.params.contactId, "comigo_fiado_remind", { level: built.level });
+  res.json(built);
 });
 
 // POST /api/comigo/fiado/:contactId/settle — recebe (total/parcial).

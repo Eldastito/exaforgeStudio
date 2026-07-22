@@ -86,6 +86,12 @@ async function main() {
   check("histórico/Impact Ledger reflete a ação aplicada", ov2.ledger.items.some((it: any) => it.title === p0.title) && ov2.ledger.expected >= p0.impact - 0.01);
   check("histórico é o Impact Ledger unificado (mesma origem da ADR-125)", typeof ov2.ledger.expected === "number" && typeof ov2.ledger.realized === "number");
 
+  // ===== 4c. Qualidade dos dados + howTo + narrativa (Fatia 3) =====
+  check("toda prioridade traz o 'como fazer' (Tutor)", ov2.priorities.every((p: any) => typeof p.howTo === "string" && p.howTo.length > 10));
+  check("checklist de qualidade dos dados presente", Array.isArray(ov2.dataQuality?.items) && ov2.dataQuality.items.length >= 4);
+  check("qualidade alta com caixa+pagar+meta+vendas informados", ov2.dataQuality.pct >= 80 && ov2.dataQuality.level === "alta");
+  check("narrativa do Diretor preenchida", typeof ov2.narrative === "string" && ov2.narrative.length > 20 && /negócio está/i.test(ov2.narrative));
+
   // ===== 5. Org vazia: sem falso alarme + isolamento =====
   const empty = mkOrg("Vazia");
   const ovE = H.overview(empty, 0);

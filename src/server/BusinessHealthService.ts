@@ -30,7 +30,16 @@ export interface Priority {
   interpretacao: string;
   risco: string;
   action: { view: string; label: string };
+  howTo?: string;
 }
+
+// "Como fazer" por origem — passo prático (modo Tutor, zero-token).
+const HOWTO: Record<Priority["source"], string> = {
+  caixa: "Abra o Plano de Caixa: comece cobrando o que já é seu e negociando as contas da semana crítica antes de dar desconto.",
+  recebiveis: "Na Caderneta, mande o lembrete gentil (a cobrança cortês já vem pronta) e combine o pagamento — sem expor ninguém.",
+  perdas: "Nos Relatórios, veja o diagnóstico de perdas: o driver que mais pesa já vem com uma sugestão específica de redução.",
+  rie: "No Revenue Intelligence, gere a ação de recuperação (rascunho) para os leads, orçamentos e carrinhos parados.",
+};
 
 export class BusinessHealthService {
   /** Snapshot leve do RIE (pode estar desativado/vazio) — nunca derruba a síntese. */
@@ -108,7 +117,41 @@ export class BusinessHealthService {
       });
     }
 
-    return cands.sort((a, b) => b.impact - a.impact).slice(0, 3);
+    return cands.sort((a, b) => b.impact - a.impact).slice(0, 3).map((p) => ({ ...p, howTo: HOWTO[p.source] }));
+  }
+
+  /**
+   * Checklist de qualidade dos dados (ADR-126 Fatia 3): mostra o que já foi
+   * informado e o que falta — quanto mais completo, mais confiável o diagnóstico.
+   */
+  static dataQuality(orgId: string) {
+    const hasCash = ((db.prepare("SELECT COUNT(*) c FROM cash_events WHERE organization_id = ?").get(orgId) as any).c > 0)
+      || ((db.prepare("SELECT COUNT(*) c FROM cash_accounts WHERE organization_id = ? AND current_balance <> 0").get(orgId) as any).c > 0);
+    const items = [
+      { key: "caixa", label: "Saldo/movimento de caixa informado", ok: hasCash },
+      { key: "pagar", label: "Contas a pagar cadastradas", ok: FinancialLedgerService.listPayables(orgId, "open").length > 0 },
+      { key: "receber", label: "Contas a receber / fiado", ok: FinancialLedgerService.listReceivables(orgId, "open").length > 0 || FinancialLedgerService.fiadoOutstanding(orgId) > 0 },
+      { key: "meta_perda", label: "Meta de perda aceitável definida", ok: LossMarginService.config(orgId).acceptablePct > 0 },
+      { key: "vendas", label: "Vendas registradas no mês", ok: LossMarginService.monthlyRevenue(orgId, new Date().toISOString().slice(0, 7)) > 0 },
+    ];
+    const done = items.filter((i) => i.ok).length;
+    const pct = Math.round((done / items.length) * 100);
+    const level = pct >= 80 ? "alta" : pct >= 40 ? "media" : "baixa";
+    return { items, done, total: items.length, pct, level };
+  }
+
+  /**
+   * Narrativa "do Diretor" (ADR-126 Fatia 3): leitura em linguagem natural do
+   * status + a primeira prioridade + a qualidade dos dados. Determinística
+   * (zero-token) por padrão; a narração rica via LLM (Diretor IA) pluga sob
+   * demanda quando o módulo está ligado.
+   */
+  static narrative(orgId: string, ctx: { statusLabel: string; synthesis: string; priorities: Priority[]; dataQuality: any }) {
+    const p = ctx.priorities[0];
+    const parts = [`Hoje seu negócio está ${ctx.statusLabel.toLowerCase()}.`, ctx.synthesis];
+    if (p?.howTo) parts.push(`Passo prático: ${p.howTo}`);
+    if (ctx.dataQuality.level !== "alta") parts.push(`Obs.: com ${ctx.dataQuality.pct}% dos dados informados, trate os números como estimativa — complete o checklist para eu ficar mais preciso.`);
+    return parts.join(" ");
   }
 
   // Mapeia a ORIGEM da prioridade para o tipo de ação do Impact Ledger (ADR-125).
@@ -149,11 +192,16 @@ export class BusinessHealthService {
     if (st.status === "saudavel") synthesis = "Sem alertas hoje. Siga cuidando do caixa e das vendas.";
     else if (priorities[0]) synthesis = `${st.triggers[0]?.label || "Há pontos de atenção."} Comece por: ${priorities[0].title.toLowerCase()}.`;
     else synthesis = st.triggers[0]?.label || "Há pontos de atenção.";
+    const statusLabel = label[st.status];
+    const dataQuality = this.dataQuality(orgId);
+    const narrative = this.narrative(orgId, { statusLabel, synthesis, priorities, dataQuality });
     return {
       status: st.status,
-      statusLabel: label[st.status],
+      statusLabel,
       triggers: st.triggers,
       synthesis,
+      narrative,
+      dataQuality,
       priorities: priorities.map((p) => ({ ...p, inPlan: open.has(p.title) })),
       ledger: this.history(orgId),
       kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },

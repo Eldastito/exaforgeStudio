@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X } from 'lucide-react';
+import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
@@ -23,6 +23,8 @@ export function HealthCenterView() {
   const setViewMode = useStore((s) => s.setViewMode);
 
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'tutor' | 'gestor'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('healthMode') === 'gestor' ? 'gestor' : 'tutor'));
+  const setModePersist = (m: 'tutor' | 'gestor') => { setMode(m); try { localStorage.setItem('healthMode', m); } catch { /* noop */ } };
   const load = useCallback(() => {
     setLoading(true);
     apiFetch('/api/health-center').then((r) => r.json()).then((x: any) => setD(x)).catch(() => {}).finally(() => setLoading(false));
@@ -51,11 +53,17 @@ export function HealthCenterView() {
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
       <div className="mx-auto max-w-3xl px-4 py-6">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/30 p-2.5"><HeartPulse className="w-6 h-6 text-indigo-300" /></div>
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-100">Central de Saúde</h2>
-            <p className="text-sm text-zinc-400">O que mudou, por que importa e o que fazer primeiro — no máximo 3 prioridades por dia.</p>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/30 p-2.5"><HeartPulse className="w-6 h-6 text-indigo-300" /></div>
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-100">Central de Saúde</h2>
+              <p className="text-sm text-zinc-400">O que mudou, por que importa e o que fazer primeiro — no máximo 3 prioridades por dia.</p>
+            </div>
+          </div>
+          <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[11px] shrink-0">
+            <button onClick={() => setModePersist('tutor')} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${mode === 'tutor' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}><GraduationCap className="w-3.5 h-3.5" /> Tutor</button>
+            <button onClick={() => setModePersist('gestor')} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${mode === 'gestor' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Gestor</button>
           </div>
         </div>
 
@@ -74,6 +82,14 @@ export function HealthCenterView() {
             </ul>
           )}
         </div>
+
+        {/* Narrativa do Diretor (modo Tutor) */}
+        {mode === 'tutor' && d?.narrative && (
+          <div className="mt-3 flex items-start gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
+            <Sparkles className="w-4 h-4 text-indigo-300 mt-0.5 shrink-0" />
+            <p className="text-[13px] text-zinc-200">{d.narrative}</p>
+          </div>
+        )}
 
         {/* KPIs rápidos */}
         <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[13px]">
@@ -100,6 +116,7 @@ export function HealthCenterView() {
                       </div>
                       <div className="mt-1 text-[12px] text-zinc-400">{p.fato}</div>
                       <div className="mt-0.5 text-[12px] text-zinc-500">{p.interpretacao} <span className="text-amber-300/80">{p.risco}</span></div>
+                      {mode === 'tutor' && p.howTo && <div className="mt-1 text-[12px] text-indigo-200/90 flex items-start gap-1"><GraduationCap className="w-3.5 h-3.5 mt-0.5 shrink-0 opacity-70" />{p.howTo}</div>}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-[15px] font-semibold text-indigo-200">{brl(p.impact)}</div>
@@ -121,6 +138,25 @@ export function HealthCenterView() {
             </ol>
           )}
         </div>
+
+        {/* Qualidade dos dados — quanto mais completo, mais confiável (ADR-126 Fatia 3) */}
+        {d?.dataQuality && d.dataQuality.level !== 'alta' && (
+          <div className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h3 className="text-sm font-medium text-amber-100 flex items-center gap-2"><ClipboardList className="w-4 h-4" /> Complete seus dados ({d.dataQuality.pct}%)</h3>
+              <span className="text-[11px] text-amber-200/80">confiança do diagnóstico: {d.dataQuality.level}</span>
+            </div>
+            <p className="text-[11px] text-zinc-400 mb-2">Enquanto faltam dados, trate os números como estimativa. Cada item marcado deixa o diagnóstico mais preciso.</p>
+            <div className="grid sm:grid-cols-2 gap-1.5">
+              {d.dataQuality.items.map((it: any) => (
+                <div key={it.key} className={`flex items-center gap-1.5 text-[12px] ${it.ok ? 'text-emerald-300' : 'text-zinc-400'}`}>
+                  {it.ok ? <Check className="w-3.5 h-3.5 shrink-0" /> : <Circle className="w-3.5 h-3.5 shrink-0 opacity-50" />}
+                  {it.label}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Histórico de recomendações — Impact Ledger unificado (ADR-125/126) */}
         {d?.ledger?.items?.length > 0 && (

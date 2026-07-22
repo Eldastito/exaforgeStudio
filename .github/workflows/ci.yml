@@ -14,6 +14,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# O postinstall do puppeteer (dependência transitiva) baixa o Chrome no `npm ci`
+# e falha por rede (ECONNRESET) de forma intermitente, derrubando jobs sem
+# relação com a mudança. Nenhum código/teste do repo usa o browser do puppeteer,
+# então pulamos o download — remove o flake sem perder cobertura.
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
 jobs:
   build:
     name: Build + typecheck

@@ -116,14 +116,14 @@ function checkInventoryCoverage(orgId: string): CheckItem {
   try {
     // Aproximação: quantos produtos ativos estão sem estoque.
     const totalRow = db.prepare(
-      `SELECT COUNT(*) AS n FROM products_services WHERE organization_id = ? AND status = 'active'`
+      `SELECT COUNT(*) AS n FROM products_services WHERE organization_id = ? AND active = 1`
     ).get(orgId) as any;
     const total = Number(totalRow?.n) || 0;
     if (total === 0) return { key: "inventory", label: "Estoque com cobertura?", status: "unknown", evidence: `Sem produtos ativos cadastrados.` };
     const outRow = db.prepare(
       `SELECT COUNT(*) AS n FROM products_services p
-        WHERE p.organization_id = ? AND p.status = 'active'
-          AND COALESCE((SELECT SUM(stock_quantity) FROM inventory_items i WHERE i.product_id = p.id), 0) <= 0`
+        WHERE p.organization_id = ? AND p.active = 1
+          AND COALESCE((SELECT SUM(quantity_available) FROM inventory_items i WHERE i.product_service_id = p.id), 0) <= 0`
     ).get(orgId) as any;
     const out = Number(outRow?.n) || 0;
     const outPct = (out / total) * 100;

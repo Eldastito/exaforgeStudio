@@ -3337,6 +3337,30 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_products_external_ref ON products_services(organization_id, external_ref);
       CREATE INDEX IF NOT EXISTS idx_variants_external_ref ON product_variants(organization_id, external_ref);
 
+      -- PERFORMANCE (auditoria 2026): índices nas tabelas mais quentes que
+      -- estavam sem cobertura. Puramente ADITIVOS (não mudam resultado de query);
+      -- SQLite constrói sem lock relevante nesta escala. Ver docs/PERFORMANCE-AUDIT.md.
+      -- messages: carga do histórico do chat + last-message do inbox (mais quente)
+      CREATE INDEX IF NOT EXISTS idx_messages_ticket_created ON messages (ticket_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_org_sender ON messages (organization_id, sender_type, ticket_id);
+      -- tickets: lista do inbox + "último ticket do contato" (caminho de toda msg recebida)
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_status_updated ON tickets (organization_id, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_contact_created ON tickets (organization_id, contact_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_assignee ON tickets (organization_id, assigned_to);
+      -- contacts: lookup por identifier a cada mensagem recebida
+      CREATE INDEX IF NOT EXISTS idx_contacts_org_identifier ON contacts (organization_id, identifier);
+      -- products_services: leitura do catálogo (type='product' AND active=1)
+      CREATE INDEX IF NOT EXISTS idx_products_org_type_active ON products_services (organization_id, type, active);
+      -- inventory_items: JOIN por produto + varredura de estoque baixo
+      CREATE INDEX IF NOT EXISTS idx_inventory_org_product ON inventory_items (organization_id, product_service_id);
+      -- appointments: agenda/conflito + histórico do contato
+      CREATE INDEX IF NOT EXISTS idx_appointments_org_status_start ON appointments (organization_id, status, scheduled_start);
+      CREATE INDEX IF NOT EXISTS idx_appointments_org_contact ON appointments (organization_id, contact_id);
+      -- audit_logs: tabela de crescimento ilimitado
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created ON audit_logs (organization_id, created_at);
+      -- order_items: agregação de mais vendidos por org
+      CREATE INDEX IF NOT EXISTS idx_order_items_org ON order_items (organization_id);
+
       CREATE TABLE IF NOT EXISTS fashion_tryon_jobs (
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL,

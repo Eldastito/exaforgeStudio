@@ -45,8 +45,10 @@ export function ComigoView() {
   // Sem arquétipo definido: o tutor abre com as 3 perguntas (ADR-120).
   if (arch && arch.configured === false) {
     return (
-      <div className="p-4 md:p-6 max-w-lg mx-auto">
-        <ArchetypeOnboarding onDone={() => { loadArch(); loadOverview(); }} />
+      <div className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
+        <div className="max-w-lg mx-auto">
+          <ArchetypeOnboarding onDone={() => { loadArch(); loadOverview(); }} />
+        </div>
       </div>
     );
   }
@@ -57,7 +59,8 @@ export function ComigoView() {
   const activeTab = tab === 'mesa' && mesaHidden ? 'balcao' : tab;
 
   return (
-    <div className="p-4 md:p-6 max-w-4xl mx-auto">
+    <div className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
+      <div className="max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-1">
         <span className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
           <HandCoins className="w-5 h-5 text-emerald-300" />
@@ -129,6 +132,7 @@ export function ComigoView() {
         )}
         {activeTab === 'caderneta' && <Caderneta onChange={loadOverview} />}
         {activeTab === 'divulgar' && <Divulgar />}
+      </div>
       </div>
     </div>
   );

@@ -34,6 +34,19 @@ export class ComigoMesaService {
     return o?.organization_id || null;
   }
 
+  /** Marca do dono para a vitrine da Mesa (reusa a da loja; fallback na org). */
+  static brand(orgId: string) {
+    const sf = db.prepare("SELECT title, subtitle, logo_url, banner_url, accent_color FROM storefront_settings WHERE organization_id = ?").get(orgId) as any || {};
+    const org = db.prepare("SELECT business_name, logo_url FROM organization_settings WHERE organization_id = ?").get(orgId) as any || {};
+    return {
+      name: sf.title || org.business_name || "Cardápio",
+      subtitle: sf.subtitle || null,
+      logo: sf.logo_url || org.logo_url || null,
+      banner: sf.banner_url || null,
+      accent: sf.accent_color || "#10b981",
+    };
+  }
+
   /** Cardápio: produtos ativos com preço do servidor. */
   static menu(orgId: string) {
     const rows = db.prepare(

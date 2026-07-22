@@ -7,11 +7,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
 type MenuItem = { id: string; name: string; price: number; image?: string | null; description?: string | null };
+type Brand = { name: string; subtitle?: string | null; logo?: string | null; banner?: string | null; accent?: string | null };
 type Placed = { orderId: string; total: number; txid?: string; qrPayload?: string; fiado?: boolean };
 
 export function ComigoMesaPage() {
   const token = useMemo(() => window.location.pathname.split('/')[2] || '', []);
   const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [brand, setBrand] = useState<Brand | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [alias, setAlias] = useState('');
   const [phone, setPhone] = useState('');
@@ -25,7 +27,7 @@ export function ComigoMesaPage() {
 
   useEffect(() => {
     fetch(`/api/public/comigo/${token}/menu`).then((r) => r.json()).then((r) => {
-      if (Array.isArray(r?.items)) setMenu(r.items); else setErr('Cardápio não encontrado.');
+      if (Array.isArray(r?.items)) { setMenu(r.items); setBrand(r.brand || null); } else setErr('Cardápio não encontrado.');
     }).catch(() => setErr('Não consegui carregar o cardápio.')).finally(() => setLoading(false));
   }, [token]);
 
@@ -73,10 +75,33 @@ export function ComigoMesaPage() {
   }, [placed, paid, token]);
 
   const S = STYLES;
+  const accent = brand?.accent || '#10b981';
   return (
     <div style={S.page}>
       <div style={S.wrap}>
-        <h1 style={S.h1}>🍽️ Faça seu pedido</h1>
+        {/* Cabeçalho com a marca do dono (banner ou logo + nome) */}
+        {brand?.banner ? (
+          <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', marginBottom: 14, border: '1px solid #27272a' }}>
+            <img src={brand.banner} alt={brand.name} style={{ width: '100%', display: 'block', maxHeight: 180, objectFit: 'cover' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.75))', display: 'flex', alignItems: 'flex-end', padding: 14, gap: 10 }}>
+              {brand.logo ? <img src={brand.logo} alt="" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover', border: '2px solid rgba(255,255,255,0.85)' }} /> : null}
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>{brand.name}</div>
+                {brand.subtitle ? <div style={{ fontSize: 12, color: '#e4e4e7' }}>{brand.subtitle}</div> : null}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            {brand?.logo
+              ? <img src={brand.logo} alt={brand.name} style={{ width: 48, height: 48, borderRadius: 12, objectFit: 'cover', border: `2px solid ${accent}` }} />
+              : <div style={{ width: 48, height: 48, borderRadius: 12, background: accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>🍽️</div>}
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1 }}>{brand?.name || 'Faça seu pedido'}</div>
+              <div style={{ fontSize: 12, color: '#a1a1aa' }}>{brand?.subtitle || 'Escolha, peça e pague por aqui 😋'}</div>
+            </div>
+          </div>
+        )}
 
         {loading && <p style={{ color: '#a1a1aa' }}>Carregando cardápio…</p>}
         {err && <p style={S.err}>{err}</p>}
@@ -131,7 +156,7 @@ export function ComigoMesaPage() {
                   ))}
                 </div>
 
-                <button onClick={() => order('pix')} disabled={busy} style={{ ...S.btnPay, background: '#10b981', opacity: busy ? 0.6 : 1 }}>
+                <button onClick={() => order('pix')} disabled={busy} style={{ ...S.btnPay, background: accent, opacity: busy ? 0.6 : 1 }}>
                   Pagar {brl(total)} no Pix • {count} {count === 1 ? 'item' : 'itens'}
                 </button>
 

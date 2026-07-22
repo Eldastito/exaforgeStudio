@@ -213,6 +213,7 @@ jobs:
           - { name: 'storefront-looks', script: 'test:storefront-looks' }
           - { name: 'storefront-look-generation', script: 'test:storefront-look-generation' }
           - { name: 'alterdata-connector', script: 'test:alterdata-connector' }
+          - { name: 'alterdata-sync', script: 'test:alterdata-sync' }
           - { name: 'account-diagnostic', script: 'test:account-diagnostic' }
           - { name: 'store-checkout-frictionless', script: 'test:store-checkout-frictionless' }
           - { name: 'sales-report-vertical', script: 'test:sales-report-vertical' }

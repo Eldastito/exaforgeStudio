@@ -84,6 +84,7 @@
     "test:retail-responsibles": "tsx scripts/test-retail-responsibles.ts",
     "test:alterdata-sync": "tsx scripts/test-alterdata-sync.ts",
     "test:alterdata-supply-mapper": "tsx scripts/test-alterdata-supply-mapper.ts",
+    "test:alterdata-sync-runner": "tsx scripts/test-alterdata-sync-runner.ts",
     "test:retail-stock": "tsx scripts/test-retail-stock.ts",
     "test:retail-commission": "tsx scripts/test-retail-commission.ts",
     "test:retail-dashboard": "tsx scripts/test-retail-dashboard.ts",

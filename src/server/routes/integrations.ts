@@ -12,6 +12,7 @@ import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReportsService } from "../ReportsService.js";
 import { AlterdataConnectorService } from "../AlterdataConnectorService.js";
+import { AlterdataSyncRunner } from "../AlterdataSyncRunner.js";
 
 const router = Router();
 
@@ -480,6 +481,19 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
   });
   logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SETTINGS_UPDATED', { enabled: !!b.enabled, environment: b.environment });
   res.json(AlterdataConnectorService.publicSettings(req.organizationId));
+});
+
+// Dispara o sync (backfill + delta) da org sob demanda (ADR-105, Fase 1c).
+// owner/admin. Retorna o resumo (referências/variantes/saldos).
+router.post("/alterdata/sync", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const summary = await AlterdataSyncRunner.runOrg(req.organizationId);
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SYNC_MANUAL', { referencias: summary.referencias, variantes: summary.variantes });
+    res.json({ ok: true, summary });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao sincronizar com a Alterdata." });
+  }
 });
 
 // Testa a emissão do token no Guardian com as credenciais gravadas (ADR-105).

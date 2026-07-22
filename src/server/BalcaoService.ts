@@ -198,6 +198,34 @@ export class BalcaoService {
   static setBlockAllSales(orgId: string, contactId: string, on: boolean) {
     this.upsertCredit(orgId, contactId, { block_all_sales: on ? 1 : 0 });
   }
+
+  // ── Resumo do dia: caixa × a receber (ADR-112 D3) ───────────────────────────
+  static totalReceivable(orgId: string): number {
+    const debt = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='debt'").get(orgId) as any).s;
+    const paid = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='payment'").get(orgId) as any).s;
+    return Math.max(0, round2(debt - paid));
+  }
+
+  /**
+   * Caixa = só o RECEBIDO (à vista + fiado quitado). Fiado em aberto é "a
+   * receber", NÃO infla o caixa (senão o termômetro mente). Ticket médio deriva
+   * das vendas do dia (à vista + o que foi anotado no fiado).
+   */
+  static daySummary(orgId: string, date: string) {
+    const cash = db.prepare("SELECT COALESCE(SUM(total),0) s, COUNT(*) c FROM comigo_orders WHERE organization_id = ? AND status='paid' AND paid_via IN ('cash','pix_manual') AND date(paid_at) = ?").get(orgId, date) as any;
+    const settled = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='payment' AND date(created_at) = ?").get(orgId, date) as any).s;
+    const fiado = db.prepare("SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM comigo_fiado_ledger WHERE organization_id = ? AND kind='debt' AND date(created_at) = ?").get(orgId, date) as any;
+    const vendasHoje = round2(cash.s + fiado.s);
+    const pedidosHoje = (cash.c || 0) + (fiado.c || 0);
+    return {
+      date,
+      caixaHoje: round2(cash.s + settled),
+      aReceber: this.totalReceivable(orgId),
+      vendasHoje,
+      pedidosHoje,
+      ticketMedio: pedidosHoje ? round2(vendasHoje / pedidosHoje) : 0,
+    };
+  }
 }
 
 export default BalcaoService;

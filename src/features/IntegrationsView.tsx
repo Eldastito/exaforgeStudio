@@ -776,7 +776,14 @@ function AlterdataConnectorPanel() {
           </select>
         </label>
         <label className="text-xs text-zinc-400">Padrão de URL dos módulos
-          <input className={inputCls} value={basePattern} onChange={e => setBasePattern(e.target.value)} placeholder="toulon-{module}.apimodaup.com.br" />
+          <input className={inputCls} value={basePattern} onChange={e => setBasePattern(e.target.value)} placeholder="toulon-fq-grande-rio-{module}.apimodaup.com.br" />
+          {basePattern.includes('{module}') ? (
+            <div className="mt-1 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-[11px] text-zinc-500 space-y-0.5">
+              <div>SUPPLY → <span className="text-zinc-300">https://{basePattern.replace('{module}', 'supply').replace(/^https?:\/\//, '').replace(/\/$/, '')}</span></div>
+              <div>PRICES → <span className="text-zinc-300">https://{basePattern.replace('{module}', 'price').replace(/^https?:\/\//, '').replace(/\/$/, '')}</span></div>
+              <div className="text-zinc-600">Confira se batem com as URLs que a Alterdata enviou (o <code>{'{module}'}</code> vira supply/price automaticamente).</div>
+            </div>
+          ) : <span className="mt-1 block text-[11px] text-amber-300/80">Use o marcador <code>{'{module}'}</code> — ele vira supply/price. Ex.: toulon-fq-grande-rio-{'{module}'}.apimodaup.com.br</span>}
         </label>
         <label className="text-xs text-zinc-400">Tabela de preço (módulo Price)
           <input className={inputCls} value={priceTable} onChange={e => setPriceTable(e.target.value)} placeholder="nº da tabela de preço da rede (ex.: 1)" />

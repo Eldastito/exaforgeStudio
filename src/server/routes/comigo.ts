@@ -5,6 +5,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { ComigoPricingService } from "../ComigoPricingService.js";
 import { BalcaoService } from "../BalcaoService.js";
 import { ComigoCollectionService } from "../ComigoCollectionService.js";
+import { AiGovernanceService } from "../AiGovernanceService.js";
 import { ComigoHealthService, Period } from "../ComigoHealthService.js";
 import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
 import { ComigoPixService } from "../ComigoPixService.js";
@@ -467,6 +468,21 @@ router.post("/fiado/:contactId/blacklist", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const on = !!req.body?.on;
+  // Governança de IA (ADR-130): bloquear um cliente afeta uma PESSOA — a IA só
+  // sugere; aplicar exige decisão humana com MOTIVO registrado (guardrail de viés).
+  if (on) {
+    try {
+      AiGovernanceService.recordDecision(orgId, {
+        kind: "fiado_blacklist", subjectId: req.params.contactId, decision: "applied",
+        actorId: req.user?.userId, reason: req.body?.reason, suggestedBy: req.body?.suggested ? "ai" : "human",
+      });
+    } catch (e: any) {
+      if (e?.code === "human_decision_required") return res.status(400).json({ error: "human_decision_required", message: "Bloquear um cliente exige um motivo — é uma decisão humana registrada." });
+      throw e;
+    }
+  } else {
+    try { AiGovernanceService.recordDecision(orgId, { kind: "fiado_blacklist", subjectId: req.params.contactId, decision: "dismissed", actorId: req.user?.userId, reason: req.body?.reason || "retirado da lista" }); } catch { /* noop */ }
+  }
   BalcaoService.setBlacklist(orgId, req.params.contactId, on, req.body?.reason);
   audit(orgId, req.user?.userId, req.params.contactId, on ? "comigo_blacklist_add" : "comigo_blacklist_remove", { reason: req.body?.reason });
   res.json({ ok: true });

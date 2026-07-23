@@ -124,10 +124,11 @@ export class Scheduler {
   }
 
   /**
-   * Tutor de Gestão no WhatsApp (ADR-131, Fatia 1): resumo da manhã ao DONO.
-   * Só orgs com opt-in; o serviço decide janela/dedupe/número. Best-effort.
+   * Tutor de Gestão no WhatsApp (ADR-131): resumos proativos ao DONO — manhã
+   * (Fatia 1) e meio-dia/ponto de equilíbrio (Fatia 2). Só orgs com opt-in; o
+   * serviço decide janela/dedupe/número/aplicabilidade. Best-effort, 1 loop.
    */
-  static async tutorMorningPass() {
+  static async tutorPass() {
     let orgs: any[] = [];
     try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(tutor_wa_enabled,0)=1`).all() as any[]; } catch { return; }
     if (!orgs.length) return;
@@ -137,11 +138,10 @@ export class Scheduler {
       try {
         const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
         if (!channel) continue; // sem canal conectado não há como enviar
-        await BusinessTutorService.runMorningPass(orgId, {
-          now,
-          send: (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message),
-        });
-      } catch (e) { console.error("[Tutor] passe da manhã da org falhou", orgId, e); }
+        const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+        await BusinessTutorService.runMorningPass(orgId, { now, send });
+        await BusinessTutorService.runMiddayPass(orgId, { now, send });
+      } catch (e) { console.error("[Tutor] passe da org falhou", orgId, e); }
     }
   }
 
@@ -173,7 +173,7 @@ export class Scheduler {
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     this.trialPass();
-    await this.tutorMorningPass().catch(e => console.error('[Scheduler] tutor da manhã falhou', e));
+    await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }
 

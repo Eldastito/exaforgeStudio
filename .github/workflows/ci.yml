@@ -247,6 +247,7 @@ jobs:
           - { name: 'people-checkins', script: 'test:people-checkins' }
           - { name: 'production-bom', script: 'test:production-bom' }
           - { name: 'production-orders', script: 'test:production-orders' }
+          - { name: 'production-shopfloor', script: 'test:production-shopfloor' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

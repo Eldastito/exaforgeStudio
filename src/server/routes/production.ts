@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requirePermission } from "../middleware/auth.js";
 import { ProductionService } from "../ProductionService.js";
 import { ProductionOrderService } from "../ProductionOrderService.js";
+import { ProductionShopFloorService } from "../ProductionShopFloorService.js";
 
 // Produção (Supervisor de Produção IA, ADR-141) — produto fabricado + BOM +
 // necessidade de materiais. Gateado pelo módulo `production` (só gestores por
@@ -90,6 +91,28 @@ router.post("/orders/:id/cancel", requirePermission("production", "write"), (req
   const r = ProductionOrderService.cancel(orgOf(req), req.params.id, { createdBy: req.user?.userId });
   if (!r.ok) return res.status(400).json({ error: r.error });
   res.json(r);
+});
+
+// ── Chão de fábrica (fatia 3): consumo / qualidade / parada ──
+router.post("/orders/:id/consume", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = b.fromBom
+    ? ProductionShopFloorService.consumeForBom(orgOf(req), req.params.id, b.quantity, { createdBy: req.user?.userId })
+    : ProductionShopFloorService.consumeMaterial(orgOf(req), req.params.id, { materialProductServiceId: b.materialProductServiceId, quantity: b.quantity, note: b.note, createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+router.post("/orders/:id/quality", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = ProductionShopFloorService.addQualityCheck(orgOf(req), req.params.id, { name: b.name, passed: b.passed, stepId: b.stepId, notes: b.notes, createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+router.post("/orders/:id/downtime", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = ProductionShopFloorService.addDowntime(orgOf(req), req.params.id, { reason: b.reason, minutes: b.minutes, note: b.note, createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
 });
 
 export default router;

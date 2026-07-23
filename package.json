@@ -220,7 +220,8 @@
     "test:people-development": "tsx scripts/test-people-development.ts",
     "test:people-checkins": "tsx scripts/test-people-checkins.ts",
     "test:production-bom": "tsx scripts/test-production-bom.ts",
-    "test:production-orders": "tsx scripts/test-production-orders.ts"
+    "test:production-orders": "tsx scripts/test-production-orders.ts",
+    "test:production-shopfloor": "tsx scripts/test-production-shopfloor.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

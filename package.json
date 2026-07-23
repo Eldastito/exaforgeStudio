@@ -208,7 +208,8 @@
     "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:command-executor": "tsx scripts/test-command-executor.ts",
-    "test:purchase-orders": "tsx scripts/test-purchase-orders.ts"
+    "test:purchase-orders": "tsx scripts/test-purchase-orders.ts",
+    "test:goods-receipt": "tsx scripts/test-goods-receipt.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

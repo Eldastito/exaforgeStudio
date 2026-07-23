@@ -5,6 +5,7 @@ import { PurchaseRequisitionService } from "../PurchaseRequisitionService.js";
 import { SupplierQuoteService } from "../SupplierQuoteService.js";
 import { SupplyNetworkService } from "../SupplyNetworkService.js";
 import { PurchaseOrderService } from "../PurchaseOrderService.js";
+import { GoodsReceiptService } from "../GoodsReceiptService.js";
 
 const router = Router();
 
@@ -119,6 +120,25 @@ router.get("/order/:id", (req: AuthRequest, res): any => {
     if (!o) return res.status(404).json({ error: "Ordem não encontrada." });
     res.json(o);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/procurement/order/:id/receive — registra um recebimento
+// (completo/parcial/divergência); estoque só do confirmado bom.
+router.post("/order/:id/receive", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(GoodsReceiptService.receive(orgId, req.params.id, req.body || {}, userId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/procurement/order/:id/receipts — histórico de recebimentos da ordem.
+router.get("/order/:id/receipts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ receipts: GoodsReceiptService.listByOrder(orgId, req.params.id) }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ============================================================================

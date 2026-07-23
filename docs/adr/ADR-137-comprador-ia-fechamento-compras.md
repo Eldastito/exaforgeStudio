@@ -1,6 +1,6 @@
 # ADR-137 — Comprador IA: fechamento do ciclo de compras (cotação → ordem → recebimento → conta a pagar)
 
-- **Status:** Epic 5 / Fatias E5.1 (cotação aceita → **ordem de compra imutável**), E5.2 (**recebimento** completo/parcial/divergência) e E5.3 (**conta a pagar** idempotente) implementadas. Performance de fornecedor (E5.4) na fatia seguinte.
+- **Status:** Epic 5 **COMPLETO** — E5.1 (cotação aceita → **ordem de compra imutável**), E5.2 (**recebimento** completo/parcial/divergência), E5.3 (**conta a pagar** idempotente) e E5.4 (**performance do fornecedor**) implementadas.
 - **Data:** 2026-07
 - **Origem:** PRD "ZappFlow Enterprise Intelligence" (Epic 5, §16). Hoje o fluxo de compras **termina na escolha do fornecedor** — não fecha pedido, recebimento, conciliação e conta a pagar (§4, item 6). O módulo ajuda a decidir, mas não garante que a compra **aconteceu corretamente**. Fechar o ciclo transforma Supply em resultado operacional mensurável.
 - **Relacionadas:** ADR-099 (cotação multicanal WhatsApp/e-mail), ADR-136 (Decision & Action Ledger — sinais/ações), ADR-085 (Impact Ledger — economia em compras). PRD §16.
@@ -35,8 +35,11 @@ Rotas: `POST /api/procurement/order/:id/receive`, `GET /api/procurement/order/:i
 
 Rota: `POST /api/procurement/order/:id/payable`.
 
+### D7 — Performance do fornecedor (E5.4)
+`supplier_performance_snapshots` + `SupplierPerformanceService`: mede cada fornecedor com números **determinísticos** a partir do histórico já existente (cotações → ordens → recebimentos), sem IA. Métricas (PRD §16, item 9): **preço escolhido × média das cotações** da mesma requisição (economia); **prazo prometido × realizado** (`delivery_days` da cotação vs dias entre criação e recebimento da ordem, `onTime`); **completude** (`Σ received_qty ÷ Σ ordered_qty`); **divergências** no recebimento; **taxa de resposta** (respondidas ÷ enviadas — `answered_at`, sem contar `sent` auto-rejeitado). `ranking` cobre fornecedores locais e da rede; `snapshot(period)` persiste (idempotente por `UNIQUE(org, supplier_key, period)`). Rotas: `GET /api/procurement/suppliers/performance`, `GET /api/procurement/supplier/:contactId/performance`.
+
 ## Consequências
-**Positivas:** o ciclo de compras chega ao **financeiro** — cotação → ordem imutável → recebimento auditável → **conta a pagar única** no caixa/DRE. Corrige um contrato quebrado (erro de tipo pré-existente). Aditivo: reusa cotações/requisições/estoque/sinais/tarefas/`payables` existentes; nenhum fluxo atual muda de comportamento.
+**Positivas:** o ciclo de compras fica **completo e mensurável** — cotação → ordem imutável → recebimento auditável → conta a pagar única no caixa/DRE → **avaliação objetiva do fornecedor**. Supply vira resultado operacional medido. Corrige um contrato quebrado (erro de tipo pré-existente). Aditivo: reusa cotações/requisições/estoque/sinais/tarefas/`payables` existentes; nenhum fluxo atual muda de comportamento.
 
 **Trade-offs / escopo:** E5.1 entrega só a **ordem** (nenhum recebimento/financeiro). `goods_receipts`/`goods_receipt_items` (recebimento completo/parcial/divergência, entrada no estoque só da quantidade confirmada), a **conta a pagar** idempotente e o `supplier_performance_snapshots` (preço escolhido × média, prazo prometido × realizado, completude, taxa de resposta) vêm nas próximas fatias.
 
@@ -49,3 +52,5 @@ Rota: `POST /api/procurement/order/:id/payable`.
 `test:goods-receipt` (E5.2) — recebimento parcial (6 confirmados entram no estoque) + avaria (avariado NÃO entra); ordem fica `receiving`; **divergência gera sinal + tarefa**; **parcial não encerra saldo** (`received_qty` preservado, avaria não conta); completar o restante → ordem `received` (recebimento `complete`); ordem finalizada não recebe mais; **entrega a mais = divergência `over`** (entra no estoque); **nota ausente** gera sinal e marca `has_divergence`; isolamento por org.
 
 `test:purchase-payable` (E5.3) — sem recebimento não gera conta (valor devido 0); **valor pelo recebido** (130, não o pedido 150); conta vinculada à ordem, categoria `compras`, fornecedor no snapshot; **entra no `a pagar`** do FinancialLedger; **idempotência** (segunda chamada → MESMA conta; só 1 por ordem); `basis: 'ordered'` fatura o total do pedido; ordem inexistente/cancelada não gera; isolamento por org. Regressão: `test:cash-ledger` 18/18.
+
+`test:supplier-performance` (E5.4) — vencedor: taxa de resposta 100%, preço 100 vs média 110 (90,9%, economia 10), prazo prometido 5 × realizado 7 (atrasado), completude 100%, 0 divergências; concorrente que respondeu mas perdeu (won=0, sem ordem → prazo/completude nulos); fornecedor que nunca respondeu (taxa 0%, auto-rejeitado não conta); **avaria conta como divergência** e derruba a completude; ranking cobre os 3; **snapshot idempotente** por período (upsert); isolamento por org.

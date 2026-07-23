@@ -1380,6 +1380,20 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_goods_receipts_po ON goods_receipts(organization_id, purchase_order_id);
       CREATE INDEX IF NOT EXISTS idx_goods_receipt_items_gr ON goods_receipt_items(goods_receipt_id);
+      -- Epic 5 (E5.4) — retrato de performance do fornecedor (preço × média,
+      -- prazo prometido × realizado, completude, divergências, taxa de
+      -- resposta). Um snapshot por (org, fornecedor, período). PRD §16.
+      CREATE TABLE IF NOT EXISTS supplier_performance_snapshots (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        supplier_key TEXT NOT NULL,          -- contact_id OU 'net:'||network_org_id
+        supplier_name TEXT,
+        period TEXT NOT NULL,                -- rótulo do período (ex.: 'all' | 'YYYY-MM')
+        metrics_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, supplier_key, period)
+      );
+      CREATE INDEX IF NOT EXISTS idx_supplier_perf_org ON supplier_performance_snapshots(organization_id, period);
     `);
   } catch(e){ console.error('[DB] Falha ao criar purchase_orders', e); }
   // Supply (Fase 3) — Rede ZappFlow: a própria org pode se oferecer como

@@ -7,6 +7,7 @@ import { SupplyNetworkService } from "../SupplyNetworkService.js";
 import { PurchaseOrderService } from "../PurchaseOrderService.js";
 import { GoodsReceiptService } from "../GoodsReceiptService.js";
 import { PurchasePayableService } from "../PurchasePayableService.js";
+import { SupplierPerformanceService } from "../SupplierPerformanceService.js";
 
 const router = Router();
 
@@ -139,6 +140,22 @@ router.get("/order/:id/receipts", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json({ receipts: GoodsReceiptService.listByOrder(orgId, req.params.id) }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/suppliers/performance — ranking de performance.
+router.get("/suppliers/performance", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ suppliers: SupplierPerformanceService.ranking(orgId) }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/supplier/:contactId/performance — métricas de um fornecedor.
+router.get("/supplier/:contactId/performance", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SupplierPerformanceService.metricsFor(orgId, { contactId: req.params.contactId })); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

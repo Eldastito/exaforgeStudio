@@ -717,7 +717,12 @@ function Caderneta({ onChange }: { onChange: () => void }) {
   const setLimite = (c: FiadoCustomer) => {
     const v = window.prompt(`Limite de fiado de ${c.name}:`, String(c.credit_limit || 0));
     if (v == null) return;
-    act(`/api/comigo/fiado/${c.contact_id}/credit`, { limit: Number(v.replace(',', '.')) || 0 }, 'PUT');
+    // Governança de IA (ADR-130): definir o limite de crédito afeta a pessoa —
+    // decisão humana com motivo registrado (base = histórico, não perfil).
+    const reason = window.prompt(`Motivo do limite de ${c.name}? (fica registrado — ex.: bom histórico de pagamento, atraso recorrente)`, c.credit_limit ? '' : 'primeiro limite');
+    if (reason == null) return;
+    if (!reason.trim()) { toast.error('Informe um motivo — é uma decisão registrada.'); return; }
+    act(`/api/comigo/fiado/${c.contact_id}/credit`, { limit: Number(v.replace(',', '.')) || 0, reason: reason.trim() }, 'PUT');
   };
   const toggleBlacklist = (c: FiadoCustomer) => {
     if (!c.blacklisted) {
@@ -730,7 +735,18 @@ function Caderneta({ onChange }: { onChange: () => void }) {
       act(`/api/comigo/fiado/${c.contact_id}/blacklist`, { on: false, reason: 'retirado da lista' });
     }
   };
-  const toggleBlockAll = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: !c.block_all_sales });
+  const toggleBlockAll = (c: FiadoCustomer) => {
+    if (!c.block_all_sales) {
+      // Governança de IA (ADR-130): suspender TODAS as vendas (inclui à vista) é
+      // a medida mais severa — decisão humana com motivo registrado.
+      const reason = window.prompt(`Motivo para suspender TODAS as vendas de ${c.name}? (inclui à vista — fica registrado)`);
+      if (reason == null) return;
+      if (!reason.trim()) { toast.error('Informe um motivo — é uma decisão registrada.'); return; }
+      act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: true, reason: reason.trim() });
+    } else {
+      act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: false, reason: 'venda liberada' });
+    }
+  };
   const toggleStoreFiado = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/store-fiado`, { on: !c.store_fiado_enabled });
   const writeOff = (c: FiadoCustomer) => {
     if (!window.confirm(`Dar baixa em ${brl(c.balance)} de ${c.name} como calote? Isso zera a dívida e lança a perda no relatório. Não dá pra desfazer.`)) return;

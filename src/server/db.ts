@@ -4124,7 +4124,7 @@ const initDb = () => {
       CREATE TABLE IF NOT EXISTS ai_decisions (
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL,
-        kind TEXT NOT NULL,                 -- fiado_blacklist | fiado_limit | prospect_targeting | ...
+        kind TEXT NOT NULL,                 -- fiado_blacklist | fiado_limit | fiado_block_all | prospect_targeting | ...
         subject_id TEXT,                    -- a quem/que a decisão se refere (ex.: contact_id)
         decision TEXT NOT NULL,             -- applied | dismissed
         suggested_by TEXT DEFAULT 'human',  -- ai (a IA sugeriu) | human

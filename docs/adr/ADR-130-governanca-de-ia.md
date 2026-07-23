@@ -22,6 +22,8 @@ Sugestões de IA que afetam pessoas ficam num **registro explícito** (`PEOPLE_A
 
 Fluxos ligados:
 - **Lista negra do fiado** — o dono informa o motivo (registrado); a sugestão da IA (`blacklistSuggested`) é marcada como `suggested_by=ai`, mas só o humano aplica.
+- **Limite de crédito do fiado** (`fiado_limit`) — definir o limite afeta a pessoa; a IA sugere (orientativo), o dono define o valor com **motivo registrado**, baseado no histórico de pagamento (não em perfil).
+- **Suspensão total de vendas** (`fiado_block_all`) — cortar TODAS as vendas (inclusive à vista) é a medida mais severa (mais forte que a lista negra); exige **humano + motivo**, é auditada e reversível.
 - **Aprovação de prospecção antes do 1º contato** — aprovar uma abordagem (`ProspectService.setOutreachStatus → "approved"`) é a decisão que autoriza o **primeiro contato** com uma pessoa. O alvo e a mensagem são sugeridos pela IA (`suggested_by=ai`); aprovar exige **humano + motivo** (o guardrail barra antes de qualquer mutação) e a decisão é auditada em `ai_decisions`.
 
 ### D3 — Auditoria de decisão de ponta a ponta

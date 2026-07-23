@@ -206,7 +206,8 @@
     "test:business-signals": "tsx scripts/test-business-signals.ts",
     "test:decision-actions": "tsx scripts/test-decision-actions.ts",
     "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts",
-    "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts"
+    "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
+    "test:command-executor": "tsx scripts/test-command-executor.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

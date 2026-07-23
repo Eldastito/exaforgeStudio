@@ -180,6 +180,17 @@ function PlanoDeAcaoTab() {
     const v = amounts[id] != null && amounts[id] !== '' ? Number(amounts[id]) : undefined;
     post(id, 'complete', { resultAmount: v }, 'Ação concluída e resultado registrado.');
   };
+  const prepare = async (id: string) => {
+    setBusy(id);
+    try {
+      const r = await apiFetch(`/api/actions/${id}/prepare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não foi possível preparar.'); return; }
+      toast.success(d.result?.summary || 'Comando preparado (rascunho). Nada foi enviado.');
+      load();
+    } catch { toast.error('Falha de conexão.'); }
+    finally { setBusy(''); }
+  };
 
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><RefreshCw className="h-5 w-5 animate-spin mr-2" /> Carregando o plano de ação…</div>;
 
@@ -288,8 +299,11 @@ function PlanoDeAcaoTab() {
             {approved.map((a) => (
               <div key={a.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
                 <p className="text-sm font-medium text-zinc-100">{a.title}</p>
-                <p className="text-[11px] text-zinc-500 mt-0.5">{a.domain} · esperado {a.expected_impact != null ? brl(a.expected_impact) : '—'}</p>
-                <div className="flex gap-2 mt-2 items-center">
+                <p className="text-[11px] text-zinc-500 mt-0.5">{a.domain} · esperado {a.expected_impact != null ? brl(a.expected_impact) : '—'}{a.executed_at ? ' · preparada' : ''}</p>
+                <div className="flex gap-2 mt-2 items-center flex-wrap">
+                  {a.command_type && (
+                    <Button onClick={() => prepare(a.id)} disabled={busy === a.id} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 h-8 px-3 text-xs border border-zinc-700"><Sparkles className="h-3.5 w-3.5 mr-1" /> Preparar</Button>
+                  )}
                   <input
                     type="number"
                     value={amounts[a.id] || ''}

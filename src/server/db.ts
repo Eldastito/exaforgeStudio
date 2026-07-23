@@ -4257,6 +4257,39 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela business_signals', e); }
 
+  // Epic 3 (Fatia 4, ADR-139) — preferências de briefing por (org, usuário) +
+  // entregas deduplicadas (o reenvio do Scheduler não duplica a mensagem).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS briefing_preferences (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        channel TEXT NOT NULL DEFAULT 'whatsapp',
+        morning_time TEXT NOT NULL DEFAULT '08:00',   -- HH:MM
+        days_json TEXT,                                -- [1..7] (1=segunda); nulo = todos os dias
+        domains_json TEXT,                             -- domínios permitidos; nulo = todos
+        mode TEXT NOT NULL DEFAULT 'gestor',           -- gestor|tutor
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS briefing_delivery (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        slot TEXT NOT NULL,                            -- morning|midday|evening
+        ref_date TEXT NOT NULL,                        -- YYYY-MM-DD
+        dedupe_key TEXT NOT NULL,
+        text_snapshot TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, dedupe_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_briefing_delivery_org ON briefing_delivery(organization_id, user_id, ref_date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de briefing', e); }
+
   // Decision & Action Ledger (ADR-136, Epic 2 — C2): ação proposta → aprovação
   // → conclusão, com política de autonomia por (domínio, tipo). A IA propõe; a
   // política decide se exige aprovação. Nada executa sozinho. Isolado por org.

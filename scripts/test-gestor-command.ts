@@ -85,7 +85,18 @@ async function main() {
   check("owner: 'oi' devolve o menu do Controller", /Controller IA/.test(G.handle(orgA, "11999990001", "oi").reply));
   check("owner: 'prioridades' responde (sem sinais → aviso)", G.handle(orgA, "11999990001", "prioridades").intent === "prioridades");
 
-  // ===== 9. Isolamento por organização =====
+  // ===== 9. Roteamento no webhook (shouldRoute) — Fatia 2 =====
+  check("roteia 'saldo' de gestor conhecido p/ o Controller", G.shouldRoute(G.handle(orgA, "11999990001", "saldo")) === true);
+  check("roteia 'aprovar 1' (ação diferida)", G.shouldRoute(G.handle(orgA, "11999990001", "aprovar 1")) === true);
+  check("NÃO roteia 'oi' (menu → Coordenador/tarefas)", G.shouldRoute(G.handle(orgA, "11999990001", "oi")) === false);
+  check("NÃO roteia desconhecido (→ Coordenador)", G.shouldRoute(G.handle(orgA, "11999990001", "qualquer coisa")) === false);
+  check("NÃO roteia número desconhecido (sem user)", G.shouldRoute(G.handle(orgA, "11888880000", "saldo")) === false);
+  check("roteia denial de vendedor (Controller responde a negação)", G.shouldRoute(G.handle(orgA, "11999990002", "saldo")) === true);
+  // 'prioridades' não sequestra pergunta de tarefas do colaborador.
+  check("'o que tenho pra fazer hoje' NÃO vira prioridades", G.parse("o que tenho pra fazer hoje").intent === "desconhecido");
+  check("desligado: shouldRoute=false (webhook segue p/ Coordenador)", G.shouldRoute(G.handle(mkOrg(), "11999990001", "saldo")) === false);
+
+  // ===== 10. Isolamento por organização =====
   check("isolamento: número de A não é reconhecido em B", G.handle(orgB, "11999990001", "saldo").user === null);
 
   console.log("\n=== TEST: GestorCommandService (Epic 3 — fatia 1) ===\n");

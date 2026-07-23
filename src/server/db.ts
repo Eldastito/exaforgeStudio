@@ -4398,6 +4398,44 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de RH (employees)', e); }
 
+  // Produção (Supervisor de Produção IA — fatia 1, ADR-141): produto fabricado
+  // + lista de materiais (BOM). Reusa catálogo/estoque (products_services /
+  // inventory_items) para materiais. Determinístico, isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS manufactured_products (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,   -- produto acabado no catálogo
+        name TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, product_service_id)
+      );
+      CREATE TABLE IF NOT EXISTS bill_of_materials (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        manufactured_product_id TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT 'Padrão',  -- versão/rótulo da BOM
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS bom_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        bom_id TEXT NOT NULL,
+        material_product_service_id TEXT NOT NULL,  -- material no catálogo
+        quantity REAL NOT NULL DEFAULT 0,           -- por 1 unidade do acabado
+        unit TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, bom_id, material_product_service_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_manuf_prod_org ON manufactured_products(organization_id, active);
+      CREATE INDEX IF NOT EXISTS idx_bom_mp ON bill_of_materials(organization_id, manufactured_product_id);
+      CREATE INDEX IF NOT EXISTS idx_bom_items_bom ON bom_items(organization_id, bom_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de Produção', e); }
+
   // Decision & Action Ledger (ADR-136, Epic 2 — C2): ação proposta → aprovação
   // → conclusão, com política de autonomia por (domínio, tipo). A IA propõe; a
   // política decide se exige aprovação. Nada executa sozinho. Isolado por org.

@@ -218,7 +218,8 @@
     "test:people-registry": "tsx scripts/test-people-registry.ts",
     "test:people-workload": "tsx scripts/test-people-workload.ts",
     "test:people-development": "tsx scripts/test-people-development.ts",
-    "test:people-checkins": "tsx scripts/test-people-checkins.ts"
+    "test:people-checkins": "tsx scripts/test-people-checkins.ts",
+    "test:production-bom": "tsx scripts/test-production-bom.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

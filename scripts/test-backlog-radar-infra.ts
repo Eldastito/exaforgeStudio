@@ -119,7 +119,7 @@ async function main() {
   check("Índice único parcial bloqueia duplicata mesmo fora do saveAnswer", uniqueBlocked);
 
   // respondente convidado tem linha própria (não colide com a resposta autenticada)
-  const added = RadarService.addRespondent(orgA, session.id, "actor_A", { name: "Convidado" });
+  const added: any = RadarService.addRespondent(orgA, session.id, "actor_A", { name: "Convidado" });
   RadarService.saveAnswer(orgA, session.id, undefined, { questionId: q1.id, value: "2", respondentId: added.respondent.id });
   const allRows = db.prepare(`SELECT COUNT(*) AS c FROM radar_answers WHERE session_id = ? AND question_id = ?`).get(session.id, q1.id) as any;
   check("Resposta de respondente convidado convive com a autenticada (2 linhas, chaves distintas)", allRows.c === 2);

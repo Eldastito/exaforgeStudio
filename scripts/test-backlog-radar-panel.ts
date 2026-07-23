@@ -117,7 +117,7 @@ async function main() {
   check("Excluir evidência já excluída é rejeitado", deleteMissingRejected);
 
   // ---- item 17: reenvio de convite ----
-  const added = RadarService.addRespondent(orgA, session.id, "actor_A", { name: "Maria Gestora", email: "maria@empresa.com" });
+  const added: any = RadarService.addRespondent(orgA, session.id, "actor_A", { name: "Maria Gestora", email: "maria@empresa.com" });
   const respondentId = added.respondent.id;
   const oldHash = (db.prepare(`SELECT invite_token_hash FROM radar_respondents WHERE id = ?`).get(respondentId) as any).invite_token_hash;
 

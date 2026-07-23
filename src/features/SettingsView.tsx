@@ -687,7 +687,7 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
   const available = (items || []).filter(m => m.section === 'available');
   const upgrade = (items || []).filter(m => m.section === 'upgrade');
 
-  const Row = ({ m }: { m: ModuleOverviewItem }) => {
+  const Row: React.FC<{ m: ModuleOverviewItem }> = ({ m }) => {
     const on = enabled.has(m.key);
     return (
       <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">

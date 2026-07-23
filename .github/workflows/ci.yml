@@ -38,12 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      # Typecheck é sinal, não gate. Há erros pré-existentes em arquivos
-      # legados que preciso corrigir aos poucos — não trava PR novo,
-      # mas continua reportando o número de erros pra pressão descer.
-      - name: Typecheck (soft)
+      # Typecheck agora é GATE (Epic 0, ADR-138): `npm run lint` retorna zero
+      # (os erros legados foram zerados). Trava o PR que reintroduzir erro de
+      # tipo — mantém a fundação limpa antes de ampliar autonomia de IA.
+      - name: Typecheck
         run: npm run lint
-        continue-on-error: true
 
       - name: Build
         run: npm run build

@@ -84,7 +84,7 @@ async function main() {
   // ==== 4. Estoque insuficiente trunca ====
   console.log("\n=== 4. Estoque insuficiente ===");
   const qLow = QuoteService.buildAndSave(orgA, [{ name: "Refrigerante 2L", quantity: 10 }], { contactId: contactA });
-  const lowSnap = JSON.parse(db.prepare(`SELECT items_snapshot FROM quotes WHERE id = ?`).get(qLow!.id).items_snapshot);
+  const lowSnap = JSON.parse((db.prepare(`SELECT items_snapshot FROM quotes WHERE id = ?`).get(qLow!.id) as any).items_snapshot);
   check("4.1 qty pedido=10 mas estoque=3 → snap tem qty=3", lowSnap[0].qty === 3);
   check("4.2 total ajustado (3 * 15)", qLow!.total === 45);
   check("4.3 texto informa quantidade disponível", qLow!.text.includes("só temos") || qLow!.text.includes("*3*"));
@@ -92,7 +92,7 @@ async function main() {
   // ==== 5. Sem estoque → qty=0 ====
   console.log("\n=== 5. Sem estoque ===");
   const qOut = QuoteService.buildAndSave(orgA, [{ name: "Copo Descartável", quantity: 5 }], { contactId: contactA });
-  const outSnap = JSON.parse(db.prepare(`SELECT items_snapshot FROM quotes WHERE id = ?`).get(qOut!.id).items_snapshot);
+  const outSnap = JSON.parse((db.prepare(`SELECT items_snapshot FROM quotes WHERE id = ?`).get(qOut!.id) as any).items_snapshot);
   check("5.1 snap com qty=0", outSnap[0].qty === 0);
   check("5.2 texto marca 'sem estoque'", qOut!.text.includes("sem estoque"));
   check("5.3 total=0 quando único item está esgotado", qOut!.total === 0);

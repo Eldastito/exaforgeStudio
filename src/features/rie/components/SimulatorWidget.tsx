@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Clock, GitMerge, TrendingUp } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { useCountUp } from '../hooks/useCountUp';
@@ -40,7 +40,7 @@ export function SimulatorWidget() {
     setLoading(true);
     const params = lever === 'response_time' ? { targetSeconds } : { targetReachPct };
     const assumptions: Record<string, number> = {};
-    for (const [k, v] of Object.entries(edits)) if (OVERRIDE_KEYS.has(k)) assumptions[k] = v;
+    for (const [k, v] of Object.entries(edits)) if (OVERRIDE_KEYS.has(k)) assumptions[k] = v as number;
     try {
       const res = await apiFetch('/api/analytics/revenue-intelligence/simulate', {
         method: 'POST',

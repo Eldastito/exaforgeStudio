@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode, ChangeEvent } from 'react';
 import {
   Radar, Plus, ArrowLeft, ArrowRight, Loader2, HelpCircle, Sparkles, TrendingUp,
@@ -188,7 +188,7 @@ export function RadarView() {
   );
 }
 
-function Card({ children, className = '' }: { children?: ReactNode; className?: string }) {
+const Card: React.FC<{ children?: ReactNode; className?: string }> = ({ children, className = '' }) => {
   return <div className={`rounded-xl border border-white/10 bg-white/[0.03] p-5 ${className}`}>{children}</div>;
 }
 

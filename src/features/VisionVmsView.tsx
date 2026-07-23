@@ -394,7 +394,7 @@ function Section({ title, onNew, newLabel, disabled, disabledHint, children }: {
   );
 }
 
-function Row({ children }: { children: React.ReactNode }) {
+const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3 gap-3">{children}</div>;
 }
 

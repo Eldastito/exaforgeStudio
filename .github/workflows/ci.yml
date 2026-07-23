@@ -239,6 +239,7 @@ jobs:
           - { name: 'purchase-payable', script: 'test:purchase-payable' }
           - { name: 'supplier-performance', script: 'test:supplier-performance' }
           - { name: 'rbac-finance', script: 'test:rbac-finance' }
+          - { name: 'gestor-command', script: 'test:gestor-command' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

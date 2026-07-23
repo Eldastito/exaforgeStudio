@@ -907,6 +907,9 @@ const initDb = () => {
   // organização. 0 = intacto (comportamento atual); 1 = gateia financeiro/
   // saúde. Ligado só para contas validadas (ex.: Toulon em produção).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN rbac_finance_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // Epic 3 (WhatsApp como interface de gestão): consultas de gestão/finanças
+  // pelo WhatsApp do gestor. OPT-IN por organização (default off).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN wa_gestor_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,

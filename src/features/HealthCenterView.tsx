@@ -161,6 +161,14 @@ export function HealthCenterView() {
           </div>
         )}
 
+        {/* Concentração no maior cliente (ADR-132 Fatia 3) */}
+        {d?.concentracao?.topPct >= 40 && (
+          <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/5 p-2.5 text-[13px] flex items-center justify-between gap-2">
+            <span className="text-zinc-400">Concentração no maior cliente{d.concentracao.topName ? ` (${d.concentracao.topName})` : ''}</span>
+            <span className="font-semibold text-amber-300">{d.concentracao.topPct}% da receita</span>
+          </div>
+        )}
+
         {/* Prioridades do dia */}
         <div className="mt-5">
           <h3 className="text-sm font-medium text-zinc-200 mb-2 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-300" /> Prioridades de hoje</h3>

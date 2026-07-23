@@ -83,13 +83,43 @@ export class BusinessHealthService {
       triggers.push({ level: "atencao", code: "conversao_caiu", label: `Conversão de orçamentos caiu de ${conversao.prevRatePct}% para ${conversao.ratePct}%.` });
     }
 
+    // Concentração no maior cliente (ADR-132 Fatia 3) — risco de dependência.
+    const concentracao = this.customerConcentration(orgId);
+    if (concentracao && concentracao.topPct >= 40) {
+      triggers.push({ level: "atencao", code: "concentracao_cliente", label: `Seu maior cliente${concentracao.topName ? ` (${concentracao.topName})` : ""} é ${concentracao.topPct}% da receita — risco de dependência.` });
+    }
+
     const overall = (triggers.reduce<StatusLevel>((acc, t) => (SEVERITY[t.level] > SEVERITY[acc] ? t.level : acc), "saudavel"));
-    return { status: overall, triggers, cash, forecast: fc, loss, owner, conversao };
+    return { status: overall, triggers, cash, forecast: fc, loss, owner, conversao, concentracao };
   }
 
   /** Conversão de orçamentos (guardada — nunca derruba a síntese). */
   private static quoteConversion(orgId: string): any | null {
     try { return QuoteService.conversionStats(orgId); } catch { return null; }
+  }
+
+  /**
+   * Concentração de receita no maior cliente (ADR-132 Fatia 3). Determinístico:
+   * soma vendas pagas (orders + comigo_orders) numa janela e mede a fatia do
+   * maior cliente IDENTIFICADO sobre a receita TOTAL (inclui venda anônima, para
+   * não superestimar). Isolado por organization_id.
+   */
+  static customerConcentration(orgId: string, days = 90): { topPct: number; topName: string | null; topRevenue: number; totalRevenue: number } | null {
+    try {
+      const win = `-${days} days`;
+      const SALES = `
+        SELECT contact_id, total_amount AS amt FROM orders
+          WHERE organization_id = ? AND status IN ('pago','em_preparo','entregue','concluido') AND created_at >= datetime('now', ?)
+        UNION ALL
+        SELECT contact_id, total AS amt FROM comigo_orders
+          WHERE organization_id = ? AND status IN ('paid','done') AND created_at >= datetime('now', ?)`;
+      const total = Number((db.prepare(`SELECT COALESCE(SUM(amt),0) s FROM (${SALES})`).get(orgId, win, orgId, win) as any).s) || 0;
+      if (total <= 0) return null;
+      const top = db.prepare(`SELECT contact_id, SUM(amt) s FROM (${SALES}) WHERE contact_id IS NOT NULL GROUP BY contact_id ORDER BY s DESC LIMIT 1`).get(orgId, win, orgId, win) as any;
+      if (!top || !top.contact_id) return { topPct: 0, topName: null, topRevenue: 0, totalRevenue: round2(total) };
+      const c = db.prepare("SELECT name FROM contacts WHERE id = ? AND organization_id = ?").get(top.contact_id, orgId) as any;
+      return { topPct: Math.round((Number(top.s) / total) * 100), topName: c?.name || null, topRevenue: round2(top.s), totalRevenue: round2(total) };
+    } catch { return null; }
   }
 
   /** Resumo Empresa × Proprietário (guardado — pode falhar sem derrubar a síntese). */
@@ -248,6 +278,7 @@ export class BusinessHealthService {
       ledger: this.history(orgId),
       kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aReceberVencido: st.cash.aReceberVencido, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },
       conversao: st.conversao || null,
+      concentracao: st.concentracao || null,
     };
   }
 }

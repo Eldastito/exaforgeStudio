@@ -496,6 +496,19 @@ router.post("/alterdata/sync", async (req: AuthRequest, res): Promise<any> => {
   }
 });
 
+// DIAGNÓSTICO ("Testar módulos"): probe cada endpoint (Referencia/CodigoDeBarras/
+// Saldo/Preco) separadamente e devolve o HTTP status de cada um, para isolar por
+// eliminação qual está devolvendo 500 na homologação. Não grava nada.
+router.post("/alterdata/probe", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const probes = await AlterdataSyncRunner.probeOrg(req.organizationId);
+    res.json({ ok: true, probes });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao testar os módulos da Alterdata." });
+  }
+});
+
 // Testa a emissão do token no Guardian com as credenciais gravadas (ADR-105).
 // Responde só com o status público (sem token/segredo). Erro → mensagem amigável.
 router.post("/alterdata/test-token", async (req: AuthRequest, res): Promise<any> => {

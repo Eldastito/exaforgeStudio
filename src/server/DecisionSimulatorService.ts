@@ -157,6 +157,38 @@ export class DecisionSimulatorService {
       veredito,
     };
   }
+
+  /**
+   * "Quanto vender para pagar essa máquina?" (ADR-133 Fatia 4) — payback de um
+   * investimento. Receita total necessária = investimento ÷ margem (a margem é
+   * o que sobra de cada venda para amortizar). Em N meses (padrão 12), quanto de
+   * venda por mês; e o payback no ritmo de lucro atual.
+   */
+  static payback(orgId: string, input: { amount: number; months?: number }): any {
+    const amount = Number(input?.amount) || 0;
+    if (!(amount > 0)) return { ok: false, reason: "valor_invalido", message: "Informe o valor do investimento." };
+    const months = Math.min(120, Math.max(1, Math.floor(Number(input?.months) || 12)));
+    const { marginFrac, avgTicket, monthlyRevenue } = this.marginContext(orgId);
+    if (marginFrac <= 0) return { ok: false, reason: "sem_margem", message: "Cadastre seus custos para eu conhecer sua margem — sem ela não dá para calcular o payback." };
+
+    const totalRevenueNeeded = round2(amount / marginFrac);
+    const monthlyRevenueNeeded = round2(totalRevenueNeeded / months);
+    const pctOfCurrent = monthlyRevenue > 0 ? Math.round((monthlyRevenueNeeded / monthlyRevenue) * 100) : null;
+    const extraTicketsPerDay = avgTicket > 0 ? Math.ceil(monthlyRevenueNeeded / 30 / avgTicket) : null;
+    const monthlyMargin = monthlyRevenue * marginFrac;
+    const paybackMonths = monthlyMargin > 0 ? Math.ceil(amount / monthlyMargin) : null;
+    const marginPct = Math.round(marginFrac * 100);
+
+    let veredito: string;
+    if (paybackMonths == null) veredito = `Com margem de ${marginPct}%, é preciso gerar ${brl(totalRevenueNeeded)} em vendas para pagar o investimento (${brl(monthlyRevenueNeeded)}/mês em ${months} meses).`;
+    else veredito = `Para pagar ${brl(amount)} em ${months} meses, some ~${brl(monthlyRevenueNeeded)}/mês em vendas${pctOfCurrent != null ? ` (${pctOfCurrent}% a mais que hoje)` : ""}. No seu ritmo de lucro atual, o payback é de ~${paybackMonths} ${paybackMonths === 1 ? "mês" : "meses"}.`;
+
+    return {
+      ok: true, amount, months, marginPct, monthlyRevenue,
+      totalRevenueNeeded, monthlyRevenueNeeded, pctOfCurrent, extraTicketsPerDay, paybackMonths,
+      veredito,
+    };
+  }
 }
 
 function brl(n: any): string { return `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`; }

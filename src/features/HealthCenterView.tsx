@@ -272,15 +272,16 @@ export function HealthCenterView() {
 
 // Simulador de Decisões (ADR-133) — "posso contratar?" / "posso comprar estoque?".
 function HireSimulatorCard() {
-  const [mode, setMode] = useState<'hire' | 'stock' | 'withdraw'>('hire');
+  const [mode, setMode] = useState<'hire' | 'stock' | 'withdraw' | 'payback'>('hire');
   const [value, setValue] = useState('');
   const [res, setRes] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
-  const setModeReset = (m: 'hire' | 'stock' | 'withdraw') => { setMode(m); setRes(null); setValue(''); };
+  const setModeReset = (m: 'hire' | 'stock' | 'withdraw' | 'payback') => { setMode(m); setRes(null); setValue(''); };
   const CFG = {
     hire: { url: '/api/health-center/simulate/hire', key: 'monthlyCost', label: 'Posso contratar?', hint: 'Custo mensal da contratação → quanto de venda a mais isso exige, com a sua margem atual.', ph: 'custo mensal (ex.: 3.500)' },
     stock: { url: '/api/health-center/simulate/buy-stock', key: 'amount', label: 'Posso comprar estoque?', hint: 'Valor da compra → quantos dias de cobertura e quanto tende a ficar parado.', ph: 'valor da compra (ex.: 30.000)' },
     withdraw: { url: '/api/health-center/simulate/withdraw', key: 'amount', label: 'Posso retirar mais?', hint: 'Valor da retirada → efeito no caixa e se cabe no pró-labore sustentável.', ph: 'valor da retirada (ex.: 2.000)' },
+    payback: { url: '/api/health-center/simulate/payback', key: 'amount', label: 'Pagar um investimento?', hint: 'Valor do investimento → quanto vender pra pagar (em 12 meses) e o payback no seu ritmo atual.', ph: 'valor da máquina (ex.: 12.000)' },
   } as const;
   const simulate = async () => {
     const num = Number(String(value).replace(/\./g, '').replace(',', '.')) || 0;
@@ -296,7 +297,7 @@ function HireSimulatorCard() {
     <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
       <h3 className="text-sm font-medium text-indigo-100 flex items-center gap-2"><Target className="w-4 h-4" /> Simulador de decisões</h3>
       <div className="mt-2 flex flex-wrap items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[11px] w-fit gap-0.5">
-        {(['hire', 'stock', 'withdraw'] as const).map((m) => (
+        {(['hire', 'stock', 'withdraw', 'payback'] as const).map((m) => (
           <button key={m} onClick={() => setModeReset(m)} className={`rounded px-2.5 py-1 ${mode === m ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>{CFG[m].label}</button>
         ))}
       </div>
@@ -331,6 +332,13 @@ function HireSimulatorCard() {
                 <span>Caixa: <b className="text-zinc-200">{brl(res.caixaAtual)}→{brl(res.caixaAfter)}</b></span>
                 {res.pctResultAfter != null && <span>= <b className="text-zinc-200">{res.pctResultAfter}%</b> do resultado</span>}
                 <span className={res.nivel === 'excesso' ? 'text-red-300' : res.nivel === 'atencao' ? 'text-amber-300' : 'text-emerald-300'}>{res.nivel === 'ok' ? 'sustentável' : res.nivel === 'atencao' ? 'acima do ideal' : 'excesso'}</span>
+              </>
+            )}
+            {mode === 'payback' && (
+              <>
+                <span>Vender ao todo: <b className="text-amber-200">{brl(res.totalRevenueNeeded)}</b></span>
+                <span>~<b className="text-zinc-200">{brl(res.monthlyRevenueNeeded)}</b>/mês ({res.months}m)</span>
+                {res.paybackMonths != null && <span>Payback: <b className="text-zinc-200">~{res.paybackMonths} {res.paybackMonths === 1 ? 'mês' : 'meses'}</b></span>}
               </>
             )}
           </div>

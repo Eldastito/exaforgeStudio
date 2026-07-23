@@ -169,6 +169,14 @@ export function HealthCenterView() {
           </div>
         )}
 
+        {/* Estoque parado sem giro (ADR-132 Fatia 4) */}
+        {d?.estoque?.slowMoverCapital > 0 && (
+          <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px] flex items-center justify-between gap-2">
+            <span className="text-zinc-400">Estoque parado sem giro{d.estoque.slowMoverCount > 0 ? ` (${d.estoque.slowMoverCount} item${d.estoque.slowMoverCount > 1 ? 's' : ''})` : ''}</span>
+            <span className="font-semibold text-amber-300">{brl(d.estoque.slowMoverCapital)}{d.estoque.totalCapital > d.estoque.slowMoverCapital ? <span className="text-[11px] text-zinc-500"> de {brl(d.estoque.totalCapital)}</span> : null}</span>
+          </div>
+        )}
+
         {/* Prioridades do dia */}
         <div className="mt-5">
           <h3 className="text-sm font-medium text-zinc-200 mb-2 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-300" /> Prioridades de hoje</h3>

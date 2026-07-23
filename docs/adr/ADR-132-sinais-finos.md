@@ -1,6 +1,6 @@
 # ADR-132 — Sinais finos da Central de Saúde (precisão que a apresentação promete)
 
-- **Status:** Fatias 1–3 implementadas (recebíveis vencidos; conversão de orçamentos; concentração no maior cliente). Fatia 4 planejada.
+- **Status:** Completa — Fatias 1–4 (recebíveis vencidos; conversão de orçamentos; concentração no maior cliente; estoque sem giro conectado).
 - **Data:** 2026-07
 - **Origem:** auditoria de veracidade da apresentação "ZappFlow Sobrevivência". A Central de Saúde e o Índice já existem e são testados, mas alguns sinais eram **aproximados** demais para o que a apresentação afirma. Esta ADR os torna precisos, um por fatia.
 - **Relacionadas:** ADR-126 (Central de Saúde), ADR-127 (Índice de Sobrevivência), ADR-125 (Motor de Caixa), ADR-088 D5 (frugal/zero-token).
@@ -36,14 +36,20 @@
 - Entregue como **sinal da Central** (não como novo componente do Índice) para não reponderar os 7 componentes existentes (peso 100) — uma mudança de produto que exigiria decisão à parte.
 - Determinístico (zero-token), isolado por `organization_id`.
 
-### Fatia 4 — Estoque sem giro conectado (planejada)
-Ligar `RetailImpactService.stalledCapital` (capital parado sem saída há N dias) à Central e ao Índice, no lugar do capital total de estoque.
+### Fatia 4 — Estoque sem giro conectado ✅
+Liga `RetailImpactService.stockCapital` (capital **sem giro** = com saldo e **sem saída** há N dias) à Central e ao Índice, no lugar do capital **total** de estoque.
+
+- **Índice de Sobrevivência:** o componente `estoque` passa a pontuar pelo capital **sem giro** (não pelo total). Assim, muito estoque **que gira** deixa de ser penalizado; só o dinheiro travado no produto errado pesa. A nota mostra "R$ X parados sem giro (de R$ Y em estoque)".
+- **Central de Saúde:** gatilho `estoque_parado` ("R$ X parados em estoque sem giro (N itens)") quando o capital sem giro é material (≥ 15% da receita do mês, ou qualquer valor quando não há vendas); `overview` expõe `estoque` (total, sem giro, contagem).
+- **UI:** cartão com o valor sem giro e o total de estoque.
+- Determinístico (fato, não estimativa), isolado por `organization_id`.
 
 ## Guardas
 - Determinístico (zero-token), isolado por `organization_id`. Mudanças aditivas — orgs sem o sinal ficam inalteradas.
 
 ## Testes
 - `test:business-health` — recebível vencido gera o KPI `aReceberVencido` (só o que passou do vencimento), o gatilho `receber_vencido` e a prioridade destacando o vencido; conversão em queda vira o gatilho `conversao_caiu` e `overview.conversao` traz as taxas.
-- `test:survival-index` — recebível vencido derruba o componente de recebíveis e a nota registra o valor vencido.
+- `test:survival-index` — recebível vencido derruba o componente de recebíveis e a nota registra o valor vencido; muito capital **que gira** (com saída recente) NÃO é penalizado no componente de estoque.
+- `test:business-health` (estoque) — capital sem giro material vira o gatilho `estoque_parado` e aparece em `overview.estoque`.
 - `test:quote-service` — `conversionStats`: taxa atual/anterior, sinal de queda (deltaPts), amostra mínima (<3 decididos não gera taxa) e isolamento por org.
 - `test:business-health` (concentração) — maior cliente = 80% da receita vira `concentracao_cliente` e aparece em `overview.concentracao`; receita pulverizada não dispara o alerta.

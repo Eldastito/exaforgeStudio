@@ -103,6 +103,15 @@ async function main() {
   db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'p1', 10, 50)`).run(randomUUID(), orgEstoqueOk);
   check("estoque enxuto pontua alto", (S.score(orgEstoqueOk).components.find((c: any) => c.key === "estoque")?.score ?? 0) >= 80);
 
+  // Estoque com GIRO recente NÃO é penalizado — mede sem giro, não capital total (ADR-132 Fatia 4).
+  const orgGiro = mkOrg("Giro");
+  F.recordEvent(orgGiro, { direction: "in", amount: 5000 });
+  db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 2000)`).run(randomUUID(), orgGiro);
+  db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'pGiro', 100, 80)`).run(randomUUID(), orgGiro); // 8000 em estoque
+  db.prepare(`INSERT INTO stock_movements (id, organization_id, product_service_id, type, quantity) VALUES (?, ?, 'pGiro', 'saida', 5)`).run(randomUUID(), orgGiro); // vendeu hoje → gira
+  const compGiro = S.score(orgGiro).components.find((c: any) => c.key === "estoque");
+  check("muito capital mas girando → componente NÃO é penalizado", compGiro.score >= 80 && /girando/i.test(compGiro.note));
+
   // ===== 5c. Histórico do placar =====
   S.snapshot(orgEstoque, "2026-05"); S.snapshot(orgEstoque, "2026-06");
   const withHist = S.scoreWithHistory(orgEstoque);

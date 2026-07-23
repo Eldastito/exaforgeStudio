@@ -4379,6 +4379,22 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_employee_skills_emp ON employee_skills(organization_id, employee_id);
       CREATE INDEX IF NOT EXISTS idx_training_paths_org ON training_paths(organization_id, active);
       CREATE INDEX IF NOT EXISTS idx_training_assign_emp ON training_assignments(organization_id, employee_id);
+      -- Epic 7 (fatia 4): check-ins e reconhecimento/feedback DOCUMENTADO.
+      -- Texto humano; sem pontuar "qualidade humana"; recomendações não são
+      -- executáveis. Decisões trabalhistas seguem humanas e registradas.
+      CREATE TABLE IF NOT EXISTS performance_checkins (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        author_user_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'checkin',  -- checkin|recognition|feedback
+        period TEXT,                           -- YYYY-MM (opcional)
+        summary TEXT NOT NULL,
+        strengths TEXT,
+        next_steps TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_checkins_emp ON performance_checkins(organization_id, employee_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de RH (employees)', e); }
 

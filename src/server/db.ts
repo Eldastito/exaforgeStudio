@@ -4336,6 +4336,49 @@ const initDb = () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_emp_avail_org ON employee_availability_events(organization_id, employee_id);
+      -- Epic 7 (fatia 2): competências e trilhas de treinamento. "Orientação e
+      -- treinamento aplicável à função" — capacidade/desenvolvimento, não folha.
+      CREATE TABLE IF NOT EXISTS skills (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        category TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, name)
+      );
+      CREATE TABLE IF NOT EXISTS employee_skills (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        skill_id TEXT NOT NULL,
+        level TEXT NOT NULL DEFAULT 'basic',  -- none|basic|intermediate|advanced
+        assessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, employee_id, skill_id)
+      );
+      CREATE TABLE IF NOT EXISTS training_paths (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        role_id TEXT,                         -- função alvo (nulo = geral)
+        required_skills_json TEXT,            -- ids de skills que a trilha desenvolve
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS training_assignments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        path_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'assigned', -- assigned|in_progress|completed
+        assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        UNIQUE(organization_id, employee_id, path_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_employee_skills_emp ON employee_skills(organization_id, employee_id);
+      CREATE INDEX IF NOT EXISTS idx_training_paths_org ON training_paths(organization_id, active);
+      CREATE INDEX IF NOT EXISTS idx_training_assign_emp ON training_assignments(organization_id, employee_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de RH (employees)', e); }
 

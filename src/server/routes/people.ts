@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requirePermission } from "../middleware/auth.js";
 import { EmployeeService } from "../EmployeeService.js";
 import { WorkloadService } from "../WorkloadService.js";
+import { PeopleDevelopmentService } from "../PeopleDevelopmentService.js";
 
 // RH / People Intelligence (Epic 7, ADR-140) — cadastro funcional. Gateado pelo
 // módulo `people` (só gestores por padrão; via fallback, owner/admin). Isolado
@@ -66,6 +67,52 @@ router.get("/workload", requirePermission("people", "read"), (req: AuthRequest, 
 // Publica os sinais de sobrecarga no ledger (idempotente por dia).
 router.post("/workload/publish-signals", requirePermission("people", "write"), (req: AuthRequest, res): any => {
   res.json(WorkloadService.publishOverloadSignals(orgOf(req), { asOfDate: req.body?.asOfDate }));
+});
+
+// ── Competências e treinamentos (fatia 2) ──
+router.get("/skills", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  res.json({ skills: PeopleDevelopmentService.listSkills(orgOf(req)) });
+});
+router.post("/skills", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const r = PeopleDevelopmentService.createSkill(orgOf(req), req.body?.name, req.body?.category);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+
+router.get("/employees/:id/skills", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  res.json({ skills: PeopleDevelopmentService.listEmployeeSkills(orgOf(req), req.params.id) });
+});
+router.put("/employees/:id/skills", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const r = PeopleDevelopmentService.setEmployeeSkill(orgOf(req), req.params.id, req.body?.skillId, req.body?.level);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r);
+});
+
+router.get("/training-paths", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  res.json({ paths: PeopleDevelopmentService.listPaths(orgOf(req)) });
+});
+router.post("/training-paths", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const r = PeopleDevelopmentService.createPath(orgOf(req), req.body || {});
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+
+router.post("/employees/:id/training", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const r = PeopleDevelopmentService.assign(orgOf(req), req.params.id, req.body?.pathId);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+router.put("/training-assignments/:id", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const r = PeopleDevelopmentService.setAssignmentStatus(orgOf(req), req.params.id, req.body?.status);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r);
+});
+
+// Plano de desenvolvimento: lacuna de competência + trilhas recomendadas.
+router.get("/employees/:id/development", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  const plan = PeopleDevelopmentService.developmentPlan(orgOf(req), req.params.id);
+  if (!plan) return res.status(404).json({ error: "Colaborador não encontrado." });
+  res.json(plan);
 });
 
 export default router;

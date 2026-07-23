@@ -43,7 +43,7 @@ router.post("/search", async (req: AuthRequest, res): Promise<any> => {
       comEmail: !!b.comEmail,
       limit: b.limit != null ? Number(b.limit) : undefined,
     });
-    if (!result.ok) return res.status(400).json({ error: result.error });
+    if (!result.ok) return res.status(400).json({ error: (result as { ok: false; error: string }).error });
     res.json({ ponto, resumo: result.resumo, empresas: result.empresas });
   } catch (e: any) {
     res.status(500).json({ error: e.message || "Falha na busca." });

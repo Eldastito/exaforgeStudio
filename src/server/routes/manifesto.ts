@@ -76,7 +76,7 @@ Devolva SOMENTE JSON:
 }`;
 
   try {
-    const raw = await chat(prompt, "Você é consultor de marca. Responda SOMENTE em JSON válido.");
+    const raw = await chat(prompt, { system: "Você é consultor de marca. Responda SOMENTE em JSON válido." });
     let parsed: any = {};
     try {
       // Aceita a resposta com ou sem markdown fences

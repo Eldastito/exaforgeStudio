@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Gauge, RefreshCw, AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { apiFetch } from '@/src/lib/api';
@@ -45,7 +45,7 @@ const ACTION_STATUS: Record<string, { label: string; cls: string }> = {
   dismissed: { label: 'Descartada', cls: 'border-zinc-500/40 bg-zinc-500/10 text-zinc-400' },
 };
 
-function Card({ children, className = '' }: { children?: React.ReactNode; className?: string }) {
+const Card: React.FC<{ children?: React.ReactNode; className?: string }> = ({ children, className = '' }) => {
   return (
     <div className={`rounded-ric-card border border-ric-border bg-ric-surface p-5 ${className}`}>
       {children}

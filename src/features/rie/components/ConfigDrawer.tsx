@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Save, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 

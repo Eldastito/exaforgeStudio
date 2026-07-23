@@ -1,6 +1,6 @@
 # ADR-138 — RBAC financeiro: proteger caixa, DRE, retiradas e saúde por perfil (opt-in por org)
 
-- **Status:** Epic 0 / Fatias 1 (gate financeiro opt-in + testes de negação) e 2 (ocultar no menu o que o perfil não acessa) implementadas. Reduzir os erros de typecheck legados (`npm run lint` zero) vem na fatia seguinte.
+- **Status:** Epic 0 **COMPLETO** — Fatias 1 (gate financeiro opt-in + testes de negação), 2 (ocultar no menu o que o perfil não acessa) e 3 (`npm run lint` retorna zero + typecheck vira gate no CI) implementadas.
 - **Data:** 2026-07
 - **Origem:** PRD "ZappFlow Enterprise Intelligence" (Epic 0, §11). Hoje **Caixa, DRE, Saúde e Empresa × Proprietário não têm autorização RBAC específica** (§4, item 8): as rotas `/cash`, `/dre`, `/owner`, `/health-center` não estavam mapeadas a nenhum módulo, então passavam sem checagem de perfil. "Não se deve conectar IA a finanças enquanto o acesso financeiro não está explicitamente protegido."
 - **Relacionadas:** ADR-095 (RBAC granular — `PermissionService`, perfis, `enforceModulePermission`), ADR-129 (Empresa × Proprietário), ADR-126 (Central de Saúde). PRD §11.
@@ -28,8 +28,11 @@ Todo acesso a módulo financeiro numa org com o flag on é auditado (`logAuthEve
 ### D6 — Menu espelha o enforcement (Fatia 2)
 `PermissionService.permissionMap` (consumido por `GET /api/permissions/me`) passa a **omitir os módulos financeiros quando o flag está desligado** e incluí-los (com o nível real) quando ligado. Como o cliente já trata "módulo ausente do mapa" como visível (`canAccessModule` → `undefined ⇒ true`), o menu fica **idêntico ao de hoje** no parque legado e **esconde Caixa/Central de Saúde** exatamente para os perfis sem acesso quando o flag está on — sem lógica nova no cliente. Na `Sidebar`, os itens **Caixa** (`financeiro`) e **Central de Saúde** (`saude_negocio`) passaram a ser gateados por `canAccessModule(...)` (antes eram fixos). Fonte única de verdade: o backend continua reforçando via `enforceModulePermission`; o menu é só coerência visual.
 
+### D7 — `npm run lint` zero + typecheck vira gate (Fatia 3)
+Zerados os **27 erros de typecheck legados** (PRD §11, itens 1–2), sem mudar comportamento: import de `React` onde faltava o namespace (`React.ReactNode`/`React.FC`); componentes de apresentação usados com `key` tipados como `React.FC<Props>` (o padrão que já funciona no resto do código — `key` deixa de ser rejeitado); `unknown` de `db.get()`/serviços castado nos scripts de teste; e duas correções reais de tipo no servidor — `chat(prompt, { system })` (o system prompt do manifesto era **silenciosamente descartado** por ser passado como string) e narrowing do union em `radarB2B`. Com `npm run lint` em zero, o passo de typecheck do CI deixou de ser `continue-on-error` e virou **gate** — trava qualquer PR que reintroduza erro de tipo.
+
 ## Consequências
-**Positivas:** finanças passam a ter proteção RBAC explícita **e** o menu deixa de mostrar o que o perfil não pode abrir — ativável **sem risco** para o parque legado (opt-in por org). Reusa toda a fundação da ADR-095. Auditável. Cumpre a condição do PRD de "acesso financeiro explicitamente protegido" antes de ampliar autonomia de IA sobre finanças.
+**Positivas:** finanças passam a ter proteção RBAC explícita, o menu deixa de mostrar o que o perfil não pode abrir, **e a fundação técnica fica limpa** (`lint` zero, agora gateado) — tudo ativável **sem risco** para o parque legado (opt-in por org). Reusa a fundação da ADR-095. Auditável. Cumpre as condições do PRD ("typecheck e build passam"; "acesso financeiro explicitamente protegido") antes de ampliar autonomia de IA sobre finanças.
 
 **Trade-offs / escopo:** esta fatia entrega o **gate de backend + testes de negação**. Ocultar no menu o que o perfil não acessa (front-end), e a redução dos ~28 erros de typecheck legados (`npm run lint` zero, item 1/2 do Epic 0), ficam para as próximas fatias. `people`/`production` (módulos citados no §11) entram junto dos seus épicos.
 

@@ -46,7 +46,7 @@ async function main() {
   L.recordLoss(orgId, { driver: "desconto", amount: 100 });
   db.prepare(`INSERT INTO payables (id, organization_id, description, amount, due_date, status) VALUES (?, ?, 'Aluguel', 300, ?, 'open')`).run(randomUUID(), orgId, today);
 
-  const dre = D.monthly(orgId, period);
+  const dre: any = D.monthly(orgId, period);
   const l = dre.linhas;
 
   // ===== 1. Receita soma core + Comigo =====

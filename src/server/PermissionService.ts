@@ -32,8 +32,15 @@ export const RBAC_MODULES = [
   "compras", "orcamentos", "agenda", "reservas", "assinaturas", "campanhas",
   "cadencias", "areas", "integracoes", "eventos", "diretor", "estudio",
   "rie", "execucao", "relatorios", "cobranca", "usuarios", "configuracoes",
+  // Epic 0 — módulos financeiros sensíveis (gateados por perfil, opt-in por org).
+  "financeiro", "saude_negocio", "empresa_proprietario",
 ] as const;
 export type RbacModule = (typeof RBAC_MODULES)[number];
+
+// Módulos financeiros sensíveis: o enforcement deles é OPT-IN por organização
+// (flag `rbac_finance_enabled`) — assim a proteção entra sem tocar o parque
+// legado, ligada só para contas validadas.
+export const FINANCE_MODULES = new Set(["financeiro", "saude_negocio", "empresa_proprietario"]);
 
 // 1º segmento da rota (/api/<seg>/...) → módulo RBAC. Espelha o
 // ModuleService.MODULE_BY_ROUTE, mas SÓ os segmentos cujo módulo é governado
@@ -59,6 +66,12 @@ export const ROUTE_MODULE: Record<string, string> = {
   executive: "diretor",
   studio: "estudio",
   tasks: "execucao",
+  // Epic 0 — rotas financeiras sensíveis (PRD §11): /cash, /dre, /owner →
+  // financeiro; /health-center → saude_negocio.
+  cash: "financeiro",
+  dre: "financeiro",
+  owner: "financeiro",
+  "health-center": "saude_negocio",
 };
 
 // Rótulos amigáveis para a tela de editor de perfis (Bloco 3).
@@ -72,6 +85,8 @@ export const RBAC_MODULE_LABELS: Record<string, string> = {
   rie: "Revenue Intelligence", execucao: "Execução / Tarefas",
   relatorios: "Relatórios", cobranca: "Cobrança / Assinatura",
   usuarios: "Usuários e Permissões", configuracoes: "Configurações",
+  financeiro: "Financeiro (Caixa / DRE / Retiradas)", saude_negocio: "Saúde do Negócio",
+  empresa_proprietario: "Empresa × Proprietário",
 };
 
 type ProfileSpec = { key: string; name: string; default: Level; overrides: Partial<Record<string, Level>> };
@@ -82,6 +97,7 @@ export const SYSTEM_PROFILES: ProfileSpec[] = [
   { key: "owner", name: "Dono", default: "full", overrides: {} },
   {
     key: "gerente", name: "Gerente", default: "full",
+    // Gerente enxerga finanças/saúde (default full cobre os módulos novos).
     overrides: { cobranca: "read", configuracoes: "read" },
   },
   {
@@ -94,7 +110,7 @@ export const SYSTEM_PROFILES: ProfileSpec[] = [
   },
   {
     key: "financeiro", name: "Financeiro", default: "none",
-    overrides: { vendas: "read", pagamentos: "full", relatorios: "read", cobranca: "full" },
+    overrides: { vendas: "read", pagamentos: "full", relatorios: "read", cobranca: "full", financeiro: "full", saude_negocio: "read", empresa_proprietario: "read" },
   },
   {
     key: "atendente", name: "Atendente", default: "none",
@@ -126,10 +142,17 @@ export class PermissionService {
     let created = 0;
     const insProfile = db.prepare(`INSERT INTO role_profiles (id, organization_id, name, system_key, is_system) VALUES (?, ?, ?, ?, 1)`);
     const insPerm = db.prepare(`INSERT OR REPLACE INTO role_permissions (role_profile_id, module, level) VALUES (?, ?, ?)`);
+    // Top-up idempotente: para perfis já existentes, adiciona só os módulos que
+    // faltam (INSERT OR IGNORE preserva edições do admin) — assim módulos novos
+    // (ex.: financeiro) chegam aos perfis já semeados sem sobrescrever nada.
+    const topUp = db.prepare(`INSERT OR IGNORE INTO role_permissions (role_profile_id, module, level) VALUES (?, ?, ?)`);
     const tx = db.transaction(() => {
       for (const spec of SYSTEM_PROFILES) {
         const existing = db.prepare(`SELECT id FROM role_profiles WHERE organization_id = ? AND system_key = ?`).get(orgId, spec.key) as any;
-        if (existing) continue;
+        if (existing) {
+          for (const module of RBAC_MODULES) topUp.run(existing.id, module, this.specLevel(spec, module));
+          continue;
+        }
         const id = uuidv4();
         insProfile.run(id, orgId, spec.name, spec.key);
         for (const module of RBAC_MODULES) insPerm.run(id, module, this.specLevel(spec, module));
@@ -184,6 +207,52 @@ export class PermissionService {
   static moduleForSegment(segment?: string | null): string | null {
     if (!segment) return null;
     return ROUTE_MODULE[segment] || null;
+  }
+
+  /** O módulo é financeiro sensível (enforcement opt-in por org)? */
+  static isFinanceModule(module?: string | null): boolean {
+    return !!module && FINANCE_MODULES.has(module);
+  }
+
+  /** A organização ligou o RBAC financeiro? (flag opt-in; default desligado). */
+  static financeRbacEnabled(orgId?: string | null): boolean {
+    if (!orgId) return false;
+    try {
+      const r = db.prepare(`SELECT rbac_finance_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      return !!Number(r?.rbac_finance_enabled);
+    } catch { return false; }
+  }
+
+  /** Liga/desliga o RBAC financeiro da organização. */
+  static setFinanceRbac(orgId: string, enabled: boolean): void {
+    db.prepare(`UPDATE organization_settings SET rbac_finance_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+  }
+
+  private static actionForMethod(method?: string): Action {
+    const m = (method || "GET").toUpperCase();
+    if (m === "GET" || m === "HEAD" || m === "OPTIONS") return "read";
+    if (m === "DELETE") return "delete";
+    return "write";
+  }
+
+  /**
+   * Decisão de acesso a uma rota por (segmento, método), centralizando a regra
+   * do enforcement global. Para módulos FINANCEIROS: só gateia quando a org
+   * ligou o flag — e, ligado, enforce para todos (perfil OU fallback legado).
+   * Para os demais módulos: comportamento atual (opt-in via `hasProfile`).
+   */
+  static checkRouteAccess(orgId: string | null | undefined, user: any, segment?: string | null, method?: string): { module: string | null; gated: boolean; allow: boolean; finance: boolean; action: Action } {
+    const action = this.actionForMethod(method);
+    const module = this.moduleForSegment(segment);
+    if (!module) return { module: null, gated: false, allow: true, finance: false, action };
+    const finance = this.isFinanceModule(module);
+    if (finance) {
+      if (!this.financeRbacEnabled(orgId)) return { module, gated: false, allow: true, finance, action };
+      return { module, gated: true, allow: this.can(orgId as string, user, module, action), finance, action };
+    }
+    // Não-financeiro: só gateia quem tem perfil atribuído (parque legado intacto).
+    if (!this.hasProfile(orgId as string, user)) return { module, gated: false, allow: true, finance, action };
+    return { module, gated: true, allow: this.can(orgId as string, user, module, action), finance, action };
   }
 
   /** Mapa módulo → nível para o usuário (consumido por GET /api/permissions/me). */

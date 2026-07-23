@@ -903,6 +903,10 @@ const initDb = () => {
   // Enterprise Intelligence (ADR-135): feature-flag do Diretor consumir o
   // Business Snapshot V2 (panorama financeiro). Desligada por padrão.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN diretor_snapshot_v2 INTEGER DEFAULT 0`); } catch(e){}
+  // Epic 0 (RBAC financeiro): enforcement dos módulos financeiros é OPT-IN por
+  // organização. 0 = intacto (comportamento atual); 1 = gateia financeiro/
+  // saúde. Ligado só para contas validadas (ex.: Toulon em produção).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN rbac_finance_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,

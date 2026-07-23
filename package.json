@@ -211,7 +211,8 @@
     "test:purchase-orders": "tsx scripts/test-purchase-orders.ts",
     "test:goods-receipt": "tsx scripts/test-goods-receipt.ts",
     "test:purchase-payable": "tsx scripts/test-purchase-payable.ts",
-    "test:supplier-performance": "tsx scripts/test-supplier-performance.ts"
+    "test:supplier-performance": "tsx scripts/test-supplier-performance.ts",
+    "test:rbac-finance": "tsx scripts/test-rbac-finance.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

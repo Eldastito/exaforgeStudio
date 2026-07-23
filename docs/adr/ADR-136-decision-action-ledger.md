@@ -1,6 +1,6 @@
 # ADR-136 — Decision & Action Ledger (sinais → decisões → resultados)
 
-- **Status:** Epic 2 / Fatia C1 implementada (Ledger de Sinais + FinanceSignalPublisher). Decisões/ações, aprovações, outcomes, Pareto e o executor governado nas fatias seguintes.
+- **Status:** Epic 2 / Fatias C1 (Ledger de Sinais) e C2a (Ações + Aprovações + Políticas de autonomia) implementadas. Outcomes detalhados (C2b), Pareto (C3), UI (C4) e o executor governado (C5) nas fatias seguintes.
 - **Data:** 2026-07
 - **Origem:** PRD "ZappFlow Enterprise Intelligence" (Epic 2). Hoje cada módulo mede valor e reage de forma diferente; falta um **contrato comum** para publicar um sinal, priorizar por impacto e transformar em ação medida. Esta ADR abre essa camada, começando pelo **ledger de sinais** (read/write, sem execução) sobre a fundação do Snapshot V2 (ADR-135).
 - **Relacionadas:** ADR-135 (Snapshot V2/adapters), ADR-126 (Central de Saúde), ADR-085 (Impact Ledger), ADR-130 (Governança de IA). PRD §7.1, §24.
@@ -19,8 +19,11 @@ Deriva sinais financeiros tipados a partir dos motores determinísticos existent
 ### D4 — API read/write
 `GET /api/signals` (lista, ordenada por severidade), `POST /api/signals/refresh` (deriva+publica), `POST /api/signals/:id/acknowledge|dismiss`.
 
+### D5 — Ações + Aprovações + Políticas de autonomia (C2a)
+`decision_actions`/`action_approvals`/`agent_policies` (PRD §7.2/7.3/7.6). `DecisionActionService`: **propor** (a IA/regra propõe) → a política decide se nasce `approved` (baixo risco) ou `awaiting_approval` → **aprovar/rejeitar** (auditado em `action_approvals`) → **concluir/cancelar**. `ApprovalPolicyService.resolve` usa a política da organização (`agent_policies`) quando existe, senão a **matriz padrão do PRD §10.2** (`create_task`=none; `collection`=single; `change_price`=role owner; `choose_supplier`/`create_purchase_order`=two_step). `two_step` exige **2 aprovadores distintos**. Autonomia baixa (observe/suggest) e valor acima do `max_auto_amount` **endurecem** a política. RBAC de perfil na rota. **Nada de `execute` automático** — o mais alto é preparar+aprovar+concluir manualmente; a execução governada (comandos tipados) é a fatia C5.
+
 ## Consequências
-**Positivas:** cria o contrato único sobre o qual o Pareto (C3) prioriza e as decisões/ações (C2) se apoiam; reusa os motores existentes; idempotente e auditável. Aditivo — nada dos fluxos atuais muda.
+**Positivas:** cria o contrato único de sinais **e** o ciclo de ação governado (propor→aprovar→concluir) sobre o qual o Pareto (C3) prioriza; reusa os motores existentes; idempotente e auditável. Aditivo — nada dos fluxos atuais muda.
 
 **Trade-offs / escopo:** C1 entrega só **sinais** (nenhuma ação/execução). `decision_actions`/`action_approvals`/`action_outcomes`/`agent_policies`, o `ImpactPrioritizationService` (Pareto) e o executor governado (`CommandExecutorService`/Maestro 2.0) vêm nas fatias seguintes — começando em observar/sugerir/preparar, sem `execute` automático. Só o publisher financeiro nesta fatia; os demais domínios entram como novos publishers.
 
@@ -28,4 +31,6 @@ Deriva sinais financeiros tipados a partir dos motores determinísticos existent
 - Determinístico (zero-token); IA não publica sinal por conta própria nesta fatia. Idempotência por `dedupe_key`. Isolado por `organization_id`. Sem execução.
 
 ## Testes
-`test:business-signals` — o publisher deriva ≥2 sinais dos motores (caixa negativo = critical/fato/impacto −1000 com evidência JSON; recebível vencido = attention/700); lista ordenada por severidade; **re-rodar no mesmo dia não duplica** (idempotente) e o mesmo `dedupe_key` reusa o id; validação de severidade/campos obrigatórios; acknowledge/dismiss mudam o status; isolamento (sinais de uma org não vazam para outra).
+`test:business-signals` (C1) — o publisher deriva ≥2 sinais dos motores (caixa negativo = critical/fato/impacto −1000 com evidência JSON; recebível vencido = attention/700); lista ordenada por severidade; **re-rodar no mesmo dia não duplica** (idempotente) e o mesmo `dedupe_key` reusa o id; validação; acknowledge/dismiss; isolamento.
+
+`test:decision-actions` (C2a) — matriz padrão (create_task=none, collection=single, change_price=role owner, choose_supplier=two_step); baixo risco nasce aprovado, demais aguardam; 1 aprovação fecha single; **two_step exige 2 aprovadores distintos** (o mesmo não conta duas vezes); só conclui aprovada (com resultado); rejeitar/cancelar; política da org (autonomia observe) endurece none→single; isolamento por org.

@@ -4168,6 +4168,66 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela business_signals', e); }
 
+  // Decision & Action Ledger (ADR-136, Epic 2 — C2): ação proposta → aprovação
+  // → conclusão, com política de autonomia por (domínio, tipo). A IA propõe; a
+  // política decide se exige aprovação. Nada executa sozinho. Isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS decision_actions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        signal_id TEXT,
+        domain TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        priority_score REAL DEFAULT 0,
+        expected_impact REAL,
+        impact_unit TEXT,
+        basis TEXT DEFAULT 'estimate',
+        confidence REAL DEFAULT 0.7,
+        status TEXT NOT NULL DEFAULT 'proposed',   -- proposed|awaiting_approval|approved|rejected|cancelled|done
+        approval_policy TEXT NOT NULL DEFAULT 'single', -- none|single|role|two_step
+        approval_role TEXT,
+        assigned_to TEXT,
+        due_at DATETIME,
+        command_type TEXT,
+        command_payload_json TEXT,
+        baseline_json TEXT,
+        result_amount REAL,
+        created_by TEXT NOT NULL DEFAULT 'rule',   -- rule|ai|user|integration
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        approved_at DATETIME,
+        executed_at DATETIME,
+        completed_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_decision_actions_org ON decision_actions(organization_id, status, domain);
+      CREATE TABLE IF NOT EXISTS action_approvals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        required_role TEXT,
+        approver_user_id TEXT,
+        decision TEXT NOT NULL,                    -- approved|rejected
+        reason TEXT,
+        decided_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_action_approvals_action ON action_approvals(organization_id, action_id);
+      CREATE TABLE IF NOT EXISTS agent_policies (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        domain TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        autonomy_level TEXT NOT NULL DEFAULT 'suggest', -- observe|suggest|prepare|execute
+        approval_role TEXT,
+        max_auto_amount REAL,
+        active INTEGER DEFAULT 1,
+        config_json TEXT,
+        UNIQUE(organization_id, domain, action_type)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de decisão/ação', e); }
+
   // Governança de IA (ADR-130): auditoria de decisão para sugestões que afetam
   // pessoas — a IA sugere, o humano decide com MOTIVO registrado.
   try {

@@ -63,6 +63,7 @@ import lgpdRoutes from "./src/server/routes/lgpd.js";
 import executiveRoutes from "./src/server/routes/executive.js";
 import businessRoutes from "./src/server/routes/business.js";
 import signalsRoutes from "./src/server/routes/signals.js";
+import actionsRoutes from "./src/server/routes/actions.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import { PlanService } from "./src/server/PlanService.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
@@ -501,6 +502,7 @@ async function startServer() {
   protectedApi.use("/executive", executiveRoutes);
   protectedApi.use("/business", businessRoutes);
   protectedApi.use("/signals", signalsRoutes);
+  protectedApi.use("/actions", actionsRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);

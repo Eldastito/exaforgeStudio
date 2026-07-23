@@ -4225,6 +4225,22 @@ const initDb = () => {
         config_json TEXT,
         UNIQUE(organization_id, domain, action_type)
       );
+      -- Outcomes: esperado × realizado por ação (ADR-136 C2b, PRD §7.5). O elo
+      -- que fecha o Impact Ledger unificado — cada ação concluída registra o
+      -- valor realizado ancorado numa evidência, separando fato de estimativa.
+      CREATE TABLE IF NOT EXISTS action_outcomes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        expected_value REAL,
+        realized_value REAL,
+        basis TEXT DEFAULT 'estimate',              -- fact|estimate
+        measurement_method TEXT NOT NULL,           -- self_reported|manual|attributed|derived
+        attribution_window_days INTEGER,
+        evidence_json TEXT,
+        measured_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_action_outcomes_action ON action_outcomes(organization_id, action_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de decisão/ação', e); }
 
@@ -4340,7 +4356,8 @@ const initDb = () => {
         result_amount REAL,                 -- impacto medido ao concluir
         created_by TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        resolved_at DATETIME
+        resolved_at DATETIME,
+        decision_action_id TEXT             -- ponte opcional p/ ledger unificado (ADR-136 C2b)
       );
       CREATE INDEX IF NOT EXISTS idx_cash_actions_org ON cash_actions(organization_id, status, created_at);
 
@@ -4371,6 +4388,9 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas do motor de caixa', e); }
+  // Ponte opcional p/ o ledger unificado em DBs já existentes (ADR-136 C2b).
+  // Nulo por padrão: nada dos fluxos atuais de caixa muda.
+  try { db.exec(`ALTER TABLE cash_actions ADD COLUMN decision_action_id TEXT`); } catch(e){}
 };
 
 initDb();

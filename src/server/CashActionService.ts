@@ -2,6 +2,7 @@ import db from "./db.js";
 import { randomUUID } from "crypto";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { CashForecastService } from "./CashForecastService.js";
+import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
 
 /**
  * Motor de Caixa — Alerta → Ação → Medição (ADR-125 Fatia 3).
@@ -57,21 +58,41 @@ export class CashActionService {
     return { firstRisk: fc.firstRisk, shortfall, actions: actions.slice(0, 3) };
   }
 
-  /** Persiste uma ação aceita pelo lojista (nunca executa nada por conta). */
-  static create(orgId: string, input: { kind: string; title: string; rationale?: string; expectedImpact?: number; baselineShortfall?: number; createdBy?: string }) {
+  /**
+   * Persiste uma ação aceita pelo lojista (nunca executa nada por conta).
+   * `decisionActionId` é uma ponte OPCIONAL (ADR-136 C2b) para o ledger
+   * unificado; nulo por padrão — nada do fluxo atual muda.
+   */
+  static create(orgId: string, input: { kind: string; title: string; rationale?: string; expectedImpact?: number; baselineShortfall?: number; createdBy?: string; decisionActionId?: string }) {
     const kind = (KINDS as readonly string[]).includes(input.kind) ? input.kind : "outro";
     if (!input.title) return { ok: false as const, error: "title_required" };
     const id = randomUUID();
-    db.prepare(`INSERT INTO cash_actions (id, organization_id, kind, title, rationale, expected_impact, baseline_shortfall, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'accepted', ?)`)
-      .run(id, orgId, kind, String(input.title).slice(0, 160), input.rationale || null, round2(input.expectedImpact || 0), round2(input.baselineShortfall || 0), input.createdBy || null);
+    db.prepare(`INSERT INTO cash_actions (id, organization_id, kind, title, rationale, expected_impact, baseline_shortfall, status, created_by, decision_action_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?)`)
+      .run(id, orgId, kind, String(input.title).slice(0, 160), input.rationale || null, round2(input.expectedImpact || 0), round2(input.baselineShortfall || 0), input.createdBy || null, input.decisionActionId || null);
     return { ok: true as const, id };
   }
 
-  /** Conclui a ação registrando o impacto MEDIDO (esperado × realizado). */
+  /**
+   * Conclui a ação registrando o impacto MEDIDO (esperado × realizado). Quando
+   * a ação está vinculada a uma decisão unificada (`decision_action_id`),
+   * espelha o outcome no ledger unificado (ADR-136 C2b) — sem alterar o
+   * comportamento legado quando não há vínculo.
+   */
   static complete(orgId: string, id: string, resultAmount: number) {
     const a = db.prepare("SELECT * FROM cash_actions WHERE organization_id = ? AND id = ? AND status = 'accepted'").get(orgId, id) as any;
     if (!a) return { ok: false as const, error: "not_found_or_resolved" };
     db.prepare("UPDATE cash_actions SET status = 'done', result_amount = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?").run(round2(resultAmount), id);
+    if (a.decision_action_id) {
+      try {
+        OutcomeMeasurementService.record(orgId, a.decision_action_id, {
+          expectedValue: Number(a.expected_impact) || 0,
+          realizedValue: round2(resultAmount),
+          basis: "estimate",
+          measurementMethod: "self_reported",
+          evidence: { source: "cash_action.complete", cash_action_id: id, kind: a.kind },
+        });
+      } catch (e) { /* ponte aditiva — nunca bloqueia a conclusão do caixa */ }
+    }
     return { ok: true as const };
   }
 

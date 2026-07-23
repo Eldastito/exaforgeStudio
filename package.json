@@ -204,7 +204,8 @@
     "test:task-result": "tsx scripts/test-task-result.ts",
     "test:business-snapshot": "tsx scripts/test-business-snapshot.ts",
     "test:business-signals": "tsx scripts/test-business-signals.ts",
-    "test:decision-actions": "tsx scripts/test-decision-actions.ts"
+    "test:decision-actions": "tsx scripts/test-decision-actions.ts",
+    "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

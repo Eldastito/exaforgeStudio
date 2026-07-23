@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { DecisionActionService } from "../DecisionActionService.js";
+import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -13,6 +14,15 @@ router.get("/", (req: AuthRequest, res): any => {
   const status = typeof req.query?.status === "string" ? req.query.status : undefined;
   const domain = typeof req.query?.domain === "string" ? req.query.domain : undefined;
   res.json({ actions: DecisionActionService.list(orgId, { status, domain }) });
+});
+
+// GET /api/actions/ledger — Impact Ledger unificado (esperado × realizado).
+// Precisa vir ANTES de /:id para não ser capturada como id="ledger".
+router.get("/ledger", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const domain = typeof req.query?.domain === "string" ? req.query.domain : undefined;
+  res.json(OutcomeMeasurementService.ledger(orgId, { domain }));
 });
 
 router.get("/:id", (req: AuthRequest, res): any => {
@@ -88,6 +98,26 @@ router.post("/:id/cancel", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(DecisionActionService.cancel(orgId, req.params.id)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/actions/:id/outcomes — outcomes medidos de uma ação.
+router.get("/:id/outcomes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ outcomes: OutcomeMeasurementService.forAction(orgId, req.params.id) });
+});
+
+// POST /api/actions/:id/outcomes — registra um outcome manual (esperado × realizado).
+router.post("/:id/outcomes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    res.status(201).json(OutcomeMeasurementService.record(orgId, req.params.id, {
+      expectedValue: b.expectedValue, realizedValue: b.realizedValue, basis: b.basis,
+      measurementMethod: b.measurementMethod, attributionWindowDays: b.attributionWindowDays, evidence: b.evidence,
+    }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

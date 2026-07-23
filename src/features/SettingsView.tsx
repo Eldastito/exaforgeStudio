@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -83,6 +83,9 @@ export function SettingsView() {
           </button>
           <button onClick={() => setActiveTab('privacidade')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'privacidade' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Lock className="w-4 h-4" /> Privacidade (LGPD)
+          </button>
+          <button onClick={() => setActiveTab('governanca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'governanca' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Scale className="w-4 h-4" /> Governança de IA
           </button>
           <button onClick={() => setActiveTab('radar')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'radar' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Crosshair className="w-4 h-4" /> Radar
@@ -215,6 +218,7 @@ export function SettingsView() {
           {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('cobranca')} />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
+          {activeTab === 'governanca' && <GovernancePanel />}
           {activeTab === 'radar' && <RadarSettingsPanel />}
           {activeTab === 'landing' && <DefaultLandingPanel />}
 
@@ -1292,6 +1296,93 @@ function AiAttendancePanel() {
         </div>
       )}
     </>
+  );
+}
+
+// Governança de IA (ADR-130) — política vigente + auditoria de decisões que afetam pessoas.
+function GovernancePanel() {
+  const [pol, setPol] = useState<any | null>(null);
+  const [decisions, setDecisions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch('/api/ai-governance').then(r => r.json()).catch(() => null),
+      apiFetch('/api/ai-governance/decisions').then(r => r.json()).catch(() => ({})),
+    ]).then(([p, d]) => { setPol(p); setDecisions(Array.isArray(d?.decisions) ? d.decisions : []); }).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
+  if (!pol) return <div className="text-sm text-zinc-500">Não consegui carregar a política de governança.</div>;
+
+  return (
+    <div className="max-w-3xl">
+      <h2 className="zf-page-title flex items-center gap-2"><Scale className="w-5 h-5 text-teal-300" /> Governança de IA</h2>
+      <p className="text-zinc-400 text-sm mt-1">Como a IA do ZappFlow decide com responsabilidade: a IA sugere, você decide — com registro e sem viés.</p>
+
+      {/* Princípios */}
+      <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <h3 className="text-sm font-medium text-zinc-100 mb-2">Princípios</h3>
+        <ul className="space-y-1">
+          {pol.principios.map((p: string, i: number) => <li key={i} className="text-[13px] text-zinc-300 flex items-start gap-1.5"><Check className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />{p}</li>)}
+        </ul>
+      </div>
+
+      {/* Controles por área */}
+      <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <h3 className="text-sm font-medium text-zinc-100 mb-2">Controles vigentes</h3>
+        <div className="space-y-2">
+          {pol.controles.map((c: any, i: number) => (
+            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
+              <div className="text-[13px] font-medium text-teal-300">{c.area}</div>
+              <div className="text-[12px] text-zinc-400 mt-0.5">{c.como}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Sugestões que afetam pessoas + checklist */}
+      <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
+        <h3 className="text-sm font-medium text-indigo-100 mb-1 flex items-center gap-2"><UserCheck className="w-4 h-4" /> Decisões que afetam pessoas</h3>
+        <p className="text-[12px] text-zinc-400 mb-2">A IA só sugere. Aplicar exige <strong>humano + motivo</strong>, com base no <strong>comportamento</strong> (nunca em característica pessoal).</p>
+        <div className="space-y-1.5">
+          {pol.peopleAffecting.map((p: any) => (
+            <div key={p.kind} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
+              <div className="text-[13px] text-zinc-100">{p.label}</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">Base: {p.basis}</div>
+              <div className="text-[11px] text-zinc-400 mt-0.5">{p.fairnessNote}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 border-t border-indigo-500/15 pt-2">
+          <div className="text-[11px] uppercase tracking-wide text-indigo-300/80 mb-1">Checklist de fairness</div>
+          <ul className="space-y-0.5">{pol.checklistFairness.map((c: string, i: number) => <li key={i} className="text-[12px] text-zinc-300 flex items-start gap-1.5"><span className="text-indigo-400">→</span>{c}</li>)}</ul>
+        </div>
+      </div>
+
+      {/* Auditoria de decisões */}
+      <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <h3 className="text-sm font-medium text-zinc-100 mb-2">Últimas decisões registradas</h3>
+        {decisions.length === 0 ? (
+          <div className="text-[13px] text-zinc-500">Nenhuma decisão registrada ainda.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {decisions.map((d: any) => (
+              <div key={d.id} className="flex items-start justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-[13px] text-zinc-100">{d.kind} <span className={`text-[11px] ${d.decision === 'applied' ? 'text-amber-300' : 'text-zinc-500'}`}>· {d.decision === 'applied' ? 'aplicada' : 'dispensada'}</span></div>
+                  {d.reason && <div className="text-[11px] text-zinc-500 mt-0.5">Motivo: {d.reason}</div>}
+                </div>
+                <div className="text-right shrink-0">
+                  {d.suggested_by === 'ai' && <span className="text-[10px] rounded-full border border-indigo-500/40 text-indigo-300 px-1.5 py-0.5">sugerida pela IA</span>}
+                  <div className="text-[10px] text-zinc-600 mt-0.5">{String(d.created_at || '').slice(0, 10)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

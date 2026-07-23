@@ -3,6 +3,7 @@ import { AnalyticsService } from "./AnalyticsService.js";
 import { LossMarginService } from "./LossMarginService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
+import db from "./db.js";
 
 /**
  * Simulador de Decisões (ADR-133) — "decidir antes de gerar o problema".
@@ -16,8 +17,22 @@ import { OwnerDrawService } from "./OwnerDrawService.js";
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
 export class DecisionSimulatorService {
-  /** Margem e ticket médios recentes + receita do mês — robusto entre verticais. */
-  static marginContext(orgId: string): { marginFrac: number; avgTicket: number; monthlyRevenue: number } {
+  /** Receita dos últimos 30 dias (janela MÓVEL), entre verticais (orders + comigo_orders). */
+  static revenue30(orgId: string): number {
+    try {
+      const row = db.prepare(`
+        SELECT COALESCE(SUM(x),0) s FROM (
+          SELECT total_amount AS x FROM orders WHERE organization_id = ? AND status IN ('pago','em_preparo','entregue','concluido') AND created_at >= datetime('now','-30 days')
+          UNION ALL
+          SELECT total AS x FROM comigo_orders WHERE organization_id = ? AND status IN ('paid','done') AND created_at >= datetime('now','-30 days')
+        )
+      `).get(orgId, orgId) as any;
+      return Math.round((Number(row?.s) || 0) * 100) / 100;
+    } catch { return 0; }
+  }
+
+  /** Margem e ticket médios recentes + receita (mês corrente e janela móvel de 30d). */
+  static marginContext(orgId: string): { marginFrac: number; avgTicket: number; monthlyRevenue: number; revenue30: number } {
     let marginFrac = 0, avgTicket = 0;
     try {
       const be = ComigoHealthService.breakEven(orgId) as any;
@@ -35,7 +50,7 @@ export class DecisionSimulatorService {
     }
     let monthlyRevenue = 0;
     try { monthlyRevenue = LossMarginService.monthlyRevenue(orgId, new Date().toISOString().slice(0, 10).slice(0, 7)); } catch { /* 0 */ }
-    return { marginFrac, avgTicket, monthlyRevenue };
+    return { marginFrac, avgTicket, monthlyRevenue, revenue30: this.revenue30(orgId) };
   }
 
   /**
@@ -83,9 +98,11 @@ export class DecisionSimulatorService {
       slowMoverCapital = Number(sc?.slowMoverCapital) || 0;
     } catch { /* sem estoque */ }
 
-    const { marginFrac, monthlyRevenue } = this.marginContext(orgId);
-    // CMV/dia ≈ receita do mês × (1 - margem) ÷ 30. Sem margem/vendas, fica 0.
-    const cogsDaily = marginFrac > 0 && monthlyRevenue > 0 ? (monthlyRevenue * (1 - marginFrac)) / 30 : 0;
+    const { marginFrac, revenue30 } = this.marginContext(orgId);
+    // CMV/dia = receita dos ÚLTIMOS 30 DIAS (janela móvel) × (1 - margem) ÷ 30.
+    // Janela móvel (não o mês corrente) evita subestimar o CMV/dia no início do
+    // mês — o que superestimaria a cobertura. Sem margem/vendas, fica 0.
+    const cogsDaily = marginFrac > 0 && revenue30 > 0 ? (revenue30 * (1 - marginFrac)) / 30 : 0;
     const slowShare = totalCapital > 0 ? slowMoverCapital / totalCapital : 0;
     const estIdle = round2(amount * slowShare);
     const slowPct = Math.round(slowShare * 100);

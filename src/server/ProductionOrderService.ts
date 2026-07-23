@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { ProductionService } from "./ProductionService.js";
+import { ProductionShopFloorService } from "./ProductionShopFloorService.js";
 
 /**
  * ProductionOrderService (Supervisor de Produção IA — fatia 2, ADR-141).
@@ -101,6 +102,11 @@ export class ProductionOrderService {
     o.steps = db.prepare("SELECT * FROM production_steps WHERE organization_id = ? AND order_id = ? ORDER BY seq, created_at").all(orgId, orderId);
     o.events = db.prepare("SELECT * FROM production_events WHERE organization_id = ? AND order_id = ? ORDER BY created_at DESC LIMIT 100").all(orgId, orderId);
     o.requirements = o.bom_id ? ProductionService.materialRequirements(orgId, o.bom_id, o.pending || o.qty_planned) : null;
+    // Chão de fábrica (fatia 3): consumo real, qualidade e paradas.
+    o.consumptions = ProductionShopFloorService.listConsumptions(orgId, orderId);
+    o.qualityChecks = ProductionShopFloorService.listQualityChecks(orgId, orderId);
+    o.downtime = ProductionShopFloorService.listDowntime(orgId, orderId);
+    o.shopFloor = ProductionShopFloorService.summary(orgId, orderId);
     return o;
   }
 

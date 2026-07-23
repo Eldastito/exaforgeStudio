@@ -4474,6 +4474,42 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_prod_orders_org ON production_orders(organization_id, status);
       CREATE INDEX IF NOT EXISTS idx_prod_steps_order ON production_steps(organization_id, order_id);
       CREATE INDEX IF NOT EXISTS idx_prod_events_order ON production_events(organization_id, order_id);
+      -- Produção (fatia 3, ADR-141): consumo real de materiais (baixa estoque),
+      -- checklist de qualidade e motivos de parada.
+      CREATE TABLE IF NOT EXISTS material_consumptions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        material_product_service_id TEXT NOT NULL,
+        quantity REAL NOT NULL DEFAULT 0,
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS quality_checks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        step_id TEXT,
+        name TEXT NOT NULL,
+        passed INTEGER NOT NULL DEFAULT 1,
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS downtime_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        minutes INTEGER NOT NULL DEFAULT 0,
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_mat_consum_order ON material_consumptions(organization_id, order_id);
+      CREATE INDEX IF NOT EXISTS idx_quality_order ON quality_checks(organization_id, order_id);
+      CREATE INDEX IF NOT EXISTS idx_downtime_order ON downtime_events(organization_id, order_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de Produção', e); }
 

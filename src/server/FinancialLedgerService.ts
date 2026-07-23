@@ -83,12 +83,12 @@ export class FinancialLedgerService {
   }
 
   // ── Contas a pagar ────────────────────────────────────────────────────────
-  static addPayable(orgId: string, input: { description: string; amount: number; dueDate: string; category?: string; supplierName?: string; recurrence?: string; createdBy?: string }) {
+  static addPayable(orgId: string, input: { description: string; amount: number; dueDate: string; category?: string; supplierName?: string; recurrence?: string; createdBy?: string; sourcePurchaseOrderId?: string | null }) {
     if (!input.description || !isDate(input.dueDate) || !(round2(input.amount) > 0)) return { ok: false as const, error: "invalid_payable" };
     const id = randomUUID();
     const rec = ["none", "weekly", "monthly"].includes(String(input.recurrence)) ? input.recurrence : "none";
-    db.prepare(`INSERT INTO payables (id, organization_id, description, category, supplier_name, amount, due_date, recurrence, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`)
-      .run(id, orgId, String(input.description).slice(0, 160), input.category || null, input.supplierName || null, round2(input.amount), input.dueDate, rec, input.createdBy || null);
+    db.prepare(`INSERT INTO payables (id, organization_id, description, category, supplier_name, amount, due_date, recurrence, status, created_by, source_purchase_order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
+      .run(id, orgId, String(input.description).slice(0, 160), input.category || null, input.supplierName || null, round2(input.amount), input.dueDate, rec, input.createdBy || null, input.sourcePurchaseOrderId || null);
     return { ok: true as const, id };
   }
 

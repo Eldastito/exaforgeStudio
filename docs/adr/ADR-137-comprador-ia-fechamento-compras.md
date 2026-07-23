@@ -1,6 +1,6 @@
 # ADR-137 — Comprador IA: fechamento do ciclo de compras (cotação → ordem → recebimento → conta a pagar)
 
-- **Status:** Epic 5 / Fatias E5.1 (cotação aceita → **ordem de compra imutável**) e E5.2 (**recebimento** completo/parcial/divergência) implementadas. Conta a pagar (E5.3) e performance de fornecedor (E5.4) nas fatias seguintes.
+- **Status:** Epic 5 / Fatias E5.1 (cotação aceita → **ordem de compra imutável**), E5.2 (**recebimento** completo/parcial/divergência) e E5.3 (**conta a pagar** idempotente) implementadas. Performance de fornecedor (E5.4) na fatia seguinte.
 - **Data:** 2026-07
 - **Origem:** PRD "ZappFlow Enterprise Intelligence" (Epic 5, §16). Hoje o fluxo de compras **termina na escolha do fornecedor** — não fecha pedido, recebimento, conciliação e conta a pagar (§4, item 6). O módulo ajuda a decidir, mas não garante que a compra **aconteceu corretamente**. Fechar o ciclo transforma Supply em resultado operacional mensurável.
 - **Relacionadas:** ADR-099 (cotação multicanal WhatsApp/e-mail), ADR-136 (Decision & Action Ledger — sinais/ações), ADR-085 (Impact Ledger — economia em compras). PRD §16.
@@ -27,8 +27,16 @@ A ordem é criada **internamente** (status `open`); o envio ao fornecedor só oc
 
 Rotas: `POST /api/procurement/order/:id/receive`, `GET /api/procurement/order/:id/receipts`.
 
+### D6 — Conta a pagar idempotente (E5.3)
+`PurchasePayableService.createFromOrder` fecha compras no **financeiro**: gera a conta a pagar a partir da ordem, no mesmo `payables` que caixa/DRE já enxergam (via `FinancialLedgerService.addPayable`, reusado). Guardas:
+- **não é criada duas vezes** (aceite §16): coluna `payables.source_purchase_order_id` + **índice UNIQUE parcial** `(org, source_purchase_order_id)` + verificação prévia; a segunda chamada devolve a MESMA conta (`deduped`);
+- **valor pelo RECEBIDO** por padrão (`Σ received_qty × unit_price`) — honesto com as divergências da E5.2 (paga-se o que chegou, não o que se pediu); `basis: 'ordered'` usa o total do pedido quando fizer sentido;
+- **vencimento é decisão do gestor** (não inferido); a rota exige perfil owner/admin (§10.2 "registrar conta a pagar" é ação sensível). Não paga nada — o pagamento (saída de caixa) continua sendo ação humana separada (`payPayable`).
+
+Rota: `POST /api/procurement/order/:id/payable`.
+
 ## Consequências
-**Positivas:** o Supply passa a ter um artefato de compra **rastreável e imutável** e um **recebimento auditável** (estoque só do confirmado, divergência vira sinal+tarefa) — base para conta a pagar e avaliação de fornecedor. Corrige um contrato quebrado (erro de tipo pré-existente). Aditivo: reusa cotações/requisições/estoque/sinais/tarefas existentes; nenhum fluxo atual muda de comportamento.
+**Positivas:** o ciclo de compras chega ao **financeiro** — cotação → ordem imutável → recebimento auditável → **conta a pagar única** no caixa/DRE. Corrige um contrato quebrado (erro de tipo pré-existente). Aditivo: reusa cotações/requisições/estoque/sinais/tarefas/`payables` existentes; nenhum fluxo atual muda de comportamento.
 
 **Trade-offs / escopo:** E5.1 entrega só a **ordem** (nenhum recebimento/financeiro). `goods_receipts`/`goods_receipt_items` (recebimento completo/parcial/divergência, entrada no estoque só da quantidade confirmada), a **conta a pagar** idempotente e o `supplier_performance_snapshots` (preço escolhido × média, prazo prometido × realizado, completude, taxa de resposta) vêm nas próximas fatias.
 
@@ -39,3 +47,5 @@ Rotas: `POST /api/procurement/order/:id/receive`, `GET /api/procurement/order/:i
 `test:purchase-orders` (E5.1) — aceitar gera a ordem (requisição→`ordered`, cotação→`accepted`); ordem é **snapshot** dos itens com `qty = min(pedido, disponível)`, preço e total congelados; **alterar a cotação depois não muda a ordem**; **idempotência** (aceitar de novo / `createFromQuote` devolvem a MESMA ordem; só 1 ordem por requisição); cotação não aceita não gera ordem; isolamento por org. Regressão: `test:quote-email-channel` 10/10 (contrato de `sendQuotes`).
 
 `test:goods-receipt` (E5.2) — recebimento parcial (6 confirmados entram no estoque) + avaria (avariado NÃO entra); ordem fica `receiving`; **divergência gera sinal + tarefa**; **parcial não encerra saldo** (`received_qty` preservado, avaria não conta); completar o restante → ordem `received` (recebimento `complete`); ordem finalizada não recebe mais; **entrega a mais = divergência `over`** (entra no estoque); **nota ausente** gera sinal e marca `has_divergence`; isolamento por org.
+
+`test:purchase-payable` (E5.3) — sem recebimento não gera conta (valor devido 0); **valor pelo recebido** (130, não o pedido 150); conta vinculada à ordem, categoria `compras`, fornecedor no snapshot; **entra no `a pagar`** do FinancialLedger; **idempotência** (segunda chamada → MESMA conta; só 1 por ordem); `basis: 'ordered'` fatura o total do pedido; ordem inexistente/cancelada não gera; isolamento por org. Regressão: `test:cash-ledger` 18/18.

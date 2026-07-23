@@ -69,6 +69,24 @@ function ClosingsTab() {
   const [closings, setClosings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [informing, setInforming] = useState<any | null>(null);
+  const [storeForm, setStoreForm] = useState<null | { name: string; code: string; whatsappIdentifier: string }>(null);
+  const [savingStore, setSavingStore] = useState(false);
+
+  const saveStore = async () => {
+    if (!storeForm) return;
+    const name = storeForm.name.trim();
+    if (!name) { toast.error('Dê um nome à loja.'); return; }
+    setSavingStore(true);
+    try {
+      const wa = storeForm.whatsappIdentifier.replace(/\D/g, '');
+      const res = await apiFetch('/api/retailops/stores', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, code: storeForm.code.trim() || null, whatsappIdentifier: wa || null }),
+      });
+      if (res.ok) { toast.success('Loja cadastrada.'); setStoreForm(null); load(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao cadastrar a loja.'); }
+    } finally { setSavingStore(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -107,11 +125,14 @@ function ClosingsTab() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         </label>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        <button onClick={() => setStoreForm({ name: '', code: '', whatsappIdentifier: '' })} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
 
       {stores.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-          Nenhuma loja cadastrada na rede ainda. Cadastre as lojas (filiais) para registrar o fechamento diário.
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center">
+          <p className="text-sm text-zinc-500">Nenhuma loja cadastrada na rede ainda.</p>
+          <p className="mt-1 text-[12px] text-zinc-600">Cadastre as lojas (filiais) para registrar o fechamento diário, apurar comissão e conferir divergências.</p>
+          <button onClick={() => setStoreForm({ name: '', code: '', whatsappIdentifier: '' })} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Cadastrar primeira loja</button>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -157,6 +178,33 @@ function ClosingsTab() {
       )}
 
       {informing && <InformModal closing={informing} onClose={() => setInforming(null)} onSaved={() => { setInforming(null); load(); }} />}
+
+      {storeForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setStoreForm(null)}>
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-zinc-100">Nova loja (filial)</h3>
+              <button onClick={() => setStoreForm(null)} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="mt-4 space-y-3">
+              <label className="block text-xs text-zinc-400">Nome da loja
+                <input value={storeForm.name} onChange={e => setStoreForm({ ...storeForm, name: e.target.value })} placeholder="Ex.: Loja Centro" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+              </label>
+              <label className="block text-xs text-zinc-400">Código (opcional)
+                <input value={storeForm.code} onChange={e => setStoreForm({ ...storeForm, code: e.target.value })} placeholder="Ex.: 01, CENTRO" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+              </label>
+              <label className="block text-xs text-zinc-400">WhatsApp da loja (opcional)
+                <input value={storeForm.whatsappIdentifier} onChange={e => setStoreForm({ ...storeForm, whatsappIdentifier: e.target.value })} placeholder="Ex.: 5511987654321" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+                <span className="mt-1 block text-[11px] text-zinc-500">Recebe a cobrança de pendências (fechamento, malote) e permite dar baixa respondendo.</span>
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setStoreForm(null)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+              <button onClick={saveStore} disabled={savingStore} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{savingStore ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar loja</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

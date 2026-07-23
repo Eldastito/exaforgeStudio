@@ -123,6 +123,23 @@ async function main() {
   try { ProspectExecutionService.convertToCrm(B.orgId, A.acc.id, B.actorId); } catch (e: any) { threw = e.message; }
   check("Conversão cross-tenant falha", threw.includes("não encontrada"));
 
+  // ---- 5b. Governança de IA (ADR-130): aprovar autoriza o 1º contato ----
+  // Aprovar a abordagem é a decisão que afeta pessoas — exige humano + motivo.
+  const g1 = insertOutreach(A, "pending_approval");
+  let gThrew = "";
+  try { ProspectService.setOutreachStatus(A.orgId, g1, "approved", A.actorId); } catch (e: any) { gThrew = e?.code || e?.message || ""; }
+  check("Aprovar sem motivo é barrado (human_decision_required)", gThrew === "human_decision_required");
+  const stillPending = db.prepare("SELECT status FROM prospect_outreach WHERE id = ?").get(g1) as any;
+  check("Abordagem segue pendente quando o guardrail barra", stillPending.status === "pending_approval");
+  check("Nada gravado em ai_decisions quando barrado", (db.prepare("SELECT COUNT(*) n FROM ai_decisions WHERE organization_id = ?").get(A.orgId) as any).n === 0);
+  // Com humano + motivo: aprova e AUDITA (alvo/mensagem sugeridos pela IA).
+  ProspectService.setOutreachStatus(A.orgId, g1, "approved", A.actorId, "aderente ao ICP e com evidência de dor");
+  const approved = db.prepare("SELECT status FROM prospect_outreach WHERE id = ?").get(g1) as any;
+  check("Com humano + motivo, a abordagem é aprovada", approved.status === "approved");
+  const dec = db.prepare("SELECT * FROM ai_decisions WHERE organization_id = ? AND kind = 'prospect_targeting'").get(A.orgId) as any;
+  check("Decisão auditada em ai_decisions (motivo, ator, origem ai)", dec && dec.reason === "aderente ao ICP e com evidência de dor" && dec.actor_user_id === A.actorId && dec.suggested_by === "ai" && dec.decision === "applied");
+  check("Isolamento: org B sem decisões de prospecção", (db.prepare("SELECT COUNT(*) n FROM ai_decisions WHERE organization_id = ?").get(B.orgId) as any).n === 0);
+
   // ---- 5. Isolamento dos eventos ----
   check("Org B não vê eventos da org A", ProspectExecutionService.listEvents(B.orgId).length === 0);
   const audited = db.prepare("SELECT event_type FROM auth_audit_logs WHERE organization_id = ?").all(A.orgId).map((r: any) => r.event_type);

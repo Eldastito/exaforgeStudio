@@ -113,8 +113,16 @@ export function ProspectView() {
   };
 
   const queueAction = async (oid: string, status: string) => {
+    // Governança de IA (ADR-130): aprovar autoriza o 1º contato — exige motivo.
+    let reason: string | undefined;
+    if (status === 'approved') {
+      const r = window.prompt('Aprovar autoriza o primeiro contato com esta pessoa. Qual o motivo da aprovação? (ex.: aderente ao ICP, evidência de dor)');
+      if (r === null) return;
+      reason = r.trim();
+      if (!reason) { toast.error('Informe um motivo para aprovar.'); return; }
+    }
     try {
-      const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, reason }) });
       if (!r.ok) throw new Error((await r.json()).error || 'Falha');
       toast.success(status === 'approved' ? 'Abordagem aprovada. ✅' : status === 'sent' ? 'Marcada como enviada. 📨' : 'Voltou para rascunho.');
       loadQueue(); loadAccounts();
@@ -557,7 +565,15 @@ function AccountDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
     catch (e: any) { toast.error(e.message); }
   };
   const outStatus = async (oid: string, status: string) => {
-    try { const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d); }
+    // Governança de IA (ADR-130): aprovar autoriza o 1º contato — exige motivo.
+    let reason: string | undefined;
+    if (status === 'approved') {
+      const r = window.prompt('Aprovar autoriza o primeiro contato com esta pessoa. Qual o motivo da aprovação? (ex.: aderente ao ICP, evidência de dor)');
+      if (r === null) return;
+      reason = r.trim();
+      if (!reason) { toast.error('Informe um motivo para aprovar.'); return; }
+    }
+    try { const r = await apiFetch(`/api/prospect/outreach/${oid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, reason }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Falha'); apply(d); }
     catch (e: any) { toast.error(e.message); }
   };
   const askCopilot = async () => {

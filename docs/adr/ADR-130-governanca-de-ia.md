@@ -20,7 +20,9 @@ Sugestões de IA que afetam pessoas ficam num **registro explícito** (`PEOPLE_A
 - a base legítima é **comportamento/critério de negócio** (ex.: dias em atraso), **nunca característica pessoal**;
 - a decisão é **auditada** em `ai_decisions` (kind, sujeito, decisão, quem sugeriu, ator, motivo).
 
-Primeiro fluxo ligado: a **lista negra do fiado** — o dono informa o motivo (registrado); a sugestão da IA (`blacklistSuggested`) é marcada como `suggested_by=ai`, mas só o humano aplica.
+Fluxos ligados:
+- **Lista negra do fiado** — o dono informa o motivo (registrado); a sugestão da IA (`blacklistSuggested`) é marcada como `suggested_by=ai`, mas só o humano aplica.
+- **Aprovação de prospecção antes do 1º contato** — aprovar uma abordagem (`ProspectService.setOutreachStatus → "approved"`) é a decisão que autoriza o **primeiro contato** com uma pessoa. O alvo e a mensagem são sugeridos pela IA (`suggested_by=ai`); aprovar exige **humano + motivo** (o guardrail barra antes de qualquer mutação) e a decisão é auditada em `ai_decisions`.
 
 ### D3 — Auditoria de decisão de ponta a ponta
 Além do `ai_interactions_log` (prompt/resposta/**confiança**/**needs_human**) e do `auth_audit_logs`, `ai_decisions` fecha o rastro do que a IA sugeriu × o que o humano decidiu × por quê. Junto com o Impact Ledger (esperado × realizado), cobre "o que acontece quando o agente erra": nada sensível anda sem decisão humana registrada.

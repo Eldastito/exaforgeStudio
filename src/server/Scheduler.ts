@@ -140,6 +140,7 @@ export class Scheduler {
         if (!channel) continue; // sem canal conectado não há como enviar
         const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
         await BusinessTutorService.runMorningPass(orgId, { now, send });
+        await BusinessTutorService.runCollectPass(orgId, { now, send });
         await BusinessTutorService.runMiddayPass(orgId, { now, send });
         await BusinessTutorService.runEveningPass(orgId, { now, send });
       } catch (e) { console.error("[Tutor] passe da org falhou", orgId, e); }

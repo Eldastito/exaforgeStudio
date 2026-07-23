@@ -117,6 +117,45 @@ async function main() {
   const e4 = await T.runEveningPass(orgNoBE, { now: EVENING, send });
   check("fim do dia envia mesmo sem custo fixo", e4.sent === true);
 
+  // ===== 6d. Loop conversacional (ADR-131 Fatia 4): "SIM" agenda a cobrança =====
+  // orgBE já tem número (5521960000000) e recebíveis? Precisa de a receber > 0.
+  // Cria um recebível em aberto para abrir a oferta.
+  db.prepare("INSERT INTO receivables (id, organization_id, description, amount, due_date, status) VALUES (?, ?, 'Venda a prazo', 150, '2026-07-30', 'open')").run(randomUUID(), orgBE);
+  const evBrief = T.eveningBrief(orgBE);
+  check("fim do dia com a receber oferece cobrança (SIM)", evBrief.hasReceivables === true && /SIM/.test(evBrief.text));
+  // Envia o fim do dia num 2º dia (para não colidir com o dedupe do EVENING acima).
+  const EVENING2 = new Date("2026-07-24T23:00:00Z");
+  await T.runEveningPass(orgBE, { now: EVENING2, send });
+  const offer = db.prepare("SELECT tutor_collect_offer_at o FROM organization_settings WHERE organization_id = ?").get(orgBE) as any;
+  check("envio da noite abre a oferta de cobrança", !!offer.o);
+
+  // Resposta de um número que NÃO é o dono → não trata.
+  const notOwner = await T.handleOwnerReply(orgBE, "5511000000000", "sim", { send, now: EVENING2 });
+  check("resposta de não-dono não é tratada", notOwner === false);
+  // Resposta ambígua do dono → não sequestra a conversa.
+  const ambiguous = await T.handleOwnerReply(orgBE, "5521960000000", "quanto foi mesmo?", { send, now: EVENING2 });
+  check("resposta ambígua do dono não é capturada", ambiguous === false);
+  // "SIM" do dono → agenda a cobrança para o dia seguinte e responde.
+  const replyBefore = sends.length;
+  const yes = await T.handleOwnerReply(orgBE, "55 21 96000-0000", "Sim!", { send, now: EVENING2 });
+  check("'SIM' do dono é tratado e responde", yes === true && sends.length === replyBefore + 1 && /Combinado/.test(sends[sends.length - 1].text));
+  const sched = db.prepare("SELECT tutor_collect_scheduled_for f, tutor_collect_offer_at o FROM organization_settings WHERE organization_id = ?").get(orgBE) as any;
+  check("agenda para o dia seguinte e limpa a oferta", sched.f === "2026-07-25" && !sched.o);
+
+  // Na manhã seguinte (25/07), o passe de cobrança envia o lembrete e limpa.
+  const MORNING_25 = new Date("2026-07-25T11:30:00Z"); // 08:30 SP
+  const cBefore = sends.length;
+  const c1 = await T.runCollectPass(orgBE, { now: MORNING_25, send });
+  check("lembrete de cobrança é enviado na manhã agendada", c1.sent === true && sends.length === cBefore + 1 && /Cobran/.test(sends[sends.length - 1].text));
+  const c2 = await T.runCollectPass(orgBE, { now: MORNING_25, send });
+  check("cobrança não repete depois de enviada", c2.sent === false && c2.reason === "disabled");
+
+  // "não" cancela a oferta sem agendar.
+  db.prepare("UPDATE organization_settings SET tutor_collect_offer_at = ? WHERE organization_id = ?").run("2026-07-24", orgBE);
+  const no = await T.handleOwnerReply(orgBE, "5521960000000", "não precisa", { send, now: EVENING2 });
+  const afterNo = db.prepare("SELECT tutor_collect_offer_at o, tutor_collect_scheduled_for f FROM organization_settings WHERE organization_id = ?").get(orgBE) as any;
+  check("'não' cancela a oferta e não agenda", no === true && !afterNo.o && !afterNo.f);
+
   // ===== 7. sendNow (teste manual) ignora janela/dedupe =====
   const snBefore = sends.length;
   const sn = await T.sendNow(orgA, { send });

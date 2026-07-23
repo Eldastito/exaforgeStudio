@@ -235,6 +235,7 @@ jobs:
           - { name: 'outcome-measurement', script: 'test:outcome-measurement' }
           - { name: 'impact-prioritization', script: 'test:impact-prioritization' }
           - { name: 'command-executor', script: 'test:command-executor' }
+          - { name: 'purchase-orders', script: 'test:purchase-orders' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

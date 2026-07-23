@@ -4,6 +4,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { PurchaseRequisitionService } from "../PurchaseRequisitionService.js";
 import { SupplierQuoteService } from "../SupplierQuoteService.js";
 import { SupplyNetworkService } from "../SupplyNetworkService.js";
+import { PurchaseOrderService } from "../PurchaseOrderService.js";
 
 const router = Router();
 
@@ -88,13 +89,35 @@ router.get("/requisition/:id/quotes", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/procurement/quote/:id/accept — escolhe o fornecedor vencedor.
+// POST /api/procurement/quote/:id/accept — escolhe o fornecedor vencedor e
+// gera a ordem de compra imutável (uma cotação aceita → exatamente uma ordem).
 router.post("/quote/:id/accept", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const ok = SupplierQuoteService.accept(orgId, req.params.id);
-    res.json({ success: ok });
+    const r = SupplierQuoteService.accept(orgId, req.params.id);
+    res.json({ success: r.ok, orderId: r.orderId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/orders — ordens de compra (opcional ?requisitionId=).
+router.get("/orders", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const reqId = typeof req.query?.requisitionId === "string" ? req.query.requisitionId : undefined;
+    res.json({ orders: reqId ? PurchaseOrderService.listByRequisition(orgId, reqId) : PurchaseOrderService.list(orgId) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/procurement/order/:id — ordem de compra com itens (snapshot).
+router.get("/order/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const o = PurchaseOrderService.get(orgId, req.params.id);
+    if (!o) return res.status(404).json({ error: "Ordem não encontrada." });
+    res.json(o);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

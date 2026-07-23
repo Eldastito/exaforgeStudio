@@ -1350,6 +1350,36 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_purchase_orders_org ON purchase_orders(organization_id, requisition_id, status);
       CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
+      -- Epic 5 (E5.2) — RECEBIMENTO: completo/parcial/divergência/avaria/nota
+      -- ausente. Estoque entra só pela quantidade CONFIRMADA (boa); divergência
+      -- gera sinal e tarefa, nunca baixa silenciosa (PRD §16).
+      CREATE TABLE IF NOT EXISTS goods_receipts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        purchase_order_id TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'partial',   -- partial|complete (se este recebimento fechou a ordem)
+        invoice_present INTEGER NOT NULL DEFAULT 1,
+        has_divergence INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        received_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS goods_receipt_items (
+        id TEXT PRIMARY KEY,
+        goods_receipt_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        purchase_order_item_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        product_name TEXT,
+        expected_qty INTEGER NOT NULL DEFAULT 0,  -- saldo pendente antes deste recebimento
+        received_qty INTEGER NOT NULL DEFAULT 0,  -- fisicamente recebido
+        good_qty INTEGER NOT NULL DEFAULT 0,      -- confirmado bom → entrou no estoque
+        condition TEXT NOT NULL DEFAULT 'ok',     -- ok|damaged|wrong_item|missing
+        divergence TEXT,                          -- shortfall|over|damaged|wrong_item|missing (NULL = sem divergência)
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_goods_receipts_po ON goods_receipts(organization_id, purchase_order_id);
+      CREATE INDEX IF NOT EXISTS idx_goods_receipt_items_gr ON goods_receipt_items(goods_receipt_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar purchase_orders', e); }
   // Supply (Fase 3) — Rede ZappFlow: a própria org pode se oferecer como

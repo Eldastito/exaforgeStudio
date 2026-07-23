@@ -1303,13 +1303,15 @@ function AiAttendancePanel() {
 function GovernancePanel() {
   const [pol, setPol] = useState<any | null>(null);
   const [decisions, setDecisions] = useState<any[]>([]);
+  const [rehab, setRehab] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       apiFetch('/api/ai-governance').then(r => r.json()).catch(() => null),
       apiFetch('/api/ai-governance/decisions').then(r => r.json()).catch(() => ({})),
-    ]).then(([p, d]) => { setPol(p); setDecisions(Array.isArray(d?.decisions) ? d.decisions : []); }).finally(() => setLoading(false));
+      apiFetch('/api/ai-governance/rehabilitation').then(r => r.json()).catch(() => ({})),
+    ]).then(([p, d, rb]) => { setPol(p); setDecisions(Array.isArray(d?.decisions) ? d.decisions : []); setRehab(Array.isArray(rb?.items) ? rb.items : []); }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
@@ -1359,6 +1361,26 @@ function GovernancePanel() {
           <ul className="space-y-0.5">{pol.checklistFairness.map((c: string, i: number) => <li key={i} className="text-[12px] text-zinc-300 flex items-start gap-1.5"><span className="text-indigo-400">→</span>{c}</li>)}</ul>
         </div>
       </div>
+
+      {/* Trilha de reabilitação — restrições antigas ainda ativas, candidatas a revisão */}
+      {rehab.length > 0 && (
+        <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+          <h3 className="text-sm font-medium text-amber-100 mb-1 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Revisões pendentes (reabilitação)</h3>
+          <p className="text-[12px] text-zinc-400 mb-2">Toda restrição é revisável: estas estão ativas há mais de 30 dias. Vale revisar se ainda fazem sentido — a pessoa pode ser reabilitada.</p>
+          <div className="space-y-1.5">
+            {rehab.map((r: any, i: number) => (
+              <div key={i} className="flex items-start justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-[13px] text-zinc-100">{r.subjectName || r.subjectId} <span className="text-[11px] text-amber-300/90">· {r.label}</span></div>
+                  {r.reason && <div className="text-[11px] text-zinc-500 mt-0.5">Motivo original: {r.reason}</div>}
+                </div>
+                <div className="text-[11px] text-amber-300/80 shrink-0 text-right">há {r.daysActive} dias</div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-zinc-500 mt-2">Para revisar, vá em <strong>Fiado</strong> e retire da lista negra / libere as vendas quando for o caso.</p>
+        </div>
+      )}
 
       {/* Auditoria de decisões */}
       <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">

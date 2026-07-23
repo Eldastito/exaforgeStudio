@@ -77,6 +77,47 @@ export class AiGovernanceService {
     return db.prepare("SELECT id, kind, subject_id, decision, suggested_by, actor_user_id, reason, created_at FROM ai_decisions WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?").all(orgId, limit) as any[];
   }
 
+  // Restrições que "prendem" uma pessoa e podem ser reabilitadas (limite de
+  // crédito não entra: ajustar o valor não é um bloqueio a ser revisto).
+  static readonly RESTRICTIVE_KINDS = ["fiado_blacklist", "fiado_block_all"];
+
+  /**
+   * Trilha de reabilitação (ADR-130, checklist de fairness — "a pessoa afetada
+   * pode ser revista/reabilitada?"): restrições ainda ATIVAS (a última decisão
+   * do par kind+sujeito é 'applied', sem reversão depois) há mais de N dias —
+   * candidatas a revisão. Determinístico, isolado por organization_id.
+   */
+  static rehabilitationDue(orgId: string, olderThanDays = 30) {
+    const days = Math.max(1, Math.floor(olderThanDays));
+    const rows = db.prepare(`
+      SELECT d.kind, d.subject_id, d.reason, d.actor_user_id, d.created_at,
+             CAST(julianday('now') - julianday(d.created_at) AS INTEGER) AS days_active,
+             c.name AS subject_name
+      FROM ai_decisions d
+      LEFT JOIN contacts c ON c.id = d.subject_id AND c.organization_id = d.organization_id
+      WHERE d.organization_id = ?
+        AND d.kind IN ('fiado_blacklist', 'fiado_block_all')
+        AND d.decision = 'applied'
+        AND d.created_at <= datetime('now', ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM ai_decisions d2
+          WHERE d2.organization_id = d.organization_id AND d2.kind = d.kind
+            AND d2.subject_id IS d.subject_id AND d2.created_at > d.created_at
+        )
+      ORDER BY d.created_at ASC
+    `).all(orgId, `-${days} days`) as any[];
+    return rows.map((r) => ({
+      kind: r.kind,
+      label: PEOPLE_AFFECTING[r.kind]?.label || r.kind,
+      subjectId: r.subject_id,
+      subjectName: r.subject_name || null,
+      reason: r.reason || null,
+      actorId: r.actor_user_id || null,
+      appliedAt: r.created_at,
+      daysActive: Number(r.days_active || 0),
+    }));
+  }
+
   /**
    * Política de Governança de IA (ADR-130) — resumo dos controles vigentes, para
    * a UI/onboarding mostrar (a governança é camada central, não borda opcional).

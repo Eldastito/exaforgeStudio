@@ -26,6 +26,9 @@ Fluxos ligados:
 - **Suspensão total de vendas** (`fiado_block_all`) — cortar TODAS as vendas (inclusive à vista) é a medida mais severa (mais forte que a lista negra); exige **humano + motivo**, é auditada e reversível.
 - **Aprovação de prospecção antes do 1º contato** — aprovar uma abordagem (`ProspectService.setOutreachStatus → "approved"`) é a decisão que autoriza o **primeiro contato** com uma pessoa. O alvo e a mensagem são sugeridos pela IA (`suggested_by=ai`); aprovar exige **humano + motivo** (o guardrail barra antes de qualquer mutação) e a decisão é auditada em `ai_decisions`.
 
+### D2b — Trilha de reabilitação (o último item do checklist de fairness)
+"A pessoa afetada pode ser revista/reabilitada?" deixa de ser só uma pergunta: `rehabilitationDue(orgId, dias)` lista, de forma determinística, as restrições ainda **ativas** (lista negra, suspensão total) cuja última decisão é `applied` sem reversão posterior e que já duram mais de N dias (padrão 30). O painel de Governança mostra essas revisões pendentes — um lembrete para o dono revisar bloqueios antigos e reabilitar quem já pode voltar. Limite de crédito **não** entra (ajustar valor não é um bloqueio a ser revisto).
+
 ### D3 — Auditoria de decisão de ponta a ponta
 Além do `ai_interactions_log` (prompt/resposta/**confiança**/**needs_human**) e do `auth_audit_logs`, `ai_decisions` fecha o rastro do que a IA sugeriu × o que o humano decidiu × por quê. Junto com o Impact Ledger (esperado × realizado), cobre "o que acontece quando o agente erra": nada sensível anda sem decisão humana registrada.
 

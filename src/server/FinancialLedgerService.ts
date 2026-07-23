@@ -168,14 +168,27 @@ export class FinancialLedgerService {
     const recebManual = round2((db.prepare("SELECT COALESCE(SUM(amount),0) s FROM receivables WHERE organization_id = ? AND status = 'open'").get(orgId) as any).s);
     const fiado = this.fiadoOutstanding(orgId);
     const t = today();
+    const overdue = this.overdueReceivables(orgId);
     return {
       caixaAtual,
       aPagar,
       aReceber: round2(recebManual + fiado),
       aReceberDetalhe: { manual: recebManual, fiado },
+      // Recorte de VENCIDOS (due_date < hoje) — só as contas a receber com data;
+      // fiado é saldo corrente, sem vencimento por item, então fica de fora.
+      aReceberVencido: overdue.amount,
+      aReceberVencidoCount: overdue.count,
       realizadoHoje: this.realizedCash(orgId, t, t),
       realizado7d: this.realizedCash(orgId, daysAgo(6), t),
     };
+  }
+
+  /** Contas a receber já VENCIDAS (status aberto, due_date < hoje). */
+  static overdueReceivables(orgId: string): { amount: number; count: number } {
+    const row = db.prepare(
+      "SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM receivables WHERE organization_id = ? AND status = 'open' AND due_date < ?"
+    ).get(orgId, today()) as any;
+    return { amount: round2(row.s), count: Number(row.c) || 0 };
   }
 
   static overview(orgId: string) {

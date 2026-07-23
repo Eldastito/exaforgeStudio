@@ -69,6 +69,16 @@ async function main() {
   const ovC = H.overview(orgC, 0);
   check("recebível gera prioridade de cobrança", ovC.priorities.some((p: any) => p.source === "recebiveis" && p.impact >= 400));
 
+  // Recebíveis VENCIDOS (ADR-132 Fatia 1) — recorte de due_date < hoje.
+  const orgV = mkOrg("Vencidos");
+  F.addReceivable(orgV, { description: "Cliente atrasado", amount: 700, dueDate: inWeek(-1), probability: 1 });
+  F.addReceivable(orgV, { description: "Cliente em dia", amount: 300, dueDate: inWeek(2), probability: 1 });
+  const ovV = H.overview(orgV);
+  check("KPI 'a receber vencido' reflete só o que passou do vencimento", Math.abs(ovV.kpis.aReceberVencido - 700) < 0.01);
+  check("gatilho de recebível vencido aparece", ovV.triggers.some((t: any) => t.code === "receber_vencido"));
+  const recV = ovV.priorities.find((p: any) => p.source === "recebiveis");
+  check("prioridade de cobrança destaca o vencido", !!recV && /vencido/i.test(recV.title) && /vencido/i.test(recV.fato));
+
   // ===== 4. SAUDÁVEL: sem gatilhos =====
   const orgOk = mkOrg("Ok");
   F.recordEvent(orgOk, { direction: "in", amount: 8000 });

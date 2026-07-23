@@ -144,7 +144,7 @@ export function HealthCenterView() {
         {/* KPIs rápidos */}
         <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[13px]">
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500 flex items-center gap-1"><Wallet className="w-3 h-3" /> Caixa</div><div className="text-zinc-100 font-semibold mt-0.5">{brl(d?.kpis?.caixaAtual)}</div></div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">A receber</div><div className="text-amber-200 font-semibold mt-0.5">{brl(d?.kpis?.aReceber)}</div></div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">A receber</div><div className="text-amber-200 font-semibold mt-0.5">{brl(d?.kpis?.aReceber)}</div>{d?.kpis?.aReceberVencido > 0 && <div className="text-[10px] text-red-300 mt-0.5">{brl(d.kpis.aReceberVencido)} vencido</div>}</div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">A pagar</div><div className="text-red-200 font-semibold mt-0.5">{brl(d?.kpis?.aPagar)}</div></div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Dias de caixa</div><div className="text-zinc-100 font-semibold mt-0.5">{d?.kpis?.survivalDays != null ? `~${d.kpis.survivalDays}` : '—'}</div></div>
         </div>

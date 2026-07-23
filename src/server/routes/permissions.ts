@@ -40,6 +40,22 @@ router.get("/modules", requirePermission("usuarios", "read"), (_req: AuthRequest
   res.json({ modules: RBAC_MODULES.map((key) => ({ key, label: RBAC_MODULE_LABELS[key] || key })), levels: PermissionService.LEVELS });
 });
 
+// GET /api/permissions/finance-rbac — estado do enforcement financeiro da org.
+router.get("/finance-rbac", requirePermission("usuarios", "read"), (req: AuthRequest, res: Response): any => {
+  res.json({ enabled: PermissionService.financeRbacEnabled(orgOf(req)) });
+});
+
+// PUT /api/permissions/finance-rbac { enabled } — liga/desliga o RBAC financeiro.
+router.put("/finance-rbac", requirePermission("usuarios", "write"), (req: AuthRequest, res: Response): any => {
+  const orgId = orgOf(req);
+  const enabled = !!req.body?.enabled;
+  // Garante que os perfis (e os módulos financeiros) existam antes de ligar.
+  if (enabled) PermissionService.seedSystemProfiles(orgId);
+  PermissionService.setFinanceRbac(orgId, enabled);
+  try { logAuthEvent(orgId, req.user?.userId, null, "RBAC_FINANCE_TOGGLED", { enabled }); } catch { /* noop */ }
+  res.json({ ok: true, enabled });
+});
+
 // GET /api/permissions/profiles — lista de perfis com mapa de permissões + nº usuários.
 router.get("/profiles", requirePermission("usuarios", "read"), (req: AuthRequest, res: Response): any => {
   try { res.json({ profiles: PermissionService.listProfiles(orgOf(req)) }); }

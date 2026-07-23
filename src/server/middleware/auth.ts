@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { JWT_SECRET, MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { PermissionService, Action } from "../PermissionService.js";
+import { logAuthEvent } from "../auditLog.js";
 
 export interface AuthRequest extends Request {
   user?: any;
@@ -117,13 +118,15 @@ export const enforceModulePermission = (req: AuthRequest, res: Response, next: N
   if (!req.user) return next(); // requireAuth já cuidou; aqui é só o gate de módulo
   if (req.user.email && req.user.email === MASTER_ADMIN_EMAIL) return next();
   const seg = (req.path || "").split("/").filter(Boolean)[0];
-  const module = PermissionService.moduleForSegment(seg);
-  if (!module) return next(); // segmento não gateado
   const orgId = req.organizationId || req.user.organizationId;
-  if (!PermissionService.hasProfile(orgId, req.user)) return next(); // legado: sem perfil, sem restrição
-  const act = methodAction(req.method);
-  if (!PermissionService.can(orgId, req.user, module, act)) {
-    return res.status(403).json({ error: `Sem permissão de ${act} em ${module}` });
+  const dec = PermissionService.checkRouteAccess(orgId, req.user, seg, req.method);
+  if (!dec.gated) return next(); // segmento não gateado, ou financeiro sem flag, ou legado sem perfil
+  if (!dec.allow) {
+    // Auditoria de acesso financeiro sensível NEGADO (PRD §11 item 6).
+    if (dec.finance) { try { logAuthEvent(orgId, req.user.userId, null, "FINANCE_ACCESS_DENIED", { module: dec.module, action: dec.action, path: req.path, method: req.method }); } catch { /* noop */ } }
+    return res.status(403).json({ error: `Sem permissão de ${dec.action} em ${dec.module}` });
   }
+  // Auditoria de leitura/mutação financeira sensível CONCEDIDA (PRD §11 item 6).
+  if (dec.finance) { try { logAuthEvent(orgId, req.user.userId, null, dec.action === "read" ? "FINANCE_READ" : "FINANCE_WRITE", { module: dec.module, path: req.path, method: req.method }); } catch { /* noop */ } }
   next();
 };

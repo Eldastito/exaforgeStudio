@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { ApprovalPolicyService, ApprovalPolicy } from "./ApprovalPolicyService.js";
+import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
 
 /**
  * DecisionActionService (ADR-136, Epic 2 — C2).
@@ -52,6 +53,7 @@ export class DecisionActionService {
     const a = db.prepare("SELECT * FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) return null;
     a.approvals = db.prepare("SELECT id, approver_user_id, decision, reason, decided_at FROM action_approvals WHERE action_id = ? AND organization_id = ? ORDER BY decided_at ASC").all(id, orgId);
+    a.outcomes = OutcomeMeasurementService.forAction(orgId, id);
     a.command_payload = a.command_payload_json ? safeParse(a.command_payload_json) : null;
     return a;
   }
@@ -114,13 +116,30 @@ export class DecisionActionService {
     return this.get(orgId, id);
   }
 
-  /** Conclui uma ação APROVADA (o outcome esperado×realizado detalhado vem em C2b). */
+  /**
+   * Conclui uma ação APROVADA e registra o outcome esperado×realizado (C2b).
+   * O impacto esperado vem da própria ação; o realizado é o `resultAmount`
+   * informado — sempre com a mesma `basis` (fato/estimativa) da ação, para o
+   * Impact Ledger unificado nunca somar comprovado com estimado.
+   */
   static complete(orgId: string, id: string, opts: { resultAmount?: number | null } = {}): any {
-    const a = db.prepare("SELECT status FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    const a = db.prepare("SELECT status, expected_impact, basis FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) throw new Error("Ação não encontrada.");
     if (a.status !== "approved") throw new Error(`Só conclui ação aprovada (atual: ${a.status}).`);
+    const result = opts.resultAmount != null ? Number(opts.resultAmount) : null;
     db.prepare("UPDATE decision_actions SET status = 'done', completed_at = CURRENT_TIMESTAMP, result_amount = ? WHERE id = ? AND organization_id = ?")
-      .run(opts.resultAmount != null ? Number(opts.resultAmount) : null, id, orgId);
+      .run(result, id, orgId);
+    // Fecha o loop prometido×entregue no Impact Ledger unificado. Não falha a
+    // conclusão se a medição der erro (a ação já está 'done').
+    try {
+      OutcomeMeasurementService.record(orgId, id, {
+        expectedValue: a.expected_impact != null ? Number(a.expected_impact) : null,
+        realizedValue: result,
+        basis: a.basis || "estimate",
+        measurementMethod: "self_reported",
+        evidence: { source: "decision_action.complete" },
+      });
+    } catch (e) { /* medição é aditiva — nunca bloqueia a conclusão */ }
     return this.get(orgId, id);
   }
 }

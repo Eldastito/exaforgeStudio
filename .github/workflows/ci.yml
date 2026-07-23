@@ -232,6 +232,7 @@ jobs:
           - { name: 'business-snapshot', script: 'test:business-snapshot' }
           - { name: 'business-signals', script: 'test:business-signals' }
           - { name: 'decision-actions', script: 'test:decision-actions' }
+          - { name: 'outcome-measurement', script: 'test:outcome-measurement' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

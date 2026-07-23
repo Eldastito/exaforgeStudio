@@ -4478,6 +4478,11 @@ const initDb = () => {
   // Ponte opcional p/ o ledger unificado em DBs já existentes (ADR-136 C2b).
   // Nulo por padrão: nada dos fluxos atuais de caixa muda.
   try { db.exec(`ALTER TABLE cash_actions ADD COLUMN decision_action_id TEXT`); } catch(e){}
+  // Epic 5 (E5.3) — vínculo conta a pagar → ordem de compra + idempotência
+  // "não é criada duas vezes" (UNIQUE parcial). Nulo por padrão nas contas
+  // manuais existentes.
+  try { db.exec(`ALTER TABLE payables ADD COLUMN source_purchase_order_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_payables_po ON payables(organization_id, source_purchase_order_id) WHERE source_purchase_order_id IS NOT NULL`); } catch(e){}
 };
 
 initDb();

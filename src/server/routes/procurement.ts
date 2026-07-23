@@ -6,6 +6,7 @@ import { SupplierQuoteService } from "../SupplierQuoteService.js";
 import { SupplyNetworkService } from "../SupplyNetworkService.js";
 import { PurchaseOrderService } from "../PurchaseOrderService.js";
 import { GoodsReceiptService } from "../GoodsReceiptService.js";
+import { PurchasePayableService } from "../PurchasePayableService.js";
 
 const router = Router();
 
@@ -139,6 +140,20 @@ router.get("/order/:id/receipts", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json({ receipts: GoodsReceiptService.listByOrder(orgId, req.params.id) }); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/procurement/order/:id/payable — gera a conta a pagar da ordem
+// (idempotente: não cria duas vezes). Gestor decide o vencimento. { dueDate, basis? }
+router.post("/order/:id/payable", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores registram conta a pagar." });
+  const dueDate = typeof req.body?.dueDate === "string" ? req.body.dueDate : "";
+  const basis = req.body?.basis === "ordered" ? "ordered" : "received";
+  const r = PurchasePayableService.createFromOrder(orgId, req.params.id, { dueDate, basis, createdBy: userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r);
 });
 
 // ============================================================================

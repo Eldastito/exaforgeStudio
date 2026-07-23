@@ -208,8 +208,13 @@ router.post("/outreach/:oid/status", (req: AuthRequest, res): any => {
   if ((status === "approved" || status === "rejected") && !["owner", "admin"].includes(req.user?.role)) {
     return res.status(403).json({ error: "Apenas gestores (owner/admin) aprovam ou rejeitam abordagens." });
   }
-  try { res.json(ProspectService.setOutreachStatus(orgId, req.params.oid, status, actor(req))); }
-  catch (e: any) { res.status(400).json({ error: e.message }); }
+  const reason = String(req.body?.reason || "").trim();
+  try { res.json(ProspectService.setOutreachStatus(orgId, req.params.oid, status, actor(req), reason)); }
+  catch (e: any) {
+    // Governança de IA (ADR-130): aprovar exige motivo (autoriza o 1º contato).
+    if (e?.code === "human_decision_required") return res.status(400).json({ error: "Aprovar uma abordagem autoriza o primeiro contato com uma pessoa — informe o motivo da aprovação.", code: "human_decision_required" });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ── Execução real (ADR-079, Fase B) ──────────────────────────────────────

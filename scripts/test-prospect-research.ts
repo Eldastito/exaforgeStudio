@@ -96,7 +96,7 @@ async function main() {
   // Envia tudo (fluxo de aprovação da Fase A; envio marcado via transição).
   for (const a of allocated) {
     ProspectService.setOutreachStatus(A.orgId, a.outreachId, "pending_approval", A.actorId);
-    ProspectService.setOutreachStatus(A.orgId, a.outreachId, "approved", A.actorId);
+    ProspectService.setOutreachStatus(A.orgId, a.outreachId, "approved", A.actorId, "aderente ao ICP (teste)");
     ProspectService.setOutreachStatus(A.orgId, a.outreachId, "sent", A.actorId);
   }
 
@@ -130,7 +130,7 @@ async function main() {
   }
   for (const a of alloc2) {
     ProspectService.setOutreachStatus(A.orgId, a.outreachId, "pending_approval", A.actorId);
-    ProspectService.setOutreachStatus(A.orgId, a.outreachId, "approved", A.actorId);
+    ProspectService.setOutreachStatus(A.orgId, a.outreachId, "approved", A.actorId, "aderente ao ICP (teste)");
     ProspectService.setOutreachStatus(A.orgId, a.outreachId, "sent", A.actorId);
   }
   const [v3, v4] = exp2.variants.map((v: any) => v.id);

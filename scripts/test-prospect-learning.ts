@@ -61,7 +61,7 @@ async function main() {
     for (let i = 0; i < 20; i++) alloc.push({ ...ProspectResearchService.draftFromVariant(A.orgId, exp.id, A.accounts[i].id, undefined, A.actorId), accountId: A.accounts[i].id });
     for (const a of alloc) {
       ProspectService.setOutreachStatus(A.orgId, a.outreachId, "pending_approval", A.actorId);
-      ProspectService.setOutreachStatus(A.orgId, a.outreachId, "approved", A.actorId);
+      ProspectService.setOutreachStatus(A.orgId, a.outreachId, "approved", A.actorId, "aderente ao ICP (teste)");
       ProspectService.setOutreachStatus(A.orgId, a.outreachId, "sent", A.actorId);
     }
     const v1 = exp.variants[0].id;

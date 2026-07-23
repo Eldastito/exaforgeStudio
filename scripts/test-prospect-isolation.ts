@@ -89,9 +89,9 @@ async function main() {
   // 3a. Opt-out bloqueia aprovação (rascunho criado ANTES do opt-out).
   const o1 = insertOutreach("pending_approval");
   ProspectService.setContactOptOut(A.orgId, accA.id, contactA.id, true, A.actorId);
-  expectThrow("Contato em opt-out não pode ser aprovado", () => ProspectService.setOutreachStatus(A.orgId, o1, "approved", A.actorId), "opt-out");
+  expectThrow("Contato em opt-out não pode ser aprovado", () => ProspectService.setOutreachStatus(A.orgId, o1, "approved", A.actorId, "aderente ao ICP (teste)"), "opt-out");
   ProspectService.setContactOptOut(A.orgId, accA.id, contactA.id, false, A.actorId);
-  ProspectService.setOutreachStatus(A.orgId, o1, "approved", A.actorId);
+  ProspectService.setOutreachStatus(A.orgId, o1, "approved", A.actorId, "aderente ao ICP (teste)");
   ProspectService.setOutreachStatus(A.orgId, o1, "sent", A.actorId);
   check("Fluxo normal aprova e envia após revogar opt-out", true);
 
@@ -103,7 +103,7 @@ async function main() {
   // 3c. Bloqueio da conta impede aprovação de qualquer abordagem.
   const o3 = insertOutreach("pending_approval");
   ProspectService.setAccountBlocked(A.orgId, accA.id, true, A.actorId);
-  expectThrow("Conta bloqueada não pode ter abordagem aprovada", () => ProspectService.setOutreachStatus(A.orgId, o3, "approved", A.actorId), "bloqueada");
+  expectThrow("Conta bloqueada não pode ter abordagem aprovada", () => ProspectService.setOutreachStatus(A.orgId, o3, "approved", A.actorId, "aderente ao ICP (teste)"), "bloqueada");
   ProspectService.setAccountBlocked(A.orgId, accA.id, false, A.actorId);
 
   // ---- 4. Auditoria: eventos gravados e escopados por organização ----

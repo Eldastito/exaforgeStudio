@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chat } from "./llm.js";
 import { logAuthEvent } from "./auditLog.js";
 import { expectedSegments, norm as normCat } from "./prospectCategories.js";
+import { AiGovernanceService } from "./AiGovernanceService.js";
 
 /**
  * Prospect AI — Inteligência de Prospecção B2B (Fase 0: fundação).
@@ -471,7 +472,7 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
   }
 
   /** Transições: draft→pending_approval; pending→approved/rejected/draft; approved→sent/rejected. */
-  static setOutreachStatus(orgId: string, id: string, status: string, actorId?: string): any {
+  static setOutreachStatus(orgId: string, id: string, status: string, actorId?: string, reason?: string): any {
     const o = db.prepare("SELECT prospect_account_id, contact_id, status FROM prospect_outreach WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!o) throw new Error("Abordagem não encontrada.");
     const allowed: Record<string, string[]> = {
@@ -482,6 +483,13 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
       sent: [],
     };
     if (!(allowed[o.status] || []).includes(status)) throw new Error(`Transição inválida (${o.status} → ${status}).`);
+    // Governança de IA (ADR-130): aprovar a abordagem é a decisão que autoriza o
+    // PRIMEIRO CONTATO com uma pessoa — sugestão que afeta pessoas. A IA só
+    // sugere (alvo + mensagem); aplicar exige HUMANO + MOTIVO. Barra antes de
+    // qualquer mutação se faltar (lança human_decision_required).
+    if (status === "approved") {
+      AiGovernanceService.guardApplied("prospect_targeting", { decision: "applied", actorId, reason });
+    }
     // Guardrails LGPD (ADR-079, Fase A): aprovação e envio respeitam bloqueio,
     // opt-out e o teto de tentativas por contato — mesmo que o rascunho tenha
     // sido criado antes do bloqueio/opt-out.
@@ -499,6 +507,11 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
     params.push(id, orgId);
     db.prepare(`UPDATE prospect_outreach SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`).run(...params);
     logAuthEvent(orgId, actorId, null, "PROSPECT_OUTREACH_STATUS", { outreachId: id, accountId: o.prospect_account_id, from: o.status, to: status });
+    // Auditoria de decisão (ADR-130): registra a aprovação do alvo/mensagem com
+    // o motivo do humano. O alvo e o texto são sugeridos pela IA (suggestedBy).
+    if (status === "approved") {
+      AiGovernanceService.recordDecision(orgId, { kind: "prospect_targeting", subjectId: id, decision: "applied", actorId, reason, suggestedBy: "ai" });
+    }
     return this.getAccount(orgId, o.prospect_account_id);
   }
 

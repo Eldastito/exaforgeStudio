@@ -4433,6 +4433,47 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_manuf_prod_org ON manufactured_products(organization_id, active);
       CREATE INDEX IF NOT EXISTS idx_bom_mp ON bill_of_materials(organization_id, manufactured_product_id);
       CREATE INDEX IF NOT EXISTS idx_bom_items_bom ON bom_items(organization_id, bom_id);
+      -- Produção (fatia 2, ADR-141): ORDEM DE PRODUÇÃO + etapas + apontamentos.
+      CREATE TABLE IF NOT EXISTS production_orders (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        manufactured_product_id TEXT NOT NULL,
+        bom_id TEXT,
+        qty_planned REAL NOT NULL DEFAULT 0,
+        qty_produced REAL NOT NULL DEFAULT 0,   -- unidades boas produzidas
+        qty_scrapped REAL NOT NULL DEFAULT 0,   -- refugo
+        status TEXT NOT NULL DEFAULT 'draft',   -- draft|released|in_progress|done|cancelled
+        promised_date TEXT,                      -- YYYY-MM-DD prometida
+        expected_date TEXT,                      -- YYYY-MM-DD prevista
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        started_at DATETIME,
+        completed_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS production_steps (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        seq INTEGER NOT NULL DEFAULT 0,
+        name TEXT NOT NULL,
+        assigned_to TEXT,
+        status TEXT NOT NULL DEFAULT 'pending', -- pending|in_progress|done
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS production_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        step_id TEXT,
+        kind TEXT NOT NULL,                      -- release|start|progress|scrap|complete|cancel|note
+        qty REAL,
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prod_orders_org ON production_orders(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_prod_steps_order ON production_steps(organization_id, order_id);
+      CREATE INDEX IF NOT EXISTS idx_prod_events_order ON production_events(organization_id, order_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de Produção', e); }
 

@@ -13,6 +13,49 @@ export type QuoteStatus = 'sent' | 'viewed' | 'accepted' | 'declined' | 'expired
  * vai para o WhatsApp E persiste em `quotes` para análise e follow-up.
  */
 export class QuoteService {
+  /**
+   * Conversão de orçamentos (ADR-132 Fatia 2): taxa e tendência. Determinístico.
+   * Base = orçamentos DECIDIDOS (aceito/recusado/expirado) por janela de envio,
+   * para não subestimar por causa dos que ainda estão em aberto. Compara a
+   * janela atual com a anterior (mesma duração). Isolado por organization_id.
+   */
+  static conversionStats(orgId: string, days = 30) {
+    const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+    const win = (fromDays: number, toDays: number) => {
+      const row = db.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END),0) accepted,
+          COALESCE(SUM(CASE WHEN status IN ('accepted','declined','expired') THEN 1 ELSE 0 END),0) decided,
+          COUNT(*) sent,
+          COALESCE(AVG(total_amount),0) avgTicket
+        FROM quotes
+        WHERE organization_id = ? AND sent_at >= datetime('now', ?) AND sent_at < datetime('now', ?)
+      `).get(orgId, `-${fromDays} days`, `-${toDays} days`) as any;
+      const decided = Number(row.decided) || 0;
+      const accepted = Number(row.accepted) || 0;
+      return { accepted, decided, sent: Number(row.sent) || 0, avgTicket: round2(row.avgTicket), rate: decided > 0 ? accepted / decided : null };
+    };
+    const MIN = 3; // amostra mínima para não gerar sinal de ruído
+    const cur = win(days, 0);
+    const prev = win(days * 2, days);
+    const curRate = cur.decided >= MIN ? cur.rate : null;
+    const prevRate = prev.decided >= MIN ? prev.rate : null;
+    let signal: "subindo" | "estavel" | "caindo" | "sem_dado" = "sem_dado";
+    let deltaPts = 0;
+    if (curRate != null && prevRate != null) {
+      deltaPts = Math.round((curRate - prevRate) * 100);
+      signal = deltaPts <= -8 ? "caindo" : deltaPts >= 8 ? "subindo" : "estavel";
+    } else if (curRate != null) {
+      signal = "estavel";
+    }
+    return {
+      ratePct: curRate != null ? Math.round(curRate * 100) : null,
+      prevRatePct: prevRate != null ? Math.round(prevRate * 100) : null,
+      deltaPts, signal,
+      decided: cur.decided, accepted: cur.accepted, sent: cur.sent, avgTicket: cur.avgTicket,
+    };
+  }
+
   static validityHours(orgId: string): number {
     const o = db.prepare(`SELECT COALESCE(quote_validity_hours,72) AS h FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
     return Math.max(1, parseInt(String(o?.h || 72), 10) || 72);

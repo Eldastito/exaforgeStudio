@@ -4,6 +4,7 @@ import { LossMarginService } from "./LossMarginService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { CashActionService } from "./CashActionService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
+import { QuoteService } from "./QuoteService.js";
 import db from "./db.js";
 
 /**
@@ -76,8 +77,19 @@ export class BusinessHealthService {
       else if (owner.alerta?.nivel === "atencao") triggers.push({ level: "atencao", code: "retiradas_altas", label: `Retiradas já são ${owner.pctDoResultado}% do resultado do mês.` });
     }
 
+    // Conversão de orçamentos caindo (ADR-132 Fatia 2) — sinal comercial.
+    const conversao = this.quoteConversion(orgId);
+    if (conversao && conversao.signal === "caindo" && conversao.ratePct != null && conversao.prevRatePct != null) {
+      triggers.push({ level: "atencao", code: "conversao_caiu", label: `Conversão de orçamentos caiu de ${conversao.prevRatePct}% para ${conversao.ratePct}%.` });
+    }
+
     const overall = (triggers.reduce<StatusLevel>((acc, t) => (SEVERITY[t.level] > SEVERITY[acc] ? t.level : acc), "saudavel"));
-    return { status: overall, triggers, cash, forecast: fc, loss, owner };
+    return { status: overall, triggers, cash, forecast: fc, loss, owner, conversao };
+  }
+
+  /** Conversão de orçamentos (guardada — nunca derruba a síntese). */
+  private static quoteConversion(orgId: string): any | null {
+    try { return QuoteService.conversionStats(orgId); } catch { return null; }
   }
 
   /** Resumo Empresa × Proprietário (guardado — pode falhar sem derrubar a síntese). */
@@ -235,6 +247,7 @@ export class BusinessHealthService {
       priorities: priorities.map((p) => ({ ...p, inPlan: open.has(p.title) })),
       ledger: this.history(orgId),
       kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aReceberVencido: st.cash.aReceberVencido, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },
+      conversao: st.conversao || null,
     };
   }
 }

@@ -48,7 +48,8 @@ async function main() {
   check("parse 'a receber'", G.parse("a receber").intent === "a_receber");
   check("parse 'contas a pagar'", G.parse("contas a pagar").intent === "a_pagar");
   check("parse 'o que devo atacar hoje'", G.parse("o que devo atacar hoje").intent === "prioridades");
-  check("parse 'aprovar 1' = ação diferida", G.parse("aprovar 1").intent === "acao_diferida");
+  check("parse 'aprovar 1' = intent aprovar (índice 1)", G.parse("aprovar 1").intent === "aprovar" && G.parse("aprovar 1").index === 1);
+  check("parse 'delegar 2' = ação diferida", G.parse("delegar 2").intent === "acao_diferida");
   check("parse 'oi' = menu", G.parse("oi").intent === "menu");
   check("parse 'asdf' = desconhecido", G.parse("asdf").intent === "desconhecido");
 
@@ -77,9 +78,9 @@ async function main() {
   check("legado owner vê saldo", G.handle(orgB, "11777770001", "saldo").denied !== true);
   check("legado agent NÃO vê saldo", G.handle(orgB, "11777770002", "saldo").denied === true);
 
-  // ===== 7. Ações são DIFERIDAS (nada executa aqui) =====
-  const acao = G.handle(orgA, "11999990001", "aprovar 1");
-  check("ação diferida: responde 'Plano de Ação', não executa", acao.intent === "acao_diferida" && /Plano de Ação/i.test(acao.reply));
+  // ===== 7. Delegar/adiar/explicar ainda são DIFERIDAS =====
+  const acao = G.handle(orgA, "11999990001", "delegar 2 para Ana");
+  check("delegar ainda diferido: aponta o Plano de Ação", acao.intent === "acao_diferida" && /Plano de Ação/i.test(acao.reply));
 
   // ===== 8. Menu / desconhecido =====
   check("owner: 'oi' devolve o menu do Controller", /Controller IA/.test(G.handle(orgA, "11999990001", "oi").reply));
@@ -96,7 +97,43 @@ async function main() {
   check("'o que tenho pra fazer hoje' NÃO vira prioridades", G.parse("o que tenho pra fazer hoje").intent === "desconhecido");
   check("desligado: shouldRoute=false (webhook segue p/ Coordenador)", G.shouldRoute(G.handle(mkOrg(), "11999990001", "saldo")) === false);
 
-  // ===== 10. Isolamento por organização =====
+  // ===== 10. Ações governadas por WhatsApp (Fatia 3) =====
+  const { DecisionActionService: D } = await import("../src/server/DecisionActionService.js");
+  // owner (admin role) na orgA já existe (11999990001, role 'owner').
+  const c1 = D.propose(orgA, { domain: "finance", actionType: "collection", title: "Cobrar R$ 4.200", expectedImpact: 4200 });
+  const c2 = D.propose(orgA, { domain: "finance", actionType: "collection", title: "Cobrar R$ 800", expectedImpact: 800 });
+  const listReply = G.handle(orgA, "11999990001", "aprovações");
+  check("aprovações: lista numerada as pendências", listReply.intent === "aprovacoes" && /1\..*4\.200/.test(listReply.reply) && /2\./.test(listReply.reply));
+  check("roteia 'aprovações' no webhook", G.shouldRoute(listReply) === true);
+  const okApprove = G.handle(orgA, "11999990001", "aprovar 1");
+  check("aprovar 1: single aprova a ação", okApprove.intent === "aprovar" && /Aprovada/.test(okApprove.reply) && D.get(orgA, c1.id).status === "approved");
+  check("aprovar de novo: já resolvida → aviso, nada muda", /não está mais disponível/i.test(G.handle(orgA, "11999990001", "aprovar 1").reply));
+  const okReject = G.handle(orgA, "11999990001", "dispensar 2");
+  check("dispensar 2: rejeita a ação", /Dispensada/.test(okReject.reply) && D.get(orgA, c2.id).status === "rejected");
+  check("índice inválido → aviso sem efeito", /Não achei/i.test(G.handle(orgA, "11999990001", "aprovar 9").reply));
+
+  // Vendedor (agent) NÃO opera aprovações.
+  check("vendedor não vê aprovações", G.handle(orgA, "11999990002", "aprovações").denied === true);
+  check("vendedor não aprova", G.handle(orgA, "11999990002", "aprovar 1").denied === true);
+
+  // two_step: 1ª aprovação do owner ainda aguarda 2º aprovador distinto.
+  const sup = D.propose(orgA, { domain: "procurement", actionType: "choose_supplier", title: "Fornecedor X", expectedImpact: 30000 });
+  G.handle(orgA, "11999990001", "aprovações");
+  const twoStep = G.handle(orgA, "11999990001", `aprovar ${D.list(orgA, { status: "awaiting_approval" }).findIndex((a: any) => a.id === sup.id) + 1}`);
+  check("two_step: 1ª aprovação registra mas ainda aguarda", /falta outra aprova/i.test(twoStep.reply) && D.get(orgA, sup.id).status === "awaiting_approval");
+
+  // approval_role: change_price exige owner; admin não aprova.
+  const orgR = mkOrg();
+  db.prepare("UPDATE organization_settings SET wa_gestor_enabled = 1 WHERE organization_id = ?").run(orgR);
+  mkUser(orgR, "11666660001", "admin");
+  const cp = D.propose(orgR, { domain: "sales", actionType: "change_price", title: "Mudar preço" });
+  G.handle(orgR, "11666660001", "aprovações");
+  check("admin NÃO aprova change_price (exige owner)", G.handle(orgR, "11666660001", "aprovar 1").denied === true && D.get(orgR, cp.id).status === "awaiting_approval");
+
+  // Roteamento inclui os novos intents.
+  check("roteia 'aprovar 1' e 'dispensar 2'", G.shouldRoute(G.handle(orgA, "11999990001", "aprovar 1")) === true && G.shouldRoute(G.handle(orgA, "11999990001", "dispensar 1")) === true);
+
+  // ===== 11. Isolamento por organização =====
   check("isolamento: número de A não é reconhecido em B", G.handle(orgB, "11999990001", "saldo").user === null);
 
   console.log("\n=== TEST: GestorCommandService (Epic 3 — fatia 1) ===\n");

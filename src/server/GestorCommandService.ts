@@ -3,6 +3,7 @@ import { phoneMatches } from "./phoneMatch.js";
 import { PermissionService } from "./PermissionService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
+import { DecisionActionService } from "./DecisionActionService.js";
 import { logAuthEvent } from "./auditLog.js";
 
 /**
@@ -22,14 +23,18 @@ import { logAuthEvent } from "./auditLog.js";
 
 const brl = (n: any) => `R$ ${(Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export type GestorIntent = "menu" | "saldo" | "a_receber" | "a_pagar" | "prioridades" | "acao_diferida" | "desconhecido";
+export type GestorIntent = "menu" | "saldo" | "a_receber" | "a_pagar" | "prioridades" | "aprovacoes" | "aprovar" | "rejeitar" | "acao_diferida" | "desconhecido";
 
 export interface GestorResult { handled: boolean; reply: string; intent: GestorIntent; denied?: boolean; user?: { id: string; name: string } | null }
 
 export class GestorCommandService {
+  // Memória curta: última lista de aprovações enviada por (org, usuário) — para
+  // resolver "aprovar 2" contra o que foi numerado (como o Coordenador faz).
+  private static lastActions = new Map<string, { ids: string[] }>();
+
   // Intents que o Controller "possui" no canal interno — o webhook roteia só
   // estes para cá; menu/greeting/desconhecido caem no Coordenador (tarefas).
-  static ROUTED_INTENTS: GestorIntent[] = ["saldo", "a_receber", "a_pagar", "prioridades", "acao_diferida"];
+  static ROUTED_INTENTS: GestorIntent[] = ["saldo", "a_receber", "a_pagar", "prioridades", "aprovacoes", "aprovar", "rejeitar", "acao_diferida"];
 
   /** O webhook deve entregar esta mensagem ao Controller (em vez do Coordenador)? */
   static shouldRoute(r: GestorResult): boolean {
@@ -48,26 +53,37 @@ export class GestorCommandService {
   }
 
   /** Classifica o texto num intent determinístico (sem IA). */
-  static parse(text: string): { intent: GestorIntent } {
+  static parse(text: string): { intent: GestorIntent; index?: number } {
     const m = String(text || "").trim().toLowerCase();
     if (!m || /^(oi|ol[áa]|menu|ajuda|help|bom dia|boa tarde|boa noite|comandos?)$/.test(m)) return { intent: "menu" };
+    let mm: RegExpMatchArray | null;
+    // Ações numeradas primeiro (aprovar/dispensar N) — antes das consultas.
+    if ((mm = m.match(/^(aprovar|aprova|aprovado)\s+(\d+)/))) return { intent: "aprovar", index: parseInt(mm[2], 10) };
+    if ((mm = m.match(/^(dispensar|dispensa|rejeitar|rejeita|recusar|recusa)\s+(\d+)/))) return { intent: "rejeitar", index: parseInt(mm[2], 10) };
+    if (/(aprova[çc][õo]es|aprovacoes|pend[êe]ncias|o que.*aprovar|aguardando aprova)/.test(m)) return { intent: "aprovacoes" };
     if (/(^|\b)(saldo|caixa|quanto tenho|dinheiro)(\b|$)/.test(m)) return { intent: "saldo" };
     if (/(a\s*receber|receb[ií]veis|vencidos?|cobran[çc]a)/.test(m)) return { intent: "a_receber" };
     if (/(a\s*pagar|pagar|contas? a pagar|fornecedor)/.test(m)) return { intent: "a_pagar" };
     // "prioridades" só com frase clara — evita colidir com pergunta de tarefas
     // do colaborador ("o que tenho pra fazer hoje") no canal interno.
     if (/(prioridades?|o que.*atacar|foco do dia)/.test(m)) return { intent: "prioridades" };
-    if (/^(aprovar|aprova|delegar|delega|adiar|adia|dispensar|dispensa|rejeitar|rejeita|explicar|explica)\b/.test(m)) return { intent: "acao_diferida" };
+    // Delegar/adiar/explicar ainda são diferidos (sem execução nesta fatia).
+    if (/^(delegar|delega|adiar|adia|explicar|explica)\b/.test(m)) return { intent: "acao_diferida" };
     return { intent: "desconhecido" };
   }
 
   private static menu(name: string): string {
-    return `Olá${name ? `, ${name}` : ""}! Sou o *Controller IA* 📊\nConsulte o negócio por aqui:\n\n• *saldo* — caixa atual\n• *a receber* — recebíveis e vencidos\n• *a pagar* — contas em aberto\n• *prioridades* — o que atacar hoje\n\n(As ações — aprovar, dispensar — ficam no *Plano de Ação* do painel por enquanto.)`;
+    return `Olá${name ? `, ${name}` : ""}! Sou o *Controller IA* 📊\nConsulte e decida por aqui:\n\n• *saldo* — caixa atual\n• *a receber* — recebíveis e vencidos\n• *a pagar* — contas em aberto\n• *prioridades* — o que atacar hoje\n• *aprovações* — ações aguardando sua decisão\n• *aprovar 1* / *dispensar 2* — decidir uma ação da lista`;
   }
 
   /** Consulta financeira exige leitura no módulo `financeiro` (RBAC, Epic 0). */
   private static canFinance(orgId: string, user: any): boolean {
     return PermissionService.can(orgId, user, "financeiro", "read");
+  }
+
+  /** Só gestores (owner/admin) operam aprovações pelo WhatsApp — igual à rota. */
+  private static isManager(user: any): boolean {
+    return ["owner", "admin"].includes(String(user?.role));
   }
 
   /**
@@ -82,8 +98,55 @@ export class GestorCommandService {
       return { handled: true, reply: "Olá! Não reconheço este número. 🙋 Peça ao administrador para cadastrar seu WhatsApp em *Configurações → Usuários*.", intent: "menu", user: null };
     }
     const name = String(user.name || "").trim().split(/\s+/)[0] || "";
-    const { intent } = this.parse(text);
+    const { intent, index } = this.parse(text);
+    const key = `${orgId}:${user.id}`;
     try { logAuthEvent(orgId, user.id, null, "WA_GESTOR_COMMAND", { intent, from: fromNumber }); } catch { /* noop */ }
+
+    // ── Aprovações governadas (Epic 2 / DecisionActionService) ──
+    if (intent === "aprovacoes" || intent === "aprovar" || intent === "rejeitar") {
+      if (!this.isManager(user)) {
+        try { logAuthEvent(orgId, user.id, null, "WA_ACTION_DENIED", { intent }); } catch { /* noop */ }
+        return { handled: true, reply: "Apenas gestores (dono/administrador) decidem ações por aqui.", intent, denied: true, user: { id: user.id, name: user.name } };
+      }
+      if (intent === "aprovacoes") {
+        const pend = DecisionActionService.list(orgId, { status: "awaiting_approval" });
+        this.lastActions.set(key, { ids: pend.map((a: any) => a.id) });
+        const reply = pend.length
+          ? `📝 *Aguardando sua decisão:*\n\n${pend.map((a: any, i: number) => `*${i + 1}.* ${a.title}${a.expected_impact != null ? ` (${brl(a.expected_impact)})` : ""}`).join("\n")}\n\nResponda *aprovar 1* ou *dispensar 1*.`
+          : "✅ Nada aguardando aprovação no momento.";
+        return { handled: true, reply, intent, user: { id: user.id, name: user.name } };
+      }
+      // aprovar/rejeitar N → resolve o índice contra a última lista enviada.
+      const ids = this.lastActions.get(key)?.ids || DecisionActionService.list(orgId, { status: "awaiting_approval" }).map((a: any) => a.id);
+      const id = index && index > 0 ? ids[index - 1] : undefined;
+      if (!id) return { handled: true, reply: "Não achei essa ação. Manda *aprovações* que eu numero pra você.", intent, user: { id: user.id, name: user.name } };
+      const action = DecisionActionService.get(orgId, id);
+      // Aceite do PRD: só age em ação AINDA VÁLIDA e da MESMA organização.
+      if (!action || action.status !== "awaiting_approval") {
+        return { handled: true, reply: "Essa ação não está mais disponível para decisão (já resolvida ou cancelada).", intent, user: { id: user.id, name: user.name } };
+      }
+      if (intent === "aprovar") {
+        // RBAC igual à rota: perfil exigido pela política; senão owner/admin.
+        const required = action.approval_role;
+        const ok = required ? (user.role === required || user.role === "owner") : ["owner", "admin"].includes(user.role);
+        if (!ok) {
+          try { logAuthEvent(orgId, user.id, null, "WA_ACTION_DENIED", { intent, actionId: id, required }); } catch { /* noop */ }
+          return { handled: true, reply: `Esta aprovação exige o perfil *${required || "gestor"}*. Você não pode aprovar esta ação.`, intent, denied: true, user: { id: user.id, name: user.name } };
+        }
+        try {
+          const r = DecisionActionService.approve(orgId, id, user.id, { reason: "aprovado via WhatsApp" });
+          const reply = r.status === "approved"
+            ? `✅ *Aprovada:* ${action.title}`
+            : `👍 Registrei sua aprovação de *${action.title}*. Ainda falta outra aprovação (política de 2 pessoas).`;
+          return { handled: true, reply, intent, user: { id: user.id, name: user.name } };
+        } catch (e: any) { return { handled: true, reply: `Não consegui aprovar: ${e.message}`, intent, user: { id: user.id, name: user.name } }; }
+      }
+      // rejeitar
+      try {
+        DecisionActionService.reject(orgId, id, user.id, { reason: "dispensado via WhatsApp" });
+        return { handled: true, reply: `🚫 *Dispensada:* ${action.title}`, intent, user: { id: user.id, name: user.name } };
+      } catch (e: any) { return { handled: true, reply: `Não consegui dispensar: ${e.message}`, intent, user: { id: user.id, name: user.name } }; }
+    }
 
     // Consultas financeiras: exigem RBAC de leitura em `financeiro`.
     if (intent === "saldo" || intent === "a_receber" || intent === "a_pagar") {
@@ -113,7 +176,7 @@ export class GestorCommandService {
     }
 
     if (intent === "acao_diferida") {
-      return { handled: true, reply: "As ações por aqui (aprovar, dispensar, delegar, adiar) entram *em breve* — por enquanto use o *Plano de Ação* no painel, onde cada ação passa pela sua política de aprovação.", intent, user: { id: user.id, name: user.name } };
+      return { handled: true, reply: "Delegar/adiar/explicar ainda ficam no *Plano de Ação* do painel por enquanto. Por aqui você já pode *aprovar* e *dispensar* — manda *aprovações* pra ver a lista.", intent, user: { id: user.id, name: user.name } };
     }
 
     if (intent === "desconhecido") {

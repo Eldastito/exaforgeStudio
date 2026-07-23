@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle } from 'lucide-react';
+import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
@@ -84,6 +84,8 @@ export function HealthCenterView() {
             </ul>
           )}
         </div>
+
+        <TutorWhatsAppCard />
 
         {/* Índice de Sobrevivência (ADR-127) */}
         {idx && (() => {
@@ -234,6 +236,83 @@ export function HealthCenterView() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Tutor de Gestão no WhatsApp (ADR-131) — opt-in do resumo diário da manhã.
+function TutorWhatsAppCard() {
+  const [cfg, setCfg] = useState<any | null>(null);
+  const [phone, setPhone] = useState('');
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    apiFetch('/api/health-center/tutor').then((r) => r.json()).then((x: any) => { setCfg(x); setPhone(x?.phone || ''); }).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (enabled: boolean, ph: string) => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/health-center/tutor', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, phone: ph }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Falha');
+      setCfg((c: any) => ({ ...c, enabled: d.enabled, phone: d.phone }));
+      toast.success(enabled ? 'Tutor no WhatsApp ativado. ☀️' : 'Tutor desativado.');
+    } catch (e: any) { toast.error(e.message || 'Não consegui salvar.'); } finally { setBusy(false); }
+  };
+  const sendTest = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/health-center/tutor/test', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Falha');
+      toast.success('Resumo enviado no WhatsApp. 📲');
+    } catch (e: any) { toast.error(e.message || 'Não consegui enviar.'); } finally { setBusy(false); }
+  };
+
+  if (!cfg) return null;
+  const noNumber = !phone.trim() && !cfg.ownerPhoneFallback;
+
+  return (
+    <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <MessageCircle className="w-4 h-4 text-emerald-300 shrink-0" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-zinc-100">Receber este resumo no WhatsApp toda manhã</div>
+            <div className="text-[12px] text-zinc-400">O tutor te manda as prioridades do dia — sem você precisar abrir o app.</div>
+          </div>
+        </div>
+        <button
+          onClick={() => save(!cfg.enabled, phone)}
+          disabled={busy}
+          className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${cfg.enabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}
+          aria-label="Ativar tutor no WhatsApp"
+        >
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${cfg.enabled ? 'translate-x-5' : ''}`} />
+        </button>
+      </div>
+
+      {cfg.enabled && (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              onBlur={() => save(true, phone)}
+              placeholder={cfg.ownerPhoneFallback ? `Padrão: ${cfg.ownerPhoneFallback}` : 'WhatsApp do dono (DDD + número)'}
+              className="flex-1 min-w-[180px] rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600"
+              inputMode="tel"
+            />
+            <button onClick={sendTest} disabled={busy || !cfg.hasChannel || noNumber} className="text-xs rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 px-2.5 py-1.5 inline-flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> Enviar teste</button>
+          </div>
+          {!cfg.hasChannel && <div className="text-[11px] text-amber-300/90">Conecte um canal de WhatsApp para o envio funcionar.</div>}
+          <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1"><ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} /> {open ? 'Ocultar' : 'Ver'} prévia da mensagem</button>
+          {open && <pre className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-[12px] text-zinc-300 font-sans">{cfg.preview}</pre>}
+        </div>
+      )}
     </div>
   );
 }

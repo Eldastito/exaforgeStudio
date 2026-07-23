@@ -18,6 +18,7 @@ import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { TicketSlaService } from "./TicketSlaService.js";
 import { OpportunityRadarService } from "./OpportunityRadarService.js";
 import { InstagramService } from "./InstagramService.js";
+import { BusinessTutorService } from "./BusinessTutorService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
@@ -122,6 +123,28 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Tutor de Gestão no WhatsApp (ADR-131, Fatia 1): resumo da manhã ao DONO.
+   * Só orgs com opt-in; o serviço decide janela/dedupe/número. Best-effort.
+   */
+  static async tutorMorningPass() {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(tutor_wa_enabled,0)=1`).all() as any[]; } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        if (!channel) continue; // sem canal conectado não há como enviar
+        await BusinessTutorService.runMorningPass(orgId, {
+          now,
+          send: (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message),
+        });
+      } catch (e) { console.error("[Tutor] passe da manhã da org falhou", orgId, e); }
+    }
+  }
+
   static async tick() {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
@@ -150,6 +173,7 @@ export class Scheduler {
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     this.trialPass();
+    await this.tutorMorningPass().catch(e => console.error('[Scheduler] tutor da manhã falhou', e));
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }
 

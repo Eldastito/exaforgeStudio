@@ -255,10 +255,19 @@ export class PermissionService {
     return { module, gated: true, allow: this.can(orgId as string, user, module, action), finance, action };
   }
 
-  /** Mapa módulo → nível para o usuário (consumido por GET /api/permissions/me). */
+  /**
+   * Mapa módulo → nível para o usuário (consumido por GET /api/permissions/me).
+   * Módulos financeiros só entram quando a org ligou o RBAC financeiro — assim
+   * o menu do cliente esconde finanças EXATAMENTE quando o backend as gateia, e
+   * fica idêntico ao de hoje (finanças visíveis) enquanto o flag está desligado.
+   */
   static permissionMap(orgId: string, user: any): Record<string, Level> {
     const out: Record<string, Level> = {};
-    for (const m of RBAC_MODULES) out[m] = this.levelFor(orgId, user, m);
+    const financeOn = this.financeRbacEnabled(orgId);
+    for (const m of RBAC_MODULES) {
+      if (this.isFinanceModule(m) && !financeOn) continue; // omitido → o front trata como visível
+      out[m] = this.levelFor(orgId, user, m);
+    }
     return out;
   }
 

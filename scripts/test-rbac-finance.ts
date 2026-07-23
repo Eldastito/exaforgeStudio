@@ -78,6 +78,17 @@ async function main() {
   // ===== Flag helpers =====
   check("financeRbacEnabled reflete o estado", P.financeRbacEnabled(orgT) === true && P.financeRbacEnabled(orgLegacy) === false);
 
+  // ===== Menu (Fatia 2): permissionMap espelha o enforcement =====
+  // Com flag: módulos financeiros ENTRAM no mapa com o nível real.
+  const mapVendT = P.permissionMap(orgT, userWith(orgT, "vendedor"));
+  check("com flag: mapa inclui 'financeiro' (menu decide pelo nível)", "financeiro" in mapVendT && mapVendT.financeiro === "none");
+  const mapOwnerT = P.permissionMap(orgT, userWith(orgT, "owner"));
+  check("com flag: owner tem financeiro=full no mapa", mapOwnerT.financeiro === "full" && mapOwnerT.saude_negocio === "full");
+  // Sem flag: módulos financeiros são OMITIDOS → o front os trata como visíveis (intacto).
+  const mapVendLegacy = P.permissionMap(orgLegacy, userWith(orgLegacy, "vendedor"));
+  check("sem flag: 'financeiro' omitido do mapa (menu intacto)", !("financeiro" in mapVendLegacy) && !("saude_negocio" in mapVendLegacy));
+  check("sem flag: módulos não-financeiros seguem no mapa", "vendas" in mapVendLegacy);
+
   console.log("\n=== TEST: RBAC financeiro (Epic 0) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

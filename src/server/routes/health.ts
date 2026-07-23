@@ -55,6 +55,7 @@ router.get("/tutor", (req: AuthRequest, res): any => {
     lastMorning: s.tutor_wa_last_morning || null,
     hasChannel,
     preview: BusinessTutorService.morningBrief(orgId).text,
+    previewMidday: BusinessTutorService.middayBrief(orgId).text || null,
   });
 });
 

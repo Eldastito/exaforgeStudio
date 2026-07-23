@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
+import { ComigoHealthService } from "./ComigoHealthService.js";
 import { onlyDigits } from "./phoneMatch.js";
 
 /**
@@ -17,7 +18,7 @@ const brl = (n: any) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
 
 export interface TutorSendResult {
   sent: boolean;
-  reason?: "disabled" | "outside_window" | "already_sent" | "no_phone";
+  reason?: "disabled" | "outside_window" | "already_sent" | "no_phone" | "no_breakeven";
   phone?: string;
   text?: string;
 }
@@ -27,6 +28,8 @@ export class BusinessTutorService {
   // dispara em qualquer hora da janela, mas só uma vez por dia (dedupe por data).
   private static MORNING_START = 7;
   private static MORNING_END = 12; // exclusivo
+  private static MIDDAY_START = 12;
+  private static MIDDAY_END = 16; // exclusivo
 
   /** Data e hora em São Paulo a partir de um Date (determinístico p/ teste). */
   static spParts(now: Date): { dateSP: string; hourSP: number } {
@@ -98,6 +101,50 @@ export class BusinessTutorService {
     const { text } = this.morningBrief(orgId);
     await opts.send(phone, text);
     db.prepare("UPDATE organization_settings SET tutor_wa_last_morning = ? WHERE organization_id = ?").run(dateSP, orgId);
+    return { sent: true, phone, text };
+  }
+
+  /**
+   * Texto do "durante o dia" (ADR-131 Fatia 2): quanto do ponto de equilíbrio o
+   * dia já cobriu. Só se aplica quando há custo fixo informado e breakeven > 0
+   * (senão não há o que reportar — o passe pula sem enviar). Zero-token.
+   */
+  static middayBrief(orgId: string): { text: string; applicable: boolean } {
+    const be = ComigoHealthService.breakEven(orgId) as any;
+    const applicable = !!be?.hasFixedCosts && Number(be?.breakEvenRevenue) > 0;
+    if (!applicable) return { text: "", applicable: false };
+    const pct = Math.round(Number(be.progress || 0) * 100);
+    const falta = Math.max(0, Number(be.breakEvenRevenue) - Number(be.achievedRevenue));
+    const lines: string[] = [];
+    lines.push("☕ *Meio-dia* — como vai o dia:");
+    lines.push("");
+    lines.push(`Você já fez ${brl(be.achievedRevenue)} — *${pct}%* do ponto de equilíbrio (${brl(be.breakEvenRevenue)}).`);
+    if (pct >= 100) {
+      lines.push("Já pagou o dia! Daqui pra frente é lucro. 🎉");
+    } else {
+      const ped = Number(be.avgTicket) > 0 ? ` (~${Math.ceil(falta / Number(be.avgTicket))} pedido(s))` : "";
+      lines.push(`Faltam ${brl(falta)}${ped} pra virar o dia no azul. 💪`);
+    }
+    return { text: lines.join("\n"), applicable: true };
+  }
+
+  /**
+   * Passe do meio-dia para uma org. Só envia com opt-in ligado, na janela do
+   * meio-dia (SP), ainda não enviado hoje, com número do dono E breakeven
+   * aplicável. Não marca a data se pulou (breakeven pode ficar pronto mais tarde).
+   */
+  static async runMiddayPass(orgId: string, opts: { now: Date; send: (phone: string, text: string) => any }): Promise<TutorSendResult> {
+    const s = db.prepare("SELECT tutor_wa_enabled, tutor_wa_last_midday FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    if (!s || !Number(s.tutor_wa_enabled)) return { sent: false, reason: "disabled" };
+    const { dateSP, hourSP } = this.spParts(opts.now);
+    if (hourSP < this.MIDDAY_START || hourSP >= this.MIDDAY_END) return { sent: false, reason: "outside_window" };
+    if (s.tutor_wa_last_midday === dateSP) return { sent: false, reason: "already_sent" };
+    const phone = this.ownerPhone(orgId);
+    if (!phone) return { sent: false, reason: "no_phone" };
+    const { text, applicable } = this.middayBrief(orgId);
+    if (!applicable) return { sent: false, reason: "no_breakeven" };
+    await opts.send(phone, text);
+    db.prepare("UPDATE organization_settings SET tutor_wa_last_midday = ? WHERE organization_id = ?").run(dateSP, orgId);
     return { sent: true, phone, text };
   }
 

@@ -309,8 +309,21 @@ function TutorWhatsAppCard() {
             <button onClick={sendTest} disabled={busy || !cfg.hasChannel || noNumber} className="text-xs rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 px-2.5 py-1.5 inline-flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> Enviar teste</button>
           </div>
           {!cfg.hasChannel && <div className="text-[11px] text-amber-300/90">Conecte um canal de WhatsApp para o envio funcionar.</div>}
-          <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1"><ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} /> {open ? 'Ocultar' : 'Ver'} prévia da mensagem</button>
-          {open && <pre className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-[12px] text-zinc-300 font-sans">{cfg.preview}</pre>}
+          <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1"><ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} /> {open ? 'Ocultar' : 'Ver'} prévia das mensagens</button>
+          {open && (
+            <div className="space-y-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">☀️ Manhã (todo dia)</div>
+                <pre className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-[12px] text-zinc-300 font-sans">{cfg.preview}</pre>
+              </div>
+              {cfg.previewMidday && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">☕ Meio-dia (quando há ponto de equilíbrio)</div>
+                  <pre className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-[12px] text-zinc-300 font-sans">{cfg.previewMidday}</pre>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

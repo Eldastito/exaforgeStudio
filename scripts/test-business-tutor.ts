@@ -73,9 +73,39 @@ async function main() {
   const marked = db.prepare("SELECT tutor_wa_last_morning m FROM organization_settings WHERE organization_id = ?").get(orgNoPhone) as any;
   check("sem número, não marca a data (poderá enviar quando configurar)", !marked.m);
 
+  // ===== 6b. Meio-dia (ADR-131 Fatia 2): % do ponto de equilíbrio =====
+  const MIDDAY = new Date("2026-07-23T16:00:00Z"); // 13:00 em São Paulo
+  // Org sem custo fixo: não há breakeven a reportar → passe pula sem enviar.
+  const orgNoBE = seedOrg(1, "5521970000000");
+  const rNoBE = await T.runMiddayPass(orgNoBE, { now: MIDDAY, send });
+  check("sem custo fixo, meio-dia não se aplica (no_breakeven)", rNoBE.sent === false && rNoBE.reason === "no_breakeven");
+  check("meio-dia sem breakeven não marca a data", !(db.prepare("SELECT tutor_wa_last_midday m FROM organization_settings WHERE organization_id = ?").get(orgNoBE) as any).m);
+  check("middayBrief não aplicável quando falta custo fixo", T.middayBrief(orgNoBE).applicable === false);
+
+  // Org com custo fixo + vendas pagas (janela 30d, inclui hoje).
+  const orgBE = seedOrg(1, "5521960000000");
+  db.prepare("UPDATE organization_settings SET comigo_fixed_costs_monthly = 3000 WHERE organization_id = ?").run(orgBE); // R$ 100/dia
+  const seedSale = (revenue: number, cost: number) => {
+    const oid = randomUUID();
+    db.prepare("INSERT INTO comigo_orders (id, organization_id, status, total) VALUES (?, ?, 'paid', ?)").run(oid, orgBE, revenue);
+    db.prepare("INSERT INTO comigo_order_items (id, order_id, name, qty, unit_price, unit_cost_snapshot) VALUES (?, ?, 'Item', 1, ?, ?)").run(randomUUID(), oid, revenue, cost);
+  };
+  for (let i = 0; i < 3; i++) seedSale(40, 16); // margem 60%, ticket 40
+  const beBrief = T.middayBrief(orgBE);
+  check("middayBrief aplicável com custo fixo + vendas", beBrief.applicable === true);
+  check("texto do meio-dia cita o ponto de equilíbrio e o %", /ponto de equil/.test(beBrief.text) && /%/.test(beBrief.text));
+  const midBefore = sends.length;
+  const m1 = await T.runMiddayPass(orgBE, { now: MIDDAY, send });
+  check("envia no meio-dia quando aplicável", m1.sent === true && sends.length === midBefore + 1 && sends[sends.length - 1].phone === "5521960000000");
+  const m2 = await T.runMiddayPass(orgBE, { now: MIDDAY, send });
+  check("não reenvia o meio-dia no mesmo dia (dedupe)", m2.sent === false && m2.reason === "already_sent");
+  const m3 = await T.runMiddayPass(orgBE, { now: MORNING, send });
+  check("fora da janela do meio-dia não envia", m3.sent === false && m3.reason === "outside_window");
+
   // ===== 7. sendNow (teste manual) ignora janela/dedupe =====
+  const snBefore = sends.length;
   const sn = await T.sendNow(orgA, { send });
-  check("envio de teste manda mesmo já tendo enviado hoje", (sn as any).ok === true && sends.length === before + 1);
+  check("envio de teste manda mesmo já tendo enviado hoje", (sn as any).ok === true && sends.length === snBefore + 1);
 
   // ===== 8. Isolamento =====
   const lastB = db.prepare("SELECT tutor_wa_last_morning m FROM organization_settings WHERE organization_id = ?").get(orgB) as any;

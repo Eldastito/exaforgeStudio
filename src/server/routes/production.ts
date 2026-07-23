@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest, requirePermission } from "../middleware/auth.js";
 import { ProductionService } from "../ProductionService.js";
+import { ProductionOrderService } from "../ProductionOrderService.js";
 
 // Produção (Supervisor de Produção IA, ADR-141) — produto fabricado + BOM +
 // necessidade de materiais. Gateado pelo módulo `production` (só gestores por
@@ -40,6 +41,54 @@ router.get("/bom/:id/requirements", requirePermission("production", "read"), (re
   const quantity = Number(req.query?.quantity) || 0;
   const r = ProductionService.materialRequirements(orgOf(req), req.params.id, quantity);
   if (!r) return res.status(404).json({ error: "BOM não encontrada." });
+  res.json(r);
+});
+
+// ── Ordens de produção (fatia 2) ──
+router.get("/orders", requirePermission("production", "read"), (req: AuthRequest, res): any => {
+  const status = typeof req.query?.status === "string" ? req.query.status : undefined;
+  res.json({ orders: ProductionOrderService.list(orgOf(req), { status }) });
+});
+router.post("/orders", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = ProductionOrderService.create(orgOf(req), { manufacturedProductId: b.manufacturedProductId, bomId: b.bomId, qtyPlanned: b.qtyPlanned, promisedDate: b.promisedDate, expectedDate: b.expectedDate, createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+router.get("/orders/:id", requirePermission("production", "read"), (req: AuthRequest, res): any => {
+  const o = ProductionOrderService.get(orgOf(req), req.params.id);
+  if (!o) return res.status(404).json({ error: "Ordem não encontrada." });
+  res.json(o);
+});
+
+router.post("/orders/:id/steps", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = ProductionOrderService.addStep(orgOf(req), req.params.id, { name: b.name, seq: b.seq, assignedTo: b.assignedTo });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+router.put("/steps/:id", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const r = ProductionOrderService.setStepStatus(orgOf(req), req.params.id, req.body?.status);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r);
+});
+
+// Liberar a ordem (aprovação por perfil — gestor de produção).
+router.post("/orders/:id/release", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const r = ProductionOrderService.release(orgOf(req), req.params.id, { createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r);
+});
+// Apontamento de progresso/refugo.
+router.post("/orders/:id/report", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = ProductionOrderService.report(orgOf(req), req.params.id, { producedQty: b.producedQty, scrappedQty: b.scrappedQty, stepId: b.stepId, note: b.note, createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json(r);
+});
+router.post("/orders/:id/cancel", requirePermission("production", "write"), (req: AuthRequest, res): any => {
+  const r = ProductionOrderService.cancel(orgOf(req), req.params.id, { createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
   res.json(r);
 });
 

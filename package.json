@@ -201,7 +201,8 @@
     "test:ai-governance": "tsx scripts/test-ai-governance.ts",
     "test:business-tutor": "tsx scripts/test-business-tutor.ts",
     "test:decision-simulator": "tsx scripts/test-decision-simulator.ts",
-    "test:task-result": "tsx scripts/test-task-result.ts"
+    "test:task-result": "tsx scripts/test-task-result.ts",
+    "test:business-snapshot": "tsx scripts/test-business-snapshot.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

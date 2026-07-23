@@ -238,6 +238,7 @@ jobs:
           - { name: 'purchase-orders', script: 'test:purchase-orders' }
           - { name: 'goods-receipt', script: 'test:goods-receipt' }
           - { name: 'purchase-payable', script: 'test:purchase-payable' }
+          - { name: 'supplier-performance', script: 'test:supplier-performance' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

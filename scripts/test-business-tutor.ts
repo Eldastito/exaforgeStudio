@@ -102,6 +102,21 @@ async function main() {
   const m3 = await T.runMiddayPass(orgBE, { now: MORNING, send });
   check("fora da janela do meio-dia não envia", m3.sent === false && m3.reason === "outside_window");
 
+  // ===== 6c. Fim do dia (ADR-131 Fatia 3): vendeu/recebeu/margem/pendências =====
+  const EVENING = new Date("2026-07-23T23:00:00Z"); // 20:00 em São Paulo
+  const ev = T.eveningBrief(orgBE);
+  check("resumo do fim do dia traz vendas, caixa e margem", /Fim do dia/.test(ev.text) && /Vendas/.test(ev.text) && /Margem estimada/.test(ev.text));
+  const evBefore = sends.length;
+  const e1 = await T.runEveningPass(orgBE, { now: EVENING, send });
+  check("envia o fim do dia na janela da noite", e1.sent === true && sends.length === evBefore + 1);
+  const e2 = await T.runEveningPass(orgBE, { now: EVENING, send });
+  check("não reenvia o fim do dia no mesmo dia (dedupe)", e2.sent === false && e2.reason === "already_sent");
+  const e3 = await T.runEveningPass(orgBE, { now: MIDDAY, send });
+  check("fora da janela da noite não envia", e3.sent === false && e3.reason === "outside_window");
+  // Fim do dia envia mesmo sem custo fixo (é o fechamento, não depende de breakeven).
+  const e4 = await T.runEveningPass(orgNoBE, { now: EVENING, send });
+  check("fim do dia envia mesmo sem custo fixo", e4.sent === true);
+
   // ===== 7. sendNow (teste manual) ignora janela/dedupe =====
   const snBefore = sends.length;
   const sn = await T.sendNow(orgA, { send });

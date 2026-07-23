@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
+import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { onlyDigits } from "./phoneMatch.js";
 
 /**
@@ -30,6 +31,8 @@ export class BusinessTutorService {
   private static MORNING_END = 12; // exclusivo
   private static MIDDAY_START = 12;
   private static MIDDAY_END = 16; // exclusivo
+  private static EVENING_START = 18;
+  private static EVENING_END = 22; // exclusivo
 
   /** Data e hora em São Paulo a partir de um Date (determinístico p/ teste). */
   static spParts(now: Date): { dateSP: string; hourSP: number } {
@@ -145,6 +148,52 @@ export class BusinessTutorService {
     if (!applicable) return { sent: false, reason: "no_breakeven" };
     await opts.send(phone, text);
     db.prepare("UPDATE organization_settings SET tutor_wa_last_midday = ? WHERE organization_id = ?").run(dateSP, orgId);
+    return { sent: true, phone, text };
+  }
+
+  /**
+   * Texto do "fim do dia" (ADR-131 Fatia 3): quanto vendeu, quanto entrou no
+   * caixa, margem estimada e o que ficou a receber. Determinístico: vendas/margem
+   * do dia via ComigoHealthService; recebido/pendente via FinancialLedgerService.
+   * O "sim, cobre amanhã" (loop conversacional) fica para a Fatia 4.
+   */
+  static eveningBrief(orgId: string): { text: string } {
+    const today = new Date().toISOString().slice(0, 10);
+    const day = ComigoHealthService.rangeResult(orgId, today, today) as any;
+    const sum = FinancialLedgerService.summary(orgId) as any;
+    const aReceber = Number(sum?.aReceber) || 0;
+    const lines: string[] = [];
+    lines.push("📊 *Fim do dia* — o resumo de hoje:");
+    lines.push("");
+    lines.push(`🛒 Vendas: ${brl(day.revenue)}${Number(day.orders) > 0 ? ` (${day.orders} pedido(s))` : ""}`);
+    lines.push(`💵 Entrou no caixa: ${brl(sum?.realizadoHoje)}`);
+    lines.push(`📈 Margem estimada: ${brl(day.profit)}`);
+    if (aReceber > 0) {
+      lines.push("");
+      lines.push(`Ainda há ${brl(aReceber)} a receber em aberto. Amanhã cedo eu te lembro de cobrar. 💬`);
+    } else {
+      lines.push("");
+      lines.push("Nada em aberto por hoje. Bom descanso! 🌙");
+    }
+    return { text: lines.join("\n") };
+  }
+
+  /**
+   * Passe do fim do dia para uma org. Opt-in ligado, janela da noite (SP), ainda
+   * não enviado hoje, com número do dono. É o fechamento do dia — sempre envia
+   * (mesmo dia parado), pois é o ritual que o dono pediu.
+   */
+  static async runEveningPass(orgId: string, opts: { now: Date; send: (phone: string, text: string) => any }): Promise<TutorSendResult> {
+    const s = db.prepare("SELECT tutor_wa_enabled, tutor_wa_last_evening FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    if (!s || !Number(s.tutor_wa_enabled)) return { sent: false, reason: "disabled" };
+    const { dateSP, hourSP } = this.spParts(opts.now);
+    if (hourSP < this.EVENING_START || hourSP >= this.EVENING_END) return { sent: false, reason: "outside_window" };
+    if (s.tutor_wa_last_evening === dateSP) return { sent: false, reason: "already_sent" };
+    const phone = this.ownerPhone(orgId);
+    if (!phone) return { sent: false, reason: "no_phone" };
+    const { text } = this.eveningBrief(orgId);
+    await opts.send(phone, text);
+    db.prepare("UPDATE organization_settings SET tutor_wa_last_evening = ? WHERE organization_id = ?").run(dateSP, orgId);
     return { sent: true, phone, text };
   }
 

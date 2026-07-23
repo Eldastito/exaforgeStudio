@@ -97,7 +97,26 @@ async function main() {
   // Sem resultado no mês, qualquer retirada descapitaliza.
   check("retirada com resultado zerado é excesso", D.withdraw(orgW, { amount: 500 }).nivel === "excesso");
 
-  // ===== 6. Isolamento =====
+  // ===== 6. "Quanto vender para pagar a máquina?" (Fatia 4 — payback) =====
+  const orgP = mkOrg();
+  for (let i = 0; i < 3; i++) {
+    const oid = randomUUID();
+    db.prepare("INSERT INTO comigo_orders (id, organization_id, status, total) VALUES (?, ?, 'paid', 1000)").run(oid, orgP);
+    db.prepare("INSERT INTO comigo_order_items (id, order_id, name, qty, unit_price, unit_cost_snapshot) VALUES (?, ?, 'Item', 1, 1000, 500)").run(randomUUID(), oid);
+  }
+  // margem 50%, receita/mês 3000, lucro/mês 1500.
+  check("payback sem valor é rejeitado", D.payback(orgP, { amount: 0 }).ok === false);
+  check("payback sem margem pede dados", D.payback(mkOrg(), { amount: 12000 }).ok === false && D.payback(mkOrg(), { amount: 12000 }).reason === "sem_margem");
+  const pb = D.payback(orgP, { amount: 12000, months: 12 });
+  check("receita total p/ pagar = investimento / margem (12000/0,5 = 24000)", pb.ok === true && Math.abs(pb.totalRevenueNeeded - 24000) < 0.01);
+  check("venda/mês em 12 meses = 24000/12 = 2000", Math.abs(pb.monthlyRevenueNeeded - 2000) < 0.01);
+  check("payback no ritmo de lucro atual = 12000/1500 = 8 meses", pb.paybackMonths === 8);
+  check("veredito de payback presente", typeof pb.veredito === "string" && /payback/i.test(pb.veredito));
+  // Prazo diferente muda a venda/mês (24 meses → 1000/mês), mas não o payback real.
+  const pb24 = D.payback(orgP, { amount: 12000, months: 24 });
+  check("prazo maior reduz a venda/mês, payback real inalterado", Math.abs(pb24.monthlyRevenueNeeded - 1000) < 0.01 && pb24.paybackMonths === 8);
+
+  // ===== 7. Isolamento =====
   check("isolamento: outra org sem vendas não simula contratação", D.hire(mkOrg(), { monthlyCost: 5000 }).ok === false);
 
   console.log("\n=== TEST: Simulador de Decisões (ADR-133) ===\n");

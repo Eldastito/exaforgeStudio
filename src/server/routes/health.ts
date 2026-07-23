@@ -64,6 +64,13 @@ router.post("/simulate/withdraw", (req: AuthRequest, res): any => {
   res.json(DecisionSimulatorService.withdraw(orgId, { amount: Number(req.body?.amount) || 0 }));
 });
 
+// POST /api/health-center/simulate/payback — "quanto vender p/ pagar?" (ADR-133 Fatia 4).
+router.post("/simulate/payback", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(DecisionSimulatorService.payback(orgId, { amount: Number(req.body?.amount) || 0, months: Number(req.body?.months) || 12 }));
+});
+
 // GET /api/health-center/tutor — config do Tutor no WhatsApp + prévia do resumo.
 router.get("/tutor", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

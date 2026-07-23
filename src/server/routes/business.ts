@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSnapshotV2Service } from "../BusinessSnapshotV2Service.js";
+import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import db from "../db.js";
 
 // Enterprise Intelligence Kernel (ADR-135) — Business Snapshot V2 (read-only) +
@@ -13,6 +14,14 @@ router.get("/snapshot", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = typeof req.query?.period === "string" && /^\d{4}-\d{2}$/.test(req.query.period) ? req.query.period : undefined;
   res.json(BusinessSnapshotV2Service.build(orgId, period));
+});
+
+// GET /api/business/priorities — Pareto: até 3 prioridades globais e 3 por
+// domínio, com score determinístico e explicação (ADR-136 C3, PRD §9).
+router.get("/priorities", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ImpactPrioritizationService.prioritize(orgId));
 });
 
 // GET /api/business/snapshot/flag — estado da feature-flag do Diretor V2.

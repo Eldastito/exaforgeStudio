@@ -2143,6 +2143,12 @@ const initDb = () => {
 
   // Execution Intelligence (Fase 3) — alocação de recursos por tarefa + Maestro.
   try { db.exec(`ALTER TABLE tasks ADD COLUMN budget_amount REAL DEFAULT 0`); } catch(e){}
+  // Tarefa com RESULTADO medido + EVIDÊNCIA (ADR-134): problema (baseline) →
+  // resultado (final) e a foto/relatório que comprova a execução.
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN result_label TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN result_baseline REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN result_final REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN evidence_url TEXT`); } catch(e){}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS task_resources (

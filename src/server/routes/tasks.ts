@@ -56,6 +56,15 @@ router.post("/:id/move", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// POST /api/tasks/:id/result { resultFinal?, evidenceUrl? } — conclui com resultado + evidência (ADR-134).
+router.post("/:id/result", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(TaskService.recordResult(orgId, req.params.id, { resultFinal: req.body?.resultFinal, evidenceUrl: req.body?.evidenceUrl }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // POST /api/tasks/:id/resources { kind, productId?, label?, quantity?, amount? }
 router.post("/:id/resources", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

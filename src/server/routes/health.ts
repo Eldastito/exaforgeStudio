@@ -15,11 +15,11 @@ router.get("/", (req: AuthRequest, res): any => {
   res.json(BusinessHealthService.overview(orgId, minCash));
 });
 
-// GET /api/health-center/survival-index — placar 0-100 + faixa + composição.
+// GET /api/health-center/survival-index — placar 0-100 + faixa + composição + histórico.
 router.get("/survival-index", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(SurvivalIndexService.score(orgId));
+  res.json(SurvivalIndexService.scoreWithHistory(orgId));
 });
 
 // POST /api/health-center/survival-index/snapshot — fecha o snapshot do mês.

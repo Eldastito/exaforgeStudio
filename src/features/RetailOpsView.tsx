@@ -69,6 +69,13 @@ function ClosingsTab() {
   const [closings, setClosings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [informing, setInforming] = useState<any | null>(null);
+  const [storeModal, setStoreModal] = useState<null | { store: any | null }>(null);
+
+  const toggleActive = async (s: any) => {
+    const res = await apiFetch(`/api/retailops/stores/${s.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !s.active }) });
+    if (res.ok) { toast.success(s.active ? 'Loja desativada.' : 'Loja reativada.'); load(); }
+    else toast.error('Falha ao atualizar a loja.');
+  };
 
   const load = async () => {
     setLoading(true);
@@ -107,11 +114,14 @@ function ClosingsTab() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         </label>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        <button onClick={() => setStoreModal({ store: null })} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
 
       {stores.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-          Nenhuma loja cadastrada na rede ainda. Cadastre as lojas (filiais) para registrar o fechamento diário.
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center">
+          <p className="text-sm text-zinc-500">Nenhuma loja cadastrada na rede ainda.</p>
+          <p className="mt-1 text-[12px] text-zinc-600">Cadastre as lojas (filiais) para registrar o fechamento diário, apurar comissão e conferir divergências.</p>
+          <button onClick={() => setStoreModal({ store: null })} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Cadastrar primeira loja</button>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -131,8 +141,15 @@ function ClosingsTab() {
                 const c = byStore[s.id];
                 const variance = Number(c?.variance_amount || 0);
                 return (
-                  <tr key={s.id} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 text-zinc-200">{s.name}</td>
+                  <tr key={s.id} className={`border-t border-zinc-800/70 ${!s.active ? 'opacity-50' : ''}`}>
+                    <td className="px-3 py-2 text-zinc-200">
+                      <div className="flex items-center gap-2">
+                        <span>{s.name}{s.code ? <span className="text-zinc-500"> · {s.code}</span> : null}</span>
+                        {!s.active && <span className="text-[10px] rounded-full border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-zinc-400">inativa</span>}
+                        <button onClick={() => setStoreModal({ store: s })} title="Editar loja" className="text-[11px] text-zinc-500 hover:text-zinc-300">editar</button>
+                        <button onClick={() => toggleActive(s)} title={s.active ? 'Desativar loja' : 'Reativar loja'} className="text-[11px] text-zinc-500 hover:text-zinc-300">{s.active ? 'desativar' : 'reativar'}</button>
+                      </div>
+                    </td>
                     <td className="px-3 py-2">{c ? <Badge map={CLOSING_STATUS} s={c.status} /> : <span className="text-xs text-zinc-500">—</span>}</td>
                     <td className="px-3 py-2 text-right text-zinc-400">{c ? brl(c.quota_amount) : '—'}</td>
                     <td className="px-3 py-2 text-right text-zinc-200">{c?.informed_total != null ? brl(c.informed_total) : '—'}</td>
@@ -157,7 +174,68 @@ function ClosingsTab() {
       )}
 
       {informing && <InformModal closing={informing} onClose={() => setInforming(null)} onSaved={() => { setInforming(null); load(); }} />}
+      {storeModal && <StoreFormModal store={storeModal.store} onClose={() => setStoreModal(null)} onSaved={() => { setStoreModal(null); load(); }} />}
     </div>
+  );
+}
+
+// ---- Cadastro/edição de loja (reutilizável nas abas) ------------------------
+function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClose: () => void; onSaved: () => void }) {
+  const editing = !!store;
+  const [name, setName] = useState(store?.name || '');
+  const [code, setCode] = useState(store?.code || '');
+  const [wa, setWa] = useState(store?.whatsapp_identifier || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) { toast.error('Dê um nome à loja.'); return; }
+    setSaving(true);
+    try {
+      const body = JSON.stringify({ name: name.trim(), code: code.trim() || null, whatsappIdentifier: wa.replace(/\D/g, '') || null });
+      const res = editing
+        ? await apiFetch(`/api/retailops/stores/${store.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
+        : await apiFetch('/api/retailops/stores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      if (res.ok) { toast.success(editing ? 'Loja atualizada.' : 'Loja cadastrada.'); onSaved(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar a loja.'); }
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100">{editing ? 'Editar loja' : 'Nova loja (filial)'}</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="mt-4 space-y-3">
+          <label className="block text-xs text-zinc-400">Nome da loja
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Loja Centro" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          </label>
+          <label className="block text-xs text-zinc-400">Código (opcional)
+            <input value={code} onChange={e => setCode(e.target.value)} placeholder="Ex.: 01, CENTRO" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          </label>
+          <label className="block text-xs text-zinc-400">WhatsApp da loja (opcional)
+            <input value={wa} onChange={e => setWa(e.target.value)} placeholder="Ex.: 5511987654321" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            <span className="mt-1 block text-[11px] text-zinc-500">Recebe a cobrança de pendências (fechamento, malote) e permite dar baixa respondendo.</span>
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar loja</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Botão reutilizável "Nova loja" (para as abas que dependem de lojas cadastradas).
+function NewStoreButton({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20"><Plus className="w-3.5 h-3.5" /> Nova loja</button>
+      {open && <StoreFormModal store={null} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); onCreated(); }} />}
+    </>
   );
 }
 
@@ -293,9 +371,12 @@ function CommissionTab() {
       <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-indigo-400" /> Regras de comissão</div>
-          <button onClick={() => setRuleForm({ name: '', scope: 'store', calculationType: 'percent_sales', percent: '5', amount: '', bonus: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20">
-            <Plus className="w-3.5 h-3.5" /> Nova regra
-          </button>
+          <div className="flex items-center gap-2">
+            <NewStoreButton onCreated={load} />
+            <button onClick={() => setRuleForm({ name: '', scope: 'store', calculationType: 'percent_sales', percent: '5', amount: '', bonus: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20">
+              <Plus className="w-3.5 h-3.5" /> Nova regra
+            </button>
+          </div>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">É aqui que você define <strong>quanto vai pagar de comissão</strong> — o percentual sobre as vendas, um valor fixo, ou um bônus ao bater a meta. Sem regra ativa, a apuração vem zerada.</p>
         {rules.length === 0 ? (
@@ -494,6 +575,7 @@ function ReconciliationTab() {
           {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Importar CSV do sistema
           <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.currentTarget.value = ''; }} />
         </label>
+        <div className="ml-auto"><NewStoreButton onCreated={load} /></div>
       </div>
 
       {s && (

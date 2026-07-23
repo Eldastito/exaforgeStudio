@@ -19,6 +19,7 @@ import { LossMarginService } from "./LossMarginService.js";
 
 const clamp = (n: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n));
 const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
+const brl = (n: number) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
 const NEUTRAL = 50;
 
 interface Comp { key: string; label: string; weight: number; score: number; hasData: boolean; note: string }
@@ -28,6 +29,16 @@ export class SurvivalIndexService {
 
   private static cashEventsCount(orgId: string): number {
     try { return (db.prepare("SELECT COUNT(*) c FROM cash_events WHERE organization_id = ?").get(orgId) as any).c; } catch { return 0; }
+  }
+
+  /** Capital parado no estoque (ADR-127 Fatia 2): Σ quantidade × custo médio. */
+  private static inventoryCapital(orgId: string): { hasData: boolean; parado: number } {
+    try {
+      const total = (db.prepare("SELECT COUNT(*) c FROM inventory_items WHERE organization_id = ?").get(orgId) as any).c;
+      if (!total) return { hasData: false, parado: 0 };
+      const p = (db.prepare("SELECT COALESCE(SUM(quantity_available * avg_cost),0) s FROM inventory_items WHERE organization_id = ? AND quantity_available > 0").get(orgId) as any).s;
+      return { hasData: true, parado: Math.round((Number(p) || 0) * 100) / 100 };
+    } catch { return { hasData: false, parado: 0 }; }
   }
 
   /** Calcula os 7 componentes ponderados. */
@@ -72,6 +83,16 @@ export class SurvivalIndexService {
       recebScore = clamp(100 * (1 - ratio));
     }
 
+    // 5) Estoque e capital parado (10%) — ADR-127 Fatia 2
+    const inv = this.inventoryCapital(orgId);
+    let estoqueScore = NEUTRAL;
+    if (inv.hasData) {
+      const receita = LossMarginService.monthlyRevenue(orgId, this.nowPeriod());
+      if (inv.parado <= 0) estoqueScore = 100;
+      else if (receita > 0) estoqueScore = clamp(100 - ((inv.parado / receita - 1) / 3) * 100); // ~1 mês de estoque ok; 4 meses ruim
+      else estoqueScore = 30; // capital parado sem vendas para girar
+    }
+
     // 7) Dependência do dono e qualidade dos dados (5%)
     const dq = BusinessHealthService.dataQuality(orgId);
 
@@ -80,7 +101,7 @@ export class SurvivalIndexService {
       { key: "margem", label: "Margem e rentabilidade", weight: 20, score: round1(margemScore), hasData: margemData, note: margemData ? "" : "Cadastre custos para calcular a margem." },
       { key: "vendas", label: "Vendas, conversão e recompra", weight: 20, score: round1(vendasScore), hasData: vendasData, note: vendasData ? "" : "Sem sinal de vendas suficiente ainda." },
       { key: "recebiveis", label: "Recebíveis e inadimplência", weight: 12, score: round1(recebScore), hasData: recebData, note: recebData ? "" : "Sem recebíveis/caixa para avaliar." },
-      { key: "estoque", label: "Estoque e capital parado", weight: 10, score: NEUTRAL, hasData: false, note: "Sinal dedicado na próxima fatia." },
+      { key: "estoque", label: "Estoque e capital parado", weight: 10, score: round1(estoqueScore), hasData: inv.hasData, note: inv.hasData ? (inv.parado > 0 ? `${brl(inv.parado)} parados no estoque.` : "") : "Sem controle de estoque para avaliar." },
       { key: "operacao", label: "Execução operacional", weight: 8, score: round1(operScore), hasData: operData, note: operData ? "" : "Sem sinal operacional ainda." },
       { key: "dados", label: "Qualidade dos dados", weight: 5, score: round1(dq.pct), hasData: true, note: dq.pct < 100 ? "Complete o checklist da Central de Saúde." : "" },
     ];
@@ -118,6 +139,18 @@ export class SurvivalIndexService {
       ON CONFLICT(organization_id, period) DO UPDATE SET score=excluded.score, faixa=excluded.faixa, confidence=excluded.confidence, components=excluded.components
     `).run(randomUUID(), orgId, period, s.score, s.faixa, s.confidence, JSON.stringify(s.components));
     return s;
+  }
+
+  /** Histórico do placar (últimos N meses) para o gráfico de tendência. */
+  static history(orgId: string, months = 6) {
+    const rows = db.prepare("SELECT period, score, faixa FROM survival_index_snapshots WHERE organization_id = ? ORDER BY period DESC LIMIT ?").all(orgId, months) as any[];
+    return rows.reverse().map((r) => ({ period: r.period, score: round1(r.score), faixa: r.faixa }));
+  }
+
+  /** Fecha o snapshot do mês e devolve o placar + o histórico (para a tela). */
+  static scoreWithHistory(orgId: string) {
+    const s = this.snapshot(orgId); // upsert idempotente do mês corrente
+    return { ...s, history: this.history(orgId) };
   }
 }
 

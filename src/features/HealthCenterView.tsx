@@ -105,6 +105,14 @@ export function HealthCenterView() {
                   </div>
                   <div className="mt-2 h-2 w-full rounded-full bg-zinc-800 overflow-hidden"><div className={`h-full ${f.bar}`} style={{ width: `${Math.round(idx.score)}%` }} /></div>
                   {idx.weakest?.length > 0 && <div className="mt-1.5 text-[11px] text-zinc-500">Puxando para baixo: {idx.weakest.join(' · ')}.</div>}
+                  {idx.history?.length > 1 && (
+                    <div className="mt-2 flex items-end gap-1 h-8" title="Histórico do índice">
+                      {idx.history.map((h: any) => {
+                        const hf = STATUS_UI[h.faixa] || STATUS_UI.atencao;
+                        return <div key={h.period} className="flex-1 flex flex-col items-center justify-end h-full" title={`${h.period}: ${Math.round(h.score)}`}><div className={`w-full rounded-t ${hf.bar}`} style={{ height: `${Math.max(6, Math.round(h.score))}%` }} /><span className="text-[8px] text-zinc-600 mt-0.5">{h.period.slice(5)}</span></div>;
+                      })}
+                    </div>
+                  )}
                   <p className="mt-1 text-[10px] text-zinc-600">Indicador orientativo — aponta fatores de risco, não prevê fechamento.</p>
                 </div>
               </div>

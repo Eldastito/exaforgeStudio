@@ -1,6 +1,6 @@
 # ADR-127 — Índice de Sobrevivência Empresarial (placar 0-100)
 
-- **Status:** Proposto (design + Fatia 1 nesta entrega)
+- **Status:** Implementada (Fatias 1–2). F1: placar 0-100 ponderado, hasData/confiança, faixa, tendência, snapshot, exposição na Central. F2: componente de estoque/capital parado com dado real (Σ quantidade × custo médio vs. faturamento) e histórico do placar (`history` + snapshot-on-read + mini-gráfico na Central).
 - **Data:** 2026-07
 - **Origem:** PRD "Central de Sobrevivência e Decisão" — Épico 11. Um indicador único de 0 a 100, com faixas (saudável/atenção/risco/crítico), que **não prevê fechamento** — aponta **fatores de risco** e reforça o plano de ação.
 - **Relacionadas:** ADR-126 (Central de Saúde — status por regra e prioridades), ADR-125 (Motor de Caixa — dias de sobrevivência, ruptura), ADR-114 (margem de perda), RIE/IQR (qualidade de receita), AnalyticsService (margem/lucro). ADR-088 D5 (frugalidade), ADR-091 §6 (orientativo, humano decide).

@@ -63,6 +63,7 @@ import lgpdRoutes from "./src/server/routes/lgpd.js";
 import executiveRoutes from "./src/server/routes/executive.js";
 import businessRoutes from "./src/server/routes/business.js";
 import gestorRoutes from "./src/server/routes/gestor.js";
+import peopleRoutes from "./src/server/routes/people.js";
 import signalsRoutes from "./src/server/routes/signals.js";
 import actionsRoutes from "./src/server/routes/actions.js";
 import plansRoutes from "./src/server/routes/plans.js";
@@ -505,6 +506,7 @@ async function startServer() {
   protectedApi.use("/signals", signalsRoutes);
   protectedApi.use("/actions", actionsRoutes);
   protectedApi.use("/gestor", gestorRoutes);
+  protectedApi.use("/people", peopleRoutes);
   protectedApi.use("/plans", plansRoutes);
   protectedApi.use("/storefront", storefrontRoutes);
   protectedApi.use("/reservations", reservationsRoutes);

@@ -6,6 +6,7 @@ import { BusinessHealthService } from "./BusinessHealthService.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { LossMarginService } from "./LossMarginService.js";
+import { RetailImpactService } from "./RetailImpactService.js";
 
 /**
  * Índice de Sobrevivência Empresarial (ADR-127) — placar único 0-100.
@@ -32,13 +33,14 @@ export class SurvivalIndexService {
   }
 
   /** Capital parado no estoque (ADR-127 Fatia 2): Σ quantidade × custo médio. */
-  private static inventoryCapital(orgId: string): { hasData: boolean; parado: number } {
+  // Capital PARADO = o que está SEM GIRO (com saldo e sem saída há N dias),
+  // não o capital total de estoque (ADR-132 Fatia 4 — conecta stockCapital).
+  private static inventoryCapital(orgId: string): { hasData: boolean; parado: number; total: number } {
     try {
-      const total = (db.prepare("SELECT COUNT(*) c FROM inventory_items WHERE organization_id = ?").get(orgId) as any).c;
-      if (!total) return { hasData: false, parado: 0 };
-      const p = (db.prepare("SELECT COALESCE(SUM(quantity_available * avg_cost),0) s FROM inventory_items WHERE organization_id = ? AND quantity_available > 0").get(orgId) as any).s;
-      return { hasData: true, parado: Math.round((Number(p) || 0) * 100) / 100 };
-    } catch { return { hasData: false, parado: 0 }; }
+      const sc = RetailImpactService.stockCapital(orgId) as any;
+      if (!sc || Number(sc.itemsInStock) <= 0) return { hasData: false, parado: 0, total: 0 };
+      return { hasData: true, parado: Number(sc.slowMoverCapital) || 0, total: Number(sc.totalCapital) || 0 };
+    } catch { return { hasData: false, parado: 0, total: 0 }; }
   }
 
   /** Calcula os 7 componentes ponderados. */
@@ -108,7 +110,7 @@ export class SurvivalIndexService {
       { key: "margem", label: "Margem e rentabilidade", weight: 20, score: round1(margemScore), hasData: margemData, note: margemData ? "" : "Cadastre custos para calcular a margem." },
       { key: "vendas", label: "Vendas, conversão e recompra", weight: 20, score: round1(vendasScore), hasData: vendasData, note: vendasData ? "" : "Sem sinal de vendas suficiente ainda." },
       { key: "recebiveis", label: "Recebíveis e inadimplência", weight: 12, score: round1(recebScore), hasData: recebData, note: recebData ? recebNote : "Sem recebíveis/caixa para avaliar." },
-      { key: "estoque", label: "Estoque e capital parado", weight: 10, score: round1(estoqueScore), hasData: inv.hasData, note: inv.hasData ? (inv.parado > 0 ? `${brl(inv.parado)} parados no estoque.` : "") : "Sem controle de estoque para avaliar." },
+      { key: "estoque", label: "Estoque e capital parado", weight: 10, score: round1(estoqueScore), hasData: inv.hasData, note: inv.hasData ? (inv.parado > 0 ? `${brl(inv.parado)} parados sem giro${inv.total > inv.parado ? ` (de ${brl(inv.total)} em estoque)` : ""}.` : "Estoque girando bem.") : "Sem controle de estoque para avaliar." },
       { key: "operacao", label: "Execução operacional", weight: 8, score: round1(operScore), hasData: operData, note: operData ? "" : "Sem sinal operacional ainda." },
       { key: "dados", label: "Qualidade dos dados", weight: 5, score: round1(dq.pct), hasData: true, note: dq.pct < 100 ? "Complete o checklist da Central de Saúde." : "" },
     ];

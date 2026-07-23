@@ -227,6 +227,7 @@ jobs:
           - { name: 'owner-draws', script: 'test:owner-draws' }
           - { name: 'ai-governance', script: 'test:ai-governance' }
           - { name: 'business-tutor', script: 'test:business-tutor' }
+          - { name: 'decision-simulator', script: 'test:decision-simulator' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

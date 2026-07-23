@@ -104,6 +104,14 @@ async function main() {
   for (let i = 0; i < 6; i++) { const cid = randomUUID(); db.prepare("INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, 'ch', ?, ?)").run(cid, orgSpread, `C${i}`, randomUUID().slice(0, 10)); db.prepare("INSERT INTO comigo_orders (id, organization_id, contact_id, status, total) VALUES (?, ?, ?, 'paid', 100)").run(randomUUID(), orgSpread, cid); }
   check("receita distribuída não gera alerta de concentração", !H.overview(orgSpread).triggers.some((t: any) => t.code === "concentracao_cliente"));
 
+  // Estoque parado sem giro (ADR-132 Fatia 4).
+  const orgStock = mkOrg("EstoqueParado");
+  db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 1000)`).run(randomUUID(), orgStock);
+  db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'pDead', 50, 40)`).run(randomUUID(), orgStock); // 2000 parado, sem saída
+  const ovStock = H.overview(orgStock);
+  check("estoque parado sem giro vira gatilho na Central", ovStock.triggers.some((t: any) => t.code === "estoque_parado"));
+  check("overview expõe o estoque sem giro", ovStock.estoque?.slowMoverCapital === 2000);
+
   // ===== 4. SAUDÁVEL: sem gatilhos =====
   const orgOk = mkOrg("Ok");
   F.recordEvent(orgOk, { direction: "in", amount: 8000 });

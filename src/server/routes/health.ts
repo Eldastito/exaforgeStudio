@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { BusinessHealthService } from "../BusinessHealthService.js";
 import { SurvivalIndexService } from "../SurvivalIndexService.js";
 import { BusinessTutorService } from "../BusinessTutorService.js";
+import { DecisionSimulatorService } from "../DecisionSimulatorService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import db from "../db.js";
 
@@ -40,6 +41,13 @@ router.post("/apply", (req: AuthRequest, res): any => {
   const out = BusinessHealthService.apply(orgId, { source, title, impact: Number(impact) || 0, rationale, baselineShortfall: Number(baselineShortfall) || 0 }, req.user?.userId);
   if (!out.ok) return res.status(400).json(out);
   res.status(201).json(out);
+});
+
+// POST /api/health-center/simulate/hire — "posso contratar?" (ADR-133 Fatia 1).
+router.post("/simulate/hire", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(DecisionSimulatorService.hire(orgId, { monthlyCost: Number(req.body?.monthlyCost) || 0 }));
 });
 
 // GET /api/health-center/tutor — config do Tutor no WhatsApp + prévia do resumo.

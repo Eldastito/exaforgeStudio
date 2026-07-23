@@ -5,6 +5,7 @@ import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { CashActionService } from "./CashActionService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
 import { QuoteService } from "./QuoteService.js";
+import { RetailImpactService } from "./RetailImpactService.js";
 import db from "./db.js";
 
 /**
@@ -89,13 +90,30 @@ export class BusinessHealthService {
       triggers.push({ level: "atencao", code: "concentracao_cliente", label: `Seu maior cliente${concentracao.topName ? ` (${concentracao.topName})` : ""} é ${concentracao.topPct}% da receita — risco de dependência.` });
     }
 
+    // Estoque parado sem giro (ADR-132 Fatia 4) — capital travado no produto errado.
+    const estoque = this.stockSummary(orgId);
+    if (estoque && estoque.slowMoverCapital > 0) {
+      const rev = LossMarginService.monthlyRevenue(orgId, new Date().toISOString().slice(0, 7));
+      const material = rev > 0 ? estoque.slowMoverCapital >= 0.15 * rev : estoque.slowMoverCapital > 0;
+      if (material) triggers.push({ level: "atencao", code: "estoque_parado", label: `${brl(estoque.slowMoverCapital)} parados em estoque sem giro${estoque.slowMoverCount > 0 ? ` (${estoque.slowMoverCount} item${estoque.slowMoverCount > 1 ? "s" : ""})` : ""}.` });
+    }
+
     const overall = (triggers.reduce<StatusLevel>((acc, t) => (SEVERITY[t.level] > SEVERITY[acc] ? t.level : acc), "saudavel"));
-    return { status: overall, triggers, cash, forecast: fc, loss, owner, conversao, concentracao };
+    return { status: overall, triggers, cash, forecast: fc, loss, owner, conversao, concentracao, estoque };
   }
 
   /** Conversão de orçamentos (guardada — nunca derruba a síntese). */
   private static quoteConversion(orgId: string): any | null {
     try { return QuoteService.conversionStats(orgId); } catch { return null; }
+  }
+
+  /** Capital de estoque + sem giro (guardado) — só os agregados, sem a lista. */
+  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number } | null {
+    try {
+      const sc = RetailImpactService.stockCapital(orgId) as any;
+      if (!sc || Number(sc.itemsInStock) <= 0) return null;
+      return { totalCapital: Number(sc.totalCapital) || 0, slowMoverCapital: Number(sc.slowMoverCapital) || 0, slowMoverCount: Number(sc.slowMoverCount) || 0 };
+    } catch { return null; }
   }
 
   /**
@@ -279,6 +297,7 @@ export class BusinessHealthService {
       kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aReceberVencido: st.cash.aReceberVencido, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },
       conversao: st.conversao || null,
       concentracao: st.concentracao || null,
+      estoque: st.estoque || null,
     };
   }
 }

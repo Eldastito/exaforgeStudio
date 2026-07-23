@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { DecisionActionService } from "../DecisionActionService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
+import { CommandExecutorService } from "../CommandExecutorService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -98,6 +99,23 @@ router.post("/:id/cancel", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(DecisionActionService.cancel(orgId, req.params.id)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/actions/:id/prepare — executor governado (Maestro 2.0): prepara o
+// comando tipado de uma ação APROVADA (rascunho auditável, sem efeito externo).
+router.post("/:id/prepare", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem preparar a execução." });
+  try { res.json(CommandExecutorService.prepare(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/actions/:id/executions — trilha de execução (auditoria).
+router.get("/:id/executions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ executions: CommandExecutorService.executions(orgId, req.params.id) });
 });
 
 // GET /api/actions/:id/outcomes — outcomes medidos de uma ação.

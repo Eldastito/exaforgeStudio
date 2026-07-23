@@ -4241,6 +4241,25 @@ const initDb = () => {
         measured_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_action_outcomes_action ON action_outcomes(organization_id, action_id);
+      -- Trilha de execução do comando (ADR-136 C5, PRD §7.4). Cada tentativa de
+      -- preparar/executar um comando tipado fica auditada aqui — nunca há baixa
+      -- silenciosa. No MVP o executor governa até 'prepare' (rascunho), sem
+      -- efeito externo automático.
+      CREATE TABLE IF NOT EXISTS action_execution_log (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        handler TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'prepare',       -- prepare (MVP); execute é fatia futura
+        request_json TEXT,
+        response_json TEXT,
+        status TEXT NOT NULL,                        -- executing|done|failed
+        error_code TEXT,
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        finished_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_action_execution_log_action ON action_execution_log(organization_id, action_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de decisão/ação', e); }
 

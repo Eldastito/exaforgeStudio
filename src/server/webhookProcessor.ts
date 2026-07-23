@@ -25,6 +25,7 @@ import { QuoteService } from "./QuoteService.js";
 import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
+import { BusinessTutorService } from "./BusinessTutorService.js";
 import { MaestroService } from "./MaestroService.js";
 import { ProspectExecutionService } from "./ProspectExecutionService.js";
 import { ModuleService } from "./ModuleService.js";
@@ -170,6 +171,20 @@ export async function processIncomingMessage(
       console.error('[Coordenador] Falha ao processar mensagem interna:', e);
     }
     return;
+  }
+
+  // ===== Loop conversacional do TUTOR (ADR-131 Fatia 4) =====
+  // Se a mensagem vem do DONO e responde a uma oferta de cobrança feita à noite
+  // ("SIM"), o tutor agenda o lembrete da manhã e responde — NÃO vira
+  // contato/ticket nem aciona o bot de atendimento ao cliente. Só captura quando
+  // há uma oferta pendente; caso contrário, segue o fluxo normal.
+  try {
+    const handled = await BusinessTutorService.handleOwnerReply(orgId, payload.senderId, payload.text || '', {
+      send: (to: string, message: string) => MessageProviderService.sendMessage(channel.id, to, message),
+    });
+    if (handled) return;
+  } catch (e) {
+    console.error('[Tutor] resposta do dono falhou:', e);
   }
 
   // 1. Resolve Contact

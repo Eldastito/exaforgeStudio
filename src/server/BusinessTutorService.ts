@@ -157,7 +157,7 @@ export class BusinessTutorService {
    * do dia via ComigoHealthService; recebido/pendente via FinancialLedgerService.
    * O "sim, cobre amanhã" (loop conversacional) fica para a Fatia 4.
    */
-  static eveningBrief(orgId: string): { text: string } {
+  static eveningBrief(orgId: string): { text: string; hasReceivables: boolean } {
     const today = new Date().toISOString().slice(0, 10);
     const day = ComigoHealthService.rangeResult(orgId, today, today) as any;
     const sum = FinancialLedgerService.summary(orgId) as any;
@@ -170,12 +170,12 @@ export class BusinessTutorService {
     lines.push(`📈 Margem estimada: ${brl(day.profit)}`);
     if (aReceber > 0) {
       lines.push("");
-      lines.push(`Ainda há ${brl(aReceber)} a receber em aberto. Amanhã cedo eu te lembro de cobrar. 💬`);
+      lines.push(`Ainda há ${brl(aReceber)} a receber em aberto. Responda *SIM* que amanhã cedo eu te lembro de cobrar. 💬`);
     } else {
       lines.push("");
       lines.push("Nada em aberto por hoje. Bom descanso! 🌙");
     }
-    return { text: lines.join("\n") };
+    return { text: lines.join("\n"), hasReceivables: aReceber > 0 };
   }
 
   /**
@@ -191,9 +191,83 @@ export class BusinessTutorService {
     if (s.tutor_wa_last_evening === dateSP) return { sent: false, reason: "already_sent" };
     const phone = this.ownerPhone(orgId);
     if (!phone) return { sent: false, reason: "no_phone" };
-    const { text } = this.eveningBrief(orgId);
+    const { text, hasReceivables } = this.eveningBrief(orgId);
     await opts.send(phone, text);
-    db.prepare("UPDATE organization_settings SET tutor_wa_last_evening = ? WHERE organization_id = ?").run(dateSP, orgId);
+    // Marca o envio e, se há a receber, abre a "oferta de cobrança" — o dono
+    // responde SIM e o loop conversacional (Fatia 4) agenda o lembrete da manhã.
+    db.prepare("UPDATE organization_settings SET tutor_wa_last_evening = ?, tutor_collect_offer_at = ? WHERE organization_id = ?")
+      .run(dateSP, hasReceivables ? dateSP : null, orgId);
+    return { sent: true, phone, text };
+  }
+
+  private static norm(s: string): string {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  }
+  private static addDaysSP(dateSP: string, n: number): string {
+    const d = new Date(`${dateSP}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Loop conversacional (ADR-131 Fatia 4): resposta do DONO à oferta de cobrança
+   * feita à noite. Determinístico (zero-token) por palavra-chave. Só age se: for
+   * o número do dono E houver uma oferta recente (hoje/ontem). "sim/cobrar/1"
+   * agenda o lembrete da manhã seguinte; "não" cancela. Resposta ambígua NÃO é
+   * capturada (deixa o fluxo normal seguir). Retorna se tratou a mensagem.
+   */
+  static async handleOwnerReply(orgId: string, fromPhone: string, text: string, opts: { send: (phone: string, text: string) => any; now?: Date }): Promise<boolean> {
+    const from = onlyDigits(fromPhone);
+    if (!from || from !== this.ownerPhone(orgId)) return false;
+    const s = db.prepare("SELECT tutor_wa_enabled, tutor_collect_offer_at FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    if (!s || !Number(s.tutor_wa_enabled) || !s.tutor_collect_offer_at) return false;
+    const now = opts.now || new Date();
+    const { dateSP } = this.spParts(now);
+    // Oferta válida só se de hoje ou ontem (evita agir num "sim" solto dias depois).
+    if (s.tutor_collect_offer_at !== dateSP && s.tutor_collect_offer_at !== this.addDaysSP(dateSP, -1)) {
+      db.prepare("UPDATE organization_settings SET tutor_collect_offer_at = NULL WHERE organization_id = ?").run(orgId);
+      return false;
+    }
+    const t = this.norm(text);
+    const AFFIRM = new Set(["sim", "s", "cobrar", "cobra", "pode", "pode cobrar", "ok", "isso", "1", "bora", "manda", "claro", "positivo"]);
+    const NEGATE = new Set(["nao", "n", "deixa", "depois", "2", "nao precisa", "agora nao"]);
+    const isAffirm = AFFIRM.has(t) || t.startsWith("sim") || t.startsWith("pode cobr") || t.startsWith("cobr");
+    const isNeg = NEGATE.has(t) || t.startsWith("nao");
+    if (!isAffirm && !isNeg) return false; // ambíguo — não sequestra a conversa
+    if (isNeg) {
+      db.prepare("UPDATE organization_settings SET tutor_collect_offer_at = NULL WHERE organization_id = ?").run(orgId);
+      await opts.send(from, "Tudo bem, não vou cobrar. Se mudar de ideia, é só falar. 👍");
+      return true;
+    }
+    const scheduledFor = this.addDaysSP(dateSP, 1);
+    db.prepare("UPDATE organization_settings SET tutor_collect_offer_at = NULL, tutor_collect_scheduled_for = ? WHERE organization_id = ?").run(scheduledFor, orgId);
+    await opts.send(from, "Combinado! Amanhã cedo eu te lembro de cobrar os clientes em aberto. 💪");
+    return true;
+  }
+
+  /** Texto do lembrete de cobrança da manhã (o que o "sim" agendou). */
+  static collectDigest(orgId: string): string {
+    const sum = FinancialLedgerService.summary(orgId) as any;
+    const aReceber = Number(sum?.aReceber) || 0;
+    if (aReceber <= 0) return "🔔 Bom dia! Sobre a cobrança de hoje: já está tudo recebido, não há o que cobrar. 🎉";
+    return `🔔 *Cobrança de hoje* (conforme combinamos ontem): você tem ${brl(aReceber)} a receber em aberto. Abra a *Caderneta* e mande a cobrança cortês — já vem pronta, sem constranger ninguém. 💬`;
+  }
+
+  /**
+   * Passe do lembrete de cobrança da manhã (Fatia 4): se o dono confirmou ontem,
+   * hoje de manhã manda o lembrete e limpa o agendamento (não repete).
+   */
+  static async runCollectPass(orgId: string, opts: { now: Date; send: (phone: string, text: string) => any }): Promise<TutorSendResult> {
+    const s = db.prepare("SELECT tutor_wa_enabled, tutor_collect_scheduled_for FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    if (!s || !Number(s.tutor_wa_enabled) || !s.tutor_collect_scheduled_for) return { sent: false, reason: "disabled" };
+    const { dateSP, hourSP } = this.spParts(opts.now);
+    if (hourSP < this.MORNING_START || hourSP >= this.MORNING_END) return { sent: false, reason: "outside_window" };
+    if (s.tutor_collect_scheduled_for !== dateSP) return { sent: false, reason: "already_sent" };
+    const phone = this.ownerPhone(orgId);
+    if (!phone) return { sent: false, reason: "no_phone" };
+    const text = this.collectDigest(orgId);
+    await opts.send(phone, text);
+    db.prepare("UPDATE organization_settings SET tutor_collect_scheduled_for = NULL WHERE organization_id = ?").run(orgId);
     return { sent: true, phone, text };
   }
 

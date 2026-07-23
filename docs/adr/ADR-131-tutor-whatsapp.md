@@ -1,6 +1,6 @@
 # ADR-131 — Tutor de Gestão no WhatsApp (empurrar a inteligência para o dono)
 
-- **Status:** Fatias 1, 2 e 3 implementadas (manhã + meio-dia + fim do dia; opt-in, determinístico, testado). Falta só o loop conversacional (Fatia 4).
+- **Status:** Completa — Fatias 1–4 (manhã + meio-dia + fim do dia + loop conversacional determinístico; opt-in, testado).
 - **Data:** 2026-07
 - **Origem:** auditoria de veracidade da apresentação "ZappFlow Sobrevivência". A Central de Saúde (ADR-126) já interpreta o negócio e destila as 3 prioridades do dia, mas a entrega era **pull/in-app** — o dono só via se abrisse a tela. A apresentação promete o oposto: o ZappFlow encontra o empreendedor **onde ele já trabalha, no WhatsApp**.
 - **Relacionadas:** ADR-126 (Central de Saúde — fonte do conteúdo), ADR-125 (Motor de Caixa/KPIs), ADR-088 D5 (frugal/zero-token), Scheduler (passes proativos), ADR-091 §6 (IA sugere, humano decide).
@@ -23,6 +23,9 @@ O agendador (`Scheduler`) já dispara WhatsApp sozinho, mas exclusivamente para 
 ### D2c — Fim do dia: o fechamento (Fatia 3)
 `eveningBrief()` fecha o dia com vendas + margem estimada (do dia, via `ComigoHealthService.rangeResult`) e o que **entrou no caixa** + o que **ficou a receber** (via `FinancialLedgerService.summary`): "vendeu R$ X, entrou R$ Y, margem R$ Z; ainda há R$ W a receber". Janela da noite (18–22h SP), dedupe `tutor_wa_last_evening`. Diferente do meio-dia, **sempre envia** quando ligado — é o ritual de fechamento, não depende de breakeven. O "amanhã cedo eu te lembro de cobrar" é uma frase (soft); o loop conversacional de resposta ("sim, cobre amanhã") fica para a Fatia 4.
 
+### D2d — Loop conversacional determinístico (Fatia 4)
+O "fim do dia", quando há a receber, abre uma **oferta** (`tutor_collect_offer_at`) e pede "responda *SIM*". A resposta do dono chega no canal de atendimento; o `webhookProcessor` chama `BusinessTutorService.handleOwnerReply` **antes** de criar contato/ticket. A interpretação é **determinística por palavra-chave** (zero-token): só age se o remetente é o número do dono **E** há oferta recente (hoje/ontem); "sim/cobrar/ok/1…" agenda o lembrete para a manhã seguinte (`tutor_collect_scheduled_for`) e responde "Combinado!"; "não…" cancela; **resposta ambígua não é capturada** (o fluxo normal segue — nunca sequestra uma conversa do dono como cliente). Na manhã agendada, `runCollectPass` envia o lembrete de cobrança (aponta para a Caderneta, onde a cobrança cortês já existe) e limpa o agendamento. O "sim" do dono **é** a decisão humana (ADR-091 §6); o tutor não cobra clientes sozinho.
+
 ### D3 — Envio testável sem rede
 `runMorningPass`/`sendNow` recebem a função `send` injetada. O Scheduler injeta o envio real (`MessageProviderService.sendMessage`); o teste injeta um capturador. O serviço decide só o **quê** e o **quando**.
 
@@ -35,11 +38,11 @@ Determinístico, isolado por `organization_id`, opt-in (nada é empurrado sem o 
 ## Consequências
 **Positivas:** fecha a lacuna mais visível da apresentação (o tutor que fala no WhatsApp), reusando a inteligência que já existe; sem custo de token; testado.
 
-**Trade-offs / escopo:** Fatias 1–3 cobrem **manhã** (prioridades), **meio-dia** (ponto de equilíbrio) e **fim do dia** (vendeu/recebeu/margem/pendências). Falta só o **loop conversacional** de resposta ("sim, cobre amanhã" → o tutor age) — Fatia 4.
+**Escopo:** completo — manhã (prioridades) + meio-dia (ponto de equilíbrio) + fim do dia (vendeu/recebeu/margem/pendências) + loop conversacional ("sim, cobre amanhã" → agenda o lembrete da manhã). O loop é **determinístico por palavra-chave**; entender linguagem livre com IA (com `isAIConfigured` + guardrails) fica como evolução futura, se desejado.
 
 ## Guardas
 - IA sugere, humano decide: o tutor **informa e recomenda**; nenhuma ação é executada sozinha.
 - Opt-in explícito; determinístico; isolado por `organization_id`.
 
 ## Testes
-`test:business-tutor` — fuso de São Paulo; texto determinístico do resumo (bom dia + situação + KPIs); número do dono (configurado × fallback para o usuário dono, nunca o agente); manhã envia 1×/dia e deduplica; fora da janela/desligado não envia; ligado sem número não envia e não marca a data (retenta); **meio-dia**: sem custo fixo não se aplica (no_breakeven, sem marcar), com custo fixo + vendas envia o % do ponto de equilíbrio, deduplica no dia e respeita a janela; **fim do dia**: traz vendas/caixa/margem, envia na janela da noite, deduplica, respeita a janela e envia mesmo sem custo fixo; `sendNow` ignora janela/dedupe; isolamento por org.
+`test:business-tutor` — fuso de São Paulo; texto determinístico do resumo (bom dia + situação + KPIs); número do dono (configurado × fallback para o usuário dono, nunca o agente); manhã envia 1×/dia e deduplica; fora da janela/desligado não envia; ligado sem número não envia e não marca a data (retenta); **meio-dia**: sem custo fixo não se aplica (no_breakeven, sem marcar), com custo fixo + vendas envia o % do ponto de equilíbrio, deduplica no dia e respeita a janela; **fim do dia**: traz vendas/caixa/margem, envia na janela da noite, deduplica, respeita a janela e envia mesmo sem custo fixo; **loop conversacional**: fim do dia com a receber abre a oferta; resposta de não-dono e resposta ambígua não são capturadas; "SIM" do dono agenda a cobrança do dia seguinte e responde; o lembrete é enviado na manhã agendada e não repete; "não" cancela; `sendNow` ignora janela/dedupe; isolamento por org.

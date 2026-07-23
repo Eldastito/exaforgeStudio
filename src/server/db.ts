@@ -4137,6 +4137,37 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela de consultas jurídicas', e); }
 
+  // Enterprise Intelligence Kernel (ADR-136, Epic 2 — C1): ledger de SINAIS
+  // empresariais tipados. Contrato comum para qualquer módulo publicar um sinal,
+  // deduplicado por (org, dedupe_key). Determinístico, isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS business_signals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        domain TEXT NOT NULL,               -- finance|sales|procurement|inventory|retail_ops|tasks|...
+        signal_type TEXT NOT NULL,
+        severity TEXT NOT NULL,             -- info|attention|risk|critical
+        basis TEXT NOT NULL,                -- fact|estimate
+        confidence REAL NOT NULL,           -- 0..1
+        impact_amount REAL,
+        impact_unit TEXT,                   -- BRL|hours|units|percent|score
+        occurred_at DATETIME,
+        detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        source_service TEXT NOT NULL,
+        source_entity_type TEXT,
+        source_entity_id TEXT,
+        evidence_json TEXT NOT NULL,
+        premises_json TEXT,
+        dedupe_key TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',  -- open|acknowledged|resolved|dismissed
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, dedupe_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_business_signals_org ON business_signals(organization_id, status, domain);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela business_signals', e); }
+
   // Governança de IA (ADR-130): auditoria de decisão para sugestões que afetam
   // pessoas — a IA sugere, o humano decide com MOTIVO registrado.
   try {

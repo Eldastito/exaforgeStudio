@@ -2,6 +2,7 @@ import { ComigoHealthService } from "./ComigoHealthService.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { LossMarginService } from "./LossMarginService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
+import { OwnerDrawService } from "./OwnerDrawService.js";
 
 /**
  * Simulador de Decisões (ADR-133) — "decidir antes de gerar o problema".
@@ -105,6 +106,54 @@ export class DecisionSimulatorService {
     return {
       ok: true, coverageKnown: true, amount, totalCapital,
       currentCoverageDays, newCoverageDays, estIdle, slowPct, cogsDaily: round2(cogsDaily),
+      veredito,
+    };
+  }
+
+  /**
+   * "Posso retirar mais?" (ADR-133 Fatia 3) — what-if de uma retirada ADICIONAL
+   * agora: efeito no caixa e no % do resultado, contra o pró-labore sustentável
+   * (30% do resultado, limitado ao caixa). Reusa OwnerDrawService.summary.
+   */
+  static withdraw(orgId: string, input: { amount: number }): any {
+    const amount = Number(input?.amount) || 0;
+    if (!(amount > 0)) return { ok: false, reason: "valor_invalido", message: "Informe o valor que você quer retirar." };
+
+    const s = OwnerDrawService.summary(orgId) as any;
+    const retiradas = Number(s?.retiradas) || 0;
+    const resultado = Number(s?.resultado) || 0;
+    const caixa = Number(s?.caixa) || 0;
+    const proLaboreSugerido = Number(s?.proLaboreSugerido) || 0;
+
+    const caixaAfter = round2(caixa - amount);
+    const retiradasAfter = round2(retiradas + amount);
+    const pctResultAfter = resultado > 0 ? Math.round((retiradasAfter / resultado) * 100) : null;
+    const roomLeft = round2(Math.max(0, proLaboreSugerido - retiradas));
+
+    let nivel: "ok" | "atencao" | "excesso";
+    let veredito: string;
+    if (caixaAfter < 0) {
+      nivel = "excesso";
+      veredito = `Não há caixa para isso: retirar ${brl(amount)} deixaria o caixa em ${brl(caixaAfter)}. Retire no máximo ${brl(caixa)}.`;
+    } else if (resultado <= 0) {
+      nivel = "excesso";
+      veredito = `O resultado do mês está zerado ou negativo — retirar ${brl(amount)} descapitaliza a empresa. Espere o negócio gerar resultado.`;
+    } else if (amount <= roomLeft) {
+      nivel = "ok";
+      veredito = `Pode retirar ${brl(amount)} com tranquilidade — cabe no pró-labore sustentável (teto ~${brl(proLaboreSugerido)}${retiradas > 0 ? `, já retirado ${brl(retiradas)}` : ""}).`;
+    } else if (pctResultAfter != null && pctResultAfter <= 70) {
+      nivel = "atencao";
+      veredito = `Dá para retirar ${brl(amount)}, mas passa do sugerido: as retiradas ficariam em ${pctResultAfter}% do resultado (o ideal é até 30%). Se puder, retire perto de ${brl(proLaboreSugerido)}.`;
+    } else {
+      nivel = "excesso";
+      veredito = `Retirar ${brl(amount)} leva as retiradas a ${pctResultAfter}% do resultado — acima de 70%. Risco de descapitalizar; retire bem menos (sugerido ~${brl(proLaboreSugerido)}).`;
+    }
+
+    return {
+      ok: true, amount, nivel,
+      caixaAtual: round2(caixa), caixaAfter,
+      retiradasAtual: round2(retiradas), retiradasAfter,
+      resultado: round2(resultado), pctResultAfter, proLaboreSugerido, roomLeft,
       veredito,
     };
   }

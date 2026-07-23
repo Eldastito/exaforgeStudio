@@ -50,6 +50,13 @@ router.post("/simulate/hire", (req: AuthRequest, res): any => {
   res.json(DecisionSimulatorService.hire(orgId, { monthlyCost: Number(req.body?.monthlyCost) || 0 }));
 });
 
+// POST /api/health-center/simulate/buy-stock — "posso comprar esse estoque?" (ADR-133 Fatia 2).
+router.post("/simulate/buy-stock", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(DecisionSimulatorService.buyStock(orgId, { amount: Number(req.body?.amount) || 0 }));
+});
+
 // GET /api/health-center/tutor — config do Tutor no WhatsApp + prévia do resumo.
 router.get("/tutor", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

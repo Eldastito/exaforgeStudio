@@ -1,6 +1,7 @@
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { LossMarginService } from "./LossMarginService.js";
+import { RetailImpactService } from "./RetailImpactService.js";
 
 /**
  * Simulador de Decisões (ADR-133) — "decidir antes de gerar o problema".
@@ -61,6 +62,49 @@ export class DecisionSimulatorService {
       ok: true,
       monthlyCost, marginPct, monthlyRevenue,
       extraRevenueNeeded, pctOfCurrent, extraTicketsPerDay, avgTicket: round2(avgTicket),
+      veredito,
+    };
+  }
+
+  /**
+   * "Posso comprar esse estoque?" — impacto na COBERTURA (dias) e quanto tende a
+   * ficar PARADO. cobertura = capital em estoque ÷ CMV/dia; o parado estimado usa
+   * a fração atual de estoque sem giro aplicada à compra.
+   */
+  static buyStock(orgId: string, input: { amount: number }): any {
+    const amount = Number(input?.amount) || 0;
+    if (!(amount > 0)) return { ok: false, reason: "valor_invalido", message: "Informe o valor da compra de estoque." };
+
+    let totalCapital = 0, slowMoverCapital = 0;
+    try {
+      const sc = RetailImpactService.stockCapital(orgId) as any;
+      totalCapital = Number(sc?.totalCapital) || 0;
+      slowMoverCapital = Number(sc?.slowMoverCapital) || 0;
+    } catch { /* sem estoque */ }
+
+    const { marginFrac, monthlyRevenue } = this.marginContext(orgId);
+    // CMV/dia ≈ receita do mês × (1 - margem) ÷ 30. Sem margem/vendas, fica 0.
+    const cogsDaily = marginFrac > 0 && monthlyRevenue > 0 ? (monthlyRevenue * (1 - marginFrac)) / 30 : 0;
+    const slowShare = totalCapital > 0 ? slowMoverCapital / totalCapital : 0;
+    const estIdle = round2(amount * slowShare);
+    const slowPct = Math.round(slowShare * 100);
+
+    if (cogsDaily <= 0) {
+      return {
+        ok: true, coverageKnown: false, amount, totalCapital, estIdle, slowPct,
+        veredito: `Ainda não tenho velocidade de venda (margem/vendas) para estimar a cobertura em dias.${totalCapital > 0 ? ` Pelo seu histórico, ~${slowPct}% do estoque hoje está sem giro — ao comprar ${brl(amount)}, algo perto de ${brl(estIdle)} pode ficar parado se o padrão se repetir.` : ""}`,
+      };
+    }
+    const currentCoverageDays = Math.round(totalCapital / cogsDaily);
+    const newCoverageDays = Math.round((totalCapital + amount) / cogsDaily);
+    let veredito: string;
+    if (newCoverageDays <= 60) veredito = `Comprar ${brl(amount)} leva sua cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — dentro do saudável. Só ~${slowPct}% costuma ficar sem giro (~${brl(estIdle)}).`;
+    else if (newCoverageDays <= 120) veredito = `Comprar ${brl(amount)} leva a cobertura de ${currentCoverageDays} para ${newCoverageDays} dias. Dá, mas ~${brl(estIdle)} (~${slowPct}% do padrão) pode ficar parado +60 dias — priorize o que gira.`;
+    else veredito = `Comprar ${brl(amount)} leva a cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — é muito estoque para o giro atual. Cerca de ${brl(estIdle)} tende a empatar capital. Compre menos ou o que sai mais rápido.`;
+
+    return {
+      ok: true, coverageKnown: true, amount, totalCapital,
+      currentCoverageDays, newCoverageDays, estIdle, slowPct, cogsDaily: round2(cogsDaily),
       veredito,
     };
   }

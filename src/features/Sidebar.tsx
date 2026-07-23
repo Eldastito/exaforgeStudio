@@ -40,7 +40,7 @@ export function Sidebar() {
         <div className="px-4 pb-2">
           <p className="px-2 text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Workspace</p>
           <nav className="space-y-1">
-             <NavItem icon={<HeartPulse />} label="Central de Saúde" active={viewMode === 'saude'} onClick={() => setViewMode('saude')} />
+             {canAccessModule('saude_negocio') && <NavItem icon={<HeartPulse />} label="Central de Saúde" active={viewMode === 'saude'} onClick={() => setViewMode('saude')} />}
              <NavItem icon={<MessageSquare />} label="Atendimento" active={viewMode === 'kanban'} onClick={() => setViewMode('kanban')} />
              {mod('rie') && <NavItem icon={<Gauge />} label="Revenue Intelligence" active={viewMode === 'rie'} onClick={() => setViewMode('rie')} />}
              {mod('estudio') && <NavItem icon={<Wand2 />} label="Estúdio de Criação" active={viewMode === 'studio'} onClick={() => setViewMode('studio')} />}
@@ -69,7 +69,7 @@ export function Sidebar() {
              <NavItem icon={<Users />} label="Contatos" active={viewMode === 'contacts'} onClick={() => setViewMode('contacts')} />
              {mod('integracoes') && <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />}
              <NavItem icon={<BarChart3 />} label="Dashboard" active={viewMode === 'dashboard'} onClick={() => setViewMode('dashboard')} />
-             <NavItem icon={<Wallet />} label="Caixa" active={viewMode === 'caixa'} onClick={() => setViewMode('caixa')} />
+             {canAccessModule('financeiro') && <NavItem icon={<Wallet />} label="Caixa" active={viewMode === 'caixa'} onClick={() => setViewMode('caixa')} />}
              <NavItem icon={<LineChart />} label="Relatórios" active={viewMode === 'reports'} onClick={() => setViewMode('reports')} />
              <NavItem icon={<Scale />} label="Consultora Jurídica" active={viewMode === 'juridico'} onClick={() => setViewMode('juridico')} />
              <NavItem icon={<ScrollText />} label="Manifesto da Marca" active={viewMode === 'manifesto'} onClick={() => setViewMode('manifesto')} />

@@ -4321,6 +4321,21 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_employees_org ON employees(organization_id, status);
       CREATE INDEX IF NOT EXISTS idx_employee_roles_org ON employee_roles(organization_id, active);
+      -- Epic 7 (fatia 3): disponibilidade DECLARADA (ausência/reduzida) — insumo
+      -- do cálculo de sobrecarga. Sem inferência: só o que o gestor/colaborador
+      -- declara.
+      CREATE TABLE IF NOT EXISTS employee_availability_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'absence',  -- absence|reduced|available
+        start_date TEXT NOT NULL,              -- YYYY-MM-DD
+        end_date TEXT,                         -- YYYY-MM-DD (nulo = em aberto)
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_emp_avail_org ON employee_availability_events(organization_id, employee_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de RH (employees)', e); }
 

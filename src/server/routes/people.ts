@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest, requirePermission } from "../middleware/auth.js";
 import { EmployeeService } from "../EmployeeService.js";
+import { WorkloadService } from "../WorkloadService.js";
 
 // RH / People Intelligence (Epic 7, ADR-140) — cadastro funcional. Gateado pelo
 // módulo `people` (só gestores por padrão; via fallback, owner/admin). Isolado
@@ -42,6 +43,29 @@ router.put("/employees/:id", requirePermission("people", "write"), (req: AuthReq
   const r = EmployeeService.update(orgOf(req), req.params.id, req.body || {});
   if (!r.ok) return res.status(400).json({ error: r.error });
   res.json(r);
+});
+
+// ── Disponibilidade declarada ──
+router.get("/employees/:id/availability", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  res.json({ events: WorkloadService.listAvailability(orgOf(req), req.params.id) });
+});
+
+router.post("/employees/:id/availability", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = WorkloadService.addAvailability(orgOf(req), { employeeId: req.params.id, kind: b.kind, startDate: b.startDate, endDate: b.endDate, note: b.note, createdBy: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
+});
+
+// ── Sobrecarga (tarefas + disponibilidade, com evidência) ──
+router.get("/workload", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  const asOfDate = typeof req.query?.asOfDate === "string" ? req.query.asOfDate : undefined;
+  res.json(WorkloadService.assess(orgOf(req), { asOfDate }));
+});
+
+// Publica os sinais de sobrecarga no ledger (idempotente por dia).
+router.post("/workload/publish-signals", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  res.json(WorkloadService.publishOverloadSignals(orgOf(req), { asOfDate: req.body?.asOfDate }));
 });
 
 export default router;

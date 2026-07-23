@@ -225,6 +225,7 @@ jobs:
           - { name: 'survival-index', script: 'test:survival-index' }
           - { name: 'managerial-dre', script: 'test:managerial-dre' }
           - { name: 'owner-draws', script: 'test:owner-draws' }
+          - { name: 'ai-governance', script: 'test:ai-governance' }
           - { name: 'asaas-billing', script: 'test:asaas-billing' }
           - { name: 'billing-dunning', script: 'test:billing-dunning' }
           - { name: 'performance-fee', script: 'test:performance-fee' }

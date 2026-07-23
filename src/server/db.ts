@@ -4117,6 +4117,25 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela de consultas jurídicas', e); }
 
+  // Governança de IA (ADR-130): auditoria de decisão para sugestões que afetam
+  // pessoas — a IA sugere, o humano decide com MOTIVO registrado.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_decisions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        kind TEXT NOT NULL,                 -- fiado_blacklist | fiado_limit | prospect_targeting | ...
+        subject_id TEXT,                    -- a quem/que a decisão se refere (ex.: contact_id)
+        decision TEXT NOT NULL,             -- applied | dismissed
+        suggested_by TEXT DEFAULT 'human',  -- ai (a IA sugeriu) | human
+        actor_user_id TEXT,                 -- humano que decidiu
+        reason TEXT,                        -- motivo (obrigatório em decisão que afeta pessoa)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_decisions_org ON ai_decisions(organization_id, kind, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela de decisões de IA', e); }
+
   // Motor de Caixa (ADR-125): livro-caixa global. Venda ≠ lucro ≠ caixa —
   // recebível NÃO entra no caixa até quitar. Isolado por organization_id.
   try {

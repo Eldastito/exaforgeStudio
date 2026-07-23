@@ -720,8 +720,15 @@ function Caderneta({ onChange }: { onChange: () => void }) {
     act(`/api/comigo/fiado/${c.contact_id}/credit`, { limit: Number(v.replace(',', '.')) || 0 }, 'PUT');
   };
   const toggleBlacklist = (c: FiadoCustomer) => {
-    if (!c.blacklisted && !window.confirm(`Colocar ${c.name} na lista negra? Para de dar fiado (mas segue vendendo à vista).`)) return;
-    act(`/api/comigo/fiado/${c.contact_id}/blacklist`, { on: !c.blacklisted, reason: 'definido pelo dono' });
+    if (!c.blacklisted) {
+      // Governança de IA (ADR-130): bloquear uma pessoa é decisão humana com motivo.
+      const reason = window.prompt(`Motivo para colocar ${c.name} na lista negra? (fica registrado — para de dar fiado, mas segue vendendo à vista)`, c.blacklistSuggested ? `${c.daysOverdue} dias em atraso` : '');
+      if (reason == null) return;
+      if (!reason.trim()) { toast.error('Informe um motivo — é uma decisão registrada.'); return; }
+      act(`/api/comigo/fiado/${c.contact_id}/blacklist`, { on: true, reason: reason.trim(), suggested: c.blacklistSuggested });
+    } else {
+      act(`/api/comigo/fiado/${c.contact_id}/blacklist`, { on: false, reason: 'retirado da lista' });
+    }
   };
   const toggleBlockAll = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/block-all`, { on: !c.block_all_sales });
   const toggleStoreFiado = (c: FiadoCustomer) => act(`/api/comigo/fiado/${c.contact_id}/store-fiado`, { on: !c.store_fiado_enabled });

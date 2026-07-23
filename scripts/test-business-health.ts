@@ -88,6 +88,22 @@ async function main() {
   check("conversão em queda vira gatilho na Central", ovConv.triggers.some((t: any) => t.code === "conversao_caiu"));
   check("overview expõe a conversão (atual e anterior)", ovConv.conversao?.ratePct === 20 && ovConv.conversao?.prevRatePct === 60);
 
+  // Concentração no maior cliente (ADR-132 Fatia 3).
+  const orgConc = mkOrg("Concentracao");
+  const mkContact = (name: string) => { const id = randomUUID(); db.prepare("INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, 'ch', ?, ?)").run(id, orgConc, name, randomUUID().slice(0, 10)); return id; };
+  const cBig = mkContact("Big Corp"); const cSmall = mkContact("Cliente Pequeno");
+  const mkOrder = (contactId: string, total: number) => db.prepare("INSERT INTO comigo_orders (id, organization_id, contact_id, status, total) VALUES (?, ?, ?, 'paid', ?)").run(randomUUID(), orgConc, contactId, total);
+  mkOrder(cBig, 800); mkOrder(cSmall, 200); // maior cliente = 80% de 1000
+  const conc = H.customerConcentration(orgConc);
+  check("concentração: maior cliente representa 80% da receita", conc?.topPct === 80 && conc?.topName === "Big Corp");
+  const ovConc = H.overview(orgConc);
+  check("concentração alta vira gatilho na Central", ovConc.triggers.some((t: any) => t.code === "concentracao_cliente"));
+  check("overview expõe a concentração", ovConc.concentracao?.topPct === 80);
+  // Receita pulverizada não dispara o alerta.
+  const orgSpread = mkOrg("Pulverizada");
+  for (let i = 0; i < 6; i++) { const cid = randomUUID(); db.prepare("INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, 'ch', ?, ?)").run(cid, orgSpread, `C${i}`, randomUUID().slice(0, 10)); db.prepare("INSERT INTO comigo_orders (id, organization_id, contact_id, status, total) VALUES (?, ?, ?, 'paid', 100)").run(randomUUID(), orgSpread, cid); }
+  check("receita distribuída não gera alerta de concentração", !H.overview(orgSpread).triggers.some((t: any) => t.code === "concentracao_cliente"));
+
   // ===== 4. SAUDÁVEL: sem gatilhos =====
   const orgOk = mkOrg("Ok");
   F.recordEvent(orgOk, { direction: "in", amount: 8000 });

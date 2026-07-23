@@ -79,6 +79,15 @@ async function main() {
   const recV = ovV.priorities.find((p: any) => p.source === "recebiveis");
   check("prioridade de cobrança destaca o vencido", !!recV && /vencido/i.test(recV.title) && /vencido/i.test(recV.fato));
 
+  // Conversão de orçamentos caindo (ADR-132 Fatia 2).
+  const orgConv = mkOrg("Conversao");
+  const insQ = (status: string, daysAgo: number) => db.prepare("INSERT INTO quotes (id, organization_id, status, total_amount, sent_at) VALUES (?, ?, ?, 100, datetime('now', ?))").run(randomUUID(), orgConv, status, `-${daysAgo} days`);
+  insQ("accepted", 5); for (let i = 0; i < 4; i++) insQ("declined", 5);
+  for (let i = 0; i < 3; i++) insQ("accepted", 45); for (let i = 0; i < 2; i++) insQ("declined", 45);
+  const ovConv = H.overview(orgConv);
+  check("conversão em queda vira gatilho na Central", ovConv.triggers.some((t: any) => t.code === "conversao_caiu"));
+  check("overview expõe a conversão (atual e anterior)", ovConv.conversao?.ratePct === 20 && ovConv.conversao?.prevRatePct === 60);
+
   // ===== 4. SAUDÁVEL: sem gatilhos =====
   const orgOk = mkOrg("Ok");
   F.recordEvent(orgOk, { direction: "in", amount: 8000 });

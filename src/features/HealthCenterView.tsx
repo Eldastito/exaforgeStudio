@@ -149,6 +149,18 @@ export function HealthCenterView() {
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Dias de caixa</div><div className="text-zinc-100 font-semibold mt-0.5">{d?.kpis?.survivalDays != null ? `~${d.kpis.survivalDays}` : '—'}</div></div>
         </div>
 
+        {/* Conversão de orçamentos (ADR-132 Fatia 2) */}
+        {d?.conversao?.ratePct != null && (
+          <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px] flex items-center justify-between gap-2">
+            <span className="text-zinc-400">Conversão de orçamentos <span className="text-[11px] text-zinc-600">({d.conversao.decided} decididos)</span></span>
+            <span className="font-semibold">
+              <span className={d.conversao.signal === 'caindo' ? 'text-red-300' : d.conversao.signal === 'subindo' ? 'text-emerald-300' : 'text-zinc-100'}>{d.conversao.ratePct}%</span>
+              {d.conversao.prevRatePct != null && d.conversao.signal === 'caindo' && <span className="text-[11px] text-zinc-500"> (caiu de {d.conversao.prevRatePct}%)</span>}
+              {d.conversao.prevRatePct != null && d.conversao.signal === 'subindo' && <span className="text-[11px] text-zinc-500"> (subiu de {d.conversao.prevRatePct}%)</span>}
+            </span>
+          </div>
+        )}
+
         {/* Prioridades do dia */}
         <div className="mt-5">
           <h3 className="text-sm font-medium text-zinc-200 mb-2 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-300" /> Prioridades de hoje</h3>

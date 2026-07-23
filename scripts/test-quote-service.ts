@@ -173,6 +173,22 @@ async function main() {
   check("12.2 filtro por status funciona", QuoteService.list(orgA, { status: "accepted" }).length >= 1);
   check("12.3 orgB tem 0 quotes", QuoteService.list(orgB).length === 0);
 
+  // ==== 13. Conversão de orçamentos (ADR-132 Fatia 2) ====
+  console.log("\n=== 13. conversão ===");
+  const orgConv = `org_conv_${randomUUID().slice(0, 6)}`;
+  const insQ = (status: string, daysAgo: number) => db.prepare("INSERT INTO quotes (id, organization_id, status, total_amount, sent_at) VALUES (?, ?, ?, 100, datetime('now', ?))").run(randomUUID(), orgConv, status, `-${daysAgo} days`);
+  insQ("accepted", 5); for (let i = 0; i < 4; i++) insQ("declined", 5);       // atual: 1/5 = 20%
+  for (let i = 0; i < 3; i++) insQ("accepted", 45); for (let i = 0; i < 2; i++) insQ("declined", 45); // anterior: 3/5 = 60%
+  const cs = QuoteService.conversionStats(orgConv, 30);
+  check("13.1 taxa de conversão atual = 20%", cs.ratePct === 20);
+  check("13.2 taxa anterior = 60%", cs.prevRatePct === 60);
+  check("13.3 sinal de queda (deltaPts = -40)", cs.signal === "caindo" && cs.deltaPts === -40);
+  const orgSmall = `org_sm_${randomUUID().slice(0, 6)}`;
+  db.prepare("INSERT INTO quotes (id, organization_id, status, total_amount, sent_at) VALUES (?, ?, 'accepted', 100, datetime('now','-2 days'))").run(randomUUID(), orgSmall);
+  const csSmall = QuoteService.conversionStats(orgSmall, 30);
+  check("13.4 amostra < 3 decididos não gera taxa (sem ruído)", csSmall.ratePct === null && csSmall.signal === "sem_dado");
+  check("13.5 isolamento: orgB sem conversão", QuoteService.conversionStats(orgB, 30).ratePct === null);
+
   // ==== Relatório ====
   console.log("\n=========================================");
   console.log("RELATÓRIO — QuoteService (ADR-063)");

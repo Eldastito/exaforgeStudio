@@ -82,6 +82,28 @@ async function main() {
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Y', 'active')`).run(randomUUID(), other);
   check("isolamento: outra org sem decisões", cnt(other) === 0 && G.decisions(other).length === 0);
 
+  // ===== 7. Trilha de reabilitação (restrição antiga ainda ativa) =====
+  const cOld = "contact-reab-old";
+  db.prepare("INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, 'ch', 'Cliente Antigo', ?)").run(cOld, orgId, "5521999900");
+  G.recordDecision(orgId, { kind: "fiado_block_all", subjectId: cOld, decision: "applied", actorId: "user-1", reason: "inadimplência reiterada" });
+  db.prepare("UPDATE ai_decisions SET created_at = datetime('now','-40 days') WHERE organization_id=? AND kind='fiado_block_all' AND subject_id=?").run(orgId, cOld);
+  const due = G.rehabilitationDue(orgId, 30);
+  check("restrição ativa há 40d aparece para revisão", due.some((d: any) => d.subjectId === cOld && d.kind === "fiado_block_all"));
+  check("nome do sujeito é resolvido pelo contato", (due.find((d: any) => d.subjectId === cOld) || {}).subjectName === "Cliente Antigo");
+  check("dias ativos calculados (~40)", (due.find((d: any) => d.subjectId === cOld) || {}).daysActive >= 39);
+
+  const cNew = "contact-reab-new";
+  db.prepare("INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, 'ch', 'Cliente Novo', ?)").run(cNew, orgId, "5521888800");
+  G.recordDecision(orgId, { kind: "fiado_blacklist", subjectId: cNew, decision: "applied", actorId: "user-1", reason: "atraso" });
+  check("restrição recente NÃO entra na trilha", !G.rehabilitationDue(orgId, 30).some((d: any) => d.subjectId === cNew));
+
+  // Reverter (dismissed) tira da trilha de reabilitação.
+  G.recordDecision(orgId, { kind: "fiado_block_all", subjectId: cOld, decision: "dismissed", actorId: "user-1", reason: "reabilitado" });
+  check("restrição revertida sai da trilha", !G.rehabilitationDue(orgId, 30).some((d: any) => d.subjectId === cOld));
+  // Limite de crédito não é bloqueio — nunca entra na trilha de reabilitação.
+  check("limite de crédito não entra na trilha", !G.rehabilitationDue(orgId, 0).some((d: any) => d.kind === "fiado_limit"));
+  check("trilha de reabilitação isolada por org", G.rehabilitationDue(other, 0).length === 0);
+
   // --- Relatório ---
   console.log("\n=== TEST: Governança de IA (ADR-130) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);

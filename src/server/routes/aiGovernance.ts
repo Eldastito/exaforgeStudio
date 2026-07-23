@@ -19,4 +19,13 @@ router.get("/decisions", (req: AuthRequest, res): any => {
   res.json({ decisions: AiGovernanceService.decisions(orgId) });
 });
 
+// GET /api/ai-governance/rehabilitation — restrições antigas ainda ativas,
+// candidatas a revisão (trilha de reabilitação do checklist de fairness).
+router.get("/rehabilitation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = Math.min(3650, Math.max(1, Number(req.query.days) || 30));
+  res.json({ days, items: AiGovernanceService.rehabilitationDue(orgId, days) });
+});
+
 export default router;

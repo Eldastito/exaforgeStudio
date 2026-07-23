@@ -23,6 +23,15 @@ export class TaskService {
       const c = db.prepare("SELECT name, identifier FROM contacts WHERE id = ? AND organization_id = ?").get(t.contact_id, orgId) as any;
       t.contact = c ? { name: c.name || c.identifier } : null;
     } else t.contact = null;
+    // Resultado medido (ADR-134): problema (baseline) → resultado (final) + evidência.
+    const hasResult = t.result_label != null || t.result_baseline != null || t.result_final != null || t.evidence_url;
+    t.result = hasResult ? {
+      label: t.result_label || null,
+      baseline: t.result_baseline != null ? Number(t.result_baseline) : null,
+      final: t.result_final != null ? Number(t.result_final) : null,
+      delta: (t.result_baseline != null && t.result_final != null) ? Math.round((Number(t.result_baseline) - Number(t.result_final)) * 100) / 100 : null,
+      evidenceUrl: t.evidence_url || null,
+    } : null;
     return t;
   }
 
@@ -79,18 +88,42 @@ export class TaskService {
   static create(orgId: string, input: {
     title: string; description?: string; assignedTo?: string | null; priority?: string;
     dueAt?: string | null; source?: string; contactId?: string | null; ticketId?: string | null; refLabel?: string | null; budget?: number;
+    resultLabel?: string | null; resultBaseline?: number | null;
   }, actorId?: string): any {
     const title = String(input.title || "").trim();
     if (!title) throw new Error("Informe um título para a tarefa.");
     const priority = PRIORITIES.includes(String(input.priority)) ? input.priority : "media";
     const source = ["manual", "ric", "ia", "vision", "radar"].includes(String(input.source)) ? input.source : "manual";
     const id = randomUUID();
+    const resultLabel = String(input.resultLabel || "").trim() || null;
+    const resultBaseline = input.resultBaseline != null && input.resultBaseline !== undefined && String(input.resultBaseline) !== "" ? Number(input.resultBaseline) : null;
     db.prepare(`
-      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount, result_label, result_baseline)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, title, input.description || "", input.assignedTo || null, actorId || null, priority,
-      input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null, Math.max(0, Number(input.budget) || 0));
+      input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null, Math.max(0, Number(input.budget) || 0), resultLabel, resultBaseline);
     if (input.assignedTo) this.notifyAssignee(orgId, input.assignedTo, title);
+    return this.get(orgId, id);
+  }
+
+  /**
+   * Conclui a tarefa REGISTRANDO O RESULTADO (ADR-134): o número final (antes →
+   * depois) e a evidência (foto/relatório). Fecha o ciclo problema → resultado.
+   */
+  static recordResult(orgId: string, id: string, input: { resultFinal?: number | null; evidenceUrl?: string | null }, actorId?: string): any {
+    const cur = db.prepare("SELECT status, result_label, result_baseline FROM tasks WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    if (!cur) throw new Error("Tarefa não encontrada.");
+    const finalNum = input.resultFinal != null && String(input.resultFinal) !== "" ? Number(input.resultFinal) : null;
+    const ev = String(input.evidenceUrl || "").trim() || null;
+    db.prepare(`UPDATE tasks SET result_final = COALESCE(?, result_final), evidence_url = COALESCE(?, evidence_url), status = 'feito', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
+      .run(finalNum, ev, id, orgId);
+    let msg = "Tarefa concluída";
+    if (cur.result_baseline != null && finalNum != null) {
+      const delta = Math.round((Number(cur.result_baseline) - finalNum) * 100) / 100;
+      msg += ` — ${cur.result_label || "resultado"}: ${Number(cur.result_baseline)} → ${finalNum}${delta > 0 ? ` (redução de ${delta})` : ""}`;
+    }
+    if (ev) msg += " · com evidência anexada";
+    this.addUpdate(orgId, id, actorId, "result", msg + ".");
     return this.get(orgId, id);
   }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ListChecks, Plus, Loader2, Sparkles, Calendar, User as UserIcon, X, MessageSquarePlus, Flag } from 'lucide-react';
+import { ListChecks, Plus, Loader2, Sparkles, Calendar, User as UserIcon, X, MessageSquarePlus, Flag, Paperclip, Camera, Check } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -12,6 +12,7 @@ type Task = {
   priority: 'baixa' | 'media' | 'alta'; status: 'a_fazer' | 'fazendo' | 'feito' | 'cancelada';
   due_at?: string | null; source?: string; contact?: { name: string } | null; ref_label?: string | null;
   created_at: string; updates?: Update[]; resources?: Resource[]; budget_amount?: number; allocated_total?: number;
+  result?: { label: string | null; baseline: number | null; final: number | null; delta: number | null; evidenceUrl: string | null } | null;
 };
 type OrgUser = { id: string; name?: string; email?: string };
 
@@ -36,6 +37,7 @@ export function TasksView() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState<Task | null>(null);
+  const [completing, setCompleting] = useState<Task | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -104,9 +106,15 @@ export function TasksView() {
                         {t.source === 'ric' && <span className="text-fuchsia-400">do RIC</span>}
                         {t.contact?.name && <span className="text-sky-400">· {t.contact.name}</span>}
                       </div>
+                      {(t.result?.final != null || t.result?.evidenceUrl) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
+                          {t.result?.final != null && t.result?.baseline != null && <span className="text-emerald-300">{t.result.label || 'Resultado'}: {t.result.baseline} → {t.result.final}{t.result.delta > 0 ? ` (-${t.result.delta})` : ''}</span>}
+                          {t.result?.evidenceUrl && <a href={t.result.evidenceUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300"><Paperclip className="w-3 h-3" /> evidência</a>}
+                        </div>
+                      )}
                       <div className="mt-2 flex gap-1" onClick={e => e.stopPropagation()}>
                         {col.id === 'a_fazer' && <CardBtn onClick={() => move(t.id, 'fazendo')}>Iniciar</CardBtn>}
-                        {col.id === 'fazendo' && <><CardBtn onClick={() => move(t.id, 'feito')}>Concluir</CardBtn><CardBtn onClick={() => move(t.id, 'a_fazer')} ghost>Voltar</CardBtn></>}
+                        {col.id === 'fazendo' && <><CardBtn onClick={() => setCompleting(t)}>Concluir</CardBtn><CardBtn onClick={() => move(t.id, 'a_fazer')} ghost>Voltar</CardBtn></>}
                         {col.id === 'feito' && <CardBtn onClick={() => move(t.id, 'fazendo')} ghost>Reabrir</CardBtn>}
                       </div>
                     </div>
@@ -119,6 +127,7 @@ export function TasksView() {
       )}
 
       {creating && <CreateModal users={users} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); load(); }} />}
+      {completing && <CompleteTaskModal task={completing} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); load(); }} />}
       {detail && <DetailDrawer task={detail} users={users} onClose={() => setDetail(null)} onRefresh={load} />}
     </div>
   );
@@ -128,6 +137,69 @@ function CardBtn({ children, onClick, ghost }: { children: React.ReactNode; onCl
   return <button onClick={onClick} className={`text-[10px] px-2 py-1 rounded-md font-medium transition-colors ${ghost ? 'text-zinc-400 hover:text-zinc-200 border border-zinc-800' : 'bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/30'}`}>{children}</button>;
 }
 
+// Concluir com RESULTADO medido + EVIDÊNCIA (ADR-134).
+function CompleteTaskModal({ task, onClose, onDone }: { task: Task; onClose: () => void; onDone: () => void }) {
+  const hasMetric = !!(task.result?.label || task.result?.baseline != null);
+  const [finalVal, setFinalVal] = useState('');
+  const [evidenceUrl, setEvidenceUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const body = new FormData(); body.append('file', file);
+      const r = await apiFetch('/api/uploads/image', { method: 'POST', body });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Falha no upload.');
+      setEvidenceUrl(d.url);
+      toast.success('Evidência anexada. 📎');
+    } catch (e: any) { toast.error(e.message); } finally { setUploading(false); }
+  };
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const resultFinal = finalVal.trim() ? Number(finalVal.replace(/\./g, '').replace(',', '.')) : null;
+      const r = await apiFetch(`/api/tasks/${task.id}/result`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resultFinal, evidenceUrl: evidenceUrl || null }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha.');
+      toast.success('Concluída com resultado. ✅');
+      onDone();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6">
+        <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Check className="w-5 h-5 text-emerald-400" /> Concluir tarefa</h3>
+        <p className="text-[13px] text-zinc-400 mb-4 line-clamp-2">{task.title}</p>
+
+        {hasMetric && (
+          <div className="mb-4">
+            <label className="text-xs text-zinc-400 mb-1 block">{task.result?.label || 'Resultado'}{task.result?.baseline != null ? ` — começou em ${task.result.baseline}` : ''}</label>
+            <input value={finalVal} onChange={e => setFinalVal(e.target.value)} inputMode="decimal" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="Valor final (ex.: 420)" />
+          </div>
+        )}
+
+        <label className="text-xs text-zinc-400 mb-1 block">Evidência (foto/relatório) <span className="text-zinc-600">— opcional</span></label>
+        <div className="flex items-center gap-2 mb-4">
+          <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1.5">
+            {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />} {evidenceUrl ? 'Trocar foto' : 'Anexar foto'}
+            <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); }} />
+          </label>
+          {evidenceUrl && <a href={evidenceUrl} target="_blank" rel="noreferrer" className="text-xs text-sky-400 hover:text-sky-300 inline-flex items-center gap-1"><Paperclip className="w-3 h-3" /> ver</a>}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
+          <Button onClick={submit} disabled={busy || uploading} className="zf-button zf-button-primary">
+            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}Concluir
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose: () => void; onCreated: () => void }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -135,15 +207,18 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
   const [priority, setPriority] = useState('media');
   const [due, setDue] = useState('');
   const [refLabel, setRefLabel] = useState('');
+  const [resultLabel, setResultLabel] = useState('');
+  const [resultBaseline, setResultBaseline] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!title.trim()) { toast.error('Informe um título.'); return; }
     setBusy(true);
     try {
+      const baselineNum = resultBaseline.trim() ? Number(resultBaseline.replace(/\./g, '').replace(',', '.')) : null;
       const r = await apiFetch('/api/tasks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, assignedTo: assignedTo || null, priority, dueAt: due ? new Date(due).toISOString() : null, refLabel: refLabel || null }),
+        body: JSON.stringify({ title, description, assignedTo: assignedTo || null, priority, dueAt: due ? new Date(due).toISOString() : null, refLabel: refLabel || null, resultLabel: resultLabel.trim() || null, resultBaseline: baselineNum }),
       });
       if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar.');
       toast.success('Tarefa criada! 📋');
@@ -182,6 +257,14 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
           <div>
             <label className="text-xs text-zinc-400 mb-1 block">Referência</label>
             <input value={refLabel} onChange={e => setRefLabel(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" placeholder="Ex.: Orçamento #41" />
+          </div>
+        </div>
+        {/* Resultado a medir (ADR-134) — opcional: liga a tarefa a um número antes → depois */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 mb-4">
+          <div className="text-[11px] text-zinc-400 mb-2">Resultado a medir <span className="text-zinc-600">(opcional — ex.: reduzir a divergência de estoque)</span></div>
+          <div className="grid grid-cols-2 gap-3">
+            <input value={resultLabel} onChange={e => setResultLabel(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" placeholder="O que medir (ex.: Divergência R$)" />
+            <input value={resultBaseline} onChange={e => setResultBaseline(e.target.value)} inputMode="decimal" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" placeholder="Valor inicial (ex.: 3.200)" />
           </div>
         </div>
         <div className="flex justify-end gap-2">

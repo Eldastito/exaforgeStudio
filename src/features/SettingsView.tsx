@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -1314,13 +1314,35 @@ function GovernancePanel() {
     ]).then(([p, d, rb]) => { setPol(p); setDecisions(Array.isArray(d?.decisions) ? d.decisions : []); setRehab(Array.isArray(rb?.items) ? rb.items : []); }).finally(() => setLoading(false));
   }, []);
 
+  const exportReport = async (format: 'csv' | 'pdf') => {
+    try {
+      const r = await apiFetch(`/api/ai-governance/decisions/export?format=${format}`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao exportar.');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `governanca-ia.${format}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Relatório ${format.toUpperCase()} exportado.`);
+    } catch (e: any) { toast.error(e.message || 'Falha ao exportar.'); }
+  };
+
   if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
   if (!pol) return <div className="text-sm text-zinc-500">Não consegui carregar a política de governança.</div>;
 
   return (
     <div className="max-w-3xl">
-      <h2 className="zf-page-title flex items-center gap-2"><Scale className="w-5 h-5 text-teal-300" /> Governança de IA</h2>
-      <p className="text-zinc-400 text-sm mt-1">Como a IA do ZappFlow decide com responsabilidade: a IA sugere, você decide — com registro e sem viés.</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="zf-page-title flex items-center gap-2"><Scale className="w-5 h-5 text-teal-300" /> Governança de IA</h2>
+          <p className="text-zinc-400 text-sm mt-1">Como a IA do ZappFlow decide com responsabilidade: a IA sugere, você decide — com registro e sem viés.</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => exportReport('csv')} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1.5 inline-flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /> CSV</button>
+          <button onClick={() => exportReport('pdf')} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1.5 inline-flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /> PDF</button>
+        </div>
+      </div>
 
       {/* Princípios */}
       <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">

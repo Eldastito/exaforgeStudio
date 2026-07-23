@@ -261,4 +261,64 @@ export class ReportPdfService {
       return null;
     }
   }
+
+  /**
+   * Relatório de Governança de IA (ADR-130) para auditoria externa: princípios,
+   * controles e o registro completo das decisões que afetam pessoas. Retorna o
+   * PDF como Buffer (download direto, sem depender de storage).
+   */
+  static generateGovernancePdf(orgId: string, opts: { policy: any; rows: string[][] }): Promise<Buffer> {
+    const biz = this.businessName(orgId);
+    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const { policy, rows } = opts;
+    const dataRows = rows.slice(1); // sem o cabeçalho
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ size: "A4", margin: 48 });
+        const chunks: Buffer[] = [];
+        doc.on("data", (c: Buffer) => chunks.push(c));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+
+        doc.fillColor("#0f766e").font("Helvetica-Bold").fontSize(20).text(biz);
+        doc.fillColor("#111827").fontSize(15).text("Relatório de Governança de IA");
+        doc.fillColor("#6b7280").font("Helvetica").fontSize(9).text(`Gerado em ${now}`);
+        doc.moveDown(0.8);
+
+        if (Array.isArray(policy?.principios) && policy.principios.length) {
+          doc.fillColor("#111827").font("Helvetica-Bold").fontSize(11).text("Princípios");
+          doc.font("Helvetica").fontSize(9.5).fillColor("#374151");
+          for (const p of policy.principios) doc.text(`• ${p}`);
+          doc.moveDown(0.5);
+        }
+        if (Array.isArray(policy?.controles) && policy.controles.length) {
+          doc.fillColor("#111827").font("Helvetica-Bold").fontSize(11).text("Controles vigentes");
+          doc.fontSize(9.5);
+          for (const c of policy.controles) {
+            doc.font("Helvetica-Bold").fillColor("#0f766e").text(String(c.area || ""), { continued: false });
+            doc.font("Helvetica").fillColor("#374151").text(String(c.como || ""));
+          }
+          doc.moveDown(0.5);
+        }
+
+        doc.fillColor("#111827").font("Helvetica-Bold").fontSize(11).text(`Decisões registradas (${dataRows.length})`);
+        doc.moveDown(0.2);
+        if (!dataRows.length) {
+          doc.font("Helvetica").fontSize(9.5).fillColor("#6b7280").text("Nenhuma decisão registrada no período.");
+        } else {
+          for (const r of dataRows) {
+            const [data, tipo, sujeito, decisao, sugerido, resp, motivo] = r;
+            doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#111827").text(`${String(data).slice(0, 19)} · ${tipo} · ${sujeito}`);
+            doc.font("Helvetica").fontSize(9).fillColor("#374151").text(`Decisão: ${decisao} (sugerido por: ${sugerido}${resp ? `, responsável: ${resp}` : ""})`);
+            if (motivo) doc.fillColor("#6b7280").text(`Motivo: ${motivo}`);
+            doc.moveDown(0.35);
+          }
+        }
+
+        doc.moveDown(0.5);
+        doc.font("Helvetica-Oblique").fontSize(8).fillColor("#9ca3af").text("ZappFlow — Governança de IA (ADR-130): a IA sugere, o humano decide, com motivo registrado.");
+        doc.end();
+      } catch (e) { reject(e as any); }
+    });
+  }
 }

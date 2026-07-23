@@ -29,6 +29,9 @@ Fluxos ligados:
 ### D2b — Trilha de reabilitação (o último item do checklist de fairness)
 "A pessoa afetada pode ser revista/reabilitada?" deixa de ser só uma pergunta: `rehabilitationDue(orgId, dias)` lista, de forma determinística, as restrições ainda **ativas** (lista negra, suspensão total) cuja última decisão é `applied` sem reversão posterior e que já duram mais de N dias (padrão 30). O painel de Governança mostra essas revisões pendentes — um lembrete para o dono revisar bloqueios antigos e reabilitar quem já pode voltar. Limite de crédito **não** entra (ajustar valor não é um bloqueio a ser revisto).
 
+### D2c — Exportação para auditoria externa
+O registro de decisões é exportável em **CSV** (com BOM, para abrir com acentos no Excel) e **PDF** (princípios + controles + decisões, gerado com pdfkit e baixado direto), via `GET /api/ai-governance/decisions/export?format=csv|pdf`. Rótulos legíveis (ex.: "Lista negra de fiado" em vez da chave crua), nome do sujeito resolvido, origem IA/humano e motivo — pronto para um auditor externo.
+
 ### D3 — Auditoria de decisão de ponta a ponta
 Além do `ai_interactions_log` (prompt/resposta/**confiança**/**needs_human**) e do `auth_audit_logs`, `ai_decisions` fecha o rastro do que a IA sugeriu × o que o humano decidiu × por quê. Junto com o Impact Ledger (esperado × realizado), cobre "o que acontece quando o agente erra": nada sensível anda sem decisão humana registrada.
 

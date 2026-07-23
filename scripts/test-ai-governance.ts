@@ -104,6 +104,18 @@ async function main() {
   check("limite de crédito não entra na trilha", !G.rehabilitationDue(orgId, 0).some((d: any) => d.kind === "fiado_limit"));
   check("trilha de reabilitação isolada por org", G.rehabilitationDue(other, 0).length === 0);
 
+  // ===== 8. Exportação para auditoria externa (CSV/PDF) =====
+  const repRows = G.decisionsReportRows(orgId);
+  check("relatório tem cabeçalho legível", repRows[0].join(",") === "Data,Tipo,Sujeito,Decisão,Sugerido por,Responsável,Motivo");
+  check("relatório traz as decisões (com dados)", repRows.length > 1);
+  const flat = repRows.slice(1).map((r: any) => r.join(" | ")).join("\n");
+  check("relatório usa rótulo legível do tipo (não a chave crua)", flat.includes("Lista negra de fiado") && !flat.includes("fiado_blacklist"));
+  check("relatório mostra origem IA/humano em texto", flat.includes(" | IA | ") || flat.includes(" | humano | "));
+  const { ReportPdfService } = await import("../src/server/ReportPdfService.js");
+  const pdf = await ReportPdfService.generateGovernancePdf(orgId, { policy: G.policy(), rows: repRows });
+  check("PDF de governança é gerado (assinatura %PDF)", Buffer.isBuffer(pdf) && pdf.length > 500 && pdf.slice(0, 4).toString() === "%PDF");
+  check("exportação isolada por org (outra org sem linhas de dados)", G.decisionsReportRows(other).length === 1);
+
   // --- Relatório ---
   console.log("\n=== TEST: Governança de IA (ADR-130) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);

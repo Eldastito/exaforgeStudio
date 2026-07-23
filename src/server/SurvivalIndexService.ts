@@ -75,12 +75,19 @@ export class SurvivalIndexService {
       } catch { /* neutro */ }
     }
 
-    // 4) Recebíveis e inadimplência (12%)
-    let recebScore = NEUTRAL, recebData = false;
+    // 4) Recebíveis e inadimplência (12%) — penaliza pela fatia VENCIDA
+    let recebScore = NEUTRAL, recebData = false, recebNote = "";
     if (hasCash || cash.aReceber > 0) {
       recebData = true;
       const ratio = cash.aReceber / (cash.aReceber + Math.max(0, cash.caixaAtual) + 1);
       recebScore = clamp(100 * (1 - ratio));
+      // Inadimplência real: quanto do que há a receber já venceu (due_date < hoje).
+      const vencido = Number(cash.aReceberVencido) || 0;
+      if (cash.aReceber > 0 && vencido > 0) {
+        const overdueShare = Math.min(1, vencido / cash.aReceber);
+        recebScore = clamp(recebScore * (1 - 0.5 * overdueShare)); // até -50% se tudo vencido
+        recebNote = `${brl(vencido)} já vencido a receber.`;
+      }
     }
 
     // 5) Estoque e capital parado (10%) — ADR-127 Fatia 2
@@ -100,7 +107,7 @@ export class SurvivalIndexService {
       { key: "caixa", label: "Caixa e dias de sobrevivência", weight: 25, score: round1(caixaScore), hasData: hasCash, note: hasCash ? "" : "Informe o saldo/movimento de caixa." },
       { key: "margem", label: "Margem e rentabilidade", weight: 20, score: round1(margemScore), hasData: margemData, note: margemData ? "" : "Cadastre custos para calcular a margem." },
       { key: "vendas", label: "Vendas, conversão e recompra", weight: 20, score: round1(vendasScore), hasData: vendasData, note: vendasData ? "" : "Sem sinal de vendas suficiente ainda." },
-      { key: "recebiveis", label: "Recebíveis e inadimplência", weight: 12, score: round1(recebScore), hasData: recebData, note: recebData ? "" : "Sem recebíveis/caixa para avaliar." },
+      { key: "recebiveis", label: "Recebíveis e inadimplência", weight: 12, score: round1(recebScore), hasData: recebData, note: recebData ? recebNote : "Sem recebíveis/caixa para avaliar." },
       { key: "estoque", label: "Estoque e capital parado", weight: 10, score: round1(estoqueScore), hasData: inv.hasData, note: inv.hasData ? (inv.parado > 0 ? `${brl(inv.parado)} parados no estoque.` : "") : "Sem controle de estoque para avaliar." },
       { key: "operacao", label: "Execução operacional", weight: 8, score: round1(operScore), hasData: operData, note: operData ? "" : "Sem sinal operacional ainda." },
       { key: "dados", label: "Qualidade dos dados", weight: 5, score: round1(dq.pct), hasData: true, note: dq.pct < 100 ? "Complete o checklist da Central de Saúde." : "" },

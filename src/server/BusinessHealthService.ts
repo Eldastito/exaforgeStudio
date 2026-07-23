@@ -68,6 +68,7 @@ export class BusinessHealthService {
     // atenção
     if (fc.survivalDays != null && fc.survivalDays < 30 && !(fc.firstRisk && fc.firstRisk.weeksAhead <= 2)) triggers.push({ level: "atencao", code: "sobrevivencia_curta", label: `~${fc.survivalDays} dias de caixa no ritmo atual.` });
     if (cash.aReceber > 0 && cash.aReceber >= cash.caixaAtual && cash.caixaAtual >= 0) triggers.push({ level: "atencao", code: "receber_alto", label: `Você tem ${brl(cash.aReceber)} a receber — mais que o caixa atual.` });
+    if (cash.aReceberVencido > 0) triggers.push({ level: "atencao", code: "receber_vencido", label: `${brl(cash.aReceberVencido)} já venceram e não foram recebidos${cash.aReceberVencidoCount > 0 ? ` (${cash.aReceberVencidoCount} conta${cash.aReceberVencidoCount > 1 ? "s" : ""})` : ""}.` });
     // Retiradas do dono em excesso (ADR-129) — descapitaliza o negócio.
     const owner = this.ownerSummary(orgId);
     if (owner && owner.retiradas > 0) {
@@ -104,10 +105,15 @@ export class BusinessHealthService {
       });
     }
     if (cash.aReceber > 0) {
+      const vencido = Number(cash.aReceberVencido) || 0;
       cands.push({
-        source: "recebiveis", title: `Cobrar ${brl(cash.aReceber)} a receber`, impact: round2(cash.aReceber), basis: "fato",
-        fato: `${brl(cash.aReceberDetalhe?.fiado || 0)} em fiado + ${brl(cash.aReceberDetalhe?.manual || 0)} em contas a receber.`,
-        interpretacao: "Dinheiro que já é seu e ainda não entrou no caixa.",
+        source: "recebiveis",
+        title: vencido > 0 ? `Cobrar ${brl(vencido)} já vencido (de ${brl(cash.aReceber)} a receber)` : `Cobrar ${brl(cash.aReceber)} a receber`,
+        impact: round2(cash.aReceber), basis: "fato",
+        fato: vencido > 0
+          ? `${brl(vencido)} já vencido${cash.aReceberVencidoCount > 0 ? ` em ${cash.aReceberVencidoCount} conta(s)` : ""} — de ${brl(cash.aReceber)} totais (${brl(cash.aReceberDetalhe?.fiado || 0)} em fiado).`
+          : `${brl(cash.aReceberDetalhe?.fiado || 0)} em fiado + ${brl(cash.aReceberDetalhe?.manual || 0)} em contas a receber.`,
+        interpretacao: vencido > 0 ? "Contas que já passaram do vencimento — prioridade de cobrança." : "Dinheiro que já é seu e ainda não entrou no caixa.",
         risco: "Recebível parado vira capital de giro travado (e risco de calote).",
         action: { view: "comigo", label: "Ir para a caderneta" },
       });
@@ -228,7 +234,7 @@ export class BusinessHealthService {
       dataQuality,
       priorities: priorities.map((p) => ({ ...p, inPlan: open.has(p.title) })),
       ledger: this.history(orgId),
-      kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },
+      kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aReceberVencido: st.cash.aReceberVencido, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays },
     };
   }
 }

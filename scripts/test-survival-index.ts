@@ -64,6 +64,16 @@ async function main() {
   check("caixa forte pontua alto no componente caixa", so.components.find((c: any) => c.key === "caixa").score >= 80);
   check("índice do caixa forte ≥ índice do caixa em ruptura", so.score > sc.score);
 
+  // ===== 4b. Recebíveis VENCIDOS derrubam o componente (ADR-132 Fatia 1) =====
+  const orgOd = mkOrg("Vencido"); const orgCur = mkOrg("EmDia");
+  for (const o of [orgOd, orgCur]) F.recordEvent(o, { direction: "in", amount: 2000 });
+  F.addReceivable(orgOd, { description: "Atrasado", amount: 1000, dueDate: inWeek(-1), probability: 1 });
+  F.addReceivable(orgCur, { description: "Futuro", amount: 1000, dueDate: inWeek(2), probability: 1 });
+  const rOd = S.score(orgOd).components.find((c: any) => c.key === "recebiveis");
+  const rCur = S.score(orgCur).components.find((c: any) => c.key === "recebiveis")?.score ?? 0;
+  check("recebível vencido derruba o componente de recebíveis", (rOd?.score ?? 0) < rCur);
+  check("componente de recebíveis anota o valor vencido", typeof rOd?.note === "string" && /vencido/i.test(rOd.note));
+
   // ===== 5. Snapshot + tendência =====
   // grava um snapshot do mês passado para medir a tendência.
   const lastPeriod = (() => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();

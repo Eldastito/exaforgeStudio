@@ -458,6 +458,17 @@ router.post("/fiado/:contactId/writeoff", (req: AuthRequest, res): any => {
 router.put("/fiado/:contactId/credit", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  // Governança de IA (ADR-130): definir o limite de crédito afeta uma PESSOA —
+  // a IA só sugere; aplicar exige decisão humana com MOTIVO registrado.
+  try {
+    AiGovernanceService.recordDecision(orgId, {
+      kind: "fiado_limit", subjectId: req.params.contactId, decision: "applied",
+      actorId: req.user?.userId, reason: req.body?.reason, suggestedBy: req.body?.suggested ? "ai" : "human",
+    });
+  } catch (e: any) {
+    if (e?.code === "human_decision_required") return res.status(400).json({ error: "human_decision_required", message: "Definir o limite de crédito exige um motivo — é uma decisão humana registrada." });
+    throw e;
+  }
   BalcaoService.setCreditLimit(orgId, req.params.contactId, Number(req.body?.limit));
   audit(orgId, req.user?.userId, req.params.contactId, "comigo_fiado_limit", { limit: req.body?.limit });
   res.json({ ok: true });
@@ -501,8 +512,24 @@ router.post("/fiado/:contactId/store-fiado", (req: AuthRequest, res): any => {
 router.post("/fiado/:contactId/block-all", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  BalcaoService.setBlockAllSales(orgId, req.params.contactId, !!req.body?.on);
-  audit(orgId, req.user?.userId, req.params.contactId, "comigo_block_all", { on: !!req.body?.on });
+  const on = !!req.body?.on;
+  // Governança de IA (ADR-130): suspender TODAS as vendas é a medida mais severa
+  // (mais forte que a lista negra) — aplicar exige decisão humana com MOTIVO.
+  if (on) {
+    try {
+      AiGovernanceService.recordDecision(orgId, {
+        kind: "fiado_block_all", subjectId: req.params.contactId, decision: "applied",
+        actorId: req.user?.userId, reason: req.body?.reason, suggestedBy: req.body?.suggested ? "ai" : "human",
+      });
+    } catch (e: any) {
+      if (e?.code === "human_decision_required") return res.status(400).json({ error: "human_decision_required", message: "Suspender todas as vendas exige um motivo — é uma decisão humana registrada." });
+      throw e;
+    }
+  } else {
+    try { AiGovernanceService.recordDecision(orgId, { kind: "fiado_block_all", subjectId: req.params.contactId, decision: "dismissed", actorId: req.user?.userId, reason: req.body?.reason || "venda liberada" }); } catch { /* noop */ }
+  }
+  BalcaoService.setBlockAllSales(orgId, req.params.contactId, on);
+  audit(orgId, req.user?.userId, req.params.contactId, on ? "comigo_block_all" : "comigo_block_all_off", { on });
   res.json({ ok: true });
 });
 

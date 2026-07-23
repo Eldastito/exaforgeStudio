@@ -47,6 +47,24 @@ async function main() {
   const row = db.prepare("SELECT * FROM ai_decisions WHERE organization_id=? AND kind='fiado_blacklist' LIMIT 1").get(orgId) as any;
   check("decisão auditada com motivo, ator e origem (ai)", row && row.reason === "35 dias em atraso" && row.actor_user_id === "user-1" && row.suggested_by === "ai" && row.decision === "applied");
 
+  // ===== 3b. Outros fluxos que afetam pessoas: limite e suspensão total =====
+  check("limite de crédito afeta pessoa", G.isPeopleAffecting("fiado_limit"));
+  check("suspensão total afeta pessoa", G.isPeopleAffecting("fiado_block_all"));
+  // Ambos exigem humano + motivo ao aplicar.
+  let threwLim = false;
+  try { G.recordDecision(orgId, { kind: "fiado_limit", subjectId: "c2", decision: "applied", actorId: "user-1" }); } catch (e: any) { threwLim = e?.code === "human_decision_required"; }
+  check("definir limite sem motivo é barrado", threwLim);
+  let threwBlk = false;
+  try { G.recordDecision(orgId, { kind: "fiado_block_all", subjectId: "c2", decision: "applied", reason: "risco" }); } catch (e: any) { threwBlk = e?.code === "human_decision_required"; }
+  check("suspensão total sem ator é barrada", threwBlk);
+  // Com humano + motivo: aplicam e auditam.
+  const rl = G.recordDecision(orgId, { kind: "fiado_limit", subjectId: "c2", decision: "applied", actorId: "user-1", reason: "bom histórico de pagamento" });
+  check("limite com humano+motivo aplica", (rl as any).ok === true);
+  const rb = G.recordDecision(orgId, { kind: "fiado_block_all", subjectId: "c2", decision: "applied", actorId: "user-1", reason: "inadimplência reiterada" });
+  check("suspensão total com humano+motivo aplica", (rb as any).ok === true);
+  const audited = db.prepare("SELECT kind FROM ai_decisions WHERE organization_id=? AND decision='applied'").all(orgId).map((r: any) => r.kind);
+  check("as duas decisões ficam auditadas", audited.includes("fiado_limit") && audited.includes("fiado_block_all"));
+
   // ===== 4. 'dismissed' e tipos neutros não travam =====
   const d = G.recordDecision(orgId, { kind: "fiado_blacklist", subjectId: "c1", decision: "dismissed" });
   check("dismissed não exige humano/motivo", (d as any).ok === true);

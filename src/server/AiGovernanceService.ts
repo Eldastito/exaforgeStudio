@@ -24,7 +24,12 @@ export const PEOPLE_AFFECTING: Record<string, PeopleAffecting> = {
   fiado_limit: {
     label: "Limite de crédito (fiado)",
     basis: "histórico de pagamento e saldo, não perfil pessoal",
-    fairnessNote: "Sugestão de limite é orientativa; o dono define o valor. Baseia-se no histórico, não em características do cliente.",
+    fairnessNote: "Sugestão de limite é orientativa; o dono define o valor, com motivo registrado. Baseia-se no histórico, não em características do cliente.",
+  },
+  fiado_block_all: {
+    label: "Suspensão total de vendas",
+    basis: "comportamento/risco (inadimplência, fraude), nunca característica pessoal",
+    fairnessNote: "Suspender TODAS as vendas — inclusive à vista — é a medida mais severa; decisão humana com motivo registrado, revisável e reversível a qualquer momento.",
   },
   prospect_targeting: {
     label: "Segmentação de prospecção",

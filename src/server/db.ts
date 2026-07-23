@@ -889,6 +889,11 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar satisfaction_surveys', e); }
   // Número de WhatsApp da empresa para a IA encaminhar leads (ex.: vindos do Instagram).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN forward_whatsapp TEXT`); } catch(e){}
+  // Tutor de Gestão no WhatsApp (ADR-131): resumo diário proativo para o DONO.
+  // Opt-in + número de destino + dedupe da manhã por data (SP).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_phone TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_last_morning TEXT`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,

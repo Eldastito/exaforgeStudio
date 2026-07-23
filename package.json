@@ -198,7 +198,8 @@
     "test:survival-index": "tsx scripts/test-survival-index.ts",
     "test:managerial-dre": "tsx scripts/test-managerial-dre.ts",
     "test:owner-draws": "tsx scripts/test-owner-draws.ts",
-    "test:ai-governance": "tsx scripts/test-ai-governance.ts"
+    "test:ai-governance": "tsx scripts/test-ai-governance.ts",
+    "test:business-tutor": "tsx scripts/test-business-tutor.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

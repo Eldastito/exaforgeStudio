@@ -77,6 +77,33 @@ export class AiGovernanceService {
     return db.prepare("SELECT id, kind, subject_id, decision, suggested_by, actor_user_id, reason, created_at FROM ai_decisions WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?").all(orgId, limit) as any[];
   }
 
+  /** Todas as decisões (sem limite), com nome do sujeito — para exportação/auditoria. */
+  static decisionsForExport(orgId: string) {
+    return db.prepare(`
+      SELECT d.kind, d.subject_id, d.decision, d.suggested_by, d.actor_user_id, d.reason, d.created_at,
+             c.name AS subject_name
+      FROM ai_decisions d
+      LEFT JOIN contacts c ON c.id = d.subject_id AND c.organization_id = d.organization_id
+      WHERE d.organization_id = ?
+      ORDER BY d.created_at DESC
+    `).all(orgId) as any[];
+  }
+
+  /** Linhas (cabeçalho + dados) para o relatório de auditoria (CSV/PDF), com rótulos legíveis. */
+  static decisionsReportRows(orgId: string): string[][] {
+    const header = ["Data", "Tipo", "Sujeito", "Decisão", "Sugerido por", "Responsável", "Motivo"];
+    const rows = this.decisionsForExport(orgId).map((d) => [
+      String(d.created_at || ""),
+      PEOPLE_AFFECTING[d.kind]?.label || d.kind,
+      String(d.subject_name || d.subject_id || ""),
+      d.decision === "applied" ? "aplicada" : "dispensada",
+      d.suggested_by === "ai" ? "IA" : "humano",
+      String(d.actor_user_id || ""),
+      String(d.reason || ""),
+    ]);
+    return [header, ...rows];
+  }
+
   // Restrições que "prendem" uma pessoa e podem ser reabilitadas (limite de
   // crédito não entra: ajustar o valor não é um bloqueio a ser revisto).
   static readonly RESTRICTIVE_KINDS = ["fiado_blacklist", "fiado_block_all"];

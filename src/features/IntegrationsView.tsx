@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle, ShieldCheck, Copy, Check, RotateCcw } from 'lucide-react';
+import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X, Play, Trash2, AlertTriangle, ShieldCheck, Copy, Check, RotateCcw, Activity } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -708,6 +708,26 @@ function AlterdataConnectorPanel() {
     } finally { setSyncing(false); }
   };
 
+  const [probing, setProbing] = useState(false);
+  const [probes, setProbes] = useState<Array<{ resource: string; status: number; ok: boolean; snippet: string; path: string }> | null>(null);
+  const runProbe = async () => {
+    setProbing(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/probe', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok && Array.isArray(d.probes)) {
+        setProbes(d.probes);
+        const bad = d.probes.filter((p: any) => !p.ok);
+        if (bad.length === 0) toast.success('Todos os módulos responderam OK.');
+        else toast.error(`${bad.length} módulo(s) com falha: ${bad.map((p: any) => `${p.resource} (HTTP ${p.status})`).join(', ')}.`);
+      } else {
+        toast.error(d.error || 'Falha ao testar os módulos.');
+      }
+    } catch {
+      toast.error('Falha ao testar os módulos.');
+    } finally { setProbing(false); }
+  };
+
   const testToken = async () => {
     setTesting(true);
     try {
@@ -821,6 +841,12 @@ function AlterdataConnectorPanel() {
           {syncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
           Sincronizar agora
         </Button>
+        {/* Diagnóstico: probe cada endpoint separadamente para isolar qual está
+            devolvendo 500 na homologação (por eliminação). */}
+        <Button onClick={runProbe} disabled={probing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Testa cada endpoint (produtos, códigos de barras, saldo, preço) separadamente e mostra o HTTP de cada um — para isolar qual falha'}>
+          {probing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
+          Testar módulos
+        </Button>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />
           Integração ativa
@@ -834,6 +860,27 @@ function AlterdataConnectorPanel() {
           <span className="font-semibold">{lastSync.ok ? 'Última sincronização: ' : 'Falha na sincronização: '}</span>
           {lastSync.text}
           <span className="text-zinc-500"> · {new Date(lastSync.at).toLocaleString('pt-BR')}</span>
+        </div>
+      )}
+
+      {/* Diagnóstico por endpoint — verde = OK, vermelho = falha (com o HTTP e um
+          trecho do corpo), para isolar por eliminação qual módulo está em 500. */}
+      {probes && (
+        <div className="mt-3 rounded-lg border border-zinc-700/60 bg-zinc-900/40 px-3 py-2 text-xs">
+          <div className="font-semibold text-zinc-200 mb-2">Teste de módulos (por endpoint)</div>
+          <div className="space-y-1">
+            {probes.map((p, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className={`mt-0.5 inline-block w-2 h-2 rounded-full flex-shrink-0 ${p.ok ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                <div className="min-w-0">
+                  <span className={`font-medium ${p.ok ? 'text-emerald-200' : 'text-rose-200'}`}>{p.resource}</span>
+                  <span className="text-zinc-500"> · HTTP {p.status || '—'}</span>
+                  <span className="text-zinc-600 ml-2 font-mono text-[10px]">{p.path}</span>
+                  {!p.ok && p.snippet && <div className="text-rose-300/80 mt-0.5 break-words">{p.snippet}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

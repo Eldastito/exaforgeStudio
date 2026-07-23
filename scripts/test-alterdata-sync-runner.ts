@@ -97,6 +97,20 @@ async function main() {
   const r4 = AlterdataStockMapper.upsertSaldos(A, [{ filial: "1", produto: "2002", saldoAtual: 4 }]);
   check("saldo casa por referência do produto (variant_id vazio)", r4.applied === 1);
 
+  // ===== 4. probeOrg: isola o endpoint em 500 (por eliminação) =====
+  // Referencia → 500 (corpo vazio); demais → 200. probeOrg NÃO lança, NÃO grava,
+  // e devolve o HTTP status cru de cada endpoint.
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    if (url.includes("/Referencia/versao/")) return resp(500, "", {});
+    return resp(200, [], {});
+  });
+  const probes = await AlterdataSyncRunner.probeOrg(A);
+  const byRes = (name: string) => probes.find((p) => p.resource === name || p.resource.startsWith(name));
+  check("probeOrg cobre Referencia/CodigoDeBarras/Saldo", probes.length >= 3, JSON.stringify(probes.map((p) => p.resource)));
+  check("probe Referencia isola o 500", byRes("Referencia")?.status === 500 && byRes("Referencia")?.ok === false, JSON.stringify(byRes("Referencia")));
+  check("probe CodigoDeBarras OK (200)", byRes("CodigoDeBarras")?.ok === true && byRes("CodigoDeBarras")?.status === 200);
+  check("probe Saldo OK (200)", byRes("Saldo")?.ok === true && byRes("Saldo")?.status === 200, JSON.stringify(byRes("Saldo")));
+
   __setAlterdataSyncHttpForTests(null);
   __setAlterdataTokenHttpForTests(null);
 

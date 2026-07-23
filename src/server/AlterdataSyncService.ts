@@ -81,6 +81,33 @@ export class AlterdataSyncService {
     return { status: res.status, items, totalPages, version, body };
   }
 
+  /**
+   * DIAGNÓSTICO ("Testar módulos"): faz UM único GET autenticado a um endpoint,
+   * SEM retry-em-5xx e SEM lançar erro — devolve o HTTP status cru + um trecho
+   * do corpo. Serve para isolar, por eliminação, qual endpoint (Referencia /
+   * CodigoDeBarras / Saldo / Preco) está devolvendo 500 na homologação.
+   */
+  static async probe(orgId: string, moduleKey: string, pathSuffix: string): Promise<{ module: string; path: string; url: string | null; status: number; ok: boolean; snippet: string }> {
+    let base: string | null = null;
+    try { base = AlterdataConnectorService.moduleBaseUrl(orgId, moduleKey); } catch { base = null; }
+    if (!base) return { module: moduleKey, path: pathSuffix, url: null, status: 0, ok: false, snippet: `base URL do módulo '${moduleKey}' não configurada` };
+    const url = `${base}${pathSuffix.startsWith("/") ? "" : "/"}${pathSuffix}`;
+    const http: SyncHttp = _http || ((u, i) => fetch(u, i) as any);
+    const hdr = (b: string): Record<string, string> => ({ Accept: "application/json", pagina: "1", itensPorPagina: "1", Authorization: `Bearer ${b}` });
+    try {
+      let token = await AlterdataConnectorService.getOrRefreshToken(orgId);
+      let res = await http(url, { method: "GET", headers: hdr(token) });
+      if (res.status === 401) {
+        token = (await AlterdataConnectorService.acquireToken(orgId)).accessToken;
+        res = await http(url, { method: "GET", headers: hdr(token) });
+      }
+      const body = await res.text().catch(() => "");
+      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 300) };
+    } catch (e: any) {
+      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 300) };
+    }
+  }
+
   /** Fetch com retry/backoff em 5xx, 429 e falha de rede. */
   static async fetchWithRetry(url: string, init: any): Promise<SyncResponse> {
     const http: SyncHttp = _http || ((u, i) => fetch(u, i) as any);

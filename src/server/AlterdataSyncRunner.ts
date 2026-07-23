@@ -95,6 +95,34 @@ export class AlterdataSyncRunner {
     return summary;
   }
 
+  /**
+   * DIAGNÓSTICO ("Testar módulos"): probe cada endpoint separadamente (sem
+   * retry, sem lançar) para isolar, por eliminação, qual está devolvendo 500 na
+   * homologação. Não grava nada, não respeita a flag `enabled` — é só teste.
+   */
+  static async probeOrg(orgId: string): Promise<Array<{ resource: string; module: string; path: string; url: string | null; status: number; ok: boolean; snippet: string }>> {
+    const settings = AlterdataConnectorService.publicSettings(orgId);
+    const filiais: string[] = Array.isArray(settings.filiais) && settings.filiais.length ? settings.filiais : [""];
+    const rede = str(settings.rede);
+    const table = str(settings.priceTable);
+
+    const out: Array<{ resource: string; module: string; path: string; url: string | null; status: number; ok: boolean; snippet: string }> = [];
+    const run = async (resource: string, moduleKey: string, path: string) => {
+      const p = await AlterdataSyncService.probe(orgId, moduleKey, path);
+      out.push({ resource, ...p });
+    };
+
+    await run("Referencia", "supply", "/api/v1/Referencia/versao/0");
+    await run("CodigoDeBarras", "supply", "/api/v1/CodigoDeBarras/versao/0");
+    for (const filial of filiais) {
+      await run(filial ? `Saldo (filial ${filial})` : "Saldo", "supply", filial ? `/api/v1/Saldo/versao/${filial}/0` : "/api/v1/Saldo/versao/0");
+    }
+    if (rede && table) {
+      await run("Preco", "price", `/api/v1/Preco/versao/${rede}/${table}/0`);
+    }
+    return out;
+  }
+
   /** Passa nas orgs ativas e enfileira o sync das que venceram o intervalo. */
   static alterdataSyncPass(): void {
     const orgs = enabledOrgs();

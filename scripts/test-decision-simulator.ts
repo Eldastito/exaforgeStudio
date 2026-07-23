@@ -83,7 +83,21 @@ async function main() {
   const bNoVel = D.buyStock(orgNoVel, { amount: 1000 });
   check("compra sem velocidade de venda: coverageKnown=false, mas responde", bNoVel.ok === true && bNoVel.coverageKnown === false);
 
-  // ===== 5. Isolamento =====
+  // ===== 5. "Posso retirar mais?" (Fatia 3) — what-if do caixa =====
+  const { FinancialLedgerService: F } = await import("../src/server/FinancialLedgerService.js");
+  const orgW = mkOrg();
+  F.recordEvent(orgW, { direction: "in", amount: 3000 }); // caixa 3000
+  const wInvalid = D.withdraw(orgW, { amount: 0 });
+  check("retirada: valor <= 0 é rejeitado", wInvalid.ok === false && wInvalid.reason === "valor_invalido");
+  const w1 = D.withdraw(orgW, { amount: 1000 });
+  check("retirada projeta o caixa (3000 - 1000 = 2000)", w1.ok === true && w1.caixaAtual === 3000 && w1.caixaAfter === 2000);
+  check("retirada tem veredito e nível", typeof w1.veredito === "string" && ["ok", "atencao", "excesso"].includes(w1.nivel));
+  const wOver = D.withdraw(orgW, { amount: 5000 });
+  check("retirar mais que o caixa é excesso (não há caixa)", wOver.ok === true && wOver.caixaAfter < 0 && wOver.nivel === "excesso");
+  // Sem resultado no mês, qualquer retirada descapitaliza.
+  check("retirada com resultado zerado é excesso", D.withdraw(orgW, { amount: 500 }).nivel === "excesso");
+
+  // ===== 6. Isolamento =====
   check("isolamento: outra org sem vendas não simula contratação", D.hire(mkOrg(), { monthlyCost: 5000 }).ok === false);
 
   console.log("\n=== TEST: Simulador de Decisões (ADR-133) ===\n");

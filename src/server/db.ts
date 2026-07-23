@@ -1314,6 +1314,44 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_quote_items_q ON purchase_quote_items(quote_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar purchase_quotes', e); }
+  // Epic 5 (Comprador IA) — fechamento do ciclo: ordem de compra IMUTÁVEL a
+  // partir da cotação aceita (snapshot dos itens). UNIQUE(org, quote_id)
+  // garante "uma cotação aceita gera exatamente uma ordem" (PRD §16).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS purchase_orders (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        requisition_id TEXT NOT NULL,
+        quote_id TEXT NOT NULL,
+        supplier_contact_id TEXT,
+        network_org_id TEXT,
+        supplier_name TEXT,                  -- snapshot do nome do fornecedor
+        status TEXT NOT NULL DEFAULT 'open',  -- open|confirmed|receiving|received|cancelled
+        total_amount REAL DEFAULT 0,
+        delivery_days INTEGER,
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        confirmed_at DATETIME,
+        received_at DATETIME,
+        UNIQUE(organization_id, quote_id)
+      );
+      CREATE TABLE IF NOT EXISTS purchase_order_items (
+        id TEXT PRIMARY KEY,
+        purchase_order_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        product_name TEXT,                   -- snapshot imutável
+        ordered_qty INTEGER NOT NULL DEFAULT 0,
+        unit_price REAL,
+        line_total REAL,
+        received_qty INTEGER NOT NULL DEFAULT 0  -- preenchido no recebimento (fatia seguinte)
+      );
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_org ON purchase_orders(organization_id, requisition_id, status);
+      CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar purchase_orders', e); }
   // Supply (Fase 3) — Rede ZappFlow: a própria org pode se oferecer como
   // fornecedora; cotação cross-org via API (sem WhatsApp), com geo (cidade + raio).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN is_network_supplier INTEGER DEFAULT 0`); } catch(e){}

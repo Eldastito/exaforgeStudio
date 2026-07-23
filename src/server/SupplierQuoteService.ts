@@ -5,6 +5,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 import { NotificationService } from "./NotificationService.js";
 import { SupplyNetworkService } from "./SupplyNetworkService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
+import { PurchaseOrderService } from "./PurchaseOrderService.js";
 
 /**
  * Cotação com fornecedores conhecidos (Fase 2 do Supply).
@@ -92,7 +93,7 @@ export class SupplierQuoteService {
    * (2) fornecedores DA REDE ZappFlow — cria a cotação na própria base com
    *     network_org_id; o fornecedor responde direto na UI "Pedidos da Rede".
    */
-  static async sendQuotes(orgId: string, reqId: string, io?: any): Promise<{ sent: number; network: number; emailed: number }> {
+  static async sendQuotes(orgId: string, reqId: string, io?: any): Promise<{ sent: number; network: number; emailed: number; failed: number }> {
     const items = db.prepare(`
       SELECT ri.product_service_id, ri.variant_id, ri.suggested_qty,
              p.name AS product_name, pv.name AS variant_name, p.category AS category
@@ -101,7 +102,7 @@ export class SupplierQuoteService {
       LEFT JOIN product_variants pv ON pv.id = ri.variant_id
       WHERE ri.requisition_id = ?
     `).all(reqId) as any[];
-    if (items.length === 0) return { sent: 0, network: 0 };
+    if (items.length === 0) return { sent: 0, network: 0, emailed: 0, failed: 0 };
 
     const suppliers = this.eligibleSuppliers(orgId, reqId);
     const o = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
@@ -113,6 +114,7 @@ export class SupplierQuoteService {
 
     let sent = 0;
     let emailed = 0;
+    let failed = 0;
     for (const s of suppliers) {
       try {
         const channelId = s.channel_id || fallbackChannel?.id;
@@ -143,7 +145,7 @@ export class SupplierQuoteService {
 
         sent++;
         if (io) io.to(`org:${orgId}`).emit("supplier_quote_sent", { quoteId, supplierId: s.id });
-      } catch (e) { console.error("[Supply] Falha ao enviar cotação para", s.name, e); }
+      } catch (e) { failed++; console.error("[Supply] Falha ao enviar cotação para", s.name, e); }
     }
 
     // (2) FORNECEDORES DA REDE: cria a cotação na própria base. A org fornecedora
@@ -168,11 +170,11 @@ export class SupplierQuoteService {
             io.to(`org:${orgId}`).emit("supplier_quote_sent", { quoteId, networkOrgId: ns.orgId });
             io.to(`org:${ns.orgId}`).emit("network_quote_received", { quoteId, fromOrgId: orgId });
           }
-        } catch (e) { console.error("[Supply] Falha ao criar cotação de rede para", ns.name, e); }
+        } catch (e) { failed++; console.error("[Supply] Falha ao criar cotação de rede para", ns.name, e); }
       }
     } catch (e) { console.error("[Supply] Falha ao listar fornecedores da rede", e); }
 
-    return { sent, network, emailed };
+    return { sent, network, emailed, failed };
   }
 
   /**
@@ -314,16 +316,23 @@ DEVOLVA APENAS UM JSON neste formato (em reais e dias; use null se o fornecedor 
     return true;
   }
 
-  /** Confirma o vencedor (marca esta como aceita e as demais como rejeitadas). */
-  static accept(orgId: string, quoteId: string): boolean {
+  /**
+   * Confirma o vencedor (marca esta como aceita, as demais como rejeitadas) e
+   * gera a ORDEM DE COMPRA imutável (snapshot dos itens). Idempotente: aceitar a
+   * mesma cotação de novo não cria uma segunda ordem (PRD §16). Devolve o id da
+   * ordem para a UI.
+   */
+  static accept(orgId: string, quoteId: string): { ok: boolean; orderId: string | null } {
     const q = db.prepare(`SELECT * FROM purchase_quotes WHERE id = ? AND organization_id = ?`).get(quoteId, orgId) as any;
-    if (!q) return false;
+    if (!q) return { ok: false, orderId: null };
     const tx = db.transaction(() => {
       db.prepare(`UPDATE purchase_quotes SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP WHERE id = ?`).run(quoteId);
       db.prepare(`UPDATE purchase_quotes SET status = 'rejected' WHERE requisition_id = ? AND id != ? AND status IN ('sent','answered')`).run(q.requisition_id, quoteId);
       db.prepare(`UPDATE purchase_requisitions SET status = 'ordered' WHERE id = ?`).run(q.requisition_id);
     });
     tx();
-    return true;
+    // Fora da transação de status: cria (ou reusa) a ordem imutável.
+    const po = PurchaseOrderService.createFromQuote(orgId, quoteId);
+    return { ok: true, orderId: po.id };
   }
 }

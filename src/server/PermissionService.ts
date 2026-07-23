@@ -34,6 +34,8 @@ export const RBAC_MODULES = [
   "rie", "execucao", "relatorios", "cobranca", "usuarios", "configuracoes",
   // Epic 0 — módulos financeiros sensíveis (gateados por perfil, opt-in por org).
   "financeiro", "saude_negocio", "empresa_proprietario",
+  // Epic 7 — RH / People Intelligence (só gestores por padrão).
+  "people",
 ] as const;
 export type RbacModule = (typeof RBAC_MODULES)[number];
 
@@ -72,6 +74,8 @@ export const ROUTE_MODULE: Record<string, string> = {
   dre: "financeiro",
   owner: "financeiro",
   "health-center": "saude_negocio",
+  // Epic 7 — RH.
+  people: "people",
 };
 
 // Rótulos amigáveis para a tela de editor de perfis (Bloco 3).
@@ -86,7 +90,7 @@ export const RBAC_MODULE_LABELS: Record<string, string> = {
   relatorios: "Relatórios", cobranca: "Cobrança / Assinatura",
   usuarios: "Usuários e Permissões", configuracoes: "Configurações",
   financeiro: "Financeiro (Caixa / DRE / Retiradas)", saude_negocio: "Saúde do Negócio",
-  empresa_proprietario: "Empresa × Proprietário",
+  empresa_proprietario: "Empresa × Proprietário", people: "RH / Pessoas",
 };
 
 type ProfileSpec = { key: string; name: string; default: Level; overrides: Partial<Record<string, Level>> };

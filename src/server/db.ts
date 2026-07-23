@@ -4290,6 +4290,40 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de briefing', e); }
 
+  // Epic 7 (People Intelligence / RH IA — fatia 1, ADR-140): cadastro funcional.
+  // Só registro (função/gestor/unidade/jornada/status) — nada de dado sensível,
+  // nenhuma pontuação de "qualidade humana", decisões trabalhistas são humanas.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS employee_roles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, name)
+      );
+      CREATE TABLE IF NOT EXISTS employees (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT,                       -- vínculo opcional a users (quando tem acesso ao sistema)
+        name TEXT NOT NULL,
+        role_id TEXT,                       -- employee_roles
+        manager_user_id TEXT,               -- gestor (users.id)
+        unit TEXT,                          -- unidade/loja
+        work_schedule TEXT,                 -- jornada (texto livre: "seg-sex 9-18")
+        status TEXT NOT NULL DEFAULT 'active', -- active|inactive|leave
+        hired_at TEXT,                      -- YYYY-MM-DD
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_employees_org ON employees(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_employee_roles_org ON employee_roles(organization_id, active);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas de RH (employees)', e); }
+
   // Decision & Action Ledger (ADR-136, Epic 2 — C2): ação proposta → aprovação
   // → conclusão, com política de autonomia por (domínio, tipo). A IA propõe; a
   // política decide se exige aprovação. Nada executa sozinho. Isolado por org.

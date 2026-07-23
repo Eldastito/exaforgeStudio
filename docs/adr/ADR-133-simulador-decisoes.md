@@ -1,6 +1,6 @@
 # ADR-133 — Simulador de Decisões ("decidir antes de gerar o problema")
 
-- **Status:** Completa — Fatias 1–4 (contratar; comprar estoque; retirar mais; payback de investimento).
+- **Status:** Completa — Fatias 1–4 (contratar; comprar estoque; retirar mais; payback de investimento). Hardening: CMV/dia do `buyStock` em janela móvel de 30 dias.
 - **Data:** 2026-07
 - **Origem:** auditoria de veracidade da apresentação "ZappFlow Sobrevivência". O "Simulador de decisões" — o dono pergunta ANTES de agir ("posso contratar? posso comprar esse estoque? quanto vender para pagar a máquina?") — foi apontado como majoritariamente **ausente** (só existia o `RevenueSimulatorService`, de 2 alavancas de receita). Esta ADR cria o simulador de decisões de gestão prometido, uma pergunta por fatia.
 - **Relacionadas:** ADR-126 (Central de Saúde), ADR-125 (Motor de Caixa), ADR-129 (Empresa × Proprietário), ADR-088 D5 (frugal/zero-token), ADR-091 §6 (IA sugere, humano decide).
@@ -17,7 +17,7 @@
 - UI: cartão "Simulador — posso contratar?" na Central de Saúde (custo mensal → resultado).
 
 ### D2b — Fatia 2: "posso comprar esse estoque?"
-`buyStock(orgId, { amount })` responde o impacto na **cobertura** (dias) e quanto tende a ficar **parado**. Cobertura = capital em estoque ÷ **CMV/dia** (CMV/dia ≈ receita do mês × (1 − margem) ÷ 30). O parado estimado usa a **fração atual de estoque sem giro** (`RetailImpactService.stockCapital`) aplicada à compra. Sem velocidade de venda (margem/vendas), devolve `coverageKnown=false` mas ainda alerta o parado pelo padrão — honesto sobre o que não dá para estimar.
+`buyStock(orgId, { amount })` responde o impacto na **cobertura** (dias) e quanto tende a ficar **parado**. Cobertura = capital em estoque ÷ **CMV/dia**, com **CMV/dia = receita dos últimos 30 dias (janela MÓVEL) × (1 − margem) ÷ 30**. A janela móvel (`revenue30`, sobre `orders` + `comigo_orders`) — e não a receita do mês corrente — evita subestimar o CMV/dia no início do mês, o que superestimaria a cobertura (viés apontado na re-auditoria). O parado estimado usa a **fração atual de estoque sem giro** (`RetailImpactService.stockCapital`) aplicada à compra. Sem velocidade de venda (margem/vendas), devolve `coverageKnown=false` mas ainda alerta o parado pelo padrão — honesto sobre o que não dá para estimar.
 
 - Rota `POST /api/health-center/simulate/buy-stock`.
 - UI: o cartão da Central vira um simulador com duas perguntas ("Posso contratar?" / "Posso comprar estoque?").

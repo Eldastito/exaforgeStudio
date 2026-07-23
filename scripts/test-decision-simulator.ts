@@ -77,6 +77,22 @@ async function main() {
   check("compra: nova cobertura inclui a compra ((3000+1500)/50 = 90)", b.newCoverageDays === 90);
   check("compra: parado estimado usa a fração sem giro (1000/3000 ≈ 33% → ~R$500)", b.slowPct === 33 && Math.abs(b.estIdle - 500) < 0.01);
 
+  // CMV/dia usa JANELA MÓVEL de 30 dias (não o mês corrente) — determinístico
+  // independente do dia do mês. Venda de 25 dias entra; de 40 dias fica fora.
+  const orgWin = mkOrg();
+  const seedSaleAt = (org: string, total: number, price: number, cost: number, daysAgo: number) => {
+    const oid = randomUUID();
+    db.prepare("INSERT INTO comigo_orders (id, organization_id, status, total, created_at) VALUES (?, ?, 'paid', ?, datetime('now', ?))").run(oid, org, total, `-${daysAgo} days`);
+    db.prepare("INSERT INTO comigo_order_items (id, order_id, name, qty, unit_price, unit_cost_snapshot, created_at) VALUES (?, ?, 'Item', 1, ?, ?, datetime('now', ?))").run(randomUUID(), oid, price, cost, `-${daysAgo} days`);
+  };
+  seedSaleAt(orgWin, 3000, 3000, 1500, 25);   // dentro da janela (margem 50%)
+  seedSaleAt(orgWin, 9999, 9999, 5000, 40);   // FORA da janela — não deve contar
+  db.prepare("INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'pWin', 30, 100)").run(randomUUID(), orgWin); // 3000 em estoque
+  check("receita de 30d ignora venda de 40 dias atrás", D.revenue30(orgWin) === 3000);
+  const bWin = D.buyStock(orgWin, { amount: 1500 });
+  check("CMV/dia usa janela móvel: 3000×0,5÷30 = 50", bWin.cogsDaily === 50);
+  check("cobertura pela janela móvel: 3000/50 = 60 → 90", bWin.currentCoverageDays === 60 && bWin.newCoverageDays === 90);
+
   // Sem vendas: não estima cobertura, mas ainda alerta o parado pelo padrão.
   const orgNoVel = mkOrg();
   db.prepare("INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'pX', 10, 100)").run(randomUUID(), orgNoVel);

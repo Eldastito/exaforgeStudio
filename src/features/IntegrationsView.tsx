@@ -686,6 +686,7 @@ function AlterdataConnectorPanel() {
   const [testing, setTesting] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
   const runSync = async () => {
     setSyncing(true);
     try {
@@ -693,8 +694,17 @@ function AlterdataConnectorPanel() {
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
         const s = d.summary || {};
-        toast.success(`Sincronizado: ${s.referencias || 0} produtos, ${s.variantes || 0} variantes, ${s.saldos?.applied || 0} saldos, ${s.precos?.applied || 0} preços.`);
-      } else toast.error(d.error || 'Falha ao sincronizar.');
+        const text = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+        toast.success(`Sincronizado: ${text}.`);
+        setLastSync({ at: new Date().toISOString(), ok: true, text });
+      } else {
+        const err = d.error || 'Falha ao sincronizar.';
+        toast.error(err);
+        setLastSync({ at: new Date().toISOString(), ok: false, text: err });
+      }
+    } catch {
+      toast.error('Falha ao sincronizar.');
+      setLastSync({ at: new Date().toISOString(), ok: false, text: 'Falha de conexão.' });
     } finally { setSyncing(false); }
   };
 
@@ -805,7 +815,9 @@ function AlterdataConnectorPanel() {
           {testing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Link2 className="w-4 h-4 mr-2" />}
           Testar conexão
         </Button>
-        <Button onClick={runSync} disabled={syncing || !st?.enabled || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.enabled ? 'Ative a integração primeiro' : 'Puxa produtos, variantes e estoque da Alterdata agora'}>
+        {/* Sync manual funciona com credenciais válidas — não exige a integração
+            ativa (o toggle governa só a sincronização automática/agendada). */}
+        <Button onClick={runSync} disabled={syncing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Puxa produtos, variantes, estoque e preços da Alterdata agora (funciona em homologação sem ativar)'}>
           {syncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
           Sincronizar agora
         </Button>
@@ -815,6 +827,15 @@ function AlterdataConnectorPanel() {
         </label>
         {st?.tokenExpiresAt && <span className="text-[11px] text-zinc-500">token expira: {new Date(st.tokenExpiresAt).toLocaleString('pt-BR')}</span>}
       </div>
+
+      {/* Resultado da última sincronização — fica na tela (o toast some rápido). */}
+      {lastSync && (
+        <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${lastSync.ok ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200' : 'border-rose-500/30 bg-rose-500/5 text-rose-200'}`}>
+          <span className="font-semibold">{lastSync.ok ? 'Última sincronização: ' : 'Falha na sincronização: '}</span>
+          {lastSync.text}
+          <span className="text-zinc-500"> · {new Date(lastSync.at).toLocaleString('pt-BR')}</span>
+        </div>
+      )}
     </div>
   );
 }

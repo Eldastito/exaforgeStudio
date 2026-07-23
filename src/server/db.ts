@@ -900,6 +900,9 @@ const initDb = () => {
   // noite (data SP) e o dia agendado para o lembrete de cobrança da manhã.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_collect_offer_at TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_collect_scheduled_for TEXT`); } catch(e){}
+  // Enterprise Intelligence (ADR-135): feature-flag do Diretor consumir o
+  // Business Snapshot V2 (panorama financeiro). Desligada por padrão.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN diretor_snapshot_v2 INTEGER DEFAULT 0`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,

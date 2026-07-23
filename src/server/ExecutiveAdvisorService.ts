@@ -2,6 +2,7 @@ import { chat } from "./llm.js";
 import db from "./db.js";
 import { BusinessContextService } from "./BusinessContextService.js";
 import { RevenueAuditService } from "./RevenueAuditService.js";
+import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -19,11 +20,35 @@ REGRAS:
 - Seja conciso e termine com uma lista curta de AÇÕES PRIORIZADAS (no máximo 5), da mais impactante para a menos.
 - Tom de conselheiro de confiança: honesto, sem enrolação, sem jargão.`;
 
+  /**
+   * Panorama consumido pelo Diretor. Base = BusinessContextService (compatível).
+   * Sob feature-flag `diretor_snapshot_v2`, ANEXA o panorama financeiro V2
+   * (caixa/DRE/previsão/retiradas) — ADR-135, Epic 1. Desligada por padrão:
+   * organizações existentes não mudam de comportamento.
+   */
+  static buildPanorama(orgId: string): string {
+    const base = BusinessContextService.build(orgId);
+    return base + this.financeBlockV2(orgId);
+  }
+
+  private static financeBlockV2(orgId: string): string {
+    try {
+      const s = db.prepare("SELECT diretor_snapshot_v2 FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+      if (!s || !Number(s.diretor_snapshot_v2)) return "";
+      const snap = BusinessSnapshotV2Service.build(orgId);
+      return `\n\n=== PANORAMA FINANCEIRO V2 (determinístico) ===
+Use EXATAMENTE estes números (caixa, contas, DRE, previsão, retiradas). NUNCA invente valores; se um campo faltar ou vier available:false, diga explicitamente que o dado não está disponível.
+FINANÇAS: ${JSON.stringify(snap.domains?.finance || {})}
+PRIORIDADES: ${JSON.stringify(snap.topPriorities || [])}
+QUALIDADE DOS DADOS: ${JSON.stringify(snap.dataQuality || {})}`;
+    } catch { return ""; }
+  }
+
   /** Responde uma pergunta do gestor usando o panorama real do negócio. */
   static async ask(orgId: string, question: string): Promise<string> {
     const q = String(question || "").trim();
     if (!q) return "Faça uma pergunta sobre o seu negócio (ex.: \"por que minhas vendas caíram?\").";
-    const panorama = BusinessContextService.build(orgId);
+    const panorama = this.buildPanorama(orgId);
     const prompt = `${this.GUARDRAILS}
 
 PANORAMA DO NEGÓCIO (dados reais, últimos 30 dias salvo indicação):
@@ -116,7 +141,7 @@ Seja conciso. Não invente dados que você não tem.`;
 
   /** Briefing diário: o que vai bem, o que preocupa e as ações do dia. */
   static async briefing(orgId: string): Promise<string> {
-    const panorama = BusinessContextService.build(orgId);
+    const panorama = this.buildPanorama(orgId);
     const prompt = `${this.GUARDRAILS}
 
 PANORAMA DO NEGÓCIO (dados reais):

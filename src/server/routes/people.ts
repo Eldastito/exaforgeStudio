@@ -3,6 +3,7 @@ import { AuthRequest, requirePermission } from "../middleware/auth.js";
 import { EmployeeService } from "../EmployeeService.js";
 import { WorkloadService } from "../WorkloadService.js";
 import { PeopleDevelopmentService } from "../PeopleDevelopmentService.js";
+import { PeopleCheckinService } from "../PeopleCheckinService.js";
 
 // RH / People Intelligence (Epic 7, ADR-140) — cadastro funcional. Gateado pelo
 // módulo `people` (só gestores por padrão; via fallback, owner/admin). Isolado
@@ -113,6 +114,18 @@ router.get("/employees/:id/development", requirePermission("people", "read"), (r
   const plan = PeopleDevelopmentService.developmentPlan(orgOf(req), req.params.id);
   if (!plan) return res.status(404).json({ error: "Colaborador não encontrado." });
   res.json(plan);
+});
+
+// ── Check-ins / reconhecimento / feedback documentado (fatia 4) ──
+router.get("/employees/:id/checkins", requirePermission("people", "read"), (req: AuthRequest, res): any => {
+  const kind = typeof req.query?.kind === "string" ? req.query.kind : undefined;
+  res.json({ checkins: PeopleCheckinService.list(orgOf(req), req.params.id, { kind }), summary: PeopleCheckinService.summaryFor(orgOf(req), req.params.id) });
+});
+router.post("/employees/:id/checkins", requirePermission("people", "write"), (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const r = PeopleCheckinService.create(orgOf(req), { employeeId: req.params.id, kind: b.kind, period: b.period, summary: b.summary, strengths: b.strengths, nextSteps: b.nextSteps, authorUserId: req.user?.userId });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.status(201).json(r);
 });
 
 export default router;

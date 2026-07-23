@@ -1,6 +1,6 @@
 # ADR-140 — People Intelligence / RH IA: fundação (cadastro funcional + módulo RBAC)
 
-- **Status:** Epic 7 / Fatias 1 (cadastro funcional + módulo RBAC `people`), 3 (**sobrecarga com evidência**) e 2 (**competências + trilhas de treinamento** / lacuna de competência) implementadas — os três aceites do MVP de RH cobertos. Check-ins de performance / reconhecimento como refinamento futuro.
+- **Status:** Epic 7 **MVP COMPLETO** — Fatias 1 (cadastro funcional + módulo RBAC `people`), 3 (**sobrecarga com evidência**), 2 (**competências + trilhas** / lacuna) e 4 (**check-ins + reconhecimento/feedback documentado**) implementadas.
 - **Data:** 2026-07
 - **Origem:** PRD "ZappFlow Enterprise Intelligence" (Epic 7, §18). "O primeiro valor de RH deve ser capacidade e desenvolvimento, não folha." Condição de entrada do PRD — "Snapshot V2, RBAC, Ledger e Maestro estáveis" — cumprida (ADRs 135, 138, 136).
 - **Relacionadas:** ADR-138 (RBAC granular / módulos), ADR-136 (Ledger/tarefas), ADR-051 (WhatsApp interno). PRD §18.
@@ -22,10 +22,13 @@ Esta fatia é **só registro**. Nada de: pontuar "qualidade humana" por conversa
 ### D5 — Competências + trilhas de treinamento / lacuna de competência (Fatia 2)
 `skills` (catálogo), `employee_skills` (nível none|basic|intermediate|advanced, upsert por `(emp, skill)`), `training_paths` (com **função alvo** e competências que desenvolve), `training_assignments` (assigned|in_progress|completed, idempotente por `(emp, path)`). `PeopleDevelopmentService.developmentPlan` cruza, de forma **determinística**, as competências exigidas pelas **trilhas aplicáveis à função** × o que o colaborador tem, e devolve a **LACUNA** (skills abaixo de `basic`) + as **trilhas recomendadas** que a cobrem — o "orientação e treinamento **aplicável à função**" do aceite §18. Rotas sob `/api/people/*` (skills, employee-skills, training-paths, training, `/employees/:id/development`).
 
-## Consequências
-**Positivas:** o **MVP de RH** fica coberto — cadastro (F1), **sobrecarga com evidência** (F3) e **capacidade/desenvolvimento** (F2: competências, trilhas por função, lacuna) — tudo determinístico, restrito a gestores, isolado por org, aditivo. O primeiro valor de RH é capacidade/desenvolvimento, não folha, exatamente como o PRD pede.
+### D6 — Check-ins + reconhecimento/feedback documentado (Fatia 4)
+`performance_checkins` (kind `checkin|recognition|feedback`, `period`, `summary`, `strengths`, `next_steps`, autor). `PeopleCheckinService`: `create`/`list`/`get`/`summaryFor` (contagem por tipo + último de cada). Texto **humano documentado** — cumpre "reconhecimento e feedback documentado" (§18) sem pontuar "qualidade humana" e sem recomendação executável. RBAC `people`, isolado por org.
 
-**Trade-offs / escopo:** entregues cadastro (F1), sobrecarga (F3) e competências/trilhas (F2); `performance_checkins`/reconhecimento documentado ficam como refinamento. Sem UI nestas fatias (backend + rotas). Os limiares de sobrecarga e o nível mínimo de competência (`basic`) são constantes por ora (não configuráveis por org).
+## Consequências
+**Positivas:** o **MVP de RH** fica completo — cadastro (F1), **sobrecarga com evidência** (F3), **capacidade/desenvolvimento** (F2) e **reconhecimento/feedback documentado** (F4) — tudo determinístico, restrito a gestores, isolado por org, aditivo. O primeiro valor de RH é capacidade/desenvolvimento, não folha, exatamente como o PRD pede.
+
+**Trade-offs / escopo:** MVP completo (F1/F2/F3/F4). Sem UI nestas fatias (backend + rotas). Os limiares de sobrecarga e o nível mínimo de competência (`basic`) são constantes por ora (não configuráveis por org).
 
 ## Guardas
 - Só registro (sem pontuação de qualidade humana, sem dado sensível, sem recomendação trabalhista). RBAC restrito a gestores (via `requirePermission`, com fallback legado). Determinístico, isolado por `organization_id`.
@@ -36,3 +39,5 @@ Esta fatia é **só registro**. Nada de: pontuar "qualidade humana" por conversa
 `test:people-workload` (F3) — sobrecarregado por volume (7 abertas) + vencidas (4) → `risk` com evidência (amostra) e `reason`; tranquilo não sinaliza; **ausente com tarefas abertas** sinaliza (responsável AUSENTE); `asOfDate` fora da janela → disponibilidade volta a `available`; **só colaboradores ativos com usuário vinculado** entram; **sinais `employee_overload`** publicados (2) e **idempotentes por dia** (re-publicar não duplica); isolamento por org.
 
 `test:people-development` (F2) — skill idempotente por nome; `employee_skill` upsert por nível; **trilhas aplicáveis à função** (função + gerais, não a de outra função); **lacuna de competência** (aponta a skill faltante, ignora a que já tem) + **trilhas recomendadas** que a cobrem; **após aprender, a lacuna zera**; atribuição idempotente + status (`completed` grava `completed_at`); validações (nível/status inválidos, skill/trilha inexistentes); isolamento por org.
+
+`test:people-checkins` (F4) — resumo obrigatório; colaborador válido; tipos checkin/recognition/feedback (tipo inválido → checkin); lista + filtro por tipo (mais recente primeiro); `summaryFor` conta por tipo e traz o último de cada; `get` preserva os campos; isolamento por org.

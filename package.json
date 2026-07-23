@@ -213,7 +213,8 @@
     "test:purchase-payable": "tsx scripts/test-purchase-payable.ts",
     "test:supplier-performance": "tsx scripts/test-supplier-performance.ts",
     "test:rbac-finance": "tsx scripts/test-rbac-finance.ts",
-    "test:gestor-command": "tsx scripts/test-gestor-command.ts"
+    "test:gestor-command": "tsx scripts/test-gestor-command.ts",
+    "test:briefing": "tsx scripts/test-briefing.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

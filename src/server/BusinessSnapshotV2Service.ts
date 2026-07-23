@@ -1,5 +1,6 @@
 import { FinanceSnapshotAdapter } from "./FinanceSnapshotAdapter.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
+import { SalesSnapshotAdapter, InventorySnapshotAdapter, ProcurementSnapshotAdapter, RetailOpsSnapshotAdapter, TaskSnapshotAdapter } from "./BusinessSnapshotAdapters.js";
 
 /**
  * Business Snapshot V2 (ADR-135, Enterprise Intelligence Kernel — Epic 1).
@@ -23,7 +24,11 @@ export class BusinessSnapshotV2Service {
       dataQuality: safe(() => BusinessHealthService.dataQuality(orgId), null),
       domains: {
         finance: FinanceSnapshotAdapter.build(orgId, p),
-        // sales / inventory / procurement / retail_ops / tasks entram nas próximas fatias (B2).
+        sales: SalesSnapshotAdapter.build(orgId, p),
+        inventory: InventorySnapshotAdapter.build(orgId),
+        procurement: ProcurementSnapshotAdapter.build(orgId),
+        retail_ops: RetailOpsSnapshotAdapter.build(orgId),
+        tasks: TaskSnapshotAdapter.build(orgId),
       },
       topPriorities: safe(() => (BusinessHealthService.overview(orgId) as any).priorities || [], []),
     };

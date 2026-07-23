@@ -22,23 +22,23 @@ REGRAS:
 
   /**
    * Panorama consumido pelo Diretor. Base = BusinessContextService (compatível).
-   * Sob feature-flag `diretor_snapshot_v2`, ANEXA o panorama financeiro V2
-   * (caixa/DRE/previsão/retiradas) — ADR-135, Epic 1. Desligada por padrão:
-   * organizações existentes não mudam de comportamento.
+   * Sob feature-flag `diretor_snapshot_v2`, ANEXA o panorama V2 por DOMÍNIO
+   * (finanças, vendas, estoque, compras, operação, tarefas) — ADR-135, Epic 1.
+   * Desligada por padrão: organizações existentes não mudam de comportamento.
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.financeBlockV2(orgId);
+    return base + this.snapshotBlockV2(orgId);
   }
 
-  private static financeBlockV2(orgId: string): string {
+  private static snapshotBlockV2(orgId: string): string {
     try {
       const s = db.prepare("SELECT diretor_snapshot_v2 FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
       if (!s || !Number(s.diretor_snapshot_v2)) return "";
       const snap = BusinessSnapshotV2Service.build(orgId);
-      return `\n\n=== PANORAMA FINANCEIRO V2 (determinístico) ===
-Use EXATAMENTE estes números (caixa, contas, DRE, previsão, retiradas). NUNCA invente valores; se um campo faltar ou vier available:false, diga explicitamente que o dado não está disponível.
-FINANÇAS: ${JSON.stringify(snap.domains?.finance || {})}
+      return `\n\n=== PANORAMA EMPRESARIAL V2 (determinístico, por domínio) ===
+Use EXATAMENTE estes números (finanças, vendas, estoque, compras, operação, tarefas). NUNCA invente valores; se um campo faltar ou vier available:false, diga explicitamente que o dado não está disponível.
+DOMÍNIOS: ${JSON.stringify(snap.domains || {})}
 PRIORIDADES: ${JSON.stringify(snap.topPriorities || [])}
 QUALIDADE DOS DADOS: ${JSON.stringify(snap.dataQuality || {})}`;
     } catch { return ""; }

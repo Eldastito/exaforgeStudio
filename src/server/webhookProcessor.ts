@@ -25,6 +25,7 @@ import { QuoteService } from "./QuoteService.js";
 import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
+import { GestorCommandService } from "./GestorCommandService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
 import { MaestroService } from "./MaestroService.js";
 import { ProspectExecutionService } from "./ProspectExecutionService.js";
@@ -165,6 +166,19 @@ export async function processIncomingMessage(
   // COLABORADOR — não de um cliente. Roteamos para o Coordenador IA e saímos:
   // NÃO cria contato/ticket nem aciona o fluxo de atendimento ao cliente.
   if (channel.kind === 'internal') {
+    // Controller Financeiro IA (ADR-139): quando a org habilitou o gestor por
+    // WhatsApp e o número é de um gestor, comandos CLAROS de gestão (saldo, a
+    // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.
+    // Greeting/menu/tarefas caem no Coordenador (fluxo atual, sem duplicar).
+    try {
+      const g = GestorCommandService.handle(orgId, payload.senderId, payload.text || '');
+      if (GestorCommandService.shouldRoute(g)) {
+        await MessageProviderService.sendMessage(channel.id, payload.senderId, g.reply);
+        return;
+      }
+    } catch (e) {
+      console.error('[Controller] Falha ao processar comando de gestão:', e);
+    }
     try {
       await CoordenadorService.handleInbound(orgId, channel.id, payload.senderId, payload.text || '');
     } catch (e) {

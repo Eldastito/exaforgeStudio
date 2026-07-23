@@ -27,6 +27,15 @@ export type GestorIntent = "menu" | "saldo" | "a_receber" | "a_pagar" | "priorid
 export interface GestorResult { handled: boolean; reply: string; intent: GestorIntent; denied?: boolean; user?: { id: string; name: string } | null }
 
 export class GestorCommandService {
+  // Intents que o Controller "possui" no canal interno — o webhook roteia só
+  // estes para cá; menu/greeting/desconhecido caem no Coordenador (tarefas).
+  static ROUTED_INTENTS: GestorIntent[] = ["saldo", "a_receber", "a_pagar", "prioridades", "acao_diferida"];
+
+  /** O webhook deve entregar esta mensagem ao Controller (em vez do Coordenador)? */
+  static shouldRoute(r: GestorResult): boolean {
+    return !!(r && r.handled && r.user && this.ROUTED_INTENTS.includes(r.intent));
+  }
+
   static isEnabled(orgId: string): boolean {
     try { return !!Number((db.prepare("SELECT wa_gestor_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.wa_gestor_enabled); }
     catch { return false; }
@@ -45,7 +54,9 @@ export class GestorCommandService {
     if (/(^|\b)(saldo|caixa|quanto tenho|dinheiro)(\b|$)/.test(m)) return { intent: "saldo" };
     if (/(a\s*receber|receb[ií]veis|vencidos?|cobran[çc]a)/.test(m)) return { intent: "a_receber" };
     if (/(a\s*pagar|pagar|contas? a pagar|fornecedor)/.test(m)) return { intent: "a_pagar" };
-    if (/(prioridade|o que.*(fazer|atacar)|hoje|foco)/.test(m)) return { intent: "prioridades" };
+    // "prioridades" só com frase clara — evita colidir com pergunta de tarefas
+    // do colaborador ("o que tenho pra fazer hoje") no canal interno.
+    if (/(prioridades?|o que.*atacar|foco do dia)/.test(m)) return { intent: "prioridades" };
     if (/^(aprovar|aprova|delegar|delega|adiar|adia|dispensar|dispensa|rejeitar|rejeita|explicar|explica)\b/.test(m)) return { intent: "acao_diferida" };
     return { intent: "desconhecido" };
   }

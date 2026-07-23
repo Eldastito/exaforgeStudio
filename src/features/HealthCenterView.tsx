@@ -270,28 +270,36 @@ export function HealthCenterView() {
   );
 }
 
-// Simulador de Decisões (ADR-133 Fatia 1) — "posso contratar?".
+// Simulador de Decisões (ADR-133) — "posso contratar?" / "posso comprar estoque?".
 function HireSimulatorCard() {
-  const [cost, setCost] = useState('');
+  const [mode, setMode] = useState<'hire' | 'stock'>('hire');
+  const [value, setValue] = useState('');
   const [res, setRes] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
+  const setModeReset = (m: 'hire' | 'stock') => { setMode(m); setRes(null); setValue(''); };
   const simulate = async () => {
-    const monthlyCost = Number(String(cost).replace(/\./g, '').replace(',', '.')) || 0;
-    if (!(monthlyCost > 0)) { toast.error('Informe o custo mensal.'); return; }
+    const num = Number(String(value).replace(/\./g, '').replace(',', '.')) || 0;
+    if (!(num > 0)) { toast.error('Informe um valor.'); return; }
     setBusy(true);
     try {
-      const r = await apiFetch('/api/health-center/simulate/hire', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ monthlyCost }) });
+      const url = mode === 'hire' ? '/api/health-center/simulate/hire' : '/api/health-center/simulate/buy-stock';
+      const body = mode === 'hire' ? { monthlyCost: num } : { amount: num };
+      const r = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       setRes(await r.json());
     } catch { toast.error('Não consegui simular.'); } finally { setBusy(false); }
   };
   return (
     <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
-      <h3 className="text-sm font-medium text-indigo-100 flex items-center gap-2"><Target className="w-4 h-4" /> Simulador — posso contratar?</h3>
-      <p className="text-[12px] text-zinc-400 mt-0.5">Diga o custo mensal e eu digo quanto de venda a mais isso exige, com a sua margem atual.</p>
+      <h3 className="text-sm font-medium text-indigo-100 flex items-center gap-2"><Target className="w-4 h-4" /> Simulador de decisões</h3>
+      <div className="mt-2 flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[11px] w-fit">
+        <button onClick={() => setModeReset('hire')} className={`rounded px-2.5 py-1 ${mode === 'hire' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Posso contratar?</button>
+        <button onClick={() => setModeReset('stock')} className={`rounded px-2.5 py-1 ${mode === 'stock' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Posso comprar estoque?</button>
+      </div>
+      <p className="text-[12px] text-zinc-400 mt-2">{mode === 'hire' ? 'Custo mensal da contratação → quanto de venda a mais isso exige, com a sua margem atual.' : 'Valor da compra → quantos dias de cobertura e quanto tende a ficar parado.'}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1 rounded-lg bg-zinc-900 border border-zinc-700 px-2.5 py-1.5">
           <span className="text-zinc-500 text-sm">R$</span>
-          <input value={cost} onChange={(e) => setCost(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && simulate()} placeholder="custo mensal (ex.: 3.500)" inputMode="decimal" className="w-40 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-600 outline-none" />
+          <input value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && simulate()} placeholder={mode === 'hire' ? 'custo mensal (ex.: 3.500)' : 'valor da compra (ex.: 30.000)'} inputMode="decimal" className="w-44 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-600 outline-none" />
         </div>
         <button onClick={simulate} disabled={busy} className="text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 font-medium">Simular</button>
       </div>
@@ -299,10 +307,19 @@ function HireSimulatorCard() {
         <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
           <div className="text-[13px] text-zinc-100">{res.veredito}</div>
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-400">
-            <span>Margem atual: <b className="text-zinc-200">{res.marginPct}%</b></span>
-            <span>Venda a mais/mês: <b className="text-amber-200">{brl(res.extraRevenueNeeded)}</b></span>
-            {res.pctOfCurrent != null && <span>= <b className="text-zinc-200">{res.pctOfCurrent}%</b> a mais que hoje</span>}
-            {res.extraTicketsPerDay != null && <span>~<b className="text-zinc-200">{res.extraTicketsPerDay}</b> venda(s)/dia</span>}
+            {mode === 'hire' ? (
+              <>
+                <span>Margem atual: <b className="text-zinc-200">{res.marginPct}%</b></span>
+                <span>Venda a mais/mês: <b className="text-amber-200">{brl(res.extraRevenueNeeded)}</b></span>
+                {res.pctOfCurrent != null && <span>= <b className="text-zinc-200">{res.pctOfCurrent}%</b> a mais que hoje</span>}
+                {res.extraTicketsPerDay != null && <span>~<b className="text-zinc-200">{res.extraTicketsPerDay}</b> venda(s)/dia</span>}
+              </>
+            ) : (
+              <>
+                {res.coverageKnown && <span>Cobertura: <b className="text-zinc-200">{res.currentCoverageDays}→{res.newCoverageDays}</b> dias</span>}
+                <span>Pode ficar parado: <b className="text-amber-200">{brl(res.estIdle)}</b> {res.slowPct != null && <span className="text-zinc-500">(~{res.slowPct}%)</span>}</span>
+              </>
+            )}
           </div>
         </div>
       ) : (

@@ -31,9 +31,13 @@ export interface SyncRunSummary {
 function str(v: any): string { return v == null ? "" : String(v).trim(); }
 
 export class AlterdataSyncRunner {
-  /** Sincroniza uma org (Supply: Referencia → CodigoDeBarras → Saldo por filial). */
-  static async runOrg(orgId: string): Promise<SyncRunSummary> {
-    if (!AlterdataConnectorService.isEnabled(orgId)) {
+  /**
+   * Sincroniza uma org (Supply: Referencia → CodigoDeBarras → Saldo por filial).
+   * `manual` (clique em "Sincronizar agora") dispensa a flag `enabled` — o toggle
+   * governa só a sincronização AUTOMÁTICA/agendada, não o teste manual (homologação).
+   */
+  static async runOrg(orgId: string, opts: { manual?: boolean } = {}): Promise<SyncRunSummary> {
+    if (!opts.manual && !AlterdataConnectorService.isEnabled(orgId)) {
       throw new Error("Alterdata: integração desligada para esta organização (ative em Integrações).");
     }
     const settings = AlterdataConnectorService.publicSettings(orgId);

@@ -488,7 +488,7 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
 router.post("/alterdata/sync", async (req: AuthRequest, res): Promise<any> => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const summary = await AlterdataSyncRunner.runOrg(req.organizationId);
+    const summary = await AlterdataSyncRunner.runOrg(req.organizationId, { manual: true });
     logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SYNC_MANUAL', { referencias: summary.referencias, variantes: summary.variantes });
     res.json({ ok: true, summary });
   } catch (e: any) {

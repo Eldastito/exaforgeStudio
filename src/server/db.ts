@@ -895,6 +895,7 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_phone TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_last_morning TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_last_midday TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN tutor_wa_last_evening TEXT`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,

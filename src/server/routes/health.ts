@@ -56,6 +56,7 @@ router.get("/tutor", (req: AuthRequest, res): any => {
     hasChannel,
     preview: BusinessTutorService.morningBrief(orgId).text,
     previewMidday: BusinessTutorService.middayBrief(orgId).text || null,
+    previewEvening: BusinessTutorService.eveningBrief(orgId).text,
   });
 });
 

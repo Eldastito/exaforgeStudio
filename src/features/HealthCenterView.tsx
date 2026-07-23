@@ -322,6 +322,12 @@ function TutorWhatsAppCard() {
                   <pre className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-[12px] text-zinc-300 font-sans">{cfg.previewMidday}</pre>
                 </div>
               )}
+              {cfg.previewEvening && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">📊 Fim do dia (todo dia)</div>
+                  <pre className="whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-[12px] text-zinc-300 font-sans">{cfg.previewEvening}</pre>
+                </div>
+              )}
             </div>
           )}
         </div>

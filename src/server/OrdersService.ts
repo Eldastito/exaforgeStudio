@@ -42,6 +42,11 @@ export class OrdersService {
     const orderId = uuidv4();
     const status: OrderStatus = params.autoClose ? "pago" : "aguardando_pagamento";
 
+    // Vendedor da venda (comissão por vendedor): usa o explícito ou, senão,
+    // ATRIBUI AUTOMATICAMENTE o atendente do ticket (tickets.assigned_to) — só
+    // se for um usuário válido da org. Sem atendente humano → sem vendedor.
+    const sellerUserId = OrdersService.resolveSeller(orgId, params.sellerUserId, params.ticketId);
+
     const tx = db.transaction(() => {
       let total = 0;
       const resolved: any[] = [];
@@ -88,7 +93,7 @@ export class OrdersService {
       db.prepare(`
         INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_id, created_by, notes, store_id, seller_user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null, params.storeId || null, params.sellerUserId || null);
+      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null, params.storeId || null, sellerUserId);
 
       const insItem = db.prepare(`
         INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, unit_cost, quantity, line_total, stock_committed)
@@ -122,6 +127,26 @@ export class OrdersService {
     GoogleAutomationService.logOrder(orgId, orderId).catch(() => {});
     GoogleAutomationService.confirmOrder(orgId, orderId).catch(() => {});
     return { id: orderId, status, total, items: resolved, discount };
+  }
+
+  /**
+   * Resolve o vendedor da venda: o explícito, senão o atendente do ticket
+   * (tickets.assigned_to) — só se for um usuário existente na org. Sem atendente
+   * humano (ex.: venda 100% da IA) → null (não entra na comissão por vendedor).
+   */
+  static resolveSeller(orgId: string, explicit?: string | null, ticketId?: string | null): string | null {
+    const validUser = (id: any): string | null => {
+      if (!id) return null;
+      const u = db.prepare('SELECT id FROM users WHERE id = ? AND organization_id = ?').get(String(id), orgId) as any;
+      return u?.id || null;
+    };
+    const ex = validUser(explicit);
+    if (ex) return ex;
+    if (ticketId) {
+      const t = db.prepare('SELECT assigned_to FROM tickets WHERE id = ? AND organization_id = ?').get(ticketId, orgId) as any;
+      return validUser(t?.assigned_to);
+    }
+    return null;
   }
 
   /** Atualiza o status de um pedido, aplicando os efeitos de estoque corretos. */

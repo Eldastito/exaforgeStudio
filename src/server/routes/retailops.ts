@@ -25,6 +25,7 @@ import { RetailReconciliationService } from "../RetailReconciliationService.js";
 import { RetailScanService } from "../RetailScanService.js";
 import { RetailReceivingService } from "../RetailReceivingService.js";
 import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
+import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -47,6 +48,30 @@ router.put("/revenue-bridge", requireRole("owner", "admin"), (req: AuthRequest, 
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const enabled = RetailRevenueBridgeService.setEnabled(orgId, !!req.body?.enabled);
   res.json({ ok: true, enabled });
+});
+
+// --- Memória de Padrões do Varejo (ADR-142 Fatia 1): estado + lista + passe ---
+router.get("/patterns", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: RetailPatternMemoryService.isEnabled(orgId), patterns: RetailPatternMemoryService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }) });
+});
+
+router.put("/patterns/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ok: true, enabled: RetailPatternMemoryService.setEnabled(orgId, !!req.body?.enabled) });
+});
+
+router.post("/patterns/learn", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = await RetailPatternMemoryService.learnPass(orgId, { asOf: req.body?.asOf });
+    res.json({ ok: true, ...result, patterns: RetailPatternMemoryService.list(orgId) });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || "Falha ao rodar o aprendizado de padrões." });
+  }
 });
 
 // --- Recebimento de mercadoria / pré-estoque (ADR-086) ---

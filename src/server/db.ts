@@ -1913,6 +1913,39 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_business_pattern_type_stats
         ON business_pattern_type_stats (organization_id, domain, pattern_type);
 
+      -- CONTROLER (PRD-E-007, Fatia 1a): fundação de Departamentos e Centros de
+      -- Custo. Aditivo e opt-in — não altera nenhum fluxo existente. Todo o
+      -- consumo/custo futuro pendura nessas dimensões. Isolado por organização.
+      CREATE TABLE IF NOT EXISTS business_departments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,                              -- código curto opcional (único por org quando informado)
+        manager_user_id TEXT,                   -- gestor responsável (users.id)
+        parent_department_id TEXT,              -- hierarquia (NULL = raiz)
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_business_departments_org ON business_departments(organization_id, active);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_business_departments_code ON business_departments(organization_id, code) WHERE code IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS cost_centers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,                              -- código curto opcional (único por org quando informado)
+        department_id TEXT,                     -- vínculo opcional a um departamento
+        store_id TEXT,                          -- unidade/loja opcional
+        budget_owner_user_id TEXT,              -- dono do orçamento (users.id)
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_cost_centers_org ON cost_centers(organization_id, active);
+      CREATE INDEX IF NOT EXISTS idx_cost_centers_dept ON cost_centers(organization_id, department_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_centers_code ON cost_centers(organization_id, code) WHERE code IS NOT NULL;
+
       -- Loja Virtual → PDV (ADR-143 Fase 0). Reserva e-commerce por loja/produto:
       -- a loja virtual vende SÓ desta reserva (Saldo Alterdata − buffer) → nunca
       -- vende o que não tem (sem oversell). Absoluto por (org, loja, produto, variante).

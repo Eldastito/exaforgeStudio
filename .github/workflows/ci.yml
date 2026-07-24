@@ -114,6 +114,7 @@ jobs:
           - { name: 'inventory-patterns', script: 'test:inventory-patterns' }
           - { name: 'agenda-sales-patterns', script: 'test:agenda-sales-patterns' }
           - { name: 'executive-effectiveness', script: 'test:executive-effectiveness' }
+          - { name: 'controler-foundation', script: 'test:controler-foundation' }
           - { name: 'order-seller-attribution', script: 'test:order-seller-attribution' }
           - { name: 'storefront-seller-attribution', script: 'test:storefront-seller-attribution' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }

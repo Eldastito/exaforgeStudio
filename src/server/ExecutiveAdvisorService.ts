@@ -4,6 +4,7 @@ import { BusinessContextService } from "./BusinessContextService.js";
 import { RevenueAuditService } from "./RevenueAuditService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
+import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -29,7 +30,21 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId);
+    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.retailSignalsBlock(orgId);
+  }
+
+  /**
+   * Sinais ABERTOS das operações de varejo (ADR-136) para o Diretor narrar e
+   * sugerir — reserva esgotada, ruptura, sem giro, concentração, etc. Fatos do
+   * ledger de sinais; NUNCA inventar número.
+   */
+  static retailSignalsBlock(orgId: string): string {
+    try {
+      const sigs = RetailOpsSignalPublisher.topOpenSignals(orgId, 6);
+      if (!sigs.length) return "";
+      const lines = sigs.map((s) => `- [${s.severity}] ${RetailOpsSignalPublisher.describe(s)}${s.impactUnit === "BRL" && s.impactAmount ? ` (impacto R$ ${s.impactAmount})` : ""}`);
+      return `\n\n=== SINAIS DA OPERAÇÃO DA LOJA (fatos; use como contexto, não invente número) ===\n${lines.join("\n")}`;
+    } catch { return ""; }
   }
 
   /**

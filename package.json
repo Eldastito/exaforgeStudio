@@ -231,7 +231,8 @@
     "test:production-bom": "tsx scripts/test-production-bom.ts",
     "test:production-orders": "tsx scripts/test-production-orders.ts",
     "test:production-shopfloor": "tsx scripts/test-production-shopfloor.ts",
-    "test:production-signals": "tsx scripts/test-production-signals.ts"
+    "test:production-signals": "tsx scripts/test-production-signals.ts",
+    "test:retail-insights-briefing": "tsx scripts/test-retail-insights-briefing.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

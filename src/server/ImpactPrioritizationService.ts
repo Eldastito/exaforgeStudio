@@ -54,6 +54,9 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   producao_atrasada_recorrente: { actionType: "create_task", label: "Atacar o gargalo de produção (capacidade/material)" },
   fornecedor_divergencia_recorrente: { actionType: "create_task", label: "Cobrar o fornecedor e reforçar a conferência" },
   fornecedor_atraso_recorrente: { actionType: "prepare_purchase", label: "Renegociar prazo ou buscar fornecedor alternativo" },
+  cliente_pagamento_atrasado_recorrente: { actionType: "collection", label: "Rever prazo/limite do cliente que atrasa" },
+  categoria_despesa_estoura_recorrente: { actionType: "create_task", label: "Revisar e cortar a categoria de despesa em alta" },
+  vendedor_queda_recorrente: { actionType: "create_task", label: "Apoiar o vendedor em queda (meta/coaching)" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
+import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
 
 export type OrderStatus =
   | "aguardando_pagamento" | "pago" | "em_preparo" | "entregue"
@@ -33,7 +34,7 @@ export class OrdersService {
   static createOrder(orgId: string, params: {
     contactId?: string; ticketId?: string; items: NewOrderItem[];
     createdBy?: string; autoClose?: boolean; notes?: string;
-    discountPercent?: number; couponId?: string;
+    discountPercent?: number; couponId?: string; storeId?: string;
   }): { id: string; status: OrderStatus; total: number; items: any[]; discount: number } {
     const items = (params.items || []).filter(i => i && i.quantity > 0);
     if (items.length === 0) throw new Error("Pedido sem itens.");
@@ -85,9 +86,9 @@ export class OrdersService {
       const finalTotal = Math.max(0, Math.round((total - discount) * 100) / 100);
 
       db.prepare(`
-        INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_id, created_by, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null);
+        INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_id, created_by, notes, store_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null, params.storeId || null);
 
       const insItem = db.prepare(`
         INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, unit_cost, quantity, line_total, stock_committed)
@@ -95,6 +96,20 @@ export class OrdersService {
       `);
       for (const r of resolved) {
         insItem.run(r.id, orderId, orgId, r.product_service_id, r.variant_id || null, r.name_snapshot, r.unit_price, r.unit_cost || 0, r.quantity, r.line_total, r.stock_committed);
+      }
+
+      // Loja Virtual → PDV (ADR-143 Fase 0): pedido de uma FILIAL vende da reserva
+      // e-commerce e registra a baixa pendente. Reserva insuficiente BLOQUEIA a
+      // venda (sem oversell) — o throw desfaz a transação inteira. Opt-in.
+      if (params.storeId && RetailOnlineReserveService.isEnabled(orgId)) {
+        const r = RetailOnlineReserveService.recordSale(orgId, {
+          orderId, storeId: params.storeId,
+          items: resolved.filter((x) => x.product_service_id).map((x) => ({ productId: x.product_service_id, variantId: x.variant_id, qty: x.quantity })),
+        }, params.createdBy);
+        if (r.ok === false) {
+          const names = (r.blocked || []).map((b) => resolved.find((x) => x.product_service_id === b.productId)?.name_snapshot || b.productId).join(", ");
+          throw new Error(`Estoque online insuficiente na loja para: ${names}.`);
+        }
       }
 
       return { total: finalTotal, discount, resolved };

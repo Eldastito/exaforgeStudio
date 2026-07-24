@@ -919,6 +919,12 @@ const initDb = () => {
   // (observar→hipotetizar→verificar→lembrar). OPT-IN por organização (default
   // off). Ver RetailPatternMemoryService.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_pattern_memory INTEGER DEFAULT 0`); } catch(e){}
+  // Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixa pendente +
+  // reconciliação anti-clobber no sync. OPT-IN por organização (default off).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN online_store_reserve INTEGER DEFAULT 0`); } catch(e){}
+  // store_id no pedido (ADR-143 D2): pedido nativo passa a poder pertencer a uma
+  // filial (loja virtual multi-loja). NULL = org (comportamento atual).
+  try { db.exec(`ALTER TABLE orders ADD COLUMN store_id TEXT`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,
@@ -1845,6 +1851,42 @@ const initDb = () => {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_pattern_type_stats
         ON retail_pattern_type_stats (organization_id, pattern_type);
+
+      -- Loja Virtual → PDV (ADR-143 Fase 0). Reserva e-commerce por loja/produto:
+      -- a loja virtual vende SÓ desta reserva (Saldo Alterdata − buffer) → nunca
+      -- vende o que não tem (sem oversell). Absoluto por (org, loja, produto, variante).
+      CREATE TABLE IF NOT EXISTS retail_online_reserve (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT NOT NULL DEFAULT '',
+        qty_reserved INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_online_reserve
+        ON retail_online_reserve (organization_id, store_id, product_service_id, variant_id);
+
+      -- Baixa pendente (ADR-143 Fase 0/D3): cada item de venda online vira uma
+      -- baixa a lançar no PDV. A reconciliação re-aplica as pendentes na
+      -- sobrescrita do Saldo (a venda online para de sumir). status: pending →
+      -- (Fase 1) sent → confirmed | failed. Idempotente por (org, order, item).
+      CREATE TABLE IF NOT EXISTS retail_online_writeback (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT NOT NULL DEFAULT '',
+        qty INTEGER NOT NULL,
+        status TEXT DEFAULT 'pending',         -- pending | sent | confirmed | failed
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_online_writeback_item
+        ON retail_online_writeback (organization_id, order_id, product_service_id, variant_id);
+      CREATE INDEX IF NOT EXISTS idx_retail_online_writeback_pending
+        ON retail_online_writeback (organization_id, store_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase F', e); }
 

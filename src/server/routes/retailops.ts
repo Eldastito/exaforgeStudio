@@ -26,6 +26,7 @@ import { RetailScanService } from "../RetailScanService.js";
 import { RetailReceivingService } from "../RetailReceivingService.js";
 import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
+import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -68,6 +69,45 @@ router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRe
   const r = RetailPatternMemoryService.recordOutcome(orgId, req.params.id, { outcome: req.body?.outcome, realizedImpact: req.body?.realizedImpact, note: req.body?.note }, (req as any).userId);
   if (!r.ok) return res.status(400).json(r);
   res.json({ ...r, patterns: RetailPatternMemoryService.list(orgId), typeStats: RetailPatternMemoryService.allTypeStats(orgId) });
+});
+
+// --- Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixas pendentes ---
+router.get("/online-reserve", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({
+    enabled: RetailOnlineReserveService.isEnabled(orgId),
+    reserves: RetailOnlineReserveService.listReserves(orgId, req.query.storeId ? String(req.query.storeId) : undefined),
+    pending: RetailOnlineReserveService.listPending(orgId, { storeId: req.query.storeId ? String(req.query.storeId) : undefined }),
+  });
+});
+
+router.put("/online-reserve/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ok: true, enabled: RetailOnlineReserveService.setEnabled(orgId, !!req.body?.enabled) });
+});
+
+// Define a reserva e-commerce de um produto/variante numa loja.
+router.put("/online-reserve/item", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (!b.storeId || !b.productId) return res.status(400).json({ error: "storeId e productId são obrigatórios." });
+  const r = RetailOnlineReserveService.setReserve(orgId, String(b.storeId), String(b.productId), b.variantId ?? null, Number(b.qty || 0), (req as any).userId);
+  res.json({ ok: true, reserve: r, available: RetailOnlineReserveService.available(orgId, String(b.storeId), String(b.productId), b.variantId ?? null) });
+});
+
+// Confirma a baixa (operador lançou no PDV) — por pedido ou por item.
+router.post("/online-reserve/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const r = b.orderId ? RetailOnlineReserveService.confirmByOrder(orgId, String(b.orderId), (req as any).userId)
+          : b.id ? RetailOnlineReserveService.confirmItem(orgId, String(b.id), (req as any).userId)
+          : null;
+  if (!r) return res.status(400).json({ error: "Informe orderId ou id." });
+  res.json({ ok: true, ...r, pending: RetailOnlineReserveService.listPending(orgId) });
 });
 
 router.put("/patterns/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

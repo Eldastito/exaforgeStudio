@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -124,7 +124,7 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe' | 'padroes';
+type RetailTab = 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
@@ -132,6 +132,7 @@ const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
   { key: 'equipe', label: 'Equipe & cobrança', icon: Users },
   { key: 'padroes', label: 'Padrões (IA)', icon: Sparkles },
+  { key: 'lojavirtual', label: 'Loja virtual → PDV', icon: Globe },
 ];
 
 const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
@@ -161,6 +162,97 @@ export function RetailOpsView() {
       {tab === 'estoque' && <NegativeStockTab />}
       {tab === 'equipe' && <ResponsiblesTab />}
       {tab === 'padroes' && <PatternsTab />}
+      {tab === 'lojavirtual' && <OnlineReserveTab />}
+    </div>
+  );
+}
+
+// ---- Loja virtual → PDV: baixas pendentes (ADR-143 Fase 0) -------------------
+function OnlineReserveTab() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [reserves, setReserves] = useState<any[]>([]);
+  const [pending, setPending] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const d = await apiFetch('/api/retailops/online-reserve').then(r => r.json()).catch(() => ({}));
+      setEnabled(!!d?.enabled);
+      setReserves(Array.isArray(d?.reserves) ? d.reserves : []);
+      setPending(Array.isArray(d?.pending) ? d.pending : []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = async () => {
+    const res = await apiFetch('/api/retailops/online-reserve/flag', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { setEnabled(!!d.enabled); toast.success(d.enabled ? 'Loja virtual → PDV ligada.' : 'Desligada.'); }
+    else toast.error(d.error || 'Falha ao alterar.');
+  };
+  const confirm = async (row: any) => {
+    const res = await apiFetch('/api/retailops/online-reserve/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: row.id }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success('Baixa confirmada — lançada no PDV.'); setPending(Array.isArray(d.pending) ? d.pending : pending.filter(p => p.id !== row.id)); load(); }
+    else toast.error(d.error || 'Falha ao confirmar.');
+  };
+
+  if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
+        <p className="text-sm text-zinc-400 max-w-2xl">A loja virtual vende de uma reserva por loja (sem vender o que não tem). Cada venda online gera uma <b>baixa a lançar no PDV</b> — confirme aqui depois de lançar, para o estoque não descontar duas vezes.</p>
+        <button onClick={toggle} className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${enabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} /> {enabled ? 'ligada' : 'desligada'}
+        </button>
+      </div>
+
+      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Baixas pendentes no PDV ({pending.length})</h3>
+      {pending.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">Nenhuma baixa pendente. Vendas online aparecem aqui para você lançar no PDV.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">Loja</th>
+              <th className="px-3 py-2 text-left font-medium">Produto</th>
+              <th className="px-3 py-2 text-right font-medium">Qtd</th>
+              <th className="px-3 py-2 text-left font-medium">Pedido</th>
+              <th className="px-3 py-2 text-right font-medium">Ação</th>
+            </tr></thead>
+            <tbody>
+              {pending.map((p) => (
+                <tr key={p.id} className="border-t border-zinc-800/60">
+                  <td className="px-3 py-2 text-zinc-300">{p.store_name || p.store_id}</td>
+                  <td className="px-3 py-2 text-zinc-200">{p.product_name || p.product_service_id}</td>
+                  <td className="px-3 py-2 text-right text-zinc-200">{p.qty}</td>
+                  <td className="px-3 py-2 font-mono text-[11px] text-zinc-500">{String(p.order_id).slice(0, 8)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button onClick={() => confirm(p)} className="inline-flex items-center gap-1 rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10"><Check className="w-3 h-3" /> Lancei no PDV</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mt-6 mb-2">Reserva e-commerce por loja ({reserves.length})</h3>
+      {reserves.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-[12px] text-zinc-600">Nenhuma reserva definida. Defina quanto de cada produto a loja virtual pode vender por loja (via API <span className="font-mono">/online-reserve/item</span> — editor visual na próxima fatia).</div>
+      ) : (
+        <div className="space-y-1">
+          {reserves.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 text-sm rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-1.5">
+              <span className="text-zinc-500 font-mono text-[11px]">{String(r.store_id).slice(0, 8)}</span>
+              <span className="text-zinc-300">{String(r.product_service_id).slice(0, 8)}</span>
+              <span className="ml-auto text-zinc-400">reserva {r.qty_reserved}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

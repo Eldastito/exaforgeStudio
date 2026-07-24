@@ -12,6 +12,7 @@
  */
 import db from "./db.js";
 import { RetailInventoryService } from "./RetailInventoryService.js";
+import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
 
 export interface SaldoMapResult { applied: number; skippedNoStore: number; skippedNoProduct: number; }
 
@@ -32,7 +33,13 @@ export class AlterdataStockMapper {
       const target = this.resolveProduct(orgId, produto);
       if (!target) { res.skippedNoProduct++; continue; }
 
-      const qty = Math.trunc(Number(s?.saldoAtual ?? 0));
+      // Anti-clobber (ADR-143 D3): quando a reserva online está ligada, desconta
+      // do saldo do ERP as vendas online ainda não lançadas no PDV — assim a
+      // sobrescrita absoluta não apaga a venda da loja virtual.
+      let qty = Math.trunc(Number(s?.saldoAtual ?? 0));
+      if (RetailOnlineReserveService.isEnabled(orgId)) {
+        qty = RetailOnlineReserveService.netStoreQty(orgId, storeId, target.productId, target.variantId, qty);
+      }
       RetailInventoryService.setQuantity(orgId, storeId, target.productId, target.variantId, qty, 0, "alterdata");
       res.applied++;
     }

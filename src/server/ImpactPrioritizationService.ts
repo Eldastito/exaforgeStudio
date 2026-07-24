@@ -64,6 +64,11 @@ const round4 = (n: number) => Math.round((Number(n) || 0) * 10000) / 10000;
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
 export class ImpactPrioritizationService {
+  /** Ação recomendada para um tipo de sinal (rótulo + action_type), com default. */
+  static actionFor(signalType: string): { actionType: string; label: string } {
+    return ACTION_MAP[signalType] || { actionType: "create_task", label: "Registrar e acompanhar" };
+  }
+
   /**
    * Calcula as prioridades a partir dos sinais ABERTOS. Retorna `{ global, byDomain }`.
    * `global` = até 3 no total; `byDomain` = até 3 por domínio.

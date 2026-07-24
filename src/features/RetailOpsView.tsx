@@ -41,6 +41,18 @@ function InsightsTab() {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [acted, setActed] = useState<Record<string, string>>({});
+
+  const act = async (p: any) => {
+    if (!p?.signalId) return;
+    const res = await apiFetch('/api/retailops/insights/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signalId: p.signalId }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d.ok) {
+      const st = d.action?.status;
+      setActed(prev => ({ ...prev, [p.signalId]: st }));
+      toast.success(st === 'approved' ? 'Ação criada e aprovada.' : 'Ação criada — aguardando aprovação.');
+    } else toast.error(d.error || 'Falha ao criar a ação.');
+  };
 
   const load = async () => {
     setLoading(true);
@@ -89,9 +101,12 @@ function InsightsTab() {
                 <span className="text-[11px] text-zinc-500">· {p.dueHint}</span>
               </div>
               <p className="mt-1 text-sm text-zinc-200">{p.interpretation || p.fact}</p>
-              <div className="mt-1.5 flex items-center gap-2 text-[12px]">
+              <div className="mt-1.5 flex items-center gap-2 text-[12px] flex-wrap">
                 <span className="text-zinc-500">Sugestão:</span>
                 <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-indigo-200">{p.recommendedAction}</span>
+                {p.signalId && (acted[p.signalId]
+                  ? <span className="inline-flex items-center gap-1 text-emerald-300"><Check className="w-3.5 h-3.5" /> {acted[p.signalId] === 'approved' ? 'ação criada' : 'ação criada (aguarda aprovação)'}</span>
+                  : <button onClick={() => act(p)} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">Agir</button>)}
               </div>
             </div>
           ))}

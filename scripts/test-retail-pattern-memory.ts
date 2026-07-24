@@ -153,7 +153,25 @@ async function main() {
   const rb = await RetailPatternMemoryService.learnPass(B, { asOf: ASOF });
   check("isolamento: org B sem dados → 0 padrões", rb.detected === 0 && RetailPatternMemoryService.list(B).length === 0);
 
+  // ===== 7. Novos detectores: meta não batida + fechamento atrasado =====
   __setRetailPatternHypothesizerForTests(null);
+  const F = `org_F_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'F', 'active')`).run(randomUUID(), F);
+  const storeF = RetailStoreService.create(F, { name: "Loja F", code: "7" });
+  const nextDay = (d: string): string => { const dt = new Date(`${d}T00:00:00Z`); dt.setUTCDate(dt.getUTCDate() + 1); return dt.toISOString().slice(0, 10); };
+  const mkF = (date: string, variance: number, late: boolean) =>
+    db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, quota_amount, variance_amount, submitted_at) VALUES (?, ?, ?, ?, 'approved', 1000, ?, ?)`)
+      .run(randomUUID(), F, storeF.id, date, variance, late ? `${nextDay(date)} 10:00:00` : `${date} 12:00:00`);
+  for (const d of ["2026-07-01", "2026-07-08", "2026-07-15", "2026-07-22", "2026-06-24"]) mkF(d, -100, true);  // abaixo da meta + atrasado
+  for (const d of ["2026-06-03", "2026-06-10", "2026-06-17"]) mkF(d, 50, false);                               // acima + no prazo
+  RetailPatternMemoryService.setEnabled(F, true);
+  await RetailPatternMemoryService.learnPass(F, { asOf: ASOF });
+  const meta = db.prepare(`SELECT * FROM retail_store_patterns WHERE organization_id=? AND pattern_type='meta_nao_batida_recorrente'`).get(F) as any;
+  check("meta não batida: 5/8 → validado, confiança 0,63", meta && meta.status === "validated" && Number(meta.confidence) === 0.63, JSON.stringify(meta));
+  const late = db.prepare(`SELECT * FROM retail_store_patterns WHERE organization_id=? AND pattern_type='fechamento_atrasado_recorrente'`).get(F) as any;
+  check("fechamento atrasado: 5/8 → validado", late && late.status === "validated" && Number(late.confidence) === 0.63, JSON.stringify(late));
+  check("novos padrões viram sinais retail_ops", !!db.prepare(`SELECT id FROM business_signals WHERE organization_id=? AND signal_type='meta_nao_batida_recorrente' AND status='open'`).get(F));
+
   console.log("\n=== Memória de Padrões do Varejo (ADR-142 Fatia 1) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);

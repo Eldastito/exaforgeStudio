@@ -586,7 +586,7 @@ function CommissionTab() {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
-  const [ruleForm, setRuleForm] = useState<null | { name: string; scope: string; calculationType: string; percent: string; amount: string; bonus: string }>(null);
+  const [ruleForm, setRuleForm] = useState<null | { name: string; scope: string; calculationType: string; percent: string; amount: string; bonus: string; quota: string }>(null);
   const [savingRule, setSavingRule] = useState(false);
   const firstOfMonth = todayStr().slice(0, 8) + '01';
   const [start, setStart] = useState(firstOfMonth);
@@ -631,7 +631,7 @@ function CommissionTab() {
     let config: any = {};
     if (ruleForm.calculationType === 'percent_sales') config = { percent: Number(ruleForm.percent) || 0 };
     else if (ruleForm.calculationType === 'fixed') config = { amount: Number(ruleForm.amount) || 0 };
-    else if (ruleForm.calculationType === 'quota_bonus') config = { bonus: Number(ruleForm.bonus) || 0 };
+    else if (ruleForm.calculationType === 'quota_bonus') config = { bonus: Number(ruleForm.bonus) || 0, quota: Number(ruleForm.quota) || 0 };
     setSavingRule(true);
     try {
       const res = await apiFetch('/api/retailops/commission/rules', {
@@ -664,7 +664,7 @@ function CommissionTab() {
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-indigo-400" /> Regras de comissão</div>
           <div className="flex items-center gap-2">
             <NewStoreButton onCreated={load} />
-            <button onClick={() => setRuleForm({ name: '', scope: 'store', calculationType: 'percent_sales', percent: '5', amount: '', bonus: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20">
+            <button onClick={() => setRuleForm({ name: '', scope: 'store', calculationType: 'percent_sales', percent: '5', amount: '', bonus: '', quota: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20">
               <Plus className="w-3.5 h-3.5" /> Nova regra
             </button>
           </div>
@@ -677,7 +677,7 @@ function CommissionTab() {
             {rules.map(r => (
               <div key={r.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm text-zinc-100">{r.name} <span className="text-zinc-500">· {r.scope === 'global' ? 'rede toda' : 'por loja'}</span></div>
+                  <div className="truncate text-sm text-zinc-100">{r.name} <span className="text-zinc-500">· {r.scope === 'global' ? 'rede toda' : r.scope === 'seller' ? 'por vendedor' : r.scope === 'product' ? 'por produto' : 'por loja'}</span></div>
                   <div className="text-[11px] text-indigo-300">{ruleSummary(r)}</div>
                 </div>
                 <button onClick={() => toggleRule(r)} className={`ml-3 shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${r.active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400'}`}>{r.active ? 'Ativa' : 'Inativa'}</button>
@@ -700,9 +700,12 @@ function CommissionTab() {
               </label>
               <label className="block text-xs text-zinc-400">Aplica-se a
                 <select value={ruleForm.scope} onChange={e => setRuleForm({ ...ruleForm, scope: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
-                  <option value="store">Cada loja</option>
-                  <option value="global">A rede toda</option>
+                  <option value="store">Cada loja (fechamentos)</option>
+                  <option value="global">A rede toda (fechamentos)</option>
+                  <option value="seller">Cada vendedor (vendas do ZappFlow)</option>
+                  <option value="product">Cada produto (vendas do ZappFlow)</option>
                 </select>
+                {(ruleForm.scope === 'seller' || ruleForm.scope === 'product') && <span className="mt-1 block text-[11px] text-zinc-500">Apura sobre as vendas feitas pelo ZappFlow (WhatsApp/loja virtual). Vendas do balcão físico entram por loja.</span>}
               </label>
               <label className="block text-xs text-zinc-400">Como calcular
                 <select value={ruleForm.calculationType} onChange={e => setRuleForm({ ...ruleForm, calculationType: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
@@ -718,10 +721,18 @@ function CommissionTab() {
                 </label>
               )}
               {ruleForm.calculationType === 'quota_bonus' && (
-                <label className="block text-xs text-zinc-400">Bônus (R$)
-                  <input type="number" step="0.01" min="0" value={ruleForm.bonus} onChange={e => setRuleForm({ ...ruleForm, bonus: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
-                  <span className="mt-1 block text-[11px] text-zinc-500">Pago só quando as vendas do período atingem a meta (cota).</span>
-                </label>
+                <>
+                  <label className="block text-xs text-zinc-400">Bônus (R$)
+                    <input type="number" step="0.01" min="0" value={ruleForm.bonus} onChange={e => setRuleForm({ ...ruleForm, bonus: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+                    <span className="mt-1 block text-[11px] text-zinc-500">Pago só quando as vendas do período atingem a meta (cota).</span>
+                  </label>
+                  {(ruleForm.scope === 'seller' || ruleForm.scope === 'product') && (
+                    <label className="block text-xs text-zinc-400">Meta (R$) do vendedor/produto
+                      <input type="number" step="0.01" min="0" value={ruleForm.quota} onChange={e => setRuleForm({ ...ruleForm, quota: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+                      <span className="mt-1 block text-[11px] text-zinc-500">Por loja a meta vem das cotas diárias; por vendedor/produto, defina aqui.</span>
+                    </label>
+                  )}
+                </>
               )}
               {ruleForm.calculationType === 'fixed' && (
                 <label className="block text-xs text-zinc-400">Valor fixo (R$)

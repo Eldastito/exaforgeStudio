@@ -91,6 +91,7 @@
     "test:security-hardening": "tsx scripts/test-security-hardening.ts",
     "test:retail-stock": "tsx scripts/test-retail-stock.ts",
     "test:retail-commission": "tsx scripts/test-retail-commission.ts",
+    "test:retail-commission-seller-product": "tsx scripts/test-retail-commission-seller-product.ts",
     "test:retail-dashboard": "tsx scripts/test-retail-dashboard.ts",
     "test:retail-decouple": "tsx scripts/test-retail-decouple.ts",
     "test:retail-activation": "tsx scripts/test-retail-activation.ts",

@@ -51,6 +51,7 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   retail_reserve_low: { actionType: "create_task", label: "Reabastecer a reserva antes de esgotar" },
   retail_store_stockout: { actionType: "create_task", label: "Repor o estoque da loja (rupturas ativas)" },
   retail_seller_concentration: { actionType: "create_task", label: "Distribuir vendas / formar mais vendedores" },
+  producao_atrasada_recorrente: { actionType: "create_task", label: "Atacar o gargalo de produção (capacidade/material)" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

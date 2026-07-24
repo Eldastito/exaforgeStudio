@@ -68,6 +68,17 @@ async function main() {
   const noGiroAfter = db.prepare(`SELECT status FROM business_signals WHERE organization_id=? AND signal_type='retail_product_no_online_sales'`).get(A) as any;
   check("sinal sem-giro segue aberto (condição ainda vale)", noGiroAfter?.status === "open");
 
+  // ===== 3a2. Reserva baixa (alerta antecipado) + ruptura ativa por loja =====
+  const PL = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, stock_control_enabled) VALUES (?, ?, 'product', 'PL', 100, 1, 0)`).run(PL, A);
+  RetailOnlineReserveService.setReserve(A, store.id, PL, null, 10);
+  OrdersService.createOrder(A, { items: [{ productId: PL, name: "PL", unitPrice: 0, quantity: 9 }], storeId: store.id, autoClose: true }); // available 1 (≤20%)
+  for (const pid of [randomUUID(), randomUUID(), randomUUID()]) db.prepare(`INSERT INTO retail_stock_alerts (id, organization_id, store_id, product_service_id, alert_type, quantity, status) VALUES (?, ?, ?, ?, 'negative_stock', -2, 'open')`).run(randomUUID(), A, store.id, pid);
+  RetailOpsSignalPublisher.run(A, { asOf: today, windowDays: 3650 });
+  check("reserva baixa (1 de 10) → retail_reserve_low", !!db.prepare(`SELECT id FROM business_signals WHERE organization_id=? AND signal_type='retail_reserve_low' AND status='open'`).get(A));
+  const stockout = db.prepare(`SELECT domain, severity, impact_amount FROM business_signals WHERE organization_id=? AND signal_type='retail_store_stockout' AND status='open'`).get(A) as any;
+  check("3 rupturas na loja → retail_store_stockout (inventory/risco, impacto 3)", stockout && stockout.domain === "inventory" && stockout.severity === "risk" && Number(stockout.impact_amount) === 3, JSON.stringify(stockout));
+
   // ===== 3b. Novos sinais: concentração, backlog, vendedor abaixo da meta =====
   const C = `org_C_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'C', 'active')`).run(randomUUID(), C);

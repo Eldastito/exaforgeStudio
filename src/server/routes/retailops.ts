@@ -29,6 +29,8 @@ import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
+import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
+import { BusinessSignalService } from "../BusinessSignalService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -78,6 +80,19 @@ router.post("/signals/refresh", requireRole("owner", "admin"), (req: AuthRequest
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: true, ...RetailOpsSignalPublisher.run(orgId, { asOf: req.body?.asOf }) });
+});
+
+// Insights consolidados da loja: prioridades (o que atacar), padrões aprendidos
+// e sinais abertos por severidade. Só leitura — reusa o Pareto e a memória.
+router.get("/insights", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const priorities = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 8 })?.global || [];
+  const patterns = RetailPatternMemoryService.list(orgId, { status: "validated" });
+  const open = BusinessSignalService.list(orgId, { status: "open" });
+  const bySeverity: Record<string, number> = { critical: 0, risk: 0, attention: 0, info: 0 };
+  for (const s of open) bySeverity[s.severity] = (bySeverity[s.severity] || 0) + 1;
+  res.json({ priorities, patterns, openCount: open.length, bySeverity });
 });
 
 // --- Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixas pendentes ---

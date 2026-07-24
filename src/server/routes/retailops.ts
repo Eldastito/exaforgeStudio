@@ -31,6 +31,7 @@ import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
+import { DecisionActionService } from "../DecisionActionService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -93,6 +94,29 @@ router.get("/insights", (req: AuthRequest, res): any => {
   const bySeverity: Record<string, number> = { critical: 0, risk: 0, attention: 0, info: 0 };
   for (const s of open) bySeverity[s.severity] = (bySeverity[s.severity] || 0) + 1;
   res.json({ priorities, patterns, openCount: open.length, bySeverity });
+});
+
+// Age a partir de um insight: propõe a AÇÃO recomendada do sinal (kernel C2).
+// A política de aprovação decide se já nasce aprovada ou aguardando (nada
+// executa sozinho). Retorna a ação criada.
+router.post("/insights/act", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const signalId = String(req.body?.signalId || "");
+  const sig = db.prepare("SELECT * FROM business_signals WHERE organization_id = ? AND id = ? AND status = 'open'").get(orgId, signalId) as any;
+  if (!sig) return res.status(404).json({ error: "Sinal não encontrado ou já resolvido." });
+  const action = ImpactPrioritizationService.actionFor(sig.signal_type);
+  try {
+    const proposed = DecisionActionService.propose(orgId, {
+      signalId: sig.id, domain: sig.domain, actionType: action.actionType, title: action.label,
+      description: `Ação a partir do sinal ${sig.signal_type}.`,
+      expectedImpact: sig.impact_amount != null ? Number(sig.impact_amount) : null, impactUnit: sig.impact_unit || null,
+      basis: sig.basis || "estimate", confidence: Number(sig.confidence) || 0.7, createdBy: (req as any).userId || "user",
+    });
+    res.status(201).json({ ok: true, action: proposed });
+  } catch (e: any) {
+    res.status(400).json({ ok: false, error: e?.message || "Falha ao criar a ação." });
+  }
 });
 
 // --- Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixas pendentes ---

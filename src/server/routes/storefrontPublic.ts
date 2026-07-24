@@ -9,6 +9,7 @@ import { ensureProductSlug } from "../productSlug.js";
 import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionLookService } from "../FashionLookService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
+import { OrdersService } from "../OrdersService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -401,11 +402,18 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     // loja — sem oversell — e registra a baixa pendente no PDV. store_id no pedido.
     const onlineStoreId = RetailOnlineReserveService.isEnabled(orgId) ? RetailOnlineReserveService.getOnlineStoreId(orgId) : null;
 
+    // Vendedor da venda por LINK (comissão): herda o dono da conversa
+    // (tickets.assigned_to via o ticket do link); se a conversa não tem dono
+    // (venda 100% IA), cai no VENDEDOR PADRÃO da loja online (se o dono definiu).
+    // Sem os dois → sem vendedor (decisão do dono: venda IA não comissiona).
+    const sellerUserId = OrdersService.resolveSeller(orgId, undefined, ticketId)
+      || OrdersService.resolveSeller(orgId, RetailOnlineReserveService.getDefaultOnlineSeller(orgId), null);
+
     const tx = db.transaction(() => {
       db.prepare(
-        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id, store_id)
-         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?, ?)`
-      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId, onlineStoreId);
+        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id, store_id, seller_user_id)
+         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?, ?, ?)`
+      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId, onlineStoreId, sellerUserId);
       if (fashionLookId) {
         FashionStudioService.recordEvent(orgId, "FashionOrderPlaced", { orderId, total }, null, fashionLookId);
       }

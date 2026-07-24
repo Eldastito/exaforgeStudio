@@ -574,11 +574,17 @@ export class AIOrchestratorService {
       ).get(orgId) as any;
       if (!store || !store.published || !store.slug) return null;
 
+      // Vincula o link ao TICKET aberto do contato (a conversa atual) — assim a
+      // compra feita na vitrine herda o dono da conversa p/ a comissão por
+      // vendedor (ADR-083 Fase G). Sem contato/ticket → só o contato.
+      const ticket = contactId
+        ? (db.prepare("SELECT id FROM tickets WHERE contact_id = ? AND organization_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1").get(contactId, orgId) as any)
+        : null;
       const token = uuidv4().replace(/-/g, '').slice(0, 16);
       db.prepare(
         `INSERT INTO storefront_links (token, organization_id, contact_id, ticket_id, expires_at)
-         VALUES (?, ?, ?, NULL, datetime('now', '+30 days'))`
-      ).run(token, orgId, contactId || null);
+         VALUES (?, ?, ?, ?, datetime('now', '+30 days'))`
+      ).run(token, orgId, contactId || null, ticket?.id || null);
 
       const base = (process.env.APP_URL || process.env.CORS_ORIGIN || '').replace(/\/$/, '');
       const path = `/loja/${store.slug}?c=${token}`;

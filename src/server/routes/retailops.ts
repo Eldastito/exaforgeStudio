@@ -4,6 +4,7 @@
  * lojas. Fases seguintes acrescentam cotas, fechamentos, tarefas, etc.
  */
 import { Router } from "express";
+import db from "../db.js";
 import multer from "multer";
 import sharp from "sharp";
 import fs from "fs";
@@ -78,9 +79,18 @@ router.get("/online-reserve", (req: AuthRequest, res): any => {
   res.json({
     enabled: RetailOnlineReserveService.isEnabled(orgId),
     onlineStoreId: RetailOnlineReserveService.getOnlineStoreId(orgId),
+    defaultSellerUserId: RetailOnlineReserveService.getDefaultOnlineSeller(orgId),
+    users: db.prepare("SELECT id, name, email FROM users WHERE organization_id = ? AND global_status = 'active' ORDER BY name").all(orgId),
     reserves: RetailOnlineReserveService.listReserves(orgId, req.query.storeId ? String(req.query.storeId) : undefined),
     pending: RetailOnlineReserveService.listPending(orgId, { storeId: req.query.storeId ? String(req.query.storeId) : undefined }),
   });
+});
+
+// Vendedor padrão da loja online (comissão das vendas headless). "" = sem.
+router.put("/online-reserve/default-seller", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ok: true, defaultSellerUserId: RetailOnlineReserveService.setDefaultOnlineSeller(orgId, req.body?.userId || null) });
 });
 
 router.put("/online-reserve/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

@@ -87,6 +87,41 @@ export class RetailCommissionService {
     return Number((q as any)?.s || 0);
   }
 
+  // Vendas do ZappFlow (orders faturados) por VENDEDOR e por PRODUTO — base das
+  // comissões por vendedor/produto (as vendas do PDV físico só têm total/loja).
+  private static readonly FULFILLED = "('pago','em_preparo','entregue','concluido')";
+
+  /** Vendas faturadas por vendedor no período (só pedidos com seller_user_id). */
+  static onlineSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string; sellerName: string; sales: number }> {
+    const rows = db.prepare(
+      `SELECT o.seller_user_id AS sid, COALESCE(SUM(o.total_amount),0) AS s
+         FROM orders o
+        WHERE o.organization_id = ? AND o.seller_user_id IS NOT NULL
+          AND o.status IN ${this.FULFILLED} AND date(o.created_at) BETWEEN ? AND ?
+        GROUP BY o.seller_user_id`
+    ).all(orgId, start, end) as any[];
+    return rows.map((r) => ({ sellerUserId: String(r.sid), sellerName: this.sellerName(orgId, String(r.sid)), sales: Number(r.s) || 0 }));
+  }
+
+  /** Vendas faturadas por produto no período (itens dos pedidos faturados). */
+  static onlineSalesByProduct(orgId: string, start: string, end: string): Array<{ productId: string; productName: string; sales: number }> {
+    const rows = db.prepare(
+      `SELECT i.product_service_id AS pid, COALESCE(SUM(i.line_total),0) AS s, MAX(i.name_snapshot) AS nm
+         FROM order_items i JOIN orders o ON o.id = i.order_id
+        WHERE i.organization_id = ? AND i.product_service_id IS NOT NULL
+          AND o.status IN ${this.FULFILLED} AND date(o.created_at) BETWEEN ? AND ?
+        GROUP BY i.product_service_id`
+    ).all(orgId, start, end) as any[];
+    return rows.map((r) => ({ productId: String(r.pid), productName: this.productName(orgId, String(r.pid)) || String(r.nm || "produto"), sales: Number(r.s) || 0 }));
+  }
+
+  private static sellerName(orgId: string, userId: string): string {
+    try { const u = db.prepare(`SELECT name, email FROM users WHERE id = ? AND organization_id = ?`).get(userId, orgId) as any; return u?.name || u?.email || userId; } catch { return userId; }
+  }
+  private static productName(orgId: string, productId: string): string | null {
+    try { return (db.prepare(`SELECT name FROM products_services WHERE id = ? AND organization_id = ?`).get(productId, orgId) as any)?.name || null; } catch { return null; }
+  }
+
   /** Estimativa da premiação do período SEM persistir (card do dashboard). */
   static estimateTotal(orgId: string, periodStart: string, periodEnd: string): number {
     const rules = db.prepare(`SELECT * FROM retail_commission_rules WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
@@ -115,15 +150,31 @@ export class RetailCommissionService {
 
     for (const rule of rules) {
       const config = safeParse(rule.config_json);
+      // Cota para vendedor/produto vem da regra (config.quota) — não há cota
+      // diária por vendedor como há por loja.
+      const ruleQuota = Number(config?.quota || 0);
       if (rule.scope === "global") {
         const base = this.periodSales(orgId, null, periodStart, periodEnd);
         const quota = this.periodQuota(orgId, null, periodStart, periodEnd);
         const { amount, detail } = computeCommission(rule.calculation_type, config, base, quota);
         items.push({ storeId: null, sellerName: "GLOBAL", base, commission: amount, ruleId: rule.id, detail });
         totalCommission += amount;
+      } else if (rule.scope === "seller") {
+        // Comissão por VENDEDOR: base = vendas faturadas do ZappFlow por vendedor.
+        for (const sv of this.onlineSalesBySeller(orgId, periodStart, periodEnd)) {
+          const { amount, detail } = computeCommission(rule.calculation_type, config, sv.sales, ruleQuota);
+          items.push({ storeId: null, sellerUserId: sv.sellerUserId, sellerName: sv.sellerName, base: sv.sales, commission: amount, ruleId: rule.id, detail });
+          totalCommission += amount;
+        }
+      } else if (rule.scope === "product") {
+        // Comissão por PRODUTO: base = vendas faturadas do ZappFlow por produto.
+        for (const pv of this.onlineSalesByProduct(orgId, periodStart, periodEnd)) {
+          const { amount, detail } = computeCommission(rule.calculation_type, config, pv.sales, ruleQuota);
+          items.push({ storeId: null, productId: pv.productId, sellerName: pv.productName, base: pv.sales, commission: amount, ruleId: rule.id, detail });
+          totalCommission += amount;
+        }
       } else {
-        // store | seller | product → apurados por LOJA (vendedor/produto exigem
-        // atribuição por venda que ainda não temos; ficam a nível de loja).
+        // store (default): base = realizado da loja (fechamentos).
         for (const s of stores) {
           const base = this.periodSales(orgId, s.id, periodStart, periodEnd);
           const quota = this.periodQuota(orgId, s.id, periodStart, periodEnd);
@@ -138,8 +189,8 @@ export class RetailCommissionService {
     db.prepare(`INSERT INTO retail_commission_runs (id, organization_id, period_start, period_end, status, total_sales, total_commission, created_by) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)`)
       .run(runId, orgId, periodStart, periodEnd, totalSales, totalCommission, actorId || null);
     for (const it of items) {
-      db.prepare(`INSERT INTO retail_commission_items (id, organization_id, run_id, store_id, seller_name, base_amount, commission_amount, rule_id, calculation_details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(randomUUID(), orgId, runId, it.storeId, it.sellerName, it.base, it.commission, it.ruleId, JSON.stringify(it.detail));
+      db.prepare(`INSERT INTO retail_commission_items (id, organization_id, run_id, store_id, seller_user_id, seller_name, product_service_id, base_amount, commission_amount, rule_id, calculation_details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(randomUUID(), orgId, runId, it.storeId || null, it.sellerUserId || null, it.sellerName, it.productId || null, it.base, it.commission, it.ruleId, JSON.stringify(it.detail));
     }
     try { logAuthEvent(orgId, actorId || "system", runId, "RETAIL_COMMISSION_RUN_CREATED", { periodStart, periodEnd, totalCommission }); } catch { /* noop */ }
     return this.getRun(orgId, runId);

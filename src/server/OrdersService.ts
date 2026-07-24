@@ -34,7 +34,7 @@ export class OrdersService {
   static createOrder(orgId: string, params: {
     contactId?: string; ticketId?: string; items: NewOrderItem[];
     createdBy?: string; autoClose?: boolean; notes?: string;
-    discountPercent?: number; couponId?: string; storeId?: string;
+    discountPercent?: number; couponId?: string; storeId?: string; sellerUserId?: string;
   }): { id: string; status: OrderStatus; total: number; items: any[]; discount: number } {
     const items = (params.items || []).filter(i => i && i.quantity > 0);
     if (items.length === 0) throw new Error("Pedido sem itens.");
@@ -86,9 +86,9 @@ export class OrdersService {
       const finalTotal = Math.max(0, Math.round((total - discount) * 100) / 100);
 
       db.prepare(`
-        INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_id, created_by, notes, store_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null, params.storeId || null);
+        INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_id, created_by, notes, store_id, seller_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(orderId, orgId, params.contactId || null, params.ticketId || null, status, finalTotal, discount, params.couponId || null, params.createdBy || null, params.notes || null, params.storeId || null, params.sellerUserId || null);
 
       const insItem = db.prepare(`
         INSERT INTO order_items (id, order_id, organization_id, product_service_id, variant_id, name_snapshot, unit_price, unit_cost, quantity, line_total, stock_committed)

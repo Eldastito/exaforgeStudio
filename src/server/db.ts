@@ -928,6 +928,12 @@ const initDb = () => {
   // store_id no pedido (ADR-143 D2): pedido nativo passa a poder pertencer a uma
   // filial (loja virtual multi-loja). NULL = org (comportamento atual).
   try { db.exec(`ALTER TABLE orders ADD COLUMN store_id TEXT`); } catch(e){}
+  // seller_user_id no pedido: vendedor atribuído à venda (comissão por vendedor).
+  // NULL = sem vendedor (não entra na apuração por vendedor).
+  try { db.exec(`ALTER TABLE orders ADD COLUMN seller_user_id TEXT`); } catch(e){}
+  // product_service_id no item de comissão: comissão por PRODUTO (apuração sobre
+  // as vendas do ZappFlow por produto).
+  try { db.exec(`ALTER TABLE retail_commission_items ADD COLUMN product_service_id TEXT`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,
@@ -1934,6 +1940,7 @@ const initDb = () => {
         store_id TEXT,
         seller_user_id TEXT,
         seller_name TEXT,
+        product_service_id TEXT,
         base_amount REAL DEFAULT 0,
         commission_amount REAL DEFAULT 0,
         expected_amount REAL,                    -- premiação informada manualmente (p/ comparar)

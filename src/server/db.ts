@@ -915,6 +915,10 @@ const initDb = () => {
   // enxergarem o faturamento da loja supervisionada. OPT-IN por organização
   // (default off) — nada muda até o gestor ligar. Ver RetailRevenueBridgeService.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_revenue_bridge INTEGER DEFAULT 0`); } catch(e){}
+  // Memória de Padrões do Varejo (ADR-142 Fatia 1): loop de aprendizado da loja
+  // (observar→hipotetizar→verificar→lembrar). OPT-IN por organização (default
+  // off). Ver RetailPatternMemoryService.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_pattern_memory INTEGER DEFAULT 0`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,
@@ -1798,6 +1802,31 @@ const initDb = () => {
         UNIQUE(organization_id, store_id, product_service_id, variant_id, alert_type)
       );
       CREATE INDEX IF NOT EXISTS idx_retail_stock_alerts ON retail_stock_alerts (organization_id, status);
+
+      -- Memória de Padrões do Varejo (ADR-142 Fatia 1): padrões recorrentes
+      -- observados numa loja (ou na rede). A confiança/status é calculada por
+      -- REGRA (recorrência), não pelo LLM. store_id NULL = rede toda.
+      CREATE TABLE IF NOT EXISTS retail_store_patterns (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT,
+        pattern_type TEXT NOT NULL,             -- caixa_divergente_recorrente | estoque_negativo_recorrente | ...
+        pattern_key TEXT NOT NULL,              -- chave normalizada p/ idempotência (upsert)
+        description TEXT,
+        evidence_json TEXT,
+        confidence REAL DEFAULT 0,              -- 0..1 (regra de recorrência)
+        status TEXT DEFAULT 'candidate',        -- candidate | validated | refuted | dormant
+        occurrences INTEGER DEFAULT 0,          -- em quantos passes foi re-detectado
+        first_seen_date DATE,
+        last_seen_date DATE,
+        created_by_type TEXT DEFAULT 'rule',    -- rule | ai | user
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_store_patterns_key
+        ON retail_store_patterns (organization_id, COALESCE(store_id,''), pattern_type, pattern_key);
+      CREATE INDEX IF NOT EXISTS idx_retail_store_patterns_org
+        ON retail_store_patterns (organization_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase F', e); }
 

@@ -157,35 +157,6 @@ export class RetailOpsSignalPublisher {
 
     return { published, resolved, reserves: reserves.length };
   }
-
-  /** Sinais de varejo abertos (do publicador + padrões), do mais grave ao menos. */
-  static topOpenSignals(orgId: string, limit = 3): Array<{ signalType: string; severity: string; impactAmount: number | null; impactUnit: string | null; evidence: any }> {
-    const rows = db.prepare(
-      `SELECT signal_type, severity, impact_amount, impact_unit, evidence_json
-         FROM business_signals
-        WHERE organization_id = ? AND status = 'open'
-          AND source_service IN ('RetailOpsSignalPublisher','RetailPatternMemoryService')
-        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'risk' THEN 1 WHEN 'attention' THEN 2 ELSE 3 END, detected_at DESC
-        LIMIT ?`
-    ).all(orgId, Math.max(1, limit)) as any[];
-    return rows.map((r) => ({ signalType: r.signal_type, severity: r.severity, impactAmount: r.impact_amount != null ? Number(r.impact_amount) : null, impactUnit: r.impact_unit || null, evidence: (() => { try { return JSON.parse(r.evidence_json || "{}"); } catch { return {}; } })() }));
-  }
-
-  /** Frase curta pt-BR de um sinal de varejo (para o briefing e o Diretor). */
-  static describe(sig: { signalType: string; evidence: any }): string {
-    const e = sig.evidence || {};
-    switch (sig.signalType) {
-      case "retail_online_reserve_out": return `Reserva online esgotada: ${e.product} (${e.store})`;
-      case "retail_reserve_low": return `Reserva online baixa: ${e.product} (${e.store})`;
-      case "retail_product_no_online_sales": return `Produto sem giro online: ${e.product}`;
-      case "retail_sales_concentration": return `Vendas concentradas em ${e.product} (${e.pct}%)`;
-      case "retail_writeback_backlog": return `${e.pending} baixas pendentes de lançar no PDV`;
-      case "retail_seller_below_quota": return `${e.seller} abaixo da meta`;
-      case "retail_seller_concentration": return `Vendas concentradas em ${e.seller} (${e.pct}%)`;
-      case "retail_store_stockout": return `Ruptura ativa na ${e.store} (${e.alerts} itens negativos)`;
-      default: return String(e.description || sig.signalType);
-    }
-  }
 }
 
 export default RetailOpsSignalPublisher;

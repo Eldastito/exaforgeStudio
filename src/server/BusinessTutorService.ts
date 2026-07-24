@@ -1,6 +1,6 @@
 import db from "./db.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
-import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
+import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { onlyDigits } from "./phoneMatch.js";
@@ -78,14 +78,24 @@ export class BusinessTutorService {
       lines.push("Nenhuma urgência hoje — caixa e prioridades sob controle. 👍");
     }
 
-    // Operação da loja (ADR-136): leva os sinais de varejo ao briefing — eles não
-    // entram nas prioridades financeiras da Central de Saúde.
+    // Sinais da operação (ADR-136): leva o Pareto de TODOS os domínios ao briefing
+    // (produção, compras, pessoas, varejo, estoque, vendas…). Exclui "finance"
+    // porque caixa/recebíveis já entram nas prioridades da Central de Saúde acima.
     try {
-      const retail = RetailOpsSignalPublisher.topOpenSignals(orgId, 2);
-      if (retail.length) {
+      const ops = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 6 })
+        .global.filter((p: any) => p.domain !== "finance");
+      if (ops.length) {
         lines.push("");
-        lines.push("*🏬 Operação da loja:*");
-        retail.forEach((s) => lines.push(`• ${RetailOpsSignalPublisher.describe(s)}`));
+        lines.push("*🔎 Sinais da operação:*");
+        ops.slice(0, 3).forEach((p: any) => {
+          let imp = "";
+          if (p.impact && Number(p.impact.amount) > 0) {
+            if (p.impact.unit === "BRL") imp = ` (${brl(p.impact.amount)})`;
+            else if (p.impact.unit === "units") imp = ` (${p.impact.amount} un)`;
+            else imp = ` (${p.impact.amount}${p.impact.unit ? ` ${p.impact.unit}` : ""})`;
+          }
+          lines.push(`• ${p.recommendedAction || p.interpretation || p.fact}${imp}`);
+        });
       }
     } catch { /* noop */ }
 

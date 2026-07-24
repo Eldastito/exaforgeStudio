@@ -1,12 +1,16 @@
 /**
- * TESTE — Insights de varejo no briefing (WhatsApp) e no Diretor IA + sinal de
- * concentração de vendedor.
+ * TESTE — Sinais do negócio no briefing (WhatsApp) e no Diretor IA, generalizados
+ * para TODOS os domínios (ADR-136).
  *
- * Prova que os sinais da operação chegam onde o gestor lê:
- *   - retail_seller_concentration: um vendedor ≥ 70% das vendas → sinal;
- *   - topOpenSignals/describe geram a frase curta;
- *   - o briefing da manhã (BusinessTutorService) inclui a seção "Operação da loja";
- *   - o panorama do Diretor IA inclui o bloco de sinais da operação.
+ * Prova que o Pareto de sinais abertos (ImpactPrioritizationService) chega onde o
+ * gestor lê — não só varejo, mas produção, compras, pessoas, estoque, vendas e
+ * finanças:
+ *   - o briefing da manhã (BusinessTutorService) ganha a seção "Sinais da operação"
+ *     alimentada pelo Pareto, EXCLUINDO finanças (já coberto pelas prioridades da
+ *     Central de Saúde) — logo produção/varejo chegam ao WhatsApp;
+ *   - o panorama do Diretor IA (businessSignalsBlock) lista os sinais de TODOS os
+ *     domínios (finance + production + retail_ops), provando a generalização;
+ *   - isolamento por organização.
  *
  * Uso:  npm run test:retail-insights-briefing
  */
@@ -26,46 +30,56 @@ function check(name: string, ok: boolean, detail = "") { results.push({ name, ok
 
 async function main() {
   const { default: db } = await import("../src/server/db.js");
-  const { OrdersService } = await import("../src/server/OrdersService.js");
-  const { RetailOpsSignalPublisher } = await import("../src/server/RetailOpsSignalPublisher.js");
+  const { BusinessSignalService } = await import("../src/server/BusinessSignalService.js");
+  const { ImpactPrioritizationService } = await import("../src/server/ImpactPrioritizationService.js");
   const { BusinessTutorService } = await import("../src/server/BusinessTutorService.js");
   const { ExecutiveAdvisorService } = await import("../src/server/ExecutiveAdvisorService.js");
 
-  const today = new Date().toISOString().slice(0, 10);
   const G = `org_G_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'G', 'active')`).run(randomUUID(), G);
-  const U1 = randomUUID(), U2 = randomUUID();
-  db.prepare(`INSERT INTO users (id, organization_id, name, email) VALUES (?, ?, 'Ana', ?)`).run(U1, G, `a_${U1.slice(0, 6)}@x.com`);
-  db.prepare(`INSERT INTO users (id, organization_id, name, email) VALUES (?, ?, 'Bruno', ?)`).run(U2, G, `b_${U2.slice(0, 6)}@x.com`);
-  const P = randomUUID();
-  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, stock_control_enabled) VALUES (?, ?, 'product', 'Camisa', 100, 1, 0)`).run(P, G);
 
-  OrdersService.createOrder(G, { items: [{ productId: P, name: "Camisa", unitPrice: 0, quantity: 9 }], sellerUserId: U1, autoClose: true }); // Ana 900
-  OrdersService.createOrder(G, { items: [{ productId: P, name: "Camisa", unitPrice: 0, quantity: 1 }], sellerUserId: U2, autoClose: true }); // Bruno 100
+  // Sinais abertos em TRÊS domínios distintos (como os publicadores criariam).
+  BusinessSignalService.publish(G, {
+    domain: "finance", signalType: "receivable_overdue", severity: "risk", basis: "fact", confidence: 1,
+    impactAmount: 5000, impactUnit: "BRL", sourceService: "FinanceSignalPublisher",
+    evidence: { count: 3 }, dedupeKey: "fin:recv:1",
+  });
+  BusinessSignalService.publish(G, {
+    domain: "production", signalType: "production_order_delayed", severity: "risk", basis: "fact", confidence: 1,
+    impactAmount: 20, impactUnit: "units", sourceService: "ProductionSignalPublisher",
+    evidence: { orders: 4 }, dedupeKey: "prod:delay:1",
+  });
+  BusinessSignalService.publish(G, {
+    domain: "retail_ops", signalType: "retail_seller_concentration", severity: "attention", basis: "fact", confidence: 1,
+    impactAmount: null, impactUnit: null, sourceService: "RetailOpsSignalPublisher",
+    evidence: { seller: "Ana", pct: 90 }, dedupeKey: "retail:seller_conc:1",
+  });
 
-  RetailOpsSignalPublisher.run(G, { asOf: today, windowDays: 3650 });
-  check("concentração de vendedor: Ana 90% → sinal", !!db.prepare(`SELECT id FROM business_signals WHERE organization_id=? AND signal_type='retail_seller_concentration' AND status='open'`).get(G));
+  // O Pareto enxerga os três domínios.
+  const pri = ImpactPrioritizationService.prioritize(G, { globalLimit: 8 }).global;
+  const domains = new Set(pri.map((p: any) => p.domain));
+  check("Pareto abrange os 3 domínios", domains.has("finance") && domains.has("production") && domains.has("retail_ops"), JSON.stringify([...domains]));
 
-  const top = RetailOpsSignalPublisher.topOpenSignals(G, 3);
-  check("topOpenSignals retorna o sinal", top.length >= 1 && top[0].signalType === "retail_seller_concentration", JSON.stringify(top));
-  check("describe gera a frase (Ana 90%)", RetailOpsSignalPublisher.describe(top[0]).includes("Ana") && RetailOpsSignalPublisher.describe(top[0]).includes("90"));
-
-  // Briefing da manhã inclui a seção da operação da loja.
+  // Briefing da manhã: seção "Sinais da operação" alimentada pelo Pareto, sem finanças.
   const brief = BusinessTutorService.morningBrief(G);
-  check("briefing WhatsApp inclui 'Operação da loja'", brief.text.includes("Operação da loja"), brief.text.slice(0, 300));
-  check("briefing menciona a concentração", /concentrad/i.test(brief.text));
+  check("briefing WhatsApp inclui 'Sinais da operação'", brief.text.includes("Sinais da operação"), brief.text.slice(0, 400));
+  check("briefing leva o sinal de varejo (não-finanças) ao WhatsApp", /Distribuir vendas|formar mais vendedores/i.test(brief.text), brief.text);
+  check("briefing NÃO duplica finanças na seção da operação", !/Cobrar recebíveis vencidos/i.test(brief.text.split("Sinais da operação")[1] || ""));
 
-  // Panorama do Diretor IA inclui o bloco de sinais da operação.
-  const block = ExecutiveAdvisorService.retailSignalsBlock(G);
-  check("Diretor: bloco de sinais da operação", block.includes("SINAIS DA OPERAÇÃO") && /concentrad/i.test(block), block.slice(0, 160));
+  // Panorama do Diretor IA: bloco generalizado com TODOS os domínios.
+  const block = ExecutiveAdvisorService.businessSignalsBlock(G);
+  check("Diretor: cabeçalho 'PRIORIDADES DO NEGÓCIO'", block.includes("PRIORIDADES DO NEGÓCIO"), block.slice(0, 160));
+  check("Diretor: inclui [finance]", block.includes("[finance]"));
+  check("Diretor: inclui [production]", block.includes("[production]"));
+  check("Diretor: inclui [retail_ops]", block.includes("[retail_ops]"));
 
-  // Isolamento: org sem operação não polui o briefing.
+  // Isolamento: org sem sinais não polui briefing nem Diretor.
   const H = `org_H_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'H', 'active')`).run(randomUUID(), H);
-  check("isolamento: org H sem seção de loja no briefing", !BusinessTutorService.morningBrief(H).text.includes("Operação da loja"));
-  check("isolamento: Diretor H sem bloco de sinais", ExecutiveAdvisorService.retailSignalsBlock(H) === "");
+  check("isolamento: org H sem 'Sinais da operação' no briefing", !BusinessTutorService.morningBrief(H).text.includes("Sinais da operação"));
+  check("isolamento: Diretor H sem bloco de prioridades", ExecutiveAdvisorService.businessSignalsBlock(H) === "");
 
-  console.log("\n=== Insights de varejo no briefing + Diretor IA ===");
+  console.log("\n=== Sinais do negócio no briefing + Diretor IA (generalizados) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

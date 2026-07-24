@@ -1946,6 +1946,43 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_cost_centers_dept ON cost_centers(organization_id, department_id);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_centers_code ON cost_centers(organization_id, code) WHERE code IS NOT NULL;
 
+      -- CONTROLER (PRD-E-007, Fatia 1b): LOCALIZAÇÕES de estoque. Onde o material
+      -- fisicamente está (almoxarifado, filial, sala, veículo, máquina, custódia
+      -- do colaborador, manutenção, limpeza…). Aditivo; o agregado legado
+      -- inventory_items permanece intocado. Isolado por organização.
+      CREATE TABLE IF NOT EXISTS inventory_locations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'almoxarifado',  -- almoxarifado|filial|sala|veiculo|maquina|custodia_colaborador|manutencao|limpeza|outro
+        code TEXT,                                   -- código curto opcional (único por org quando informado)
+        store_id TEXT,                               -- unidade/loja opcional
+        department_id TEXT,                          -- departamento opcional
+        responsible_user_id TEXT,                    -- responsável pela custódia (users.id)
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_inventory_locations_org ON inventory_locations(organization_id, active);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_locations_code ON inventory_locations(organization_id, code) WHERE code IS NOT NULL;
+
+      -- Saldo por LOCAL × produto × variação. Tabela nova (não substitui o
+      -- agregado atual); a reconciliação com inventory_items entra na fatia de
+      -- consumo. O saldo aqui muda só por primitivas governadas (receber/transferir).
+      CREATE TABLE IF NOT EXISTS inventory_location_balances (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        quantity REAL NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_loc_balances_key
+        ON inventory_location_balances(organization_id, location_id, product_service_id, COALESCE(variant_id,''));
+      CREATE INDEX IF NOT EXISTS idx_inv_loc_balances_prod
+        ON inventory_location_balances(organization_id, product_service_id);
+
       -- Loja Virtual → PDV (ADR-143 Fase 0). Reserva e-commerce por loja/produto:
       -- a loja virtual vende SÓ desta reserva (Saldo Alterdata − buffer) → nunca
       -- vende o que não tem (sem oversell). Absoluto por (org, loja, produto, variante).

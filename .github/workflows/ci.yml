@@ -115,6 +115,7 @@ jobs:
           - { name: 'agenda-sales-patterns', script: 'test:agenda-sales-patterns' }
           - { name: 'executive-effectiveness', script: 'test:executive-effectiveness' }
           - { name: 'controler-foundation', script: 'test:controler-foundation' }
+          - { name: 'controler-locations', script: 'test:controler-locations' }
           - { name: 'order-seller-attribution', script: 'test:order-seller-attribution' }
           - { name: 'storefront-seller-attribution', script: 'test:storefront-seller-attribution' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }

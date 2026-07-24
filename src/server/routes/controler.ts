@@ -11,6 +11,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { DepartmentService } from "../DepartmentService.js";
 import { CostCenterService } from "../CostCenterService.js";
+import { InventoryLocationService } from "../InventoryLocationService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -76,6 +77,56 @@ router.post("/cost-centers/:id/active", requireRole("owner", "admin"), (req: Aut
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(CostCenterService.setActive(orgId, req.params.id, !!req.body?.active, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ─── Localizações de estoque (Fatia 1b) ─────────────────────────────────────────
+router.get("/inventory-locations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ locations: InventoryLocationService.list(orgId, { includeInactive: truthy(req.query?.includeInactive), type: typeof req.query?.type === "string" ? req.query.type : undefined }) });
+});
+
+router.post("/inventory-locations", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.status(201).json(InventoryLocationService.create(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.put("/inventory-locations/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(InventoryLocationService.update(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/inventory-locations/:id/active", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(InventoryLocationService.setActive(orgId, req.params.id, !!req.body?.active, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/inventory-locations/balances", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ balances: InventoryLocationService.balances(orgId, { locationId: typeof req.query?.locationId === "string" ? req.query.locationId : undefined, productId: typeof req.query?.productId === "string" ? req.query.productId : undefined }) });
+});
+
+router.post("/inventory-locations/receive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try { res.status(201).json(InventoryLocationService.receive(orgId, { locationId: b.locationId, productId: b.productId, variantId: b.variantId, quantity: Number(b.quantity) }, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/inventory-locations/transfer", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try { res.status(201).json(InventoryLocationService.transfer(orgId, { fromLocationId: b.fromLocationId, toLocationId: b.toLocationId, productId: b.productId, variantId: b.variantId, quantity: Number(b.quantity) }, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

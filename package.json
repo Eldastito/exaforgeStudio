@@ -241,7 +241,8 @@
     "test:inventory-patterns": "tsx scripts/test-inventory-patterns.ts",
     "test:agenda-sales-patterns": "tsx scripts/test-agenda-sales-patterns.ts",
     "test:executive-effectiveness": "tsx scripts/test-executive-effectiveness.ts",
-    "test:controler-foundation": "tsx scripts/test-controler-foundation.ts"
+    "test:controler-foundation": "tsx scripts/test-controler-foundation.ts",
+    "test:controler-locations": "tsx scripts/test-controler-locations.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

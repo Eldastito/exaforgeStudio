@@ -77,6 +77,7 @@ router.get("/online-reserve", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({
     enabled: RetailOnlineReserveService.isEnabled(orgId),
+    onlineStoreId: RetailOnlineReserveService.getOnlineStoreId(orgId),
     reserves: RetailOnlineReserveService.listReserves(orgId, req.query.storeId ? String(req.query.storeId) : undefined),
     pending: RetailOnlineReserveService.listPending(orgId, { storeId: req.query.storeId ? String(req.query.storeId) : undefined }),
   });
@@ -85,7 +86,10 @@ router.get("/online-reserve", (req: AuthRequest, res): any => {
 router.put("/online-reserve/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ ok: true, enabled: RetailOnlineReserveService.setEnabled(orgId, !!req.body?.enabled) });
+  const enabled = RetailOnlineReserveService.setEnabled(orgId, !!req.body?.enabled);
+  // A filial da loja virtual pode ser definida junto (opcional).
+  if (req.body?.onlineStoreId !== undefined) RetailOnlineReserveService.setOnlineStoreId(orgId, req.body.onlineStoreId || null);
+  res.json({ ok: true, enabled, onlineStoreId: RetailOnlineReserveService.getOnlineStoreId(orgId) });
 });
 
 // Define a reserva e-commerce de um produto/variante numa loja.

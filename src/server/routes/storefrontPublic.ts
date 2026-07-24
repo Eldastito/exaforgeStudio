@@ -8,6 +8,7 @@ import { ReservationService } from "../ReservationService.js";
 import { ensureProductSlug } from "../productSlug.js";
 import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionLookService } from "../FashionLookService.js";
+import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -395,11 +396,16 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     ].filter(Boolean);
     const orderNotes = noteParts.length ? noteParts.join(" · ") : null;
 
+    // Loja Virtual → PDV (ADR-143 Fase 0): quando a reserva e-commerce está ligada
+    // e há uma filial online definida, o storefront vende SÓ da reserva daquela
+    // loja — sem oversell — e registra a baixa pendente no PDV. store_id no pedido.
+    const onlineStoreId = RetailOnlineReserveService.isEnabled(orgId) ? RetailOnlineReserveService.getOnlineStoreId(orgId) : null;
+
     const tx = db.transaction(() => {
       db.prepare(
-        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id)
-         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?)`
-      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId);
+        `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id, store_id)
+         VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?, ?)`
+      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId, onlineStoreId);
       if (fashionLookId) {
         FashionStudioService.recordEvent(orgId, "FashionOrderPlaced", { orderId, total }, null, fashionLookId);
       }
@@ -412,6 +418,19 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
         stmt.run(r.id, orderId, orgId, r.pid, r.name, r.price, r.qty, r.total, r.label);
       }
       if (couponId) db.prepare("UPDATE storefront_coupons SET used_count = used_count + 1 WHERE id = ?").run(couponId);
+
+      // Reserva/baixa online: bloqueia se a reserva não cobrir (o throw desfaz o
+      // pedido inteiro). Itens sem produto vinculado (peso/volume) não entram.
+      if (onlineStoreId) {
+        const r = RetailOnlineReserveService.recordSale(orgId, {
+          orderId, storeId: onlineStoreId,
+          items: resolved.filter((x) => x.pid).map((x) => ({ productId: x.pid as string, variantId: null, qty: x.qty })),
+        });
+        if (r.ok === false) {
+          const names = (r.blocked || []).map((b) => resolved.find((x) => x.pid === b.productId)?.name || b.productId).join(", ");
+          throw new Error(`ONLINE_OUT_OF_STOCK:${names}`);
+        }
+      }
     });
     tx();
     // E-mail informado no checkout: guarda no contato (se houver) para confirmações.
@@ -499,6 +518,10 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
 
     res.json({ ok: true, orderId, total, whatsappUrl, payment });
   } catch (e: any) {
+    const msg = String(e?.message || "");
+    if (msg.startsWith("ONLINE_OUT_OF_STOCK:")) {
+      return res.status(409).json({ error: `Sem estoque disponível na loja para: ${msg.slice("ONLINE_OUT_OF_STOCK:".length)}.`, code: "out_of_stock" });
+    }
     res.status(500).json({ error: e.message || "Falha ao criar pedido." });
   }
 });

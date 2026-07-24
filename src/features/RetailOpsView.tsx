@@ -170,6 +170,8 @@ export function RetailOpsView() {
 // ---- Loja virtual → PDV: baixas pendentes (ADR-143 Fase 0) -------------------
 function OnlineReserveTab() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [onlineStoreId, setOnlineStoreId] = useState<string>('');
+  const [stores, setStores] = useState<any[]>([]);
   const [reserves, setReserves] = useState<any[]>([]);
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,20 +179,27 @@ function OnlineReserveTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const d = await apiFetch('/api/retailops/online-reserve').then(r => r.json()).catch(() => ({}));
+      const [d, st] = await Promise.all([
+        apiFetch('/api/retailops/online-reserve').then(r => r.json()).catch(() => ({})),
+        apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({})),
+      ]);
       setEnabled(!!d?.enabled);
+      setOnlineStoreId(d?.onlineStoreId || '');
       setReserves(Array.isArray(d?.reserves) ? d.reserves : []);
       setPending(Array.isArray(d?.pending) ? d.pending : []);
+      setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  const toggle = async () => {
-    const res = await apiFetch('/api/retailops/online-reserve/flag', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
+  const saveFlag = async (patch: { enabled?: boolean; onlineStoreId?: string }) => {
+    const body = { enabled: patch.enabled ?? enabled, onlineStoreId: patch.onlineStoreId ?? onlineStoreId };
+    const res = await apiFetch('/api/retailops/online-reserve/flag', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await res.json().catch(() => ({}));
-    if (res.ok) { setEnabled(!!d.enabled); toast.success(d.enabled ? 'Loja virtual → PDV ligada.' : 'Desligada.'); }
+    if (res.ok) { setEnabled(!!d.enabled); setOnlineStoreId(d.onlineStoreId || ''); toast.success('Configuração salva.'); }
     else toast.error(d.error || 'Falha ao alterar.');
   };
+  const toggle = () => saveFlag({ enabled: !enabled });
   const confirm = async (row: any) => {
     const res = await apiFetch('/api/retailops/online-reserve/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: row.id }) });
     const d = await res.json().catch(() => ({}));
@@ -207,6 +216,14 @@ function OnlineReserveTab() {
         <button onClick={toggle} className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${enabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
           <span className={`inline-block w-2 h-2 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} /> {enabled ? 'ligada' : 'desligada'}
         </button>
+      </div>
+
+      <div className="mb-4 flex items-center gap-2 text-sm">
+        <label className="text-xs text-zinc-400">Filial da loja virtual (de qual loja o estoque online sai):</label>
+        <select value={onlineStoreId} onChange={e => saveFlag({ onlineStoreId: e.target.value })} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+          <option value="">— não aplicar reserva no checkout —</option>
+          {stores.map((s) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ''}</option>)}
+        </select>
       </div>
 
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Baixas pendentes no PDV ({pending.length})</h3>

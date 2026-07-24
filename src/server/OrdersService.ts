@@ -155,6 +155,12 @@ export class OrdersService {
         }
       }
 
+      // Loja Virtual → PDV: pedido cancelado/estornado libera a reserva online
+      // (baixas ainda pendentes) — o estoque da loja virtual volta a ficar livre.
+      if (becomingReversed && order.store_id) {
+        RetailOnlineReserveService.releaseByOrder(orgId, orderId);
+      }
+
       db.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStatus, orderId);
     });
 

@@ -35,6 +35,18 @@ export class RetailOnlineReserveService {
     return this.isEnabled(orgId);
   }
 
+  /** Filial da qual a LOJA VIRTUAL (checkout público) vende. NULL = não aplica. */
+  static getOnlineStoreId(orgId: string): string | null {
+    try {
+      const r = db.prepare("SELECT online_store_id FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+      return r?.online_store_id || null;
+    } catch { return null; }
+  }
+  static setOnlineStoreId(orgId: string, storeId: string | null): string | null {
+    db.prepare("UPDATE organization_settings SET online_store_id = ? WHERE organization_id = ?").run(storeId || null, orgId);
+    return this.getOnlineStoreId(orgId);
+  }
+
   // ── Reserva e-commerce (D1) ───────────────────────────────────────────────────
   static setReserve(orgId: string, storeId: string, productId: string, variantId: string | null | undefined, qty: number, actorId?: string): any {
     db.prepare(
@@ -123,6 +135,17 @@ export class RetailOnlineReserveService {
     const r = db.prepare("UPDATE retail_online_writeback SET status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND order_id=? AND status='pending'").run(orgId, orderId);
     if (r.changes > 0) { try { logAuthEvent(orgId, actorId || "system", orderId, "RETAIL_ONLINE_WRITEBACK_CONFIRMED", { confirmed: r.changes }); } catch { /* noop */ } }
     return { ok: true, confirmed: r.changes };
+  }
+
+  /**
+   * Libera a reserva de um pedido (cancelado/estornado): remove as baixas AINDA
+   * pendentes — o estoque online volta a ficar disponível. Baixas já confirmadas
+   * (lançadas no PDV) não são tocadas. Idempotente.
+   */
+  static releaseByOrder(orgId: string, orderId: string, actorId?: string): { ok: boolean; released: number } {
+    const r = db.prepare("DELETE FROM retail_online_writeback WHERE organization_id=? AND order_id=? AND status='pending'").run(orgId, orderId);
+    if (r.changes > 0) { try { logAuthEvent(orgId, actorId || "system", orderId, "RETAIL_ONLINE_WRITEBACK_RELEASED", { released: r.changes }); } catch { /* noop */ } }
+    return { ok: true, released: r.changes };
   }
 
   /** Confirma uma baixa específica pelo id da linha. */

@@ -111,6 +111,7 @@ jobs:
           - { name: 'pattern-memory', script: 'test:pattern-memory' }
           - { name: 'procurement-patterns', script: 'test:procurement-patterns' }
           - { name: 'finance-people-patterns', script: 'test:finance-people-patterns' }
+          - { name: 'inventory-patterns', script: 'test:inventory-patterns' }
           - { name: 'order-seller-attribution', script: 'test:order-seller-attribution' }
           - { name: 'storefront-seller-attribution', script: 'test:storefront-seller-attribution' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }

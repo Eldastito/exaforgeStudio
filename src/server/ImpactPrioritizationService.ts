@@ -57,6 +57,7 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   cliente_pagamento_atrasado_recorrente: { actionType: "collection", label: "Rever prazo/limite do cliente que atrasa" },
   categoria_despesa_estoura_recorrente: { actionType: "create_task", label: "Revisar e cortar a categoria de despesa em alta" },
   vendedor_queda_recorrente: { actionType: "create_task", label: "Apoiar o vendedor em queda (meta/coaching)" },
+  produto_ruptura_recorrente: { actionType: "prepare_purchase", label: "Recalibrar ponto de pedido do produto que rompe" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

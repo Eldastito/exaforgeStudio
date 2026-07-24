@@ -237,7 +237,8 @@
     "test:insights-global": "tsx scripts/test-insights-global.ts",
     "test:pattern-memory": "tsx scripts/test-pattern-memory.ts",
     "test:procurement-patterns": "tsx scripts/test-procurement-patterns.ts",
-    "test:finance-people-patterns": "tsx scripts/test-finance-people-patterns.ts"
+    "test:finance-people-patterns": "tsx scripts/test-finance-people-patterns.ts",
+    "test:inventory-patterns": "tsx scripts/test-inventory-patterns.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

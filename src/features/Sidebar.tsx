@@ -41,6 +41,7 @@ export function Sidebar() {
           <p className="px-2 text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Workspace</p>
           <nav className="space-y-1">
              {canAccessModule('saude_negocio') && <NavItem icon={<HeartPulse />} label="Central de Saúde" active={viewMode === 'saude'} onClick={() => setViewMode('saude')} />}
+             <NavItem icon={<Lightbulb />} label="Insights" active={viewMode === 'insights'} onClick={() => setViewMode('insights')} />
              <NavItem icon={<MessageSquare />} label="Atendimento" active={viewMode === 'kanban'} onClick={() => setViewMode('kanban')} />
              {mod('rie') && <NavItem icon={<Gauge />} label="Revenue Intelligence" active={viewMode === 'rie'} onClick={() => setViewMode('rie')} />}
              {mod('estudio') && <NavItem icon={<Wand2 />} label="Estúdio de Criação" active={viewMode === 'studio'} onClick={() => setViewMode('studio')} />}

@@ -54,7 +54,20 @@ router.put("/revenue-bridge", requireRole("owner", "admin"), (req: AuthRequest, 
 router.get("/patterns", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ enabled: RetailPatternMemoryService.isEnabled(orgId), patterns: RetailPatternMemoryService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }) });
+  res.json({
+    enabled: RetailPatternMemoryService.isEnabled(orgId),
+    patterns: RetailPatternMemoryService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }),
+    typeStats: RetailPatternMemoryService.allTypeStats(orgId),
+  });
+});
+
+// Desfecho de uma ação sobre um padrão (fecha o loop — ADR-142 Fatia 3).
+router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = RetailPatternMemoryService.recordOutcome(orgId, req.params.id, { outcome: req.body?.outcome, realizedImpact: req.body?.realizedImpact, note: req.body?.note }, (req as any).userId);
+  if (!r.ok) return res.status(400).json(r);
+  res.json({ ...r, patterns: RetailPatternMemoryService.list(orgId), typeStats: RetailPatternMemoryService.allTypeStats(orgId) });
 });
 
 router.put("/patterns/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

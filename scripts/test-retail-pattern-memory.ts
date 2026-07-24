@@ -112,6 +112,40 @@ async function main() {
   const cDiv = db.prepare(`SELECT description, created_by_type FROM retail_store_patterns WHERE organization_id=? AND pattern_type='caixa_divergente_recorrente'`).get(C) as any;
   check("fallback: sem LLM → descrição determinística ('rule')", cDiv && cDiv.created_by_type === "rule" && String(cDiv.description).includes("Divergência de caixa recorrente"), JSON.stringify(cDiv));
 
+  // ===== 5b. Fatia 3 — desfecho ajusta a eficácia do tipo (aprende o que funciona) =====
+  const E = `org_E_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'E', 'active')`).run(randomUUID(), E);
+  const storeE = RetailStoreService.create(E, { name: "Loja E", code: "5" });
+  for (const d of ["2026-07-01", "2026-07-08", "2026-07-15", "2026-07-22"]) db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, divergence_status) VALUES (?, ?, ?, ?, 'approved', 'divergent')`).run(randomUUID(), E, storeE.id, d);
+  for (const d of ["2026-06-03", "2026-06-10", "2026-06-17", "2026-06-24"]) db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, divergence_status) VALUES (?, ?, ?, ?, 'approved', 'ok')`).run(randomUUID(), E, storeE.id, d);
+  RetailPatternMemoryService.setEnabled(E, true);
+  await RetailPatternMemoryService.learnPass(E, { asOf: ASOF });
+  const pe = db.prepare(`SELECT * FROM retail_store_patterns WHERE organization_id=? AND pattern_type='caixa_divergente_recorrente'`).get(E) as any;
+  check("Fatia 3: padrão validado p/ registrar desfecho", pe && pe.status === "validated");
+
+  // "Funcionou" → eficácia do tipo sobe (1/1 = 1,0); confiança do padrão sobe.
+  const o1 = RetailPatternMemoryService.recordOutcome(E, pe.id, { outcome: "worked", realizedImpact: 300 }, "u1");
+  check("Fatia 3: worked → eficácia 1,0", o1.ok && o1.effectiveness === 1, JSON.stringify(o1));
+  check("Fatia 3: worked → confiança do padrão sobe (0,5→0,6)", o1.patternConfidence === 0.6, JSON.stringify(o1));
+
+  // "Piorou" → eficácia cai ((1+0)/2 = 0,5); confiança do padrão desce.
+  const o2 = RetailPatternMemoryService.recordOutcome(E, pe.id, { outcome: "backfired" }, "u1");
+  check("Fatia 3: backfired → eficácia baixa p/ 0,5", o2.ok && o2.effectiveness === 0.5, JSON.stringify(o2));
+  check("Fatia 3: backfired → confiança do padrão desce (0,6→0,4)", o2.patternConfidence === 0.4, JSON.stringify(o2));
+
+  // net_impact acumula; desfecho inválido é rejeitado.
+  const st = RetailPatternMemoryService.typeStats(E, "caixa_divergente_recorrente")!;
+  check("Fatia 3: stats acumulam (acted=2, worked=1, backfired=1, net=300)", st.acted === 2 && st.worked === 1 && st.backfired === 1 && st.net_impact === 300, JSON.stringify(st));
+  check("Fatia 3: outcome inválido é rejeitado", RetailPatternMemoryService.recordOutcome(E, pe.id, { outcome: "talvez" }).ok === false);
+  check("Fatia 3: padrão inexistente é rejeitado", RetailPatternMemoryService.recordOutcome(E, "nope", { outcome: "worked" }).ok === false);
+
+  // Feed-forward: tipo com eficácia baixa (<=0,25) rebaixa o sinal para 'info'.
+  RetailPatternMemoryService.recordOutcome(E, pe.id, { outcome: "backfired" }, "u1"); // acted=3, eff=(1+0+0)/3=0,33
+  RetailPatternMemoryService.recordOutcome(E, pe.id, { outcome: "backfired" }, "u1"); // acted=4, eff=(1)/4=0,25
+  await RetailPatternMemoryService.learnPass(E, { asOf: ASOF });
+  const sigE = db.prepare(`SELECT severity, evidence_json FROM business_signals WHERE organization_id=? AND signal_type='caixa_divergente_recorrente' AND status='open'`).get(E) as any;
+  check("Fatia 3: eficácia baixa rebaixa o sinal p/ 'info'", sigE && sigE.severity === "info", JSON.stringify(sigE));
+
   // ===== 6. Isolamento por organização =====
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

@@ -58,6 +58,10 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   categoria_despesa_estoura_recorrente: { actionType: "create_task", label: "Revisar e cortar a categoria de despesa em alta" },
   vendedor_queda_recorrente: { actionType: "create_task", label: "Apoiar o vendedor em queda (meta/coaching)" },
   produto_ruptura_recorrente: { actionType: "prepare_purchase", label: "Recalibrar ponto de pedido do produto que rompe" },
+  cliente_no_show_recorrente: { actionType: "create_task", label: "Confirmar presença / pedir sinal do cliente que falta" },
+  horario_no_show_recorrente: { actionType: "create_task", label: "Reforçar lembrete / rever encaixe no horário de faltas" },
+  produto_queda_giro_recorrente: { actionType: "create_task", label: "Reagir à queda de giro do produto (preço/vitrine/campanha)" },
+  categoria_queda_giro_recorrente: { actionType: "create_task", label: "Rever mix e exposição da categoria em queda" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

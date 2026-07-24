@@ -24,6 +24,8 @@ import { ProcurementPatternMemory } from "../ProcurementPatternMemory.js";
 import { FinancePatternMemory } from "../FinancePatternMemory.js";
 import { PeoplePatternMemory } from "../PeoplePatternMemory.js";
 import { InventoryPatternMemory } from "../InventoryPatternMemory.js";
+import { AgendaPatternMemory } from "../AgendaPatternMemory.js";
+import { SalesPatternMemory } from "../SalesPatternMemory.js";
 
 const router = Router();
 
@@ -62,11 +64,14 @@ router.post("/refresh", requireRole("owner", "admin"), async (req: AuthRequest, 
   try { ran.financePatterns = await FinancePatternMemory.learnPass(orgId); } catch (e: any) { ran.financePatterns = { error: e?.message || "falhou" }; }
   try { ran.peoplePatterns = await PeoplePatternMemory.learnPass(orgId); } catch (e: any) { ran.peoplePatterns = { error: e?.message || "falhou" }; }
   try { ran.inventoryPatterns = await InventoryPatternMemory.learnPass(orgId); } catch (e: any) { ran.inventoryPatterns = { error: e?.message || "falhou" }; }
+  try { ran.agendaPatterns = await AgendaPatternMemory.learnPass(orgId); } catch (e: any) { ran.agendaPatterns = { error: e?.message || "falhou" }; }
+  try { ran.salesPatterns = await SalesPatternMemory.learnPass(orgId); } catch (e: any) { ran.salesPatterns = { error: e?.message || "falhou" }; }
   const published =
     (ran.finance?.count || 0) + (ran.production?.published || 0) + (ran.retail?.published || 0) +
     (ran.productionPatterns?.published || 0) + (ran.procurementPatterns?.published || 0) +
     (ran.financePatterns?.published || 0) + (ran.peoplePatterns?.published || 0) +
-    (ran.inventoryPatterns?.published || 0);
+    (ran.inventoryPatterns?.published || 0) + (ran.agendaPatterns?.published || 0) +
+    (ran.salesPatterns?.published || 0);
   res.json({ ok: true, published, ran, openCount: BusinessSignalService.list(orgId, { status: "open" }).length });
 });
 

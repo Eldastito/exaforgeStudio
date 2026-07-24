@@ -51,16 +51,25 @@ export class RetailOpsSignalPublisher {
 
     for (const r of reserves) {
       const sold = soldByProduct.get(String(r.product_service_id));
+      const selling = !!sold && sold.sales > 0;
       const available = Number(r.available);
       const reserved = Number(r.qty_reserved);
-      if (available <= 0 && sold && sold.sales > 0) {
+      const lowAt = Math.max(1, Math.ceil(reserved * 0.2)); // ≤20% da reserva = baixa
+      if (selling && available <= 0) {
         pub({
           domain: "retail_ops", signalType: "retail_online_reserve_out", severity: "risk",
-          impactAmount: round2(sold.sales), impactUnit: "BRL", sourceEntityId: r.id,
-          evidence: { store: r.store_name, product: r.product_name, reserved, available, soldWindow: sold.sales, windowDays },
+          impactAmount: round2(sold!.sales), impactUnit: "BRL", sourceEntityId: r.id,
+          evidence: { store: r.store_name, product: r.product_name, reserved, available, soldWindow: sold!.sales, windowDays },
           dedupeKey: `retail_ops:reserve_out:${r.store_id}:${r.product_service_id}`,
         });
-      } else if (reserved > 0 && (!sold || sold.sales <= 0)) {
+      } else if (selling && available <= lowAt) {
+        pub({
+          domain: "retail_ops", signalType: "retail_reserve_low", severity: "attention",
+          impactAmount: round2(sold!.sales), impactUnit: "BRL", sourceEntityId: r.id,
+          evidence: { store: r.store_name, product: r.product_name, reserved, available, soldWindow: sold!.sales, windowDays },
+          dedupeKey: `retail_ops:reserve_low:${r.store_id}:${r.product_service_id}`,
+        });
+      } else if (reserved > 0 && !selling) {
         pub({
           domain: "sales", signalType: "retail_product_no_online_sales", severity: "attention",
           impactAmount: reserved, impactUnit: "units", sourceEntityId: r.id,
@@ -68,6 +77,18 @@ export class RetailOpsSignalPublisher {
           dedupeKey: `retail_ops:no_online_sales:${r.store_id}:${r.product_service_id}`,
         });
       }
+    }
+
+    // Ruptura ativa: loja com muitos alertas de estoque negativo abertos agora.
+    const stockouts = db.prepare("SELECT store_id, COUNT(*) AS n FROM retail_stock_alerts WHERE organization_id = ? AND alert_type = 'negative_stock' AND status = 'open' AND store_id IS NOT NULL GROUP BY store_id").all(orgId) as any[];
+    for (const so of stockouts) {
+      if (Number(so.n) < 3) continue;
+      const storeName = (db.prepare("SELECT name FROM retail_stores WHERE id = ? AND organization_id = ?").get(so.store_id, orgId) as any)?.name || "loja";
+      pub({
+        domain: "inventory", signalType: "retail_store_stockout", severity: "risk",
+        impactAmount: Number(so.n), impactUnit: "units", sourceEntityType: "retail_store", sourceEntityId: so.store_id,
+        evidence: { store: storeName, alerts: Number(so.n) }, dedupeKey: `retail_ops:stockout:${so.store_id}`,
+      });
     }
 
     // Concentração de vendas: um produto ≥ 50% do total online (dependência).

@@ -48,6 +48,8 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   retail_seller_below_quota: { actionType: "create_task", label: "Acompanhar vendedor abaixo da meta" },
   meta_nao_batida_recorrente: { actionType: "create_task", label: "Rever metas/execução da loja abaixo da meta" },
   fechamento_atrasado_recorrente: { actionType: "create_task", label: "Cobrar o fechamento no prazo" },
+  retail_reserve_low: { actionType: "create_task", label: "Reabastecer a reserva antes de esgotar" },
+  retail_store_stockout: { actionType: "create_task", label: "Repor o estoque da loja (rupturas ativas)" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

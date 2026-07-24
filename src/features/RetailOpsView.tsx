@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -28,6 +28,91 @@ const RUN_STATUS: Record<string, { label: string; cls: string }> = {
 function Badge({ map, s }: { map: Record<string, { label: string; cls: string }>; s: string }) {
   const it = map[s] || { label: s, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' };
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${it.cls}`}>{it.label}</span>;
+}
+
+// ---- Insights da loja: o que a IA observou e sugere ------------------------
+const SEV: Record<string, { label: string; cls: string }> = {
+  critical: { label: 'crítico', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  risk: { label: 'risco', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/30' },
+  attention: { label: 'atenção', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  info: { label: 'info', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+};
+function InsightsTab() {
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { setData(await apiFetch('/api/retailops/insights').then(r => r.json()).catch(() => null)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+  const analyze = async () => {
+    setAnalyzing(true);
+    try {
+      const res = await apiFetch('/api/retailops/signals/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      if (res.ok) { const d = await res.json().catch(() => ({})); toast.success(`Operações analisadas: ${d.published || 0} sinal(is).`); load(); }
+      else toast.error('Falha ao analisar.');
+    } finally { setAnalyzing(false); }
+  };
+
+  if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
+  const priorities: any[] = data?.priorities || [];
+  const patterns: any[] = data?.patterns || [];
+  const sev = data?.bySeverity || {};
+  const fmtImpact = (im: any) => im ? (im.unit === 'BRL' ? brl(im.amount) : `${im.amount} ${im.unit === 'units' ? 'un' : (im.unit || '')}`.trim()) : null;
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Lightbulb className="w-4 h-4 text-amber-400" /> O que a IA observou na sua loja</div>
+        <div className="flex items-center gap-1.5">
+          {(['critical', 'risk', 'attention', 'info'] as const).filter(k => (sev[k] || 0) > 0).map(k => (
+            <span key={k} className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${SEV[k].cls}`}>{sev[k]} {SEV[k].label}</span>
+          ))}
+        </div>
+        <button onClick={analyze} disabled={analyzing} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{analyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Analisar agora</button>
+      </div>
+
+      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">O que atacar primeiro</h3>
+      {priorities.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">Nenhuma prioridade agora. Clique em <strong>“Analisar agora”</strong> — a IA varre a operação e traz o que importa.</div>
+      ) : (
+        <div className="space-y-2">
+          {priorities.map((p, i) => (
+            <div key={p.signalId || i} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-mono text-zinc-500">#{i + 1}</span>
+                <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{p.domain}</span>
+                {p.impact && <span className="text-[11px] text-emerald-300">impacto {fmtImpact(p.impact)}</span>}
+                <span className="text-[11px] text-zinc-500">· {p.dueHint}</span>
+              </div>
+              <p className="mt-1 text-sm text-zinc-200">{p.interpretation || p.fact}</p>
+              <div className="mt-1.5 flex items-center gap-2 text-[12px]">
+                <span className="text-zinc-500">Sugestão:</span>
+                <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-indigo-200">{p.recommendedAction}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mt-6 mb-2">Padrões aprendidos ({patterns.length})</h3>
+      {patterns.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-center text-[12px] text-zinc-600">A IA ainda não validou padrões recorrentes. Eles aparecem quando algo se repete ao longo das semanas (rode o aprendizado na aba Padrões).</div>
+      ) : (
+        <div className="space-y-1.5">
+          {patterns.map((p) => (
+            <div key={p.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+              <div className="flex items-center gap-2 flex-wrap text-[11px] text-zinc-500"><span className="font-mono">{p.pattern_type}</span><span>· confiança {Math.round(Number(p.confidence) * 100)}% · visto {p.occurrences}x</span></div>
+              {p.description && <p className="text-sm text-zinc-200">{p.description}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Tabela compacta do relatório de comissão (por vendedor/produto/loja).
@@ -160,8 +245,9 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
+  { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'divergencia', label: 'Divergência', icon: Scale },
@@ -179,7 +265,7 @@ const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 export function RetailOpsView() {
-  const [tab, setTab] = useState<RetailTab>('fechamento');
+  const [tab, setTab] = useState<RetailTab>('insights');
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="mb-4">
@@ -192,6 +278,7 @@ export function RetailOpsView() {
           <button key={key} onClick={() => setTab(key)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>
         ))}
       </div>
+      {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'comissao' && <CommissionTab />}
       {tab === 'divergencia' && <ReconciliationTab />}

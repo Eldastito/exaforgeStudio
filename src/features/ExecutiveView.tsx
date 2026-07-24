@@ -5,7 +5,13 @@ import { toast } from '@/src/lib/toast';
 import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target } from 'lucide-react';
 
 type Msg = { role: 'user' | 'ai'; text: string };
-type Tab = 'conversar' | 'plano';
+type Tab = 'conversar' | 'plano' | 'funciona';
+
+const DOMAIN_LABEL: Record<string, string> = {
+  finance: 'Finanças', production: 'Produção', procurement: 'Compras', inventory: 'Estoque',
+  sales: 'Vendas', retail_ops: 'Varejo', tasks: 'Tarefas', people: 'Pessoas', agenda: 'Agenda',
+};
+const domLabel = (d: string) => DOMAIN_LABEL[d] || d;
 
 const SUGESTOES = [
   'Por que minhas vendas mudaram este mês?',
@@ -28,9 +34,10 @@ export function ExecutiveView() {
         <div className="flex gap-2 mt-4">
           <TabButton active={tab === 'conversar'} onClick={() => setTab('conversar')} icon={<MessageSquare className="h-4 w-4" />} label="Conversar" />
           <TabButton active={tab === 'plano'} onClick={() => setTab('plano')} icon={<ListChecks className="h-4 w-4" />} label="Plano de Ação" />
+          <TabButton active={tab === 'funciona'} onClick={() => setTab('funciona')} icon={<TrendingUp className="h-4 w-4" />} label="O que funciona" />
         </div>
       </div>
-      {tab === 'conversar' ? <ConversarTab /> : <PlanoDeAcaoTab />}
+      {tab === 'conversar' ? <ConversarTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : <FuncionaTab />}
     </div>
   );
 }
@@ -133,6 +140,55 @@ const policyLabel = (a: any) => {
   const p = a.policy;
   return p === 'none' ? 'Sem aprovação' : p === 'single' ? '1 aprovação' : p === 'two_step' ? '2 aprovações' : p === 'role' ? `Perfil ${a.requiredRole || 'gestor'}` : String(p);
 };
+
+// ===== Aba: O que funciona (eficácia aprendida por tipo de ação) =====
+function FuncionaTab() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch('/api/executive/effectiveness').then(r => r.json()).then(d => setItems(Array.isArray(d.items) ? d.items : [])).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const effCls = (e: number) => e >= 0.66 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : e >= 0.34 ? 'text-amber-300 bg-amber-500/10 border-amber-500/30' : 'text-rose-300 bg-rose-500/10 border-rose-500/30';
+
+  if (loading) return <div className="flex-1 flex items-center gap-2 p-6 text-sm text-zinc-500"><RefreshCw className="h-4 w-4 animate-spin" /> Carregando…</div>;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-4 flex items-center gap-2 text-sm text-zinc-300">
+          <TrendingUp className="h-4 w-4 text-indigo-400" />
+          O que <strong>costuma funcionar</strong> no seu negócio — aprendido dos desfechos que você registrou.
+        </div>
+        {items.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">
+            Ainda não há histórico de eficácia. Conforme você <strong>age sobre os padrões</strong> (na tela de Insights) e marca o desfecho
+            (<em>Funcionou / Sem efeito / Piorou</em>), a plataforma aprende quais ações resolvem — e mostra aqui, ranqueado.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((it, i) => (
+              <div key={`${it.domain}-${it.patternType}-${i}`} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{domLabel(it.domain)}</span>
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${effCls(it.effectiveness)}`}>eficácia {Math.round(it.effectiveness * 100)}%</span>
+                  <span className="text-[11px] text-zinc-500">em {it.acted} ação{it.acted > 1 ? 'ões' : ''}</span>
+                </div>
+                <p className="mt-1 text-sm text-zinc-200">{it.recommendedAction}</p>
+                <div className="mt-1 flex items-center gap-3 text-[11px] text-zinc-500">
+                  <span className="text-emerald-400">✓ funcionou {it.worked}</span>
+                  <span>• sem efeito {it.noEffect}</span>
+                  <span className="text-rose-400">✗ piorou {it.backfired}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PlanoDeAcaoTab() {
   const [priorities, setPriorities] = useState<any[]>([]);

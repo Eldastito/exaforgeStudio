@@ -68,6 +68,31 @@ async function main() {
   const noGiroAfter = db.prepare(`SELECT status FROM business_signals WHERE organization_id=? AND signal_type='retail_product_no_online_sales'`).get(A) as any;
   check("sinal sem-giro segue aberto (condição ainda vale)", noGiroAfter?.status === "open");
 
+  // ===== 3b. Novos sinais: concentração, backlog, vendedor abaixo da meta =====
+  const C = `org_C_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'C', 'active')`).run(randomUUID(), C);
+  const storeC = (await import("../src/server/RetailStoreService.js")).RetailStoreService.create(C, { name: "Loja C", code: "9" });
+  const { RetailCommissionService } = await import("../src/server/RetailCommissionService.js");
+  const U1 = randomUUID();
+  db.prepare(`INSERT INTO users (id, organization_id, name, email) VALUES (?, ?, 'Ana', ?)`).run(U1, C, `ana_${U1.slice(0, 6)}@x.com`);
+  const PX = randomUUID(), PY = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, stock_control_enabled) VALUES (?, ?, 'product', 'PX', 100, 1, 0)`).run(PX, C);
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, stock_control_enabled) VALUES (?, ?, 'product', 'PY', 100, 1, 0)`).run(PY, C);
+  RetailOnlineReserveService.setEnabled(C, true);
+  RetailOnlineReserveService.setReserve(C, storeC.id, PX, null, 100); // alta: não esgota
+  // 5 vendas online de PX pela Ana → 5 baixas pendentes + vendas do vendedor.
+  for (let i = 0; i < 5; i++) OrdersService.createOrder(C, { items: [{ productId: PX, name: "PX", unitPrice: 0, quantity: 1 }], storeId: storeC.id, sellerUserId: U1, autoClose: true });
+  OrdersService.createOrder(C, { items: [{ productId: PY, name: "PY", unitPrice: 0, quantity: 1 }], autoClose: true }); // PY: só p/ haver 2 produtos
+  // Regra de meta por vendedor (Ana vendeu 500 < meta 1000).
+  RetailCommissionService.createRule(C, { name: "Meta", scope: "seller", calculationType: "quota_bonus", config: { bonus: 100, quota: 1000 } });
+
+  const rc = RetailOpsSignalPublisher.run(C, { asOf: today, windowDays: 3650 });
+  check("concentração: PX ~83% das vendas → sinal", !!db.prepare(`SELECT id FROM business_signals WHERE organization_id=? AND signal_type='retail_sales_concentration' AND status='open'`).get(C), JSON.stringify(rc));
+  const backlog = db.prepare(`SELECT impact_amount FROM business_signals WHERE organization_id=? AND signal_type='retail_writeback_backlog' AND status='open'`).get(C) as any;
+  check("backlog: 5 baixas pendentes → sinal (impacto 5)", backlog && Number(backlog.impact_amount) === 5, JSON.stringify(backlog));
+  const below = db.prepare(`SELECT evidence_json FROM business_signals WHERE organization_id=? AND signal_type='retail_seller_below_quota' AND status='open'`).get(C) as any;
+  check("vendedor abaixo da meta: Ana 500 < 1000 → sinal", below && JSON.parse(below.evidence_json).gap === 500, JSON.stringify(below));
+
   // ===== 4. Isolamento =====
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

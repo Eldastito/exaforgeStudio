@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
+import { RetailRevenueBridgeService } from "./RetailRevenueBridgeService.js";
 
 /**
  * Margem de Perda Aceitável (ADR-114) — indicador GLOBAL de perdas.
@@ -60,7 +61,11 @@ export class LossMarginService {
     return this.config(orgId);
   }
 
-  /** Faturamento do mês: vendas do core (orders) + do Comigo (comigo_orders). */
+  /**
+   * Faturamento do mês: vendas do core (orders) + do Comigo (comigo_orders) +,
+   * quando a ponte Fechamento → Faturamento está ligada (opt-in), os fechamentos
+   * diários de loja elegíveis (Operação da Rede).
+   */
   static monthlyRevenue(orgId: string, period: string): number {
     const a = (db.prepare(
       "SELECT COALESCE(SUM(total_amount),0) s FROM orders WHERE organization_id = ? AND status IN ('pago','em_preparo','entregue','concluido') AND strftime('%Y-%m', created_at) = ?"
@@ -68,7 +73,8 @@ export class LossMarginService {
     const b = (db.prepare(
       "SELECT COALESCE(SUM(total),0) s FROM comigo_orders WHERE organization_id = ? AND status IN ('paid','done') AND strftime('%Y-%m', created_at) = ?"
     ).get(orgId, period) as any).s;
-    return round2(a + b);
+    const c = RetailRevenueBridgeService.isEnabled(orgId) ? RetailRevenueBridgeService.monthlyRevenue(orgId, period) : 0;
+    return round2(a + b + c);
   }
 
   static recordLoss(orgId: string, p: { driver: string; amount: number; period?: string; source?: string; isEstimate?: boolean; note?: string; createdBy?: string }) {

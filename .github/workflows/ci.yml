@@ -117,6 +117,7 @@ jobs:
           - { name: 'retail-adoption-coach', script: 'test:retail-adoption-coach' }
           - { name: 'retail-diagnostic', script: 'test:retail-diagnostic' }
           - { name: 'retail-diagnostic-apply', script: 'test:retail-diagnostic-apply' }
+          - { name: 'retail-revenue-bridge', script: 'test:retail-revenue-bridge' }
           - { name: 'retail-reconciliation', script: 'test:retail-reconciliation' }
           - { name: 'retail-reconciliation-report', script: 'test:retail-reconciliation-report' }
           - { name: 'retail-scan-barcode', script: 'test:retail-scan-barcode' }

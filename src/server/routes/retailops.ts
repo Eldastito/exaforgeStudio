@@ -24,6 +24,7 @@ import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
 import { RetailReconciliationService } from "../RetailReconciliationService.js";
 import { RetailScanService } from "../RetailScanService.js";
 import { RetailReceivingService } from "../RetailReceivingService.js";
+import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -31,6 +32,22 @@ const router = Router();
 const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+// --- Ponte Fechamento → Faturamento (opt-in): estado + liga/desliga ---
+// Quando ligada, os fechamentos de loja aprovados/conciliados viram entrada de
+// caixa/receita — o Diretor IA / Pareto / DRE passam a enxergar o faturamento.
+router.get("/revenue-bridge", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: RetailRevenueBridgeService.isEnabled(orgId) });
+});
+
+router.put("/revenue-bridge", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const enabled = RetailRevenueBridgeService.setEnabled(orgId, !!req.body?.enabled);
+  res.json({ ok: true, enabled });
+});
 
 // --- Recebimento de mercadoria / pré-estoque (ADR-086) ---
 router.get("/receiving", (req: AuthRequest, res): any => {

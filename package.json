@@ -106,6 +106,7 @@
     "test:retail-adoption-coach": "tsx scripts/test-retail-adoption-coach.ts",
     "test:retail-diagnostic": "tsx scripts/test-retail-diagnostic.ts",
     "test:retail-diagnostic-apply": "tsx scripts/test-retail-diagnostic-apply.ts",
+    "test:retail-revenue-bridge": "tsx scripts/test-retail-revenue-bridge.ts",
     "test:retail-reconciliation": "tsx scripts/test-retail-reconciliation.ts",
     "test:retail-reconciliation-report": "tsx scripts/test-retail-reconciliation-report.ts",
     "test:retail-scan-barcode": "tsx scripts/test-retail-scan-barcode.ts",

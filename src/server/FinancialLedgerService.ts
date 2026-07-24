@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
+import { RetailRevenueBridgeService } from "./RetailRevenueBridgeService.js";
 
 /**
  * Motor de Caixa — Livro-caixa (ADR-125 Fatia 1).
@@ -155,6 +156,16 @@ export class FinancialLedgerService {
       for (const o of comigo) {
         const r = this.recordEvent(orgId, { direction: "in", amount: Number(o.total) || 0, eventDate: String(o.dt || today()).slice(0, 10), sourceType: "comigo_order", sourceId: o.id, note: "Venda paga (Balcão)" });
         if (r.ok && !("deduped" in r)) created++;
+      }
+    } catch { /* noop */ }
+    try {
+      // Ponte Fechamento → Faturamento (OPT-IN): fechamentos de loja aprovados/
+      // conciliados viram entrada de caixa. Idempotente por fechamento (loja/dia).
+      if (RetailRevenueBridgeService.isEnabled(orgId)) {
+        for (const c of RetailRevenueBridgeService.eligibleClosings(orgId)) {
+          const r = this.recordEvent(orgId, { direction: "in", amount: c.value, eventDate: c.closing_date, sourceType: "retail_closing", sourceId: c.id, note: "Venda da loja (fechamento diário)" });
+          if (r.ok && !("deduped" in r)) created++;
+        }
       }
     } catch { /* noop */ }
     return { created };

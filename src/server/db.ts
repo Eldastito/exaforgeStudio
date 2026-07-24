@@ -910,6 +910,11 @@ const initDb = () => {
   // Epic 3 (WhatsApp como interface de gestão): consultas de gestão/finanças
   // pelo WhatsApp do gestor. OPT-IN por organização (default off).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN wa_gestor_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // Ponte Fechamento → Faturamento: os fechamentos diários de loja (Operação da
+  // Rede) viram ENTRADA de caixa/receita, para o Diretor IA / Pareto / DRE
+  // enxergarem o faturamento da loja supervisionada. OPT-IN por organização
+  // (default off) — nada muda até o gestor ligar. Ver RetailRevenueBridgeService.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_revenue_bridge INTEGER DEFAULT 0`); } catch(e){}
 
   // ===== Planos / Billing (Fase 2) — grade ADR-091 =====
   // Plans.features (JSON) com limites: ai_monthly_limit, contacts_limit,

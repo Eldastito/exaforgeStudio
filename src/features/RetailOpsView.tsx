@@ -70,6 +70,15 @@ function ClosingsTab() {
   const [loading, setLoading] = useState(true);
   const [informing, setInforming] = useState<any | null>(null);
   const [storeModal, setStoreModal] = useState<null | { store: any | null }>(null);
+  const [bridge, setBridge] = useState<boolean | null>(null);
+
+  const toggleBridge = async () => {
+    const next = !bridge;
+    const res = await apiFetch('/api/retailops/revenue-bridge', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { setBridge(!!d.enabled); toast.success(d.enabled ? 'Faturamento das lojas agora conta no Diretor/Caixa.' : 'Ponte de faturamento desligada.'); }
+    else toast.error(d.error || 'Falha ao alterar a ponte de faturamento.');
+  };
 
   const toggleActive = async (s: any) => {
     const res = await apiFetch(`/api/retailops/stores/${s.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !s.active }) });
@@ -80,12 +89,14 @@ function ClosingsTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const [st, cl] = await Promise.all([
+      const [st, cl, br] = await Promise.all([
         apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({})),
         apiFetch(`/api/retailops/closings?date=${date}`).then(r => r.json()).catch(() => ({})),
+        apiFetch('/api/retailops/revenue-bridge').then(r => r.json()).catch(() => ({})),
       ]);
       setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
       setClosings(Array.isArray(cl?.closings) ? cl.closings : (Array.isArray(cl) ? cl : []));
+      setBridge(!!br?.enabled);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [date]);
@@ -114,7 +125,19 @@ function ClosingsTab() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         </label>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
-        <button onClick={() => setStoreModal({ store: null })} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Nova loja</button>
+        {bridge !== null && (
+          <button
+            onClick={toggleBridge}
+            title={bridge
+              ? 'Ligado: os fechamentos aprovados/conciliados contam como faturamento no Diretor IA / Caixa / DRE. Clique para desligar.'
+              : 'Desligado: o faturamento das lojas fica só na Operação da Rede. Clique para o Diretor IA / Caixa enxergarem a receita.'}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${bridge ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}
+          >
+            <span className={`inline-block w-2 h-2 rounded-full ${bridge ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+            Faturamento no Diretor {bridge ? 'ligado' : 'desligado'}
+          </button>
+        )}
+        <button onClick={() => setStoreModal({ store: null })} className={`inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 ${bridge === null ? 'ml-auto' : ''}`}><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
 
       {stores.length === 0 ? (

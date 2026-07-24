@@ -56,6 +56,13 @@ async function main() {
   const done = DecisionActionService.complete(A, act.id, { resultAmount: 5 });
   check("concluída (done) com resultado 5", done.status === "done" && Number(done.result_amount) === 5, JSON.stringify({ st: done.status, r: done.result_amount }));
 
+  // Painel de ações do varejo (a query da rota /insights/actions).
+  const panel = db.prepare(
+    `SELECT a.id, a.status FROM decision_actions a JOIN business_signals s ON s.id = a.signal_id
+      WHERE a.organization_id = ? AND s.source_service IN ('RetailOpsSignalPublisher','RetailPatternMemoryService')`
+  ).all(A) as any[];
+  check("painel lista a ação do insight", panel.length === 1 && panel[0].id === act.id && panel[0].status === "done", JSON.stringify(panel));
+
   // Isolamento.
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

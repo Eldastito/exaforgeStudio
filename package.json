@@ -92,6 +92,7 @@
     "test:retail-stock": "tsx scripts/test-retail-stock.ts",
     "test:retail-commission": "tsx scripts/test-retail-commission.ts",
     "test:retail-commission-seller-product": "tsx scripts/test-retail-commission-seller-product.ts",
+    "test:retail-commission-report": "tsx scripts/test-retail-commission-report.ts",
     "test:order-seller-attribution": "tsx scripts/test-order-seller-attribution.ts",
     "test:storefront-seller-attribution": "tsx scripts/test-storefront-seller-attribution.ts",
     "test:retail-dashboard": "tsx scripts/test-retail-dashboard.ts",

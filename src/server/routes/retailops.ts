@@ -578,6 +578,15 @@ router.get("/commission/runs", (req: AuthRequest, res): any => {
   res.json({ runs: RetailCommissionService.listRuns(orgId) });
 });
 
+// Relatório consolidado do período (por vendedor/produto/loja) — só leitura.
+router.get("/commission/report", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || ""), end = String(req.query.end || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "start e end (YYYY-MM-DD) obrigatórios" });
+  res.json(RetailCommissionService.report(orgId, start, end));
+});
+
 router.get("/commission/runs/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

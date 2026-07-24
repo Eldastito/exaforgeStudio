@@ -21,6 +21,8 @@ import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { PatternMemoryService } from "../PatternMemoryService.js";
 import { ProductionPatternMemory } from "../ProductionPatternMemory.js";
 import { ProcurementPatternMemory } from "../ProcurementPatternMemory.js";
+import { FinancePatternMemory } from "../FinancePatternMemory.js";
+import { PeoplePatternMemory } from "../PeoplePatternMemory.js";
 
 const router = Router();
 
@@ -56,9 +58,12 @@ router.post("/refresh", requireRole("owner", "admin"), async (req: AuthRequest, 
   // padrões validados como sinais, que entram no mesmo Pareto.
   try { ran.productionPatterns = await ProductionPatternMemory.learnPass(orgId); } catch (e: any) { ran.productionPatterns = { error: e?.message || "falhou" }; }
   try { ran.procurementPatterns = await ProcurementPatternMemory.learnPass(orgId); } catch (e: any) { ran.procurementPatterns = { error: e?.message || "falhou" }; }
+  try { ran.financePatterns = await FinancePatternMemory.learnPass(orgId); } catch (e: any) { ran.financePatterns = { error: e?.message || "falhou" }; }
+  try { ran.peoplePatterns = await PeoplePatternMemory.learnPass(orgId); } catch (e: any) { ran.peoplePatterns = { error: e?.message || "falhou" }; }
   const published =
     (ran.finance?.count || 0) + (ran.production?.published || 0) + (ran.retail?.published || 0) +
-    (ran.productionPatterns?.published || 0) + (ran.procurementPatterns?.published || 0);
+    (ran.productionPatterns?.published || 0) + (ran.procurementPatterns?.published || 0) +
+    (ran.financePatterns?.published || 0) + (ran.peoplePatterns?.published || 0);
   res.json({ ok: true, published, ran, openCount: BusinessSignalService.list(orgId, { status: "open" }).length });
 });
 

@@ -103,6 +103,12 @@ function PatternsTab() {
       else toast.error(d.error || 'Falha ao rodar o aprendizado.');
     } finally { setLearning(false); }
   };
+  const analyzeOps = async () => {
+    const res = await apiFetch('/api/retailops/signals/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) toast.success(`Operações analisadas: ${d.published || 0} sinal(is) para o Diretor/Pareto${d.resolved ? `, ${d.resolved} resolvido(s)` : ''}.`);
+    else toast.error(d.error || 'Falha ao analisar as operações.');
+  };
 
   if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
 
@@ -115,6 +121,9 @@ function PatternsTab() {
         </button>
         <button onClick={learn} disabled={learning || !enabled} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
           {learning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Rodar aprendizado agora
+        </button>
+        <button onClick={analyzeOps} title="Analisa as operações (loja virtual, reservas, vendas) e publica sinais para o Pareto e o Diretor IA." className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-200 hover:bg-emerald-500/20">
+          <Calculator className="w-4 h-4" /> Analisar operações
         </button>
       </div>
 

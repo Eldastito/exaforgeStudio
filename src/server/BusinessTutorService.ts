@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
+import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { onlyDigits } from "./phoneMatch.js";
@@ -76,6 +77,17 @@ export class BusinessTutorService {
       lines.push("");
       lines.push("Nenhuma urgência hoje — caixa e prioridades sob controle. 👍");
     }
+
+    // Operação da loja (ADR-136): leva os sinais de varejo ao briefing — eles não
+    // entram nas prioridades financeiras da Central de Saúde.
+    try {
+      const retail = RetailOpsSignalPublisher.topOpenSignals(orgId, 2);
+      if (retail.length) {
+        lines.push("");
+        lines.push("*🏬 Operação da loja:*");
+        retail.forEach((s) => lines.push(`• ${RetailOpsSignalPublisher.describe(s)}`));
+      }
+    } catch { /* noop */ }
 
     const k = ov?.kpis || {};
     const kpiParts = [`Caixa ${brl(k.caixaAtual)}`, `a receber ${brl(k.aReceber)}`, `a pagar ${brl(k.aPagar)}`];

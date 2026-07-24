@@ -116,12 +116,14 @@ export class RetailOpsSignalPublisher {
       });
     }
 
+    const sellers = RetailCommissionService.onlineSalesBySeller(orgId, start, asOf);
+
     // Vendedor abaixo da meta (das regras de comissão por vendedor com meta).
     const quotaRules = db.prepare("SELECT config_json FROM retail_commission_rules WHERE organization_id = ? AND active = 1 AND scope = 'seller' AND calculation_type = 'quota_bonus'").all(orgId) as any[];
     let target = 0;
     for (const r of quotaRules) { try { const q = Number((JSON.parse(r.config_json || "{}") || {}).quota || 0); if (q > target) target = q; } catch { /* noop */ } }
     if (target > 0) {
-      for (const s of RetailCommissionService.onlineSalesBySeller(orgId, start, asOf)) {
+      for (const s of sellers) {
         if (s.sales < target) {
           pub({
             domain: "retail_ops", signalType: "retail_seller_below_quota", severity: "attention",
@@ -133,12 +135,56 @@ export class RetailOpsSignalPublisher {
       }
     }
 
+    // Concentração de vendedor: um vendedor ≥ 70% das vendas → dependência.
+    const totalSellerSales = round2(sellers.reduce((a, s) => a + s.sales, 0));
+    if (sellers.length >= 2 && totalSellerSales > 0) {
+      const top = sellers.reduce((a, s) => (s.sales > a.sales ? s : a));
+      const pct = top.sales / totalSellerSales;
+      if (pct >= 0.7) {
+        pub({
+          domain: "retail_ops", signalType: "retail_seller_concentration", severity: "attention",
+          impactAmount: round2(top.sales), impactUnit: "BRL", sourceEntityType: "user", sourceEntityId: top.sellerUserId,
+          evidence: { seller: top.sellerName, pct: round2(pct * 100), totalSales: totalSellerSales, windowDays },
+          dedupeKey: `retail_ops:seller_concentration`,
+        });
+      }
+    }
+
     // Auto-resolve: sinais deste publicador que não valem mais (voltaram ao normal).
     let resolved = 0;
     const open = db.prepare("SELECT dedupe_key FROM business_signals WHERE organization_id = ? AND source_service = 'RetailOpsSignalPublisher' AND status = 'open'").all(orgId) as any[];
     for (const s of open) if (!current.has(s.dedupe_key)) { if (BusinessSignalService.resolveByDedupe(orgId, s.dedupe_key).ok) resolved++; }
 
     return { published, resolved, reserves: reserves.length };
+  }
+
+  /** Sinais de varejo abertos (do publicador + padrões), do mais grave ao menos. */
+  static topOpenSignals(orgId: string, limit = 3): Array<{ signalType: string; severity: string; impactAmount: number | null; impactUnit: string | null; evidence: any }> {
+    const rows = db.prepare(
+      `SELECT signal_type, severity, impact_amount, impact_unit, evidence_json
+         FROM business_signals
+        WHERE organization_id = ? AND status = 'open'
+          AND source_service IN ('RetailOpsSignalPublisher','RetailPatternMemoryService')
+        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'risk' THEN 1 WHEN 'attention' THEN 2 ELSE 3 END, detected_at DESC
+        LIMIT ?`
+    ).all(orgId, Math.max(1, limit)) as any[];
+    return rows.map((r) => ({ signalType: r.signal_type, severity: r.severity, impactAmount: r.impact_amount != null ? Number(r.impact_amount) : null, impactUnit: r.impact_unit || null, evidence: (() => { try { return JSON.parse(r.evidence_json || "{}"); } catch { return {}; } })() }));
+  }
+
+  /** Frase curta pt-BR de um sinal de varejo (para o briefing e o Diretor). */
+  static describe(sig: { signalType: string; evidence: any }): string {
+    const e = sig.evidence || {};
+    switch (sig.signalType) {
+      case "retail_online_reserve_out": return `Reserva online esgotada: ${e.product} (${e.store})`;
+      case "retail_reserve_low": return `Reserva online baixa: ${e.product} (${e.store})`;
+      case "retail_product_no_online_sales": return `Produto sem giro online: ${e.product}`;
+      case "retail_sales_concentration": return `Vendas concentradas em ${e.product} (${e.pct}%)`;
+      case "retail_writeback_backlog": return `${e.pending} baixas pendentes de lançar no PDV`;
+      case "retail_seller_below_quota": return `${e.seller} abaixo da meta`;
+      case "retail_seller_concentration": return `Vendas concentradas em ${e.seller} (${e.pct}%)`;
+      case "retail_store_stockout": return `Ruptura ativa na ${e.store} (${e.alerts} itens negativos)`;
+      default: return String(e.description || sig.signalType);
+    }
   }
 }
 

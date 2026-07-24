@@ -105,6 +105,7 @@ jobs:
           - { name: 'retail-commission-seller-product', script: 'test:retail-commission-seller-product' }
           - { name: 'retail-commission-report', script: 'test:retail-commission-report' }
           - { name: 'retail-ops-signals', script: 'test:retail-ops-signals' }
+          - { name: 'retail-insights-briefing', script: 'test:retail-insights-briefing' }
           - { name: 'order-seller-attribution', script: 'test:order-seller-attribution' }
           - { name: 'storefront-seller-attribution', script: 'test:storefront-seller-attribution' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }

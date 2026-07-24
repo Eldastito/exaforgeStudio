@@ -67,6 +67,7 @@ import peopleRoutes from "./src/server/routes/people.js";
 import productionRoutes from "./src/server/routes/production.js";
 import signalsRoutes from "./src/server/routes/signals.js";
 import actionsRoutes from "./src/server/routes/actions.js";
+import insightsRoutes from "./src/server/routes/insights.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import { PlanService } from "./src/server/PlanService.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
@@ -506,6 +507,7 @@ async function startServer() {
   protectedApi.use("/business", businessRoutes);
   protectedApi.use("/signals", signalsRoutes);
   protectedApi.use("/actions", actionsRoutes);
+  protectedApi.use("/insights", insightsRoutes);
   protectedApi.use("/gestor", gestorRoutes);
   protectedApi.use("/people", peopleRoutes);
   protectedApi.use("/production", productionRoutes);

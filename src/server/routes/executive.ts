@@ -13,6 +13,14 @@ router.get("/briefing", async (req: AuthRequest, res): Promise<any> => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/executive/effectiveness — "o que costuma funcionar": eficácia aprendida
+// por tipo de ação (todos os domínios), ranqueada. Só leitura, determinística.
+router.get("/effectiveness", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ items: ExecutiveAdvisorService.learnedEffectiveness(orgId) });
+});
+
 // POST /api/executive/ask — pergunta livre do gestor ao Diretor IA.
 router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;

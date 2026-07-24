@@ -5,6 +5,7 @@ import { RevenueAuditService } from "./RevenueAuditService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
+import { PatternMemoryService } from "./PatternMemoryService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -30,7 +31,39 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.businessSignalsBlock(orgId);
+    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId);
+  }
+
+  /**
+   * "O QUE COSTUMA FUNCIONAR" (ADR-142 Fatia 3, generalizada): a eficácia APRENDIDA
+   * por tipo de ação, de TODOS os domínios (genéricos + varejo). Cada desfecho que
+   * o dono registrou (funcionou/sem efeito/piorou) ajusta a eficácia do tipo; aqui
+   * o Diretor passa a saber, com base no HISTÓRICO do próprio negócio, quais ações
+   * costumam resolver — para priorizar o que funciona. Fatos, nunca invente número.
+   */
+  static learnedEffectiveness(orgId: string): any[] {
+    const rows: any[] = [];
+    try { for (const r of PatternMemoryService.allTypeStats(orgId)) rows.push({ ...r }); } catch { /* noop */ }
+    try { for (const r of RetailPatternMemoryService.allTypeStats(orgId)) rows.push({ domain: "retail_ops", ...r }); } catch { /* noop */ }
+    return rows
+      .filter((r) => Number(r.acted) > 0)
+      .map((r) => ({
+        domain: r.domain, patternType: r.pattern_type,
+        acted: Number(r.acted), worked: Number(r.worked), noEffect: Number(r.no_effect), backfired: Number(r.backfired),
+        netImpact: Number(r.net_impact) || 0, effectiveness: Number(r.effectiveness) || 0,
+        recommendedAction: ImpactPrioritizationService.actionFor(r.pattern_type).label,
+      }))
+      .sort((a, b) => (b.effectiveness - a.effectiveness) || (b.acted - a.acted));
+  }
+
+  static learnedEffectivenessBlock(orgId: string): string {
+    try {
+      const items = this.learnedEffectiveness(orgId);
+      if (!items.length) return "";
+      const lines = items.slice(0, 12).map((it) =>
+        `- [${it.domain}] ${it.recommendedAction} (tipo ${it.patternType}): eficácia ${Math.round(it.effectiveness * 100)}% em ${it.acted} ação(ões) — funcionou ${it.worked}, sem efeito ${it.noEffect}, piorou ${it.backfired}`);
+      return `\n\n=== O QUE COSTUMA FUNCIONAR (eficácia aprendida por tipo de ação; use p/ priorizar o que resolve; fatos) ===\n${lines.join("\n")}`;
+    } catch { return ""; }
   }
 
   /**

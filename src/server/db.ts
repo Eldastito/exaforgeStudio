@@ -922,6 +922,9 @@ const initDb = () => {
   // Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixa pendente +
   // reconciliação anti-clobber no sync. OPT-IN por organização (default off).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN online_store_reserve INTEGER DEFAULT 0`); } catch(e){}
+  // Filial da qual a LOJA VIRTUAL (checkout público) vende — a reserva daquela
+  // loja governa o estoque online. NULL = storefront não aplica reserva (ADR-143).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN online_store_id TEXT`); } catch(e){}
   // store_id no pedido (ADR-143 D2): pedido nativo passa a poder pertencer a uma
   // filial (loja virtual multi-loja). NULL = org (comportamento atual).
   try { db.exec(`ALTER TABLE orders ADD COLUMN store_id TEXT`); } catch(e){}

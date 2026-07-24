@@ -120,6 +120,7 @@ jobs:
           - { name: 'retail-revenue-bridge', script: 'test:retail-revenue-bridge' }
           - { name: 'retail-pattern-memory', script: 'test:retail-pattern-memory' }
           - { name: 'retail-online-reserve', script: 'test:retail-online-reserve' }
+          - { name: 'retail-online-reserve-checkout', script: 'test:retail-online-reserve-checkout' }
           - { name: 'retail-reconciliation', script: 'test:retail-reconciliation' }
           - { name: 'retail-reconciliation-report', script: 'test:retail-reconciliation-report' }
           - { name: 'retail-scan-barcode', script: 'test:retail-scan-barcode' }

@@ -109,6 +109,7 @@
     "test:retail-revenue-bridge": "tsx scripts/test-retail-revenue-bridge.ts",
     "test:retail-pattern-memory": "tsx scripts/test-retail-pattern-memory.ts",
     "test:retail-online-reserve": "tsx scripts/test-retail-online-reserve.ts",
+    "test:retail-online-reserve-checkout": "tsx scripts/test-retail-online-reserve-checkout.ts",
     "test:retail-reconciliation": "tsx scripts/test-retail-reconciliation.ts",
     "test:retail-reconciliation-report": "tsx scripts/test-retail-reconciliation-report.ts",
     "test:retail-scan-barcode": "tsx scripts/test-retail-scan-barcode.ts",

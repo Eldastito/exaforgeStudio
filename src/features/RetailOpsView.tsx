@@ -33,9 +33,12 @@ function Badge({ map, s }: { map: Record<string, { label: string; cls: string }>
 // ---- Padrões (IA) — memória de padrões do varejo (ADR-142) ------------------
 function PatternsTab() {
   const [patterns, setPatterns] = useState<any[]>([]);
+  const [typeStats, setTypeStats] = useState<any[]>([]);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [learning, setLearning] = useState(false);
+
+  const effOf = (type: string) => typeStats.find((s) => s.pattern_type === type);
 
   const load = async () => {
     setLoading(true);
@@ -43,9 +46,20 @@ function PatternsTab() {
       const d = await apiFetch('/api/retailops/patterns').then(r => r.json()).catch(() => ({}));
       setEnabled(!!d?.enabled);
       setPatterns(Array.isArray(d?.patterns) ? d.patterns : []);
+      setTypeStats(Array.isArray(d?.typeStats) ? d.typeStats : []);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const recordOutcome = async (p: any, outcome: 'worked' | 'no_effect' | 'backfired') => {
+    const res = await apiFetch(`/api/retailops/patterns/${p.id}/outcome`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast.success('Desfecho registrado — o sistema aprendeu com o resultado.');
+      if (Array.isArray(d.patterns)) setPatterns(d.patterns);
+      if (Array.isArray(d.typeStats)) setTypeStats(d.typeStats);
+    } else toast.error(d.error || 'Falha ao registrar o desfecho.');
+  };
 
   const toggle = async () => {
     const res = await apiFetch('/api/retailops/patterns/flag', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
@@ -84,16 +98,26 @@ function PatternsTab() {
         </div>
       ) : (
         <div className="space-y-2">
-          {patterns.map((p) => (
+          {patterns.map((p) => {
+            const eff = effOf(p.pattern_type);
+            return (
             <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-mono text-zinc-500">{p.pattern_type}</span>
                 <Badge map={PATTERN_STATUS} s={p.status} />
                 <span className="text-[11px] text-zinc-500">confiança {Math.round(Number(p.confidence) * 100)}% · visto {p.occurrences}x{p.last_seen_date ? ` · ${p.last_seen_date}` : ''}</span>
+                {eff && eff.acted > 0 && <span className="text-[11px] text-indigo-300">eficácia das ações {Math.round(Number(eff.effectiveness) * 100)}% ({eff.acted}x)</span>}
               </div>
               {p.description && <p className="mt-1.5 text-sm text-zinc-200">{p.description}</p>}
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-[11px] text-zinc-500">Agiu sobre isso? Como foi:</span>
+                <button onClick={() => recordOutcome(p, 'worked')} className="rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10">Funcionou</button>
+                <button onClick={() => recordOutcome(p, 'no_effect')} className="rounded border border-zinc-600 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">Sem efeito</button>
+                <button onClick={() => recordOutcome(p, 'backfired')} className="rounded border border-red-500/30 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10">Piorou</button>
+              </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

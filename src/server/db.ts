@@ -1827,6 +1827,24 @@ const initDb = () => {
         ON retail_store_patterns (organization_id, COALESCE(store_id,''), pattern_type, pattern_key);
       CREATE INDEX IF NOT EXISTS idx_retail_store_patterns_org
         ON retail_store_patterns (organization_id, status);
+
+      -- Eficácia por TIPO de padrão (ADR-142 Fatia 3): fecha o loop com o
+      -- resultado. Quando o gestor age sobre um padrão e mede o desfecho, a
+      -- eficácia do tipo se ajusta — o sistema aprende O QUE FUNCIONA na loja.
+      CREATE TABLE IF NOT EXISTS retail_pattern_type_stats (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        pattern_type TEXT NOT NULL,
+        acted INTEGER DEFAULT 0,
+        worked INTEGER DEFAULT 0,
+        no_effect INTEGER DEFAULT 0,
+        backfired INTEGER DEFAULT 0,
+        net_impact REAL DEFAULT 0,
+        effectiveness REAL DEFAULT 0.5,        -- 0..1 (prior neutro 0,5 sem dado)
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_pattern_type_stats
+        ON retail_pattern_type_stats (organization_id, pattern_type);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase F', e); }
 

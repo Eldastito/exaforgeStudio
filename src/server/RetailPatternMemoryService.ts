@@ -2,6 +2,11 @@ import db from "./db.js";
 import { randomUUID } from "crypto";
 import { chat, isAIConfigured } from "./llm.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
+import { logAuthEvent } from "./auditLog.js";
+
+const OUTCOMES = ["worked", "no_effect", "backfired"] as const;
+type Outcome = typeof OUTCOMES[number];
+const OUTCOME_CONF_DELTA: Record<Outcome, number> = { worked: 0.1, no_effect: -0.05, backfired: -0.2 };
 
 /**
  * Memória de Padrões do Varejo (ADR-142 Fatia 1) — o loop de aprendizado da loja.
@@ -197,20 +202,75 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
       if (p.status !== "validated") { if (BusinessSignalService.resolveByDedupe(orgId, dedupeKey).ok) resolved++; continue; }
       const ev = (() => { try { return JSON.parse(p.evidence_json || "{}"); } catch { return {}; } })();
       const storeName = (db.prepare("SELECT name FROM retail_stores WHERE id = ? AND organization_id = ?").get(p.store_id, orgId) as any)?.name || "loja";
-      const severity = Number(p.confidence) >= 0.6 ? "risk" : "attention";
+      const stats = this.typeStats(orgId, p.pattern_type);
+      // Feed-forward (Fatia 3): a EFICÁCIA aprendida do tipo modula a prioridade.
+      // Tipo cujas ações costumam funcionar sobe; o que não ajuda desce.
+      let severity = Number(p.confidence) >= 0.6 ? "risk" : "attention";
+      if (stats && stats.acted >= 2) {
+        if (stats.effectiveness <= 0.25) severity = "info";        // agir aqui não costuma ajudar
+        else if (stats.effectiveness >= 0.66) severity = "risk";   // vale atacar — costuma resolver
+      }
       try {
         BusinessSignalService.publish(orgId, {
           domain: "retail_ops", signalType: p.pattern_type, severity, basis: "fact",
           confidence: Number(p.confidence) || 0.5,
           impactAmount: Number(ev.evidenceCount) || null, impactUnit: "units",
           sourceService: "RetailPatternMemoryService", sourceEntityType: "retail_store_pattern", sourceEntityId: p.id,
-          evidence: { store: storeName, description: p.description, occurrences: p.occurrences, ...ev },
+          evidence: { store: storeName, description: p.description, occurrences: p.occurrences, effectiveness: stats?.effectiveness ?? null, acted: stats?.acted ?? 0, ...ev },
           dedupeKey,
         });
         published++;
       } catch { /* noop */ }
     }
     return { published, resolved };
+  }
+
+  // ── FECHAR O LOOP (ADR-142 Fatia 3): desfecho ajusta a eficácia do tipo ───────
+  /** Estatística de eficácia de um tipo de padrão (null se ainda sem registro). */
+  static typeStats(orgId: string, patternType: string): { acted: number; worked: number; no_effect: number; backfired: number; net_impact: number; effectiveness: number } | null {
+    const r = db.prepare("SELECT acted, worked, no_effect, backfired, net_impact, effectiveness FROM retail_pattern_type_stats WHERE organization_id = ? AND pattern_type = ?").get(orgId, patternType) as any;
+    if (!r) return null;
+    return { acted: Number(r.acted), worked: Number(r.worked), no_effect: Number(r.no_effect), backfired: Number(r.backfired), net_impact: Number(r.net_impact), effectiveness: Number(r.effectiveness) };
+  }
+  static allTypeStats(orgId: string): any[] {
+    return db.prepare("SELECT pattern_type, acted, worked, no_effect, backfired, net_impact, effectiveness FROM retail_pattern_type_stats WHERE organization_id = ? ORDER BY pattern_type").all(orgId) as any[];
+  }
+
+  /**
+   * Registra o DESFECHO de uma ação sobre um padrão (o gestor agiu e mediu):
+   * `worked` | `no_effect` | `backfired`, com impacto realizado opcional. Ajusta
+   * (1) a EFICÁCIA aprendida do tipo — `effectiveness = Σpeso/acted` (worked=1,
+   * no_effect=0,5, backfired=0) — e (2) a confiança do próprio padrão. É assim que
+   * o sistema aprende O QUE FUNCIONA nesta loja. Determinístico, auditável.
+   */
+  static recordOutcome(orgId: string, patternId: string, input: { outcome: string; realizedImpact?: number; note?: string }, actorId?: string): { ok: boolean; error?: string; effectiveness?: number; patternConfidence?: number } {
+    const outcome = String(input?.outcome || "") as Outcome;
+    if (!OUTCOMES.includes(outcome)) return { ok: false, error: "outcome inválido (worked|no_effect|backfired)" };
+    const p = db.prepare("SELECT * FROM retail_store_patterns WHERE organization_id = ? AND id = ?").get(orgId, patternId) as any;
+    if (!p) return { ok: false, error: "padrão não encontrado" };
+    const impact = Number(input?.realizedImpact) || 0;
+
+    const existing = db.prepare("SELECT * FROM retail_pattern_type_stats WHERE organization_id = ? AND pattern_type = ?").get(orgId, p.pattern_type) as any;
+    const acted = (existing ? Number(existing.acted) : 0) + 1;
+    const worked = (existing ? Number(existing.worked) : 0) + (outcome === "worked" ? 1 : 0);
+    const noEffect = (existing ? Number(existing.no_effect) : 0) + (outcome === "no_effect" ? 1 : 0);
+    const backfired = (existing ? Number(existing.backfired) : 0) + (outcome === "backfired" ? 1 : 0);
+    const netImpact = round2((existing ? Number(existing.net_impact) : 0) + impact);
+    const effectiveness = round2((worked * 1 + noEffect * 0.5 + backfired * 0) / Math.max(1, acted));
+    if (existing) {
+      db.prepare("UPDATE retail_pattern_type_stats SET acted=?, worked=?, no_effect=?, backfired=?, net_impact=?, effectiveness=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(acted, worked, noEffect, backfired, netImpact, effectiveness, existing.id);
+    } else {
+      db.prepare("INSERT INTO retail_pattern_type_stats (id, organization_id, pattern_type, acted, worked, no_effect, backfired, net_impact, effectiveness) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), orgId, p.pattern_type, acted, worked, noEffect, backfired, netImpact, effectiveness);
+    }
+
+    // Nudge na confiança do próprio padrão (feedback imediato).
+    const patternConfidence = clamp01(round2(Number(p.confidence) + OUTCOME_CONF_DELTA[outcome]));
+    db.prepare("UPDATE retail_store_patterns SET confidence=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(patternConfidence, p.id);
+
+    try { logAuthEvent(orgId, actorId || "system", p.id, "RETAIL_PATTERN_OUTCOME", { patternType: p.pattern_type, outcome, impact, effectiveness }); } catch { /* noop */ }
+    return { ok: true, effectiveness, patternConfidence };
   }
 
   /**

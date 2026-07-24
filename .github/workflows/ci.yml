@@ -103,6 +103,7 @@ jobs:
           - { name: 'retail-stock', script: 'test:retail-stock' }
           - { name: 'retail-commission', script: 'test:retail-commission' }
           - { name: 'retail-commission-seller-product', script: 'test:retail-commission-seller-product' }
+          - { name: 'order-seller-attribution', script: 'test:order-seller-attribution' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }
           - { name: 'retail-decouple', script: 'test:retail-decouple' }
           - { name: 'retail-activation', script: 'test:retail-activation' }

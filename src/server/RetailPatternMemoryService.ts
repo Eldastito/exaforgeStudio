@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { chat, isAIConfigured } from "./llm.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /**
  * Memória de Padrões do Varejo (ADR-142 Fatia 1) — o loop de aprendizado da loja.
@@ -179,13 +180,46 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     return decayed;
   }
 
+  // ── REALIMENTAR (ADR-142 Fatia 2): padrões validados viram sinais ─────────────
+  /**
+   * Publica os padrões `validated` como sinais `retail_ops` no `business_signals`
+   * (ADR-136) — de onde fluem sozinhos para o Pareto e o briefing. Padrões que
+   * NÃO estão validados (candidate/dormant) têm o sinal RESOLVIDO (param de
+   * "cutucar" o gestor). Idempotente por `retail_pattern:tipo:loja`.
+   */
+  static publishSignals(orgId: string): { published: number; resolved: number } {
+    const rows = db.prepare(
+      `SELECT * FROM retail_store_patterns WHERE organization_id = ? AND pattern_type IN (${HANDLED_TYPES.map(() => "?").join(",")})`
+    ).all(orgId, ...HANDLED_TYPES) as any[];
+    let published = 0, resolved = 0;
+    for (const p of rows) {
+      const dedupeKey = `retail_pattern:${p.pattern_type}:${p.store_id || ""}`;
+      if (p.status !== "validated") { if (BusinessSignalService.resolveByDedupe(orgId, dedupeKey).ok) resolved++; continue; }
+      const ev = (() => { try { return JSON.parse(p.evidence_json || "{}"); } catch { return {}; } })();
+      const storeName = (db.prepare("SELECT name FROM retail_stores WHERE id = ? AND organization_id = ?").get(p.store_id, orgId) as any)?.name || "loja";
+      const severity = Number(p.confidence) >= 0.6 ? "risk" : "attention";
+      try {
+        BusinessSignalService.publish(orgId, {
+          domain: "retail_ops", signalType: p.pattern_type, severity, basis: "fact",
+          confidence: Number(p.confidence) || 0.5,
+          impactAmount: Number(ev.evidenceCount) || null, impactUnit: "units",
+          sourceService: "RetailPatternMemoryService", sourceEntityType: "retail_store_pattern", sourceEntityId: p.id,
+          evidence: { store: storeName, description: p.description, occurrences: p.occurrences, ...ev },
+          dedupeKey,
+        });
+        published++;
+      } catch { /* noop */ }
+    }
+    return { published, resolved };
+  }
+
   /**
    * Um passe de aprendizado: observa a janela, detecta padrões por regra, pede ao
-   * LLM a descrição (frugal), grava (idempotente) e decai os que sumiram.
-   * `asOf` = data de referência (default hoje). Opt-in: desligado → no-op.
+   * LLM a descrição (frugal), grava (idempotente), decai os que sumiram e publica
+   * os validados como sinais. `asOf` = data de referência (default hoje). Opt-in.
    */
-  static async learnPass(orgId: string, opts: { asOf?: string; windowWeeks?: number } = {}): Promise<{ enabled: boolean; detected: number; validated: number; decayed: number }> {
-    if (!this.isEnabled(orgId)) return { enabled: false, detected: 0, validated: 0, decayed: 0 };
+  static async learnPass(orgId: string, opts: { asOf?: string; windowWeeks?: number } = {}): Promise<{ enabled: boolean; detected: number; validated: number; decayed: number; published: number; resolved: number }> {
+    if (!this.isEnabled(orgId)) return { enabled: false, detected: 0, validated: 0, decayed: 0, published: 0, resolved: 0 };
     const asOf = /^\d{4}-\d{2}-\d{2}$/.test(opts.asOf || "") ? opts.asOf! : new Date().toISOString().slice(0, 10);
     const from = daysBefore(asOf, (opts.windowWeeks || WINDOW_WEEKS) * 7);
 
@@ -205,6 +239,7 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
       if (c.evidenceCount >= VALIDATE_EVIDENCE && round2(c.confidence) >= VALIDATE_CONFIDENCE) validated++;
     }
     const decayed = this.decayStale(orgId, asOf, seen);
-    return { enabled: true, detected: candidates.length, validated, decayed };
+    const sig = this.publishSignals(orgId);
+    return { enabled: true, detected: candidates.length, validated, decayed, published: sig.published, resolved: sig.resolved };
   }
 }

@@ -3,6 +3,7 @@ import db from "./db.js";
 import { BusinessContextService } from "./BusinessContextService.js";
 import { RevenueAuditService } from "./RevenueAuditService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
+import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -28,7 +29,23 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId);
+    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId);
+  }
+
+  /**
+   * Padrões APRENDIDOS da(s) loja(s) (ADR-142 Fatia 2), sob a flag
+   * `retail_pattern_memory`. Só os `validated` (confiança calculada por regra de
+   * recorrência) entram — o Diretor passa a "conhecer" a loja. Desligada por
+   * padrão. NUNCA vira ação automática (IA sugere, humano decide).
+   */
+  static retailPatternsBlock(orgId: string): string {
+    try {
+      if (!RetailPatternMemoryService.isEnabled(orgId)) return "";
+      const patterns = RetailPatternMemoryService.list(orgId, { status: "validated" });
+      if (!patterns.length) return "";
+      const lines = patterns.slice(0, 12).map((p: any) => `- [${p.pattern_type}] ${p.description || ""} (confiança ${Math.round(Number(p.confidence) * 100)}%, visto ${p.occurrences}x)`);
+      return `\n\n=== PADRÕES APRENDIDOS DA LOJA (recorrência determinística; use como contexto, não invente número) ===\n${lines.join("\n")}`;
+    } catch { return ""; }
   }
 
   private static snapshotBlockV2(orgId: string): string {

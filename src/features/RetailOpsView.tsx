@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2 } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -30,14 +30,92 @@ function Badge({ map, s }: { map: Record<string, { label: string; cls: string }>
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${it.cls}`}>{it.label}</span>;
 }
 
-type RetailTab = 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe';
+// ---- Padrões (IA) — memória de padrões do varejo (ADR-142) ------------------
+function PatternsTab() {
+  const [patterns, setPatterns] = useState<any[]>([]);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [learning, setLearning] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const d = await apiFetch('/api/retailops/patterns').then(r => r.json()).catch(() => ({}));
+      setEnabled(!!d?.enabled);
+      setPatterns(Array.isArray(d?.patterns) ? d.patterns : []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = async () => {
+    const res = await apiFetch('/api/retailops/patterns/flag', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { setEnabled(!!d.enabled); toast.success(d.enabled ? 'Aprendizado de padrões ligado.' : 'Aprendizado de padrões desligado.'); }
+    else toast.error(d.error || 'Falha ao alterar.');
+  };
+  const learn = async () => {
+    setLearning(true);
+    try {
+      const res = await apiFetch('/api/retailops/patterns/learn', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`Aprendizado rodado: ${d.detected || 0} padrão(ões), ${d.validated || 0} validado(s).`); setPatterns(Array.isArray(d.patterns) ? d.patterns : []); }
+      else toast.error(d.error || 'Falha ao rodar o aprendizado.');
+    } finally { setLearning(false); }
+  };
+
+  if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
+        <p className="text-sm text-zinc-400">Padrões recorrentes que a IA aprende da operação (divergência de caixa, estoque negativo…). A confiança é calculada por regra de recorrência; a IA só descreve.</p>
+        <button onClick={toggle} className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${enabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} /> Aprendizado {enabled ? 'ligado' : 'desligado'}
+        </button>
+        <button onClick={learn} disabled={learning || !enabled} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          {learning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Rodar aprendizado agora
+        </button>
+      </div>
+
+      {patterns.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center">
+          <p className="text-sm text-zinc-500">Nenhum padrão aprendido ainda.</p>
+          <p className="mt-1 text-[12px] text-zinc-600">{enabled ? 'Rode o aprendizado quando houver histórico (fechamentos, divergências, estoque). Padrões validados aparecem para o Diretor IA e no Pareto.' : 'Ligue o aprendizado para a IA começar a observar os padrões da loja.'}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {patterns.map((p) => (
+            <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-mono text-zinc-500">{p.pattern_type}</span>
+                <Badge map={PATTERN_STATUS} s={p.status} />
+                <span className="text-[11px] text-zinc-500">confiança {Math.round(Number(p.confidence) * 100)}% · visto {p.occurrences}x{p.last_seen_date ? ` · ${p.last_seen_date}` : ''}</span>
+              </div>
+              {p.description && <p className="mt-1.5 text-sm text-zinc-200">{p.description}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type RetailTab = 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe' | 'padroes';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'divergencia', label: 'Divergência', icon: Scale },
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
   { key: 'equipe', label: 'Equipe & cobrança', icon: Users },
+  { key: 'padroes', label: 'Padrões (IA)', icon: Sparkles },
 ];
+
+const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
+  validated: { label: 'Validado', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  candidate: { label: 'Candidato', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  dormant: { label: 'Adormecido', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+  refuted: { label: 'Refutado', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+};
 
 export function RetailOpsView() {
   const [tab, setTab] = useState<RetailTab>('fechamento');
@@ -58,6 +136,7 @@ export function RetailOpsView() {
       {tab === 'divergencia' && <ReconciliationTab />}
       {tab === 'estoque' && <NegativeStockTab />}
       {tab === 'equipe' && <ResponsiblesTab />}
+      {tab === 'padroes' && <PatternsTab />}
     </div>
   );
 }

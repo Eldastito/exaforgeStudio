@@ -79,6 +79,15 @@ export class BusinessSignalService {
   static acknowledge(orgId: string, id: string) { return this.setStatus(orgId, id, "acknowledged"); }
   static dismiss(orgId: string, id: string) { return this.setStatus(orgId, id, "dismissed"); }
   static resolve(orgId: string, id: string) { return this.setStatus(orgId, id, "resolved"); }
+
+  /**
+   * Resolve um sinal AINDA ABERTO pela sua dedupe_key (ex.: o padrão que o gerou
+   * deixou de valer). No-op se não existe ou já foi fechado. Isolado por org.
+   */
+  static resolveByDedupe(orgId: string, dedupeKey: string): { ok: boolean } {
+    const r = db.prepare("UPDATE business_signals SET status = 'resolved' WHERE organization_id = ? AND dedupe_key = ? AND status = 'open'").run(orgId, dedupeKey);
+    return { ok: r.changes > 0 };
+  }
 }
 
 function safeParse(s: string): any { try { return JSON.parse(s); } catch { return {}; } }

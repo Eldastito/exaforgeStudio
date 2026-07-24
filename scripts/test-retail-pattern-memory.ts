@@ -31,6 +31,7 @@ async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { RetailStoreService } = await import("../src/server/RetailStoreService.js");
   const { RetailPatternMemoryService, __setRetailPatternHypothesizerForTests } = await import("../src/server/RetailPatternMemoryService.js");
+  const { ExecutiveAdvisorService } = await import("../src/server/ExecutiveAdvisorService.js");
 
   const A = `org_A_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'A', 'active')`).run(randomUUID(), A);
@@ -73,6 +74,15 @@ async function main() {
   const neg = db.prepare(`SELECT * FROM retail_store_patterns WHERE organization_id=? AND pattern_type='estoque_negativo_recorrente'`).get(A) as any;
   check("estoque negativo: candidate, confiança 0,3", neg && neg.status === "candidate" && Number(neg.confidence) === 0.3, JSON.stringify(neg));
 
+  // ===== 2b. Fatia 2 — padrão validado vira sinal retail_ops + entra no Diretor =====
+  check("Fatia 2: publicou >=1 sinal", r1.published >= 1, JSON.stringify(r1));
+  const sig = db.prepare(`SELECT * FROM business_signals WHERE organization_id=? AND domain='retail_ops' AND signal_type='caixa_divergente_recorrente'`).get(A) as any;
+  check("Fatia 2: sinal retail_ops ABERTO p/ a divergência", sig && sig.status === "open", JSON.stringify(sig));
+  const block = ExecutiveAdvisorService.retailPatternsBlock(A);
+  check("Fatia 2: padrão validado entra no panorama do Diretor", block.includes("PADRÕES APRENDIDOS") && block.includes("caixa_divergente_recorrente"), block.slice(0, 120));
+  // Candidato (estoque negativo) NÃO gera sinal aberto nem entra no panorama.
+  check("Fatia 2: candidato não vira sinal", !db.prepare(`SELECT id FROM business_signals WHERE organization_id=? AND signal_type='estoque_negativo_recorrente' AND status='open'`).get(A));
+
   // ===== 3. Idempotência — re-passe incrementa occurrences, não duplica =====
   await RetailPatternMemoryService.learnPass(A, { asOf: ASOF });
   const divRows = db.prepare(`SELECT * FROM retail_store_patterns WHERE organization_id=? AND pattern_type='caixa_divergente_recorrente'`).all(A) as any[];
@@ -84,6 +94,9 @@ async function main() {
   check("decay: nada detectado na janela vazia", d1.detected === 0 && d1.decayed >= 2, JSON.stringify(d1));
   const divDecay = db.prepare(`SELECT confidence, status FROM retail_store_patterns WHERE organization_id=? AND pattern_type='caixa_divergente_recorrente'`).get(A) as any;
   check("decay: confiança 0,5 → 0,3 (candidate)", Number(divDecay.confidence) === 0.3 && divDecay.status === "candidate", JSON.stringify(divDecay));
+  // Fatia 2: padrão que deixou de valer → sinal RESOLVIDO (para de cutucar o gestor).
+  const sigResolved = db.prepare(`SELECT status FROM business_signals WHERE organization_id=? AND domain='retail_ops' AND signal_type='caixa_divergente_recorrente'`).get(A) as any;
+  check("Fatia 2: padrão decaído resolve o sinal", sigResolved && sigResolved.status === "resolved" && d1.resolved >= 1, JSON.stringify({ sigResolved, resolved: d1.resolved }));
   await RetailPatternMemoryService.learnPass(A, { asOf: "2026-12-15" }); // decai de novo
   const divDormant = db.prepare(`SELECT confidence, status FROM retail_store_patterns WHERE organization_id=? AND pattern_type='caixa_divergente_recorrente'`).get(A) as any;
   check("decay: 0,3 → 0,18 vira 'dormant'", Number(divDormant.confidence) < 0.2 && divDormant.status === "dormant", JSON.stringify(divDormant));

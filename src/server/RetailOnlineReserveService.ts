@@ -47,6 +47,18 @@ export class RetailOnlineReserveService {
     return this.getOnlineStoreId(orgId);
   }
 
+  /** Vendedor padrão da loja online (comissão das vendas headless). NULL = sem. */
+  static getDefaultOnlineSeller(orgId: string): string | null {
+    try {
+      const r = db.prepare("SELECT online_default_seller_user_id FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+      return r?.online_default_seller_user_id || null;
+    } catch { return null; }
+  }
+  static setDefaultOnlineSeller(orgId: string, userId: string | null): string | null {
+    db.prepare("UPDATE organization_settings SET online_default_seller_user_id = ? WHERE organization_id = ?").run(userId || null, orgId);
+    return this.getDefaultOnlineSeller(orgId);
+  }
+
   // ── Reserva e-commerce (D1) ───────────────────────────────────────────────────
   static setReserve(orgId: string, storeId: string, productId: string, variantId: string | null | undefined, qty: number, actorId?: string): any {
     db.prepare(

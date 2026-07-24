@@ -171,6 +171,8 @@ export function RetailOpsView() {
 function OnlineReserveTab() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [onlineStoreId, setOnlineStoreId] = useState<string>('');
+  const [defaultSeller, setDefaultSeller] = useState<string>('');
+  const [users, setUsers] = useState<any[]>([]);
   const [stores, setStores] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [reserves, setReserves] = useState<any[]>([]);
@@ -190,6 +192,8 @@ function OnlineReserveTab() {
       ]);
       setEnabled(!!d?.enabled);
       setOnlineStoreId(d?.onlineStoreId || '');
+      setDefaultSeller(d?.defaultSellerUserId || '');
+      setUsers(Array.isArray(d?.users) ? d.users : []);
       setReserves(Array.isArray(d?.reserves) ? d.reserves : []);
       setPending(Array.isArray(d?.pending) ? d.pending : []);
       const sts = Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []);
@@ -221,6 +225,11 @@ function OnlineReserveTab() {
     else toast.error(d.error || 'Falha ao alterar.');
   };
   const toggle = () => saveFlag({ enabled: !enabled });
+  const saveDefaultSeller = async (userId: string) => {
+    setDefaultSeller(userId);
+    const res = await apiFetch('/api/retailops/online-reserve/default-seller', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: userId || null }) });
+    if (res.ok) toast.success('Vendedor padrão salvo.'); else toast.error('Falha ao salvar.');
+  };
   const confirm = async (row: any) => {
     const res = await apiFetch('/api/retailops/online-reserve/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: row.id }) });
     const d = await res.json().catch(() => ({}));
@@ -239,11 +248,19 @@ function OnlineReserveTab() {
         </button>
       </div>
 
-      <div className="mb-4 flex items-center gap-2 text-sm">
+      <div className="mb-4 flex items-center gap-2 text-sm flex-wrap">
         <label className="text-xs text-zinc-400">Filial da loja virtual (de qual loja o estoque online sai):</label>
         <select value={onlineStoreId} onChange={e => saveFlag({ onlineStoreId: e.target.value })} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
           <option value="">— não aplicar reserva no checkout —</option>
           {stores.map((s) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ''}</option>)}
+        </select>
+      </div>
+
+      <div className="mb-4 flex items-center gap-2 text-sm flex-wrap">
+        <label className="text-xs text-zinc-400" title="Quando o cliente compra pelo link mas a conversa não tem atendente dono, a comissão vai para este vendedor. Em branco = venda 100% IA fica sem comissão.">Vendedor padrão da loja online (vendas 100% IA):</label>
+        <select value={defaultSeller} onChange={e => saveDefaultSeller(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+          <option value="">— sem comissão (a IA vendeu) —</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
         </select>
       </div>
 

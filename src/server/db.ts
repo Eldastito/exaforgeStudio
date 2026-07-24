@@ -925,6 +925,10 @@ const initDb = () => {
   // Filial da qual a LOJA VIRTUAL (checkout público) vende — a reserva daquela
   // loja governa o estoque online. NULL = storefront não aplica reserva (ADR-143).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN online_store_id TEXT`); } catch(e){}
+  // Vendedor PADRÃO da loja online: recebe a comissão das vendas por link quando
+  // a conversa não tem dono humano (venda 100% IA). NULL = venda headless fica
+  // SEM vendedor/comissão (decisão do dono). Ver RetailOnlineReserveService.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN online_default_seller_user_id TEXT`); } catch(e){}
   // store_id no pedido (ADR-143 D2): pedido nativo passa a poder pertencer a uma
   // filial (loja virtual multi-loja). NULL = org (comportamento atual).
   try { db.exec(`ALTER TABLE orders ADD COLUMN store_id TEXT`); } catch(e){}

@@ -12,6 +12,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { DepartmentService } from "../DepartmentService.js";
 import { CostCenterService } from "../CostCenterService.js";
 import { InventoryLocationService } from "../InventoryLocationService.js";
+import { OperationalItemService } from "../OperationalItemService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -127,6 +128,33 @@ router.post("/inventory-locations/transfer", requireRole("owner", "admin"), (req
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
   try { res.status(201).json(InventoryLocationService.transfer(orgId, { fromLocationId: b.fromLocationId, toLocationId: b.toLocationId, productId: b.productId, variantId: b.variantId, quantity: Number(b.quantity) }, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ─── Classificação operacional do item (Fatia 1c) ───────────────────────────────
+router.get("/items/types", (_req: AuthRequest, res): any => {
+  res.json({ types: OperationalItemService.ITEM_TYPES });
+});
+
+router.get("/items", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const consumptionControlled = req.query?.consumptionControlled === undefined ? undefined : truthy(req.query.consumptionControlled);
+  res.json({ items: OperationalItemService.list(orgId, { type: typeof req.query?.type === "string" ? req.query.type : undefined, consumptionControlled }) });
+});
+
+router.get("/items/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const it = OperationalItemService.get(orgId, req.params.id);
+  if (!it) return res.status(404).json({ error: "Produto não encontrado." });
+  res.json(it);
+});
+
+router.put("/items/:id/classification", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(OperationalItemService.classify(orgId, req.params.id, req.body || {}, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

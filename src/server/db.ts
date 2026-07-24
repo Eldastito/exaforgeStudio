@@ -1317,6 +1317,21 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN supplier_categories TEXT`); } catch(e){} // CSV de categorias atendidas
   try { db.exec(`ALTER TABLE products_services ADD COLUMN category TEXT`); } catch(e){}    // categoria do produto (casa com a do fornecedor)
   try { db.exec(`ALTER TABLE products_services ADD COLUMN ean TEXT`); } catch(e){}         // EAN/GTIN do produto (extraído da NF-e ou manual)
+  // CONTROLER (PRD-E-007, Fatia 1c): classificação OPERACIONAL do item. Aditivo e
+  // opt-in — itens existentes nascem 'resale' com consumo desligado (§30.2), sem
+  // mudar nenhum fluxo. Dá finalidade ao item, unidade de compra × consumo (com
+  // conversão de embalagem) e vínculos-padrão às dimensões do CONTROLER.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN operational_item_type TEXT DEFAULT 'resale'`); } catch(e){} // resale|raw_material|packaging|consumable|office_supply|cleaning_supply|mro|ppe|spare_part|fuel|asset_low_value|service|utility|subscription|other_operational
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN consumption_control_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN default_uom TEXT`); } catch(e){}       // unidade de CONSUMO (ex.: folha)
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN purchase_uom TEXT`); } catch(e){}      // unidade de COMPRA (ex.: caixa)
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN conversion_factor REAL DEFAULT 1`); } catch(e){} // quantas default_uom há em 1 purchase_uom
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN default_cost_center_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN default_location_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN criticality TEXT DEFAULT 'normal'`); } catch(e){}  // baixa|normal|alta|critica
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN requires_request INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN requires_return INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN requires_recipient_ack INTEGER DEFAULT 0`); } catch(e){}
   // Smart Inventory — backlog ADR-024: vínculo da entrada de estoque com o
   // fornecedor do CRM (quando o nome da nota casa com um contato is_supplier=1),
   // chave de acesso da NF-e para dedupe de importação, e markup padrão

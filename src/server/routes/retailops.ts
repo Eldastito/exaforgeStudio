@@ -102,6 +102,15 @@ router.put("/online-reserve/item", requireRole("owner", "admin"), (req: AuthRequ
   res.json({ ok: true, reserve: r, available: RetailOnlineReserveService.available(orgId, String(b.storeId), String(b.productId), b.variantId ?? null) });
 });
 
+// Remove a reserva de um produto/variante numa loja.
+router.delete("/online-reserve/item", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (!b.storeId || !b.productId) return res.status(400).json({ error: "storeId e productId são obrigatórios." });
+  res.json({ ok: true, ...RetailOnlineReserveService.removeReserve(orgId, String(b.storeId), String(b.productId), b.variantId ?? null, (req as any).userId) });
+});
+
 // Confirma a baixa (operador lançou no PDV) — por pedido ou por item.
 router.post("/online-reserve/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

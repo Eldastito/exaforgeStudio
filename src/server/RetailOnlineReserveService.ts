@@ -62,8 +62,24 @@ export class RetailOnlineReserveService {
     return (db.prepare("SELECT * FROM retail_online_reserve WHERE organization_id=? AND store_id=? AND product_service_id=? AND variant_id=?").get(orgId, storeId, productId, vk(variantId)) as any) || null;
   }
   static listReserves(orgId: string, storeId?: string): any[] {
-    if (storeId) return db.prepare("SELECT * FROM retail_online_reserve WHERE organization_id=? AND store_id=? ORDER BY updated_at DESC").all(orgId, storeId) as any[];
-    return db.prepare("SELECT * FROM retail_online_reserve WHERE organization_id=? ORDER BY updated_at DESC").all(orgId) as any[];
+    const base = `SELECT r.*, s.name AS store_name, p.name AS product_name,
+                         (r.qty_reserved - COALESCE((SELECT SUM(w.qty) FROM retail_online_writeback w
+                            WHERE w.organization_id=r.organization_id AND w.store_id=r.store_id
+                              AND w.product_service_id=r.product_service_id AND w.variant_id=r.variant_id
+                              AND w.status='pending'),0)) AS available
+                    FROM retail_online_reserve r
+               LEFT JOIN retail_stores s ON s.id = r.store_id
+               LEFT JOIN products_services p ON p.id = r.product_service_id
+                   WHERE r.organization_id = ?`;
+    if (storeId) return db.prepare(`${base} AND r.store_id = ? ORDER BY p.name`).all(orgId, storeId) as any[];
+    return db.prepare(`${base} ORDER BY s.name, p.name`).all(orgId) as any[];
+  }
+
+  /** Remove a reserva de um produto/variante numa loja. */
+  static removeReserve(orgId: string, storeId: string, productId: string, variantId?: string | null, actorId?: string): { ok: boolean } {
+    const r = db.prepare("DELETE FROM retail_online_reserve WHERE organization_id=? AND store_id=? AND product_service_id=? AND variant_id=?").run(orgId, storeId, productId, vk(variantId));
+    if (r.changes > 0) { try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_ONLINE_RESERVE_REMOVED", { productId, variantId: vk(variantId) }); } catch { /* noop */ } }
+    return { ok: r.changes > 0 };
   }
 
   /** Soma das baixas AINDA pendentes de um produto/variante numa loja. */

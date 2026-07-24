@@ -172,25 +172,46 @@ function OnlineReserveTab() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [onlineStoreId, setOnlineStoreId] = useState<string>('');
   const [stores, setStores] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [reserves, setReserves] = useState<any[]>([]);
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fStore, setFStore] = useState('');
+  const [fProduct, setFProduct] = useState('');
+  const [fQty, setFQty] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
-      const [d, st] = await Promise.all([
+      const [d, st, pr] = await Promise.all([
         apiFetch('/api/retailops/online-reserve').then(r => r.json()).catch(() => ({})),
         apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({})),
+        apiFetch('/api/products').then(r => r.json()).catch(() => ([])),
       ]);
       setEnabled(!!d?.enabled);
       setOnlineStoreId(d?.onlineStoreId || '');
       setReserves(Array.isArray(d?.reserves) ? d.reserves : []);
       setPending(Array.isArray(d?.pending) ? d.pending : []);
-      setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
+      const sts = Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []);
+      setStores(sts);
+      setProducts(Array.isArray(pr) ? pr.filter((p: any) => p.type === 'product') : []);
+      setFStore(prev => prev || d?.onlineStoreId || (sts[0]?.id ?? ''));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const saveReserve = async () => {
+    if (!fStore || !fProduct || fQty === '') { toast.error('Escolha loja, produto e quantidade.'); return; }
+    const res = await apiFetch('/api/retailops/online-reserve/item', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId: fStore, productId: fProduct, qty: Number(fQty) }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success('Reserva salva.'); setFProduct(''); setFQty(''); load(); }
+    else toast.error(d.error || 'Falha ao salvar a reserva.');
+  };
+  const removeReserve = async (r: any) => {
+    const res = await apiFetch('/api/retailops/online-reserve/item', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId: r.store_id, productId: r.product_service_id, variantId: r.variant_id || null }) });
+    if (res.ok) { toast.success('Reserva removida.'); load(); }
+    else toast.error('Falha ao remover.');
+  };
 
   const saveFlag = async (patch: { enabled?: boolean; onlineStoreId?: string }) => {
     const body = { enabled: patch.enabled ?? enabled, onlineStoreId: patch.onlineStoreId ?? onlineStoreId };
@@ -257,17 +278,52 @@ function OnlineReserveTab() {
       )}
 
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mt-6 mb-2">Reserva e-commerce por loja ({reserves.length})</h3>
+      <p className="text-[12px] text-zinc-500 mb-2">Defina quanto de cada produto a loja virtual pode vender por loja. É deste número (menos as vendas ainda não lançadas no PDV) que sai o estoque online.</p>
+
+      <div className="mb-3 flex items-end gap-2 flex-wrap rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <label className="text-[11px] text-zinc-400 flex flex-col gap-1">Loja
+          <select value={fStore} onChange={e => setFStore(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 min-w-[140px]">
+            {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] text-zinc-400 flex flex-col gap-1">Produto
+          <select value={fProduct} onChange={e => setFProduct(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 min-w-[200px]">
+            <option value="">— escolher —</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] text-zinc-400 flex flex-col gap-1">Reservar
+          <input type="number" min={0} value={fQty} onChange={e => setFQty(e.target.value)} placeholder="0" className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 w-24" />
+        </label>
+        <button onClick={saveReserve} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Salvar reserva</button>
+      </div>
+
       {reserves.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-[12px] text-zinc-600">Nenhuma reserva definida. Defina quanto de cada produto a loja virtual pode vender por loja (via API <span className="font-mono">/online-reserve/item</span> — editor visual na próxima fatia).</div>
+        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-[12px] text-zinc-600">Nenhuma reserva definida ainda. Use o formulário acima para liberar produtos na loja virtual.</div>
       ) : (
-        <div className="space-y-1">
-          {reserves.map((r) => (
-            <div key={r.id} className="flex items-center gap-2 text-sm rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-1.5">
-              <span className="text-zinc-500 font-mono text-[11px]">{String(r.store_id).slice(0, 8)}</span>
-              <span className="text-zinc-300">{String(r.product_service_id).slice(0, 8)}</span>
-              <span className="ml-auto text-zinc-400">reserva {r.qty_reserved}</span>
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">Loja</th>
+              <th className="px-3 py-2 text-left font-medium">Produto</th>
+              <th className="px-3 py-2 text-right font-medium">Reservado</th>
+              <th className="px-3 py-2 text-right font-medium">Disponível online</th>
+              <th className="px-3 py-2 text-right font-medium"></th>
+            </tr></thead>
+            <tbody>
+              {reserves.map((r) => (
+                <tr key={r.id} className="border-t border-zinc-800/60">
+                  <td className="px-3 py-2 text-zinc-300">{r.store_name || String(r.store_id).slice(0, 8)}</td>
+                  <td className="px-3 py-2 text-zinc-200">{r.product_name || String(r.product_service_id).slice(0, 8)}</td>
+                  <td className="px-3 py-2 text-right text-zinc-200">{r.qty_reserved}</td>
+                  <td className={`px-3 py-2 text-right ${Number(r.available) <= 0 ? 'text-amber-300' : 'text-emerald-300'}`}>{r.available}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button onClick={() => removeReserve(r)} title="Remover reserva" className="inline-flex items-center rounded border border-red-500/30 px-1.5 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10"><Trash2 className="w-3 h-3" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

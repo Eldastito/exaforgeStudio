@@ -92,6 +92,12 @@ async function main() {
   check("createOrder bloqueia oversell (throw)", threw === true);
   check("oversell não criou pendência (available segue 0)", RetailOnlineReserveService.available(A, store.id, P, null) === 0);
 
+  // ===== 8b. Editor de reservas: nomes + disponível + remover =====
+  const list = RetailOnlineReserveService.listReserves(A);
+  check("listReserves traz nome do produto e 'available'", list.length === 1 && list[0].product_name === "Camisa" && typeof list[0].available === "number", JSON.stringify(list[0]));
+  const rm = RetailOnlineReserveService.removeReserve(A, store.id, P, null);
+  check("removeReserve apaga a reserva", rm.ok === true && RetailOnlineReserveService.listReserves(A).length === 0 && RetailOnlineReserveService.available(A, store.id, P, null) === 0);
+
   // ===== 9. Isolamento por organização =====
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

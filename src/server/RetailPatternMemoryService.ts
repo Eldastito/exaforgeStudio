@@ -32,7 +32,7 @@ const VALIDATE_EVIDENCE = 4;     // evidência forte → valida já
 const VALIDATE_CONFIDENCE = 0.5; // confiança mínima p/ 'validated'
 const DECAY = 0.6;               // fator de decaimento quando o padrão não reaparece
 const DORMANT_AT = 0.2;          // abaixo disso vira 'dormant'
-const HANDLED_TYPES = ["caixa_divergente_recorrente", "estoque_negativo_recorrente"] as const;
+const HANDLED_TYPES = ["caixa_divergente_recorrente", "estoque_negativo_recorrente", "meta_nao_batida_recorrente", "fechamento_atrasado_recorrente"] as const;
 
 export interface PatternCandidate {
   storeId: string | null;
@@ -118,6 +118,56 @@ export class RetailPatternMemoryService {
         storeId: String(r.store_id), patternType: "estoque_negativo_recorrente", patternKey: "estoque",
         evidenceCount: alerts, confidence, evidence: { alerts, from, to },
         fallbackDescription: `Estoque negativo recorrente: ${alerts} alertas de saldo negativo nas últimas ${WINDOW_WEEKS} semanas — provável divergência de recebimento/venda.`,
+      });
+    }
+    return out;
+  }
+
+  /** Meta não batida recorrente: loja abaixo da cota em boa parte dos fechamentos. */
+  private static detectBelowQuotaRecurrence(orgId: string, from: string, to: string): PatternCandidate[] {
+    const rows = db.prepare(
+      `SELECT store_id,
+              SUM(CASE WHEN quota_amount > 0 AND variance_amount < 0 THEN 1 ELSE 0 END) AS below,
+              SUM(CASE WHEN quota_amount > 0 THEN 1 ELSE 0 END) AS withquota
+         FROM retail_daily_closings
+        WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND store_id IS NOT NULL
+        GROUP BY store_id`
+    ).all(orgId, from, to) as any[];
+    const out: PatternCandidate[] = [];
+    for (const r of rows) {
+      const below = Number(r.below) || 0;
+      const withQuota = Number(r.withquota) || 0;
+      if (below < MIN_EVIDENCE) continue;
+      const confidence = clamp01(below / Math.max(1, withQuota));
+      out.push({
+        storeId: String(r.store_id), patternType: "meta_nao_batida_recorrente", patternKey: "meta",
+        evidenceCount: below, confidence, evidence: { below, withQuota, from, to },
+        fallbackDescription: `Meta não batida recorrente: ${below} de ${withQuota} fechamentos abaixo da meta nas últimas ${WINDOW_WEEKS} semanas.`,
+      });
+    }
+    return out;
+  }
+
+  /** Fechamento atrasado recorrente: fechamento enviado depois do dia, com frequência. */
+  private static detectLateClosingRecurrence(orgId: string, from: string, to: string): PatternCandidate[] {
+    const rows = db.prepare(
+      `SELECT store_id,
+              SUM(CASE WHEN submitted_at IS NOT NULL AND date(submitted_at) > closing_date THEN 1 ELSE 0 END) AS late,
+              COUNT(*) AS total
+         FROM retail_daily_closings
+        WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND store_id IS NOT NULL
+        GROUP BY store_id`
+    ).all(orgId, from, to) as any[];
+    const out: PatternCandidate[] = [];
+    for (const r of rows) {
+      const late = Number(r.late) || 0;
+      const total = Number(r.total) || 0;
+      if (late < MIN_EVIDENCE) continue;
+      const confidence = clamp01(late / Math.max(1, total));
+      out.push({
+        storeId: String(r.store_id), patternType: "fechamento_atrasado_recorrente", patternKey: "fechamento",
+        evidenceCount: late, confidence, evidence: { late, total, from, to },
+        fallbackDescription: `Fechamento atrasado recorrente: ${late} de ${total} fechamentos enviados após o dia nas últimas ${WINDOW_WEEKS} semanas.`,
       });
     }
     return out;
@@ -286,6 +336,8 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     const candidates = [
       ...this.detectDivergenceRecurrence(orgId, from, asOf),
       ...this.detectNegativeStockRecurrence(orgId, from, asOf),
+      ...this.detectBelowQuotaRecurrence(orgId, from, asOf),
+      ...this.detectLateClosingRecurrence(orgId, from, asOf),
     ];
     const descriptions = await this.hypothesize(orgId, candidates);
 

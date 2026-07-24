@@ -46,6 +46,8 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   retail_sales_concentration: { actionType: "create_task", label: "Diversificar o mix (dependência de um produto)" },
   retail_writeback_backlog: { actionType: "create_task", label: "Lançar as baixas pendentes no PDV" },
   retail_seller_below_quota: { actionType: "create_task", label: "Acompanhar vendedor abaixo da meta" },
+  meta_nao_batida_recorrente: { actionType: "create_task", label: "Rever metas/execução da loja abaixo da meta" },
+  fechamento_atrasado_recorrente: { actionType: "create_task", label: "Cobrar o fechamento no prazo" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

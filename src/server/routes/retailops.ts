@@ -28,6 +28,7 @@ import { RetailReceivingService } from "../RetailReceivingService.js";
 import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
+import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { isAIConfigured } from "../llm.js";
 
 const router = Router();
@@ -70,6 +71,13 @@ router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRe
   const r = RetailPatternMemoryService.recordOutcome(orgId, req.params.id, { outcome: req.body?.outcome, realizedImpact: req.body?.realizedImpact, note: req.body?.note }, (req as any).userId);
   if (!r.ok) return res.status(400).json(r);
   res.json({ ...r, patterns: RetailPatternMemoryService.list(orgId), typeStats: RetailPatternMemoryService.allTypeStats(orgId) });
+});
+
+// Analisa as operações e publica sinais p/ o Pareto/Diretor IA (ADR-136).
+router.post("/signals/refresh", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ok: true, ...RetailOpsSignalPublisher.run(orgId, { asOf: req.body?.asOf }) });
 });
 
 // --- Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixas pendentes ---

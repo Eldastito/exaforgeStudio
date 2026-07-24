@@ -41,6 +41,8 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   payable_due_soon: { actionType: "prepare_purchase", label: "Revisar contas a vencer" },
   owner_draw_excess: { actionType: "create_task", label: "Revisar retiradas do proprietário" },
   data_quality_low: { actionType: "create_task", label: "Corrigir a qualidade dos dados" },
+  retail_online_reserve_out: { actionType: "create_task", label: "Reabastecer a reserva da loja online" },
+  retail_product_no_online_sales: { actionType: "create_task", label: "Revisar vitrine/preço do produto sem giro" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

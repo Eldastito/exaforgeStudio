@@ -43,6 +43,9 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   data_quality_low: { actionType: "create_task", label: "Corrigir a qualidade dos dados" },
   retail_online_reserve_out: { actionType: "create_task", label: "Reabastecer a reserva da loja online" },
   retail_product_no_online_sales: { actionType: "create_task", label: "Revisar vitrine/preço do produto sem giro" },
+  retail_sales_concentration: { actionType: "create_task", label: "Diversificar o mix (dependência de um produto)" },
+  retail_writeback_backlog: { actionType: "create_task", label: "Lançar as baixas pendentes no PDV" },
+  retail_seller_below_quota: { actionType: "create_task", label: "Acompanhar vendedor abaixo da meta" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).

@@ -28,6 +28,7 @@ import { FashionTryOnService } from "./FashionTryOnService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
+import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
 import { BackupService } from "./BackupService.js";
 
@@ -173,6 +174,7 @@ export class Scheduler {
     try { this.ricSnapshotPass(); } catch (e: any) { console.error('[Scheduler] ricSnapshotPass error', e.message); }
     try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
+    try { this.retailOpsSignalsPass(); } catch (e: any) { console.error('[Scheduler] retailOpsSignalsPass error', e.message); }
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     this.trialPass();
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
@@ -292,6 +294,19 @@ export class Scheduler {
     const date = new Date().toISOString().slice(0, 10);
     for (const o of orgs) {
       try { RetailTaskService.generateDay(o.organization_id, date); } catch (e) { console.error('[Retail] generateDay falhou', o.organization_id, e); }
+    }
+  }
+
+  /**
+   * Analisa as operações de varejo (loja virtual/reservas/vendas) e publica os
+   * sinais para o Pareto/Diretor IA — automático, para as orgs com a loja online
+   * ligada. É a IA vigiando a operação sem o gestor precisar clicar.
+   */
+  static retailOpsSignalsPass() {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(online_store_reserve,0)=1`).all() as any[]; } catch { return; }
+    for (const o of orgs) {
+      try { RetailOpsSignalPublisher.run(o.organization_id); } catch (e) { console.error('[Retail] ops signals falhou', o.organization_id, e); }
     }
   }
 

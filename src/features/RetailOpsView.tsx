@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -28,6 +28,33 @@ const RUN_STATUS: Record<string, { label: string; cls: string }> = {
 function Badge({ map, s }: { map: Record<string, { label: string; cls: string }>; s: string }) {
   const it = map[s] || { label: s, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' };
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${it.cls}`}>{it.label}</span>;
+}
+
+// Tabela compacta do relatório de comissão (por vendedor/produto/loja).
+function ReportBlock({ title, rows, cols, empty }: { title: string; rows: any[]; cols: Array<[string, string, boolean?]>; empty: string }) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-1.5">{title}</h4>
+      {(!rows || rows.length === 0) ? (
+        <div className="rounded-lg border border-dashed border-zinc-800 p-3 text-center text-[12px] text-zinc-600">{empty}</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              {cols.map(([k, label, money]) => <th key={k} className={`px-3 py-1.5 font-medium ${money ? 'text-right' : 'text-left'}`}>{label}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} className="border-t border-zinc-800/60">
+                  {cols.map(([k, , money]) => <td key={k} className={`px-3 py-1.5 ${money ? 'text-right text-zinc-200' : 'text-zinc-300'} ${k === 'commission' ? 'text-emerald-300' : ''}`}>{money ? brl(r[k]) : r[k]}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ---- Padrões (IA) — memória de padrões do varejo (ADR-142) ------------------
@@ -608,6 +635,27 @@ function CommissionTab() {
   const firstOfMonth = todayStr().slice(0, 8) + '01';
   const [start, setStart] = useState(firstOfMonth);
   const [end, setEnd] = useState(todayStr());
+  const [report, setReport] = useState<any | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  const loadReport = async () => {
+    setLoadingReport(true);
+    try {
+      const d = await apiFetch(`/api/retailops/commission/report?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
+      if (d && !d.error) setReport(d); else toast.error(d?.error || 'Falha ao gerar o relatório.');
+    } finally { setLoadingReport(false); }
+  };
+  const downloadReportCsv = () => {
+    if (!report) return;
+    const rows: string[] = [['Dimensão', 'Nome', 'Vendas', 'Vendas (qtd)', 'Comissão'].join(';')];
+    for (const s of report.bySeller || []) rows.push(['Vendedor', s.sellerName, s.sales, s.orders, s.commission].join(';'));
+    for (const p of report.byProduct || []) rows.push(['Produto', p.productName, p.sales, p.orders, p.commission].join(';'));
+    for (const st of report.byStore || []) rows.push(['Loja', st.storeName, st.sales, '', st.commission].join(';'));
+    rows.push(['Total', '', '', '', report.totals?.totalCommission ?? 0].join(';'));
+    const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = `comissao_${start}_a_${end}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -700,6 +748,29 @@ function CommissionTab() {
                 <button onClick={() => toggleRule(r)} className={`ml-3 shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${r.active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400'}`}>{r.active ? 'Ativa' : 'Inativa'}</button>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Relatório de comissão do período (por vendedor / produto / loja) */}
+      <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-emerald-400" /> Relatório de comissão</div>
+          <label className="text-[11px] text-zinc-400 ml-2">De <input type="date" value={start} onChange={e => setStart(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" /></label>
+          <label className="text-[11px] text-zinc-400">até <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" /></label>
+          <button onClick={loadReport} disabled={loadingReport} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{loadingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Gerar</button>
+          {report && <button onClick={downloadReportCsv} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><Download className="w-3.5 h-3.5" /> CSV</button>}
+        </div>
+
+        {report && (
+          <div className="mt-3 space-y-4">
+            <div className="text-sm text-zinc-300">Comissão total do período: <span className="font-semibold text-emerald-300">{brl(report.totals?.totalCommission)}</span>
+              <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · produtos {brl(report.totals?.productCommission)} · lojas {brl(report.totals?.storeCommission)}</span>
+            </div>
+
+            <ReportBlock title="Por vendedor" empty={!report.hasRules?.seller ? 'Sem regra por vendedor ativa.' : 'Nenhuma venda com vendedor no período.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
+            <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
+            <ReportBlock title="Por loja (fechamentos)" empty={!report.hasRules?.store ? 'Sem regra por loja ativa.' : 'Sem fechamentos no período.'} rows={report.byStore} cols={[['storeName', 'Loja'], ['sales', 'Vendas', true], ['commission', 'Comissão', true]]} />
           </div>
         )}
       </div>

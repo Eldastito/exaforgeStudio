@@ -23,6 +23,7 @@ export type CommissionRuleInput = {
 };
 
 function safeParse(s: any): any { try { return JSON.parse(s ?? "null"); } catch { return null; } }
+const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
 
 /** Aplica um tipo de cálculo sobre a base (realizado) e a cota do período. */
 export function computeCommission(calcType: string, config: any, base: number, quotaTotal: number): { amount: number; detail: any } {
@@ -92,27 +93,67 @@ export class RetailCommissionService {
   private static readonly FULFILLED = "('pago','em_preparo','entregue','concluido')";
 
   /** Vendas faturadas por vendedor no período (só pedidos com seller_user_id). */
-  static onlineSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string; sellerName: string; sales: number }> {
+  static onlineSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string; sellerName: string; sales: number; orders: number }> {
     const rows = db.prepare(
-      `SELECT o.seller_user_id AS sid, COALESCE(SUM(o.total_amount),0) AS s
+      `SELECT o.seller_user_id AS sid, COALESCE(SUM(o.total_amount),0) AS s, COUNT(*) AS n
          FROM orders o
         WHERE o.organization_id = ? AND o.seller_user_id IS NOT NULL
           AND o.status IN ${this.FULFILLED} AND date(o.created_at) BETWEEN ? AND ?
         GROUP BY o.seller_user_id`
     ).all(orgId, start, end) as any[];
-    return rows.map((r) => ({ sellerUserId: String(r.sid), sellerName: this.sellerName(orgId, String(r.sid)), sales: Number(r.s) || 0 }));
+    return rows.map((r) => ({ sellerUserId: String(r.sid), sellerName: this.sellerName(orgId, String(r.sid)), sales: Number(r.s) || 0, orders: Number(r.n) || 0 }));
   }
 
   /** Vendas faturadas por produto no período (itens dos pedidos faturados). */
-  static onlineSalesByProduct(orgId: string, start: string, end: string): Array<{ productId: string; productName: string; sales: number }> {
+  static onlineSalesByProduct(orgId: string, start: string, end: string): Array<{ productId: string; productName: string; sales: number; orders: number }> {
     const rows = db.prepare(
-      `SELECT i.product_service_id AS pid, COALESCE(SUM(i.line_total),0) AS s, MAX(i.name_snapshot) AS nm
+      `SELECT i.product_service_id AS pid, COALESCE(SUM(i.line_total),0) AS s, COUNT(DISTINCT o.id) AS n, MAX(i.name_snapshot) AS nm
          FROM order_items i JOIN orders o ON o.id = i.order_id
         WHERE i.organization_id = ? AND i.product_service_id IS NOT NULL
           AND o.status IN ${this.FULFILLED} AND date(o.created_at) BETWEEN ? AND ?
         GROUP BY i.product_service_id`
     ).all(orgId, start, end) as any[];
-    return rows.map((r) => ({ productId: String(r.pid), productName: this.productName(orgId, String(r.pid)) || String(r.nm || "produto"), sales: Number(r.s) || 0 }));
+    return rows.map((r) => ({ productId: String(r.pid), productName: this.productName(orgId, String(r.pid)) || String(r.nm || "produto"), sales: Number(r.s) || 0, orders: Number(r.n) || 0 }));
+  }
+
+  /**
+   * RELATÓRIO do período (só leitura, não persiste): comissão consolidada por
+   * VENDEDOR, por PRODUTO e por LOJA, aplicando as regras ATIVAS. Serve para o
+   * gestor ver quanto cada um recebe antes de aprovar a apuração.
+   */
+  static report(orgId: string, start: string, end: string): any {
+    const rules = db.prepare(`SELECT * FROM retail_commission_rules WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const byScope = (sc: string) => rules.filter((r) => r.scope === sc);
+    const commissionOf = (ruleList: any[], base: number, quota: number) =>
+      round2(ruleList.reduce((acc, r) => {
+        const cfg = safeParse(r.config_json) || {};
+        const q = r.scope === "seller" || r.scope === "product" ? Number(cfg.quota || 0) : quota;
+        return acc + computeCommission(r.calculation_type, cfg, base, q).amount;
+      }, 0));
+
+    const sellerRules = byScope("seller"), productRules = byScope("product"), storeRules = byScope("store"), globalRules = byScope("global");
+
+    const bySeller = this.onlineSalesBySeller(orgId, start, end).map((s) => ({ ...s, commission: commissionOf(sellerRules, s.sales, 0) }));
+    const byProduct = this.onlineSalesByProduct(orgId, start, end).map((p) => ({ ...p, commission: commissionOf(productRules, p.sales, 0) }));
+
+    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const byStore = stores.map((s) => {
+      const base = this.periodSales(orgId, s.id, start, end);
+      const commission = commissionOf(storeRules, base, this.periodQuota(orgId, s.id, start, end));
+      return { storeId: s.id, storeName: s.name, sales: round2(base), commission };
+    });
+
+    const globalBase = this.periodSales(orgId, null, start, end);
+    const globalCommission = globalRules.length ? commissionOf(globalRules, globalBase, this.periodQuota(orgId, null, start, end)) : 0;
+
+    const sum = (arr: any[], k: string) => round2(arr.reduce((a, x) => a + Number(x[k] || 0), 0));
+    const totalCommission = round2(sum(bySeller, "commission") + sum(byProduct, "commission") + sum(byStore, "commission") + globalCommission);
+    return {
+      period: { start, end },
+      bySeller, byProduct, byStore, globalCommission,
+      totals: { sellerCommission: sum(bySeller, "commission"), productCommission: sum(byProduct, "commission"), storeCommission: round2(sum(byStore, "commission") + globalCommission), totalCommission },
+      hasRules: { seller: sellerRules.length > 0, product: productRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
+    };
   }
 
   private static sellerName(orgId: string, userId: string): string {

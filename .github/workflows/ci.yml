@@ -108,6 +108,7 @@ jobs:
           - { name: 'retail-insights-briefing', script: 'test:retail-insights-briefing' }
           - { name: 'retail-insight-action', script: 'test:retail-insight-action' }
           - { name: 'insights-global', script: 'test:insights-global' }
+          - { name: 'pattern-memory', script: 'test:pattern-memory' }
           - { name: 'order-seller-attribution', script: 'test:order-seller-attribution' }
           - { name: 'storefront-seller-attribution', script: 'test:storefront-seller-attribution' }
           - { name: 'retail-dashboard', script: 'test:retail-dashboard' }

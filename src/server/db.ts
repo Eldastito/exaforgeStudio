@@ -919,6 +919,10 @@ const initDb = () => {
   // (observar→hipotetizar→verificar→lembrar). OPT-IN por organização (default
   // off). Ver RetailPatternMemoryService.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_pattern_memory INTEGER DEFAULT 0`); } catch(e){}
+  // Memória de Padrões GENÉRICA (ADR-142 generalizada): o mesmo loop de
+  // aprendizado (observar→hipotetizar→verificar→lembrar→medir) para QUALQUER
+  // domínio (produção, compras, finanças…). Opt-in por org (default off).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pattern_memory INTEGER DEFAULT 0`); } catch(e){}
   // Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixa pendente +
   // reconciliação anti-clobber no sync. OPT-IN por organização (default off).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN online_store_reserve INTEGER DEFAULT 0`); } catch(e){}
@@ -1864,6 +1868,50 @@ const initDb = () => {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_pattern_type_stats
         ON retail_pattern_type_stats (organization_id, pattern_type);
+
+      -- Memória de Padrões GENÉRICA (ADR-142 generalizada): o mesmo loop de
+      -- aprendizado do varejo, agora para QUALQUER domínio. A confiança/status é
+      -- calculada por REGRA (recorrência); o LLM só narra. scope_id = dimensão
+      -- opcional do domínio (produto, fornecedor, conta…); NULL = org toda.
+      CREATE TABLE IF NOT EXISTS business_patterns (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        domain TEXT NOT NULL,                   -- production | procurement | finance | ...
+        scope_id TEXT,
+        pattern_type TEXT NOT NULL,
+        pattern_key TEXT NOT NULL,
+        description TEXT,
+        evidence_json TEXT,
+        confidence REAL DEFAULT 0,              -- 0..1 (regra de recorrência)
+        status TEXT DEFAULT 'candidate',        -- candidate | validated | refuted | dormant
+        occurrences INTEGER DEFAULT 0,
+        first_seen_date DATE,
+        last_seen_date DATE,
+        created_by_type TEXT DEFAULT 'rule',    -- rule | ai | user
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_business_patterns_key
+        ON business_patterns (organization_id, domain, COALESCE(scope_id,''), pattern_type, pattern_key);
+      CREATE INDEX IF NOT EXISTS idx_business_patterns_org
+        ON business_patterns (organization_id, domain, status);
+
+      -- Eficácia por TIPO de padrão (genérica): fecha o loop com o desfecho medido.
+      CREATE TABLE IF NOT EXISTS business_pattern_type_stats (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        domain TEXT NOT NULL,
+        pattern_type TEXT NOT NULL,
+        acted INTEGER DEFAULT 0,
+        worked INTEGER DEFAULT 0,
+        no_effect INTEGER DEFAULT 0,
+        backfired INTEGER DEFAULT 0,
+        net_impact REAL DEFAULT 0,
+        effectiveness REAL DEFAULT 0.5,        -- 0..1 (prior neutro 0,5 sem dado)
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_business_pattern_type_stats
+        ON business_pattern_type_stats (organization_id, domain, pattern_type);
 
       -- Loja Virtual → PDV (ADR-143 Fase 0). Reserva e-commerce por loja/produto:
       -- a loja virtual vende SÓ desta reserva (Saldo Alterdata − buffer) → nunca

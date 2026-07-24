@@ -18,6 +18,8 @@ import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { ProductionSignalPublisher } from "../ProductionSignalPublisher.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
+import { PatternMemoryService } from "../PatternMemoryService.js";
+import { ProductionPatternMemory } from "../ProductionPatternMemory.js";
 
 const router = Router();
 
@@ -42,16 +44,42 @@ router.get("/", (req: AuthRequest, res): any => {
 // POST /api/insights/refresh — "Analisar agora" da plataforma: roda TODOS os
 // publicadores de sinais (finanças, produção, varejo), cada um autoprotegido —
 // só publica se houver dados do domínio. Idempotente, isolado por org. owner/admin.
-router.post("/refresh", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/refresh", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ran: Record<string, any> = {};
   try { ran.finance = FinanceSignalPublisher.run(orgId); } catch (e: any) { ran.finance = { error: e?.message || "falhou" }; }
   try { ran.production = ProductionSignalPublisher.run(orgId); } catch (e: any) { ran.production = { error: e?.message || "falhou" }; }
   try { ran.retail = RetailOpsSignalPublisher.run(orgId); } catch (e: any) { ran.retail = { error: e?.message || "falhou" }; }
+  // Memória de padrões genérica (opt-in): aprende recorrências e publica os
+  // padrões validados como sinais, que entram no mesmo Pareto.
+  try { ran.productionPatterns = await ProductionPatternMemory.learnPass(orgId); } catch (e: any) { ran.productionPatterns = { error: e?.message || "falhou" }; }
   const published =
-    (ran.finance?.count || 0) + (ran.production?.published || 0) + (ran.retail?.published || 0);
+    (ran.finance?.count || 0) + (ran.production?.published || 0) + (ran.retail?.published || 0) + (ran.productionPatterns?.published || 0);
   res.json({ ok: true, published, ran, openCount: BusinessSignalService.list(orgId, { status: "open" }).length });
+});
+
+// GET /api/insights/patterns — padrões APRENDIDOS (memória genérica) de todos os
+// domínios. Filtro opcional por domínio/status.
+router.get("/patterns", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const domain = typeof req.query?.domain === "string" ? req.query.domain : undefined;
+  const status = typeof req.query?.status === "string" ? req.query.status : undefined;
+  res.json({ enabled: PatternMemoryService.isEnabled(orgId), patterns: PatternMemoryService.list(orgId, { domain, status }), typeStats: PatternMemoryService.allTypeStats(orgId) });
+});
+
+// POST /api/insights/patterns/:id/outcome — fecha o loop: o gestor mede o desfecho
+// de ter agido sobre um padrão (worked|no_effect|backfired), ajustando a eficácia
+// aprendida do tipo. owner/admin.
+router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = PatternMemoryService.recordOutcome(orgId, req.params.id, {
+    outcome: req.body?.outcome, realizedImpact: req.body?.realizedImpact, note: req.body?.note,
+  }, req.user?.userId);
+  if (!out.ok) return res.status(400).json(out);
+  res.json(out);
 });
 
 // POST /api/insights/act — age a partir de um insight de QUALQUER domínio: propõe

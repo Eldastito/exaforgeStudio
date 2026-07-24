@@ -4,7 +4,7 @@ import { BusinessContextService } from "./BusinessContextService.js";
 import { RevenueAuditService } from "./RevenueAuditService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
-import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
+import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -30,20 +30,30 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.retailSignalsBlock(orgId);
+    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.businessSignalsBlock(orgId);
   }
 
   /**
-   * Sinais ABERTOS das operações de varejo (ADR-136) para o Diretor narrar e
-   * sugerir — reserva esgotada, ruptura, sem giro, concentração, etc. Fatos do
-   * ledger de sinais; NUNCA inventar número.
+   * PRIORIDADES DO NEGÓCIO (ADR-136): o Pareto dos sinais ABERTOS de TODOS os
+   * domínios (finanças, produção, compras, pessoas, varejo, estoque, vendas…)
+   * ranqueado por impacto — não só varejo. O Diretor narra e sugere a partir dos
+   * fatos do ledger de sinais; NUNCA inventa número.
    */
-  static retailSignalsBlock(orgId: string): string {
+  static businessSignalsBlock(orgId: string): string {
     try {
-      const sigs = RetailOpsSignalPublisher.topOpenSignals(orgId, 6);
-      if (!sigs.length) return "";
-      const lines = sigs.map((s) => `- [${s.severity}] ${RetailOpsSignalPublisher.describe(s)}${s.impactUnit === "BRL" && s.impactAmount ? ` (impacto R$ ${s.impactAmount})` : ""}`);
-      return `\n\n=== SINAIS DA OPERAÇÃO DA LOJA (fatos; use como contexto, não invente número) ===\n${lines.join("\n")}`;
+      const pri = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 8 }).global;
+      if (!pri.length) return "";
+      const lines = pri.map((p: any) => {
+        let imp = "";
+        if (p.impact && Number(p.impact.amount) > 0) {
+          if (p.impact.unit === "BRL") imp = ` (impacto R$ ${p.impact.amount})`;
+          else if (p.impact.unit === "units") imp = ` (impacto ${p.impact.amount} un)`;
+          else imp = ` (impacto ${p.impact.amount}${p.impact.unit ? ` ${p.impact.unit}` : ""})`;
+        }
+        const act = p.recommendedAction ? ` → ${p.recommendedAction}` : "";
+        return `- [${p.domain}] ${p.interpretation || p.fact}${imp}${act}`;
+      });
+      return `\n\n=== PRIORIDADES DO NEGÓCIO (Pareto dos sinais abertos de todos os domínios; fatos, não invente número) ===\n${lines.join("\n")}`;
     } catch { return ""; }
   }
 

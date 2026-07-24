@@ -235,7 +235,8 @@
     "test:retail-insights-briefing": "tsx scripts/test-retail-insights-briefing.ts",
     "test:retail-insight-action": "tsx scripts/test-retail-insight-action.ts",
     "test:insights-global": "tsx scripts/test-insights-global.ts",
-    "test:pattern-memory": "tsx scripts/test-pattern-memory.ts"
+    "test:pattern-memory": "tsx scripts/test-pattern-memory.ts",
+    "test:procurement-patterns": "tsx scripts/test-procurement-patterns.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

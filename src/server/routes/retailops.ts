@@ -119,6 +119,21 @@ router.post("/insights/act", requireRole("owner", "admin"), (req: AuthRequest, r
   }
 });
 
+// Painel de ações do varejo (as criadas a partir de sinais da operação).
+router.get("/insights/actions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const actions = db.prepare(
+    `SELECT a.id, a.title, a.domain, a.action_type, a.status, a.expected_impact, a.impact_unit, a.result_amount, a.created_at, a.approval_policy, a.approval_role
+       FROM decision_actions a
+       JOIN business_signals s ON s.id = a.signal_id
+      WHERE a.organization_id = ? AND s.source_service IN ('RetailOpsSignalPublisher','RetailPatternMemoryService')
+      ORDER BY CASE a.status WHEN 'awaiting_approval' THEN 0 WHEN 'approved' THEN 1 WHEN 'done' THEN 2 ELSE 3 END, a.created_at DESC
+      LIMIT 50`
+  ).all(orgId) as any[];
+  res.json({ actions });
+});
+
 // --- Loja Virtual → PDV (ADR-143 Fase 0): reserva e-commerce + baixas pendentes ---
 router.get("/online-reserve", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

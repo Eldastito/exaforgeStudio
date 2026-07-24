@@ -37,12 +37,24 @@ const SEV: Record<string, { label: string; cls: string }> = {
   attention: { label: 'atenção', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
   info: { label: 'info', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
 };
+const ACTION_STATUS: Record<string, { label: string; cls: string }> = {
+  awaiting_approval: { label: 'aguarda aprovação', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  approved: { label: 'aprovada', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  done: { label: 'concluída', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  cancelled: { label: 'cancelada', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+  rejected: { label: 'rejeitada', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+};
 function InsightsTab() {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [acted, setActed] = useState<Record<string, string>>({});
+  const [actions, setActions] = useState<any[]>([]);
 
+  const loadActions = async () => {
+    const d = await apiFetch('/api/retailops/insights/actions').then(r => r.json()).catch(() => ({}));
+    setActions(Array.isArray(d?.actions) ? d.actions : []);
+  };
   const act = async (p: any) => {
     if (!p?.signalId) return;
     const res = await apiFetch('/api/retailops/insights/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signalId: p.signalId }) });
@@ -51,12 +63,24 @@ function InsightsTab() {
       const st = d.action?.status;
       setActed(prev => ({ ...prev, [p.signalId]: st }));
       toast.success(st === 'approved' ? 'Ação criada e aprovada.' : 'Ação criada — aguardando aprovação.');
+      loadActions();
     } else toast.error(d.error || 'Falha ao criar a ação.');
+  };
+  const actionOp = async (a: any, op: 'approve' | 'cancel' | 'complete') => {
+    let body: any = undefined;
+    if (op === 'complete') {
+      const v = window.prompt('Resultado obtido (R$, opcional):', '');
+      if (v === null) return;
+      body = { resultAmount: v.trim() === '' ? null : Number(v) };
+    }
+    const res = await apiFetch(`/api/actions/${a.id}/${op}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    if (res.ok) { toast.success(op === 'approve' ? 'Ação aprovada.' : op === 'cancel' ? 'Ação cancelada.' : 'Ação concluída (medida).'); loadActions(); }
+    else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha na operação.'); }
   };
 
   const load = async () => {
     setLoading(true);
-    try { setData(await apiFetch('/api/retailops/insights').then(r => r.json()).catch(() => null)); }
+    try { setData(await apiFetch('/api/retailops/insights').then(r => r.json()).catch(() => null)); await loadActions(); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -124,6 +148,30 @@ function InsightsTab() {
               {p.description && <p className="text-sm text-zinc-200">{p.description}</p>}
             </div>
           ))}
+        </div>
+      )}
+
+      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mt-6 mb-2">Ações em andamento ({actions.filter(a => a.status !== 'done' && a.status !== 'cancelled').length})</h3>
+      {actions.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-center text-[12px] text-zinc-600">Nenhuma ação ainda. Clique em <strong>“Agir”</strong> numa prioridade acima para criar uma.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {actions.map((a) => {
+            const st = ACTION_STATUS[a.status] || { label: a.status, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' };
+            return (
+              <div key={a.id} className="flex items-center gap-2 flex-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
+                <span className="text-sm text-zinc-200">{a.title}</span>
+                {a.expected_impact != null && <span className="text-[11px] text-zinc-500">· esperado {a.impact_unit === 'BRL' ? brl(a.expected_impact) : `${a.expected_impact} ${a.impact_unit === 'units' ? 'un' : (a.impact_unit || '')}`.trim()}</span>}
+                {a.status === 'done' && a.result_amount != null && <span className="text-[11px] text-emerald-300">· realizado {a.impact_unit === 'BRL' ? brl(a.result_amount) : a.result_amount}</span>}
+                <div className="ml-auto flex items-center gap-1.5">
+                  {a.status === 'awaiting_approval' && <button onClick={() => actionOp(a, 'approve')} className="rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10">Aprovar</button>}
+                  {a.status === 'approved' && <button onClick={() => actionOp(a, 'complete')} className="rounded border border-indigo-500/30 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/10">Concluir</button>}
+                  {(a.status === 'awaiting_approval' || a.status === 'approved') && <button onClick={() => actionOp(a, 'cancel')} className="rounded border border-zinc-600 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800">Cancelar</button>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -1317,6 +1317,21 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN supplier_categories TEXT`); } catch(e){} // CSV de categorias atendidas
   try { db.exec(`ALTER TABLE products_services ADD COLUMN category TEXT`); } catch(e){}    // categoria do produto (casa com a do fornecedor)
   try { db.exec(`ALTER TABLE products_services ADD COLUMN ean TEXT`); } catch(e){}         // EAN/GTIN do produto (extraído da NF-e ou manual)
+  // CONTROLER (PRD-E-007, Fatia 1c): classificação OPERACIONAL do item. Aditivo e
+  // opt-in — itens existentes nascem 'resale' com consumo desligado (§30.2), sem
+  // mudar nenhum fluxo. Dá finalidade ao item, unidade de compra × consumo (com
+  // conversão de embalagem) e vínculos-padrão às dimensões do CONTROLER.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN operational_item_type TEXT DEFAULT 'resale'`); } catch(e){} // resale|raw_material|packaging|consumable|office_supply|cleaning_supply|mro|ppe|spare_part|fuel|asset_low_value|service|utility|subscription|other_operational
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN consumption_control_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN default_uom TEXT`); } catch(e){}       // unidade de CONSUMO (ex.: folha)
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN purchase_uom TEXT`); } catch(e){}      // unidade de COMPRA (ex.: caixa)
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN conversion_factor REAL DEFAULT 1`); } catch(e){} // quantas default_uom há em 1 purchase_uom
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN default_cost_center_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN default_location_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN criticality TEXT DEFAULT 'normal'`); } catch(e){}  // baixa|normal|alta|critica
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN requires_request INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN requires_return INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN requires_recipient_ack INTEGER DEFAULT 0`); } catch(e){}
   // Smart Inventory — backlog ADR-024: vínculo da entrada de estoque com o
   // fornecedor do CRM (quando o nome da nota casa com um contato is_supplier=1),
   // chave de acesso da NF-e para dedupe de importação, e markup padrão
@@ -1912,6 +1927,76 @@ const initDb = () => {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_business_pattern_type_stats
         ON business_pattern_type_stats (organization_id, domain, pattern_type);
+
+      -- CONTROLER (PRD-E-007, Fatia 1a): fundação de Departamentos e Centros de
+      -- Custo. Aditivo e opt-in — não altera nenhum fluxo existente. Todo o
+      -- consumo/custo futuro pendura nessas dimensões. Isolado por organização.
+      CREATE TABLE IF NOT EXISTS business_departments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,                              -- código curto opcional (único por org quando informado)
+        manager_user_id TEXT,                   -- gestor responsável (users.id)
+        parent_department_id TEXT,              -- hierarquia (NULL = raiz)
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_business_departments_org ON business_departments(organization_id, active);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_business_departments_code ON business_departments(organization_id, code) WHERE code IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS cost_centers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,                              -- código curto opcional (único por org quando informado)
+        department_id TEXT,                     -- vínculo opcional a um departamento
+        store_id TEXT,                          -- unidade/loja opcional
+        budget_owner_user_id TEXT,              -- dono do orçamento (users.id)
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_cost_centers_org ON cost_centers(organization_id, active);
+      CREATE INDEX IF NOT EXISTS idx_cost_centers_dept ON cost_centers(organization_id, department_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_centers_code ON cost_centers(organization_id, code) WHERE code IS NOT NULL;
+
+      -- CONTROLER (PRD-E-007, Fatia 1b): LOCALIZAÇÕES de estoque. Onde o material
+      -- fisicamente está (almoxarifado, filial, sala, veículo, máquina, custódia
+      -- do colaborador, manutenção, limpeza…). Aditivo; o agregado legado
+      -- inventory_items permanece intocado. Isolado por organização.
+      CREATE TABLE IF NOT EXISTS inventory_locations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'almoxarifado',  -- almoxarifado|filial|sala|veiculo|maquina|custodia_colaborador|manutencao|limpeza|outro
+        code TEXT,                                   -- código curto opcional (único por org quando informado)
+        store_id TEXT,                               -- unidade/loja opcional
+        department_id TEXT,                          -- departamento opcional
+        responsible_user_id TEXT,                    -- responsável pela custódia (users.id)
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_inventory_locations_org ON inventory_locations(organization_id, active);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_locations_code ON inventory_locations(organization_id, code) WHERE code IS NOT NULL;
+
+      -- Saldo por LOCAL × produto × variação. Tabela nova (não substitui o
+      -- agregado atual); a reconciliação com inventory_items entra na fatia de
+      -- consumo. O saldo aqui muda só por primitivas governadas (receber/transferir).
+      CREATE TABLE IF NOT EXISTS inventory_location_balances (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        quantity REAL NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_loc_balances_key
+        ON inventory_location_balances(organization_id, location_id, product_service_id, COALESCE(variant_id,''));
+      CREATE INDEX IF NOT EXISTS idx_inv_loc_balances_prod
+        ON inventory_location_balances(organization_id, product_service_id);
 
       -- Loja Virtual → PDV (ADR-143 Fase 0). Reserva e-commerce por loja/produto:
       -- a loja virtual vende SÓ desta reserva (Saldo Alterdata − buffer) → nunca

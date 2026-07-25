@@ -98,6 +98,14 @@ async function main() {
   const r4 = AlterdataStockMapper.upsertSaldos(A, [{ filial: "1", produto: "2002", saldoAtual: 4 }]);
   check("saldo casa por referência do produto (variant_id vazio)", r4.applied === 1);
 
+  // Dígito extra do Saldo (homologação Toulon): o Saldo usa 13 dígitos
+  // (ex.: 0552380350481) e as barras/preço 12 (055238035048) — o resolve deve
+  // casar mesmo assim (tenta sem o último dígito).
+  AlterdataSupplyMapper.upsertReferencias(A, [{ referenciaId: "055238", descricao: "Jeans 13d" }]);
+  AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "055238035048", cor: "JEANS", tamanho: "48", ean: null }], "055238");
+  const r5 = AlterdataStockMapper.upsertSaldos(A, [{ filial: "1", produto: "0552380350481", saldoAtual: 9 }]);
+  check("saldo de 13 dígitos casa com a variante de 12 (dígito extra)", r5.applied === 1, JSON.stringify(r5));
+
   // ===== 4. probeOrg: isola o endpoint em 500 (por eliminação) =====
   // Referencia → 500 (corpo vazio); demais → 200. probeOrg NÃO lança, NÃO grava,
   // e devolve o HTTP status cru de cada endpoint.

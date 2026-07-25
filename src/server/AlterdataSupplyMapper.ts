@@ -79,10 +79,14 @@ export class AlterdataSupplyMapper {
       const cor = str(c?.cor);
       const tamanho = str(c?.tamanho);
       const ean = sanitizeGtin(str(c?.ean) || str(c?.codigoBarra) || str(c?.codigoDeBarras) || str(c?.barra) || str(c?.gtin));
-      // Código de PRODUTO do ERP (referência+cor+tamanho, ex.: 0552380350481).
+      // Código de PRODUTO do ERP (referência+cor+tamanho, ex.: 011994036015).
       // É ESSA a chave que o Saldo e o Preco usam no campo `produto` — então ela
-      // vira o external_ref da variante (o EAN fica no sku e também casa).
-      const erpProduto = str(c?.produto ?? c?.codigoProduto ?? c?.produtoId);
+      // vira o external_ref da variante (o EAN fica no sku e também casa). No
+      // payload real do ReferenciaRede (homologação Toulon), esse código vem no
+      // CAMPO `codigo` do item — a referência é o parâmetro da rota (refLink).
+      const rawCodigoItem = str(c?.codigo);
+      const erpProduto = str(c?.produto ?? c?.codigoProduto ?? c?.produtoId)
+        || (refLink && rawCodigoItem && rawCodigoItem !== refLink ? rawCodigoItem : "");
       const extRef = erpProduto || ean || `${codigo}:${cor}:${tamanho}`;
       const vName = [tamanho, cor].filter(Boolean).join(" / ") || (ean ? `EAN ${ean}` : `Variante ${extRef}`);
       const inactive = int(c?.inativo) === 1 || int(c?.descontinuado) === 1;

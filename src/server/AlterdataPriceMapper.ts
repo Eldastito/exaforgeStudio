@@ -48,12 +48,21 @@ export class AlterdataPriceMapper {
     return res;
   }
 
-  /** produto (ERP) → { productId, variantId } via variante (external_ref/sku) ou produto (external_ref). */
-  private static resolveProduct(orgId: string, produto: string): { productId: string; variantId: string | null } | null {
-    const v = db.prepare(`SELECT id, product_service_id FROM product_variants WHERE organization_id = ? AND (external_ref = ? OR sku = ?) LIMIT 1`).get(orgId, produto, produto) as any;
-    if (v?.product_service_id) return { productId: v.product_service_id, variantId: v.id };
-    const p = db.prepare(`SELECT id FROM products_services WHERE organization_id = ? AND external_ref = ? LIMIT 1`).get(orgId, produto) as any;
-    if (p?.id) return { productId: p.id, variantId: null };
+  /**
+   * produto (ERP) → { productId, variantId } via variante (external_ref/sku) ou
+   * produto (external_ref). Tolera o dígito extra que alguns módulos anexam ao
+   * código (o Saldo usa 13 dígitos vs 12 das barras/preço — homologação Toulon):
+   * tenta como veio e sem o último dígito.
+   */
+  private static resolveProduct(orgId: string, produtoRaw: string): { productId: string; variantId: string | null } | null {
+    const candidates = [produtoRaw];
+    if (produtoRaw.length === 13) candidates.push(produtoRaw.slice(0, 12));
+    for (const produto of candidates) {
+      const v = db.prepare(`SELECT id, product_service_id FROM product_variants WHERE organization_id = ? AND (external_ref = ? OR sku = ?) LIMIT 1`).get(orgId, produto, produto) as any;
+      if (v?.product_service_id) return { productId: v.product_service_id, variantId: v.id };
+      const p = db.prepare(`SELECT id FROM products_services WHERE organization_id = ? AND external_ref = ? LIMIT 1`).get(orgId, produto) as any;
+      if (p?.id) return { productId: p.id, variantId: null };
+    }
     return null;
   }
 }

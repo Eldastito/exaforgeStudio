@@ -31,7 +31,7 @@ const ACTION_STATUS: Record<string, { label: string; cls: string }> = {
 const DOMAIN_LABEL: Record<string, string> = {
   finance: 'Finanças', production: 'Produção', procurement: 'Compras', inventory: 'Estoque',
   sales: 'Vendas', retail_ops: 'Varejo', tasks: 'Tarefas', people: 'Pessoas',
-  agenda: 'Agenda', security: 'Segurança', compliance: 'Compliance',
+  agenda: 'Agenda', consumption: 'Consumo', security: 'Segurança', compliance: 'Compliance',
 };
 const domLabel = (d: string) => DOMAIN_LABEL[d] || d;
 const fmtImpact = (im: any) => im ? (im.unit === 'BRL' ? brl(im.amount) : `${im.amount} ${im.unit === 'units' ? 'un' : (im.unit || '')}`.trim()) : null;

@@ -26,6 +26,7 @@ import { PeoplePatternMemory } from "../PeoplePatternMemory.js";
 import { InventoryPatternMemory } from "../InventoryPatternMemory.js";
 import { AgendaPatternMemory } from "../AgendaPatternMemory.js";
 import { SalesPatternMemory } from "../SalesPatternMemory.js";
+import { ConsumptionSignalPublisher } from "../ConsumptionSignalPublisher.js";
 
 const router = Router();
 
@@ -57,6 +58,7 @@ router.post("/refresh", requireRole("owner", "admin"), async (req: AuthRequest, 
   try { ran.finance = FinanceSignalPublisher.run(orgId); } catch (e: any) { ran.finance = { error: e?.message || "falhou" }; }
   try { ran.production = ProductionSignalPublisher.run(orgId); } catch (e: any) { ran.production = { error: e?.message || "falhou" }; }
   try { ran.retail = RetailOpsSignalPublisher.run(orgId); } catch (e: any) { ran.retail = { error: e?.message || "falhou" }; }
+  try { ran.consumption = ConsumptionSignalPublisher.run(orgId); } catch (e: any) { ran.consumption = { error: e?.message || "falhou" }; }
   // Memória de padrões genérica (opt-in): aprende recorrências e publica os
   // padrões validados como sinais, que entram no mesmo Pareto.
   try { ran.productionPatterns = await ProductionPatternMemory.learnPass(orgId); } catch (e: any) { ran.productionPatterns = { error: e?.message || "falhou" }; }
@@ -68,6 +70,7 @@ router.post("/refresh", requireRole("owner", "admin"), async (req: AuthRequest, 
   try { ran.salesPatterns = await SalesPatternMemory.learnPass(orgId); } catch (e: any) { ran.salesPatterns = { error: e?.message || "falhou" }; }
   const published =
     (ran.finance?.count || 0) + (ran.production?.published || 0) + (ran.retail?.published || 0) +
+    (ran.consumption?.published || 0) +
     (ran.productionPatterns?.published || 0) + (ran.procurementPatterns?.published || 0) +
     (ran.financePatterns?.published || 0) + (ran.peoplePatterns?.published || 0) +
     (ran.inventoryPatterns?.published || 0) + (ran.agendaPatterns?.published || 0) +

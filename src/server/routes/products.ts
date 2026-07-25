@@ -698,12 +698,29 @@ router.get("/sales-analytics/csv", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/products — produtos com estoque ao vivo (disponível e vendável)
+// GET /api/products — produtos com estoque ao vivo (disponível e vendável).
+// Suporta ?q= (nome/EAN/ref. externa), ?limit= e ?offset= — com catálogos de
+// milhares de itens (ERP sincronizado), devolver tudo congela navegador e
+// servidor. Sem ?limit, mantém o comportamento antigo (compatibilidade).
+// O total (com o filtro aplicado) sai no header X-Total-Count.
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
 
   try {
+    const q = String(req.query.q || "").trim();
+    const limit = Math.min(500, Math.max(0, parseInt(String(req.query.limit || "0"), 10) || 0)); // 0 = sem limite
+    const offset = Math.max(0, parseInt(String(req.query.offset || "0"), 10) || 0);
+    const where: string[] = ["ps.organization_id = ?"];
+    const args: any[] = [orgId];
+    if (q) {
+      where.push("(ps.name LIKE ? OR ps.ean LIKE ? OR ps.external_ref LIKE ?)");
+      const like = `%${q}%`;
+      args.push(like, like, like);
+    }
+    const total = Number((db.prepare(`SELECT COUNT(*) c FROM products_services ps WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
+    res.setHeader("X-Total-Count", String(total));
+
     const products = db.prepare(`
       SELECT ps.*,
         COALESCE(prod.quantity_available, agg.qa) AS quantity_available,
@@ -716,9 +733,10 @@ router.get("/", (req: AuthRequest, res): any => {
         SELECT product_service_id, SUM(quantity_available) qa, SUM(quantity_reserved) qr
         FROM inventory_items WHERE variant_id IS NOT NULL GROUP BY product_service_id
       ) agg ON agg.product_service_id = ps.id
-      WHERE ps.organization_id = ?
+      WHERE ${where.join(" AND ")}
       ORDER BY ps.created_at DESC
-    `).all(orgId) as any[];
+      ${limit ? "LIMIT ? OFFSET ?" : ""}
+    `).all(...args, ...(limit ? [limit, offset] : [])) as any[];
     const markup = orgMarkup(orgId);
     res.json(products.map(p => ({
       ...p,

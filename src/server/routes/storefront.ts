@@ -216,12 +216,27 @@ router.get("/analytics", (req: AuthRequest, res): any => {
 // GET /api/storefront/products  -> produtos com imagens + config de vitrine (p/ o dono)
 router.get("/products", (req: AuthRequest, res): any => {
   const orgId = getOrgId(req);
+  // ?q= / ?limit= / ?offset= — catálogos de milhares de itens (ERP) congelam a
+  // tela se devolvidos inteiros. Sem ?limit mantém o comportamento antigo.
+  const q = String(req.query.q || "").trim();
+  const limit = Math.min(500, Math.max(0, parseInt(String(req.query.limit || "0"), 10) || 0));
+  const offset = Math.max(0, parseInt(String(req.query.offset || "0"), 10) || 0);
+  const where: string[] = ["organization_id = ?", "type = 'product'"];
+  const args: any[] = [orgId];
+  if (q) { where.push("(name LIKE ? OR ean LIKE ? OR external_ref LIKE ?)"); const like = `%${q}%`; args.push(like, like, like); }
+  const total = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
+  res.setHeader("X-Total-Count", String(total));
   const products = db.prepare(
-    "SELECT * FROM products_services WHERE organization_id = ? AND type = 'product' ORDER BY COALESCE(storefront_position, 999999) ASC, name ASC"
-  ).all(orgId) as any[];
+    `SELECT * FROM products_services WHERE ${where.join(" AND ")} ORDER BY COALESCE(storefront_position, 999999) ASC, name ASC ${limit ? "LIMIT ? OFFSET ?" : ""}`
+  ).all(...args, ...(limit ? [limit, offset] : [])) as any[];
+  // Imagens só dos produtos da página (não da org inteira).
   const imgsByProduct: Record<string, any[]> = {};
-  for (const img of db.prepare("SELECT * FROM product_images WHERE organization_id = ? ORDER BY position ASC", ).all(orgId) as any[]) {
-    (imgsByProduct[img.product_service_id] ||= []).push({ id: img.id, url: img.url, position: img.position });
+  if (products.length) {
+    const ids = products.map((p) => p.id);
+    const ph = ids.map(() => "?").join(",");
+    for (const img of db.prepare(`SELECT * FROM product_images WHERE organization_id = ? AND product_service_id IN (${ph}) ORDER BY position ASC`).all(orgId, ...ids) as any[]) {
+      (imgsByProduct[img.product_service_id] ||= []).push({ id: img.id, url: img.url, position: img.position });
+    }
   }
   res.json(products.map(p => ({
     id: p.id, name: p.name, price: p.price, currency: p.currency, description: p.description || "",

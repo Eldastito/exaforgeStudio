@@ -254,7 +254,9 @@ export function StorefrontSettingsView() {
 
   const loadProducts = async () => {
     try {
-      const data = await apiFetch('/api/storefront/products').then((r) => r.json());
+      // limit: catálogos de ERP têm milhares de itens — renderizar tudo congela
+      // a tela. Mostra os 200 primeiros na ordem da vitrine (busca via Catálogo).
+      const data = await apiFetch('/api/storefront/products?limit=200').then((r) => r.json());
       setProducts(Array.isArray(data) ? data.map(normalizeProduct) : []);
     } catch (e) {
       console.error(e);
@@ -1524,7 +1526,7 @@ function VitrineLooksKanban() {
     .then(r => r.json()).then(d => setLooks(d.looks || [])).catch(() => {}).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
   useEffect(() => { apiFetch('/api/storefront/fashion/preset-avatars').then(r => r.json()).then(d => setAvatars(d.avatars || [])).catch(() => {}); }, []);
-  const loadProducts = () => { if (products.length) return; apiFetch('/api/storefront/products').then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : [])).catch(() => {}); };
+  const loadProducts = () => { if (products.length) return; apiFetch('/api/storefront/products?limit=200').then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : [])).catch(() => {}); };
 
   // Enquanto houver look gerando (fila), atualiza a lista periodicamente para
   // refletir quando as 2 poses ficam prontas (sem WebSocket — polling simples).

@@ -56,6 +56,8 @@ export interface StoreResponse {
   store: Store;
   customer: Customer | null;
   products: Product[];
+  /** Total de produtos visíveis (o catálogo é paginado — products é uma página). */
+  productsTotal?: number;
   collections?: StoreCollection[];
   resources?: ReservableResource[];
 }

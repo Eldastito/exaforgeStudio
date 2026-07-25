@@ -89,16 +89,17 @@ async function main() {
   const seenUrls: string[] = [];
   __setAlterdataSyncHttpForTests(async (url: string) => {
     seenUrls.push(url);
-    // Contrato real do módulo Price: recurso TabelaPreco, delta /versao/{c}, com
-    // o preço ANINHADO em `preco` e o código da tabela em `codigo`.
-    if (url.includes("/TabelaPreco/versao/")) return resp(200, [{ codigo: 1, descricao: "Tabela 1", preco: { produto: "7891234567901", tabela: 1, preco1: 199.9 }, controleVersao: 3 }], {});
-    return resp(200, [], {});
+    // Contrato real (homologação Toulon): preço POR PRODUTO no recurso `Preco`
+    // (produto, tabela, preco1), envelope { success, data: [...] }. O runner
+    // tenta os formatos de path em ordem — o 1º é /Preco/versao/{tabela}/{c}.
+    if (url.includes("/Preco/versao/1/")) return resp(200, { success: true, data: [{ produto: "7891234567901", tabela: 1, preco1: 199.9, controleVersao: 3 }] }, {});
+    return resp(200, { success: true, data: [] }, {});
   });
   const summary = await AlterdataSyncRunner.runOrg(A);
   check("runner reporta preços aplicados", summary.precos.applied === 1, JSON.stringify(summary.precos));
   const vPrice2 = (db.prepare(`SELECT price FROM product_variants WHERE id=?`).get(variant.id) as any).price;
   check("preço atualizado pelo runner (199.90)", Number(vPrice2) === 199.9, String(vPrice2));
-  check("URL do preço usa TabelaPreco/versao", seenUrls.some((u) => u.includes("/api/v1/TabelaPreco/versao/")), seenUrls.join(" | "));
+  check("URL do preço usa Preco/versao", seenUrls.some((u) => u.includes("/api/v1/Preco/versao/")), seenUrls.join(" | "));
 
   // Sem priceTable → runner não puxa Preco (precos zerado).
   const B = `org_${randomUUID().slice(0, 8)}`;

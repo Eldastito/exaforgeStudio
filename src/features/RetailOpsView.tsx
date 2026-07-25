@@ -706,7 +706,8 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Loja Centro" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
           </label>
           <label className="block text-xs text-zinc-400">Código (opcional)
-            <input value={code} onChange={e => setCode(e.target.value)} placeholder="Ex.: 01, CENTRO" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            <input value={code} onChange={e => setCode(e.target.value)} placeholder="Ex.: 1005 (código da filial no ERP)" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            <span className="mt-1 block text-[11px] text-zinc-500">Com a integração Alterdata/ERP ligada, use aqui o <strong>mesmo código da filial do ERP</strong> (ex.: 1005, 1006) — é por ele que o estoque e o preço são casados na sincronização.</span>
           </label>
           <label className="block text-xs text-zinc-400">WhatsApp da loja (opcional)
             <input value={wa} onChange={e => setWa(e.target.value)} placeholder="Ex.: 5511987654321" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />

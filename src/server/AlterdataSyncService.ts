@@ -72,7 +72,13 @@ export class AlterdataSyncService {
     }
     const body = await res.json().catch(() => null);
     const items = extractItems(body);
-    const totalPages = num(res.headers.get("total-paginas") ?? res.headers.get("totalpaginas") ?? res.headers.get("x-total-pages"));
+    // Total de páginas: header OU corpo — a ModaUp devolve a paginação no CORPO
+    // (`pagination.totalPages`) e IGNORA o itensPorPagina do header (a homologação
+    // Toulon devolve ~20/página com "itemsPerPage":0). Sem ler o corpo, o loop
+    // parava na página 1 e o catálogo vinha truncado (20 produtos).
+    const totalPages = num(res.headers.get("total-paginas") ?? res.headers.get("totalpaginas") ?? res.headers.get("x-total-pages"))
+      ?? num(body?.pagination?.totalPages)
+      ?? num(body?.paginacao?.totalPaginas);
     const version = res.headers.get("versao") ?? res.headers.get("x-versao") ?? (body?.versao != null ? String(body.versao) : null);
     return { status: res.status, items, totalPages, version, body };
   }

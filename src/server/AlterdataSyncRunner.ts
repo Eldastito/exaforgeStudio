@@ -22,8 +22,8 @@ import { logAuthEvent } from "./auditLog.js";
 export interface SyncRunSummary {
   referencias: number;
   variantes: number;
-  saldos: { applied: number; skippedNoStore: number; skippedNoProduct: number };
-  precos: { applied: number; skippedNoProduct: number };
+  saldos: { applied: number; skippedNoStore: number; skippedNoProduct: number; sampleNoProduct: string[] };
+  precos: { applied: number; skippedNoProduct: number; sampleNoProduct: string[] };
   filiais: string[];
   ranAt: string;
 }
@@ -64,14 +64,21 @@ export class AlterdataSyncRunner {
     if (rede) {
       for (const referencia of refCodes) {
         try {
-          const { items } = await AlterdataSyncService.apiGet(orgId, "supply", `/api/v1/CodigoDeBarras/ReferenciaRede/${encodeURIComponent(referencia)}/${encodeURIComponent(rede)}`);
-          if (items.length) bar.imported += AlterdataSupplyMapper.upsertCodigosDeBarras(orgId, items, referencia);
+          // Paginado: a ModaUp ignora o itensPorPagina do header e devolve ~20
+          // por página (total no corpo) — grades grandes precisam do loop.
+          let page = 1;
+          while (page <= 50) {
+            const { items, totalPages } = await AlterdataSyncService.apiGet(orgId, "supply", `/api/v1/CodigoDeBarras/ReferenciaRede/${encodeURIComponent(referencia)}/${encodeURIComponent(rede)}`, { page });
+            if (items.length) bar.imported += AlterdataSupplyMapper.upsertCodigosDeBarras(orgId, items, referencia);
+            if (!totalPages || page >= totalPages || items.length === 0) break;
+            page++;
+          }
           bar.refs++;
         } catch { bar.errors++; /* uma referência sem barras/erro não derruba o sync */ }
       }
     }
 
-    const saldos = { applied: 0, skippedNoStore: 0, skippedNoProduct: 0 };
+    const saldos = { applied: 0, skippedNoStore: 0, skippedNoProduct: 0, sampleNoProduct: [] as string[] };
     for (const filial of filiais) {
       await AlterdataSyncService.syncResource(orgId, {
         moduleKey: "supply", resource: "Saldo", filial,
@@ -79,6 +86,7 @@ export class AlterdataSyncRunner {
         onItems: (items) => {
           const r = AlterdataStockMapper.upsertSaldos(orgId, items);
           saldos.applied += r.applied; saldos.skippedNoStore += r.skippedNoStore; saldos.skippedNoProduct += r.skippedNoProduct;
+          for (const p of r.sampleNoProduct) if (saldos.sampleNoProduct.length < 5 && !saldos.sampleNoProduct.includes(p)) saldos.sampleNoProduct.push(p);
           return r.applied;
         },
       });
@@ -92,7 +100,7 @@ export class AlterdataSyncRunner {
     //    ordem e fica no primeiro que devolver linhas de preço de verdade (com
     //    `produto`). Cursor isolado por formato (filial "tabela~i") para um
     //    formato errado não engolir o delta do formato certo.
-    const precos = { applied: 0, skippedNoProduct: 0 };
+    const precos = { applied: 0, skippedNoProduct: 0, sampleNoProduct: [] as string[] };
     const table = str(settings.priceTable);
     if (table) {
       const candidates: Array<(c: string) => string> = [
@@ -108,6 +116,7 @@ export class AlterdataSyncRunner {
             onItems: (items) => {
               const r = AlterdataPriceMapper.upsertPrecos(orgId, items, table);
               precos.applied += r.applied; precos.skippedNoProduct += r.skippedNoProduct;
+              for (const p of r.sampleNoProduct) if (precos.sampleNoProduct.length < 5 && !precos.sampleNoProduct.includes(p)) precos.sampleNoProduct.push(p);
               return r.applied;
             },
           });

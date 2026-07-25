@@ -703,9 +703,11 @@ function AlterdataConnectorPanel() {
         const sNoStore = Number(s.saldos?.skippedNoStore || 0);
         const sNoProd = Number(s.saldos?.skippedNoProduct || 0);
         const pNoProd = Number(s.precos?.skippedNoProduct || 0);
+        const sSample = Array.isArray(s.saldos?.sampleNoProduct) && s.saldos.sampleNoProduct.length ? ` (ex.: ${s.saldos.sampleNoProduct.join(', ')})` : '';
+        const pSample = Array.isArray(s.precos?.sampleNoProduct) && s.precos.sampleNoProduct.length ? ` (ex.: ${s.precos.sampleNoProduct.join(', ')})` : '';
         if (sNoStore) skips.push(`${sNoStore} saldo(s) sem loja cadastrada (código da filial)`);
-        if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente`);
-        if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente`);
+        if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente${sSample}`);
+        if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente${pSample}`);
         const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
         const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
         toast.success(`Sincronizado: ${text}.`);

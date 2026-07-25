@@ -99,6 +99,16 @@ async function main() {
   const vJ = variants(pJ.id);
   check("ReferenciaRede: variante chaveada pelo código ERP do campo codigo", nJ === 1 && vJ.length === 1 && vJ[0].external_ref === "011994036015", JSON.stringify(vJ.map((v: any) => v.external_ref)));
 
+  // ===== 3d. Variante criada do próprio código do ERP (sem barras) =====
+  // A ModaUp não expõe barras p/ todas as referências: quando a referência
+  // (prefixo do código) existe, o saldo/preço criam a variante do código.
+  const ev1 = AlterdataSupplyMapper.ensureVariantForErpCode(A, "0119940990991");
+  check("ensureVariantForErpCode cria a variante pela referência-prefixo", !!ev1 && ev1.productId === pJ.id, JSON.stringify(ev1));
+  const ev2 = AlterdataSupplyMapper.ensureVariantForErpCode(A, "0119940990991");
+  check("ensureVariantForErpCode é idempotente (mesma variante)", !!ev2 && ev2.variantId === ev1!.variantId);
+  const evMiss = AlterdataSupplyMapper.ensureVariantForErpCode(A, "9998880990991");
+  check("código sem referência no catálogo → null", evMiss === null);
+
   // ===== 4. Barra órfã (produto não importado) é pulada =====
   const nOrphan = AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "9999", cor: "Azul", tamanho: "U", ean: "7899999999994" }]);
   check("barra de produto inexistente é pulada (retorna 0)", nOrphan === 0);

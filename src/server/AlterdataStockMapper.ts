@@ -13,6 +13,7 @@
 import db from "./db.js";
 import { RetailInventoryService } from "./RetailInventoryService.js";
 import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
+import { AlterdataSupplyMapper } from "./AlterdataSupplyMapper.js";
 
 export interface SaldoMapResult { applied: number; skippedNoStore: number; skippedNoProduct: number; sampleNoProduct: string[]; }
 
@@ -76,7 +77,10 @@ export class AlterdataStockMapper {
       const hit = this.resolveProductExact(orgId, produto);
       if (hit) return hit;
     }
-    return null;
+    // A ModaUp não expõe barras para todas as referências — quando a referência
+    // (prefixo do código) está no catálogo, cria a variante do próprio código
+    // (as barras enriquecem depois pela mesma chave).
+    return AlterdataSupplyMapper.ensureVariantForErpCode(orgId, produtoRaw);
   }
 
   private static resolveProductExact(orgId: string, produto: string): { productId: string; variantId: string | null } | null {

@@ -134,55 +134,84 @@ export class AlterdataSyncService {
   }
 
   /**
-   * LOOP DE VERSÃO (delta) de um recurso: lê o cursor persistido, consome
-   * `/versao/{cursor}` página a página chamando o mapper, e avança o cursor para
-   * a MAIOR versão vista (header `versao` ou campo `versao`/`version` dos itens —
-   * contrato tolerante, a confirmar na homologação). Idempotente por natureza:
-   * o cursor só avança; o mapper deve fazer upsert por chave natural.
+   * LOOP DE VERSÃO (delta) de um recurso. CONTRATO REAL da ModaUp (confirmado na
+   * homologação Toulon): os endpoints `/versao/{v}` IGNORAM o header `pagina` —
+   * cada chamada devolve UM LOTE a partir da versão do path, e a "próxima
+   * página" é chamar de novo com a MAIOR versão vista (encadeamento por versão,
+   * keyset pagination). Pedir "páginas" 1..N devolvia o MESMO lote N vezes
+   * ("6000 produtos"/execução com o catálogo crescendo só +20).
+   *
+   * Fallback: itens sem NENHUM campo de versão utilizável (nem `controle`
+   * base64) progridem por página persistida no cursor ("versao|pagina").
+   * Idempotente por natureza: o cursor só avança; o mapper faz upsert.
    */
   static async syncResource(orgId: string, spec: SyncResourceSpec): Promise<{ imported: number; pages: number; fromVersion: string; toVersion: string }> {
     const filial = spec.filial || "";
     const maxPages = spec.maxPages ?? 50;
     const pageSize = spec.pageSize ?? 200;
-    // Cursor "versão" ou "versão|página". A parte de página só existe quando os
-    // itens NÃO expõem campo de versão utilizável — sem ela, cada execução
-    // recomeçaria da página 1 e reimportaria o MESMO bloco para sempre (foi o
-    // que travou a Referencia da homologação Toulon em "6000 produtos"/run).
     const rawCursor = AlterdataConnectorService.getCursor(orgId, spec.moduleKey, spec.resource, filial);
     const sep = String(rawCursor).indexOf("|");
     const from = sep >= 0 ? String(rawCursor).slice(0, sep) : String(rawCursor);
-    const startPage = sep >= 0 ? Math.max(1, parseInt(String(rawCursor).slice(sep + 1), 10) || 1) : 1;
     let maxVersion = from;
     let imported = 0;
     let pages = 0;
     let sawItems = false;
-    let reachedEnd = false;
-    let lastPage = startPage;
 
-    let page = startPage;
-    while (page < startPage + maxPages) {
-      const { items, totalPages, version } = await this.apiGet(orgId, spec.moduleKey, spec.buildPath(from), { page, pageSize });
-      pages++;
-      lastPage = page;
-      if (items.length) { sawItems = true; imported += await spec.onItems(items); }
-      if (version != null && gt(version, maxVersion)) maxVersion = String(version);
-      for (const it of items) {
-        const v = itemVersion(it);
-        if (v != null && gt(v, maxVersion)) maxVersion = String(v);
+    if (sep < 0) {
+      // ── MODO VERSÃO (padrão): encadeia lotes pela maior versão vista ──
+      let stalled = false;
+      while (pages < maxPages) {
+        const { items, version } = await this.apiGet(orgId, spec.moduleKey, spec.buildPath(maxVersion), { page: 1, pageSize });
+        pages++;
+        if (items.length === 0) break; // stream esgotado
+        sawItems = true;
+        imported += await spec.onItems(items);
+        let batchMax = maxVersion;
+        if (version != null && gt(version, batchMax)) batchMax = String(version);
+        for (const it of items) {
+          const v = itemVersion(it);
+          if (v != null && gt(v, batchMax)) batchMax = String(v);
+        }
+        if (!gt(batchMax, maxVersion)) { stalled = true; break; } // lote sem versão nova
+        maxVersion = batchMax;
       }
-      if (!totalPages || page >= totalPages || items.length === 0) { reachedEnd = true; break; }
-      page++;
+      if (String(maxVersion) !== String(from)) {
+        AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, maxVersion);
+      } else if (sawItems && stalled) {
+        // Itens vieram mas SEM versão utilizável → só resta progresso por página
+        // persistida (a página 1 já foi processada nesta execução).
+        AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, `${from}|2`);
+      }
+    } else {
+      // ── MODO PÁGINA (fallback p/ payload sem campo de versão) ──
+      const startPage = Math.max(1, parseInt(String(rawCursor).slice(sep + 1), 10) || 1);
+      let reachedEnd = false;
+      let lastPage = startPage;
+      let page = startPage;
+      while (page < startPage + maxPages) {
+        const { items, totalPages, version } = await this.apiGet(orgId, spec.moduleKey, spec.buildPath(from), { page, pageSize });
+        pages++;
+        lastPage = page;
+        if (items.length) { sawItems = true; imported += await spec.onItems(items); }
+        if (version != null && gt(version, maxVersion)) maxVersion = String(version);
+        for (const it of items) {
+          const v = itemVersion(it);
+          if (v != null && gt(v, maxVersion)) maxVersion = String(v);
+        }
+        if (!totalPages || page >= totalPages || items.length === 0) { reachedEnd = true; break; }
+        page++;
+      }
+      if (String(maxVersion) !== String(from)) {
+        // Versão apareceu → volta ao modo versão nas próximas execuções.
+        AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, maxVersion);
+      } else if (sawItems) {
+        // No fim do recurso fica na ÚLTIMA página (itens novos entram no final:
+        // re-buscar a última pega o delta; totalPages crescente leva adiante).
+        const nextCursor = `${from}|${reachedEnd ? lastPage : lastPage + 1}`;
+        if (nextCursor !== String(rawCursor)) AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, nextCursor);
+      }
     }
 
-    if (String(maxVersion) !== String(from)) {
-      AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, maxVersion);
-    } else if (sawItems) {
-      // Nenhum item trouxe versão utilizável → progresso por PÁGINA. No fim do
-      // recurso, fica na ÚLTIMA página (itens novos entram no final: re-buscar a
-      // última pega o delta e o totalPages crescente leva às páginas seguintes).
-      const nextCursor = `${from}|${reachedEnd ? lastPage : lastPage + 1}`;
-      if (nextCursor !== String(rawCursor)) AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, nextCursor);
-    }
     try { logAuthEvent(orgId, "system", spec.resource, "ALTERDATA_SYNC_RESOURCE", { module: spec.moduleKey, resource: spec.resource, filial, from: String(rawCursor), to: String(maxVersion), imported, pages }); } catch { /* noop */ }
     return { imported, pages, fromVersion: from, toVersion: String(maxVersion) };
   }

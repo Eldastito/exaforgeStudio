@@ -46,15 +46,17 @@ async function main() {
   let tokenCalls = 0;
   __setAlterdataTokenHttpForTests(async () => { tokenCalls++; return resp(200, { access_token: `tok-${tokenCalls}`, expires_in: 3600 }); });
 
-  // ===== 1. syncResource pagina e avança o cursor =====
+  // ===== 1. syncResource ENCADEIA lotes pela versão e avança o cursor =====
+  // Contrato real da ModaUp: /versao/{v} IGNORA o header `pagina` — a "próxima
+  // página" é chamar de novo com a MAIOR versão vista no lote.
   const seen: any[] = [];
   const reqs: string[] = [];
   __setAlterdataSyncHttpForTests(async (url: string, init: any) => {
     reqs.push(url);
-    const pagina = Number(init.headers.pagina || 1);
     check("Bearer presente no header", String(init.headers.Authorization || "").startsWith("Bearer "));
-    if (pagina === 1) return resp(200, [{ referencia: "R1", versao: 5 }, { referencia: "R2", versao: 7 }], { "total-paginas": "2" });
-    return resp(200, [{ referencia: "R3", versao: 9 }], { "total-paginas": "2" });
+    if (url.includes("/versao/0")) return resp(200, [{ referencia: "R1", versao: 5 }, { referencia: "R2", versao: 7 }], {});
+    if (url.includes("/versao/7")) return resp(200, [{ referencia: "R3", versao: 9 }], {});
+    return resp(200, [], {});
   });
 
   const r1 = await AlterdataSyncService.syncResource(orgId, {
@@ -62,8 +64,9 @@ async function main() {
     buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
     onItems: async (items) => { seen.push(...items); return items.length; },
   });
-  check("importou 3 itens em 2 páginas", r1.imported === 3 && r1.pages === 2, JSON.stringify(r1));
+  check("encadeia lotes por versão (3 itens em 3 chamadas)", r1.imported === 3 && r1.pages === 3, JSON.stringify(r1));
   check("URL usa o subdomínio do módulo supply", reqs[0].startsWith("https://toulon-supply.apimodaup.com.br/api/v1/Referencia/versao/"));
+  check("2ª chamada parte da maior versão do lote (7)", !!reqs[1] && reqs[1].includes("/versao/7"), JSON.stringify(reqs));
   check("cursor partiu de 0", r1.fromVersion === "0");
   check("cursor avançou para a maior versão (9)", r1.toVersion === "9");
   check("cursor persistido no store", AlterdataConnectorService.getCursor(orgId, "supply", "Referencia", "") === "9");
@@ -81,7 +84,12 @@ async function main() {
 
   // ===== 2. 401 → renova token e repete =====
   let call = 0;
-  __setAlterdataSyncHttpForTests(async () => { call++; return call === 1 ? resp(401, {}) : resp(200, [{ referencia: "R9", versao: 20 }], {}); });
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    call++;
+    if (call === 1) return resp(401, {});
+    if (url.includes("/versao/1/20")) return resp(200, [], {}); // fim do stream
+    return resp(200, [{ referencia: "R9", versao: 20 }], {});
+  });
   const before = tokenCalls;
   const r3 = await AlterdataSyncService.syncResource(orgId, {
     moduleKey: "supply", resource: "Saldo", filial: "1",
@@ -94,13 +102,18 @@ async function main() {
 
   // ===== 3. retry em 5xx =====
   let n = 0;
-  __setAlterdataSyncHttpForTests(async () => { n++; return n === 1 ? resp(503, {}) : resp(200, [{ referencia: "RX", versao: 30 }], {}); });
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    n++;
+    if (n === 1) return resp(503, {});
+    if (url.includes("/versao/30")) return resp(200, [], {}); // fim do stream
+    return resp(200, [{ referencia: "RX", versao: 30 }], {});
+  });
   const r4 = await AlterdataSyncService.syncResource(orgId, {
     moduleKey: "supply", resource: "Grade",
     buildPath: (c) => `/api/v1/Grade/versao/${c}`,
     onItems: async (i) => i.length,
   });
-  check("retry em 503 e depois sucesso", n === 2 && r4.imported === 1, `n=${n}`);
+  check("retry em 503 e depois sucesso", r4.imported === 1 && r4.toVersion === "30", `n=${n} ${JSON.stringify(r4)}`);
 
   // ===== 3b. versão via `controleVersao` (campo real do spec Supply) =====
   __setAlterdataSyncHttpForTests(async () => resp(200, [{ referenciaId: "R50", controleVersao: 123 }], {}));
@@ -111,21 +124,20 @@ async function main() {
   });
   check("cursor avança pelo campo controleVersao", r4b.toVersion === "123", r4b.toVersion);
 
-  // ===== 3c. paginação via CORPO (payload real da ModaUp) =====
-  // A homologação Toulon devolve a paginação no corpo ({ pagination: { totalPages }})
-  // e IGNORA o itensPorPagina do header — sem ler o corpo, o loop parava na
-  // página 1 e o catálogo vinha truncado (o bug dos "20 produtos").
-  __setAlterdataSyncHttpForTests(async (_url: string, init: any) => {
-    const pagina = Number(init.headers.pagina || 1);
-    if (pagina === 1) return resp(200, { success: true, data: [{ referenciaId: "B1", controleVersao: 1 }, { referenciaId: "B2", controleVersao: 2 }], pagination: { totalItems: 3, actualPage: 1, totalPages: 2, itemsPerPage: 0 } }, {});
-    return resp(200, { success: true, data: [{ referenciaId: "B3", controleVersao: 3 }], pagination: { totalItems: 3, actualPage: 2, totalPages: 2, itemsPerPage: 0 } }, {});
+  // ===== 3c. Envelope real ({success,data,pagination}) + encadeamento =====
+  // O /versao IGNORA o header `pagina` (o pagination do corpo diz totalPages 2,
+  // mas pedir a "página 2" devolveria o mesmo lote) — o avanço é pela versão.
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    if (url.includes("/versao/0")) return resp(200, { success: true, data: [{ referenciaId: "B1", controleVersao: 1 }, { referenciaId: "B2", controleVersao: 2 }], pagination: { totalItems: 3, actualPage: 1, totalPages: 2, itemsPerPage: 0 } }, {});
+    if (url.includes("/versao/2")) return resp(200, { success: true, data: [{ referenciaId: "B3", controleVersao: 3 }], pagination: { totalItems: 3, actualPage: 1, totalPages: 2, itemsPerPage: 0 } }, {});
+    return resp(200, { success: true, data: [], pagination: { totalPages: 2 } }, {});
   });
   const r4c = await AlterdataSyncService.syncResource(orgId, {
     moduleKey: "supply", resource: "ReferenciaBodyPag",
     buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
     onItems: async (i) => i.length,
   });
-  check("paginação via corpo (pagination.totalPages) percorre as 2 páginas", r4c.imported === 3 && r4c.pages === 2, JSON.stringify({ imported: r4c.imported, pages: r4c.pages }));
+  check("envelope {success,data}: encadeia por versão e importa tudo", r4c.imported === 3 && r4c.toVersion === "3", JSON.stringify({ imported: r4c.imported, toVersion: r4c.toVersion }));
 
   // ===== 3d. Versão via `controle` (rowversion base64) =====
   // Payload real da homologação: alguns recursos não trazem controleVersao
@@ -154,11 +166,11 @@ async function main() {
     onItems: async (i: any[]) => i.length,
   };
   const p1 = await AlterdataSyncService.syncResource(orgId, specNoVer);
-  check("sem versão: importa a janela de páginas (3 págs, 6 itens)", p1.imported === 6 && p1.pages === 3, JSON.stringify({ imported: p1.imported, pages: p1.pages }));
-  check("sem versão: cursor guarda a próxima página (0|4)", AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", "") === "0|4", AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", ""));
+  check("sem versão: 1ª execução processa o lote e persiste a página (0|2)", p1.imported === 2 && AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", "") === "0|2", JSON.stringify({ imported: p1.imported, cursor: AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", "") }));
   pagesSeen.length = 0;
-  await AlterdataSyncService.syncResource(orgId, specNoVer);
-  check("sem versão: 2ª execução continua das páginas 4-6", JSON.stringify(pagesSeen) === "[4,5,6]", JSON.stringify(pagesSeen));
+  const p2 = await AlterdataSyncService.syncResource(orgId, specNoVer);
+  check("sem versão: 2ª execução continua das páginas 2-4", JSON.stringify(pagesSeen) === "[2,3,4]" && p2.imported === 6, JSON.stringify({ pagesSeen, imported: p2.imported }));
+  check("sem versão: cursor avança para a próxima página (0|5)", AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", "") === "0|5", AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", ""));
 
   // ===== 4. base URL ausente → erro claro =====
   const orgNoBase = `org_${randomUUID().slice(0, 8)}`;

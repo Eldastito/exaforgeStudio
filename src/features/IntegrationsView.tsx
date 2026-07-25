@@ -688,42 +688,65 @@ function AlterdataConnectorPanel() {
   const [syncing, setSyncing] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
+  // Monta a mensagem do resumo (com o motivo dos "pulados" e os totais do
+  // catálogo — sem isso um "0 saldos" não explica a causa).
+  const applySummary = (s: any) => {
+    const skips: string[] = [];
+    const sNoStore = Number(s.saldos?.skippedNoStore || 0);
+    const sNoProd = Number(s.saldos?.skippedNoProduct || 0);
+    const pNoProd = Number(s.precos?.skippedNoProduct || 0);
+    const sSample = Array.isArray(s.saldos?.sampleNoProduct) && s.saldos.sampleNoProduct.length ? ` (ex.: ${s.saldos.sampleNoProduct.join(', ')})` : '';
+    const pSample = Array.isArray(s.precos?.sampleNoProduct) && s.precos.sampleNoProduct.length ? ` (ex.: ${s.precos.sampleNoProduct.join(', ')})` : '';
+    if (sNoStore) skips.push(`${sNoStore} saldo(s) sem loja cadastrada (código da filial)`);
+    if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente${sSample}`);
+    if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente${pSample}`);
+    const totals = s.totalProdutos ? ` (catálogo: ${s.totalProdutos} produtos, ${s.totalVariantes || 0} variantes)` : '';
+    const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+    const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
+    toast.success(`Sincronizado: ${text}.`);
+    setLastSync({ at: new Date().toISOString(), ok: true, text });
+  };
+
   const runSync = async (opts: { full?: boolean } = {}) => {
     const full = !!opts.full;
-    if (full && !window.confirm('Ressincronizar do zero limpa o controle de versão e reprocessa TODOS os produtos, saldos e preços da Alterdata. Use quando corrigiu a configuração (ex.: cadastrou as lojas) depois de já ter sincronizado. Continuar?')) return;
+    if (full && !window.confirm('Ressincronizar do zero limpa o controle de versão e reprocessa TODOS os produtos, saldos e preços da Alterdata em SEGUNDO PLANO (pode levar vários minutos). Use quando corrigiu a configuração depois de já ter sincronizado. Continuar?')) return;
     full ? setResyncing(true) : setSyncing(true);
     try {
       const res = await apiFetch(`/api/integrations/alterdata/${full ? 'resync' : 'sync'}`, { method: 'POST' });
       const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok && d.queued) {
+        // Resync roda em segundo plano (com o catálogo real ele leva vários
+        // minutos — a requisição síncrona estourava o timeout e o botão ficava
+        // "girando" pra sempre). Acompanha o resultado por polling.
+        toast.success('Ressincronização iniciada em segundo plano — o resultado aparece aqui quando terminar.');
+        setLastSync({ at: new Date().toISOString(), ok: true, text: 'Ressincronização em andamento… (pode levar vários minutos; pode sair desta tela)' });
+        const startedAt = Date.now();
+        const poll = async () => {
+          if (Date.now() - startedAt > 60 * 60_000) { setResyncing(false); return; } // desiste após 1h
+          try {
+            const r2 = await apiFetch('/api/integrations/alterdata/last-sync');
+            const j = await r2.json().catch(() => ({}));
+            const ranAt = j?.summary?.ranAt ? new Date(j.summary.ranAt).getTime() : 0;
+            if (ranAt >= startedAt) { applySummary(j.summary); setResyncing(false); return; }
+          } catch { /* segue tentando */ }
+          setTimeout(poll, 10_000);
+        };
+        setTimeout(poll, 10_000);
+        return; // mantém o botão "em andamento" até o job terminar
+      }
       if (res.ok && d.ok) {
-        const s = d.summary || {};
-        // Motivo dos "pulados" — sem isso, um "0 saldos" não explica a causa
-        // (loja não cadastrada com o código da filial vs. produto sem match).
-        const skips: string[] = [];
-        const sNoStore = Number(s.saldos?.skippedNoStore || 0);
-        const sNoProd = Number(s.saldos?.skippedNoProduct || 0);
-        const pNoProd = Number(s.precos?.skippedNoProduct || 0);
-        const sSample = Array.isArray(s.saldos?.sampleNoProduct) && s.saldos.sampleNoProduct.length ? ` (ex.: ${s.saldos.sampleNoProduct.join(', ')})` : '';
-        const pSample = Array.isArray(s.precos?.sampleNoProduct) && s.precos.sampleNoProduct.length ? ` (ex.: ${s.precos.sampleNoProduct.join(', ')})` : '';
-        if (sNoStore) skips.push(`${sNoStore} saldo(s) sem loja cadastrada (código da filial)`);
-        if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente${sSample}`);
-        if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente${pSample}`);
-        // Totais acumulados provam o avanço do cursor: o "N produtos" por
-        // execução repete até o catálogo acabar, mas o total só cresce.
-        const totals = s.totalProdutos ? ` (catálogo: ${s.totalProdutos} produtos, ${s.totalVariantes || 0} variantes)` : '';
-        const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
-        const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
-        toast.success(`Sincronizado: ${text}.`);
-        setLastSync({ at: new Date().toISOString(), ok: true, text });
+        applySummary(d.summary || {});
       } else {
         const err = d.error || 'Falha ao sincronizar.';
         toast.error(err);
         setLastSync({ at: new Date().toISOString(), ok: false, text: err });
       }
+      full ? setResyncing(false) : setSyncing(false);
     } catch {
       toast.error('Falha ao sincronizar.');
       setLastSync({ at: new Date().toISOString(), ok: false, text: 'Falha de conexão.' });
-    } finally { full ? setResyncing(false) : setSyncing(false); }
+      full ? setResyncing(false) : setSyncing(false);
+    }
   };
 
   const [probing, setProbing] = useState(false);

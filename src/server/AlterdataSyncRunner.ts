@@ -155,8 +155,11 @@ export class AlterdataSyncRunner {
       referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, filiais,
       ranAt: new Date().toISOString(),
     };
-    // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'.
+    // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'
+    // e persiste o resumo (a ressincronização roda em background — a tela lê o
+    // resultado em GET /alterdata/last-sync).
     AlterdataConnectorService.setCursor(orgId, "_meta", "lastRun", "", String(Date.now()));
+    try { AlterdataConnectorService.setCursor(orgId, "_meta", "lastSummary", "", JSON.stringify(summary)); } catch { /* noop */ }
     try { logAuthEvent(orgId, "system", "alterdata", "ALTERDATA_SYNC_RUN", summary as any); } catch { /* noop */ }
     return summary;
   }
@@ -231,8 +234,9 @@ function enabledOrgs(): string[] {
   } catch { return []; }
 }
 
-// Handler da fila: processa o sync de uma org em background.
+// Handler da fila: processa o sync de uma org em background. `manual` (resync
+// disparado pelo botão) dispensa a flag `enabled`, igual ao sync manual.
 JobQueueService.registerHandler("alterdata_sync", async (p: any) => {
-  const summary = await AlterdataSyncRunner.runOrg(p.orgId);
+  const summary = await AlterdataSyncRunner.runOrg(p.orgId, { manual: !!p.manual });
   return { done: true, ...summary };
 });

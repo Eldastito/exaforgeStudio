@@ -43,6 +43,9 @@ export class AlterdataSyncRunner {
    *  o mesmo cursor — uma consome o delta silenciosamente e a outra reporta 0. */
   private static running = new Set<string>();
 
+  /** A tela usa para mostrar "em andamento" de verdade (sobrevive à navegação). */
+  static isRunning(orgId: string): boolean { return this.running.has(orgId); }
+
   static async runOrg(orgId: string, opts: { manual?: boolean } = {}): Promise<SyncRunSummary> {
     if (!opts.manual && !AlterdataConnectorService.isEnabled(orgId)) {
       throw new Error("Alterdata: integração desligada para esta organização (ative em Integrações).");
@@ -267,7 +270,14 @@ function enabledOrgs(): string[] {
 
 // Handler da fila: processa o sync de uma org em background. `manual` (resync
 // disparado pelo botão) dispensa a flag `enabled`, igual ao sync manual.
+// Falha do job fica REGISTRADA em _meta/lastError — sem isso a tela ficaria
+// em "em andamento…" para sempre sem saber que o job morreu.
 JobQueueService.registerHandler("alterdata_sync", async (p: any) => {
-  const summary = await AlterdataSyncRunner.runOrg(p.orgId, { manual: !!p.manual });
-  return { done: true, ...summary };
+  try {
+    const summary = await AlterdataSyncRunner.runOrg(p.orgId, { manual: !!p.manual });
+    return { done: true, ...summary };
+  } catch (e: any) {
+    try { AlterdataConnectorService.setCursor(p.orgId, "_meta", "lastError", "", JSON.stringify({ message: String(e?.message || e), at: new Date().toISOString() })); } catch { /* noop */ }
+    throw e;
+  }
 });

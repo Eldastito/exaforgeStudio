@@ -514,14 +514,15 @@ router.post("/alterdata/resync", async (req: AuthRequest, res): Promise<any> => 
   }
 });
 
-// Resultado da última sincronização (para a tela acompanhar o resync em fila).
+// Resultado da última sincronização (para a tela acompanhar o resync em fila,
+// inclusive depois de navegar para outra tela e voltar): resumo persistido,
+// se há execução EM ANDAMENTO agora e o último erro de job (se houver).
 router.get("/alterdata/last-sync", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
-  try {
-    const raw = AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastSummary", "");
-    const summary = raw && raw !== "0" ? JSON.parse(raw) : null;
-    res.json({ ok: true, summary });
-  } catch { res.json({ ok: true, summary: null }); }
+  const parse = (raw: string) => { try { return raw && raw !== "0" ? JSON.parse(raw) : null; } catch { return null; } };
+  const summary = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastSummary", ""));
+  const lastError = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastError", ""));
+  res.json({ ok: true, summary, lastError, running: AlterdataSyncRunner.isRunning(req.organizationId) });
 });
 
 // DIAGNÓSTICO ("Testar módulos"): probe cada endpoint (Referencia/CodigoDeBarras/

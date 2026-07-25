@@ -704,8 +704,66 @@ function AlterdataConnectorPanel() {
     const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
     const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
     toast.success(`Sincronizado: ${text}.`);
-    setLastSync({ at: new Date().toISOString(), ok: true, text });
+    setLastSync({ at: s.ranAt || new Date().toISOString(), ok: true, text });
   };
+
+  // Acompanhamento do resync em fila que SOBREVIVE à navegação: o instante do
+  // disparo fica no localStorage; ao montar, a tela consulta /last-sync e
+  // retoma o polling se o job ainda não terminou (ou mostra o erro se morreu).
+  const RESYNC_LS_KEY = 'alterdata_resync_started_at';
+  const pollResync = (startedAt: number) => {
+    const tick = async () => {
+      if (Date.now() - startedAt > 60 * 60_000) { localStorage.removeItem(RESYNC_LS_KEY); setResyncing(false); return; } // desiste após 1h
+      try {
+        const r2 = await apiFetch('/api/integrations/alterdata/last-sync');
+        const j = await r2.json().catch(() => ({}));
+        const ranAt = j?.summary?.ranAt ? new Date(j.summary.ranAt).getTime() : 0;
+        const errAt = j?.lastError?.at ? new Date(j.lastError.at).getTime() : 0;
+        if (ranAt >= startedAt) { localStorage.removeItem(RESYNC_LS_KEY); applySummary(j.summary); setResyncing(false); return; }
+        if (errAt >= startedAt && !j?.running) {
+          localStorage.removeItem(RESYNC_LS_KEY);
+          const msg = j.lastError?.message || 'A ressincronização falhou.';
+          toast.error(msg);
+          setLastSync({ at: new Date().toISOString(), ok: false, text: msg });
+          setResyncing(false);
+          return;
+        }
+      } catch { /* segue tentando */ }
+      setTimeout(tick, 10_000);
+    };
+    setTimeout(tick, 10_000);
+  };
+
+  // Ao montar: restaura o último resumo persistido e retoma o acompanhamento
+  // de um resync em andamento (as informações não somem mais ao trocar de tela).
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch('/api/integrations/alterdata/last-sync');
+        const j = await r.json().catch(() => ({}));
+        const startedAt = Number(localStorage.getItem(RESYNC_LS_KEY) || 0);
+        const ranAt = j?.summary?.ranAt ? new Date(j.summary.ranAt).getTime() : 0;
+        const pending = startedAt > 0 && Date.now() - startedAt < 60 * 60_000 && ranAt < startedAt;
+        if (pending || j?.running) {
+          setResyncing(true);
+          setLastSync({ at: new Date(startedAt || Date.now()).toISOString(), ok: true, text: 'Ressincronização em andamento… (pode levar vários minutos; pode sair desta tela)' });
+          pollResync(startedAt || Date.now());
+        } else if (j?.summary) {
+          if (startedAt) localStorage.removeItem(RESYNC_LS_KEY);
+          // Restaura o último resumo sem toast (é histórico, não novidade).
+          const s = j.summary;
+          const skips: string[] = [];
+          if (Number(s.saldos?.skippedNoStore || 0)) skips.push(`${s.saldos.skippedNoStore} saldo(s) sem loja cadastrada (código da filial)`);
+          if (Number(s.saldos?.skippedNoProduct || 0)) skips.push(`${s.saldos.skippedNoProduct} saldo(s) sem produto correspondente`);
+          if (Number(s.precos?.skippedNoProduct || 0)) skips.push(`${s.precos.skippedNoProduct} preço(s) sem produto correspondente`);
+          const totals = s.totalProdutos ? ` (catálogo: ${s.totalProdutos} produtos, ${s.totalVariantes || 0} variantes)` : '';
+          const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+          setLastSync({ at: s.ranAt || new Date().toISOString(), ok: true, text: skips.length ? `${base} — pulados: ${skips.join('; ')}` : base });
+        }
+      } catch { /* sem histórico */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const runSync = async (opts: { full?: boolean } = {}) => {
     const full = !!opts.full;
@@ -716,22 +774,13 @@ function AlterdataConnectorPanel() {
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok && d.queued) {
         // Resync roda em segundo plano (com o catálogo real ele leva vários
-        // minutos — a requisição síncrona estourava o timeout e o botão ficava
-        // "girando" pra sempre). Acompanha o resultado por polling.
+        // minutos). O instante do disparo vai pro localStorage — se o usuário
+        // trocar de tela e voltar, o acompanhamento retoma sozinho.
         toast.success('Ressincronização iniciada em segundo plano — o resultado aparece aqui quando terminar.');
         setLastSync({ at: new Date().toISOString(), ok: true, text: 'Ressincronização em andamento… (pode levar vários minutos; pode sair desta tela)' });
         const startedAt = Date.now();
-        const poll = async () => {
-          if (Date.now() - startedAt > 60 * 60_000) { setResyncing(false); return; } // desiste após 1h
-          try {
-            const r2 = await apiFetch('/api/integrations/alterdata/last-sync');
-            const j = await r2.json().catch(() => ({}));
-            const ranAt = j?.summary?.ranAt ? new Date(j.summary.ranAt).getTime() : 0;
-            if (ranAt >= startedAt) { applySummary(j.summary); setResyncing(false); return; }
-          } catch { /* segue tentando */ }
-          setTimeout(poll, 10_000);
-        };
-        setTimeout(poll, 10_000);
+        try { localStorage.setItem(RESYNC_LS_KEY, String(startedAt)); } catch { /* noop */ }
+        pollResync(startedAt);
         return; // mantém o botão "em andamento" até o job terminar
       }
       if (res.ok && d.ok) {

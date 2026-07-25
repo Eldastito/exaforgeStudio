@@ -244,7 +244,8 @@
     "test:controler-foundation": "tsx scripts/test-controler-foundation.ts",
     "test:controler-locations": "tsx scripts/test-controler-locations.ts",
     "test:controler-items": "tsx scripts/test-controler-items.ts",
-    "test:controler-consumption": "tsx scripts/test-controler-consumption.ts"
+    "test:controler-consumption": "tsx scripts/test-controler-consumption.ts",
+    "test:consumption-signals": "tsx scripts/test-consumption-signals.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

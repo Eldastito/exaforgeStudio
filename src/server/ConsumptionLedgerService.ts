@@ -59,6 +59,17 @@ export class ConsumptionLedgerService {
     return round2(Number((db.prepare(sql).get(...params) as any)?.net) || 0);
   }
 
+  /** Soma bruta das SAÍDAS (out) na janela — usada p/ distinguir estoque parado. */
+  static grossOut(orgId: string, productId: string, opts: { from?: string; to?: string } = {}): number {
+    const to = opts.to || today();
+    const from = opts.from || daysBefore(to, 90);
+    const r = db.prepare(
+      `SELECT COALESCE(SUM(quantity), 0) AS out FROM consumption_events
+        WHERE organization_id = ? AND product_service_id = ? AND direction = 'out' AND occurred_at BETWEEN ? AND ?`
+    ).get(orgId, productId, from, to) as any;
+    return round2(Number(r?.out) || 0);
+  }
+
   /** Média diária = consumo líquido da janela ÷ dias da janela. */
   static dailyAverage(orgId: string, productId: string, opts: { windowDays?: number; to?: string } = {}): { average: number; net: number; windowDays: number } {
     const windowDays = Math.max(1, Number(opts.windowDays) || 30);

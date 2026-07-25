@@ -723,8 +723,8 @@ router.get("/", (req: AuthRequest, res): any => {
 
     const products = db.prepare(`
       SELECT ps.*,
-        COALESCE(prod.quantity_available, agg.qa) AS quantity_available,
-        COALESCE(prod.quantity_reserved, agg.qr) AS quantity_reserved,
+        COALESCE(prod.quantity_available, agg.qa, rsi.qa) AS quantity_available,
+        COALESCE(prod.quantity_reserved, agg.qr, rsi.qr) AS quantity_reserved,
         prod.low_stock_threshold AS low_stock_threshold,
         prod.avg_cost AS avg_cost
       FROM products_services ps
@@ -733,6 +733,13 @@ router.get("/", (req: AuthRequest, res): any => {
         SELECT product_service_id, SUM(quantity_available) qa, SUM(quantity_reserved) qr
         FROM inventory_items WHERE variant_id IS NOT NULL GROUP BY product_service_id
       ) agg ON agg.product_service_id = ps.id
+      LEFT JOIN (
+        -- Estoque POR LOJA (rede/ERP, ADR-083): soma das lojas como fallback —
+        -- sem isso, produto sincronizado do Alterdata aparece "0 em estoque" no
+        -- card mesmo com saldo nas filiais.
+        SELECT product_service_id, SUM(quantity_available) qa, SUM(quantity_reserved) qr
+        FROM retail_store_inventory GROUP BY product_service_id
+      ) rsi ON rsi.product_service_id = ps.id
       WHERE ${where.join(" AND ")}
       ORDER BY ps.created_at DESC
       ${limit ? "LIMIT ? OFFSET ?" : ""}

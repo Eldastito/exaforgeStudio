@@ -85,14 +85,18 @@ export class AlterdataSyncRunner {
     }
 
     // 4) Preço (módulo Price) — só quando a tabela de preço da rede está definida.
+    //    O recurso do módulo Price é `TabelaPreco` e o delta é `/versao/{versao}`
+    //    (um único inteiro; não há /{rede}/{table} no path). A resposta traz TODAS
+    //    as tabelas — o mapper filtra pela `table` configurada e lê o preço
+    //    aninhado em `preco` (produto/preco1).
     const precos = { applied: 0, skippedNoProduct: 0 };
     const table = str(settings.priceTable);
-    if (rede && table) {
+    if (table) {
       await AlterdataSyncService.syncResource(orgId, {
-        moduleKey: "price", resource: "Preco", filial: table,
-        buildPath: (c) => `/api/v1/Preco/versao/${rede}/${table}/${c}`,
+        moduleKey: "price", resource: "TabelaPreco", filial: table,
+        buildPath: (c) => `/api/v1/TabelaPreco/versao/${c}`,
         onItems: (items) => {
-          const r = AlterdataPriceMapper.upsertPrecos(orgId, items);
+          const r = AlterdataPriceMapper.upsertPrecos(orgId, items, table);
           precos.applied += r.applied; precos.skippedNoProduct += r.skippedNoProduct;
           return r.applied;
         },
@@ -135,8 +139,10 @@ export class AlterdataSyncRunner {
     for (const filial of filiais) {
       await run(filial ? `Saldo (filial ${filial})` : "Saldo", "supply", filial ? `/api/v1/Saldo/versao/${filial}/0` : "/api/v1/Saldo/versao/0");
     }
-    if (rede && table) {
-      await run("Preco", "price", `/api/v1/Preco/versao/${rede}/${table}/0`);
+    if (table) {
+      await run(`TabelaPreco (tabela ${table})`, "price", `/api/v1/TabelaPreco/versao/0`);
+    } else {
+      out.push({ resource: "TabelaPreco", module: "price", path: "(sem tabela)", url: null, status: 0, ok: false, snippet: "Preencha a Tabela de preço da rede para testar o módulo de preço." });
     }
     return out;
   }

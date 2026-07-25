@@ -5,9 +5,11 @@
  * ZappFlow, com UPSERT idempotente por referência externa (`external_ref`):
  *   - `Referencia` (referenciaId, descricao, preco, custo, colecao, grupo)
  *      → products_services (external_ref = referenciaId).
- *   - `CodigoDeBarras` (codigo=referência, cor, tamanho, ean)
- *      → product_variants (external_ref = ean|codigo:cor:tamanho), cor/tamanho,
- *        EAN em `sku`; marca o produto com has_variants.
+ *   - `CodigoDeBarras` (codigo=referência, produto=cód. ERP, cor, tamanho, ean)
+ *      → product_variants (external_ref = produto ERP|ean|codigo:cor:tamanho),
+ *        cor/tamanho, EAN em `sku`; marca o produto com has_variants. O código
+ *        de produto do ERP é a chave preferida porque é ELE que Saldo e Preco
+ *        usam no campo `produto`.
  *
  * É um MAPPER PURO de dados (sem HTTP): recebe os itens já baixados pelo
  * AlterdataSyncService.onItems e devolve quantos itens tratou. Idempotente por
@@ -76,15 +78,22 @@ export class AlterdataSupplyMapper {
 
       const cor = str(c?.cor);
       const tamanho = str(c?.tamanho);
-      const ean = sanitizeGtin(c?.ean);
-      const extRef = ean || `${codigo}:${cor}:${tamanho}`;
+      const ean = sanitizeGtin(str(c?.ean) || str(c?.codigoBarra) || str(c?.codigoDeBarras) || str(c?.barra) || str(c?.gtin));
+      // Código de PRODUTO do ERP (referência+cor+tamanho, ex.: 0552380350481).
+      // É ESSA a chave que o Saldo e o Preco usam no campo `produto` — então ela
+      // vira o external_ref da variante (o EAN fica no sku e também casa).
+      const erpProduto = str(c?.produto ?? c?.codigoProduto ?? c?.produtoId);
+      const extRef = erpProduto || ean || `${codigo}:${cor}:${tamanho}`;
       const vName = [tamanho, cor].filter(Boolean).join(" / ") || (ean ? `EAN ${ean}` : `Variante ${extRef}`);
       const inactive = int(c?.inativo) === 1 || int(c?.descontinuado) === 1;
 
-      const existing = db.prepare(`SELECT id FROM product_variants WHERE organization_id = ? AND product_service_id = ? AND external_ref = ? LIMIT 1`).get(orgId, product.id, extRef) as any;
+      // Aceita variantes criadas antes com a chave antiga (EAN ou codigo:cor:tam)
+      // e MIGRA a chave para o código de produto do ERP, sem duplicar.
+      const keys = [...new Set([extRef, ean, `${codigo}:${cor}:${tamanho}`].filter(Boolean))] as string[];
+      const existing = db.prepare(`SELECT id FROM product_variants WHERE organization_id = ? AND product_service_id = ? AND external_ref IN (${keys.map(() => "?").join(",")}) LIMIT 1`).get(orgId, product.id, ...keys) as any;
       if (existing?.id) {
-        db.prepare(`UPDATE product_variants SET name = ?, size = ?, color = ?, sku = COALESCE(?, sku), active = ? WHERE organization_id = ? AND id = ?`)
-          .run(vName, tamanho || null, cor || null, ean, inactive ? 0 : 1, orgId, existing.id);
+        db.prepare(`UPDATE product_variants SET name = ?, size = ?, color = ?, sku = COALESCE(?, sku), active = ?, external_ref = ? WHERE organization_id = ? AND id = ?`)
+          .run(vName, tamanho || null, cor || null, ean, inactive ? 0 : 1, extRef, orgId, existing.id);
       } else {
         db.prepare(
           `INSERT INTO product_variants (id, organization_id, product_service_id, name, sku, size, color, variant_type, active, external_ref)

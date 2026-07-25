@@ -85,22 +85,35 @@ export class AlterdataSyncRunner {
     }
 
     // 4) Preço (módulo Price) — só quando a tabela de preço da rede está definida.
-    //    O recurso do módulo Price é `TabelaPreco` e o delta é `/versao/{versao}`
-    //    (um único inteiro; não há /{rede}/{table} no path). A resposta traz TODAS
-    //    as tabelas — o mapper filtra pela `table` configurada e lê o preço
-    //    aninhado em `preco` (produto/preco1).
+    //    O preço POR PRODUTO é o recurso `Preco` (produto, tabela, preco1) — o
+    //    `TabelaPreco/versao` devolve só o CADASTRO das tabelas (sem produto,
+    //    `preco: null`), visto na homologação Toulon. O path do delta do Preco
+    //    varia entre instalações da ModaUp, então tenta os formatos conhecidos em
+    //    ordem e fica no primeiro que devolver linhas de preço de verdade (com
+    //    `produto`). Cursor isolado por formato (filial "tabela~i") para um
+    //    formato errado não engolir o delta do formato certo.
     const precos = { applied: 0, skippedNoProduct: 0 };
     const table = str(settings.priceTable);
     if (table) {
-      await AlterdataSyncService.syncResource(orgId, {
-        moduleKey: "price", resource: "TabelaPreco", filial: table,
-        buildPath: (c) => `/api/v1/TabelaPreco/versao/${c}`,
-        onItems: (items) => {
-          const r = AlterdataPriceMapper.upsertPrecos(orgId, items, table);
-          precos.applied += r.applied; precos.skippedNoProduct += r.skippedNoProduct;
-          return r.applied;
-        },
-      });
+      const candidates: Array<(c: string) => string> = [
+        (c) => `/api/v1/Preco/versao/${table}/${c}`,
+        (c) => `/api/v1/Preco/versao/${c}`,
+      ];
+      if (rede) candidates.push((c) => `/api/v1/Preco/versao/${rede}/${table}/${c}`);
+      for (let i = 0; i < candidates.length; i++) {
+        try {
+          await AlterdataSyncService.syncResource(orgId, {
+            moduleKey: "price", resource: "Preco", filial: `${table}~${i}`,
+            buildPath: candidates[i],
+            onItems: (items) => {
+              const r = AlterdataPriceMapper.upsertPrecos(orgId, items, table);
+              precos.applied += r.applied; precos.skippedNoProduct += r.skippedNoProduct;
+              return r.applied;
+            },
+          });
+        } catch { /* formato inexistente nesta instalação (404/500) — tenta o próximo */ }
+        if (precos.applied + precos.skippedNoProduct > 0) break; // achou o formato com linhas de preço
+      }
     }
 
     const summary: SyncRunSummary = {
@@ -136,13 +149,25 @@ export class AlterdataSyncRunner {
     // por referência: ReferenciaRede/{referencia}/{rede}).
     if (rede) await run("CodigoDeBarras", "supply", `/api/v1/CodigoDeBarras/CodigoProdutoTipo/${encodeURIComponent(rede)}`);
     else out.push({ resource: "CodigoDeBarras", module: "supply", path: "(sem rede)", url: null, status: 0, ok: false, snippet: "Preencha o campo Rede para testar o módulo de código de barras." });
+    // Amostra de barras POR REFERÊNCIA (o endpoint que o sync usa de verdade):
+    // revela os CAMPOS reais do payload (produto ERP / EAN) usados no casamento
+    // de saldo e preço com as variantes.
+    if (rede) {
+      const sample = db.prepare(`SELECT external_ref FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> '' LIMIT 1`).get(orgId) as any;
+      if (sample?.external_ref) await run(`CodigoDeBarras (ref ${sample.external_ref})`, "supply", `/api/v1/CodigoDeBarras/ReferenciaRede/${encodeURIComponent(sample.external_ref)}/${encodeURIComponent(rede)}`);
+    }
     for (const filial of filiais) {
       await run(filial ? `Saldo (filial ${filial})` : "Saldo", "supply", filial ? `/api/v1/Saldo/versao/${filial}/0` : "/api/v1/Saldo/versao/0");
     }
     if (table) {
-      await run(`TabelaPreco (tabela ${table})`, "price", `/api/v1/TabelaPreco/versao/0`);
+      await run(`TabelaPreco (cadastro de tabelas)`, "price", `/api/v1/TabelaPreco/versao/0`);
+      // Preço POR PRODUTO: o path do delta varia entre instalações — testa os
+      // formatos conhecidos; o corpo de cada um mostra qual devolve linhas.
+      await run(`Preco (formato tabela/versao)`, "price", `/api/v1/Preco/versao/${table}/0`);
+      await run(`Preco (formato versao)`, "price", `/api/v1/Preco/versao/0`);
+      if (rede) await run(`Preco (formato rede/tabela/versao)`, "price", `/api/v1/Preco/versao/${rede}/${table}/0`);
     } else {
-      out.push({ resource: "TabelaPreco", module: "price", path: "(sem tabela)", url: null, status: 0, ok: false, snippet: "Preencha a Tabela de preço da rede para testar o módulo de preço." });
+      out.push({ resource: "Preco", module: "price", path: "(sem tabela)", url: null, status: 0, ok: false, snippet: "Preencha a Tabela de preço da rede para testar o módulo de preço." });
     }
     return out;
   }

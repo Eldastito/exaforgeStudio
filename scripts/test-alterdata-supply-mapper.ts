@@ -78,6 +78,18 @@ async function main() {
   AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "1001", cor: "Preto", tamanho: "M", ean: "7891234567901", descontinuado: 1 }]);
   check("descontinuado marca a variante inativa", variants(p1.id).find((v) => v.size === "M")?.active === 0);
 
+  // ===== 3b. Código de produto do ERP vira a chave da variante =====
+  // Payload real da ModaUp (homologação Toulon): a barra traz `produto` (código
+  // ERP de 13 dígitos = referência+cor+tamanho) — é ESSA a chave que o Saldo e o
+  // Preco usam. Reprocessar a MESMA barra (antes chaveada por EAN) deve MIGRAR o
+  // external_ref para o código ERP, sem duplicar.
+  AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "1001", produto: "1001005500481", cor: "Preto", tamanho: "M", ean: "7891234567901" }]);
+  const vsMig = variants(p1.id);
+  check("migração p/ código ERP não duplica variante", vsMig.length === 3, String(vsMig.length));
+  const vErp = vsMig.find((v) => v.size === "M");
+  check("external_ref migra para o código de produto do ERP", vErp?.external_ref === "1001005500481", String(vErp?.external_ref));
+  check("EAN preservado no sku após a migração", vErp?.sku === "7891234567901", String(vErp?.sku));
+
   // ===== 4. Barra órfã (produto não importado) é pulada =====
   const nOrphan = AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "9999", cor: "Azul", tamanho: "U", ean: "7899999999994" }]);
   check("barra de produto inexistente é pulada (retorna 0)", nOrphan === 0);

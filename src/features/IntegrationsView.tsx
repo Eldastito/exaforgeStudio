@@ -694,7 +694,17 @@ function AlterdataConnectorPanel() {
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
         const s = d.summary || {};
-        const text = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+        // Motivo dos "pulados" — sem isso, um "0 saldos" não explica a causa
+        // (loja não cadastrada com o código da filial vs. produto sem match).
+        const skips: string[] = [];
+        const sNoStore = Number(s.saldos?.skippedNoStore || 0);
+        const sNoProd = Number(s.saldos?.skippedNoProduct || 0);
+        const pNoProd = Number(s.precos?.skippedNoProduct || 0);
+        if (sNoStore) skips.push(`${sNoStore} saldo(s) sem loja cadastrada (código da filial)`);
+        if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente`);
+        if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente`);
+        const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+        const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
         toast.success(`Sincronizado: ${text}.`);
         setLastSync({ at: new Date().toISOString(), ok: true, text });
       } else {

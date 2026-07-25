@@ -13,6 +13,7 @@ import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReportsService } from "../ReportsService.js";
 import { AlterdataConnectorService } from "../AlterdataConnectorService.js";
 import { AlterdataSyncRunner } from "../AlterdataSyncRunner.js";
+import { JobQueueService } from "../JobQueueService.js";
 
 const router = Router();
 
@@ -496,19 +497,31 @@ router.post("/alterdata/sync", async (req: AuthRequest, res): Promise<any> => {
   }
 });
 
-// RESSINCRONIZAR DO ZERO: limpa os cursores de delta e roda um pull completo.
-// Use quando a config foi corrigida DEPOIS do 1º sync (ex.: lojas cadastradas
-// depois) — sem isso o cursor já avançou e o saldo/preço antigos não voltam.
+// RESSINCRONIZAR DO ZERO: limpa os cursores de delta e roda um pull completo
+// EM SEGUNDO PLANO (fila de jobs). Com o catálogo real (milhares de refs +
+// dezenas de milhares de preços) a execução leva vários minutos — responder
+// síncrono estourava o timeout do navegador/proxy e o botão "girava" para
+// sempre. A tela acompanha por GET /alterdata/last-sync.
 router.post("/alterdata/resync", async (req: AuthRequest, res): Promise<any> => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const cleared = AlterdataConnectorService.clearCursors(req.organizationId);
-    const summary = await AlterdataSyncRunner.runOrg(req.organizationId, { manual: true });
-    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_RESYNC_MANUAL', { cleared, referencias: summary.referencias, variantes: summary.variantes });
-    res.json({ ok: true, summary, cleared });
+    JobQueueService.enqueue("alterdata_sync", { orgId: req.organizationId, manual: true }, { organizationId: req.organizationId });
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_RESYNC_MANUAL', { cleared, queued: true });
+    res.json({ ok: true, queued: true, cleared });
   } catch (e: any) {
     res.status(502).json({ ok: false, error: e?.message || "Falha ao ressincronizar com a Alterdata." });
   }
+});
+
+// Resultado da última sincronização (para a tela acompanhar o resync em fila).
+router.get("/alterdata/last-sync", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const raw = AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastSummary", "");
+    const summary = raw && raw !== "0" ? JSON.parse(raw) : null;
+    res.json({ ok: true, summary });
+  } catch { res.json({ ok: true, summary: null }); }
 });
 
 // DIAGNÓSTICO ("Testar módulos"): probe cada endpoint (Referencia/CodigoDeBarras/

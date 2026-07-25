@@ -39,10 +39,26 @@ export class AlterdataSyncRunner {
    * `manual` (clique em "Sincronizar agora") dispensa a flag `enabled` — o toggle
    * governa só a sincronização AUTOMÁTICA/agendada, não o teste manual (homologação).
    */
+  /** Trava por org: execuções SIMULTÂNEAS (clique + agendador + fila) disputam
+   *  o mesmo cursor — uma consome o delta silenciosamente e a outra reporta 0. */
+  private static running = new Set<string>();
+
   static async runOrg(orgId: string, opts: { manual?: boolean } = {}): Promise<SyncRunSummary> {
     if (!opts.manual && !AlterdataConnectorService.isEnabled(orgId)) {
       throw new Error("Alterdata: integração desligada para esta organização (ative em Integrações).");
     }
+    if (this.running.has(orgId)) {
+      throw new Error("Alterdata: já existe uma sincronização em andamento para esta organização — aguarde ela terminar.");
+    }
+    this.running.add(orgId);
+    try {
+      return await this.runOrgInner(orgId);
+    } finally {
+      this.running.delete(orgId);
+    }
+  }
+
+  private static async runOrgInner(orgId: string): Promise<SyncRunSummary> {
     const settings = AlterdataConnectorService.publicSettings(orgId);
     const filiais: string[] = Array.isArray(settings.filiais) && settings.filiais.length ? settings.filiais : [""];
     const rede = str(settings.rede);
@@ -147,6 +163,21 @@ export class AlterdataSyncRunner {
       }
     }
 
+    // Preço de EXIBIÇÃO do produto: o ERP precifica por VARIANTE (grade), mas o
+    // card do catálogo e a vitrine mostram products_services.price — que veio
+    // 0.0 da Referencia. Sem isso, o produto aparece "R$ 0,00" mesmo com as
+    // variantes precificadas. Preenche com o MENOR preço (>0) das variantes
+    // quando o produto está sem preço (idempotente; roda a cada sync).
+    try {
+      db.prepare(
+        `UPDATE products_services SET price = (
+            SELECT MIN(v.price) FROM product_variants v
+             WHERE v.product_service_id = products_services.id AND v.price > 0)
+          WHERE organization_id = ? AND (price IS NULL OR price <= 0)
+            AND EXISTS (SELECT 1 FROM product_variants v2 WHERE v2.product_service_id = products_services.id AND v2.price > 0)`
+      ).run(orgId);
+    } catch { /* noop */ }
+
     // Totais acumulados — o "N produtos" de cada execução é igual até o catálogo
     // acabar; o TOTAL crescendo é a prova de que o cursor está avançando.
     const totalProdutos = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> ''`).get(orgId) as any)?.c || 0);
@@ -155,8 +186,11 @@ export class AlterdataSyncRunner {
       referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, filiais,
       ranAt: new Date().toISOString(),
     };
-    // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'.
+    // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'
+    // e persiste o resumo (a ressincronização roda em background — a tela lê o
+    // resultado em GET /alterdata/last-sync).
     AlterdataConnectorService.setCursor(orgId, "_meta", "lastRun", "", String(Date.now()));
+    try { AlterdataConnectorService.setCursor(orgId, "_meta", "lastSummary", "", JSON.stringify(summary)); } catch { /* noop */ }
     try { logAuthEvent(orgId, "system", "alterdata", "ALTERDATA_SYNC_RUN", summary as any); } catch { /* noop */ }
     return summary;
   }
@@ -231,8 +265,9 @@ function enabledOrgs(): string[] {
   } catch { return []; }
 }
 
-// Handler da fila: processa o sync de uma org em background.
+// Handler da fila: processa o sync de uma org em background. `manual` (resync
+// disparado pelo botão) dispensa a flag `enabled`, igual ao sync manual.
 JobQueueService.registerHandler("alterdata_sync", async (p: any) => {
-  const summary = await AlterdataSyncRunner.runOrg(p.orgId);
+  const summary = await AlterdataSyncRunner.runOrg(p.orgId, { manual: !!p.manual });
   return { done: true, ...summary };
 });

@@ -71,11 +71,7 @@ export class AlterdataSyncService {
       throw new Error(`Alterdata ${moduleKey} ${pathSuffix}: HTTP ${res.status} ${String(t).slice(0, 200)}`);
     }
     const body = await res.json().catch(() => null);
-    const items = Array.isArray(body) ? body
-      : Array.isArray(body?.itens) ? body.itens
-      : Array.isArray(body?.data) ? body.data
-      : Array.isArray(body?.registros) ? body.registros
-      : [];
+    const items = extractItems(body);
     const totalPages = num(res.headers.get("total-paginas") ?? res.headers.get("totalpaginas") ?? res.headers.get("x-total-pages"));
     const version = res.headers.get("versao") ?? res.headers.get("x-versao") ?? (body?.versao != null ? String(body.versao) : null);
     return { status: res.status, items, totalPages, version, body };
@@ -102,9 +98,9 @@ export class AlterdataSyncService {
         res = await http(url, { method: "GET", headers: hdr(token) });
       }
       const body = await res.text().catch(() => "");
-      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 300) };
+      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 900) };
     } catch (e: any) {
-      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 300) };
+      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 900) };
     }
   }
 
@@ -170,6 +166,26 @@ export class AlterdataSyncService {
 }
 
 function num(v: any): number | null { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; }
+
+/**
+ * Extrai a lista de itens do corpo, tolerante ao envelope de CADA módulo da
+ * ModaUp — os endpoints não são consistentes: uns devolvem array puro
+ * (Referencia), outros um objeto com a lista dentro (itens/data/registros/…) e
+ * alguns (ex.: TabelaPreco/versao no Swagger) um ÚNICO objeto. Um 200 com corpo
+ * num formato não previsto era lido como 0 itens → "0 saldos/preços" silencioso.
+ */
+function extractItems(body: any): any[] {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === "object") {
+    for (const k of ["itens", "items", "data", "registros", "lista", "resultado", "resultados", "content", "value", "saldos", "precos"]) {
+      if (Array.isArray(body[k])) return body[k];
+    }
+    // Objeto único (não-envelope) → trata como lista de 1; o mapper ignora o que
+    // não tiver as chaves que precisa (produto/filial), então é seguro.
+    if (Object.keys(body).length > 0) return [body];
+  }
+  return [];
+}
 function gt(a: any, b: any): boolean {
   const na = Number(a), nb = Number(b);
   if (Number.isFinite(na) && Number.isFinite(nb)) return na > nb;

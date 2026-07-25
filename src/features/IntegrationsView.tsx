@@ -897,7 +897,10 @@ function AlterdataConnectorPanel() {
                   <span className={`font-medium ${p.ok ? 'text-emerald-200' : 'text-rose-200'}`}>{p.resource}</span>
                   <span className="text-zinc-500"> · HTTP {p.status || '—'}</span>
                   <span className="text-zinc-600 ml-2 font-mono text-[10px]">{p.path}</span>
-                  {!p.ok && p.snippet && <div className="text-rose-300/80 mt-0.5 break-words">{p.snippet}</div>}
+                  {/* Mostra sempre um trecho do corpo (não só em erro): um 200 com
+                      corpo vazio/num formato inesperado é a causa comum de "0
+                      saldos/preços" — ver o corpo revela o envelope de cada API. */}
+                  {p.snippet && <div className={`mt-0.5 break-words whitespace-pre-wrap font-mono text-[10px] max-h-24 overflow-auto rounded bg-zinc-950/60 px-1.5 py-1 ${p.ok ? 'text-zinc-400' : 'text-rose-300/80'}`}>{p.snippet || '(corpo vazio)'}</div>}
                 </div>
               </div>
             ))}

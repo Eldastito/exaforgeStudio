@@ -59,6 +59,25 @@ export function Storefront() {
   const { slug, productSlug, token } = useMemo(readUrl, []);
 
   const [data, setData] = useState<StoreResponse | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Catálogo paginado (lojas com ERP têm milhares de produtos): busca a próxima
+  // página e anexa, deduplicando pelo id (o pslug do deep-link pode repetir).
+  const loadMore = async () => {
+    if (!data || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}?offset=${data.products.length}`);
+      if (res.ok) {
+        const json = (await res.json()) as StoreResponse;
+        setData((prev) => prev ? {
+          ...prev,
+          products: [...prev.products, ...json.products.filter((np) => !prev.products.some((pp) => pp.id === np.id))],
+          productsTotal: json.productsTotal,
+        } : prev);
+      }
+    } finally { setLoadingMore(false); }
+  };
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -89,7 +108,8 @@ export function Storefront() {
     }
     (async () => {
       try {
-        const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}`);
+        // pslug garante o produto do deep-link na 1ª página (o catálogo é paginado).
+        const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}${productSlug ? `?pslug=${encodeURIComponent(productSlug)}` : ''}`);
         if (!res.ok) throw new Error(String(res.status));
         const json = (await res.json()) as StoreResponse;
         if (!alive) return;
@@ -454,6 +474,15 @@ export function Storefront() {
                     ))}
                   </AnimatePresence>
                 </motion.div>
+              )}
+              {!onlyFavs && data && (data.productsTotal ?? 0) > data.products.length && (
+                <div className="mt-6 flex justify-center">
+                  <button onClick={loadMore} disabled={loadingMore}
+                    className="rounded-full border px-6 py-2 text-sm font-medium transition-opacity disabled:opacity-50"
+                    style={{ borderColor: hexToRgba(accent, 0.4) }}>
+                    {loadingMore ? 'Carregando…' : `Ver mais produtos (${(data.productsTotal ?? 0) - data.products.length} restantes)`}
+                  </button>
+                </div>
               )}
             </div>
           </>

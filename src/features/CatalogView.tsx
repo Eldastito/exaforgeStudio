@@ -71,14 +71,27 @@ export function CatalogView() {
       .finally(() => setSalesLoading(false));
   };
 
-  const loadProducts = () => {
-    apiFetch('/api/products')
-      .then(r => r.json())
-      .then(data => setProducts(Array.isArray(data) ? data : []))
+  // PAGINADO (catálogos de ERP têm milhares de itens — renderizar tudo congela
+  // o navegador). Busca no servidor (nome/EAN/ref.) + "Carregar mais".
+  const PAGE_SIZE = 60;
+  const [search, setSearch] = useState('');
+  const [total, setTotal] = useState(0);
+  const loadProducts = (q: string = search, offset = 0) => {
+    apiFetch(`/api/products?limit=${PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(q)}`)
+      .then(async r => ({ rows: await r.json(), count: Number(r.headers.get('X-Total-Count') || 0) }))
+      .then(({ rows, count }) => {
+        setTotal(count);
+        const list = Array.isArray(rows) ? rows : [];
+        setProducts(prev => (offset === 0 ? list : [...prev, ...list]));
+      })
       .catch(console.error);
   };
 
-  useEffect(() => { loadProducts(); }, []);
+  useEffect(() => {
+    const t = setTimeout(() => loadProducts(search, 0), 300); // debounce da busca
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const openNew = () => { setEditing(null); setForm(emptyForm); setSuggestedTitle(''); setShowModal(true); };
   const openEdit = (p: Product) => {
@@ -380,8 +393,22 @@ export function CatalogView() {
         </div>
       </div>
 
+      {/* Busca no servidor + contador — obrigatório com catálogo de ERP (milhares de itens). */}
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar por nome, EAN ou referência…"
+          className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100"
+        />
+        {total > 0 && <span className="text-xs text-zinc-500">{products.length} de {total} itens</span>}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {products.length === 0 ? (
+          search.trim() ? (
+            <div className="col-span-full text-sm text-zinc-500 py-8 text-center">Nenhum item encontrado para “{search}”.</div>
+          ) : (
           <EmptyState
             icon={<Package className="w-6 h-6" />}
             title="Seu catálogo está vazio"
@@ -389,6 +416,7 @@ export function CatalogView() {
             actionLabel="Cadastrar primeiro item"
             onAction={openNew}
           />
+          )
         ) : (
           products.map(p => (
             <div key={p.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors group">
@@ -434,6 +462,14 @@ export function CatalogView() {
           ))
         )}
       </div>
+
+      {products.length > 0 && products.length < total && (
+        <div className="mt-4 flex justify-center">
+          <Button className="zf-button zf-button-secondary" onClick={() => loadProducts(search, products.length)}>
+            Carregar mais ({total - products.length} restantes)
+          </Button>
+        </div>
+      )}
 
       {/* Modal Criar/Editar */}
       {showModal && (

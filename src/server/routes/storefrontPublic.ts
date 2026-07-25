@@ -165,12 +165,31 @@ router.get("/store/:slug", (req, res): any => {
   if (!store) return res.status(404).json({ error: "Loja não encontrada ou não publicada." });
 
   const orgId = store.organization_id;
+  // PAGINADO (catálogos de ERP têm milhares de itens; montar productPayload de
+  // todos numa request congelava o servidor e o navegador do cliente).
+  // ?limit (padrão 60, máx 120), ?offset, ?q (nome/categoria) e ?pslug (garante
+  // o produto do deep-link /produto/:slug na resposta mesmo fora da página).
+  const q = String(req.query.q || "").trim();
+  const limit = Math.min(120, Math.max(1, parseInt(String(req.query.limit || "60"), 10) || 60));
+  const offset = Math.max(0, parseInt(String(req.query.offset || "0"), 10) || 0);
+  const where: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'"];
+  const args: any[] = [orgId];
+  if (q) { where.push("(name LIKE ? OR category LIKE ?)"); const like = `%${q}%`; args.push(like, like); }
+  const productsTotal = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
   const products = db.prepare(
     `SELECT * FROM products_services
-      WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible, 1) = 1
-        AND type = 'product'
-      ORDER BY COALESCE(storefront_position, 999999) ASC, name ASC`
-  ).all(orgId) as any[];
+      WHERE ${where.join(" AND ")}
+      ORDER BY COALESCE(storefront_position, 999999) ASC, name ASC
+      LIMIT ? OFFSET ?`
+  ).all(...args, limit, offset) as any[];
+  // Deep-link: garante o produto do slug pedido na resposta (pode estar fora da página).
+  const pslug = String(req.query.pslug || "").trim();
+  if (pslug && !products.some((p) => p.slug === pslug)) {
+    const linked = db.prepare(
+      `SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible,1) = 1 AND type='product' AND slug = ? LIMIT 1`
+    ).get(orgId, pslug) as any;
+    if (linked) products.push(linked);
+  }
 
   // Valida o token de contato (se veio) — só para registrar de quem é o acesso.
   let linkedContact: any = null;
@@ -197,6 +216,7 @@ router.get("/store/:slug", (req, res): any => {
     },
     customer: linkedContact,
     products: products.map(p => productPayload(orgId, p)),
+    productsTotal,
     collections: resolveCollections(orgId),
     resources: ReservationService.listResources(orgId),
   });

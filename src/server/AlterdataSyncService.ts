@@ -144,34 +144,80 @@ export class AlterdataSyncService {
     const filial = spec.filial || "";
     const maxPages = spec.maxPages ?? 50;
     const pageSize = spec.pageSize ?? 200;
-    const from = AlterdataConnectorService.getCursor(orgId, spec.moduleKey, spec.resource, filial);
+    // Cursor "versão" ou "versão|página". A parte de página só existe quando os
+    // itens NÃO expõem campo de versão utilizável — sem ela, cada execução
+    // recomeçaria da página 1 e reimportaria o MESMO bloco para sempre (foi o
+    // que travou a Referencia da homologação Toulon em "6000 produtos"/run).
+    const rawCursor = AlterdataConnectorService.getCursor(orgId, spec.moduleKey, spec.resource, filial);
+    const sep = String(rawCursor).indexOf("|");
+    const from = sep >= 0 ? String(rawCursor).slice(0, sep) : String(rawCursor);
+    const startPage = sep >= 0 ? Math.max(1, parseInt(String(rawCursor).slice(sep + 1), 10) || 1) : 1;
     let maxVersion = from;
     let imported = 0;
     let pages = 0;
-    let page = 1;
+    let sawItems = false;
+    let reachedEnd = false;
+    let lastPage = startPage;
 
-    while (page <= maxPages) {
+    let page = startPage;
+    while (page < startPage + maxPages) {
       const { items, totalPages, version } = await this.apiGet(orgId, spec.moduleKey, spec.buildPath(from), { page, pageSize });
       pages++;
-      if (items.length) imported += await spec.onItems(items);
+      lastPage = page;
+      if (items.length) { sawItems = true; imported += await spec.onItems(items); }
       if (version != null && gt(version, maxVersion)) maxVersion = String(version);
       for (const it of items) {
-        // No spec Supply da ModaUp, a versão do item é `controleVersao`
-        // (fallback tolerante para `versao`/`version` em outros módulos).
-        const v = it?.controleVersao ?? it?.versao ?? it?.version;
+        const v = itemVersion(it);
         if (v != null && gt(v, maxVersion)) maxVersion = String(v);
       }
-      if (!totalPages || page >= totalPages || items.length === 0) break;
+      if (!totalPages || page >= totalPages || items.length === 0) { reachedEnd = true; break; }
       page++;
     }
 
-    if (String(maxVersion) !== String(from)) AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, maxVersion);
-    try { logAuthEvent(orgId, "system", spec.resource, "ALTERDATA_SYNC_RESOURCE", { module: spec.moduleKey, resource: spec.resource, filial, from, to: String(maxVersion), imported, pages }); } catch { /* noop */ }
+    if (String(maxVersion) !== String(from)) {
+      AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, maxVersion);
+    } else if (sawItems) {
+      // Nenhum item trouxe versão utilizável → progresso por PÁGINA. No fim do
+      // recurso, fica na ÚLTIMA página (itens novos entram no final: re-buscar a
+      // última pega o delta e o totalPages crescente leva às páginas seguintes).
+      const nextCursor = `${from}|${reachedEnd ? lastPage : lastPage + 1}`;
+      if (nextCursor !== String(rawCursor)) AlterdataConnectorService.setCursor(orgId, spec.moduleKey, spec.resource, filial, nextCursor);
+    }
+    try { logAuthEvent(orgId, "system", spec.resource, "ALTERDATA_SYNC_RESOURCE", { module: spec.moduleKey, resource: spec.resource, filial, from: String(rawCursor), to: String(maxVersion), imported, pages }); } catch { /* noop */ }
     return { imported, pages, fromVersion: from, toVersion: String(maxVersion) };
   }
 }
 
 function num(v: any): number | null { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; }
+
+/**
+ * Versão de um item: `controleVersao`/`versao`/`version` (>0) ou, na falta
+ * deles, o rowversion base64 do campo `controle` (SQL Server, 8 bytes — ex.:
+ * "AAAAAAgObNc=" = 135163095). Serializers da ModaUp às vezes emitem
+ * controleVersao ZERADO (campo readOnly não mapeado) — 0 não é versão válida.
+ */
+function itemVersion(it: any): string | null {
+  for (const v of [it?.controleVersao, it?.versao, it?.version]) {
+    if (v == null) continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) { if (n > 0) return String(v); continue; }
+    if (String(v)) return String(v); // versão não numérica (contrato tolerante)
+  }
+  const d = decodeControleVersao(it?.controle);
+  return d != null ? String(d) : null;
+}
+
+/** `controle` (rowversion base64 de até 8 bytes) → número (== controleVersao). */
+function decodeControleVersao(v: any): number | null {
+  if (typeof v !== "string" || v.length < 4 || v.length > 16) return null;
+  try {
+    const buf = Buffer.from(v, "base64");
+    if (buf.length === 0 || buf.length > 8) return null;
+    let n = 0;
+    for (const b of buf) n = n * 256 + b;
+    return n > 0 ? n : null;
+  } catch { return null; }
+}
 
 /**
  * Extrai a lista de itens do corpo, tolerante ao envelope de CADA módulo da

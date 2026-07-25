@@ -127,6 +127,39 @@ async function main() {
   });
   check("paginação via corpo (pagination.totalPages) percorre as 2 páginas", r4c.imported === 3 && r4c.pages === 2, JSON.stringify({ imported: r4c.imported, pages: r4c.pages }));
 
+  // ===== 3d. Versão via `controle` (rowversion base64) =====
+  // Payload real da homologação: alguns recursos não trazem controleVersao
+  // utilizável — mas todos trazem `controle` (rowversion base64 do SQL Server).
+  // "AAAAAAgObNc=" == 135163095 (visto no Saldo real).
+  __setAlterdataSyncHttpForTests(async () => resp(200, [{ referenciaId: "RB", controleVersao: 0, controle: "AAAAAAgObNc=" }], {}));
+  const r4d = await AlterdataSyncService.syncResource(orgId, {
+    moduleKey: "supply", resource: "RefB64",
+    buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
+    onItems: async (i) => i.length,
+  });
+  check("controleVersao zerado → versão decodificada do controle base64", r4d.toVersion === "135163095", r4d.toVersion);
+
+  // ===== 3e. Sem NENHUMA versão → progresso por PÁGINA persistida =====
+  // Sem isso, cada execução recomeça na página 1 e reimporta o MESMO bloco para
+  // sempre (o bug dos "6000 produtos" repetidos na homologação Toulon).
+  const pagesSeen: number[] = [];
+  __setAlterdataSyncHttpForTests(async (_url: string, init: any) => {
+    const pagina = Number(init.headers.pagina || 1);
+    pagesSeen.push(pagina);
+    return resp(200, { success: true, data: [{ referenciaId: `P${pagina}A` }, { referenciaId: `P${pagina}B` }], pagination: { totalItems: 20, actualPage: pagina, totalPages: 10, itemsPerPage: 0 } }, {});
+  });
+  const specNoVer = {
+    moduleKey: "supply", resource: "RefNoVer", maxPages: 3,
+    buildPath: (c: string) => `/api/v1/Referencia/versao/${c}`,
+    onItems: async (i: any[]) => i.length,
+  };
+  const p1 = await AlterdataSyncService.syncResource(orgId, specNoVer);
+  check("sem versão: importa a janela de páginas (3 págs, 6 itens)", p1.imported === 6 && p1.pages === 3, JSON.stringify({ imported: p1.imported, pages: p1.pages }));
+  check("sem versão: cursor guarda a próxima página (0|4)", AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", "") === "0|4", AlterdataConnectorService.getCursor(orgId, "supply", "RefNoVer", ""));
+  pagesSeen.length = 0;
+  await AlterdataSyncService.syncResource(orgId, specNoVer);
+  check("sem versão: 2ª execução continua das páginas 4-6", JSON.stringify(pagesSeen) === "[4,5,6]", JSON.stringify(pagesSeen));
+
   // ===== 4. base URL ausente → erro claro =====
   const orgNoBase = `org_${randomUUID().slice(0, 8)}`;
   AlterdataConnectorService.saveSettings(orgNoBase, { enabled: true, authConfig: { clientId: "a", clientSecret: "b" } });

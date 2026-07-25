@@ -21,6 +21,9 @@ import { logAuthEvent } from "./auditLog.js";
 
 export interface SyncRunSummary {
   referencias: number;
+  /** Total ACUMULADO de produtos do catálogo (prova visual de que o cursor avança). */
+  totalProdutos: number;
+  totalVariantes: number;
   variantes: number;
   saldos: { applied: number; skippedNoStore: number; skippedNoProduct: number; sampleNoProduct: string[] };
   precos: { applied: number; skippedNoProduct: number; sampleNoProduct: string[] };
@@ -144,8 +147,12 @@ export class AlterdataSyncRunner {
       }
     }
 
+    // Totais acumulados — o "N produtos" de cada execução é igual até o catálogo
+    // acabar; o TOTAL crescendo é a prova de que o cursor está avançando.
+    const totalProdutos = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> ''`).get(orgId) as any)?.c || 0);
+    const totalVariantes = Number((db.prepare(`SELECT COUNT(*) c FROM product_variants WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
     const summary: SyncRunSummary = {
-      referencias: ref.imported, variantes: bar.imported, saldos, precos, filiais,
+      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, filiais,
       ranAt: new Date().toISOString(),
     };
     // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'.

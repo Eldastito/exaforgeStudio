@@ -708,7 +708,10 @@ function AlterdataConnectorPanel() {
         if (sNoStore) skips.push(`${sNoStore} saldo(s) sem loja cadastrada (código da filial)`);
         if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente${sSample}`);
         if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente${pSample}`);
-        const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+        // Totais acumulados provam o avanço do cursor: o "N produtos" por
+        // execução repete até o catálogo acabar, mas o total só cresce.
+        const totals = s.totalProdutos ? ` (catálogo: ${s.totalProdutos} produtos, ${s.totalVariantes || 0} variantes)` : '';
+        const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
         const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
         toast.success(`Sincronizado: ${text}.`);
         setLastSync({ at: new Date().toISOString(), ok: true, text });

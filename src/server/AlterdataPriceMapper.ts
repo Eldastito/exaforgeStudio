@@ -1,26 +1,38 @@
 /**
  * Conector Alterdata/ModaUp — MAPPER DE PREÇO (ADR-105, Fase 1d).
  *
- * Traduz `Preco` (módulo Price: produto, tabela, preco1) no preço de venda do
- * ZappFlow. Resolve `produto` → variante (external_ref/sku) ou produto
- * (external_ref) — mesma regra do estoque. Grava `preco1` como preço de venda:
- * na variante quando resolve variante, senão no produto. Mapper PURO (sem HTTP).
+ * Traduz `TabelaPreco` (módulo Price) no preço de venda do ZappFlow. Cada item
+ * é uma linha de tabela com o preço ANINHADO em `preco` (produto, tabela,
+ * preco1); o `codigo` do item é o código da tabela. Resolve `produto` → variante
+ * (external_ref/sku) ou produto (external_ref) — mesma regra do estoque. Grava
+ * `preco1` (fallback `precoVigente`/`valor`) como preço de venda: na variante
+ * quando resolve variante, senão no produto. Mapper PURO (sem HTTP).
  *
  * A tabela de preço da rede (`price_table`) é escolhida na config; o Runner só
- * puxa Preco quando ela está definida. min/max/markup ficam no metadata do
- * produto para referência futura (margem/precificação).
+ * puxa TabelaPreco quando ela está definida e passa `table` para FILTRAR (o
+ * delta `/versao` devolve todas as tabelas). Aceita também a forma antiga com o
+ * preço na raiz do item (compatibilidade).
  */
 import db from "./db.js";
 
 export interface PriceMapResult { applied: number; skippedNoProduct: number; }
 
 export class AlterdataPriceMapper {
-  static upsertPrecos(orgId: string, items: any[]): PriceMapResult {
+  static upsertPrecos(orgId: string, items: any[], table?: string): PriceMapResult {
     const res: PriceMapResult = { applied: 0, skippedNoProduct: 0 };
-    for (const p of Array.isArray(items) ? items : []) {
-      const produto = str(p?.produto);
+    const wantTable = str(table) || null;
+    for (const item of Array.isArray(items) ? items : []) {
+      // TabelaPreco traz o preço aninhado em `preco`; formas antigas traziam na
+      // raiz — aceita as duas (`pr` é a fonte dos campos de preço).
+      const pr = item?.preco ?? item;
+      const produto = str(pr?.produto);
       if (!produto) continue;
-      const price = numOrNull(p?.preco1 ?? p?.preco);
+      // Filtra pela tabela de preço da rede quando informada (o delta traz todas).
+      if (wantTable) {
+        const t = str(item?.codigo) || str(pr?.tabela);
+        if (t && t !== wantTable) continue;
+      }
+      const price = numOrNull(pr?.preco1 ?? item?.precoVigente ?? item?.valor ?? pr?.preco);
       if (price == null) continue; // sem preço válido, ignora
 
       const target = this.resolveProduct(orgId, produto);

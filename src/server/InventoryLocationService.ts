@@ -136,6 +136,19 @@ export class InventoryLocationService {
     return { ok: true, balance: this.balanceOf(orgId, input.locationId, input.productId, variantId) };
   }
 
+  /** Material SAI de um local (retirada para consumo). Débito; valida saldo. */
+  static issue(orgId: string, input: { locationId: string; productId: string; variantId?: string | null; quantity: number }, actorId?: string): { ok: true; balance: number } {
+    const qty = round2(input.quantity);
+    if (!(qty > 0)) throw new Error("Quantidade deve ser positiva.");
+    this.assertLocation(orgId, input.locationId);
+    const variantId = clean(input.variantId);
+    const available = this.balanceOf(orgId, input.locationId, input.productId, variantId);
+    if (available < qty) throw new Error(`Saldo insuficiente no local (disponível ${available}, pedido ${qty}).`);
+    this.applyDelta(orgId, input.locationId, input.productId, variantId, -qty);
+    try { logAuthEvent(orgId, actorId || "system", input.locationId, "INVENTORY_LOCATION_ISSUE", { productId: input.productId, quantity: qty }); } catch { /* noop */ }
+    return { ok: true, balance: this.balanceOf(orgId, input.locationId, input.productId, variantId) };
+  }
+
   /** Move quantidade entre dois locais (débito atômico na origem, crédito no destino). */
   static transfer(orgId: string, input: { fromLocationId: string; toLocationId: string; productId: string; variantId?: string | null; quantity: number }, actorId?: string): { ok: true; fromBalance: number; toBalance: number } {
     const qty = round2(input.quantity);

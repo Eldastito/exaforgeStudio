@@ -1998,6 +1998,64 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_inv_loc_balances_prod
         ON inventory_location_balances(organization_id, product_service_id);
 
+      -- CONTROLER (PRD-E-007, Fatia 2): REQUISIÇÃO interna → aprovação → retirada →
+      -- confirmação → devolução, e o LEDGER de consumo. Nada de editar saldo: a
+      -- retirada debita o saldo do local e registra um evento de consumo; a
+      -- devolução credita de volta. Isolado por organização. §11/§14.
+      CREATE TABLE IF NOT EXISTS material_requests (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        requester_user_id TEXT,
+        department_id TEXT,
+        cost_center_id TEXT,
+        purpose TEXT,                            -- finalidade
+        priority TEXT NOT NULL DEFAULT 'normal', -- baixa|normal|alta|urgente
+        status TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|issued|acknowledged|returned|rejected|cancelled
+        from_location_id TEXT,                   -- almoxarifado de origem (definido na retirada)
+        approved_by TEXT,
+        approved_at DATETIME,
+        issued_by TEXT,
+        issued_at DATETIME,
+        acknowledged_at DATETIME,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_requests_org ON material_requests(organization_id, status, created_at);
+      CREATE TABLE IF NOT EXISTS material_request_items (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        uom TEXT,                                -- unidade de consumo (snapshot)
+        qty_requested REAL NOT NULL DEFAULT 0,
+        qty_approved REAL NOT NULL DEFAULT 0,
+        qty_issued REAL NOT NULL DEFAULT 0,
+        qty_returned REAL NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_request_items_req ON material_request_items(organization_id, request_id);
+
+      -- Ledger de CONSUMO (fatos). Cada retirada/devolução vira um evento; o
+      -- consumo líquido, médias e cobertura são derivados daqui (nunca de saldo).
+      CREATE TABLE IF NOT EXISTS consumption_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        location_id TEXT,
+        cost_center_id TEXT,
+        department_id TEXT,
+        direction TEXT NOT NULL DEFAULT 'out',   -- out (consumo) | in (devolução/estorno)
+        quantity REAL NOT NULL DEFAULT 0,        -- sempre positiva; direction define o sinal
+        uom TEXT,
+        source_type TEXT NOT NULL DEFAULT 'issue', -- issue|return|manual
+        source_id TEXT,
+        actor_user_id TEXT,
+        occurred_at DATE NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_consumption_events_prod ON consumption_events(organization_id, product_service_id, occurred_at);
+      CREATE INDEX IF NOT EXISTS idx_consumption_events_cc ON consumption_events(organization_id, cost_center_id, occurred_at);
+
       -- Loja Virtual → PDV (ADR-143 Fase 0). Reserva e-commerce por loja/produto:
       -- a loja virtual vende SÓ desta reserva (Saldo Alterdata − buffer) → nunca
       -- vende o que não tem (sem oversell). Absoluto por (org, loja, produto, variante).

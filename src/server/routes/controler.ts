@@ -13,6 +13,8 @@ import { DepartmentService } from "../DepartmentService.js";
 import { CostCenterService } from "../CostCenterService.js";
 import { InventoryLocationService } from "../InventoryLocationService.js";
 import { OperationalItemService } from "../OperationalItemService.js";
+import { MaterialRequestService } from "../MaterialRequestService.js";
+import { ConsumptionLedgerService } from "../ConsumptionLedgerService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -156,6 +158,64 @@ router.put("/items/:id/classification", requireRole("owner", "admin"), (req: Aut
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(OperationalItemService.classify(orgId, req.params.id, req.body || {}, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ─── Requisição interna e consumo (Fatia 2) ─────────────────────────────────────
+router.get("/material-requests", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ requests: MaterialRequestService.list(orgId, { status: typeof req.query?.status === "string" ? req.query.status : undefined, departmentId: typeof req.query?.departmentId === "string" ? req.query.departmentId : undefined }) });
+});
+
+router.get("/material-requests/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = MaterialRequestService.get(orgId, req.params.id);
+  if (!r) return res.status(404).json({ error: "Requisição não encontrada." });
+  res.json(r);
+});
+
+// Criar requisição: qualquer usuário autenticado pode solicitar.
+router.post("/material-requests", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.status(201).json(MaterialRequestService.create(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Ações do ciclo de vida (aprovar/retirar/etc.): owner/admin (RBAC de perfil vem depois).
+const lifecycle: Array<[string, (orgId: string, id: string, req: AuthRequest) => any]> = [
+  ["approve", (o, id, r) => MaterialRequestService.approve(o, id, actor(r), { items: r.body?.items })],
+  ["reject", (o, id, r) => MaterialRequestService.reject(o, id, actor(r), r.body?.reason)],
+  ["cancel", (o, id, r) => MaterialRequestService.cancel(o, id, actor(r))],
+  ["issue", (o, id, r) => MaterialRequestService.issue(o, id, actor(r), { fromLocationId: r.body?.fromLocationId })],
+  ["acknowledge", (o, id, r) => MaterialRequestService.acknowledge(o, id, actor(r))],
+  ["return", (o, id, r) => MaterialRequestService.returnItems(o, id, { items: r.body?.items, toLocationId: r.body?.toLocationId }, actor(r))],
+];
+for (const [action, fn] of lifecycle) {
+  router.post(`/material-requests/:id/${action}`, requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+    const orgId = req.organizationId;
+    if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+    try { res.json(fn(orgId, req.params.id, req)); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+}
+
+// Médias/cobertura de consumo de um produto (derivadas do ledger).
+router.get("/consumption/:productId/average", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const windowDays = Number(req.query?.windowDays) || 30;
+  const avg = ConsumptionLedgerService.dailyAverage(orgId, req.params.productId, { windowDays });
+  const balanceRaw = req.query?.balance;
+  const coverage = balanceRaw !== undefined ? ConsumptionLedgerService.coverageDays(orgId, req.params.productId, Number(balanceRaw), { windowDays }) : null;
+  res.json({ ...avg, coverageDays: coverage });
+});
+
+router.get("/consumption/by-cost-center", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ items: ConsumptionLedgerService.byCostCenter(orgId, { from: typeof req.query?.from === "string" ? req.query.from : undefined, to: typeof req.query?.to === "string" ? req.query.to : undefined }) });
 });
 
 export default router;

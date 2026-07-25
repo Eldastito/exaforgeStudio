@@ -58,11 +58,13 @@ async function main() {
   });
 
   // ===== 2. Sync end-to-end (mock roteia por path) =====
+  // Mocks encadeáveis: o motor chama de novo com a MAIOR versão vista (contrato
+  // /versao da ModaUp) — a URL com a versão do lote encerra o stream ([]).
   __setAlterdataSyncHttpForTests(async (url: string) => {
-    if (url.includes("/Referencia/versao/")) return resp(200, [{ referenciaId: "1001", descricao: "Camisa Slim", preco: 189.9, grupo: "Camisas", controleVersao: 5 }], {});
+    if (url.includes("/Referencia/versao/0")) return resp(200, [{ referenciaId: "1001", descricao: "Camisa Slim", preco: 189.9, grupo: "Camisas", controleVersao: 5 }], {});
     // Barras por referência: GET /CodigoDeBarras/ReferenciaRede/{referencia}/{rede}
     if (url.includes("/CodigoDeBarras/ReferenciaRede/")) return resp(200, [{ codigo: "V1", cor: "Preto", tamanho: "M", ean: "7891234567901" }], {});
-    if (url.includes("/Saldo/versao/")) return resp(200, [{ filial: "1", produto: "7891234567901", saldoAtual: 7, controleVersao: 8 }], {});
+    if (url.includes("/Saldo/versao/1/0")) return resp(200, [{ filial: "1", produto: "7891234567901", saldoAtual: 7, controleVersao: 8 }], {});
     return resp(200, [], {});
   });
 

@@ -91,8 +91,9 @@ async function main() {
     seenUrls.push(url);
     // Contrato real (homologação Toulon): preço POR PRODUTO no recurso `Preco`
     // (produto, tabela, preco1), envelope { success, data: [...] }. O runner
-    // tenta os formatos de path em ordem — o 1º é /Preco/versao/{tabela}/{c}.
-    if (url.includes("/Preco/versao/1/")) return resp(200, { success: true, data: [{ produto: "7891234567901", tabela: 1, preco1: 199.9, controleVersao: 3 }] }, {});
+    // tenta os formatos de path em ordem — o 1º é /Preco/versao/{tabela}/{c} —
+    // e o motor ENCADEIA pela versão (URL com a versão do lote encerra: []).
+    if (url.includes("/Preco/versao/1/0")) return resp(200, { success: true, data: [{ produto: "7891234567901", tabela: 1, preco1: 199.9, controleVersao: 3 }] }, {});
     return resp(200, { success: true, data: [] }, {});
   });
   const summary = await AlterdataSyncRunner.runOrg(A);

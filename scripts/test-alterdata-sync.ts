@@ -111,6 +111,22 @@ async function main() {
   });
   check("cursor avança pelo campo controleVersao", r4b.toVersion === "123", r4b.toVersion);
 
+  // ===== 3c. paginação via CORPO (payload real da ModaUp) =====
+  // A homologação Toulon devolve a paginação no corpo ({ pagination: { totalPages }})
+  // e IGNORA o itensPorPagina do header — sem ler o corpo, o loop parava na
+  // página 1 e o catálogo vinha truncado (o bug dos "20 produtos").
+  __setAlterdataSyncHttpForTests(async (_url: string, init: any) => {
+    const pagina = Number(init.headers.pagina || 1);
+    if (pagina === 1) return resp(200, { success: true, data: [{ referenciaId: "B1", controleVersao: 1 }, { referenciaId: "B2", controleVersao: 2 }], pagination: { totalItems: 3, actualPage: 1, totalPages: 2, itemsPerPage: 0 } }, {});
+    return resp(200, { success: true, data: [{ referenciaId: "B3", controleVersao: 3 }], pagination: { totalItems: 3, actualPage: 2, totalPages: 2, itemsPerPage: 0 } }, {});
+  });
+  const r4c = await AlterdataSyncService.syncResource(orgId, {
+    moduleKey: "supply", resource: "ReferenciaBodyPag",
+    buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
+    onItems: async (i) => i.length,
+  });
+  check("paginação via corpo (pagination.totalPages) percorre as 2 páginas", r4c.imported === 3 && r4c.pages === 2, JSON.stringify({ imported: r4c.imported, pages: r4c.pages }));
+
   // ===== 4. base URL ausente → erro claro =====
   const orgNoBase = `org_${randomUUID().slice(0, 8)}`;
   AlterdataConnectorService.saveSettings(orgNoBase, { enabled: true, authConfig: { clientId: "a", clientSecret: "b" } });

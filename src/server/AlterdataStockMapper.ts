@@ -14,12 +14,12 @@ import db from "./db.js";
 import { RetailInventoryService } from "./RetailInventoryService.js";
 import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
 
-export interface SaldoMapResult { applied: number; skippedNoStore: number; skippedNoProduct: number; }
+export interface SaldoMapResult { applied: number; skippedNoStore: number; skippedNoProduct: number; sampleNoProduct: string[]; }
 
 export class AlterdataStockMapper {
   /** Upsert de saldos por loja. `filialToStore` opcional sobrescreve o match por código. */
   static upsertSaldos(orgId: string, items: any[], opts: { filialToStore?: Record<string, string> } = {}): SaldoMapResult {
-    const res: SaldoMapResult = { applied: 0, skippedNoStore: 0, skippedNoProduct: 0 };
+    const res: SaldoMapResult = { applied: 0, skippedNoStore: 0, skippedNoProduct: 0, sampleNoProduct: [] };
     const storeCache = new Map<string, string | null>();
 
     for (const s of Array.isArray(items) ? items : []) {
@@ -31,7 +31,13 @@ export class AlterdataStockMapper {
       if (!storeId) { res.skippedNoStore++; continue; }
 
       const target = this.resolveProduct(orgId, produto);
-      if (!target) { res.skippedNoProduct++; continue; }
+      if (!target) {
+        res.skippedNoProduct++;
+        // Amostra dos códigos sem match — diagnóstico na tela (quais produtos o
+        // ERP conhece que o catálogo importado não tem).
+        if (res.sampleNoProduct.length < 5 && !res.sampleNoProduct.includes(produto)) res.sampleNoProduct.push(produto);
+        continue;
+      }
 
       // Anti-clobber (ADR-143 D3): quando a reserva online está ligada, desconta
       // do saldo do ERP as vendas online ainda não lançadas no PDV — assim a

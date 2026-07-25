@@ -15,11 +15,11 @@
  */
 import db from "./db.js";
 
-export interface PriceMapResult { applied: number; skippedNoProduct: number; }
+export interface PriceMapResult { applied: number; skippedNoProduct: number; sampleNoProduct: string[]; }
 
 export class AlterdataPriceMapper {
   static upsertPrecos(orgId: string, items: any[], table?: string): PriceMapResult {
-    const res: PriceMapResult = { applied: 0, skippedNoProduct: 0 };
+    const res: PriceMapResult = { applied: 0, skippedNoProduct: 0, sampleNoProduct: [] };
     const wantTable = str(table) || null;
     for (const item of Array.isArray(items) ? items : []) {
       // TabelaPreco traz o preço aninhado em `preco`; formas antigas traziam na
@@ -36,7 +36,11 @@ export class AlterdataPriceMapper {
       if (price == null) continue; // sem preço válido, ignora
 
       const target = this.resolveProduct(orgId, produto);
-      if (!target) { res.skippedNoProduct++; continue; }
+      if (!target) {
+        res.skippedNoProduct++;
+        if (res.sampleNoProduct.length < 5 && !res.sampleNoProduct.includes(produto)) res.sampleNoProduct.push(produto);
+        continue;
+      }
 
       if (target.variantId) {
         db.prepare(`UPDATE product_variants SET price = ? WHERE organization_id = ? AND id = ?`).run(price, orgId, target.variantId);

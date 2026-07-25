@@ -42,19 +42,34 @@ export class AlterdataSyncRunner {
     }
     const settings = AlterdataConnectorService.publicSettings(orgId);
     const filiais: string[] = Array.isArray(settings.filiais) && settings.filiais.length ? settings.filiais : [""];
+    const rede = str(settings.rede);
 
-    // 1) Referências (produtos). 2) Códigos de barras (variantes) — depois das
-    //    referências, para casar o produto. 3) Saldo por filial (estoque).
+    // 1) Referências (produtos). Coleta os códigos de referência sincronizados
+    //    para, em seguida, puxar os códigos de barras POR referência.
+    const refCodes = new Set<string>();
     const ref = await AlterdataSyncService.syncResource(orgId, {
       moduleKey: "supply", resource: "Referencia",
       buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
-      onItems: (items) => AlterdataSupplyMapper.upsertReferencias(orgId, items),
+      onItems: (items) => {
+        for (const it of items) { const c = str(it?.referenciaId ?? it?.referencia ?? it?.codigo); if (c) refCodes.add(c); }
+        return AlterdataSupplyMapper.upsertReferencias(orgId, items);
+      },
     });
-    const bar = await AlterdataSyncService.syncResource(orgId, {
-      moduleKey: "supply", resource: "CodigoDeBarras",
-      buildPath: (c) => `/api/v1/CodigoDeBarras/versao/${c}`,
-      onItems: (items) => AlterdataSupplyMapper.upsertCodigosDeBarras(orgId, items),
-    });
+
+    // 2) Códigos de barras (variantes/EAN). O supply da ModaUp NÃO expõe delta
+    //    `/versao` para barras — a leitura é POR REFERÊNCIA:
+    //      GET /api/v1/CodigoDeBarras/ReferenciaRede/{referencia}/{rede}
+    //    Então, para cada referência sincronizada, puxa suas barras e casa a grade.
+    const bar = { imported: 0, refs: 0, errors: 0 };
+    if (rede) {
+      for (const referencia of refCodes) {
+        try {
+          const { items } = await AlterdataSyncService.apiGet(orgId, "supply", `/api/v1/CodigoDeBarras/ReferenciaRede/${encodeURIComponent(referencia)}/${encodeURIComponent(rede)}`);
+          if (items.length) bar.imported += AlterdataSupplyMapper.upsertCodigosDeBarras(orgId, items, referencia);
+          bar.refs++;
+        } catch { bar.errors++; /* uma referência sem barras/erro não derruba o sync */ }
+      }
+    }
 
     const saldos = { applied: 0, skippedNoStore: 0, skippedNoProduct: 0 };
     for (const filial of filiais) {
@@ -71,7 +86,6 @@ export class AlterdataSyncRunner {
 
     // 4) Preço (módulo Price) — só quando a tabela de preço da rede está definida.
     const precos = { applied: 0, skippedNoProduct: 0 };
-    const rede = str(settings.rede);
     const table = str(settings.priceTable);
     if (rede && table) {
       await AlterdataSyncService.syncResource(orgId, {
@@ -113,7 +127,11 @@ export class AlterdataSyncRunner {
     };
 
     await run("Referencia", "supply", "/api/v1/Referencia/versao/0");
-    await run("CodigoDeBarras", "supply", "/api/v1/CodigoDeBarras/versao/0");
+    // Barras não têm delta `/versao`; testa um GET real do módulo de barras.
+    // CodigoProdutoTipo/{rede} depende só da rede (a leitura de barras em si é
+    // por referência: ReferenciaRede/{referencia}/{rede}).
+    if (rede) await run("CodigoDeBarras", "supply", `/api/v1/CodigoDeBarras/CodigoProdutoTipo/${encodeURIComponent(rede)}`);
+    else out.push({ resource: "CodigoDeBarras", module: "supply", path: "(sem rede)", url: null, status: 0, ok: false, snippet: "Preencha o campo Rede para testar o módulo de código de barras." });
     for (const filial of filiais) {
       await run(filial ? `Saldo (filial ${filial})` : "Saldo", "supply", filial ? `/api/v1/Saldo/versao/${filial}/0` : "/api/v1/Saldo/versao/0");
     }

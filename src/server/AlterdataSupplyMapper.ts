@@ -62,10 +62,14 @@ export class AlterdataSupplyMapper {
    * Barras cujo produto ainda não foi importado são puladas (o cursor de
    * Referencia avança primeiro; no próximo ciclo elas casam).
    */
-  static upsertCodigosDeBarras(orgId: string, items: any[]): number {
+  static upsertCodigosDeBarras(orgId: string, items: any[], referencia?: string): number {
     let n = 0;
+    // Quando os itens vêm do endpoint por referência (ReferenciaRede/{ref}/{rede}),
+    // a referência é o parâmetro da rota — usa-a para ligar ao produto. Caso
+    // contrário, cai no campo do item (compatível com o formato antigo/testes).
+    const refLink = str(referencia);
     for (const c of Array.isArray(items) ? items : []) {
-      const codigo = str(c?.codigo ?? c?.referencia);
+      const codigo = refLink || str(c?.codigo ?? c?.referencia);
       if (!codigo) continue;
       const product = db.prepare(`SELECT id, ean FROM products_services WHERE organization_id = ? AND external_ref = ? LIMIT 1`).get(orgId, codigo) as any;
       if (!product?.id) continue; // produto ainda não importado — pula (idempotente no próximo ciclo)

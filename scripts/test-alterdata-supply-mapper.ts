@@ -90,6 +90,15 @@ async function main() {
   check("external_ref migra para o código de produto do ERP", vErp?.external_ref === "1001005500481", String(vErp?.external_ref));
   check("EAN preservado no sku após a migração", vErp?.sku === "7891234567901", String(vErp?.sku));
 
+  // ===== 3c. Payload real do ReferenciaRede (homologação Toulon) =====
+  // O código ERP vem no CAMPO `codigo` do item (a referência é o parâmetro da
+  // rota) e o `ean` pode vir null — a variante deve ser chaveada pelo codigo.
+  AlterdataSupplyMapper.upsertReferencias(A, [{ referenciaId: "011994", descricao: "Calça Jeans" }]);
+  const pJ = prod("011994");
+  const nJ = AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "011994036015", cor: "JEANS", tamanho: "38", ean: null, inativo: 0, descontinuado: 0 }], "011994");
+  const vJ = variants(pJ.id);
+  check("ReferenciaRede: variante chaveada pelo código ERP do campo codigo", nJ === 1 && vJ.length === 1 && vJ[0].external_ref === "011994036015", JSON.stringify(vJ.map((v: any) => v.external_ref)));
+
   // ===== 4. Barra órfã (produto não importado) é pulada =====
   const nOrphan = AlterdataSupplyMapper.upsertCodigosDeBarras(A, [{ codigo: "9999", cor: "Azul", tamanho: "U", ean: "7899999999994" }]);
   check("barra de produto inexistente é pulada (retorna 0)", nOrphan === 0);

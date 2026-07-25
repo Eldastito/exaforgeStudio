@@ -56,8 +56,24 @@ export class AlterdataStockMapper {
     return id;
   }
 
-  /** produto (ERP) → { productId, variantId } via variante (external_ref/sku) ou produto (external_ref). */
-  private static resolveProduct(orgId: string, produto: string): { productId: string; variantId: string | null } | null {
+  /**
+   * produto (ERP) → { productId, variantId } via variante (external_ref/sku) ou
+   * produto (external_ref). O Saldo da ModaUp traz o código com um dígito EXTRA
+   * no fim (13 dígitos, ex.: 0552380350481) em relação ao código das barras e do
+   * preço (12, ex.: 055238035048) — observado na homologação Toulon (todos os
+   * saldos terminam em "1"). Tenta como veio e sem o último dígito.
+   */
+  private static resolveProduct(orgId: string, produtoRaw: string): { productId: string; variantId: string | null } | null {
+    const candidates = [produtoRaw];
+    if (produtoRaw.length === 13) candidates.push(produtoRaw.slice(0, 12));
+    for (const produto of candidates) {
+      const hit = this.resolveProductExact(orgId, produto);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  private static resolveProductExact(orgId: string, produto: string): { productId: string; variantId: string | null } | null {
     const v = db.prepare(`SELECT id, product_service_id FROM product_variants WHERE organization_id = ? AND (external_ref = ? OR sku = ?) LIMIT 1`).get(orgId, produto, produto) as any;
     if (v?.product_service_id) return { productId: v.product_service_id, variantId: v.id };
     const p = db.prepare(`SELECT id FROM products_services WHERE organization_id = ? AND external_ref = ? LIMIT 1`).get(orgId, produto) as any;

@@ -496,6 +496,21 @@ router.post("/alterdata/sync", async (req: AuthRequest, res): Promise<any> => {
   }
 });
 
+// RESSINCRONIZAR DO ZERO: limpa os cursores de delta e roda um pull completo.
+// Use quando a config foi corrigida DEPOIS do 1º sync (ex.: lojas cadastradas
+// depois) — sem isso o cursor já avançou e o saldo/preço antigos não voltam.
+router.post("/alterdata/resync", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const cleared = AlterdataConnectorService.clearCursors(req.organizationId);
+    const summary = await AlterdataSyncRunner.runOrg(req.organizationId, { manual: true });
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_RESYNC_MANUAL', { cleared, referencias: summary.referencias, variantes: summary.variantes });
+    res.json({ ok: true, summary, cleared });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao ressincronizar com a Alterdata." });
+  }
+});
+
 // DIAGNÓSTICO ("Testar módulos"): probe cada endpoint (Referencia/CodigoDeBarras/
 // Saldo/Preco) separadamente e devolve o HTTP status de cada um, para isolar por
 // eliminação qual está devolvendo 500 na homologação. Não grava nada.

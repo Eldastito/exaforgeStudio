@@ -150,6 +150,18 @@ export class AlterdataConnectorService {
     return r?.version ?? "0";
   }
 
+  /**
+   * Zera os cursores de delta da org (menos o `_meta`/lastRun do scheduler), para
+   * FORÇAR um pull completo do zero. Necessário quando a config foi corrigida
+   * DEPOIS de uma sincronização que já avançou o cursor (ex.: lojas cadastradas
+   * só depois do 1º sync — o saldo daquelas versões nunca mais seria reprocessado
+   * porque o cursor só avança). Retorna quantos cursores foram limpos.
+   */
+  static clearCursors(orgId: string): number {
+    const r = db.prepare(`DELETE FROM alterdata_sync_cursors WHERE organization_id=? AND module<>'_meta'`).run(orgId);
+    return Number(r.changes || 0);
+  }
+
   static setCursor(orgId: string, module: string, resource: string, filial: string, version: string | number): void {
     const v = String(version);
     const existing = db.prepare(`SELECT id FROM alterdata_sync_cursors WHERE organization_id=? AND module=? AND resource=? AND filial=?`).get(orgId, module, resource, filial) as any;

@@ -686,11 +686,14 @@ function AlterdataConnectorPanel() {
   const [testing, setTesting] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
   const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
-  const runSync = async () => {
-    setSyncing(true);
+  const runSync = async (opts: { full?: boolean } = {}) => {
+    const full = !!opts.full;
+    if (full && !window.confirm('Ressincronizar do zero limpa o controle de versão e reprocessa TODOS os produtos, saldos e preços da Alterdata. Use quando corrigiu a configuração (ex.: cadastrou as lojas) depois de já ter sincronizado. Continuar?')) return;
+    full ? setResyncing(true) : setSyncing(true);
     try {
-      const res = await apiFetch('/api/integrations/alterdata/sync', { method: 'POST' });
+      const res = await apiFetch(`/api/integrations/alterdata/${full ? 'resync' : 'sync'}`, { method: 'POST' });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
         const s = d.summary || {};
@@ -715,7 +718,7 @@ function AlterdataConnectorPanel() {
     } catch {
       toast.error('Falha ao sincronizar.');
       setLastSync({ at: new Date().toISOString(), ok: false, text: 'Falha de conexão.' });
-    } finally { setSyncing(false); }
+    } finally { full ? setResyncing(false) : setSyncing(false); }
   };
 
   const [probing, setProbing] = useState(false);
@@ -847,9 +850,17 @@ function AlterdataConnectorPanel() {
         </Button>
         {/* Sync manual funciona com credenciais válidas — não exige a integração
             ativa (o toggle governa só a sincronização automática/agendada). */}
-        <Button onClick={runSync} disabled={syncing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Puxa produtos, variantes, estoque e preços da Alterdata agora (funciona em homologação sem ativar)'}>
+        <Button onClick={() => runSync()} disabled={syncing || resyncing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Puxa produtos, variantes, estoque e preços da Alterdata agora (funciona em homologação sem ativar)'}>
           {syncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
           Sincronizar agora
+        </Button>
+        {/* Ressincronizar do zero: limpa o cursor de delta e reprocessa tudo.
+            Necessário quando a config foi corrigida DEPOIS do 1º sync (ex.: lojas
+            cadastradas depois) — o cursor só avança, então o saldo antigo não
+            voltaria com um sync comum. */}
+        <Button onClick={() => runSync({ full: true })} disabled={syncing || resyncing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Limpa o controle de versão e reprocessa TODOS os produtos, saldos e preços do zero — use depois de corrigir a configuração (ex.: cadastrar as lojas)'}>
+          {resyncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          Ressincronizar do zero
         </Button>
         {/* Diagnóstico: probe cada endpoint separadamente para isolar qual está
             devolvendo 500 na homologação (por eliminação). */}

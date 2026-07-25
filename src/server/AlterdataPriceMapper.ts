@@ -14,6 +14,7 @@
  * preço na raiz do item (compatibilidade).
  */
 import db from "./db.js";
+import { AlterdataSupplyMapper } from "./AlterdataSupplyMapper.js";
 
 export interface PriceMapResult { applied: number; skippedNoProduct: number; sampleNoProduct: string[]; }
 
@@ -67,7 +68,10 @@ export class AlterdataPriceMapper {
       const p = db.prepare(`SELECT id FROM products_services WHERE organization_id = ? AND external_ref = ? LIMIT 1`).get(orgId, produto) as any;
       if (p?.id) return { productId: p.id, variantId: null };
     }
-    return null;
+    // A ModaUp não expõe barras para todas as referências — quando a referência
+    // (prefixo do código) está no catálogo, cria a variante do próprio código
+    // (as barras enriquecem depois pela mesma chave).
+    return AlterdataSupplyMapper.ensureVariantForErpCode(orgId, produtoRaw);
   }
 }
 

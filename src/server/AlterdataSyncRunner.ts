@@ -49,6 +49,10 @@ export class AlterdataSyncRunner {
     const refCodes = new Set<string>();
     const ref = await AlterdataSyncService.syncResource(orgId, {
       moduleKey: "supply", resource: "Referencia",
+      // A ModaUp devolve ~20 itens/página (ignora o itensPorPagina): 300 páginas
+      // ≈ 6000 referências por execução — catálogos maiores completam nas
+      // execuções seguintes (o cursor de versão continua de onde parou).
+      maxPages: 300,
       buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
       onItems: (items) => {
         for (const it of items) { const c = str(it?.referenciaId ?? it?.referencia ?? it?.codigo); if (c) refCodes.add(c); }
@@ -62,7 +66,22 @@ export class AlterdataSyncRunner {
     //    Então, para cada referência sincronizada, puxa suas barras e casa a grade.
     const bar = { imported: 0, refs: 0, errors: 0 };
     if (rede) {
-      for (const referencia of refCodes) {
+      // Barras ENRIQUECEM a grade (cor/tamanho/EAN) e custam 1+ chamadas POR
+      // referência — com milhares de referências isso não cabe numa execução.
+      // Estoque e preço NÃO dependem delas (a variante nasce do próprio código
+      // do ERP via ensureVariantForErpCode); então prioriza referências ainda
+      // não enriquecidas (nenhuma variante com cor), limitado por execução, em
+      // ordem aleatória p/ não repetir sempre as mesmas — o agendador de 15min
+      // vai varrendo o restante aos poucos.
+      const MAX_BAR_REFS = 300;
+      const pend = db.prepare(
+        `SELECT p.external_ref AS ref FROM products_services p
+          WHERE p.organization_id = ? AND p.external_ref IS NOT NULL AND p.external_ref <> ''
+            AND NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.organization_id = p.organization_id AND v.product_service_id = p.id AND v.color IS NOT NULL)
+          ORDER BY RANDOM() LIMIT ?`
+      ).all(orgId, MAX_BAR_REFS) as any[];
+      for (const row of pend) {
+        const referencia = str(row.ref);
         try {
           // Paginado: a ModaUp ignora o itensPorPagina do header e devolve ~20
           // por página (total no corpo) — grades grandes precisam do loop.

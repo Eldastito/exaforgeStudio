@@ -111,6 +111,34 @@ export class AlterdataSupplyMapper {
     }
     return n;
   }
+
+  /**
+   * Garante uma variante para um código de produto do ERP (ref+cor+tamanho,
+   * tamanho variável — 12 ou 13 dígitos na homologação Toulon) quando a
+   * REFERÊNCIA (prefixo do código) existe no catálogo mas a variante ainda não.
+   * A ModaUp não expõe barras para todas as referências — o saldo e o preço não
+   * podem esperar por elas. A variante nasce "crua" (sem cor/tamanho/EAN) e as
+   * barras enriquecem depois (o upsert casa pela mesma chave external_ref).
+   */
+  static ensureVariantForErpCode(orgId: string, code: string): { productId: string; variantId: string } | null {
+    const c = str(code);
+    if (c.length < 8) return null; // curto demais para ref+grade
+    const v = db.prepare(`SELECT id, product_service_id FROM product_variants WHERE organization_id = ? AND external_ref = ? LIMIT 1`).get(orgId, c) as any;
+    if (v?.id) return { productId: v.product_service_id, variantId: v.id };
+    const p = db.prepare(
+      `SELECT id, external_ref FROM products_services
+        WHERE organization_id = ? AND external_ref IS NOT NULL AND length(external_ref) >= 4 AND ? LIKE external_ref || '%'
+        ORDER BY length(external_ref) DESC LIMIT 1`
+    ).get(orgId, c) as any;
+    if (!p?.id) return null;
+    const id = uuidv4();
+    db.prepare(
+      `INSERT INTO product_variants (id, organization_id, product_service_id, name, variant_type, active, external_ref)
+       VALUES (?, ?, ?, ?, 'grade', 1, ?)`
+    ).run(id, orgId, p.id, `Grade ${c.slice(String(p.external_ref).length)}`, c);
+    db.prepare(`UPDATE products_services SET has_variants = 1, stock_control_enabled = 1 WHERE organization_id = ? AND id = ?`).run(orgId, p.id);
+    return { productId: p.id, variantId: id };
+  }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

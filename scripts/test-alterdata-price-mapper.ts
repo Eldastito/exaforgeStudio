@@ -1,10 +1,12 @@
 /**
  * TEST — Mapper de Preço Alterdata (ADR-105, Fase 1d): módulo Price.
  *
- * Prova, offline, a tradução Preco → preço de venda do ZappFlow:
- *   - Preco (produto, preco1) → preço da variante (por EAN/sku) ou do produto;
+ * Prova, offline, a tradução TabelaPreco → preço de venda do ZappFlow:
+ *   - preço aninhado em `preco` (produto, preco1) → variante (por EAN/sku) ou produto;
+ *   - forma antiga (campos na raiz) ainda aceita (compatibilidade);
+ *   - filtro pela tabela de preço configurada (o delta traz todas);
  *   - produto sem match → skippedNoProduct;
- *   - runner puxa Preco quando rede + priceTable estão definidos;
+ *   - runner puxa TabelaPreco via /versao/{c} quando priceTable está definido;
  *   - preço aplicado na variante correta (fim a fim).
  *
  * Uso: npm run test:alterdata-price-mapper
@@ -67,7 +69,16 @@ async function main() {
   const r4 = AlterdataPriceMapper.upsertPrecos(A, [{ produto: "7891234567901", tabela: 1, preco1: 0 }]);
   check("preço zero é ignorado", r4.applied === 0);
 
-  // ===== 4. Runner puxa Preco quando rede + priceTable definidos =====
+  // ===== 3b. Contrato real: preço ANINHADO em `preco` (produto/preco1) =====
+  const r5 = AlterdataPriceMapper.upsertPrecos(A, [{ codigo: 1, descricao: "Tabela 1", preco: { produto: "7891234567901", tabela: 1, preco1: 159.9 } }]);
+  const v5 = (db.prepare(`SELECT price FROM product_variants WHERE id=?`).get(variant.id) as any).price;
+  check("preço aninhado (preco.preco1) aplicado", r5.applied === 1 && Number(v5) === 159.9, String(v5));
+
+  // ===== 3c. Filtro por tabela: item de outra tabela é ignorado =====
+  const r6 = AlterdataPriceMapper.upsertPrecos(A, [{ codigo: 2, preco: { produto: "7891234567901", tabela: 2, preco1: 999.9 } }], "1");
+  check("tabela diferente da configurada é ignorada", r6.applied === 0);
+
+  // ===== 4. Runner puxa TabelaPreco quando priceTable definido =====
   RetailStoreService.create(A, { name: "Filial 1", code: "1" });
   AlterdataConnectorService.saveSettings(A, {
     enabled: true, rede: "TOULON", filiais: ["1"], priceTable: "1",
@@ -75,15 +86,19 @@ async function main() {
     authConfig: { clientId: "int@toulon", clientSecret: "s3nh4" },
   });
   __setAlterdataTokenHttpForTests(async () => resp(200, { access_token: "tok", expires_in: 3600 }));
+  const seenUrls: string[] = [];
   __setAlterdataSyncHttpForTests(async (url: string) => {
-    if (url.includes("/Preco/versao/TOULON/1/")) return resp(200, [{ produto: "7891234567901", tabela: 1, preco1: 199.9, controleVersao: 3 }], {});
+    seenUrls.push(url);
+    // Contrato real do módulo Price: recurso TabelaPreco, delta /versao/{c}, com
+    // o preço ANINHADO em `preco` e o código da tabela em `codigo`.
+    if (url.includes("/TabelaPreco/versao/")) return resp(200, [{ codigo: 1, descricao: "Tabela 1", preco: { produto: "7891234567901", tabela: 1, preco1: 199.9 }, controleVersao: 3 }], {});
     return resp(200, [], {});
   });
   const summary = await AlterdataSyncRunner.runOrg(A);
   check("runner reporta preços aplicados", summary.precos.applied === 1, JSON.stringify(summary.precos));
   const vPrice2 = (db.prepare(`SELECT price FROM product_variants WHERE id=?`).get(variant.id) as any).price;
   check("preço atualizado pelo runner (199.90)", Number(vPrice2) === 199.9, String(vPrice2));
-  check("URL do Preco usa rede/tabela", true); // exercitado pelo match acima
+  check("URL do preço usa TabelaPreco/versao", seenUrls.some((u) => u.includes("/api/v1/TabelaPreco/versao/")), seenUrls.join(" | "));
 
   // Sem priceTable → runner não puxa Preco (precos zerado).
   const B = `org_${randomUUID().slice(0, 8)}`;

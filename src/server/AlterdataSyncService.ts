@@ -104,9 +104,9 @@ export class AlterdataSyncService {
         res = await http(url, { method: "GET", headers: hdr(token) });
       }
       const body = await res.text().catch(() => "");
-      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 900) };
+      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 2500) };
     } catch (e: any) {
-      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 900) };
+      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 2500) };
     }
   }
 
@@ -226,6 +226,24 @@ function num(v: any): number | null { const n = Number(v); return Number.isFinit
  * controleVersao ZERADO (campo readOnly não mapeado) — 0 não é versão válida.
  */
 function itemVersion(it: any): string | null {
+  const direct = itemVersionShallow(it);
+  if (direct != null) return direct;
+  // Recursos que EMBRULHAM o registro (ex.: VendaMalote → { caixa: {...} },
+  // ClienteMalote → { cliente: {...} }) podem carregar a versão no objeto
+  // aninhado — sem olhar um nível para dentro, o cursor não anda e cada
+  // execução relê o MESMO primeiro lote para sempre.
+  if (it && typeof it === "object") {
+    for (const v of Object.values(it)) {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const nested = itemVersionShallow(v);
+        if (nested != null) return nested;
+      }
+    }
+  }
+  return null;
+}
+
+function itemVersionShallow(it: any): string | null {
   for (const v of [it?.controleVersao, it?.versao, it?.version]) {
     if (v == null) continue;
     const n = Number(v);

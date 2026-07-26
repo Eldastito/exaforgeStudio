@@ -815,6 +815,125 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
 }
 
 
+// ---- Lançamento de vendas por vendedor (manual / foto+IA — Cenário B) -------
+// A loja anota as vendas de cada vendedor no papel; o gestor digita aqui OU
+// envia a foto da folha p/ a IA ler e pré-preencher, conferindo antes de salvar.
+type SellerRow = { sellerName: string; valor: string; pecas: string };
+function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: string; onClose: () => void; onSaved: () => void }) {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState('');
+  const [date, setDate] = useState(defaultDate || todayStr());
+  const [rows, setRows] = useState<SellerRow[]>([{ sellerName: '', valor: '', pecas: '' }]);
+  const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanNote, setScanNote] = useState<string | null>(null);
+  const [scanSource, setScanSource] = useState<'manual' | 'photo'>('manual');
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => setStores(Array.isArray(d?.stores) ? d.stores : [])).catch(() => {}); }, []);
+
+  const total = useMemo(() => rows.reduce((a, r) => a + (Number(r.valor) || 0), 0), [rows]);
+  const totalPecas = useMemo(() => rows.reduce((a, r) => a + (Number(r.pecas) || 0), 0), [rows]);
+  const setRow = (i: number, patch: Partial<SellerRow>) => setRows(p => p.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  const addRow = () => setRows(p => [...p, { sellerName: '', valor: '', pecas: '' }]);
+  const removeRow = (i: number) => setRows(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p);
+
+  const onScan = async (file: File) => {
+    setScanning(true); setScanNote(null);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const res = await apiFetch('/api/retailops/seller-sales/scan', { method: 'POST', body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao ler a folha.'); return; }
+      const entries = Array.isArray(d.entries) ? d.entries : [];
+      if (!entries.length) { toast.error('A IA não encontrou vendedores legíveis. Tente uma foto mais nítida ou digite manualmente.'); return; }
+      setRows(entries.map((e: any) => ({ sellerName: String(e.sellerName || ''), valor: e.valor ? String(e.valor) : '', pecas: e.pecas ? String(e.pecas) : '' })));
+      setScanSource('photo'); setImageUrl(d.imageUrl || null);
+      setScanNote(d.needsReview
+        ? `Leitura com baixa confiança (${d.confidence}%). CONFIRA cada linha antes de salvar.`
+        : `IA leu ${entries.length} vendedor(es) (confiança ${d.confidence}%). Confira e salve.`);
+    } catch { toast.error('Falha ao enviar a imagem.'); }
+    finally { setScanning(false); }
+  };
+
+  const save = async () => {
+    const entries = rows
+      .map(r => ({ sellerName: r.sellerName.trim(), valor: Number(r.valor) || 0, pecas: Number(r.pecas) || 0 }))
+      .filter(e => e.sellerName && (e.valor > 0 || e.pecas > 0));
+    if (!entries.length) { toast.error('Informe ao menos um vendedor com nome e valor (ou peças).'); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/retailops/seller-sales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: storeId || null, saleDate: date, entries, source: scanSource, imageUrl }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`${d.created?.length || entries.length} lançamento(s) salvo(s).`); onSaved(); }
+      else toast.error(d.error || 'Falha ao salvar.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100">Vendas por vendedor</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+        <p className="mt-0.5 text-xs text-zinc-500">Digite as vendas de cada vendedor ou envie a foto da folha para a IA ler. Confira antes de salvar.</p>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <label className="text-xs text-zinc-400">Data da folha
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+          </label>
+          <label className="text-xs text-zinc-400">Loja (opcional)
+            <select value={storeId} onChange={e => setStoreId(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+              <option value="">— todas / não informar —</option>
+              {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-3">
+          <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">
+            {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Enviar foto da folha (IA)
+            <input type="file" accept="image/*" className="hidden" disabled={scanning} onChange={e => { const f = e.target.files?.[0]; if (f) onScan(f); e.currentTarget.value = ''; }} />
+          </label>
+          {scanNote && <p className="mt-2 flex items-start gap-1.5 text-[12px] text-amber-300/90"><Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {scanNote}</p>}
+        </div>
+
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-1 text-[11px] uppercase tracking-wider text-zinc-500">
+            <span>Vendedor</span><span className="w-24 text-right">Valor (R$)</span><span className="w-16 text-right">Peças</span><span className="w-6"></span>
+          </div>
+          {rows.map((r, i) => (
+            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
+              <input value={r.sellerName} onChange={e => setRow(i, { sellerName: e.target.value })} placeholder="Nome do vendedor" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+              <input inputMode="decimal" value={r.valor} onChange={e => setRow(i, { valor: e.target.value.replace(',', '.') })} placeholder="0,00" className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
+              <input inputMode="numeric" value={r.pecas} onChange={e => setRow(i, { pecas: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" className="w-16 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
+              <button onClick={() => removeRow(i)} title="Remover linha" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          ))}
+          <button onClick={addRow} className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200"><Plus className="w-3.5 h-3.5" /> Adicionar vendedor</button>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-950/60 px-3 py-2 text-sm">
+          <span className="text-zinc-400">Total</span>
+          <span className="font-semibold text-zinc-100">{brl(total)} · {totalPecas} peça(s)</span>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={save} disabled={saving || (total <= 0 && totalPecas <= 0)} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ---- Reposição / grade furada (estoque por loja do ERP) ---------------------
 // Loja que TRABALHA o produto mas está zerada num tamanho que outra loja tem
 // sobrando → sugestão de transferência entre filiais.
@@ -1078,6 +1197,8 @@ function CommissionTab() {
 
   const [pdvSellers, setPdvSellers] = useState<any[]>([]);
   const [pdvPct, setPdvPct] = useState<number | null>(null);
+  const [sellerSales, setSellerSales] = useState<any[]>([]);
+  const [sellerSalesModal, setSellerSalesModal] = useState(false);
   // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
   // vendedor" ativa, a apuração oficial passa a usar esse nome.
   const nomearVendedor = async (v: any) => {
@@ -1095,7 +1216,17 @@ function CommissionTab() {
       const pv = await apiFetch(`/api/retailops/pdv-sellers?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
       setPdvSellers(Array.isArray(pv?.sellers) ? pv.sellers : []);
       setPdvPct(pv?.commissionPercent ?? null);
+      await loadSellerSales();
     } finally { setLoadingReport(false); }
+  };
+  const loadSellerSales = async () => {
+    const d = await apiFetch(`/api/retailops/seller-sales?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
+    setSellerSales(Array.isArray(d?.entries) ? d.entries : []);
+  };
+  const deleteSellerSale = async (row: any) => {
+    if (!window.confirm(`Remover o lançamento de ${row.seller_name} (${brl(row.valor)})?`)) return;
+    const res = await apiFetch(`/api/retailops/seller-sales/${row.id}`, { method: 'DELETE' });
+    if (res.ok) { toast.success('Lançamento removido.'); loadReport(); } else toast.error('Falha ao remover.');
   };
   const downloadReportCsv = () => {
     if (!report) return;
@@ -1211,8 +1342,10 @@ function CommissionTab() {
           <label className="text-[11px] text-zinc-400 ml-2">De <input type="date" value={start} onChange={e => setStart(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" /></label>
           <label className="text-[11px] text-zinc-400">até <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" /></label>
           <button onClick={loadReport} disabled={loadingReport} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{loadingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Gerar</button>
+          <button onClick={() => setSellerSalesModal(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20"><Plus className="w-3.5 h-3.5" /> Lançar vendas por vendedor</button>
           {report && <button onClick={downloadReportCsv} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><Download className="w-3.5 h-3.5" /> CSV</button>}
         </div>
+        <p className="mt-1 text-[11px] text-zinc-500">Não tem o vendedor por venda no ERP? Anote as vendas de cada vendedor no papel e clique em <strong>“Lançar vendas por vendedor”</strong> — digite ou envie a foto da folha para a IA ler. Esses valores somam na comissão por vendedor.</p>
 
         {report && (
           <div className="mt-3 space-y-4">
@@ -1220,9 +1353,44 @@ function CommissionTab() {
               <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · produtos {brl(report.totals?.productCommission)} · lojas {brl(report.totals?.storeCommission)}</span>
             </div>
 
-            <ReportBlock title="Por vendedor" empty={!report.hasRules?.seller ? 'Sem regra por vendedor ativa.' : 'Nenhuma venda com vendedor no período.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
+            <ReportBlock title="Por vendedor" empty={!report.hasRules?.seller ? 'Sem regra por vendedor ativa.' : 'Nenhuma venda com vendedor no período. Lance a folha da loja em “Lançar vendas por vendedor”.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
             <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
             <ReportBlock title="Por loja (fechamentos)" empty={!report.hasRules?.store ? 'Sem regra por loja ativa.' : 'Sem fechamentos no período.'} rows={report.byStore} cols={[['storeName', 'Loja'], ['sales', 'Vendas', true], ['commission', 'Comissão', true]]} />
+
+            {/* Lançamentos por vendedor do período (manual/foto — Cenário B).
+                Já entram somados na tabela "Por vendedor" acima; esta lista
+                permite conferir e remover cada folha lançada. */}
+            {sellerSales.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Folhas de vendas lançadas (manual/foto)</p>
+                <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                  <table className="w-full text-sm">
+                    <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                      <th className="px-3 py-2 text-left font-medium">Data</th>
+                      <th className="px-3 py-2 text-left font-medium">Vendedor</th>
+                      <th className="px-3 py-2 text-left font-medium">Loja</th>
+                      <th className="px-3 py-2 text-right font-medium">Valor</th>
+                      <th className="px-3 py-2 text-right font-medium">Peças</th>
+                      <th className="px-3 py-2 text-center font-medium">Origem</th>
+                      <th className="px-3 py-2 text-right font-medium"></th>
+                    </tr></thead>
+                    <tbody>
+                      {sellerSales.map((v: any) => (
+                        <tr key={v.id} className="border-t border-zinc-800/70">
+                          <td className="px-3 py-2 text-zinc-300">{v.sale_date}</td>
+                          <td className="px-3 py-2 text-zinc-100">{v.seller_name}</td>
+                          <td className="px-3 py-2 text-zinc-300">{v.store_name || '—'}</td>
+                          <td className="px-3 py-2 text-right text-zinc-100">{brl(v.valor)}</td>
+                          <td className="px-3 py-2 text-right text-zinc-300">{Number(v.pecas || 0)}</td>
+                          <td className="px-3 py-2 text-center"><span className={`rounded-full border px-2 py-0.5 text-[11px] ${v.source === 'photo' ? 'border-sky-500/40 bg-sky-500/10 text-sky-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400'}`}>{v.source === 'photo' ? 'foto' : 'manual'}</span></td>
+                          <td className="px-3 py-2 text-right"><button onClick={() => deleteSellerSale(v)} title="Remover" className="text-zinc-500 hover:text-red-300"><Trash2 className="w-4 h-4" /></button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Vendas por VENDEDOR direto do PDV (Fase 4 — VendaMalote). A
                 matrícula é a do ERP; para pagar comissão por pessoa, associe a
@@ -1268,6 +1436,8 @@ function CommissionTab() {
           </div>
         )}
       </div>
+
+      {sellerSalesModal && <SellerSalesModal defaultDate={end} onClose={() => setSellerSalesModal(false)} onSaved={() => { setSellerSalesModal(false); loadReport(); }} />}
 
       {ruleForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setRuleForm(null)}>

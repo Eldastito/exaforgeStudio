@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { RetailSellerSalesService } from "./RetailSellerSalesService.js";
 
 export type CommissionRuleInput = {
   name: string;
@@ -104,6 +105,38 @@ export class RetailCommissionService {
     return rows.map((r) => ({ sellerUserId: String(r.sid), sellerName: this.sellerName(orgId, String(r.sid)), sales: Number(r.s) || 0, orders: Number(r.n) || 0 }));
   }
 
+  /**
+   * Vendas por VENDEDOR combinando o ZappFlow (pedidos com vendedor) com os
+   * lançamentos manuais/foto do Cenário B (retail_seller_sales). Consolida por
+   * vendedor (userId quando houver, senão nome) somando os dois canais — é a base
+   * da comissão por vendedor. `source`: zappflow | manual | zappflow+manual.
+   */
+  static combinedSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; source: string }> {
+    const norm = (name: string) => String(name || "").trim().toLowerCase();
+    const map = new Map<string, { sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; sources: Set<string> }>();
+    // name normalizado → chave, p/ reconciliar lançamentos manuais (que trazem só
+    // o nome) com o vendedor do ZappFlow (que tem userId) de mesmo nome.
+    const nameToKey = new Map<string, string>();
+    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string) => {
+      const n = norm(name);
+      const k = (userId && `user:${userId}`) || nameToKey.get(n) || `nom:${n}`;
+      const cur = map.get(k) || { sellerUserId: userId || null, sellerName: name, sales: 0, pecas: 0, orders: 0, sources: new Set<string>() };
+      cur.sales = round2(cur.sales + (Number(sales) || 0));
+      cur.pecas += Number(pecas) || 0;
+      cur.orders += Number(orders) || 0;
+      if (userId && !cur.sellerUserId) cur.sellerUserId = userId;
+      cur.sources.add(source);
+      map.set(k, cur);
+      if (n && !nameToKey.has(n)) nameToKey.set(n, k);
+    };
+    // ZappFlow primeiro: registra os nomes p/ o manual cair na mesma chave.
+    for (const s of this.onlineSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, 0, s.orders, "zappflow");
+    for (const s of RetailSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "manual");
+    return Array.from(map.values())
+      .map((v) => ({ sellerUserId: v.sellerUserId, sellerName: v.sellerName, sales: v.sales, pecas: v.pecas, orders: v.orders, source: Array.from(v.sources).sort().join("+") }))
+      .sort((a, b) => b.sales - a.sales);
+  }
+
   /** Vendas faturadas por produto no período (itens dos pedidos faturados). */
   static onlineSalesByProduct(orgId: string, start: string, end: string): Array<{ productId: string; productName: string; sales: number; orders: number }> {
     const rows = db.prepare(
@@ -133,11 +166,12 @@ export class RetailCommissionService {
 
     const sellerRules = byScope("seller"), productRules = byScope("product"), storeRules = byScope("store"), globalRules = byScope("global");
 
-    // Por vendedor = vendas do ZappFlow (pedidos com vendedor). O PDV NÃO entra
-    // aqui: o VendaMalote só traz o `matricula` do CAIXA (operador, que cruza
-    // lojas) — não o vendedor por item. A comissão individual do PDV virá do
-    // endpoint próprio do ERP (Venda/ComissaoVendasPorPeriodo), fase seguinte.
-    const bySeller = this.onlineSalesBySeller(orgId, start, end).map((s) => ({ ...s, source: "zappflow", commission: commissionOf(sellerRules, s.sales, 0) }));
+    // Por vendedor = vendas do ZappFlow (pedidos com vendedor) + lançamentos
+    // manuais/foto do Cenário B (retail_seller_sales). O PDV físico NÃO entra
+    // aqui automaticamente: o VendaMalote só traz o `matricula` do CAIXA
+    // (operador, que cruza lojas) — não o vendedor por item; por isso a folha
+    // por vendedor é lançada à mão (ou lida por foto) e somada aqui.
+    const bySeller = this.combinedSalesBySeller(orgId, start, end).map((s) => ({ ...s, commission: commissionOf(sellerRules, s.sales, 0) }));
     const byProduct = this.onlineSalesByProduct(orgId, start, end).map((p) => ({ ...p, commission: commissionOf(productRules, p.sales, 0) }));
 
     const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
@@ -228,8 +262,8 @@ export class RetailCommissionService {
         items.push({ storeId: null, sellerName: "GLOBAL", base, commission: amount, ruleId: rule.id, detail });
         totalCommission += amount;
       } else if (rule.scope === "seller") {
-        // Comissão por VENDEDOR: base = vendas faturadas do ZappFlow por vendedor.
-        for (const sv of this.onlineSalesBySeller(orgId, periodStart, periodEnd)) {
+        // Comissão por VENDEDOR: base = ZappFlow + lançamentos manuais/foto.
+        for (const sv of this.combinedSalesBySeller(orgId, periodStart, periodEnd)) {
           const { amount, detail } = computeCommission(rule.calculation_type, config, sv.sales, ruleQuota);
           items.push({ storeId: null, sellerUserId: sv.sellerUserId, sellerName: sv.sellerName, base: sv.sales, commission: amount, ruleId: rule.id, detail });
           totalCommission += amount;

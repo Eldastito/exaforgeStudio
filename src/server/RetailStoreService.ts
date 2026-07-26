@@ -42,9 +42,21 @@ export class RetailStoreService {
     ).get(orgId, identifier) as any) || null;
   }
 
+  /** Código de filial é a CHAVE do casamento com o ERP (estoque, caixa) — duas
+   *  lojas ativas com o mesmo código fazem os dados caírem numa delas ao acaso. */
+  private static assertCodeFree(orgId: string, code: string | null | undefined, exceptId?: string): void {
+    const c = code ? String(code).trim() : "";
+    if (!c) return;
+    const dup = db.prepare(
+      `SELECT name FROM retail_stores WHERE organization_id = ? AND active = 1 AND code = ? ${exceptId ? "AND id <> ?" : ""} LIMIT 1`
+    ).get(...(exceptId ? [orgId, c, exceptId] : [orgId, c])) as any;
+    if (dup) throw new Error(`Já existe a loja ativa "${dup.name}" com o código ${c}. Edite a loja existente em vez de criar outra (o código da filial precisa ser único — é por ele que o estoque e o caixa do ERP são casados).`);
+  }
+
   static create(orgId: string, input: StoreInput, actorId?: string): any {
     const name = String(input.name || "").trim();
     if (!name) throw new Error("Nome da loja é obrigatório");
+    this.assertCodeFree(orgId, input.code);
     const id = randomUUID();
     db.prepare(
       `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active)
@@ -74,6 +86,11 @@ export class RetailStoreService {
       manager_contact_id: patch.managerContactId !== undefined ? (patch.managerContactId || null) : undefined,
       active: patch.active !== undefined ? (patch.active ? 1 : 0) : undefined,
     };
+    // Guarda de código único entre lojas ATIVAS: cobre troca de código e
+    // REATIVAÇÃO de loja cujo código já está em uso por outra ativa.
+    const nextCode = map.code !== undefined ? map.code : cur.code;
+    const willBeActive = map.active !== undefined ? map.active === 1 : cur.active === 1;
+    if (willBeActive) this.assertCodeFree(orgId, nextCode, id);
     for (const [col, v] of Object.entries(map)) {
       if (v !== undefined) { fields.push(`${col} = ?`); vals.push(v); }
     }

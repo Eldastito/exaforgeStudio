@@ -124,19 +124,26 @@ async function main() {
 
   // ===== 2e. Comissão por VENDEDOR do ERP (Cenário A) =====
   // Venda/ComissaoVendasPorPeriodo é consultado MÊS A MÊS (janela de backfill).
-  // O mock devolve as MESMAS linhas com `data` fixa em toda janela → o dedupe por
-  // (filial|matrícula|dia) colapsa para 1 linha por vendedor (idempotente).
+  // CONTRATO REAL da ModaUp (homologação Toulon): as linhas vêm ANINHADAS em
+  // `data.metaVendedorRealizado[]` (NÃO num array plano); `data.metaVendedor[]` é
+  // a META (alvo) e deve ser IGNORADA. O mock repete as mesmas linhas com `data`
+  // fixa em toda janela → o dedupe por (filial|matrícula|dia) colapsa para 1
+  // linha por vendedor (idempotente).
   __setAlterdataSyncHttpForTests(async (url: string) => {
-    if (url.includes("/Venda/ComissaoVendasPorPeriodo/")) return resp(200, { success: true, data: [
-      { matricula: "10050026", nome: "ANA SILVA", filial: "1", data: "2025-06-15T00:00:00", valorVendido: 1200, pecas: 8, comissao: 60 },
-      { matricula: "10050042", nome: "BRUNO LIMA", filial: "1", data: "2025-06-15T00:00:00", valorVendido: 800, pecas: 5, comissao: 40 },
-    ] }, {});
-    return resp(200, { success: true, data: [] }, {});
+    if (url.includes("/Venda/ComissaoVendasPorPeriodo/")) return resp(200, { success: true, data: {
+      metaVendedor: [{ matricula: "77777", nome: "ALVO IGNORAR", filial: "1", valor: 99999, meta: 99999 }],
+      metaVendedorRealizado: [
+        { matricula: "10050026", nome: "ANA SILVA", filial: "1", data: "2025-06-15T00:00:00", valorVendido: 1200, pecas: 8, comissao: 60 },
+        { matricula: "10050042", nome: "BRUNO LIMA", filial: "1", data: "2025-06-15T00:00:00", valorVendido: 800, pecas: 5, comissao: 40 },
+      ],
+    }, pagination: { totalPages: 1 } }, {});
+    return resp(200, { success: true, data: { metaVendedor: [], metaVendedorRealizado: [] }, pagination: { totalPages: 1 } }, {});
   });
   const s2e = await AlterdataSyncRunner.runOrg(A);
   check("comissão do ERP importada (2 vendedores, dedupe entre janelas)", s2e.erpComissao?.imported === 2, JSON.stringify(s2e.erpComissao));
   const erpRows = db.prepare(`SELECT matricula, seller_name, valor, comissao_erp, store_id FROM retail_erp_seller_sales WHERE organization_id=? ORDER BY valor DESC`).all(A) as any[];
   check("2 linhas de comissão gravadas (não duplica entre os 18 meses)", erpRows.length === 2, JSON.stringify(erpRows));
+  check("META (metaVendedor / alvo) é ignorada — matrícula 77777 não entra", !erpRows.some(r => r.matricula === "77777"), JSON.stringify(erpRows));
   check("linha da Ana: valor 1200 / comissão ERP 60 / loja resolvida pela filial", erpRows[0]?.valor === 1200 && erpRows[0]?.comissao_erp === 60 && erpRows[0]?.store_id === store.id, JSON.stringify(erpRows[0]));
   const { RetailCommissionService } = await import("../src/server/RetailCommissionService.js");
   const erpReport = RetailCommissionService.report(A, "2025-01-01", "2025-12-31");

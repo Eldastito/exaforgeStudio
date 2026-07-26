@@ -449,7 +449,17 @@ router.get("/pdv-sellers", (req: AuthRequest, res): any => {
         GROUP BY s.vendedor, s.filial
         ORDER BY sales DESC LIMIT 300`
     ).all(orgId, start, end) as any[];
-    res.json({ start, end, sellers: rows });
+    // Comissão ESTIMADA por vendedor: usa a regra percentual ativa (preferindo
+    // escopo vendedor; senão a da loja como estimativa) sobre as vendas do PDV.
+    const rule = db.prepare(
+      `SELECT scope, config_json FROM retail_commission_rules
+        WHERE organization_id = ? AND active = 1 AND calculation_type = 'percent_sales'
+        ORDER BY CASE scope WHEN 'seller' THEN 0 ELSE 1 END LIMIT 1`
+    ).get(orgId) as any;
+    let pct = 0;
+    try { pct = Number(JSON.parse(rule?.config_json || "{}").percent || 0); } catch { /* noop */ }
+    const sellers = rows.map((r) => ({ ...r, commission: pct > 0 ? Math.round(Number(r.sales) * pct) / 100 : null }));
+    res.json({ start, end, commissionPercent: pct || null, commissionRuleScope: rule?.scope || null, sellers });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

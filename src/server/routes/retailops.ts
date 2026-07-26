@@ -632,6 +632,25 @@ router.post("/seller-sales", requireRole("owner", "admin"), (req: AuthRequest, r
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+router.patch("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (b.storeId && !RetailStoreService.get(orgId, String(b.storeId))) return res.status(404).json({ error: "store_not_found" });
+  try {
+    const patch: any = {};
+    if (b.sellerName !== undefined) patch.sellerName = b.sellerName;
+    if (b.valor !== undefined) patch.valor = Number(b.valor) || 0;
+    if (b.pecas !== undefined) patch.pecas = Number(b.pecas) || 0;
+    if (b.saleDate !== undefined) patch.saleDate = b.saleDate;
+    if (b.storeId !== undefined) patch.storeId = b.storeId || null;
+    if (b.matricula !== undefined) patch.matricula = b.matricula || null;
+    const updated = RetailSellerSalesService.update(orgId, String(req.params.id), patch, req.user?.userId);
+    if (!updated) return res.status(404).json({ error: "not_found" });
+    res.json(updated);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.delete("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

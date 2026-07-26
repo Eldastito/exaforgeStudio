@@ -92,6 +92,19 @@ async function main() {
   check("extractFromImage NÃO salva nada", RetailSellerSalesService.list(A, P0, P1).length === beforeCount);
   __setSellerSalesExtractorForTests(null);
 
+  // ===== update: edita nome, valor e peças de um lançamento =====
+  const brunoRow = RetailSellerSalesService.list(A, P0, P1).find(x => x.seller_name === "Bruno");
+  const upd = RetailSellerSalesService.update(A, brunoRow.id, { sellerName: "Bruno Silva", valor: 450, pecas: 9 }, U1);
+  check("update: aplica nome/valor/peças", upd?.seller_name === "Bruno Silva" && Number(upd?.valor) === 450 && Number(upd?.pecas) === 9, JSON.stringify(upd));
+  const afterUpd = RetailSellerSalesService.bySeller(A, P0, P1).find(s => s.sellerName === "Bruno Silva");
+  check("update: agregação reflete o novo valor (450)", afterUpd?.sales === 450, JSON.stringify(afterUpd));
+  check("update: linha vazia (valor 0 + peças 0) é rejeitada", (() => { try { RetailSellerSalesService.update(A, brunoRow.id, { valor: 0, pecas: 0 }); return false; } catch { return true; } })());
+  check("update: nome em branco é rejeitado", (() => { try { RetailSellerSalesService.update(A, brunoRow.id, { sellerName: "  " }); return false; } catch { return true; } })());
+  check("update: id inexistente devolve null", RetailSellerSalesService.update(A, "nao-existe", { valor: 10 }) === null);
+  // patch parcial não zera os outros campos
+  const upd2 = RetailSellerSalesService.update(A, brunoRow.id, { valor: 500 }, U1);
+  check("update parcial: só valor muda, peças/nome mantêm", Number(upd2?.valor) === 500 && Number(upd2?.pecas) === 9 && upd2?.seller_name === "Bruno Silva", JSON.stringify(upd2));
+
   // ===== remove =====
   const first = RetailSellerSalesService.list(A, P0, P1)[0];
   check("remove: apaga o lançamento", RetailSellerSalesService.remove(A, first.id, U1) === true);

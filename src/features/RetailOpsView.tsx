@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -934,6 +934,77 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
 }
 
 
+// ---- Edição de um lançamento de venda por vendedor já feito ------------------
+function EditSellerSaleModal({ sale, onClose, onSaved }: { sale: any; onClose: () => void; onSaved: () => void }) {
+  const [stores, setStores] = useState<any[]>([]);
+  const [sellerName, setSellerName] = useState(String(sale.seller_name || ''));
+  const [date, setDate] = useState(String(sale.sale_date || todayStr()).slice(0, 10));
+  const [storeId, setStoreId] = useState(String(sale.store_id || ''));
+  const [valor, setValor] = useState(sale.valor != null ? String(sale.valor) : '');
+  const [pecas, setPecas] = useState(sale.pecas != null ? String(sale.pecas) : '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => setStores(Array.isArray(d?.stores) ? d.stores : [])).catch(() => {}); }, []);
+
+  const save = async () => {
+    const name = sellerName.trim();
+    const v = Number(valor) || 0, p = Number(pecas) || 0;
+    if (!name) { toast.error('Informe o nome do vendedor.'); return; }
+    if (v <= 0 && p <= 0) { toast.error('Informe um valor ou a quantidade de peças.'); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/retailops/seller-sales/${sale.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sellerName: name, saleDate: date, storeId: storeId || null, valor: v, pecas: p }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success('Lançamento atualizado.'); onSaved(); }
+      else toast.error(d.error || 'Falha ao salvar.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100">Editar lançamento</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+        <p className="mt-0.5 text-xs text-zinc-500">Origem: {sale.source === 'photo' ? 'foto (IA)' : 'manual'}. As alterações somam na comissão por vendedor.</p>
+        <div className="mt-3 space-y-3">
+          <label className="block text-xs text-zinc-400">Vendedor
+            <input value={sellerName} onChange={e => setSellerName(e.target.value)} placeholder="Nome do vendedor" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-zinc-400">Data da folha
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+            </label>
+            <label className="text-xs text-zinc-400">Loja (opcional)
+              <select value={storeId} onChange={e => setStoreId(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+                <option value="">— não informar —</option>
+                {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-zinc-400">Valor (R$)
+              <input inputMode="decimal" value={valor} onChange={e => setValor(e.target.value.replace(',', '.'))} placeholder="0,00" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            </label>
+            <label className="text-xs text-zinc-400">Peças
+              <input inputMode="numeric" value={pecas} onChange={e => setPecas(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            </label>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ---- Reposição / grade furada (estoque por loja do ERP) ---------------------
 // Loja que TRABALHA o produto mas está zerada num tamanho que outra loja tem
 // sobrando → sugestão de transferência entre filiais.
@@ -1199,6 +1270,7 @@ function CommissionTab() {
   const [pdvPct, setPdvPct] = useState<number | null>(null);
   const [sellerSales, setSellerSales] = useState<any[]>([]);
   const [sellerSalesModal, setSellerSalesModal] = useState(false);
+  const [editSale, setEditSale] = useState<any | null>(null);
   // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
   // vendedor" ativa, a apuração oficial passa a usar esse nome.
   const nomearVendedor = async (v: any) => {
@@ -1383,7 +1455,12 @@ function CommissionTab() {
                           <td className="px-3 py-2 text-right text-zinc-100">{brl(v.valor)}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{Number(v.pecas || 0)}</td>
                           <td className="px-3 py-2 text-center"><span className={`rounded-full border px-2 py-0.5 text-[11px] ${v.source === 'photo' ? 'border-sky-500/40 bg-sky-500/10 text-sky-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400'}`}>{v.source === 'photo' ? 'foto' : 'manual'}</span></td>
-                          <td className="px-3 py-2 text-right"><button onClick={() => deleteSellerSale(v)} title="Remover" className="text-zinc-500 hover:text-red-300"><Trash2 className="w-4 h-4" /></button></td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button onClick={() => setEditSale(v)} title="Editar" className="text-zinc-500 hover:text-indigo-300"><Pencil className="w-4 h-4" /></button>
+                              <button onClick={() => deleteSellerSale(v)} title="Remover" className="text-zinc-500 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1438,6 +1515,7 @@ function CommissionTab() {
       </div>
 
       {sellerSalesModal && <SellerSalesModal defaultDate={end} onClose={() => setSellerSalesModal(false)} onSaved={() => { setSellerSalesModal(false); loadReport(); }} />}
+      {editSale && <EditSellerSaleModal sale={editSale} onClose={() => setEditSale(null)} onSaved={() => { setEditSale(null); loadReport(); }} />}
 
       {ruleForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setRuleForm(null)}>

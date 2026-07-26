@@ -413,9 +413,44 @@ router.post("/stores", requireRole("owner", "admin"), (req: AuthRequest, res): a
 router.patch("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const store = RetailStoreService.update(orgId, req.params.id, req.body || {}, req.user?.userId);
-  if (!store) return res.status(404).json({ error: "store_not_found" });
-  res.json(store);
+  try {
+    const store = RetailStoreService.update(orgId, req.params.id, req.body || {}, req.user?.userId);
+    if (!store) return res.status(404).json({ error: "store_not_found" });
+    res.json(store);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// EXCLUIR loja duplicada: se existir outra loja com o MESMO código, o histórico
+// (estoque, fechamentos, cotas…) é UNIFICADO nela antes de apagar.
+router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(RetailStoreService.remove(orgId, req.params.id, req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// VENDAS POR VENDEDOR do PDV (Fase 4): agregado do stream VendaMalote —
+// matrícula, loja, total vendido, nº de vendas e peças no período.
+router.get("/pdv-sellers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || "").slice(0, 10);
+  const end = String(req.query.end || "").slice(0, 10);
+  if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
+  try {
+    const rows = db.prepare(
+      `SELECT s.vendedor, s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS store_name,
+              SUM(s.valor) AS sales, COUNT(*) AS orders, SUM(s.pecas) AS pecas
+         FROM retail_pdv_sales s
+         LEFT JOIN retail_stores st ON st.organization_id = s.organization_id AND st.code = s.filial AND st.active = 1
+        WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
+          AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(s.vendedor, '') <> ''
+        GROUP BY s.vendedor, s.filial
+        ORDER BY sales DESC LIMIT 300`
+    ).all(orgId, start, end) as any[];
+    res.json({ start, end, sellers: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // --- Responsáveis por loja (cobrança por pessoa, ADR-108) ---

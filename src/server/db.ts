@@ -1841,6 +1841,26 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_retail_stock_alerts ON retail_stock_alerts (organization_id, status);
 
+      -- Vendas do PDV (conector Alterdata Fase 4): venda a venda do caixa, com
+      -- a MATRÍCULA do vendedor — base da comissão por vendedor e dos rankings
+      -- reais da rede. Upsert pela chave natural (filial+boleta+dia).
+      CREATE TABLE IF NOT EXISTS retail_pdv_sales (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        filial TEXT NOT NULL,
+        boleta TEXT NOT NULL,
+        sale_date TEXT NOT NULL,
+        sale_time TEXT,
+        vendedor TEXT,                           -- matrícula do vendedor no ERP
+        valor REAL DEFAULT 0,
+        pecas REAL DEFAULT 0,
+        status TEXT,                             -- 'N' normal (contrato ModaUp)
+        payments_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, filial, boleta, sale_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_pdv_sales ON retail_pdv_sales (organization_id, sale_date);
+
       -- Memória de Padrões do Varejo (ADR-142 Fatia 1): padrões recorrentes
       -- observados numa loja (ou na rede). A confiança/status é calculada por
       -- REGRA (recorrência), não pelo LLM. store_id NULL = rede toda.

@@ -11,6 +11,7 @@
  * respeitando o intervalo; a rota POST /alterdata/sync dispara sob demanda.
  */
 import db from "./db.js";
+import { randomUUID } from "crypto";
 import { AlterdataConnectorService } from "./AlterdataConnectorService.js";
 import { AlterdataSyncService } from "./AlterdataSyncService.js";
 import { AlterdataSupplyMapper } from "./AlterdataSupplyMapper.js";
@@ -31,6 +32,8 @@ export interface SyncRunSummary {
   precos: { applied: number; skippedNoProduct: number; sampleNoProduct: string[] };
   /** Fechamentos do PDV conciliados via módulo Sales (Fase 2). */
   caixas: { applied: number; skippedNoStore: number; errors: number };
+  /** Vendas do PDV importadas (venda a venda, com vendedor — Fase 4). */
+  vendas: { imported: number };
   filiais: string[];
   ranAt: string;
 }
@@ -269,6 +272,47 @@ export class AlterdataSyncRunner {
       }
     } catch { /* módulo Sales indisponível nesta instalação — segue sem PDV */ }
 
+    // 6) VENDAS DO PDV (módulo Sales — Fase 4): VendaMalote/versao é o stream
+    //    venda a venda do caixa, com a MATRÍCULA do vendedor, valor, peças e
+    //    formas de pagamento. Alimenta a comissão por vendedor e os rankings
+    //    reais da rede. Falha do endpoint não derruba o sync.
+    const vendas = { imported: 0 };
+    try {
+      const insVenda = db.prepare(
+        `INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, sale_time, vendedor, valor, pecas, status, payments_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(organization_id, filial, boleta, sale_date) DO UPDATE SET
+           sale_time = excluded.sale_time, vendedor = excluded.vendedor, valor = excluded.valor,
+           pecas = excluded.pecas, status = excluded.status, payments_json = excluded.payments_json`
+      );
+      await AlterdataSyncService.syncResource(orgId, {
+        moduleKey: "sales", resource: "VendaMalote", maxPages: 100,
+        buildPath: (c) => `/api/v1/VendaMalote/versao/${c}`,
+        onItems: (items) => {
+          let n = 0;
+          for (const it of items) {
+            const cx = it?.caixa ?? it; // o item vem { caixa: {...}, ... } (contrato real) ou plano
+            const filial = str(cx?.filial);
+            const boleta = str(cx?.boleta);
+            const date = str(cx?.data).slice(0, 10);
+            if (!filial || !boleta || !date) continue;
+            const payments = {
+              dinheiro: Number(cx?.dinheiro || 0), cartao: Number(cx?.cartao || 0), debito: Number(cx?.debito || 0),
+              creditoParcelado: Number(cx?.creditoParcelado || 0), cheque: Number(cx?.cheque || 0),
+              vale: Number(cx?.vale || 0), deposito: Number(cx?.deposito || 0), crediario: Number(cx?.crediario || 0),
+            };
+            insVenda.run(
+              randomUUID(), orgId, filial, boleta, date, str(cx?.hora) || null, str(cx?.matricula) || null,
+              Number(cx?.valor || 0), Number(cx?.vendidas || 0), str(cx?.status) || null, JSON.stringify(payments)
+            );
+            n++;
+          }
+          vendas.imported += n;
+          return n;
+        },
+      });
+    } catch { /* endpoint indisponível nesta instalação — segue sem vendas PDV */ }
+
     // Preço de EXIBIÇÃO do produto: o ERP precifica por VARIANTE (grade), mas o
     // card do catálogo e a vitrine mostram products_services.price — que veio
     // 0.0 da Referencia. Sem isso, o produto aparece "R$ 0,00" mesmo com as
@@ -289,7 +333,7 @@ export class AlterdataSyncRunner {
     const totalProdutos = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> ''`).get(orgId) as any)?.c || 0);
     const totalVariantes = Number((db.prepare(`SELECT COUNT(*) c FROM product_variants WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
     const summary: SyncRunSummary = {
-      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, filiais,
+      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, vendas, filiais,
       ranAt: new Date().toISOString(),
     };
     // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'

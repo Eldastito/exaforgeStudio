@@ -1969,6 +1969,32 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_retail_seller_sales ON retail_seller_sales (organization_id, sale_date);
 
+      -- Vendas por VENDEDOR vindas do ERP (Cenário A): quando o ERP calcula a
+      -- comissão por vendedor (endpoint Venda/ComissaoVendasPorPeriodo), a gente
+      -- guarda por vendedor DUAS coisas: o valor vendido (coluna valor) — base
+      -- para as NOSSAS regras de comissão, igual ao manual/ZappFlow — e a comissão
+      -- JÁ CALCULADA pelo ERP (coluna comissao_erp) — p/ exibir e conferir desvio.
+      -- FUNDAÇÃO: a tabela e o merge existem; o SYNC real (AlterdataSyncRunner)
+      -- só é ligado quando o formato do payload do ERP estiver confirmado.
+      -- matricula liga ao mapeamento retail_sellers (nome/usuário do ZappFlow).
+      CREATE TABLE IF NOT EXISTS retail_erp_seller_sales (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT,                           -- loja (retail_stores.id) quando resolvida
+        filial TEXT,                             -- código da filial no ERP
+        sale_date TEXT NOT NULL,                 -- YYYY-MM-DD (dia representativo)
+        matricula TEXT,                          -- matrícula do vendedor no ERP
+        seller_name TEXT,                        -- nome do vendedor (quando o ERP traz)
+        valor REAL DEFAULT 0,                    -- valor vendido (base p/ nossas regras)
+        pecas REAL DEFAULT 0,                    -- peças vendidas
+        comissao_erp REAL DEFAULT 0,             -- comissão JÁ calculada pelo ERP (conferência)
+        external_ref TEXT,                       -- idempotência do sync (chave determinística)
+        synced_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, filial, matricula, sale_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_erp_seller_sales ON retail_erp_seller_sales (organization_id, sale_date);
+
       -- Memória de Padrões do Varejo (ADR-142 Fatia 1): padrões recorrentes
       -- observados numa loja (ou na rede). A confiança/status é calculada por
       -- REGRA (recorrência), não pelo LLM. store_id NULL = rede toda.

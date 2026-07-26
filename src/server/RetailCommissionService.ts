@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailSellerSalesService } from "./RetailSellerSalesService.js";
+import { RetailErpSellerSalesService } from "./RetailErpSellerSalesService.js";
 
 export type CommissionRuleInput = {
   name: string;
@@ -106,34 +107,39 @@ export class RetailCommissionService {
   }
 
   /**
-   * Vendas por VENDEDOR combinando o ZappFlow (pedidos com vendedor) com os
-   * lançamentos manuais/foto do Cenário B (retail_seller_sales). Consolida por
-   * vendedor (userId quando houver, senão nome) somando os dois canais — é a base
-   * da comissão por vendedor. `source`: zappflow | manual | zappflow+manual.
+   * Vendas por VENDEDOR combinando as três fontes: ZappFlow (pedidos com
+   * vendedor), lançamentos manuais/foto do Cenário B (retail_seller_sales) e o
+   * ERP do Cenário A (retail_erp_seller_sales). Consolida por vendedor (userId
+   * quando houver, senão nome) somando o valor vendido — é a base da comissão por
+   * vendedor. Do ERP guarda também a `erpCommission` (comissão já calculada lá),
+   * para conferir divergência contra a nossa apuração. `source` lista as fontes
+   * que contribuíram (ex.: zappflow+manual, erp, manual+erp).
    */
-  static combinedSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; source: string }> {
+  static combinedSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; erpCommission: number; source: string }> {
     const norm = (name: string) => String(name || "").trim().toLowerCase();
-    const map = new Map<string, { sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; sources: Set<string> }>();
-    // name normalizado → chave, p/ reconciliar lançamentos manuais (que trazem só
-    // o nome) com o vendedor do ZappFlow (que tem userId) de mesmo nome.
+    const map = new Map<string, { sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; erpCommission: number; sources: Set<string> }>();
+    // name normalizado → chave, p/ reconciliar lançamentos manuais/ERP (que
+    // trazem só o nome) com o vendedor do ZappFlow (que tem userId) de mesmo nome.
     const nameToKey = new Map<string, string>();
-    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string) => {
+    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string, erpCommission = 0) => {
       const n = norm(name);
       const k = (userId && `user:${userId}`) || nameToKey.get(n) || `nom:${n}`;
-      const cur = map.get(k) || { sellerUserId: userId || null, sellerName: name, sales: 0, pecas: 0, orders: 0, sources: new Set<string>() };
+      const cur = map.get(k) || { sellerUserId: userId || null, sellerName: name, sales: 0, pecas: 0, orders: 0, erpCommission: 0, sources: new Set<string>() };
       cur.sales = round2(cur.sales + (Number(sales) || 0));
       cur.pecas += Number(pecas) || 0;
       cur.orders += Number(orders) || 0;
+      cur.erpCommission = round2(cur.erpCommission + (Number(erpCommission) || 0));
       if (userId && !cur.sellerUserId) cur.sellerUserId = userId;
       cur.sources.add(source);
       map.set(k, cur);
       if (n && !nameToKey.has(n)) nameToKey.set(n, k);
     };
-    // ZappFlow primeiro: registra os nomes p/ o manual cair na mesma chave.
+    // ZappFlow primeiro: registra os nomes p/ o manual/ERP cair na mesma chave.
     for (const s of this.onlineSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, 0, s.orders, "zappflow");
     for (const s of RetailSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "manual");
+    for (const s of RetailErpSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "erp", s.erpCommission);
     return Array.from(map.values())
-      .map((v) => ({ sellerUserId: v.sellerUserId, sellerName: v.sellerName, sales: v.sales, pecas: v.pecas, orders: v.orders, source: Array.from(v.sources).sort().join("+") }))
+      .map((v) => ({ sellerUserId: v.sellerUserId, sellerName: v.sellerName, sales: v.sales, pecas: v.pecas, orders: v.orders, erpCommission: v.erpCommission, source: Array.from(v.sources).sort().join("+") }))
       .sort((a, b) => b.sales - a.sales);
   }
 
@@ -189,8 +195,9 @@ export class RetailCommissionService {
     return {
       period: { start, end },
       bySeller, byProduct, byStore, globalCommission,
-      totals: { sellerCommission: sum(bySeller, "commission"), productCommission: sum(byProduct, "commission"), storeCommission: round2(sum(byStore, "commission") + globalCommission), totalCommission },
+      totals: { sellerCommission: sum(bySeller, "commission"), productCommission: sum(byProduct, "commission"), storeCommission: round2(sum(byStore, "commission") + globalCommission), totalCommission, sellerErpCommission: sum(bySeller, "erpCommission") },
       hasRules: { seller: sellerRules.length > 0, product: productRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
+      hasErpSellerSales: bySeller.some((s: any) => Number(s.erpCommission) > 0 || String(s.source || "").includes("erp")),
     };
   }
 

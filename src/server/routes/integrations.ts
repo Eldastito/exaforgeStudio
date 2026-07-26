@@ -469,7 +469,7 @@ router.delete("/backups/:id", (req: AuthRequest, res): any => {
 // real (Fase 1) entra quando a Alterdata fornecer token + homologação.
 router.get("/alterdata/status", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId) });
+  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId) });
 });
 
 router.put("/alterdata/settings", (req: AuthRequest, res): any => {
@@ -481,8 +481,9 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
     syncIntervalMinutes: b.syncIntervalMinutes, priceTable: b.priceTable,
   });
   if (b.pdvAutoClosing !== undefined) AlterdataConnectorService.setPdvAutoClosing(req.organizationId, !!b.pdvAutoClosing);
+  if (b.pdvCustomerImport !== undefined) AlterdataConnectorService.setPdvCustomerImport(req.organizationId, !!b.pdvCustomerImport);
   logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SETTINGS_UPDATED', { enabled: !!b.enabled, environment: b.environment });
-  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId) });
+  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId) });
 });
 
 // Dispara o sync (backfill + delta) da org sob demanda (ADR-105, Fase 1c).

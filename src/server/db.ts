@@ -1884,6 +1884,31 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sale_items ON retail_pdv_sale_items (organization_id, sale_date);
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sale_items_prod ON retail_pdv_sale_items (organization_id, produto);
 
+      -- Clientes do PDV (ClienteMalote — Fase 3, opt-in por LGPD): base
+      -- SEPARADA dos contatos do WhatsApp; alimenta campanhas/aniversariantes
+      -- sem poluir o inbox nem acionar a IA. Chave: codigoN (código do ERP).
+      CREATE TABLE IF NOT EXISTS retail_pdv_customers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        codigo_n TEXT NOT NULL,                  -- código do cliente no ERP
+        nome TEXT,
+        cpf TEXT,
+        celular TEXT,
+        email TEXT,
+        nascimento TEXT,                         -- YYYY-MM-DD (aniversário)
+        filial TEXT,
+        cidade TEXT,
+        bairro TEXT,
+        primeira_compra TEXT,
+        ultima_compra TEXT,
+        inativo INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE(organization_id, codigo_n)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_pdv_customers ON retail_pdv_customers (organization_id);
+      CREATE INDEX IF NOT EXISTS idx_retail_pdv_customers_agg ON retail_pdv_customers (organization_id, nascimento);
+
       -- Recebíveis de cartão (parcelasCartao de cada VendaMalote): valor bruto,
       -- líquido (após taxa), taxa e vencimento por parcela — base da
       -- conciliação de cartão (quanto entra, quando, quanto a adquirente reteve).

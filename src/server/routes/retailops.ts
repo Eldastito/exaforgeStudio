@@ -464,6 +464,29 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// CLIENTES DO PDV (Fase 3, opt-in): busca por nome/CPF/celular + aniversariantes
+// do mês (?birthdayMonth=MM). Base separada dos contatos do WhatsApp.
+router.get("/pdv-customers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const q = String(req.query.q || "").trim();
+  const bMonth = String(req.query.birthdayMonth || "").trim().padStart(2, "0");
+  const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || "100"), 10) || 100));
+  const offset = Math.max(0, parseInt(String(req.query.offset || "0"), 10) || 0);
+  const where: string[] = ["organization_id = ?"]; const args: any[] = [orgId];
+  if (q) { where.push("(nome LIKE ? OR cpf LIKE ? OR celular LIKE ?)"); const like = `%${q}%`; args.push(like, like, like); }
+  if (/^\d{2}$/.test(bMonth)) { where.push("substr(nascimento, 6, 2) = ?"); args.push(bMonth); }
+  try {
+    const total = Number((db.prepare(`SELECT COUNT(*) c FROM retail_pdv_customers WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
+    const rows = db.prepare(
+      `SELECT codigo_n, nome, cpf, celular, email, nascimento, filial, cidade, ultima_compra
+         FROM retail_pdv_customers WHERE ${where.join(" AND ")}
+        ORDER BY nome LIMIT ? OFFSET ?`
+    ).all(...args, limit, offset) as any[];
+    res.json({ total, customers: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // RECEBÍVEIS DE CARTÃO (parcelasCartao do PDV): por dia de VENCIMENTO — bruto,
 // líquido (o que entra), taxa retida — + totais do período. ?store filtra filial.
 router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {

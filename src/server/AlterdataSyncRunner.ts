@@ -34,6 +34,8 @@ export interface SyncRunSummary {
   caixas: { applied: number; skippedNoStore: number; errors: number };
   /** Vendas do PDV importadas (venda a venda, com vendedor — Fase 4). */
   vendas: { imported: number };
+  /** Clientes do PDV importados (Fase 3, opt-in). */
+  clientes: { imported: number };
   filiais: string[];
   ranAt: string;
 }
@@ -354,6 +356,47 @@ export class AlterdataSyncRunner {
       });
     } catch { /* endpoint indisponível nesta instalação — segue sem vendas PDV */ }
 
+    // 7) CLIENTES DO PDV (módulo CRM — Fase 3, OPT-IN por LGPD): ClienteMalote/
+    //    versao é o stream de clientes (item embrulha em `cliente`). Vai para uma
+    //    base SEPARADA (retail_pdv_customers), não para os contatos do WhatsApp.
+    const clientes = { imported: 0 };
+    if (AlterdataConnectorService.isPdvCustomerImport(orgId)) {
+      try {
+        const insCli = db.prepare(
+          `INSERT INTO retail_pdv_customers (id, organization_id, codigo_n, nome, cpf, celular, email, nascimento, filial, cidade, bairro, primeira_compra, ultima_compra, inativo, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(organization_id, codigo_n) DO UPDATE SET
+             nome = excluded.nome, cpf = excluded.cpf, celular = excluded.celular, email = excluded.email,
+             nascimento = excluded.nascimento, filial = excluded.filial, cidade = excluded.cidade, bairro = excluded.bairro,
+             primeira_compra = excluded.primeira_compra, ultima_compra = excluded.ultima_compra, inativo = excluded.inativo,
+             updated_at = CURRENT_TIMESTAMP`
+        );
+        await AlterdataSyncService.syncResource(orgId, {
+          moduleKey: "crm", resource: "ClienteMalote", maxPages: 200,
+          buildPath: (c) => `/api/v1/ClienteMalote/versao/${c}`,
+          onItems: (items) => {
+            let n = 0;
+            for (const it of items) {
+              const c = it?.cliente ?? it;
+              const codigoN = str(c?.codigoN ?? c?.codigon);
+              if (!codigoN) continue;
+              insCli.run(
+                randomUUID(), orgId, codigoN, str(c?.nome) || null, str(c?.cgc) || null,
+                str(c?.celular) || str(c?.telefone) || null, str(c?.email) || null,
+                str(c?.nascimento).slice(0, 10) || null, str(c?.filial) || null,
+                str(c?.cidade) || null, str(c?.bairro) || null,
+                str(c?.primeiraCompra).slice(0, 10) || null, str(c?.ultimaCompra).slice(0, 10) || null,
+                Number(c?.inativo) === 1 ? 1 : 0
+              );
+              n++;
+            }
+            clientes.imported += n;
+            return n;
+          },
+        });
+      } catch { /* módulo CRM indisponível — segue sem clientes */ }
+    }
+
     // Preço de EXIBIÇÃO do produto: o ERP precifica por VARIANTE (grade), mas o
     // card do catálogo e a vitrine mostram products_services.price — que veio
     // 0.0 da Referencia. Sem isso, o produto aparece "R$ 0,00" mesmo com as
@@ -374,7 +417,7 @@ export class AlterdataSyncRunner {
     const totalProdutos = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> ''`).get(orgId) as any)?.c || 0);
     const totalVariantes = Number((db.prepare(`SELECT COUNT(*) c FROM product_variants WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
     const summary: SyncRunSummary = {
-      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, vendas, filiais,
+      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, vendas, clientes, filiais,
       ranAt: new Date().toISOString(),
     };
     // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'

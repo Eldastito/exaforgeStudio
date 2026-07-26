@@ -104,6 +104,17 @@ async function main() {
   check("itens da venda (vendas[]) gravados com produto/vendedor por linha", saleItems.length === 2 && saleItems[0].produto === "0822930941201" && saleItems[0].vendedor === "10050026" && Number(saleItems[1].quantidade) === 3, JSON.stringify(saleItems));
   const cardInst = db.prepare(`SELECT parcela, valor, liquido, taxa, vencimento FROM retail_pdv_card_installments WHERE organization_id=? AND filial='1' AND numero='000574' ORDER BY seq`).all(A) as any[];
   check("parcelas de cartão gravadas (líquido/taxa/vencimento)", cardInst.length === 2 && Number(cardInst[0].liquido) === 286.96 && Number(cardInst[0].taxa) === 3.24, JSON.stringify(cardInst));
+
+  // ===== 2d. Clientes do PDV (Fase 3, opt-in) =====
+  AlterdataConnectorService.setPdvCustomerImport(A, true);
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    if (url.includes("/ClienteMalote/versao/0")) return resp(200, { success: true, data: [{ cliente: { nome: "MAGNO TAVAREZ", cgc: "124-397-347/13", celular: "(21)7306-9955", email: "magno@x.com", nascimento: "1985-06-01T00:00:00", filial: "1", codigoN: "1006000001", ultimaCompra: "2017-09-09T00:00:00", inativo: 0 }, controleVersao: 990 }] }, {});
+    return resp(200, { success: true, data: [] }, {});
+  });
+  const s3 = await AlterdataSyncRunner.runOrg(A);
+  check("clientes do PDV importados (opt-in)", s3.clientes?.imported === 1, JSON.stringify(s3.clientes));
+  const cli = db.prepare(`SELECT nome, celular, nascimento FROM retail_pdv_customers WHERE organization_id=? AND codigo_n='1006000001'`).get(A) as any;
+  check("cliente gravado com nome/celular/aniversário", cli?.nome === "MAGNO TAVAREZ" && cli?.nascimento === "1985-06-01" && !!cli?.celular, JSON.stringify(cli));
   const closingRow = db.prepare(`SELECT id, system_total, informed_total, status, divergence_status FROM retail_daily_closings WHERE organization_id=? AND store_id=? AND closing_date=?`).get(A, store.id, hoje) as any;
   check("system_total do dia gravado do PDV (2253.33)", Number(closingRow?.system_total) === 2253.33, JSON.stringify(closingRow));
   check("auto: fechamento preenchido com o total do PDV", Number(closingRow?.informed_total) === 2253.33 && closingRow?.status === "received", JSON.stringify(closingRow));

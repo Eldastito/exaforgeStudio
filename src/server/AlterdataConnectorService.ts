@@ -154,6 +154,16 @@ export class AlterdataConnectorService {
     this.setCursor(orgId, "_meta", "pdvAutoClosing", "", on ? "1" : "0");
   }
 
+  // Importar a base de CLIENTES do PDV (ClienteMalote → retail_pdv_customers).
+  // Opt-in por LGPD: dado pessoal só entra com autorização explícita, e numa
+  // base SEPARADA (não polui os contatos/inbox do WhatsApp).
+  static isPdvCustomerImport(orgId: string): boolean {
+    return this.getCursor(orgId, "_meta", "pdvCustomerImport", "") === "1";
+  }
+  static setPdvCustomerImport(orgId: string, on: boolean): void {
+    this.setCursor(orgId, "_meta", "pdvCustomerImport", "", on ? "1" : "0");
+  }
+
   // ---- cursor do delta-sync ----
 
   static getCursor(orgId: string, module: string, resource: string, filial = ""): string {

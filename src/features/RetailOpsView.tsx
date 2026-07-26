@@ -308,13 +308,14 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'maisvendidos' | 'cartao' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'maisvendidos', label: 'Mais vendidos', icon: TrendingUp },
   { key: 'cartao', label: 'Recebíveis (cartão)', icon: CreditCard },
+  { key: 'clientes', label: 'Clientes (PDV)', icon: Users },
   { key: 'divergencia', label: 'Divergência', icon: Scale },
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
   { key: 'reposicao', label: 'Reposição (grade)', icon: Boxes },
@@ -349,6 +350,7 @@ export function RetailOpsView() {
       {tab === 'comissao' && <CommissionTab />}
       {tab === 'maisvendidos' && <TopProductsTab />}
       {tab === 'cartao' && <CardReceivablesTab />}
+      {tab === 'clientes' && <PdvCustomersTab />}
       {tab === 'divergencia' && <ReconciliationTab />}
       {tab === 'estoque' && <NegativeStockTab />}
       {tab === 'reposicao' && <ReplenishmentTab />}
@@ -876,6 +878,65 @@ function ReplenishmentTab() {
 }
 
 
+
+
+// ---- Clientes do PDV (Fase 3, opt-in) ---------------------------------------
+function PdvCustomersTab() {
+  const [q, setQ] = useState('');
+  const [bMonth, setBMonth] = useState('');
+  const [data, setData] = useState<{ total: number; customers: any[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = () => {
+    setLoading(true);
+    apiFetch(`/api/retailops/pdv-customers?q=${encodeURIComponent(q)}&birthdayMonth=${bMonth}&limit=100`)
+      .then(r => r.json())
+      .then(d => setData(d && !d.error ? d : null))
+      .catch(() => toast.error('Falha ao carregar clientes.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, bMonth]);
+  const MESES = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  return (
+    <div>
+      <p className="text-[12px] text-zinc-500 mb-3">Base de clientes do PDV (nome, CPF, celular, e-mail, aniversário) — separada dos contatos do WhatsApp, para campanhas e relacionamento. Requer o opt-in "Importar clientes do PDV" em Integrações → Alterdata.</p>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nome, CPF ou celular…" className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
+        <select value={bMonth} onChange={e => setBMonth(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-2 text-sm text-zinc-100" title="Aniversariantes do mês">
+          {MESES.map((m, i) => <option key={i} value={i === 0 ? '' : String(i).padStart(2, '0')}>{i === 0 ? 'Aniversário: todos os meses' : `Aniversário: ${m}`}</option>)}
+        </select>
+        {data && <span className="text-xs text-zinc-500">{data.total} cliente(s)</span>}
+      </div>
+      {loading ? (
+        <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+      ) : !data || data.customers.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum cliente do PDV {q || bMonth ? 'para este filtro' : 'importado ainda'}. Ligue "Importar clientes do PDV" em Integrações → Alterdata e sincronize.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">Nome</th>
+              <th className="px-3 py-2 text-left font-medium">Celular</th>
+              <th className="px-3 py-2 text-left font-medium">E-mail</th>
+              <th className="px-3 py-2 text-left font-medium">Aniversário</th>
+              <th className="px-3 py-2 text-left font-medium">Última compra</th>
+            </tr></thead>
+            <tbody>
+              {data.customers.map((c: any) => (
+                <tr key={c.codigo_n} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-2 text-zinc-200">{c.nome || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-300">{c.celular || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-400">{c.email || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-300">{c.nascimento ? c.nascimento.slice(5).split('-').reverse().join('/') : '—'}</td>
+                  <td className="px-3 py-2 text-zinc-400">{c.ultima_compra ? c.ultima_compra.split('-').reverse().join('/') : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---- Recebíveis de cartão (parcelasCartao do PDV) ---------------------------
 function CardReceivablesTab() {

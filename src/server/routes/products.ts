@@ -520,9 +520,18 @@ router.get("/:id/variants", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const variants = db.prepare(`
-      SELECT pv.*, inv.quantity_available, inv.quantity_reserved
+      SELECT pv.*,
+        COALESCE(inv.quantity_available, rsi.qa) AS quantity_available,
+        COALESCE(inv.quantity_reserved, rsi.qr) AS quantity_reserved
       FROM product_variants pv
       LEFT JOIN inventory_items inv ON inv.variant_id = pv.id
+      LEFT JOIN (
+        -- Estoque POR LOJA (rede/ERP, ADR-083): soma das lojas como fallback —
+        -- sem isso a grade sincronizada do Alterdata aparece "0 em estoque" no
+        -- modal mesmo com saldo nas filiais.
+        SELECT variant_id, SUM(quantity_available) qa, SUM(quantity_reserved) qr
+        FROM retail_store_inventory WHERE variant_id IS NOT NULL AND variant_id <> '' GROUP BY variant_id
+      ) rsi ON rsi.variant_id = pv.id
       WHERE pv.organization_id = ? AND pv.product_service_id = ?
       ORDER BY pv.created_at ASC
     `).all(orgId, req.params.id) as any[];

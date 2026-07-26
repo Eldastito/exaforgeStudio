@@ -250,6 +250,23 @@ export class AlterdataSyncRunner {
         RetailReconciliationService.applyPdvTotal(orgId, storeId, g.date, totalR);
         caixas.applied++;
       }
+
+      // RETROATIVO: fechamentos que JÁ têm o total do PDV (system_total gravado
+      // por syncs anteriores) mas seguem pendentes — acontece quando o modo
+      // automático é ligado DEPOIS do sync que os trouxe (o delta do DataCaixa
+      // não revisita caixas antigos). Preenche direto do banco, sem API.
+      if (autoClosing) {
+        const pendentes = db.prepare(
+          `SELECT id, store_id, closing_date, system_total FROM retail_daily_closings
+            WHERE organization_id = ? AND status = 'pending' AND COALESCE(informed_total, 0) = 0
+              AND COALESCE(system_total, 0) > 0 AND closing_date >= date('now', '-90 days')`
+        ).all(orgId) as any[];
+        for (const c of pendentes) {
+          RetailClosingService.setInformed(orgId, c.id, { informedTotal: Number(c.system_total), source: "pdv" });
+          RetailReconciliationService.applyPdvTotal(orgId, c.store_id, c.closing_date, Number(c.system_total));
+          caixas.applied++;
+        }
+      }
     } catch { /* módulo Sales indisponível nesta instalação — segue sem PDV */ }
 
     // Preço de EXIBIÇÃO do produto: o ERP precifica por VARIANTE (grade), mas o

@@ -101,6 +101,18 @@ async function main() {
   const payItems = db.prepare(`SELECT payment_method, informed_amount FROM retail_daily_closing_items WHERE closing_id=? ORDER BY payment_method`).all(closingRow.id) as any[];
   check("auto: formas de pagamento do PDV gravadas (cartão+dinheiro)", payItems.length === 2 && payItems[0]?.payment_method === "cartao" && Number(payItems[0]?.informed_amount) === 2153.33 && payItems[1]?.payment_method === "dinheiro", JSON.stringify(payItems));
 
+  // ===== 2c. RETROATIVO: pendente com system_total (modo ligado depois) =====
+  // O delta do DataCaixa não revisita caixas antigos — mas o total do PDV já
+  // está no banco; o modo automático preenche direto de lá, sem API.
+  const { RetailClosingService } = await import("../src/server/RetailOpsService.js");
+  const ontem = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const cPrev = RetailClosingService.getOrCreate(A, store.id, ontem);
+  db.prepare(`UPDATE retail_daily_closings SET system_total = 500 WHERE id = ?`).run(cPrev.id);
+  __setAlterdataSyncHttpForTests(async () => resp(200, { success: true, data: [] }, {}));
+  await AlterdataSyncRunner.runOrg(A);
+  const rowPrev = db.prepare(`SELECT informed_total, status, divergence_status FROM retail_daily_closings WHERE id = ?`).get(cPrev.id) as any;
+  check("retroativo: pendente com system_total vira recebido (500, ok)", Number(rowPrev?.informed_total) === 500 && rowPrev?.status === "received" && rowPrev?.divergence_status === "ok", JSON.stringify(rowPrev));
+
   // ===== 3. Mapper de estoque: casos diretos =====
   // Saldo negativo permitido + idempotência.
   AlterdataStockMapper.upsertSaldos(A, [{ filial: "1", produto: "7891234567901", saldoAtual: -3 }]);

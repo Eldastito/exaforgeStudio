@@ -352,6 +352,10 @@ export class AlterdataSyncRunner {
     const hoje = new Date().toISOString().slice(0, 10);
     const f0 = filiais.find((f) => f) || "";
     await run("DataCaixa (delta versao)", "sales", `/api/v1/DataCaixa/versao/0`);
+    // MÓDULO CRM (Fase 3 — clientes do PDV): sonda os nomes prováveis do
+    // recurso de cliente; o corpo (ou o 404) revela o contrato real.
+    await run("CRM Cliente (delta versao)", "crm", `/api/v1/Cliente/versao/0`);
+    await run("CRM Pessoa (delta versao)", "crm", `/api/v1/Pessoa/versao/0`);
     if (f0) {
       await run(`DataCaixa (últ. movimento filial ${f0})`, "sales", `/api/v1/DataCaixa/UltimoMovimento/${encodeURIComponent(f0)}`);
       await run(`DataCaixa (dia ${hoje} filial ${f0})`, "sales", `/api/v1/DataCaixa/${hoje}/${encodeURIComponent(f0)}`);

@@ -596,6 +596,18 @@ function ClosingsTab() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         </label>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        <button
+          onClick={async () => {
+            const res = await apiFetch('/api/retailops/quotas/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, apply: true }) });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok) { toast.success(d.suggestions?.length ? `Cotas sugeridas pelo PDV aplicadas a ${d.suggestions.length} loja(s).` : 'Sem histórico do PDV suficiente para sugerir cotas ainda.'); load(); }
+            else toast.error(d.error || 'Falha ao sugerir cotas.');
+          }}
+          title="Calcula a cota de cada loja pela média do MESMO dia da semana nas últimas 8 semanas (vendas reais do PDV via Alterdata) e aplica na data selecionada."
+          className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/20"
+        >
+          Sugerir cotas (PDV)
+        </button>
         {bridge !== null && (
           <button
             onClick={toggleBridge}

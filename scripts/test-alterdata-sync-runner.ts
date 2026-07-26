@@ -122,6 +122,31 @@ async function main() {
   const payItems = db.prepare(`SELECT payment_method, informed_amount FROM retail_daily_closing_items WHERE closing_id=? ORDER BY payment_method`).all(closingRow.id) as any[];
   check("auto: formas de pagamento do PDV gravadas (cartão+dinheiro)", payItems.length === 2 && payItems[0]?.payment_method === "cartao" && Number(payItems[0]?.informed_amount) === 2153.33 && payItems[1]?.payment_method === "dinheiro", JSON.stringify(payItems));
 
+  // ===== 2e. Comissão por VENDEDOR do ERP (Cenário A) =====
+  // Venda/ComissaoVendasPorPeriodo é consultado MÊS A MÊS (janela de backfill).
+  // O mock devolve as MESMAS linhas com `data` fixa em toda janela → o dedupe por
+  // (filial|matrícula|dia) colapsa para 1 linha por vendedor (idempotente).
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    if (url.includes("/Venda/ComissaoVendasPorPeriodo/")) return resp(200, { success: true, data: [
+      { matricula: "10050026", nome: "ANA SILVA", filial: "1", data: "2025-06-15T00:00:00", valorVendido: 1200, pecas: 8, comissao: 60 },
+      { matricula: "10050042", nome: "BRUNO LIMA", filial: "1", data: "2025-06-15T00:00:00", valorVendido: 800, pecas: 5, comissao: 40 },
+    ] }, {});
+    return resp(200, { success: true, data: [] }, {});
+  });
+  const s2e = await AlterdataSyncRunner.runOrg(A);
+  check("comissão do ERP importada (2 vendedores, dedupe entre janelas)", s2e.erpComissao?.imported === 2, JSON.stringify(s2e.erpComissao));
+  const erpRows = db.prepare(`SELECT matricula, seller_name, valor, comissao_erp, store_id FROM retail_erp_seller_sales WHERE organization_id=? ORDER BY valor DESC`).all(A) as any[];
+  check("2 linhas de comissão gravadas (não duplica entre os 18 meses)", erpRows.length === 2, JSON.stringify(erpRows));
+  check("linha da Ana: valor 1200 / comissão ERP 60 / loja resolvida pela filial", erpRows[0]?.valor === 1200 && erpRows[0]?.comissao_erp === 60 && erpRows[0]?.store_id === store.id, JSON.stringify(erpRows[0]));
+  const { RetailCommissionService } = await import("../src/server/RetailCommissionService.js");
+  const erpReport = RetailCommissionService.report(A, "2025-01-01", "2025-12-31");
+  check("relatório marca hasErpSellerSales (coluna Comissão ERP acende)", erpReport.hasErpSellerSales === true);
+  check("relatório soma a comissão do ERP p/ conferência (60+40=100)", Number(erpReport.totals?.sellerErpCommission) === 100, JSON.stringify(erpReport.totals));
+  // Reingestão idempotente: rodar de novo não duplica.
+  await AlterdataSyncRunner.runOrg(A);
+  const erpRows2 = (db.prepare(`SELECT COUNT(*) AS n FROM retail_erp_seller_sales WHERE organization_id=?`).get(A) as any).n;
+  check("reingestão idempotente (segue 2 linhas)", erpRows2 === 2, `linhas=${erpRows2}`);
+
   // ===== 2c. RETROATIVO: pendente com system_total (modo ligado depois) =====
   // O delta do DataCaixa não revisita caixas antigos — mas o total do PDV já
   // está no banco; o modo automático preenche direto de lá, sem API.

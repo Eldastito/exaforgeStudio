@@ -21,6 +21,7 @@ import { JobQueueService } from "./JobQueueService.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailReconciliationService } from "./RetailReconciliationService.js";
 import { RetailClosingService } from "./RetailOpsService.js";
+import { RetailErpSellerSalesService, type ErpSellerSaleRow } from "./RetailErpSellerSalesService.js";
 
 export interface SyncRunSummary {
   referencias: number;
@@ -34,6 +35,8 @@ export interface SyncRunSummary {
   caixas: { applied: number; skippedNoStore: number; errors: number };
   /** Vendas do PDV importadas (venda a venda, com vendedor — Fase 4). */
   vendas: { imported: number };
+  /** Comissão POR VENDEDOR calculada pelo ERP (Cenário A) — base + comissão de conferência. */
+  erpComissao: { imported: number };
   /** Clientes do PDV importados (Fase 3, opt-in). */
   clientes: { imported: number };
   filiais: string[];
@@ -356,6 +359,39 @@ export class AlterdataSyncRunner {
       });
     } catch { /* endpoint indisponível nesta instalação — segue sem vendas PDV */ }
 
+    // 6b) COMISSÃO POR VENDEDOR do ERP (módulo Sales — Cenário A): o VendaMalote
+    //    traz só o OPERADOR do caixa; o vendedor individual e a comissão JÁ
+    //    calculada vêm do relatório Venda/ComissaoVendasPorPeriodo. Guarda o valor
+    //    vendido (BASE para as nossas regras) e a comissao_erp (conferência de
+    //    divergência). Varre MÊS A MÊS uma janela de backfill — o histórico de
+    //    homologação é de meses atrás, então uma janela curta viria vazia; cada
+    //    chamada é um agregado por vendedor (barato) e o upsert é idempotente por
+    //    (filial, matrícula, mês). O mapper é defensivo (tenta os nomes de campo
+    //    mais prováveis). Falha do endpoint NÃO derruba o sync.
+    const erpComissao = { imported: 0 };
+    try {
+      const COMMISSION_BACKFILL_MONTHS = 18;
+      // Dedupe entre janelas pela MESMA chave natural do ingest (filial|matrícula|
+      // dia) — se o payload não tiver data por linha, cada mês cai no seu fim-de-mês
+      // (`w.end`), então meses distintos não colidem e o mesmo vendedor não conta 2x.
+      const byKey = new Map<string, ErpSellerSaleRow>();
+      for (const w of lastMonthsWindows(COMMISSION_BACKFILL_MONTHS)) {
+        let page = 1;
+        while (page <= 50) {
+          const { items, totalPages } = await AlterdataSyncService.apiGet(
+            orgId, "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${w.start}/${w.end}`, { page }
+          );
+          for (const it of items) {
+            const row = RetailErpSellerSalesService.mapErpRow(it, w.end);
+            if (row) byKey.set(`${row.filial || ""}|${row.matricula || (row.sellerName || "").toLowerCase()}|${row.saleDate}`, row);
+          }
+          if (!totalPages || page >= totalPages || items.length === 0) break;
+          page++;
+        }
+      }
+      if (byKey.size) erpComissao.imported += RetailErpSellerSalesService.ingest(orgId, Array.from(byKey.values()));
+    } catch { /* endpoint de comissão indisponível nesta instalação — segue sem ele */ }
+
     // 7) CLIENTES DO PDV (módulo CRM — Fase 3, OPT-IN por LGPD): ClienteMalote/
     //    versao é o stream de clientes (item embrulha em `cliente`). Vai para uma
     //    base SEPARADA (retail_pdv_customers), não para os contatos do WhatsApp.
@@ -417,7 +453,7 @@ export class AlterdataSyncRunner {
     const totalProdutos = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> ''`).get(orgId) as any)?.c || 0);
     const totalVariantes = Number((db.prepare(`SELECT COUNT(*) c FROM product_variants WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
     const summary: SyncRunSummary = {
-      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, vendas, clientes, filiais,
+      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, vendas, erpComissao, clientes, filiais,
       ranAt: new Date().toISOString(),
     };
     // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'
@@ -488,11 +524,12 @@ export class AlterdataSyncRunner {
     // FASE 4 (comissão por vendedor / vendas reais): controller Venda do módulo
     // Sales — o corpo revela o shape da comissão por vendedor e do stream de
     // vendas (VendaMalote/versao é versionado, igual aos que já sincronizamos).
-    // Comissão POR VENDEDOR calculada pelo ERP — janela de 90 dias (as vendas
-    // de homologação são de mai/jun; a janela recente vinha vazia). É a fonte
-    // correta do vendedor individual (o VendaMalote só tem o operador de caixa).
-    const noventaDias = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-    await run("Venda Comissão (90 dias)", "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${noventaDias}/${hoje}`);
+    // Comissão POR VENDEDOR calculada pelo ERP — janela LARGA (18 meses): o
+    // histórico de homologação é de meses atrás, então uma janela curta vinha
+    // vazia e escondia o formato real do payload. É a fonte correta do vendedor
+    // individual (o VendaMalote só tem o operador de caixa).
+    const janelaComissao = new Date(Date.now() - 548 * 86_400_000).toISOString().slice(0, 10);
+    await run("Venda Comissão (18 meses)", "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${janelaComissao}/${hoje}`);
     await run("VendaMalote (delta versao)", "sales", `/api/v1/VendaMalote/versao/0`);
     await run("VendaMalote (resumo por filial)", "sales", `/api/v1/VendaMalote/relatorio/resumo/porfilial`);
     if (f0) {
@@ -519,6 +556,19 @@ export class AlterdataSyncRunner {
       } catch (e) { console.error("[Alterdata] pass falhou p/ org", orgId, e); }
     }
   }
+}
+
+/** Janelas [1º dia, último dia] (YYYY-MM-DD) dos últimos N meses, mês atual incluído.
+ *  Usado pelo pull de comissão do ERP, que consulta por período mês a mês. */
+function lastMonthsWindows(n: number): Array<{ start: string; end: string }> {
+  const out: Array<{ start: string; end: string }> = [];
+  const now = new Date();
+  for (let i = 0; i < n; i++) {
+    const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0));
+    out.push({ start: first.toISOString().slice(0, 10), end: last.toISOString().slice(0, 10) });
+  }
+  return out;
 }
 
 function enabledOrgs(): string[] {

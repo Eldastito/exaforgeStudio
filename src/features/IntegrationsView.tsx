@@ -951,6 +951,10 @@ function AlterdataConnectorPanel() {
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />
           Integração ativa
         </label>
+        <label className="flex items-center gap-2 text-sm text-zinc-300" title="Preenche o fechamento diário PENDENTE de cada loja com o total e as formas de pagamento vindos do PDV — a loja não precisa digitar. Quem informar manualmente antes continua valendo (conferência supervisionada).">
+          <input type="checkbox" checked={!!st?.pdvAutoClosing} onChange={e => save({ pdvAutoClosing: e.target.checked })} disabled={saving} />
+          Fechamento automático pelo PDV
+        </label>
         {st?.tokenExpiresAt && <span className="text-[11px] text-zinc-500">token expira: {new Date(st.tokenExpiresAt).toLocaleString('pt-BR')}</span>}
       </div>
 

@@ -143,6 +143,17 @@ export class AlterdataConnectorService {
     return `https://${host.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
   }
 
+  // ---- Fechamento automático pelo PDV (Fase 2) ----
+  // Quando ligado, o sync preenche o fechamento diário PENDENTE com o total (e
+  // formas de pagamento) do PDV — a loja não precisa digitar; quem informar
+  // manualmente antes continua valendo (modo supervisionado por fechamento).
+  static isPdvAutoClosing(orgId: string): boolean {
+    return this.getCursor(orgId, "_meta", "pdvAutoClosing", "") === "1";
+  }
+  static setPdvAutoClosing(orgId: string, on: boolean): void {
+    this.setCursor(orgId, "_meta", "pdvAutoClosing", "", on ? "1" : "0");
+  }
+
   // ---- cursor do delta-sync ----
 
   static getCursor(orgId: string, module: string, resource: string, filial = ""): string {

@@ -19,6 +19,7 @@ import { AlterdataPriceMapper } from "./AlterdataPriceMapper.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailReconciliationService } from "./RetailReconciliationService.js";
+import { RetailClosingService } from "./RetailOpsService.js";
 
 export interface SyncRunSummary {
   referencias: number;
@@ -212,22 +213,42 @@ export class AlterdataSyncRunner {
         }
         return storeCache.get(filial) || null;
       };
+      // Fechamento AUTOMÁTICO pelo PDV (opt-in): preenche o fechamento PENDENTE
+      // com o total e as formas de pagamento do PDV — a loja não digita nada.
+      // Quem informou manualmente antes continua valendo (supervisionado).
+      const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
+      const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "outros": "outros" };
       for (const g of groups.values()) {
         const storeId = storeIdFor(g.filial);
         if (!storeId) { caixas.skippedNoStore++; continue; }
         let total = 0;
         let got = false;
+        const pay = new Map<string, number>();
         for (const turno of g.turnos) {
           try {
             const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(g.filial)}/${g.date}/${turno}`);
-            const tv = (items as any[]).find((r) => String(r?.titulo || "").trim().toLowerCase() === "total de vendas");
-            if (tv != null) { total += Number(tv.valor || 0); got = true; }
+            for (const r of items as any[]) {
+              const titulo = String(r?.titulo || "").trim().toLowerCase();
+              const valor = Number(r?.valor || 0);
+              if (titulo === "total de vendas") { total += valor; got = true; }
+              else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
+            }
           } catch { caixas.errors++; /* um turno com erro não derruba o dia */ }
         }
-        if (got) {
-          RetailReconciliationService.applyPdvTotal(orgId, storeId, g.date, Math.round(total * 100) / 100);
-          caixas.applied++;
+        if (!got) continue;
+        const totalR = Math.round(total * 100) / 100;
+        if (autoClosing && totalR > 0) {
+          const closing = RetailClosingService.getOrCreate(orgId, storeId, g.date);
+          if (closing?.status === "pending" && Number(closing.informed_total || 0) === 0) {
+            RetailClosingService.setInformed(orgId, closing.id, {
+              informedTotal: totalR,
+              items: Array.from(pay.entries()).map(([paymentMethod, v]) => ({ paymentMethod, informedAmount: Math.round(v * 100) / 100 })),
+              source: "pdv",
+            });
+          }
         }
+        RetailReconciliationService.applyPdvTotal(orgId, storeId, g.date, totalR);
+        caixas.applied++;
       }
     } catch { /* módulo Sales indisponível nesta instalação — segue sem PDV */ }
 

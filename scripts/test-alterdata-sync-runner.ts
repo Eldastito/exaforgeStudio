@@ -83,17 +83,23 @@ async function main() {
 
   // ===== 2b. Fechamento do PDV (módulo Sales — Fase 2) =====
   // DataCaixa fechado (finalizado2=1) → busca ResumoFecharMovimento e grava o
-  // "Total de Vendas" como system_total do fechamento diário da loja.
+  // "Total de Vendas" como system_total. Com o modo AUTOMÁTICO ligado, também
+  // preenche o fechamento pendente (informado = PDV, itens por forma de pgto).
+  AlterdataConnectorService.setPdvAutoClosing(A, true);
   const hoje = new Date().toISOString().slice(0, 10);
   __setAlterdataSyncHttpForTests(async (url: string) => {
     if (url.includes("/DataCaixa/versao/0")) return resp(200, { success: true, data: [{ data: `${hoje}T00:00:00`, filial: "1", turno: 1, finalizado2: 1, controleVersao: 900 }] }, {});
-    if (url.includes("/ResumoFecharMovimento/1/")) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 2253.33 }, { titulo: "Dinheiro", valor: 100.0 }] }, {});
+    if (url.includes("/ResumoFecharMovimento/1/")) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 2253.33 }, { titulo: "Dinheiro", valor: 100.0 }, { titulo: "Cartão", valor: 2153.33 }, { titulo: "Sangria", valor: 50.0 }] }, {});
     return resp(200, { success: true, data: [] }, {});
   });
   const s2 = await AlterdataSyncRunner.runOrg(A);
   check("runOrg concilia o fechamento do PDV (caixas.applied=1)", s2.caixas?.applied === 1, JSON.stringify(s2.caixas));
-  const closingRow = db.prepare(`SELECT system_total FROM retail_daily_closings WHERE organization_id=? AND store_id=? AND closing_date=?`).get(A, store.id, hoje) as any;
+  const closingRow = db.prepare(`SELECT id, system_total, informed_total, status, divergence_status FROM retail_daily_closings WHERE organization_id=? AND store_id=? AND closing_date=?`).get(A, store.id, hoje) as any;
   check("system_total do dia gravado do PDV (2253.33)", Number(closingRow?.system_total) === 2253.33, JSON.stringify(closingRow));
+  check("auto: fechamento preenchido com o total do PDV", Number(closingRow?.informed_total) === 2253.33 && closingRow?.status === "received", JSON.stringify(closingRow));
+  check("auto: divergência ok (informado = PDV)", closingRow?.divergence_status === "ok", String(closingRow?.divergence_status));
+  const payItems = db.prepare(`SELECT payment_method, informed_amount FROM retail_daily_closing_items WHERE closing_id=? ORDER BY payment_method`).all(closingRow.id) as any[];
+  check("auto: formas de pagamento do PDV gravadas (cartão+dinheiro)", payItems.length === 2 && payItems[0]?.payment_method === "cartao" && Number(payItems[0]?.informed_amount) === 2153.33 && payItems[1]?.payment_method === "dinheiro", JSON.stringify(payItems));
 
   // ===== 3. Mapper de estoque: casos diretos =====
   // Saldo negativo permitido + idempotência.

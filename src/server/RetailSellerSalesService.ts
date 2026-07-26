@@ -87,6 +87,47 @@ export class RetailSellerSalesService {
     return db.prepare(`SELECT * FROM retail_seller_sales WHERE id IN (${placeholders})`).all(...created) as any[];
   }
 
+  /**
+   * Edita um lançamento já feito (uma linha). Só altera os campos enviados —
+   * nome, valor, peças, data, loja e matrícula. Não muda a origem (manual/foto).
+   * Retorna a linha atualizada, ou null se não existir na org.
+   */
+  static update(
+    orgId: string,
+    id: string,
+    patch: { sellerName?: string; valor?: number; pecas?: number; saleDate?: string; storeId?: string | null; matricula?: string | null },
+    actorId?: string
+  ): any | null {
+    const row = db.prepare(`SELECT * FROM retail_seller_sales WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!row) return null;
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (patch.sellerName !== undefined) {
+      const name = String(patch.sellerName || "").trim();
+      if (!name) throw new Error("O nome do vendedor não pode ficar em branco.");
+      sets.push("seller_name = ?"); vals.push(name);
+    }
+    if (patch.valor !== undefined) { sets.push("valor = ?"); vals.push(round2(patch.valor)); }
+    if (patch.pecas !== undefined) { sets.push("pecas = ?"); vals.push(Number(patch.pecas || 0) || 0); }
+    if (patch.saleDate !== undefined) {
+      const d = String(patch.saleDate || "").slice(0, 10);
+      if (!d) throw new Error("Data inválida.");
+      sets.push("sale_date = ?"); vals.push(d);
+    }
+    if (patch.storeId !== undefined) { sets.push("store_id = ?"); vals.push(patch.storeId ? String(patch.storeId) : null); }
+    if (patch.matricula !== undefined) { sets.push("matricula = ?"); vals.push(patch.matricula ? String(patch.matricula).trim() : null); }
+    // Guarda contra ficar sem valor E sem peças (linha vazia): usa o novo valor
+    // quando enviado, senão o atual.
+    const nextValor = patch.valor !== undefined ? round2(patch.valor) : Number(row.valor || 0);
+    const nextPecas = patch.pecas !== undefined ? (Number(patch.pecas || 0) || 0) : Number(row.pecas || 0);
+    if (nextValor <= 0 && nextPecas <= 0) throw new Error("Informe um valor ou a quantidade de peças.");
+    if (!sets.length) return row;
+    sets.push("updated_at = CURRENT_TIMESTAMP");
+    db.prepare(`UPDATE retail_seller_sales SET ${sets.join(", ")} WHERE organization_id = ? AND id = ?`).run(...vals, orgId, id);
+    try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_SELLER_SALES_UPDATED", { fields: Object.keys(patch) }); } catch { /* noop */ }
+    return db.prepare(`SELECT * FROM retail_seller_sales WHERE organization_id = ? AND id = ?`).get(orgId, id);
+  }
+
   static remove(orgId: string, id: string, actorId?: string): boolean {
     const r = db.prepare(`DELETE FROM retail_seller_sales WHERE organization_id = ? AND id = ?`).run(orgId, id);
     if (r.changes > 0) { try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_SELLER_SALES_DELETED", {}); } catch { /* noop */ } }

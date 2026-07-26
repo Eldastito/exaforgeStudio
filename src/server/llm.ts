@@ -444,6 +444,35 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente 
 }
 
 /**
+ * Lê a FOLHA DE VENDAS POR VENDEDOR (Cenário B): a loja anota, por vendedor, o
+ * total vendido e/ou o nº de peças. A IA extrai as linhas para o gestor CONFERIR
+ * antes de salvar (nunca salva sozinha). Devolve SOMENTE um JSON com a lista.
+ */
+export async function extractSellerSalesFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const system = `Você é um assistente de leitura de FOLHAS DE VENDAS POR VENDEDOR de loja no varejo brasileiro. Na folha, cada linha traz o NOME de um vendedor e o total vendido por ele (em reais) e/ou a quantidade de peças. Extraia todas as linhas legíveis e devolva SOMENTE um JSON:
+{"vendedores": [{"nome": <string, nome do vendedor>, "valor": <número em reais ou null>, "pecas": <número inteiro de peças ou null>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
+Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente um nome ou valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. Ignore linhas de total geral, cabeçalhos e anotações que não sejam de um vendedor. Não some nem calcule nada por conta própria. Responda SOMENTE o JSON, sem texto ao redor.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Leia esta folha de vendas por vendedor e devolva o JSON pedido com uma linha por vendedor (nome, valor, peças)." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        ],
+      },
+    ] as any,
+    temperature: 0.2,
+    max_tokens: 900,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * Cadastro por foto direto no WhatsApp (canal do gestor/lojista, separado da
  * IA de atendimento ao cliente): classificação BARATA e rápida (sem extrair
  * nada ainda) — só decide se a foto é de UM produto avulso (embalagem/rótulo)

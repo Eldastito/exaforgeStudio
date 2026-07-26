@@ -15,6 +15,7 @@ import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
+import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
 import { RetailImpactService } from "../RetailImpactService.js";
@@ -601,6 +602,65 @@ router.get("/pdv-sellers", (req: AuthRequest, res): any => {
     const sellers = rows.map((r) => ({ ...r, commission: pct > 0 ? Math.round(Number(r.sales) * pct) / 100 : null }));
     res.json({ start, end, commissionPercent: pct || null, commissionRuleScope: rule?.scope || null, sellers });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Vendas por VENDEDOR lançadas à mão / por foto (Cenário B) ---------------
+// Quando o ERP não traz o vendedor por venda, a loja anota no papel e o gestor
+// lança aqui (digitando ou enviando a foto p/ a IA ler). Alimenta a comissão
+// por vendedor (RetailCommissionService.combinedSalesBySeller).
+router.get("/seller-sales", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || "").slice(0, 10);
+  const end = String(req.query.end || "").slice(0, 10);
+  if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  res.json({ start, end, entries: RetailSellerSalesService.list(orgId, start, end, storeId) });
+});
+
+router.post("/seller-sales", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, saleDate, entries, source, imageUrl } = req.body || {};
+  if (!saleDate) return res.status(400).json({ error: "saleDate é obrigatório (YYYY-MM-DD)" });
+  if (!Array.isArray(entries) || entries.length === 0) return res.status(400).json({ error: "Informe ao menos um vendedor." });
+  if (storeId && !RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  try {
+    const created = RetailSellerSalesService.bulkCreate(orgId, { storeId, saleDate, entries, source, imageUrl }, req.user?.userId);
+    if (!created.length) return res.status(400).json({ error: "Nenhuma linha válida (precisa de nome e valor ou peças)." });
+    res.status(201).json({ created });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = RetailSellerSalesService.remove(orgId, String(req.params.id), req.user?.userId);
+  if (!ok) return res.status(404).json({ error: "not_found" });
+  res.json({ ok: true });
+});
+
+// Leitura por FOTO: a IA lê a folha e devolve as linhas para o gestor CONFERIR —
+// NÃO salva. O salvamento é o POST /seller-sales, após a confirmação humana.
+router.post("/seller-sales/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  closingUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
+    try {
+      const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+      let imageUrl: string | null = null;
+      try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); const name = `${randomUUID()}.jpg`; fs.writeFileSync(path.join(MEDIA_DIR, name), processed); imageUrl = `/media/${name}`; } catch { /* best-effort */ }
+      const out = await RetailSellerSalesService.extractFromImage(processed.toString("base64"), "image/jpeg");
+      res.json({ ...out, imageUrl });
+    } catch (e: any) {
+      console.error("[Retail Seller Sales Scan] erro", e);
+      res.status(500).json({ error: "Falha ao ler a folha de vendas com a IA. Tente uma foto mais nítida ou lance os valores manualmente." });
+    }
+  });
 });
 
 // --- Responsáveis por loja (cobrança por pessoa, ADR-108) ---

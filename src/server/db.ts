@@ -1945,6 +1945,30 @@ const initDb = () => {
         UNIQUE(organization_id, matricula)
       );
 
+      -- Vendas por VENDEDOR lançadas manualmente / lidas por FOTO (Cenário B):
+      -- quando o vendedor por venda NÃO vem do ERP, a loja anota as vendas de
+      -- cada vendedor no papel e o gestor lança aqui (digitando ou enviando a
+      -- foto da folha p/ a IA ler). É a base da comissão por vendedor quando não
+      -- há atribuição individual no PDV. seller_name é o texto da folha;
+      -- matricula liga ao mapeamento retail_sellers quando existir.
+      CREATE TABLE IF NOT EXISTS retail_seller_sales (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT,                           -- loja (retail_stores.id) — opcional
+        sale_date TEXT NOT NULL,                 -- YYYY-MM-DD
+        seller_name TEXT NOT NULL,               -- nome escrito na folha
+        matricula TEXT,                          -- liga ao retail_sellers quando existir
+        valor REAL DEFAULT 0,                    -- total vendido em R$
+        pecas REAL DEFAULT 0,                    -- nº de peças vendidas
+        source TEXT DEFAULT 'manual',            -- manual | photo
+        image_url TEXT,                          -- foto da folha (origem photo)
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_seller_sales ON retail_seller_sales (organization_id, sale_date);
+
       -- Memória de Padrões do Varejo (ADR-142 Fatia 1): padrões recorrentes
       -- observados numa loja (ou na rede). A confiança/status é calculada por
       -- REGRA (recorrência), não pelo LLM. store_id NULL = rede toda.

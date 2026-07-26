@@ -396,10 +396,11 @@ export class AlterdataSyncRunner {
     const hoje = new Date().toISOString().slice(0, 10);
     const f0 = filiais.find((f) => f) || "";
     await run("DataCaixa (delta versao)", "sales", `/api/v1/DataCaixa/versao/0`);
-    // MÓDULO CRM (Fase 3 — clientes do PDV): sonda os nomes prováveis do
-    // recurso de cliente; o corpo (ou o 404) revela o contrato real.
-    await run("CRM Cliente (delta versao)", "crm", `/api/v1/Cliente/versao/0`);
-    await run("CRM Pessoa (delta versao)", "crm", `/api/v1/Pessoa/versao/0`);
+    // MÓDULO CRM (Fase 3 — clientes do PDV): controllers reais confirmados no
+    // Swagger do cliente — ClienteMalote/versao é o stream versionado com o
+    // cadastro completo; o corpo revela os campos p/ mapear em contacts.
+    await run("CRM ClienteMalote (delta versao)", "crm", `/api/v1/ClienteMalote/versao/0`);
+    await run("CRM ClienteCodigo (delta versao)", "crm", `/api/v1/ClienteCodigo/versao/0`);
     // FASE 4 (comissão por vendedor / vendas reais): controller Venda do módulo
     // Sales — o corpo revela o shape da comissão por vendedor e do stream de
     // vendas (VendaMalote/versao é versionado, igual aos que já sincronizamos).

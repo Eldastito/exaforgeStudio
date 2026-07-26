@@ -133,13 +133,11 @@ export class RetailCommissionService {
 
     const sellerRules = byScope("seller"), productRules = byScope("product"), storeRules = byScope("store"), globalRules = byScope("global");
 
-    // Por vendedor = vendas do ZappFlow (pedidos com vendedor) + vendas do PDV
-    // (matrícula do ERP via conector Alterdata, com nome do mapeamento
-    // retail_sellers) — fontes distintas, sem dupla contagem.
-    const bySeller = [
-      ...this.onlineSalesBySeller(orgId, start, end).map((s) => ({ ...s, source: "zappflow" })),
-      ...this.pdvSalesBySeller(orgId, start, end),
-    ].map((s) => ({ ...s, commission: commissionOf(sellerRules, s.sales, 0) }));
+    // Por vendedor = vendas do ZappFlow (pedidos com vendedor). O PDV NÃO entra
+    // aqui: o VendaMalote só traz o `matricula` do CAIXA (operador, que cruza
+    // lojas) — não o vendedor por item. A comissão individual do PDV virá do
+    // endpoint próprio do ERP (Venda/ComissaoVendasPorPeriodo), fase seguinte.
+    const bySeller = this.onlineSalesBySeller(orgId, start, end).map((s) => ({ ...s, source: "zappflow", commission: commissionOf(sellerRules, s.sales, 0) }));
     const byProduct = this.onlineSalesByProduct(orgId, start, end).map((p) => ({ ...p, commission: commissionOf(productRules, p.sales, 0) }));
 
     const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];

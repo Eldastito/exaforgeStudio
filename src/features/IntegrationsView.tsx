@@ -701,7 +701,8 @@ function AlterdataConnectorPanel() {
     if (sNoProd) skips.push(`${sNoProd} saldo(s) sem produto correspondente${sSample}`);
     if (pNoProd) skips.push(`${pNoProd} preço(s) sem produto correspondente${pSample}`);
     const totals = s.totalProdutos ? ` (catálogo: ${s.totalProdutos} produtos, ${s.totalVariantes || 0} variantes)` : '';
-    const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+    const pdv = Number(s.caixas?.applied || 0) ? ` · ${s.caixas.applied} fechamento(s) PDV` : '';
+    const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços${pdv}`;
     const text = skips.length ? `${base} — pulados: ${skips.join('; ')}` : base;
     toast.success(`Sincronizado: ${text}.`);
     setLastSync({ at: s.ranAt || new Date().toISOString(), ok: true, text });
@@ -757,7 +758,8 @@ function AlterdataConnectorPanel() {
           if (Number(s.saldos?.skippedNoProduct || 0)) skips.push(`${s.saldos.skippedNoProduct} saldo(s) sem produto correspondente`);
           if (Number(s.precos?.skippedNoProduct || 0)) skips.push(`${s.precos.skippedNoProduct} preço(s) sem produto correspondente`);
           const totals = s.totalProdutos ? ` (catálogo: ${s.totalProdutos} produtos, ${s.totalVariantes || 0} variantes)` : '';
-          const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços`;
+          const pdv = Number(s.caixas?.applied || 0) ? ` · ${s.caixas.applied} fechamento(s) PDV` : '';
+          const base = `${s.referencias || 0} produtos · ${s.variantes || 0} variantes${totals} · ${s.saldos?.applied || 0} saldos · ${s.precos?.applied || 0} preços${pdv}`;
           setLastSync({ at: s.ranAt || new Date().toISOString(), ok: true, text: skips.length ? `${base} — pulados: ${skips.join('; ')}` : base });
         }
       } catch { /* sem histórico */ }

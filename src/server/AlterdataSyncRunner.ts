@@ -356,6 +356,13 @@ export class AlterdataSyncRunner {
     // recurso de cliente; o corpo (ou o 404) revela o contrato real.
     await run("CRM Cliente (delta versao)", "crm", `/api/v1/Cliente/versao/0`);
     await run("CRM Pessoa (delta versao)", "crm", `/api/v1/Pessoa/versao/0`);
+    // FASE 4 (comissão por vendedor / vendas reais): controller Venda do módulo
+    // Sales — o corpo revela o shape da comissão por vendedor e do stream de
+    // vendas (VendaMalote/versao é versionado, igual aos que já sincronizamos).
+    const seteDias = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+    await run("Venda Comissão (últimos 7 dias)", "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${seteDias}/${hoje}`);
+    await run("VendaMalote (delta versao)", "sales", `/api/v1/VendaMalote/versao/0`);
+    await run("VendaMalote (resumo por filial)", "sales", `/api/v1/VendaMalote/relatorio/resumo/porfilial`);
     if (f0) {
       await run(`DataCaixa (últ. movimento filial ${f0})`, "sales", `/api/v1/DataCaixa/UltimoMovimento/${encodeURIComponent(f0)}`);
       await run(`DataCaixa (dia ${hoje} filial ${f0})`, "sales", `/api/v1/DataCaixa/${hoje}/${encodeURIComponent(f0)}`);

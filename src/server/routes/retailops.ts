@@ -499,9 +499,59 @@ router.post("/quotas/suggest", requireRole("owner", "admin"), (req: AuthRequest,
     const suggested = Math.round(Number(pick?.avg || 0) * 100) / 100;
     if (suggested <= 0) continue; // sem histórico do PDV para esta loja
     suggestions.push({ storeId: s.id, storeName: s.name, suggested, samples: Number(pick?.n || 0), basis: Number(sameDow?.n || 0) >= 2 ? "mesmo dia da semana (8 sem.)" : "média 28 dias" });
-    if (apply) RetailQuotaService.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: suggested, source: "pdv_suggest" }, req.user?.userId);
+    if (apply) {
+      RetailQuotaService.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: suggested, source: "pdv_suggest" }, req.user?.userId);
+      // O fechamento guarda a cota como SNAPSHOT na criação — fechamentos já
+      // existentes do dia ficariam com a cota antiga (0) e a tela "não muda".
+      // Atualiza o snapshot e recalcula o desvio de quem já informou.
+      db.prepare(
+        `UPDATE retail_daily_closings SET quota_amount = ?,
+            variance_amount = CASE WHEN COALESCE(informed_total, 0) > 0 THEN informed_total - ? ELSE variance_amount END,
+            variance_percent = CASE WHEN COALESCE(informed_total, 0) > 0 AND ? > 0 THEN (informed_total - ?) * 100.0 / ? ELSE variance_percent END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE organization_id = ? AND store_id = ? AND closing_date = ?`
+      ).run(suggested, suggested, suggested, suggested, suggested, orgId, s.id, date);
+    }
   }
   res.json({ date, applied: apply, suggestions });
+});
+
+// GRADE FURADA / REPOSIÇÃO (dados do estoque por loja do ERP): loja que
+// TRABALHA o produto (tem outros tamanhos com saldo) mas está ZERADA numa
+// variação que outra loja tem sobrando (>= minDonor) → sugestão de
+// transferência entre filiais.
+router.get("/replenishment", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const minDonor = Math.max(1, parseInt(String(req.query.minDonor || "2"), 10) || 2);
+  const limit = Math.min(500, Math.max(10, parseInt(String(req.query.limit || "200"), 10) || 200));
+  try {
+    const rows = db.prepare(`
+      WITH carrier AS (
+        SELECT rsi.store_id, rsi.product_service_id,
+               SUM(CASE WHEN rsi.quantity_available > 0 THEN rsi.quantity_available ELSE 0 END) AS tot
+          FROM retail_store_inventory rsi
+          JOIN retail_stores s ON s.id = rsi.store_id AND s.active = 1
+         WHERE rsi.organization_id = ?
+         GROUP BY rsi.store_id, rsi.product_service_id
+        HAVING tot > 0
+      )
+      SELECT p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color,
+             sn.name AS needy_store, sd.name AS donor_store, d.quantity_available AS donor_qty
+        FROM retail_store_inventory d
+        JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
+        JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
+        JOIN retail_stores sn ON sn.id = c.store_id
+        JOIN products_services p ON p.id = d.product_service_id
+        LEFT JOIN product_variants v ON v.id = d.variant_id
+        LEFT JOIN retail_store_inventory n ON n.store_id = c.store_id AND n.product_service_id = d.product_service_id AND COALESCE(n.variant_id, '') = COALESCE(d.variant_id, '')
+       WHERE d.organization_id = ? AND d.quantity_available >= ? AND d.variant_id IS NOT NULL AND d.variant_id <> ''
+         AND COALESCE(n.quantity_available, 0) <= 0
+       ORDER BY d.quantity_available DESC, p.name ASC
+       LIMIT ?
+    `).all(orgId, orgId, minDonor, limit) as any[];
+    res.json({ count: rows.length, suggestions: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // --- Fechamentos ---

@@ -1026,7 +1026,17 @@ function CommissionTab() {
 
             {/* Vendas por VENDEDOR direto do PDV (Fase 4 — VendaMalote). A
                 matrícula é a do ERP; para pagar comissão por pessoa, associe a
-                matrícula ao vendedor e crie uma regra por vendedor. */}
+                matrícula ao vendedor e crie uma regra por vendedor. A seção
+                aparece SEMPRE que há relatório — vazia, explica o porquê (sem
+                isso o usuário acha que "não gerou"). */}
+            {pdvSellers.length === 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (matrícula)</p>
+                <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-[13px] text-zinc-500">
+                  Nenhuma venda do PDV importada para este período ainda. As vendas entram pela sincronização: vá em <span className="text-zinc-300">Integrações → Alterdata → Sincronizar agora</span> (a primeira carga traz o histórico; a mensagem mostra "N venda(s) PDV") e clique em <span className="text-zinc-300">Gerar</span> de novo.
+                </div>
+              </div>
+            )}
             {pdvSellers.length > 0 && (
               <div className="mt-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (matrícula)</p>

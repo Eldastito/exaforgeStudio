@@ -73,6 +73,66 @@ export class RetailStoreService {
     return this.get(orgId, id);
   }
 
+  /**
+   * EXCLUI uma loja duplicada com segurança: se existir OUTRA loja com o mesmo
+   * código, todo o histórico (estoque, fechamentos, cotas, tarefas, alertas,
+   * pedidos) é UNIFICADO nela antes de apagar — excluir sem unificar perderia
+   * fechamentos/estoque já gravados. Sem outra loja de mesmo código, só permite
+   * excluir se a loja não tiver fechamentos nem estoque (senão: desativar).
+   */
+  static remove(orgId: string, id: string, actorId?: string): { deleted: boolean; mergedInto: string | null; mergedIntoName?: string } {
+    const cur = this.get(orgId, id);
+    if (!cur) throw new Error("Loja não encontrada.");
+    const code = cur.code ? String(cur.code).trim() : "";
+    const target = code
+      ? (db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id <> ? AND code = ? ORDER BY active DESC, created_at ASC LIMIT 1`).get(orgId, id, code) as any)
+      : null;
+
+    if (!target) {
+      const hasClosings = db.prepare(`SELECT 1 FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? LIMIT 1`).get(orgId, id);
+      const hasStock = db.prepare(`SELECT 1 FROM retail_store_inventory WHERE organization_id = ? AND store_id = ? LIMIT 1`).get(orgId, id);
+      if (hasClosings || hasStock) throw new Error("Esta loja tem fechamentos/estoque e não existe outra loja com o mesmo código para unificar — desative em vez de excluir.");
+      db.prepare(`DELETE FROM retail_stores WHERE organization_id = ? AND id = ?`).run(orgId, id);
+      try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_DELETED", { name: cur.name }); } catch { /* noop */ }
+      return { deleted: true, mergedInto: null };
+    }
+
+    const tx = db.transaction(() => {
+      // Fechamentos: move os dias que o alvo não tem; nos conflitos, completa
+      // campos vazios do alvo com os da duplicata e descarta a linha duplicada.
+      const conflicts = db.prepare(
+        `SELECT s.id AS src_id, t.id AS tgt_id, s.informed_total AS s_inf, s.system_total AS s_sys, t.informed_total AS t_inf, t.system_total AS t_sys
+           FROM retail_daily_closings s JOIN retail_daily_closings t
+             ON t.organization_id = s.organization_id AND t.store_id = ? AND t.closing_date = s.closing_date
+          WHERE s.organization_id = ? AND s.store_id = ?`
+      ).all(target.id, orgId, id) as any[];
+      for (const c of conflicts) {
+        if (Number(c.t_inf || 0) === 0 && Number(c.s_inf || 0) > 0) db.prepare(`UPDATE retail_daily_closings SET informed_total = ?, status = 'received' WHERE id = ?`).run(c.s_inf, c.tgt_id);
+        if (Number(c.t_sys || 0) === 0 && Number(c.s_sys || 0) > 0) db.prepare(`UPDATE retail_daily_closings SET system_total = ? WHERE id = ?`).run(c.s_sys, c.tgt_id);
+        db.prepare(`DELETE FROM retail_daily_closing_items WHERE closing_id = ?`).run(c.src_id);
+        db.prepare(`DELETE FROM retail_daily_closings WHERE id = ?`).run(c.src_id);
+      }
+      db.prepare(`UPDATE retail_daily_closings SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id);
+
+      // Tabelas com UNIQUE por loja: move o que não conflita, descarta o resto
+      // (o alvo, que continuou sincronizando, tende a estar mais fresco).
+      for (const t of ["retail_store_quotas", "retail_store_inventory", "retail_stock_alerts", "retail_store_daily_tasks"]) {
+        try {
+          db.prepare(`UPDATE OR IGNORE ${t} SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id);
+          db.prepare(`DELETE FROM ${t} WHERE organization_id = ? AND store_id = ?`).run(orgId, id);
+        } catch { /* tabela pode não existir em bases antigas */ }
+      }
+      // Referências sem UNIQUE: só re-aponta.
+      for (const t of ["retail_store_responsibles", "retail_goods_receipts", "retail_store_patterns", "orders"]) {
+        try { db.prepare(`UPDATE ${t} SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id); } catch { /* noop */ }
+      }
+      db.prepare(`DELETE FROM retail_stores WHERE organization_id = ? AND id = ?`).run(orgId, id);
+    });
+    tx();
+    try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_MERGED_DELETED", { name: cur.name, into: target.id, intoName: target.name }); } catch { /* noop */ }
+    return { deleted: true, mergedInto: target.id, mergedIntoName: target.name };
+  }
+
   static update(orgId: string, id: string, patch: Partial<StoreInput>, actorId?: string): any | null {
     const cur = this.get(orgId, id);
     if (!cur) return null;

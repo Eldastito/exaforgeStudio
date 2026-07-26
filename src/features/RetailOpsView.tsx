@@ -656,6 +656,17 @@ function ClosingsTab() {
                         {!s.active && <span className="text-[10px] rounded-full border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-zinc-400">inativa</span>}
                         <button onClick={() => setStoreModal({ store: s })} title="Editar loja" className="text-[11px] text-zinc-500 hover:text-zinc-300">editar</button>
                         <button onClick={() => toggleActive(s)} title={s.active ? 'Desativar loja' : 'Reativar loja'} className="text-[11px] text-zinc-500 hover:text-zinc-300">{s.active ? 'desativar' : 'reativar'}</button>
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`Excluir a loja "${s.name}"?\n\nSe existir OUTRA loja com o mesmo código (${s.code || 'sem código'}), todo o histórico (estoque, fechamentos, cotas) será UNIFICADO nela antes de excluir — nada se perde. Sem outra loja de mesmo código, só é possível excluir loja sem histórico.`)) return;
+                            const res = await apiFetch(`/api/retailops/stores/${s.id}`, { method: 'DELETE' });
+                            const d = await res.json().catch(() => ({}));
+                            if (res.ok) { toast.success(d.mergedIntoName ? `Loja excluída — histórico unificado em "${d.mergedIntoName}".` : 'Loja excluída.'); load(); }
+                            else toast.error(d.error || 'Falha ao excluir a loja.');
+                          }}
+                          title="Excluir loja duplicada (unifica o histórico na outra loja de mesmo código)"
+                          className="text-[11px] text-rose-400/80 hover:text-rose-300"
+                        >excluir</button>
                       </div>
                     </td>
                     <td className="px-3 py-2">{c ? <Badge map={CLOSING_STATUS} s={c.status} /> : <span className="text-xs text-zinc-500">—</span>}</td>
@@ -875,11 +886,15 @@ function CommissionTab() {
   const [report, setReport] = useState<any | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
 
+  const [pdvSellers, setPdvSellers] = useState<any[]>([]);
   const loadReport = async () => {
     setLoadingReport(true);
     try {
       const d = await apiFetch(`/api/retailops/commission/report?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
       if (d && !d.error) setReport(d); else toast.error(d?.error || 'Falha ao gerar o relatório.');
+      // Vendas por VENDEDOR direto do PDV (Fase 4 — VendaMalote sincronizado).
+      const pv = await apiFetch(`/api/retailops/pdv-sellers?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
+      setPdvSellers(Array.isArray(pv?.sellers) ? pv.sellers : []);
     } finally { setLoadingReport(false); }
   };
   const downloadReportCsv = () => {
@@ -1008,6 +1023,37 @@ function CommissionTab() {
             <ReportBlock title="Por vendedor" empty={!report.hasRules?.seller ? 'Sem regra por vendedor ativa.' : 'Nenhuma venda com vendedor no período.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
             <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
             <ReportBlock title="Por loja (fechamentos)" empty={!report.hasRules?.store ? 'Sem regra por loja ativa.' : 'Sem fechamentos no período.'} rows={report.byStore} cols={[['storeName', 'Loja'], ['sales', 'Vendas', true], ['commission', 'Comissão', true]]} />
+
+            {/* Vendas por VENDEDOR direto do PDV (Fase 4 — VendaMalote). A
+                matrícula é a do ERP; para pagar comissão por pessoa, associe a
+                matrícula ao vendedor e crie uma regra por vendedor. */}
+            {pdvSellers.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (matrícula)</p>
+                <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                  <table className="w-full text-sm">
+                    <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                      <th className="px-3 py-2 text-left font-medium">Matrícula</th>
+                      <th className="px-3 py-2 text-left font-medium">Loja</th>
+                      <th className="px-3 py-2 text-right font-medium">Vendas</th>
+                      <th className="px-3 py-2 text-right font-medium">Nº vendas</th>
+                      <th className="px-3 py-2 text-right font-medium">Peças</th>
+                    </tr></thead>
+                    <tbody>
+                      {pdvSellers.map((v: any, i: number) => (
+                        <tr key={i} className="border-t border-zinc-800/70">
+                          <td className="px-3 py-2 font-mono text-zinc-200">{v.vendedor}</td>
+                          <td className="px-3 py-2 text-zinc-300">{v.store_name}</td>
+                          <td className="px-3 py-2 text-right text-zinc-100">{brl(v.sales)}</td>
+                          <td className="px-3 py-2 text-right text-zinc-300">{v.orders}</td>
+                          <td className="px-3 py-2 text-right text-zinc-300">{Number(v.pecas || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

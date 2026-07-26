@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -308,11 +308,12 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'maisvendidos' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
+  { key: 'maisvendidos', label: 'Mais vendidos', icon: TrendingUp },
   { key: 'divergencia', label: 'Divergência', icon: Scale },
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
   { key: 'reposicao', label: 'Reposição (grade)', icon: Boxes },
@@ -345,6 +346,7 @@ export function RetailOpsView() {
       {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'comissao' && <CommissionTab />}
+      {tab === 'maisvendidos' && <TopProductsTab />}
       {tab === 'divergencia' && <ReconciliationTab />}
       {tab === 'estoque' && <NegativeStockTab />}
       {tab === 'reposicao' && <ReplenishmentTab />}
@@ -861,6 +863,66 @@ function ReplenishmentTab() {
                   <td className="px-3 py-2 text-rose-300">{r.needy_store}</td>
                   <td className="px-3 py-2 text-emerald-300">{r.donor_store}</td>
                   <td className="px-3 py-2 text-right text-zinc-100">{r.donor_qty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ---- Mais vendidos por produto (itens das vendas do PDV) --------------------
+function TopProductsTab() {
+  const firstOfMonth = todayStr().slice(0, 8) + '01';
+  const [start, setStart] = useState(firstOfMonth);
+  const [end, setEnd] = useState(todayStr());
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const load = () => {
+    setLoading(true);
+    apiFetch(`/api/retailops/pdv-top-products?start=${start}&end=${end}`)
+      .then(r => r.json())
+      .then(d => setRows(Array.isArray(d?.products) ? d.products : []))
+      .catch(() => toast.error('Falha ao carregar os mais vendidos.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  const maxPecas = rows.reduce((m, r) => Math.max(m, Number(r.pecas || 0)), 0) || 1;
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-zinc-500">De</span>
+        <input type="date" value={start} onChange={e => setStart(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <span className="text-xs text-zinc-500">até</span>
+        <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <button onClick={load} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><RefreshCw className="w-4 h-4" /> Gerar</button>
+        <span className="text-xs text-zinc-500">Ranking pelos itens vendidos no PDV (peças e faturamento).</span>
+      </div>
+      {loading ? (
+        <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+      ) : rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum item de venda do PDV no período ainda. As vendas entram pela sincronização (Integrações → Alterdata) — o histórico completa aos poucos.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">#</th>
+              <th className="px-3 py-2 text-left font-medium">Produto</th>
+              <th className="px-3 py-2 text-right font-medium">Peças</th>
+              <th className="px-3 py-2 text-right font-medium">Faturamento</th>
+              <th className="px-3 py-2 text-left font-medium w-40">Volume</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.produto} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-2 text-zinc-500">{i + 1}</td>
+                  <td className="px-3 py-2 text-zinc-200">{r.nome || <span className="font-mono text-zinc-400">{r.produto}</span>}</td>
+                  <td className="px-3 py-2 text-right text-zinc-100">{r.pecas}</td>
+                  <td className="px-3 py-2 text-right text-emerald-300">{brl(r.valor)}</td>
+                  <td className="px-3 py-2"><div className="h-2 rounded-full bg-indigo-500/70" style={{ width: `${Math.max(4, Math.round(Number(r.pecas) / maxPecas * 100))}%` }} /></td>
                 </tr>
               ))}
             </tbody>

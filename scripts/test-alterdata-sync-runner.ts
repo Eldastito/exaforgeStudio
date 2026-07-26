@@ -92,7 +92,7 @@ async function main() {
     if (url.includes("/ResumoFecharMovimento/1/")) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 2253.33 }, { titulo: "Dinheiro", valor: 100.0 }, { titulo: "Cartão", valor: 2153.33 }, { titulo: "Sangria", valor: 50.0 }] }, {});
     // Fase 4: VendaMalote — venda a venda com a matrícula do vendedor (contrato
     // real: o item embrulha o registro em `caixa`).
-    if (url.includes("/VendaMalote/versao/0")) return resp(200, { success: true, data: [{ caixa: { boleta: "010908", filial: "1", data: `${hoje}T00:00:00`, hora: "11:11", matricula: "10050015", valor: 889.7, vendidas: 4, status: "N", dinheiro: 0, cartao: 0, creditoParcelado: 889.7 }, controleVersao: 950 }] }, {});
+    if (url.includes("/VendaMalote/versao/0")) return resp(200, { success: true, data: [{ caixa: { boleta: "010908", filial: "1", data: `${hoje}T00:00:00`, hora: "11:11", matricula: "10050015", usuario: "10660010", valor: 889.7, vendidas: 4, status: "N", dinheiro: 0, cartao: 0, creditoParcelado: 889.7 }, vendas: [{ item: 1, produto: "0822930941201", quantidade: 1, valor: 289.9, comissao: 5, vendedor: "10050026" }, { item: 2, produto: "0822930941202", quantidade: 3, valor: 599.8, comissao: 10, vendedor: "10050042" }], controleVersao: 950 }] }, {});
     return resp(200, { success: true, data: [] }, {});
   });
   const s2 = await AlterdataSyncRunner.runOrg(A);
@@ -100,6 +100,8 @@ async function main() {
   check("vendas do PDV importadas (VendaMalote)", s2.vendas?.imported === 1, JSON.stringify(s2.vendas));
   const pdvSale = db.prepare(`SELECT vendedor, valor, pecas FROM retail_pdv_sales WHERE organization_id=? AND filial='1' AND boleta='010908'`).get(A) as any;
   check("venda gravada com vendedor/valor/peças (matrícula 10050015)", pdvSale?.vendedor === "10050015" && Number(pdvSale?.valor) === 889.7 && Number(pdvSale?.pecas) === 4, JSON.stringify(pdvSale));
+  const saleItems = db.prepare(`SELECT produto, quantidade, valor, vendedor FROM retail_pdv_sale_items WHERE organization_id=? AND filial='1' AND boleta='010908' ORDER BY item_seq`).all(A) as any[];
+  check("itens da venda (vendas[]) gravados com produto/vendedor por linha", saleItems.length === 2 && saleItems[0].produto === "0822930941201" && saleItems[0].vendedor === "10050026" && Number(saleItems[1].quantidade) === 3, JSON.stringify(saleItems));
   const closingRow = db.prepare(`SELECT id, system_total, informed_total, status, divergence_status FROM retail_daily_closings WHERE organization_id=? AND store_id=? AND closing_date=?`).get(A, store.id, hoje) as any;
   check("system_total do dia gravado do PDV (2253.33)", Number(closingRow?.system_total) === 2253.33, JSON.stringify(closingRow));
   check("auto: fechamento preenchido com o total do PDV", Number(closingRow?.informed_total) === 2253.33 && closingRow?.status === "received", JSON.stringify(closingRow));

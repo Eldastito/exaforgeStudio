@@ -1851,7 +1851,8 @@ const initDb = () => {
         boleta TEXT NOT NULL,
         sale_date TEXT NOT NULL,
         sale_time TEXT,
-        vendedor TEXT,                           -- matrícula do vendedor no ERP
+        vendedor TEXT,                           -- matrícula no caixa (operador — ver usuario)
+        usuario TEXT,                            -- 2º id de pessoa no caixa (investigação da anomalia)
         valor REAL DEFAULT 0,
         pecas REAL DEFAULT 0,
         status TEXT,                             -- 'N' normal (contrato ModaUp)
@@ -1860,6 +1861,28 @@ const initDb = () => {
         UNIQUE(organization_id, filial, boleta, sale_date)
       );
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sales ON retail_pdv_sales (organization_id, sale_date);
+
+      -- Itens de venda do PDV (linhas do array vendas[] de cada VendaMalote):
+      -- produto, quantidade, valor e o VENDEDOR POR LINHA — base dos
+      -- mais-vendidos por produto e da comissão por vendedor correta (a
+      -- matricula do caixa é o operador, não o vendedor).
+      CREATE TABLE IF NOT EXISTS retail_pdv_sale_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        filial TEXT NOT NULL,
+        boleta TEXT NOT NULL,
+        sale_date TEXT NOT NULL,
+        item_seq INTEGER,
+        produto TEXT,                            -- código de produto do ERP
+        quantidade REAL DEFAULT 0,
+        valor REAL DEFAULT 0,
+        comissao REAL DEFAULT 0,
+        vendedor TEXT,                           -- vendedor POR LINHA (quando existir)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, filial, boleta, sale_date, item_seq)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_pdv_sale_items ON retail_pdv_sale_items (organization_id, sale_date);
+      CREATE INDEX IF NOT EXISTS idx_retail_pdv_sale_items_prod ON retail_pdv_sale_items (organization_id, produto);
 
       -- Mapeamento matrícula (ERP) → vendedor com nome (Fase 4): dá identidade
       -- às matrículas do PDV e permite comissão OFICIAL por vendedor.
@@ -5093,6 +5116,9 @@ const initDb = () => {
   // manuais existentes.
   try { db.exec(`ALTER TABLE payables ADD COLUMN source_purchase_order_id TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_payables_po ON payables(organization_id, source_purchase_order_id) WHERE source_purchase_order_id IS NOT NULL`); } catch(e){}
+  // Conector Alterdata Fase 4 — 2º id de pessoa do caixa (investigação do
+  // vendedor real; a tabela pode já existir sem a coluna).
+  try { db.exec(`ALTER TABLE retail_pdv_sales ADD COLUMN usuario TEXT`); } catch(e){}
 };
 
 initDb();

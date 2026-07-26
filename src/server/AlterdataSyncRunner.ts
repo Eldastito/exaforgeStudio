@@ -279,11 +279,20 @@ export class AlterdataSyncRunner {
     const vendas = { imported: 0 };
     try {
       const insVenda = db.prepare(
-        `INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, sale_time, vendedor, valor, pecas, status, payments_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, sale_time, vendedor, usuario, valor, pecas, status, payments_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(organization_id, filial, boleta, sale_date) DO UPDATE SET
-           sale_time = excluded.sale_time, vendedor = excluded.vendedor, valor = excluded.valor,
+           sale_time = excluded.sale_time, vendedor = excluded.vendedor, usuario = excluded.usuario, valor = excluded.valor,
            pecas = excluded.pecas, status = excluded.status, payments_json = excluded.payments_json`
+      );
+      // Itens de venda (vendas[]): produto, quantidade, valor, comissão e o
+      // vendedor POR LINHA (nome do campo varia — tenta os candidatos).
+      const insItem = db.prepare(
+        `INSERT INTO retail_pdv_sale_items (id, organization_id, filial, boleta, sale_date, item_seq, produto, quantidade, valor, comissao, vendedor)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(organization_id, filial, boleta, sale_date, item_seq) DO UPDATE SET
+           produto = excluded.produto, quantidade = excluded.quantidade, valor = excluded.valor,
+           comissao = excluded.comissao, vendedor = excluded.vendedor`
       );
       await AlterdataSyncService.syncResource(orgId, {
         // Lotes de ~20 vendas: 250 iterações ≈ 5000 vendas/execução — o
@@ -306,8 +315,19 @@ export class AlterdataSyncRunner {
             };
             insVenda.run(
               randomUUID(), orgId, filial, boleta, date, str(cx?.hora) || null, str(cx?.matricula) || null,
-              Number(cx?.valor || 0), Number(cx?.vendidas || 0), str(cx?.status) || null, JSON.stringify(payments)
+              str(cx?.usuario) || null, Number(cx?.valor || 0), Number(cx?.vendidas || 0), str(cx?.status) || null, JSON.stringify(payments)
             );
+            // Itens vendidos (linhas): mais-vendidos + vendedor por linha.
+            const linhas = Array.isArray(it?.vendas) ? it.vendas : (Array.isArray(cx?.vendas) ? cx.vendas : []);
+            linhas.forEach((ln: any, idx: number) => {
+              const seq = Number(ln?.item ?? ln?.seq ?? idx + 1);
+              const vend = str(ln?.vendedor ?? ln?.matricula ?? ln?.usuario ?? ln?.matriculaVendedor ?? ln?.codVendedor) || null;
+              insItem.run(
+                randomUUID(), orgId, filial, boleta, date, seq,
+                str(ln?.produto) || null, Number(ln?.quantidade || 0), Number(ln?.valor || 0),
+                Number(ln?.comissao || 0), vend
+              );
+            });
             n++;
           }
           vendas.imported += n;

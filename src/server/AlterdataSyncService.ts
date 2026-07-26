@@ -104,9 +104,9 @@ export class AlterdataSyncService {
         res = await http(url, { method: "GET", headers: hdr(token) });
       }
       const body = await res.text().catch(() => "");
-      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 2500) };
+      return { module: moduleKey, path: pathSuffix, url, status: res.status, ok: !!res.ok, snippet: String(body).slice(0, 6000) };
     } catch (e: any) {
-      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 2500) };
+      return { module: moduleKey, path: pathSuffix, url, status: 0, ok: false, snippet: String(e?.message || e).slice(0, 6000) };
     }
   }
 

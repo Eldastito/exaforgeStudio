@@ -378,14 +378,22 @@ export class AlterdataSyncRunner {
       for (const w of lastMonthsWindows(COMMISSION_BACKFILL_MONTHS)) {
         let page = 1;
         while (page <= 50) {
-          const { items, totalPages } = await AlterdataSyncService.apiGet(
+          const { items, totalPages, body } = await AlterdataSyncService.apiGet(
             orgId, "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${w.start}/${w.end}`, { page }
           );
-          for (const it of items) {
+          // Contrato REAL da ModaUp (homologação Toulon): as linhas por vendedor
+          // vêm ANINHADAS em `data.metaVendedorRealizado[]` (realizado = valor
+          // vendido + comissão) — NÃO num array plano, então a extração genérica
+          // (`items`) não as alcança. `data.metaVendedor[]` é a META (alvo), e é
+          // ignorada de propósito para não contar alvo como venda. Cai para
+          // `items` em instalações que porventura devolvam um array plano.
+          const realizado = body?.data?.metaVendedorRealizado;
+          const rowsPage: any[] = Array.isArray(realizado) ? realizado : items;
+          for (const it of rowsPage) {
             const row = RetailErpSellerSalesService.mapErpRow(it, w.end);
             if (row) byKey.set(`${row.filial || ""}|${row.matricula || (row.sellerName || "").toLowerCase()}|${row.saleDate}`, row);
           }
-          if (!totalPages || page >= totalPages || items.length === 0) break;
+          if (!totalPages || page >= totalPages || rowsPage.length === 0) break;
           page++;
         }
       }

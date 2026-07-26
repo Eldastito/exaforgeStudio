@@ -241,6 +241,19 @@ export class AlterdataSyncRunner {
     } else {
       out.push({ resource: "Preco", module: "price", path: "(sem tabela)", url: null, status: 0, ok: false, snippet: "Preencha a Tabela de preço da rede para testar o módulo de preço." });
     }
+
+    // MÓDULO SALES (Fase 2 — fechamento do PDV): sonda os endpoints de caixa da
+    // ModaUp para revelar o FORMATO real das respostas (mesmo método que
+    // destravou o preço). Alvo: preencher a conferência do fechamento diário
+    // (retail_daily_closings.system_total) direto do PDV, sem CSV.
+    const hoje = new Date().toISOString().slice(0, 10);
+    const f0 = filiais.find((f) => f) || "";
+    await run("DataCaixa (delta versao)", "sales", `/api/v1/DataCaixa/versao/0`);
+    if (f0) {
+      await run(`DataCaixa (últ. movimento filial ${f0})`, "sales", `/api/v1/DataCaixa/UltimoMovimento/${encodeURIComponent(f0)}`);
+      await run(`DataCaixa (dia ${hoje} filial ${f0})`, "sales", `/api/v1/DataCaixa/${hoje}/${encodeURIComponent(f0)}`);
+      await run(`ResumoFecharMovimento (filial ${f0})`, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f0)}/${hoje}/1`);
+    }
     return out;
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -308,12 +308,13 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'maisvendidos' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'maisvendidos' | 'cartao' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'maisvendidos', label: 'Mais vendidos', icon: TrendingUp },
+  { key: 'cartao', label: 'Recebíveis (cartão)', icon: CreditCard },
   { key: 'divergencia', label: 'Divergência', icon: Scale },
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
   { key: 'reposicao', label: 'Reposição (grade)', icon: Boxes },
@@ -347,6 +348,7 @@ export function RetailOpsView() {
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'comissao' && <CommissionTab />}
       {tab === 'maisvendidos' && <TopProductsTab />}
+      {tab === 'cartao' && <CardReceivablesTab />}
       {tab === 'divergencia' && <ReconciliationTab />}
       {tab === 'estoque' && <NegativeStockTab />}
       {tab === 'reposicao' && <ReplenishmentTab />}
@@ -873,6 +875,71 @@ function ReplenishmentTab() {
   );
 }
 
+
+
+// ---- Recebíveis de cartão (parcelasCartao do PDV) ---------------------------
+function CardReceivablesTab() {
+  const firstOfMonth = todayStr().slice(0, 8) + '01';
+  const [start, setStart] = useState(firstOfMonth);
+  const [end, setEnd] = useState(todayStr().slice(0, 8) + '28');
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = () => {
+    setLoading(true);
+    apiFetch(`/api/retailops/pdv-card-receivables?start=${start}&end=${end}`)
+      .then(r => r.json())
+      .then(d => setData(d && !d.error ? d : null))
+      .catch(() => toast.error('Falha ao carregar os recebíveis.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  const t = data?.totals;
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-zinc-500">Vencimento de</span>
+        <input type="date" value={start} onChange={e => setStart(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <span className="text-xs text-zinc-500">até</span>
+        <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <button onClick={load} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><RefreshCw className="w-4 h-4" /> Gerar</button>
+      </div>
+      {t && (
+        <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Parcelas</p><p className="text-lg font-semibold text-zinc-100">{t.parcelas}</p></div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Bruto</p><p className="text-lg font-semibold text-zinc-100">{brl(t.bruto)}</p></div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Taxa retida</p><p className="text-lg font-semibold text-rose-300">{brl(t.taxa)}</p></div>
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3"><p className="text-[11px] uppercase tracking-wider text-emerald-400/80">Líquido a receber</p><p className="text-lg font-semibold text-emerald-300">{brl(t.liquido)}</p></div>
+        </div>
+      )}
+      {loading ? (
+        <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+      ) : !data || data.byDay.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum recebível de cartão no período. As parcelas entram pela sincronização das vendas do PDV.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">Vencimento</th>
+              <th className="px-3 py-2 text-right font-medium">Parcelas</th>
+              <th className="px-3 py-2 text-right font-medium">Bruto</th>
+              <th className="px-3 py-2 text-right font-medium">Líquido</th>
+            </tr></thead>
+            <tbody>
+              {data.byDay.map((r: any) => (
+                <tr key={r.vencimento} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-2 text-zinc-200">{r.vencimento?.split('-').reverse().join('/')}</td>
+                  <td className="px-3 py-2 text-right text-zinc-300">{r.parcelas}</td>
+                  <td className="px-3 py-2 text-right text-zinc-300">{brl(r.bruto)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-300">{brl(r.liquido)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---- Mais vendidos por produto (itens das vendas do PDV) --------------------
 function TopProductsTab() {

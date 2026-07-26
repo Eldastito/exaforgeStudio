@@ -464,6 +464,35 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// RECEBÍVEIS DE CARTÃO (parcelasCartao do PDV): por dia de VENCIMENTO — bruto,
+// líquido (o que entra), taxa retida — + totais do período. ?store filtra filial.
+router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || "").slice(0, 10);
+  const end = String(req.query.end || "").slice(0, 10);
+  if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
+  const filial = String(req.query.store || "").trim();
+  const args: any[] = [orgId, start, end];
+  let filialClause = "";
+  if (filial) { filialClause = "AND filial = ?"; args.push(filial); }
+  try {
+    const rows = db.prepare(
+      `SELECT vencimento, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
+         FROM retail_pdv_card_installments
+        WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
+        GROUP BY vencimento ORDER BY vencimento`
+    ).all(...args) as any[];
+    const totals = rows.reduce((a, r) => ({
+      parcelas: a.parcelas + Number(r.parcelas || 0),
+      bruto: a.bruto + Number(r.bruto || 0),
+      liquido: a.liquido + Number(r.liquido || 0),
+    }), { parcelas: 0, bruto: 0, liquido: 0 });
+    totals.taxa = Math.round((totals.bruto - totals.liquido) * 100) / 100;
+    res.json({ start, end, byDay: rows.map((r) => ({ vencimento: r.vencimento, parcelas: Number(r.parcelas), bruto: Math.round(Number(r.bruto) * 100) / 100, liquido: Math.round(Number(r.liquido) * 100) / 100 })), totals });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // DIAGNÓSTICO da anomalia do vendedor: por matrícula do CAIXA, mostra em quantas
 // LOJAS ela aparece e se há vendedor por-linha nos itens — para descobrir se a
 // matrícula é do operador (compartilhada) ou do vendedor real.

@@ -191,7 +191,13 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     } catch { return {}; }
   }
   private static summary(candidates: PatternCandidate[]): string {
-    return JSON.stringify(candidates.map((c) => ({ chave: keyOf(c), tipo: c.patternType, loja: c.storeId, evidencia: c.evidence })));
+    // Manda o NOME da loja (não o UUID interno) para o LLM escrever "A loja
+    // Carioca…" em vez do código — o storeId sozinho vazava na descrição.
+    return JSON.stringify(candidates.map((c) => ({ chave: keyOf(c), tipo: c.patternType, loja: this.storeLabel(c.storeId), evidencia: c.evidence })));
+  }
+  private static storeLabel(storeId?: string): string {
+    if (!storeId) return "a rede";
+    try { const s = db.prepare(`SELECT name FROM retail_stores WHERE id = ? LIMIT 1`).get(storeId) as any; return s?.name || storeId; } catch { return storeId; }
   }
 
   // ── LEMBRAR (upsert idempotente) + decaimento ─────────────────────────────────

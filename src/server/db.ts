@@ -1884,6 +1884,28 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sale_items ON retail_pdv_sale_items (organization_id, sale_date);
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sale_items_prod ON retail_pdv_sale_items (organization_id, produto);
 
+      -- Recebíveis de cartão (parcelasCartao de cada VendaMalote): valor bruto,
+      -- líquido (após taxa), taxa e vencimento por parcela — base da
+      -- conciliação de cartão (quanto entra, quando, quanto a adquirente reteve).
+      CREATE TABLE IF NOT EXISTS retail_pdv_card_installments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        filial TEXT NOT NULL,
+        boleta TEXT,
+        sale_date TEXT,
+        numero TEXT,                             -- nº da transação do cartão
+        parcela TEXT,
+        seq INTEGER,
+        codigo_cartao TEXT,                      -- bandeira/adquirente (código ERP)
+        valor REAL DEFAULT 0,                    -- bruto da parcela
+        liquido REAL DEFAULT 0,                  -- líquido (após taxa)
+        taxa REAL DEFAULT 0,                     -- % da taxa
+        vencimento TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, filial, numero, parcela, seq)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_card_inst ON retail_pdv_card_installments (organization_id, vencimento);
+
       -- Mapeamento matrícula (ERP) → vendedor com nome (Fase 4): dá identidade
       -- às matrículas do PDV e permite comissão OFICIAL por vendedor.
       CREATE TABLE IF NOT EXISTS retail_sellers (

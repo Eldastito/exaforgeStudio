@@ -81,6 +81,20 @@ async function main() {
   check("estoque da variante na loja = 7", stock && Number(stock.quantity_available) === 7, JSON.stringify(stock));
   check("cursor de última execução gravado", Number(AlterdataConnectorService.getCursor(A, "_meta", "lastRun", "")) > 0);
 
+  // ===== 2b. Fechamento do PDV (módulo Sales — Fase 2) =====
+  // DataCaixa fechado (finalizado2=1) → busca ResumoFecharMovimento e grava o
+  // "Total de Vendas" como system_total do fechamento diário da loja.
+  const hoje = new Date().toISOString().slice(0, 10);
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    if (url.includes("/DataCaixa/versao/0")) return resp(200, { success: true, data: [{ data: `${hoje}T00:00:00`, filial: "1", turno: 1, finalizado2: 1, controleVersao: 900 }] }, {});
+    if (url.includes("/ResumoFecharMovimento/1/")) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 2253.33 }, { titulo: "Dinheiro", valor: 100.0 }] }, {});
+    return resp(200, { success: true, data: [] }, {});
+  });
+  const s2 = await AlterdataSyncRunner.runOrg(A);
+  check("runOrg concilia o fechamento do PDV (caixas.applied=1)", s2.caixas?.applied === 1, JSON.stringify(s2.caixas));
+  const closingRow = db.prepare(`SELECT system_total FROM retail_daily_closings WHERE organization_id=? AND store_id=? AND closing_date=?`).get(A, store.id, hoje) as any;
+  check("system_total do dia gravado do PDV (2253.33)", Number(closingRow?.system_total) === 2253.33, JSON.stringify(closingRow));
+
   // ===== 3. Mapper de estoque: casos diretos =====
   // Saldo negativo permitido + idempotência.
   AlterdataStockMapper.upsertSaldos(A, [{ filial: "1", produto: "7891234567901", saldoAtual: -3 }]);

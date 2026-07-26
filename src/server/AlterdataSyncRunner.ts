@@ -18,6 +18,7 @@ import { AlterdataStockMapper } from "./AlterdataStockMapper.js";
 import { AlterdataPriceMapper } from "./AlterdataPriceMapper.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { RetailReconciliationService } from "./RetailReconciliationService.js";
 
 export interface SyncRunSummary {
   referencias: number;
@@ -27,6 +28,8 @@ export interface SyncRunSummary {
   variantes: number;
   saldos: { applied: number; skippedNoStore: number; skippedNoProduct: number; sampleNoProduct: string[] };
   precos: { applied: number; skippedNoProduct: number; sampleNoProduct: string[] };
+  /** Fechamentos do PDV conciliados via módulo Sales (Fase 2). */
+  caixas: { applied: number; skippedNoStore: number; errors: number };
   filiais: string[];
   ranAt: string;
 }
@@ -166,6 +169,68 @@ export class AlterdataSyncRunner {
       }
     }
 
+    // 5) FECHAMENTO DO PDV (módulo Sales — Fase 2): DataCaixa/versao é o stream
+    //    de caixas por filial/dia/turno. Para cada caixa FECHADO (finalizado2=1)
+    //    de loja cadastrada, busca o ResumoFecharMovimento e grava o "Total de
+    //    Vendas" como system_total do fechamento diário — a aba Divergência se
+    //    concilia sozinha, sem CSV. Falha do módulo Sales NÃO derruba o sync.
+    const caixas = { applied: 0, skippedNoStore: 0, errors: 0 };
+    try {
+      const CAIXA_BACKFILL_DAYS = 90; // resumo custa 1 chamada POR caixa — não varre anos
+      const closed: Array<{ filial: string; date: string; turno: number }> = [];
+      await AlterdataSyncService.syncResource(orgId, {
+        moduleKey: "sales", resource: "DataCaixa", maxPages: 400,
+        buildPath: (c) => `/api/v1/DataCaixa/versao/${c}`,
+        onItems: (items) => {
+          let n = 0;
+          for (const it of items) {
+            const filial = str(it?.filial);
+            const date = str(it?.data).slice(0, 10);
+            if (!filial || !date) continue;
+            if (Number(it?.finalizado2) !== 1) continue; // caixa ainda aberto
+            closed.push({ filial, date, turno: Math.max(1, Number(it?.turno) || 1) });
+            n++;
+          }
+          return n;
+        },
+      });
+      const cutoff = new Date(Date.now() - CAIXA_BACKFILL_DAYS * 86_400_000).toISOString().slice(0, 10);
+      // Agrupa por loja+dia somando os TURNOS (raro ter 2º turno, mas existe).
+      const groups = new Map<string, { filial: string; date: string; turnos: Set<number> }>();
+      for (const c of closed) {
+        if (c.date < cutoff) continue;
+        const k = `${c.filial}|${c.date}`;
+        const g = groups.get(k) || { filial: c.filial, date: c.date, turnos: new Set<number>() };
+        g.turnos.add(c.turno);
+        groups.set(k, g);
+      }
+      const storeCache = new Map<string, string | null>();
+      const storeIdFor = (filial: string): string | null => {
+        if (!storeCache.has(filial)) {
+          const row = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND (code = ? OR id = ?) AND active = 1 LIMIT 1`).get(orgId, filial, filial) as any;
+          storeCache.set(filial, row?.id || null);
+        }
+        return storeCache.get(filial) || null;
+      };
+      for (const g of groups.values()) {
+        const storeId = storeIdFor(g.filial);
+        if (!storeId) { caixas.skippedNoStore++; continue; }
+        let total = 0;
+        let got = false;
+        for (const turno of g.turnos) {
+          try {
+            const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(g.filial)}/${g.date}/${turno}`);
+            const tv = (items as any[]).find((r) => String(r?.titulo || "").trim().toLowerCase() === "total de vendas");
+            if (tv != null) { total += Number(tv.valor || 0); got = true; }
+          } catch { caixas.errors++; /* um turno com erro não derruba o dia */ }
+        }
+        if (got) {
+          RetailReconciliationService.applyPdvTotal(orgId, storeId, g.date, Math.round(total * 100) / 100);
+          caixas.applied++;
+        }
+      }
+    } catch { /* módulo Sales indisponível nesta instalação — segue sem PDV */ }
+
     // Preço de EXIBIÇÃO do produto: o ERP precifica por VARIANTE (grade), mas o
     // card do catálogo e a vitrine mostram products_services.price — que veio
     // 0.0 da Referencia. Sem isso, o produto aparece "R$ 0,00" mesmo com as
@@ -186,7 +251,7 @@ export class AlterdataSyncRunner {
     const totalProdutos = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND external_ref <> ''`).get(orgId) as any)?.c || 0);
     const totalVariantes = Number((db.prepare(`SELECT COUNT(*) c FROM product_variants WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
     const summary: SyncRunSummary = {
-      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, filiais,
+      referencias: ref.imported, totalProdutos, totalVariantes, variantes: bar.imported, saldos, precos, caixas, filiais,
       ranAt: new Date().toISOString(),
     };
     // Marca a última execução (gate do Scheduler) via cursor '_meta'/'lastRun'

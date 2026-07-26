@@ -109,25 +109,37 @@ export class RetailReconciliationService {
       const store = this.matchStore(stores, rec);
       if (!store) { unmatched.push(rec.lojaLabel); results.push({ ...rec, storeId: null, matched: false }); continue; }
       matched++;
-      const closing = RetailClosingService.getOrCreate(orgId, store.id, rec.date);
-      const informed = Number(closing.informed_total || 0);
-      const divergence = informed > 0 ? Math.round((informed - rec.systemTotal) * 100) / 100 : null;
-      const status = divergence === null ? null : (Math.abs(divergence) > tol ? "divergent" : "ok");
+      const { informed, divergence, status } = this.applyPdvTotal(orgId, store.id, rec.date, rec.systemTotal, { toleranceBRL: tol, storeName: store.name });
       if (status === "divergent") divergences++;
-      db.prepare(
-        `UPDATE retail_daily_closings SET system_total = ?, divergence_status = COALESCE(?, divergence_status), updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
-      ).run(rec.systemTotal, status, orgId, closing.id);
-      // GANCHO de perda (ADR-114 Fatia 2): FALTA de caixa (informado < sistema)
-      // vira lançamento automático de divergência. Sobra não é perda. Idempotente
-      // por fechamento (reimportar não duplica).
-      if (status === "divergent" && divergence !== null && divergence < 0) {
-        try { LossMarginService.recordLossUnique(orgId, `retail_closing:${closing.id}`, { driver: "divergencia", amount: Math.abs(divergence), period: String(rec.date).slice(0, 7), note: `falta no fechamento — ${store.name} ${rec.date}` }); } catch { /* noop */ }
-      }
       results.push({ storeId: store.id, storeName: store.name, date: rec.date, systemTotal: rec.systemTotal, informed, divergence, status, matched: true });
     }
 
     try { logAuthEvent(orgId, actorId || "system", null, "RETAIL_RECONCILIATION_IMPORTED", { parsed: records.length, matched, divergences }); } catch { /* noop */ }
     return { parsed: records.length, matched, unmatchedCount: unmatched.length, unmatched, divergences, results };
+  }
+
+  /**
+   * Grava o total REAL do PDV no fechamento do dia (loja+data) — o mesmo efeito
+   * do CSV, mas reutilizável pela API do módulo Sales da ModaUp (Fase 2 do
+   * conector Alterdata): system_total + divergência + gancho de perda.
+   * Idempotente: reaplicar o mesmo total não duplica nada.
+   */
+  static applyPdvTotal(orgId: string, storeId: string, date: string, systemTotal: number, opts: { toleranceBRL?: number; storeName?: string } = {}): { informed: number; divergence: number | null; status: string | null } {
+    const tol = opts.toleranceBRL != null ? Number(opts.toleranceBRL) : 0.01;
+    const closing = RetailClosingService.getOrCreate(orgId, storeId, date);
+    const informed = Number(closing.informed_total || 0);
+    const divergence = informed > 0 ? Math.round((informed - systemTotal) * 100) / 100 : null;
+    const status = divergence === null ? null : (Math.abs(divergence) > tol ? "divergent" : "ok");
+    db.prepare(
+      `UPDATE retail_daily_closings SET system_total = ?, divergence_status = COALESCE(?, divergence_status), updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(systemTotal, status, orgId, closing.id);
+    // GANCHO de perda (ADR-114 Fatia 2): FALTA de caixa (informado < sistema)
+    // vira lançamento automático de divergência. Sobra não é perda. Idempotente
+    // por fechamento (reimportar não duplica).
+    if (status === "divergent" && divergence !== null && divergence < 0) {
+      try { LossMarginService.recordLossUnique(orgId, `retail_closing:${closing.id}`, { driver: "divergencia", amount: Math.abs(divergence), period: String(date).slice(0, 7), note: `falta no fechamento — ${opts.storeName || "PDV"} ${date}` }); } catch { /* noop */ }
+    }
+    return { informed, divergence, status };
   }
 
   /**

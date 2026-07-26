@@ -888,6 +888,14 @@ function CommissionTab() {
 
   const [pdvSellers, setPdvSellers] = useState<any[]>([]);
   const [pdvPct, setPdvPct] = useState<number | null>(null);
+  // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
+  // vendedor" ativa, a apuração oficial passa a usar esse nome.
+  const nomearVendedor = async (v: any) => {
+    const name = window.prompt(`Nome do vendedor da matrícula ${v.vendedor}:`, v.seller_name || '');
+    if (name == null) return;
+    const res = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(v.vendedor)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    if (res.ok) { toast.success('Vendedor atualizado.'); loadReport(); } else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar o vendedor.'); }
+  };
   const loadReport = async () => {
     setLoadingReport(true);
     try {
@@ -1046,6 +1054,7 @@ function CommissionTab() {
                   <table className="w-full text-sm">
                     <thead className="bg-zinc-900/60 text-zinc-400"><tr>
                       <th className="px-3 py-2 text-left font-medium">Matrícula</th>
+                      <th className="px-3 py-2 text-left font-medium">Vendedor</th>
                       <th className="px-3 py-2 text-left font-medium">Loja</th>
                       <th className="px-3 py-2 text-right font-medium">Vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Nº vendas</th>
@@ -1056,6 +1065,11 @@ function CommissionTab() {
                       {pdvSellers.map((v: any, i: number) => (
                         <tr key={i} className="border-t border-zinc-800/70">
                           <td className="px-3 py-2 font-mono text-zinc-200">{v.vendedor}</td>
+                          <td className="px-3 py-2">
+                            {v.seller_name
+                              ? <span className="text-zinc-200">{v.seller_name} <button onClick={() => nomearVendedor(v)} className="ml-1 text-[11px] text-zinc-500 hover:text-zinc-300">editar</button></span>
+                              : <button onClick={() => nomearVendedor(v)} className="text-[12px] text-indigo-300 hover:underline">nomear</button>}
+                          </td>
                           <td className="px-3 py-2 text-zinc-300">{v.store_name}</td>
                           <td className="px-3 py-2 text-right text-zinc-100">{brl(v.sales)}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{v.orders}</td>

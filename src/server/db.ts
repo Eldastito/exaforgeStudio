@@ -1861,6 +1861,20 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sales ON retail_pdv_sales (organization_id, sale_date);
 
+      -- Mapeamento matrícula (ERP) → vendedor com nome (Fase 4): dá identidade
+      -- às matrículas do PDV e permite comissão OFICIAL por vendedor.
+      CREATE TABLE IF NOT EXISTS retail_sellers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        matricula TEXT NOT NULL,
+        name TEXT,
+        user_id TEXT,                            -- usuário do ZappFlow (opcional)
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE(organization_id, matricula)
+      );
+
       -- Memória de Padrões do Varejo (ADR-142 Fatia 1): padrões recorrentes
       -- observados numa loja (ou na rede). A confiança/status é calculada por
       -- REGRA (recorrência), não pelo LLM. store_id NULL = rede toda.

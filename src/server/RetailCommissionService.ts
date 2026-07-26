@@ -133,7 +133,13 @@ export class RetailCommissionService {
 
     const sellerRules = byScope("seller"), productRules = byScope("product"), storeRules = byScope("store"), globalRules = byScope("global");
 
-    const bySeller = this.onlineSalesBySeller(orgId, start, end).map((s) => ({ ...s, commission: commissionOf(sellerRules, s.sales, 0) }));
+    // Por vendedor = vendas do ZappFlow (pedidos com vendedor) + vendas do PDV
+    // (matrícula do ERP via conector Alterdata, com nome do mapeamento
+    // retail_sellers) — fontes distintas, sem dupla contagem.
+    const bySeller = [
+      ...this.onlineSalesBySeller(orgId, start, end).map((s) => ({ ...s, source: "zappflow" })),
+      ...this.pdvSalesBySeller(orgId, start, end),
+    ].map((s) => ({ ...s, commission: commissionOf(sellerRules, s.sales, 0) }));
     const byProduct = this.onlineSalesByProduct(orgId, start, end).map((p) => ({ ...p, commission: commissionOf(productRules, p.sales, 0) }));
 
     const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
@@ -154,6 +160,29 @@ export class RetailCommissionService {
       totals: { sellerCommission: sum(bySeller, "commission"), productCommission: sum(byProduct, "commission"), storeCommission: round2(sum(byStore, "commission") + globalCommission), totalCommission },
       hasRules: { seller: sellerRules.length > 0, product: productRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
     };
+  }
+
+  /** Vendas do PDV por VENDEDOR (matrícula do ERP) — nome vem do mapeamento retail_sellers. */
+  static pdvSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; matricula: string; sales: number; orders: number; source: string }> {
+    try {
+      const rows = db.prepare(
+        `SELECT s.vendedor AS matricula, rs.name AS mapped_name, rs.user_id AS user_id,
+                SUM(s.valor) AS sales, COUNT(*) AS orders
+           FROM retail_pdv_sales s
+           LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = s.vendedor
+          WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
+            AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(s.vendedor, '') <> ''
+          GROUP BY s.vendedor ORDER BY sales DESC`
+      ).all(orgId, start, end) as any[];
+      return rows.map((r) => ({
+        sellerUserId: r.user_id || null,
+        sellerName: r.mapped_name || `Matrícula ${r.matricula}`,
+        matricula: String(r.matricula),
+        sales: round2(Number(r.sales || 0)),
+        orders: Number(r.orders || 0),
+        source: "pdv",
+      }));
+    } catch { return []; }
   }
 
   private static sellerName(orgId: string, userId: string): string {

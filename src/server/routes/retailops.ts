@@ -430,6 +430,37 @@ router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, r
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// MAPEAMENTO matrícula → vendedor (Fase 4): dá nome à matrícula do ERP.
+// GET devolve os mapeados + as matrículas vistas nas vendas ainda sem nome.
+router.get("/sellers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const sellers = db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? ORDER BY name`).all(orgId) as any[];
+  const unmapped = (db.prepare(
+    `SELECT DISTINCT vendedor FROM retail_pdv_sales
+      WHERE organization_id = ? AND COALESCE(vendedor, '') <> ''
+        AND vendedor NOT IN (SELECT matricula FROM retail_sellers WHERE organization_id = ?)
+      ORDER BY vendedor`
+  ).all(orgId, orgId) as any[]).map((r) => r.vendedor);
+  res.json({ sellers, unmapped });
+});
+
+router.put("/sellers/:matricula", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const matricula = String(req.params.matricula || "").trim();
+  if (!matricula) return res.status(400).json({ error: "Matrícula é obrigatória." });
+  const name = req.body?.name != null ? String(req.body.name).trim() : null;
+  db.prepare(
+    `INSERT INTO retail_sellers (id, organization_id, matricula, name, user_id, active)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(organization_id, matricula) DO UPDATE SET
+       name = excluded.name, user_id = COALESCE(excluded.user_id, retail_sellers.user_id),
+       active = excluded.active, updated_at = CURRENT_TIMESTAMP`
+  ).run(randomUUID(), orgId, matricula, name, req.body?.userId || null, req.body?.active === false ? 0 : 1);
+  res.json(db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
+});
+
 // VENDAS POR VENDEDOR do PDV (Fase 4): agregado do stream VendaMalote —
 // matrícula, loja, total vendido, nº de vendas e peças no período.
 router.get("/pdv-sellers", (req: AuthRequest, res): any => {
@@ -441,9 +472,11 @@ router.get("/pdv-sellers", (req: AuthRequest, res): any => {
   try {
     const rows = db.prepare(
       `SELECT s.vendedor, s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS store_name,
+              rs.name AS seller_name,
               SUM(s.valor) AS sales, COUNT(*) AS orders, SUM(s.pecas) AS pecas
          FROM retail_pdv_sales s
          LEFT JOIN retail_stores st ON st.organization_id = s.organization_id AND st.code = s.filial AND st.active = 1
+         LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = s.vendedor
         WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
           AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(s.vendedor, '') <> ''
         GROUP BY s.vendedor, s.filial

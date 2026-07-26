@@ -294,6 +294,14 @@ export class AlterdataSyncRunner {
            produto = excluded.produto, quantidade = excluded.quantidade, valor = excluded.valor,
            comissao = excluded.comissao, vendedor = excluded.vendedor`
       );
+      // Parcelas de cartão (parcelasCartao): recebíveis com líquido/taxa/vencimento.
+      const insCard = db.prepare(
+        `INSERT INTO retail_pdv_card_installments (id, organization_id, filial, boleta, sale_date, numero, parcela, seq, codigo_cartao, valor, liquido, taxa, vencimento)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(organization_id, filial, numero, parcela, seq) DO UPDATE SET
+           valor = excluded.valor, liquido = excluded.liquido, taxa = excluded.taxa,
+           vencimento = excluded.vencimento, codigo_cartao = excluded.codigo_cartao, sale_date = excluded.sale_date`
+      );
       await AlterdataSyncService.syncResource(orgId, {
         // Lotes de ~20 vendas: 250 iterações ≈ 5000 vendas/execução — o
         // histórico da rede (dezenas de milhares) completa em algumas horas
@@ -326,6 +334,16 @@ export class AlterdataSyncRunner {
                 randomUUID(), orgId, filial, boleta, date, seq,
                 str(ln?.produto) || null, Number(ln?.quantidade || 0), Number(ln?.valor || 0),
                 Number(ln?.comissao || 0), vend
+              );
+            });
+            // Parcelas de cartão (recebíveis): do item ou do caixa.
+            const parcelas = Array.isArray(it?.parcelasCartao) ? it.parcelasCartao : (Array.isArray(cx?.parcelasCartao) ? cx.parcelasCartao : []);
+            parcelas.forEach((pc: any, idx: number) => {
+              insCard.run(
+                randomUUID(), orgId, filial, boleta, date,
+                str(pc?.numero) || null, str(pc?.parcela) || null, Number(pc?.seq ?? idx + 1),
+                str(pc?.codigoCartao) || null, Number(pc?.valor || 0), Number(pc?.liquido || 0),
+                Number(pc?.taxa || 0), str(pc?.vencimento).slice(0, 10) || null
               );
             });
             n++;

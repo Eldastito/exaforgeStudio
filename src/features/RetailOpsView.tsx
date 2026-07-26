@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -308,13 +308,14 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'divergencia' | 'estoque' | 'reposicao' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'divergencia', label: 'Divergência', icon: Scale },
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
+  { key: 'reposicao', label: 'Reposição (grade)', icon: Boxes },
   { key: 'equipe', label: 'Equipe & cobrança', icon: Users },
   { key: 'padroes', label: 'Padrões (IA)', icon: Sparkles },
   { key: 'lojavirtual', label: 'Loja virtual → PDV', icon: Globe },
@@ -346,6 +347,7 @@ export function RetailOpsView() {
       {tab === 'comissao' && <CommissionTab />}
       {tab === 'divergencia' && <ReconciliationTab />}
       {tab === 'estoque' && <NegativeStockTab />}
+      {tab === 'reposicao' && <ReplenishmentTab />}
       {tab === 'equipe' && <ResponsiblesTab />}
       {tab === 'padroes' && <PatternsTab />}
       {tab === 'lojavirtual' && <OnlineReserveTab />}
@@ -791,6 +793,69 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// ---- Reposição / grade furada (estoque por loja do ERP) ---------------------
+// Loja que TRABALHA o produto mas está zerada num tamanho que outra loja tem
+// sobrando → sugestão de transferência entre filiais.
+function ReplenishmentTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [storeFilter, setStoreFilter] = useState('');
+  const load = () => {
+    setLoading(true);
+    apiFetch('/api/retailops/replenishment')
+      .then(r => r.json())
+      .then(d => setRows(Array.isArray(d?.suggestions) ? d.suggestions : []))
+      .catch(() => toast.error('Falha ao carregar as sugestões de reposição.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+  const stores = useMemo(() => Array.from(new Set(rows.map(r => r.needy_store))).sort(), [rows]);
+  const shown = storeFilter ? rows.filter(r => r.needy_store === storeFilter) : rows;
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+          <option value="">Todas as lojas</option>
+          {stores.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        <span className="text-xs text-zinc-500">{shown.length} sugestão(ões) — loja com o produto na grade, porém zerada num tamanho que outra filial tem sobrando (≥2).</span>
+      </div>
+      {loading ? (
+        <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+      ) : shown.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhuma grade furada encontrada — os tamanhos disponíveis estão bem distribuídos entre as lojas. 🎉</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Produto</th>
+                <th className="px-3 py-2 text-left font-medium">Variação</th>
+                <th className="px-3 py-2 text-left font-medium">Falta em</th>
+                <th className="px-3 py-2 text-left font-medium">Sobra em</th>
+                <th className="px-3 py-2 text-right font-medium">Qtd disponível</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r, i) => (
+                <tr key={i} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-2 text-zinc-200">{r.product_name}</td>
+                  <td className="px-3 py-2 text-zinc-300">{[r.size, r.color].filter(Boolean).join(' / ') || r.variant_name}</td>
+                  <td className="px-3 py-2 text-rose-300">{r.needy_store}</td>
+                  <td className="px-3 py-2 text-emerald-300">{r.donor_store}</td>
+                  <td className="px-3 py-2 text-right text-zinc-100">{r.donor_qty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -1302,11 +1302,14 @@ function CommissionTab() {
   };
   const downloadReportCsv = () => {
     if (!report) return;
-    const rows: string[] = [['Dimensão', 'Nome', 'Vendas', 'Vendas (qtd)', 'Comissão'].join(';')];
-    for (const s of report.bySeller || []) rows.push(['Vendedor', s.sellerName, s.sales, s.orders, s.commission].join(';'));
-    for (const p of report.byProduct || []) rows.push(['Produto', p.productName, p.sales, p.orders, p.commission].join(';'));
-    for (const st of report.byStore || []) rows.push(['Loja', st.storeName, st.sales, '', st.commission].join(';'));
-    rows.push(['Total', '', '', '', report.totals?.totalCommission ?? 0].join(';'));
+    const erp = report.hasErpSellerSales;
+    const head = ['Dimensão', 'Nome', 'Vendas', 'Vendas (qtd)', 'Comissão'];
+    if (erp) head.push('Comissão ERP');
+    const rows: string[] = [head.join(';')];
+    for (const s of report.bySeller || []) rows.push(['Vendedor', s.sellerName, s.sales, s.orders, s.commission, ...(erp ? [s.erpCommission ?? ''] : [])].join(';'));
+    for (const p of report.byProduct || []) rows.push(['Produto', p.productName, p.sales, p.orders, p.commission, ...(erp ? [''] : [])].join(';'));
+    for (const st of report.byStore || []) rows.push(['Loja', st.storeName, st.sales, '', st.commission, ...(erp ? [''] : [])].join(';'));
+    rows.push(['Total', '', '', '', report.totals?.totalCommission ?? 0, ...(erp ? [report.totals?.sellerErpCommission ?? ''] : [])].join(';'));
     const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a');
     a.href = url; a.download = `comissao_${start}_a_${end}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -1425,7 +1428,8 @@ function CommissionTab() {
               <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · produtos {brl(report.totals?.productCommission)} · lojas {brl(report.totals?.storeCommission)}</span>
             </div>
 
-            <ReportBlock title="Por vendedor" empty={!report.hasRules?.seller ? 'Sem regra por vendedor ativa.' : 'Nenhuma venda com vendedor no período. Lance a folha da loja em “Lançar vendas por vendedor”.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
+            <ReportBlock title="Por vendedor" empty={!report.hasRules?.seller ? 'Sem regra por vendedor ativa.' : 'Nenhuma venda com vendedor no período. Lance a folha da loja em “Lançar vendas por vendedor”.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
+            {report.hasErpSellerSales && <p className="text-[11px] text-zinc-500 -mt-2">“Comissão” é a nossa apuração (pelas regras); “Comissão ERP” é a que o próprio ERP calculou — compare para conferir divergências.</p>}
             <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
             <ReportBlock title="Por loja (fechamentos)" empty={!report.hasRules?.store ? 'Sem regra por loja ativa.' : 'Sem fechamentos no período.'} rows={report.byStore} cols={[['storeName', 'Loja'], ['sales', 'Vendas', true], ['commission', 'Comissão', true]]} />
 

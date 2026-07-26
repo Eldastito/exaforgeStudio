@@ -430,6 +430,61 @@ router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, r
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// MAIS VENDIDOS por produto (PDV — itens das vendas): quantidade e valor por
+// produto no período, com o nome do produto do catálogo. ?store filtra a filial.
+router.get("/pdv-top-products", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || "").slice(0, 10);
+  const end = String(req.query.end || "").slice(0, 10);
+  if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
+  const filial = String(req.query.store || "").trim();
+  const args: any[] = [orgId, start, end];
+  let filialClause = "";
+  if (filial) { filialClause = "AND i.filial = ?"; args.push(filial); }
+  try {
+    // Casa o produto do ERP (13 díg.) com a variante/produto do catálogo p/ o
+    // nome; o dígito extra do saldo (13 vs 12) é tolerado com o prefixo.
+    const rows = db.prepare(
+      `SELECT i.produto,
+              COALESCE(pv.name, ps.name, p2.name) AS nome_variante,
+              COALESCE(pp.name, p2.name) AS nome_produto,
+              SUM(i.quantidade) AS pecas, SUM(i.valor) AS valor, COUNT(*) AS linhas
+         FROM retail_pdv_sale_items i
+         LEFT JOIN product_variants pv ON pv.organization_id = i.organization_id AND (pv.external_ref = i.produto OR pv.sku = i.produto)
+         LEFT JOIN products_services pp ON pp.id = pv.product_service_id
+         LEFT JOIN products_services ps ON ps.organization_id = i.organization_id AND ps.external_ref = i.produto
+         LEFT JOIN products_services p2 ON p2.organization_id = i.organization_id AND i.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
+        WHERE i.organization_id = ? AND i.sale_date BETWEEN ? AND ? AND COALESCE(i.produto,'') <> '' ${filialClause}
+        GROUP BY i.produto
+        ORDER BY pecas DESC, valor DESC
+        LIMIT 100`
+    ).all(...args) as any[];
+    res.json({ start, end, products: rows.map((r) => ({ produto: r.produto, nome: r.nome_produto || r.nome_variante || null, variante: r.nome_variante, pecas: Math.round(Number(r.pecas || 0)), valor: Math.round(Number(r.valor || 0) * 100) / 100 })) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// DIAGNÓSTICO da anomalia do vendedor: por matrícula do CAIXA, mostra em quantas
+// LOJAS ela aparece e se há vendedor por-linha nos itens — para descobrir se a
+// matrícula é do operador (compartilhada) ou do vendedor real.
+router.get("/pdv-seller-diagnosis", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const byMatricula = db.prepare(
+      `SELECT vendedor AS matricula, COUNT(DISTINCT filial) AS lojas, COUNT(*) AS vendas,
+              COUNT(DISTINCT usuario) AS usuarios, MIN(sale_date) AS de, MAX(sale_date) AS ate
+         FROM retail_pdv_sales WHERE organization_id = ? AND COALESCE(vendedor,'') <> ''
+        GROUP BY vendedor ORDER BY vendas DESC LIMIT 20`
+    ).all(orgId) as any[];
+    const lineSellers = db.prepare(
+      `SELECT COUNT(*) AS itens, COUNT(vendedor) AS itens_com_vendedor, COUNT(DISTINCT vendedor) AS vendedores_distintos
+         FROM retail_pdv_sale_items WHERE organization_id = ?`
+    ).get(orgId) as any;
+    res.json({ byMatricula, lineSellers });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // MAPEAMENTO matrícula → vendedor (Fase 4): dá nome à matrícula do ERP.
 // GET devolve os mapeados + as matrículas vistas nas vendas ainda sem nome.
 router.get("/sellers", (req: AuthRequest, res): any => {

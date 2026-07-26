@@ -286,7 +286,10 @@ export class AlterdataSyncRunner {
            pecas = excluded.pecas, status = excluded.status, payments_json = excluded.payments_json`
       );
       await AlterdataSyncService.syncResource(orgId, {
-        moduleKey: "sales", resource: "VendaMalote", maxPages: 100,
+        // Lotes de ~20 vendas: 250 iterações ≈ 5000 vendas/execução — o
+        // histórico da rede (dezenas de milhares) completa em algumas horas
+        // com o agendador de 15 min.
+        moduleKey: "sales", resource: "VendaMalote", maxPages: 250,
         buildPath: (c) => `/api/v1/VendaMalote/versao/${c}`,
         onItems: (items) => {
           let n = 0;

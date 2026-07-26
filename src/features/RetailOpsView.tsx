@@ -887,6 +887,7 @@ function CommissionTab() {
   const [loadingReport, setLoadingReport] = useState(false);
 
   const [pdvSellers, setPdvSellers] = useState<any[]>([]);
+  const [pdvPct, setPdvPct] = useState<number | null>(null);
   const loadReport = async () => {
     setLoadingReport(true);
     try {
@@ -895,6 +896,7 @@ function CommissionTab() {
       // Vendas por VENDEDOR direto do PDV (Fase 4 — VendaMalote sincronizado).
       const pv = await apiFetch(`/api/retailops/pdv-sellers?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
       setPdvSellers(Array.isArray(pv?.sellers) ? pv.sellers : []);
+      setPdvPct(pv?.commissionPercent ?? null);
     } finally { setLoadingReport(false); }
   };
   const downloadReportCsv = () => {
@@ -1048,6 +1050,7 @@ function CommissionTab() {
                       <th className="px-3 py-2 text-right font-medium">Vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Nº vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Peças</th>
+                      {pdvPct != null && <th className="px-3 py-2 text-right font-medium">Comissão ({pdvPct}%)</th>}
                     </tr></thead>
                     <tbody>
                       {pdvSellers.map((v: any, i: number) => (
@@ -1057,6 +1060,7 @@ function CommissionTab() {
                           <td className="px-3 py-2 text-right text-zinc-100">{brl(v.sales)}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{v.orders}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{Number(v.pecas || 0)}</td>
+                          {pdvPct != null && <td className="px-3 py-2 text-right text-emerald-300">{v.commission != null ? brl(v.commission) : '—'}</td>}
                         </tr>
                       ))}
                     </tbody>

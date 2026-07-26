@@ -1103,7 +1103,7 @@ function CommissionTab() {
                 isso o usuário acha que "não gerou"). */}
             {pdvSellers.length === 0 && (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (matrícula)</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por operador de caixa — PDV (matrícula)</p>
                 <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-[13px] text-zinc-500">
                   Nenhuma venda do PDV importada para este período ainda. As vendas entram pela sincronização: vá em <span className="text-zinc-300">Integrações → Alterdata → Sincronizar agora</span> (a primeira carga traz o histórico; a mensagem mostra "N venda(s) PDV") e clique em <span className="text-zinc-300">Gerar</span> de novo.
                 </div>
@@ -1111,32 +1111,25 @@ function CommissionTab() {
             )}
             {pdvSellers.length > 0 && (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (matrícula)</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por operador de caixa — PDV (matrícula)</p>
+                <p className="text-[12px] text-amber-300/80 mb-2">A matrícula do caixa é do OPERADOR (pode cobrir a rede toda) — não é o vendedor individual. A comissão por vendedor virá do relatório de comissão do próprio ERP (em construção). Use esta tabela como volume por caixa.</p>
                 <div className="overflow-x-auto rounded-xl border border-zinc-800">
                   <table className="w-full text-sm">
                     <thead className="bg-zinc-900/60 text-zinc-400"><tr>
-                      <th className="px-3 py-2 text-left font-medium">Matrícula</th>
-                      <th className="px-3 py-2 text-left font-medium">Vendedor</th>
+                      <th className="px-3 py-2 text-left font-medium">Matrícula (operador)</th>
                       <th className="px-3 py-2 text-left font-medium">Loja</th>
                       <th className="px-3 py-2 text-right font-medium">Vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Nº vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Peças</th>
-                      {pdvPct != null && <th className="px-3 py-2 text-right font-medium">Comissão ({pdvPct}%)</th>}
                     </tr></thead>
                     <tbody>
                       {pdvSellers.map((v: any, i: number) => (
                         <tr key={i} className="border-t border-zinc-800/70">
                           <td className="px-3 py-2 font-mono text-zinc-200">{v.vendedor}</td>
-                          <td className="px-3 py-2">
-                            {v.seller_name
-                              ? <span className="text-zinc-200">{v.seller_name} <button onClick={() => nomearVendedor(v)} className="ml-1 text-[11px] text-zinc-500 hover:text-zinc-300">editar</button></span>
-                              : <button onClick={() => nomearVendedor(v)} className="text-[12px] text-indigo-300 hover:underline">nomear</button>}
-                          </td>
                           <td className="px-3 py-2 text-zinc-300">{v.store_name}</td>
                           <td className="px-3 py-2 text-right text-zinc-100">{brl(v.sales)}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{v.orders}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{Number(v.pecas || 0)}</td>
-                          {pdvPct != null && <td className="px-3 py-2 text-right text-emerald-300">{v.commission != null ? brl(v.commission) : '—'}</td>}
                         </tr>
                       ))}
                     </tbody>

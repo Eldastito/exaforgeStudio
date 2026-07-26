@@ -427,8 +427,11 @@ export class AlterdataSyncRunner {
     // FASE 4 (comissão por vendedor / vendas reais): controller Venda do módulo
     // Sales — o corpo revela o shape da comissão por vendedor e do stream de
     // vendas (VendaMalote/versao é versionado, igual aos que já sincronizamos).
-    const seteDias = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-    await run("Venda Comissão (últimos 7 dias)", "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${seteDias}/${hoje}`);
+    // Comissão POR VENDEDOR calculada pelo ERP — janela de 90 dias (as vendas
+    // de homologação são de mai/jun; a janela recente vinha vazia). É a fonte
+    // correta do vendedor individual (o VendaMalote só tem o operador de caixa).
+    const noventaDias = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+    await run("Venda Comissão (90 dias)", "sales", `/api/v1/Venda/ComissaoVendasPorPeriodo/${noventaDias}/${hoje}`);
     await run("VendaMalote (delta versao)", "sales", `/api/v1/VendaMalote/versao/0`);
     await run("VendaMalote (resumo por filial)", "sales", `/api/v1/VendaMalote/relatorio/resumo/porfilial`);
     if (f0) {

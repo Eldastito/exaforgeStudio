@@ -59,6 +59,16 @@ async function main() {
   check("peixaria: Balcão (copiloto) ligado + vendas/catalogo", mP.includes("copiloto") && mP.includes("vendas") && mP.includes("catalogo"), JSON.stringify(mP));
   check("chaveiro: Balcão (copiloto) + agenda ligados", mC.includes("copiloto") && mC.includes("agenda"), JSON.stringify(mC));
 
+  // ===== 4b. Quick-Start aplicado: personas/cadências semeadas =====
+  // copiloto sobrevive ao applyPack (que roda applyVertical por dentro) porque
+  // é ligado DEPOIS — este é o ponto crítico da ordem no seeder.
+  const areasOf = (org: string) => db.prepare("SELECT COUNT(*) c FROM service_areas WHERE organization_id = ?").get(org) as any;
+  check("peixaria: Quick-Start marcado (quickstart_applied)", settings(PEIXARIA)?.quickstart_applied === 1);
+  check("peixaria: personas do varejo semeadas (Vendas + Suporte = 2)", areasOf(PEIXARIA).c === 2, String(areasOf(PEIXARIA).c));
+  check("chaveiro: personas de serviço semeadas (4)", areasOf(CHAVEIRO).c === 4, String(areasOf(CHAVEIRO).c));
+  check("chaveiro: área Orçamentos existe", !!db.prepare("SELECT 1 FROM service_areas WHERE organization_id = ? AND lower(name)='orçamentos'").get(CHAVEIRO));
+  check("summary expõe contagem de personas", summary.find((s) => s.orgId === CHAVEIRO)?.personas === 4, JSON.stringify(summary.map((s) => s.personas)));
+
   // ===== 5. Catálogo =====
   const pProds = products(PEIXARIA);
   const tilapia = pProds.find((p) => p.name.startsWith("Tilápia"));
@@ -73,6 +83,8 @@ async function main() {
   check("re-rodar não recria (created=false)", again.every((s) => !s.created), JSON.stringify(again.map((s) => s.created)));
   check("re-rodar não duplica produtos (peixaria segue 6)", products(PEIXARIA).length === 6, String(products(PEIXARIA).length));
   check("re-rodar não duplica dono (peixaria segue 1)", (db.prepare("SELECT COUNT(*) c FROM users WHERE organization_id = ?").get(PEIXARIA) as any).c === 1);
+  check("re-rodar não duplica personas (chaveiro segue 4)", areasOf(CHAVEIRO).c === 4, String(areasOf(CHAVEIRO).c));
+  check("re-rodar preserva o Balcão (copiloto segue ligado)", modulesOf(CHAVEIRO).includes("copiloto"), JSON.stringify(modulesOf(CHAVEIRO)));
 
   // ===== 7. Balcão fecha uma venda por peso do produto semeado =====
   const o = BalcaoService.openOrder(PEIXARIA, { sessionAlias: "Balcão" });

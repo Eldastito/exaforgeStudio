@@ -59,16 +59,21 @@ export const REFERENCE_AUTONOMOS: RefSpec[] = [
 ];
 
 /** Provisiona (idempotente) as contas de referência. Retorna um resumo por conta. */
-export async function seedReferenceAutonomos(password: string): Promise<Array<{ orgId: string; businessName: string; email: string; created: boolean; products: number }>> {
+export async function seedReferenceAutonomos(password: string): Promise<Array<{ orgId: string; businessName: string; email: string; created: boolean; products: number; personas: number }>> {
   const db = (await import("../src/server/db.js")).default;
   const { ComigoArchetypeService } = await import("../src/server/ComigoArchetypeService.js");
   const { ModuleService } = await import("../src/server/ModuleService.js");
   const { applyPlanGrade } = await import("../src/server/plansGrade.js");
   const { uniqueProductSlug } = await import("../src/server/productSlug.js");
+  const { OnboardingTemplateService } = await import("../src/server/OnboardingTemplateService.js");
+  const { isAIConfigured } = await import("../src/server/llm.js");
 
   applyPlanGrade(db); // garante o plano `autonomo`
   const passwordHash = await bcrypt.hash(password, 10);
-  const out: Array<{ orgId: string; businessName: string; email: string; created: boolean; products: number }> = [];
+  // FAQ do pack indexa no RAG (embeddings) — só quando há IA configurada; sem
+  // ela, semeia áreas/cadências/automações e pula o FAQ (sem custo/erro).
+  const skipFaq = !isAIConfigured();
+  const out: Array<{ orgId: string; businessName: string; email: string; created: boolean; products: number; personas: number }> = [];
 
   for (const spec of REFERENCE_AUTONOMOS) {
     const existing = db.prepare("SELECT organization_id FROM organization_settings WHERE organization_id = ?").get(spec.orgId) as any;
@@ -94,9 +99,16 @@ export async function seedReferenceAutonomos(password: string): Promise<Array<{ 
         .run(randomUUID(), spec.orgId, spec.ownerName, spec.email, passwordHash);
     }
 
-    // Arquétipo Comigo + módulos (vertical ∩ plano) + Balcão (copiloto).
+    // Arquétipo Comigo + Quick-Start do vertical (áreas/personas + cadências +
+    // automações) + Balcão (copiloto). O applyPack roda o applyVertical POR
+    // DENTRO; como `copiloto` NÃO é add-on, o applyVertical não o preserva —
+    // por isso o copiloto é ligado DEPOIS do pack, para não ser removido.
     ComigoArchetypeService.apply(spec.orgId, { archetype: spec.archetype, service: spec.service, mobile: spec.mobile }, "seed");
-    ModuleService.applyVertical(spec.orgId, spec.vertical);
+    try {
+      await OnboardingTemplateService.applyPack(spec.orgId, spec.vertical, { skipFaq });
+    } catch {
+      ModuleService.applyVertical(spec.orgId, spec.vertical); // vertical sem pack: só liga os módulos
+    }
     ModuleService.enableModule(spec.orgId, "copiloto");
 
     // Catálogo de exemplo (dedupe por nome).
@@ -115,7 +127,8 @@ export async function seedReferenceAutonomos(password: string): Promise<Array<{ 
       productCount++;
     }
 
-    out.push({ orgId: spec.orgId, businessName: spec.businessName, email: spec.email, created, products: productCount });
+    const personas = Number((db.prepare("SELECT COUNT(*) c FROM service_areas WHERE organization_id = ?").get(spec.orgId) as any)?.c || 0);
+    out.push({ orgId: spec.orgId, businessName: spec.businessName, email: spec.email, created, products: productCount, personas });
   }
   return out;
 }
@@ -130,6 +143,7 @@ async function main() {
     console.log(`  login:    ${s.email}`);
     console.log(`  senha:    ${password}`);
     console.log(`  produtos: ${s.products}`);
+    console.log(`  personas: ${s.personas}`);
   }
   console.log("\nPronto. As contas usam o plano Autônomo com o Balcão (copiloto) ligado.");
   process.exit(0);

@@ -230,6 +230,7 @@ jobs:
           - { name: 'comigo-module', script: 'test:comigo-module' }
           - { name: 'comigo-pricing', script: 'test:comigo-pricing' }
           - { name: 'comigo-balcao', script: 'test:comigo-balcao' }
+          - { name: 'product-sale-mode', script: 'test:product-sale-mode' }
           - { name: 'comigo-caderneta', script: 'test:comigo-caderneta' }
           - { name: 'comigo-health', script: 'test:comigo-health' }
           - { name: 'comigo-suggest', script: 'test:comigo-suggest' }

@@ -19,6 +19,18 @@ import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 
 const router = Router();
 
+// Modos de venda aceitos no catálogo (espelha a validação da vitrine em
+// routes/storefront.ts): `unit` (unidade), `slice` (fatia), `size` (tamanho),
+// `weight` (por kg — preço é por quilo) e `volume` (por litro). Para weight/
+// volume, sale_options_json.steps guarda porções rápidas em gramas/ml.
+const PRODUCT_SALE_MODES = ["unit", "slice", "size", "weight", "volume"] as const;
+function normSaleMode(v: any): string { return PRODUCT_SALE_MODES.includes(v) ? v : "unit"; }
+function normSaleOptions(v: any): string | null {
+  if (!v || typeof v !== "object") return null;
+  const steps = Array.isArray(v.steps) ? v.steps.map((n: any) => Math.round(Number(n) || 0)).filter((n: number) => n > 0) : [];
+  return steps.length ? JSON.stringify({ steps }) : null;
+}
+
 // Cadastro Inteligente (Smart Inventory, ADR-019/ADR-020) — mesmo padrão de
 // disco local de src/server/routes/uploads.ts (MEDIA_DIR, servido em /media).
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
@@ -772,19 +784,23 @@ router.post("/", (req: AuthRequest, res): any => {
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, ean } = req.body;
+  const { type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, ean, sale_mode, sale_options } = req.body;
   const id = uuidv4();
+  // Só produto tem modo de venda (serviço/reserva não vendem por kg/fatia).
+  const saleMode = (type || 'product') === 'product' ? normSaleMode(sale_mode) : 'unit';
+  const saleOptionsJson = saleMode === 'weight' || saleMode === 'volume' ? normSaleOptions(sale_options) : null;
 
   try {
     db.prepare(`
-      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, slug, ean)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, duration_minutes, min_price, capacity, reservation_unit, category, slug, ean, sale_mode, sale_options_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, type || 'product', name, description || '', price || 0, stock_control_enabled ? 1 : 0, duration_minutes || null, (min_price !== undefined && min_price !== '' ? Number(min_price) : null),
        type === 'reservation' ? (Number(capacity) > 0 ? Number(capacity) : 1) : null,
        type === 'reservation' ? (['night','hour','slot','day'].includes(reservation_unit) ? reservation_unit : 'night') : null,
        category ? String(category).trim().slice(0, 80) : null,
        (type || 'product') === 'product' ? uniqueProductSlug(orgId, String(name || '')) : null,
-       ean ? String(ean).trim().slice(0, 14) : null);
+       ean ? String(ean).trim().slice(0, 14) : null,
+       saleMode, saleOptionsJson);
 
     if (stock_control_enabled) {
       db.prepare(`
@@ -811,9 +827,18 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     const product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
     if (!product) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable, ean } = req.body;
+    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable, ean, sale_mode, sale_options } = req.body;
     const updates: string[] = [];
     const vals: any[] = [];
+    // Modo de venda (por kg/fatia/etc.): quando muda para weight/volume grava as
+    // porções rápidas; ao sair de weight/volume, zera as porções antigas.
+    if (sale_mode !== undefined) {
+      const sm = normSaleMode(sale_mode);
+      updates.push("sale_mode = ?"); vals.push(sm);
+      updates.push("sale_options_json = ?"); vals.push(sm === 'weight' || sm === 'volume' ? normSaleOptions(sale_options) : null);
+    } else if (sale_options !== undefined) {
+      updates.push("sale_options_json = ?"); vals.push(normSaleOptions(sale_options));
+    }
     // Override do lojista (ADR-041): marca se o produto pode entrar no
     // provador virtual (roupa/acessório). 'manual' vence heurística e IA.
     if (fashion_wearable !== undefined) {

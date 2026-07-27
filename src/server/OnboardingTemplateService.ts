@@ -268,6 +268,104 @@ Enquanto não substituir, responda com honestidade ("vou confirmar com o time").
   },
 
   // ===========================================================================
+  // PRESTADORES DE SERVIÇO
+  // ===========================================================================
+  {
+    vertical: "servicos",
+    label: "Prestadores de Serviço",
+    areas: [
+      {
+        name: "Orçamentos",
+        description: "Entende o serviço pedido e monta o orçamento (mão de obra + material).",
+        persona: "Você atende quem procura um serviço (oficina, técnico, chaveiro, autônomo). Acolha e entenda o problema: o que precisa, onde é (no local do cliente ou na oficina), há quanto tempo, e a urgência. Monte o orçamento SOMENTE com base na tabela de preços/serviços e no valor da hora cadastrados — NUNCA invente preço, prazo ou taxa de deslocamento. Se faltar dado para orçar (ex.: precisa ver a peça), diga que é preciso uma visita/avaliação e ofereça agendar. Ao confirmar, ofereça gerar o orçamento formal.",
+      },
+      {
+        name: "Agendamento",
+        description: "Marca a visita ou o atendimento com base na agenda real.",
+        persona: "Você cuida da agenda do prestador. Para marcar, pergunte endereço (se for no local do cliente), a janela de horário preferida e confirme o serviço a ser feito. Confirme disponibilidade APENAS com base na agenda real — nunca prometa um horário que não existe. Se o profissional é móvel, considere o deslocamento entre atendimentos. Ao fechar, confirme data, hora e endereço com o cliente.",
+      },
+      {
+        name: "Ordem de Serviço / Suporte",
+        description: "Status do serviço, garantia e dúvidas sobre a OS.",
+        persona: "Você é o suporte do prestador. Responda sobre o andamento da ordem de serviço, prazo e garantia SOMENTE com base no que está registrado e documentado. Para garantia, informe o prazo cadastrado e o que cobre; não prometa cobertura fora do documentado. Quando não souber, seja honesto e encaminhe para o profissional.",
+      },
+      {
+        name: "Pós-serviço / Retorno",
+        description: "Confirma satisfação, lembra de garantia/manutenção e pede indicação.",
+        persona: "Você é o relacionamento do prestador. Depois do serviço, confirme se ficou tudo certo, relembre o prazo de garantia e, quando fizer sentido, lembre da próxima manutenção. Peça uma avaliação e ofereça o programa de indicação. Não dê orientação técnica além do documentado.",
+      },
+    ],
+    cadences: [
+      {
+        name: "Recuperação de orçamento (sem resposta)",
+        triggerStage: "proposta",
+        steps: [
+          { delayHours: 24, message: "Oi {nome}! Conseguiu ver o orçamento que te mandei? Qualquer dúvida sobre o serviço, é só falar. 😊" },
+          { delayHours: 48, message: "Oi {nome}! Ainda dá pra encaixar seu serviço na agenda. Quer que eu ajuste algo no orçamento ou já agendamos?" },
+        ],
+      },
+      {
+        name: "Confirmação de atendimento agendado",
+        triggerStage: "agendado",
+        steps: [
+          { delayHours: 24, message: "Oi {nome}! Passando pra confirmar seu atendimento em {quando}. Responda SIM pra confirmar ou REMARCAR se precisar. 🔧" },
+        ],
+      },
+      {
+        name: "Pós-serviço (garantia + indicação)",
+        triggerStage: "pos_venda",
+        steps: [
+          { delayHours: 48, message: "Oi {nome}! O serviço ficou como esperava? 🙏 Lembrando que você tem garantia. Se conhece alguém precisando, te conto do nosso programa de indicação." },
+        ],
+      },
+    ],
+    automations: {
+      // Serviço é orientado a ORÇAMENTO/agenda, não a carrinho — sem expiração de
+      // pedido nem carrinho abandonado; o follow-up vive nas cadências e no quote.
+      order_expiry_enabled: 0,
+      pix_reminder_enabled: 1, pix_reminder_max: 2, pix_reminder_minutes: 60,
+      abandoned_cart_enabled: 0,
+      nps_enabled: 1, nps_delay_hours: 24,
+      referral_enabled: 1, referral_reward_percent: 10, referral_welcome_percent: 10,
+      procurement_enabled: 0,
+      quote_validity_hours: 168, quote_followup_hours: 24, quote_followup_max: 2,
+    },
+    faq: [
+      {
+        title: "FAQ Prestadores de Serviço — base inicial",
+        content: `# Perguntas comuns do cliente
+
+## Como funciona o orçamento
+- O orçamento é feito com base no serviço pedido. Alguns casos precisam de uma visita/avaliação antes de fechar o valor.
+- O orçamento tem validade (preencher o prazo real).
+
+## Taxa de visita / deslocamento
+- Há taxa de deslocamento? Quanto? A partir de qual região? (preencher com o real).
+- Em muitos casos a taxa é abatida se o serviço for fechado.
+
+## Formas de pagamento
+- Aceitamos PIX, cartão e dinheiro. Sinal para agendar? (definir).
+
+## Prazo
+- O prazo depende do serviço e da agenda. Confirmamos ao agendar — não prometemos prazo sem confirmar.
+
+## Garantia
+- Os serviços têm garantia de X dias (preencher). Descrever o que a garantia cobre e o que não cobre.
+
+## Atendimento no local
+- Atendemos no endereço do cliente? Em qual raio/região? (preencher).
+
+## Cancelamento e remarcação
+- Avisar com X horas de antecedência (preencher).
+
+## ⚠️ Substitua estas respostas pelas regras REAIS do seu negócio.
+Enquanto não substituir, a IA responde com honestidade ("vou confirmar") em vez de inventar preço, prazo ou taxa.
+`,
+      },
+    ],
+  },
+
+  // ===========================================================================
   // SAÚDE / CLÍNICA
   // ===========================================================================
   {

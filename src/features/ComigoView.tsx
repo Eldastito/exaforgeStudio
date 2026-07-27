@@ -11,9 +11,11 @@ import { LegalTip } from '@/src/features/LegalAdvisorView';
 // ============================================================================
 
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+// Peso legível: 1.35 → "1,35 kg"; 1 → "1 kg"; 0.5 → "0,5 kg".
+const kgLabel = (n: any) => `${Number(n || 0).toFixed(3).replace(/\.?0+$/, '').replace('.', ',')} kg`;
 
-type Product = { id: string; name: string; price: number; type: string; active: number };
-type OrderItem = { id: string; name: string; qty: number; unit_price: number };
+type Product = { id: string; name: string; price: number; type: string; active: number; sale_mode?: string; sale_options_json?: string | null };
+type OrderItem = { id: string; name: string; qty: number; unit_price: number; product_id?: string };
 type SugItem = { product_id: string; name: string; count: number };
 type Overview = { recipes: number; openOrders: number; fiadoReceivable: number; blacklisted: number };
 
@@ -259,6 +261,8 @@ function Balcao({ onChange }: { onChange: () => void }) {
   const [fiado, setFiado] = useState<{ name: string; phone: string } | null>(null);
   const [suggest, setSuggest] = useState<{ alsoBought: SugItem[]; top: SugItem[] }>({ alsoBought: [], top: [] });
   const [pix, setPix] = useState<{ txid: string; qrPayload: string } | null>(null);
+  // Produto por peso aguardando o vendedor informar os kg (peixaria/açougue).
+  const [weighing, setWeighing] = useState<Product | null>(null);
 
   const loadSuggest = useCallback((pid?: string) => {
     apiFetch(`/api/comigo/suggest${pid ? `?productId=${pid}` : ''}`).then((r) => r.json())
@@ -280,7 +284,10 @@ function Balcao({ onChange }: { onChange: () => void }) {
     }).catch(() => {});
   }, []);
 
-  const addProduct = async (p: Product) => {
+  // Grava uma linha no pedido. `qty` é fracionário para venda por peso (kg) e o
+  // total = qty × unit_price (o backend já aceita qty REAL). Para peso, unitPrice
+  // é o preço POR KG e qty são os quilos informados.
+  const addLine = async (p: Product, qty: number, unitPrice: number) => {
     if (busy) return;
     setBusy(true);
     try {
@@ -289,11 +296,18 @@ function Balcao({ onChange }: { onChange: () => void }) {
         const r = await apiFetch('/api/comigo/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).then((x) => x.json());
         id = r.id; setOrderId(id);
       }
-      await apiFetch(`/api/comigo/orders/${id}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: p.id, name: p.name, unitPrice: p.price, qty: 1 }) });
+      await apiFetch(`/api/comigo/orders/${id}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: p.id, name: p.name, unitPrice, qty }) });
       refresh(id!);
       loadSuggest(p.id); // "quem levou isso também levou"
     } catch { toast.error('Não consegui adicionar o item.'); }
     finally { setBusy(false); }
+  };
+
+  const addProduct = (p: Product) => {
+    if (busy) return;
+    // Por peso: abre o teclado de kg em vez de somar 1 unidade.
+    if (p.sale_mode === 'weight') { setWeighing(p); return; }
+    addLine(p, 1, p.price);
   };
 
   // Adiciona a partir de uma sugestão (resolve preço/nome no catálogo carregado).
@@ -354,6 +368,7 @@ function Balcao({ onChange }: { onChange: () => void }) {
   };
 
   return (
+    <>
     <div className="grid md:grid-cols-2 gap-4">
       {/* Grade por toque */}
       <div>
@@ -385,7 +400,7 @@ function Balcao({ onChange }: { onChange: () => void }) {
               <button key={p.id} disabled={busy} onClick={() => addProduct(p)}
                 className="text-left rounded-xl border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 p-3 disabled:opacity-50">
                 <div className="text-sm text-zinc-100 line-clamp-2">{p.name}</div>
-                <div className="text-emerald-300 text-sm mt-1">{brl(p.price)}</div>
+                <div className="text-emerald-300 text-sm mt-1">{brl(p.price)}{p.sale_mode === 'weight' ? '/kg' : ''}</div>
               </button>
             ))}
           </div>
@@ -399,12 +414,16 @@ function Balcao({ onChange }: { onChange: () => void }) {
           <div className="text-sm text-zinc-500 flex-1">Nenhum item ainda.</div>
         ) : (
           <div className="flex-1 space-y-1">
-            {items.map((it) => (
-              <div key={it.id} className="flex justify-between text-sm text-zinc-200">
-                <span>{it.qty}× {it.name}</span>
-                <span>{brl(it.qty * it.unit_price)}</span>
-              </div>
-            ))}
+            {items.map((it) => {
+              const wp = products.find((x) => x.id === it.product_id);
+              const isWeight = wp?.sale_mode === 'weight';
+              return (
+                <div key={it.id} className="flex justify-between text-sm text-zinc-200">
+                  <span>{isWeight ? `${kgLabel(it.qty)} de ${it.name}` : `${it.qty}× ${it.name}`}</span>
+                  <span>{brl(it.qty * it.unit_price)}</span>
+                </div>
+              );
+            })}
           </div>
         )}
         <div className="flex justify-between items-center border-t border-zinc-800 mt-3 pt-3">
@@ -458,6 +477,57 @@ function Balcao({ onChange }: { onChange: () => void }) {
             <Trash2 className="w-3 h-3" /> cancelar pedido
           </button>
         )}
+      </div>
+    </div>
+    {weighing && (
+      <WeightModal product={weighing} busy={busy}
+        onCancel={() => setWeighing(null)}
+        onConfirm={(kg) => { const p = weighing; setWeighing(null); addLine(p, kg, p.price); }} />
+    )}
+    </>
+  );
+}
+
+// Teclado de PESO (kg) para venda por peso (peixaria/açougue/hortifruti):
+// atalhos das porções cadastradas + digitação livre. Confirma qty=kg,
+// unitPrice=preço por kg — o total sai de qty×preço no backend.
+function WeightModal({ product, busy, onCancel, onConfirm }: { product: Product; busy: boolean; onCancel: () => void; onConfirm: (kg: number) => void }) {
+  const [kg, setKg] = useState('');
+  let steps: number[] = [];
+  try { const o = JSON.parse(product.sale_options_json || 'null'); if (Array.isArray(o?.steps)) steps = o.steps.map((g: number) => g / 1000).filter((n: number) => n > 0); } catch { /* usa defaults */ }
+  if (!steps.length) steps = [0.5, 1, 2];
+  const kgNum = parseFloat(String(kg).replace(',', '.')) || 0;
+  const total = kgNum * Number(product.price || 0);
+  const confirm = () => { if (kgNum > 0) onConfirm(Math.round(kgNum * 1000) / 1000); };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
+      <div className="w-full max-w-xs rounded-2xl border border-zinc-800 bg-zinc-950 p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="text-sm text-zinc-100 font-medium">{product.name}</div>
+        <div className="text-emerald-300 text-sm">{brl(product.price)}/kg</div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {steps.map((s) => (
+            <button key={s} type="button" onClick={() => setKg(String(s).replace('.', ','))}
+              className="text-xs rounded-full border border-zinc-700 bg-zinc-900 text-zinc-200 px-3 py-1.5 hover:border-emerald-500/50">
+              {kgLabel(s)}
+            </button>
+          ))}
+        </div>
+        <label className="text-xs text-zinc-500 mt-3 block">Peso (kg)</label>
+        <input autoFocus type="text" inputMode="decimal" value={kg}
+          onChange={(e) => setKg(e.target.value.replace(/[^\d.,]/g, ''))}
+          onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }}
+          placeholder="ex.: 1,350"
+          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-lg text-zinc-100 mt-1" />
+        <div className="flex justify-between items-center mt-3">
+          <span className="text-zinc-500 text-sm">Total</span>
+          <span className="text-lg font-semibold text-emerald-300">{brl(total)}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <button type="button" onClick={onCancel} className="rounded-lg border border-zinc-700 text-zinc-300 text-sm py-2 hover:bg-zinc-900">Cancelar</button>
+          <button type="button" disabled={kgNum <= 0 || busy} onClick={confirm}
+            className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-2 disabled:opacity-40">Adicionar</button>
+        </div>
       </div>
     </div>
   );

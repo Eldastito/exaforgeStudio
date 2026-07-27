@@ -13,9 +13,19 @@ type Product = {
   quantity_available?: number; quantity_reserved?: number; sellable?: number | null;
   low_stock_threshold?: number; avg_cost?: number; suggested_price?: number | null;
   fashion_wearable?: number | null; fashion_wearable_source?: string | null;
+  sale_mode?: string; sale_options_json?: string | null;
 };
 
-const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '' };
+// Porções rápidas (gramas/ml no banco) → texto em kg/L p/ o campo, e volta.
+function stepsToText(json?: string | null): string {
+  try { const o = JSON.parse(json || 'null'); return Array.isArray(o?.steps) ? o.steps.map((g: number) => String(g / 1000).replace('.', ',')).join('; ') : ''; }
+  catch { return ''; }
+}
+function textToSteps(text: string): number[] {
+  return String(text || '').split(/[;,]/).map((s) => parseFloat(s.trim().replace(',', '.'))).filter((n) => n > 0).map((v) => Math.round(v * 1000));
+}
+
+const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '', sale_mode: 'unit', sale_steps: '' };
 const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1', ean: '' };
 
 export function CatalogView() {
@@ -103,12 +113,17 @@ export function CatalogView() {
       min_price: (p as any).min_price != null ? String((p as any).min_price) : '',
       fashion_wearable: p.fashion_wearable,
       ean: (p as any).ean || '',
+      sale_mode: p.sale_mode || 'unit',
+      sale_steps: stepsToText(p.sale_options_json),
     });
     setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Produto pode vender por unidade/kg/fatia/litro; serviço, sempre unidade.
+    const saleMode = form.type === 'product' ? (form.sale_mode || 'unit') : 'unit';
+    const saleOptions = (saleMode === 'weight' || saleMode === 'volume') ? { steps: textToSteps(form.sale_steps) } : undefined;
     try {
       if (editing) {
         await apiFetch(`/api/products/${editing.id}`, {
@@ -120,6 +135,7 @@ export function CatalogView() {
             min_price: form.min_price === '' ? null : parseFloat(form.min_price),
             fashion_wearable: form.fashion_wearable,
             ean: form.ean?.trim() || null,
+            sale_mode: saleMode, sale_options: saleOptions,
           }),
         });
       } else {
@@ -129,6 +145,7 @@ export function CatalogView() {
             ...form, price: parseFloat(form.price),
             initial_stock: parseInt(form.initial_stock || '0', 10),
             ean: form.ean?.trim() || null,
+            sale_mode: saleMode, sale_options: saleOptions,
           }),
         });
       }
@@ -493,9 +510,26 @@ export function CatalogView() {
                 <input required className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
                   value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} />
               </div>
+              {form.type === 'product' && (
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Modo de venda</label>
+                  <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                    value={form.sale_mode || 'unit'} onChange={(e) => setForm({ ...form, sale_mode: e.target.value })}>
+                    <option value="unit">Por unidade</option>
+                    <option value="weight">Por peso (kg)</option>
+                    <option value="slice">Por fatia</option>
+                    <option value="volume">Por volume (litro)</option>
+                  </select>
+                  {form.sale_mode === 'weight' && (
+                    <p className="text-[11px] text-zinc-500 mt-1">Ex.: peixaria, açougue, hortifruti — o preço abaixo é por quilo e o vendedor informa o peso na venda.</p>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm text-zinc-400 mb-1 block">Preço (R$)</label>
+                  <label className="text-sm text-zinc-400 mb-1 block">
+                    {form.sale_mode === 'weight' ? 'Preço por kg (R$)' : form.sale_mode === 'volume' ? 'Preço por litro (R$)' : 'Preço (R$)'}
+                  </label>
                   <input required type="number" step="0.01" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
                     value={form.price} onChange={(e) => setForm({...form, price: e.target.value})} />
                   {!!editing?.suggested_price && (
@@ -510,6 +544,15 @@ export function CatalogView() {
                     value={form.min_price} onChange={(e) => setForm({...form, min_price: e.target.value})} />
                 </div>
               </div>
+              {(form.sale_mode === 'weight' || form.sale_mode === 'volume') && (
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Porções rápidas <span className="text-zinc-600">({form.sale_mode === 'weight' ? 'kg' : 'litros'}, opcional)</span></label>
+                  <input type="text" placeholder={form.sale_mode === 'weight' ? 'ex.: 0,5; 1; 2' : 'ex.: 0,5; 1; 2'}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                    value={form.sale_steps || ''} onChange={(e) => setForm({ ...form, sale_steps: e.target.value })} />
+                  <p className="text-[11px] text-zinc-500 mt-1">Botões de atalho no Balcão. O vendedor também pode digitar qualquer {form.sale_mode === 'weight' ? 'peso' : 'volume'}.</p>
+                </div>
+              )}
               {form.type === 'product' && (
                 <div>
                   <label className="text-sm text-zinc-400 mb-1 block">EAN / GTIN <span className="text-zinc-600">(código de barras)</span></label>

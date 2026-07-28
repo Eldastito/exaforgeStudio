@@ -198,6 +198,7 @@ export function StorefrontSettingsView() {
 
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
+  const [productQ, setProductQ] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [curating, setCurating] = useState(false);
   const [curationTips, setCurationTips] = useState<{ name: string; reason: string }[] | null>(null);
@@ -254,9 +255,14 @@ export function StorefrontSettingsView() {
 
   const loadProducts = async () => {
     try {
-      // limit: catálogos de ERP têm milhares de itens — renderizar tudo congela
-      // a tela. Mostra os 200 primeiros na ordem da vitrine (busca via Catálogo).
-      const data = await apiFetch('/api/storefront/products?limit=200').then((r) => r.json());
+      // Catálogos de ERP têm milhares de itens — renderizar tudo congela a tela.
+      // SEM busca: mostra os 200 primeiros na ordem da vitrine (modo ordenar).
+      // COM busca: consulta o servidor (?q=) e alcança QUALQUER item (modo achar).
+      const term = productQ.trim();
+      const url = term
+        ? `/api/storefront/products?limit=100&q=${encodeURIComponent(term)}`
+        : '/api/storefront/products?limit=200';
+      const data = await apiFetch(url).then((r) => r.json());
       setProducts(Array.isArray(data) ? data.map(normalizeProduct) : []);
     } catch (e) {
       console.error(e);
@@ -264,6 +270,13 @@ export function StorefrontSettingsView() {
       setLoadingProducts(false);
     }
   };
+
+  // Carga inicial (q vazio) + recarga ao buscar (server-side, alcança tudo).
+  useEffect(() => {
+    const t = setTimeout(() => loadProducts(), productQ ? 300 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productQ]);
 
   // Curadoria de destaques pela IA: sugere e aplica os produtos em destaque com
   // base em vendas e margem. O dono pode ajustar depois com o toggle de cada item.
@@ -339,7 +352,6 @@ export function StorefrontSettingsView() {
       .catch((e) => console.error(e))
       .finally(() => active && setLoadingSettings(false));
 
-    loadProducts();
     loadCollections();
 
     return () => {
@@ -741,21 +753,44 @@ export function StorefrontSettingsView() {
             </div>
           )}
 
+          {/* Busca da vitrine: com catálogo grande, sem isto não se acha o item
+              #201+. COM busca é modo "achar/editar" (server-side, alcança tudo);
+              SEM busca é modo "ordenar" (drag-drop dos 200 primeiros). */}
+          <div className="mb-3 flex items-center gap-2 flex-wrap">
+            <input value={productQ} onChange={(e) => setProductQ(e.target.value)} placeholder="Buscar produto (nome, código, ref.)…"
+              className="flex-1 min-w-[200px] bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
+            {productQ && <button onClick={() => setProductQ('')} className="text-xs text-zinc-400 hover:text-zinc-200">limpar</button>}
+          </div>
           {loadingProducts ? (
             <div className="flex items-center gap-2 text-zinc-400 py-8 justify-center">
               <Loader2 className="w-4 h-4 animate-spin" /> Carregando produtos...
             </div>
           ) : products.length === 0 ? (
-            <div className="grid grid-cols-1">
-              <EmptyState
-                icon={<Store className="w-6 h-6" />}
-                title="Nenhum produto ainda"
-                description="Crie um produto aqui (ou no Catálogo) para exibi-lo na sua loja virtual."
-              />
-            </div>
+            productQ.trim() ? (
+              <p className="py-8 text-center text-sm text-zinc-500">Nenhum produto casa com “{productQ}”.</p>
+            ) : (
+              <div className="grid grid-cols-1">
+                <EmptyState
+                  icon={<Store className="w-6 h-6" />}
+                  title="Nenhum produto ainda"
+                  description="Crie um produto aqui (ou no Catálogo) para exibi-lo na sua loja virtual."
+                />
+              </div>
+            )
+          ) : productQ.trim() ? (
+            // Modo ACHAR/EDITAR: resultados da busca (sem arraste — a ordem só faz
+            // sentido na lista completa). Alcança qualquer item do catálogo.
+            <>
+              <p className="text-[11px] text-amber-300/80 mb-2">Resultados da busca — para reordenar a vitrine, limpe a busca.</p>
+              <div className="space-y-4">
+                {products.map((p: StorefrontProduct) => (
+                  <ProductRow key={p.id} product={p} onPatch={(u) => patchProduct(p.id, u)} onDelete={() => deleteProduct(p)} onEdit={() => setEditingProduct(p)} />
+                ))}
+              </div>
+            </>
           ) : (
             <>
-              <p className="text-[11px] text-zinc-500 mb-2">Arraste pela alça (⋮⋮) para definir a ordem em que os produtos aparecem na vitrine.</p>
+              <p className="text-[11px] text-zinc-500 mb-2">Arraste pela alça (⋮⋮) para definir a ordem em que os produtos aparecem na vitrine. Mostrando os 200 primeiros — use a busca para achar um item específico.</p>
               <DragDropContext onDragEnd={onDragEndProducts}>
                 <Droppable droppableId="products">
                   {(dropProvided) => (

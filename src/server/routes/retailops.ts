@@ -15,6 +15,7 @@ import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
+import { haversineKm } from "../geo.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
@@ -810,9 +811,10 @@ router.get("/replenishment", (req: AuthRequest, res): any => {
         HAVING tot > 0
       )
       SELECT p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color,
-             sn.name AS needy_store, sd.name AS donor_store, d.quantity_available AS donor_qty,
+             sn.name AS needy_store, sd.name AS donor_store, sd.code AS donor_code, d.quantity_available AS donor_qty,
              c.store_id AS needy_store_id, d.store_id AS donor_store_id,
-             d.product_service_id, d.variant_id
+             d.product_service_id, d.variant_id,
+             sn.latitude AS needy_lat, sn.longitude AS needy_lng, sd.latitude AS donor_lat, sd.longitude AS donor_lng
         FROM retail_store_inventory d
         JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
         JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
@@ -825,7 +827,18 @@ router.get("/replenishment", (req: AuthRequest, res): any => {
        ORDER BY d.quantity_available DESC, p.name ASC
        LIMIT ?
     `).all(orgId, orgId, minDonor, limit) as any[];
-    res.json({ count: rows.length, suggestions: rows });
+    // Fase 3: anota a DISTÂNCIA (loja com sobra ↔ loja com falta) e o melhor
+    // horário da loja de origem; ordena as mais PRÓXIMAS primeiro (sem coords
+    // vai para o fim). O código da loja alimenta o melhor horário via PDV.
+    const timeCache = new Map<string, string>();
+    const suggestions = rows.map((r) => {
+      const dist = haversineKm(r.needy_lat, r.needy_lng, r.donor_lat, r.donor_lng);
+      const code = String(r.donor_code || "");
+      if (!timeCache.has(code)) timeCache.set(code, RetailTransferService.suggestBestWindow(orgId, code));
+      const { needy_lat, needy_lng, donor_lat, donor_lng, ...rest } = r;
+      return { ...rest, distance_km: Number.isFinite(dist) ? dist : null, best_time: timeCache.get(code) };
+    }).sort((a, b) => (a.distance_km == null ? Infinity : a.distance_km) - (b.distance_km == null ? Infinity : b.distance_km));
+    res.json({ count: suggestions.length, suggestions });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

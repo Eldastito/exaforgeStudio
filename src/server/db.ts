@@ -1637,6 +1637,12 @@ const initDb = () => {
     `);
     // ADR-084 D4: garante a coluna em DBs que já tinham retail_stores sem ela.
     try { db.exec(`ALTER TABLE retail_stores ADD COLUMN stock_source TEXT`); } catch(e){}
+    // ADR-083 Fase G (Fase 3): geografia da loja — endereço + coordenadas para
+    // sugerir a transferência entre as lojas MAIS PRÓXIMAS (distância haversine).
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN address TEXT`); } catch(e){}
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN city TEXT`); } catch(e){}
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN latitude REAL`); } catch(e){}
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN longitude REAL`); } catch(e){}
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_retail_stores_org ON retail_stores (organization_id);
       CREATE INDEX IF NOT EXISTS idx_retail_stores_wa ON retail_stores (organization_id, whatsapp_identifier);

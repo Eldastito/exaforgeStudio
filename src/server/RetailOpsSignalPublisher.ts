@@ -2,6 +2,8 @@ import db from "./db.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
+import { RetailTransferService } from "./RetailTransferService.js";
+import { haversineKm } from "./geo.js";
 
 /**
  * RetailOpsSignalPublisher — conecta as OPERAÇÕES de varejo (loja virtual,
@@ -106,8 +108,9 @@ export class RetailOpsSignalPublisher {
         HAVING tot > 0
       )
       SELECT p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color,
-             sn.name AS needy_store, sd.name AS donor_store, d.quantity_available AS donor_qty,
-             c.store_id AS needy_store_id, d.store_id AS donor_store_id, d.product_service_id, d.variant_id
+             sn.name AS needy_store, sd.name AS donor_store, sd.code AS donor_code, d.quantity_available AS donor_qty,
+             c.store_id AS needy_store_id, d.store_id AS donor_store_id, d.product_service_id, d.variant_id,
+             sn.latitude AS needy_lat, sn.longitude AS needy_lng, sd.latitude AS donor_lat, sd.longitude AS donor_lng
         FROM retail_store_inventory d
         JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
         JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
@@ -124,11 +127,22 @@ export class RetailOpsSignalPublisher {
              AND t.origin_store_id = d.store_id AND t.dest_store_id = c.store_id
              AND ti.product_service_id = d.product_service_id AND COALESCE(ti.variant_id, '') = COALESCE(d.variant_id, '')
          )
-       ORDER BY d.quantity_available DESC, p.name ASC
-       LIMIT 15
     `).all(orgId, orgId) as any[];
+    // Fase 3: por FURO (loja+produto+variante), escolhe o doador MAIS PRÓXIMO
+    // (menor distância haversine). Doadores sem coordenada ficam para o fim
+    // (distância ∞), com desempate pela maior sobra. Uma sugestão por furo.
+    const byFuro = new Map<string, any>();
     for (const g of gradeFurada) {
+      const dist = haversineKm(g.needy_lat, g.needy_lng, g.donor_lat, g.donor_lng);
+      const cand = { ...g, dist: Number.isFinite(dist) ? dist : Infinity };
+      const key = `${g.needy_store_id}:${g.product_service_id}:${g.variant_id}`;
+      const prev = byFuro.get(key);
+      if (!prev || cand.dist < prev.dist || (cand.dist === prev.dist && Number(cand.donor_qty) > Number(prev.donor_qty))) byFuro.set(key, cand);
+    }
+    const chosen = Array.from(byFuro.values()).sort((a, b) => (a.dist - b.dist) || (Number(b.donor_qty) - Number(a.donor_qty))).slice(0, 15);
+    for (const g of chosen) {
       const variantLabel = [g.size, g.color].filter(Boolean).join(" / ") || g.variant_name;
+      const distanceKm = Number.isFinite(g.dist) ? g.dist : null;
       pub({
         domain: "inventory", signalType: "retail_transfer_suggested", severity: "attention",
         impactAmount: Number(g.donor_qty), impactUnit: "units", sourceEntityType: "retail_store", sourceEntityId: g.donor_store_id,
@@ -138,6 +152,7 @@ export class RetailOpsSignalPublisher {
           productId: g.product_service_id, product: g.product_name,
           variantId: g.variant_id, variant: variantLabel,
           donorQty: Number(g.donor_qty), quantitySuggested: 1,
+          distanceKm, bestTime: RetailTransferService.suggestBestWindow(orgId, g.donor_code),
         },
         dedupeKey: `retail_ops:transfer:${g.donor_store_id}:${g.needy_store_id}:${g.product_service_id}:${g.variant_id}`,
       });

@@ -36,7 +36,7 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-  "vms", "radar", "clinica", "retail", "copiloto",
+  "vms", "radar", "clinica", "retail", "copiloto", "escola",
 ] as const;
 
 // "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de
@@ -68,7 +68,11 @@ export const OPTIONAL_MODULES = [
 // (salvo a clínica, que é o corpo da vertical saúde). São sempre opt-in e, por
 // isso, o ModuleService PRESERVA um add-on já habilitado ao (re)aplicar uma
 // vertical — o corte do ADR-084 nunca REMOVE de quem já usa (grandfather).
-export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail"] as const;
+// "escola" (Módulo Escola, ADR-144) é o corpo da vertical "educacao" — mesmo
+// papel que "clinica" tem para "saude": preset dessa vertical, mas nunca ligado
+// por "outro" nem pelas demais (só educação ou ativação explícita), e preservado
+// (grandfather) ao (re)aplicar uma vertical.
+export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail", "escola"] as const;
 
 // PLAN_FREE_ADDONS: subconjunto dos add-ons que o DONO pode ligar em
 // Configurações › Módulos independentemente do teto do plano (billing mockado).
@@ -116,7 +120,9 @@ export const VERTICALS: Vertical[] = [
   {
     key: "educacao", label: "Escolas / Cursos", icon: "🎓",
     descricao: "Escolas e cursos: secretaria virtual, aulas, turmas e mensalidades.",
-    modules: ["assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "diretor", "rie", "execucao"],
+    // ADR-144: "escola" é o corpo da vertical — conecta a escola à família (resumo
+    // diário ao responsável no WhatsApp), como "clinica" é o corpo de "saude".
+    modules: ["escola", "assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

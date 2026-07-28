@@ -48,13 +48,14 @@ Dado de **menor de idade** (LGPD Art. 14 — o tratamento deve ser no melhor int
 
 Seguindo ADR-080 D1: um módulo `escola` registrado em `OPTIONAL_MODULES`, `ModuleService.MODULE_BY_ROUTE` e no preset da vertical `educacao`, gated como os demais. O Quick-Start `educacao` **ativa o módulo e semeia** o conteúdo inicial (áreas de secretaria/coordenação, cadências, FAQ→RAG do regimento, flags `escola_*`). A funcionalidade (aluno, responsável, agenda, resumo) vive no módulo, com suas tabelas, rotas e telas.
 
-### D2 — Aluno é ficha satélite de `contacts`; responsável é contato; vínculo explícito
+### D2 — Aluno é entidade própria (desacoplada); responsável é `contacts`; vínculo explícito
 
-Seguindo ADR-080 D2 e o molde do `PatientService`:
+O aluno é **menor**: não tem telefone e não é um contato do CRM. Forçá-lo à tabela `contacts` (que exige `identifier` NOT NULL) seria hack. Seguimos então o ADR-080 **D2** (o molde de `clinic_professionals`, entidade própria desacoplada de `users`): quem recebe é o responsável; o aluno é uma entidade própria.
 
-- **`student_profiles`** (1:1 com um `contacts`): `full_name`, `birth_date`, `turma` (classe/série), `enrollment_code` (matrícula), `status` (`active`/`inactive`), `notes`. Escopado por `organization_id`, auditado.
-- **Responsável** é um `contacts` normal (tem `identifier`/telefone → canal WhatsApp). Não gasta o molde de `users` (ADR-080 D2: quem só recebe não precisa de login).
-- **`student_guardians`** (vínculo N:N aluno↔responsável): `student_contact_id`, `guardian_contact_id`, `relationship` (mãe/pai/responsável), `is_primary`, e o **consentimento** desta relação: `digest_consent` (0/1), `digest_consent_at`, `digest_consent_by`. É aqui que mora o **consentimento-de-menor** (D3).
+- **`student_profiles`** (entidade própria, id próprio, **sem** vínculo a `contacts`): `full_name`, `birth_date`, `turma` (classe/série), `enrollment_code` (matrícula), `status` (`active`/`inactive`), `notes`. Escopado por `organization_id`, auditado.
+- **Responsável** é um `contacts` normal (tem `identifier`/telefone → canal WhatsApp). Não gasta o molde de `users` (quem só recebe não precisa de login).
+- **`student_guardians`** (vínculo N:N aluno↔responsável): `student_id`, `guardian_contact_id`, `relationship` (mãe/pai/responsável), `is_primary`, e o **consentimento** desta relação: `digest_consent` (0/1), `digest_consent_at`, `digest_consent_by`, e o dedupe do envio (`last_digest_date`). É aqui que mora o **consentimento-de-menor** (D3).
+- **`student_agenda_items`** (a "nossa agenda" da Fatia 1, sem depender de conector): `student_id`, `date` (YYYY-MM-DD), `kind` (`class`/`activity`/`notice`/`pickup`), `title`, `time_label`, `status`. Alimentada por secretaria/import; é a fonte determinística do resumo diário. A grade completa por turma/professor (reuso de `appointments`) fica para a Fatia 2.
 
 Trocar de turma **não apaga** o aluno nem seu histórico — atualiza a ficha (mesma lição do "trocar plano não apaga o paciente" do ADR-080 D6).
 
@@ -66,8 +67,8 @@ Nenhum resumo é montado ou enviado para uma relação responsável↔aluno sem 
 
 `SchoolDigestService` (novo), espelhando `BusinessTutorService`:
 
-- **`dailyDigest(orgId, studentContactId)`** → texto **zero-token** determinístico a partir da **agenda do dia** do aluno/turma (via `AppointmentService`/`appointments`) + avisos pendentes (ex.: autorização, saída). Nada de LLM no caminho quente — roda no CI sem chave.
-- **`runDigestPass(orgId, { now, send })`** → para cada aluno ativo com responsável **consentindo**, dentro da **janela da manhã** (SP, via `spParts`), **ainda não enviado hoje** (dedupe por dia SP por relação), envia a cada responsável consentindo. `send` é **injetado** (Scheduler injeta `MessageProviderService.sendMessage`; o teste injeta um capturador). A data só é marcada **após** o envio (retenta no próximo tick se falhar).
+- **`dailyDigest(orgId, studentId, date)`** → texto **zero-token** determinístico a partir dos **itens de agenda do dia** do aluno (`student_agenda_items`) + avisos pendentes (ex.: autorização, saída). Nada de LLM no caminho quente — roda no CI sem chave.
+- **`runDigestPass(orgId, { now, send })`** → para cada aluno ativo com responsável **consentindo**, dentro da **janela da manhã** (SP, via `spParts`), **ainda não enviado hoje** (dedupe por dia SP na relação `student_guardians.last_digest_date`), envia a cada responsável consentindo. `send` é **injetado** (Scheduler injeta `MessageProviderService.sendMessage`; o teste injeta um capturador). A data só é marcada **após** o envio (retenta no próximo tick se falhar).
 - **`sendNow(...)`** → botão "enviar teste" que ignora janela/dedupe.
 
 A mensagem-alvo da Fatia 1 (a "mensagem diária ideal"):

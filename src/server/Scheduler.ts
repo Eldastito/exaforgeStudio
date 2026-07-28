@@ -19,6 +19,8 @@ import { TicketSlaService } from "./TicketSlaService.js";
 import { OpportunityRadarService } from "./OpportunityRadarService.js";
 import { InstagramService } from "./InstagramService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
+import { SchoolDigestService } from "./SchoolDigestService.js";
+import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
@@ -148,6 +150,32 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Módulo Escola (ADR-144, Fatia 1): resumo diário do aluno ao RESPONSÁVEL no
+   * WhatsApp. Só orgs com o módulo "escola" habilitado; o serviço decide
+   * janela/dedupe/consentimento por relação. Best-effort, 1 loop.
+   */
+  static async schoolDigestPass() {
+    let orgs: any[] = [];
+    // Só orgs que JÁ têm responsável consentindo (o sinal real de uso do módulo);
+    // o gating fino do módulo fica no isEnabled abaixo.
+    try {
+      orgs = db.prepare(`SELECT DISTINCT organization_id FROM student_guardians WHERE digest_consent = 1`).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        if (!ModuleService.isEnabled(orgId, "escola")) continue; // módulo desligado p/ a org
+        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        if (!channel) continue; // sem canal conectado não há como enviar
+        const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+        await SchoolDigestService.runDigestPass(orgId, { now, send });
+      } catch (e) { console.error("[Escola] passe da org falhou", orgId, e); }
+    }
+  }
+
   static async tick() {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
@@ -178,6 +206,7 @@ export class Scheduler {
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     this.trialPass();
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
+    await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }
 

@@ -14,6 +14,20 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
   const [variants, setVariants] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
   const [tab, setTab] = useState<'mov' | 'var'>('mov');
+  // Grades do ERP têm dezenas de tamanhos/cores, a maioria ZERADA — por padrão
+  // esconde as sem estoque (o usuário liga se quiser ver) e permite filtrar.
+  const [hideEmpty, setHideEmpty] = useState(true);
+  const [varFilter, setVarFilter] = useState('');
+
+  const hasStock = (v: any) => Number(v?.sellable ?? 0) > 0;
+  // Em-estoque primeiro (ordenação estável nos motores atuais).
+  const inStockFirst = (a: any, b: any) => (hasStock(b) ? 1 : 0) - (hasStock(a) ? 1 : 0);
+  const matchesVar = (v: any) => {
+    const q = varFilter.trim().toLowerCase();
+    if (!q) return true;
+    return [v.name, v.size, v.color, v.variant_type].filter(Boolean).some((s: string) => String(s).toLowerCase().includes(q));
+  };
+  const shownVariants = [...variants].sort(inStockFirst).filter(v => (!hideEmpty || hasStock(v)) && matchesVar(v));
 
   // form de movimentação
   const [mov, setMov] = useState({ type: 'entrada', quantity: '', unit_cost: '', origin: 'loja física', note: '', variant_id: '' });
@@ -78,7 +92,7 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
                 {variants.length > 0 && (
                   <select className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={mov.variant_id} onChange={e => setMov({ ...mov, variant_id: e.target.value })}>
                     <option value="">Produto (sem variação)</option>
-                    {variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    {[...variants].sort(inStockFirst).map(v => <option key={v.id} value={v.id}>{v.name}{hasStock(v) ? ` · ${v.sellable}` : ''}</option>)}
                   </select>
                 )}
                 <input type="number" min="0" placeholder="Quantidade" className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={mov.quantity} onChange={e => setMov({ ...mov, quantity: e.target.value })} />
@@ -136,14 +150,29 @@ export function StockModal({ product, onClose }: { product: Product; onClose: ()
             {variants.length === 0 ? (
               <p className="text-sm text-zinc-500">Nenhuma variação. Sem variações, o estoque é controlado no produto inteiro.</p>
             ) : (
-              <div className="space-y-1.5">
-                {variants.map(v => (
-                  <div key={v.id} className="flex items-center justify-between text-sm border border-zinc-800 rounded-lg px-3 py-2">
-                    <span className="text-zinc-200">{v.name}</span>
-                    <span className="font-mono text-emerald-400">{v.sellable ?? 0} em estoque</span>
+              <>
+                {/* Filtro + ocultar zerados: separa o que existe do ruído da grade */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input value={varFilter} onChange={e => setVarFilter(e.target.value)} placeholder="Filtrar por tamanho, cor…"
+                    className="flex-1 min-w-[160px] bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" />
+                  <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer">
+                    <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} /> Ocultar sem estoque
+                  </label>
+                </div>
+                <div className="text-[11px] text-zinc-500 -mt-2">{shownVariants.length} de {variants.length} variações{hideEmpty ? ' · sem estoque ocultas' : ''}</div>
+                {shownVariants.length === 0 ? (
+                  <p className="text-sm text-zinc-500">{hideEmpty ? 'Nenhuma variação com estoque.' : 'Nenhuma variação casa com o filtro.'}</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {shownVariants.map(v => (
+                      <div key={v.id} className="flex items-center justify-between text-sm border border-zinc-800 rounded-lg px-3 py-2">
+                        <span className="text-zinc-200">{v.name}</span>
+                        <span className={`font-mono ${hasStock(v) ? 'text-emerald-400' : 'text-zinc-600'}`}>{v.sellable ?? 0} em estoque</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         )}

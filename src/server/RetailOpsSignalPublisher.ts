@@ -91,6 +91,58 @@ export class RetailOpsSignalPublisher {
       });
     }
 
+    // Reposição da GRADE (Fase G): loja com o produto porém ZERADA num tamanho/
+    // cor que outra filial tem sobrando → a IA SUGERE a transferência. Exclui o
+    // que já está em trânsito (não sugere de novo o que já está a caminho).
+    // Limita para não inundar o Pareto — os maiores furos primeiro.
+    const gradeFurada = db.prepare(`
+      WITH carrier AS (
+        SELECT rsi.store_id, rsi.product_service_id,
+               SUM(CASE WHEN rsi.quantity_available > 0 THEN rsi.quantity_available ELSE 0 END) AS tot
+          FROM retail_store_inventory rsi
+          JOIN retail_stores s ON s.id = rsi.store_id AND s.active = 1
+         WHERE rsi.organization_id = ?
+         GROUP BY rsi.store_id, rsi.product_service_id
+        HAVING tot > 0
+      )
+      SELECT p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color,
+             sn.name AS needy_store, sd.name AS donor_store, d.quantity_available AS donor_qty,
+             c.store_id AS needy_store_id, d.store_id AS donor_store_id, d.product_service_id, d.variant_id
+        FROM retail_store_inventory d
+        JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
+        JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
+        JOIN retail_stores sn ON sn.id = c.store_id
+        JOIN products_services p ON p.id = d.product_service_id
+        LEFT JOIN product_variants v ON v.id = d.variant_id
+        LEFT JOIN retail_store_inventory n ON n.store_id = c.store_id AND n.product_service_id = d.product_service_id AND COALESCE(n.variant_id, '') = COALESCE(d.variant_id, '')
+       WHERE d.organization_id = ? AND d.quantity_available >= 2 AND d.variant_id IS NOT NULL AND d.variant_id <> ''
+         AND COALESCE(n.quantity_available, 0) <= 0
+         AND NOT EXISTS (
+           SELECT 1 FROM retail_stock_transfers t
+           JOIN retail_stock_transfer_items ti ON ti.transfer_id = t.id
+           WHERE t.organization_id = d.organization_id AND t.status = 'in_transit'
+             AND t.origin_store_id = d.store_id AND t.dest_store_id = c.store_id
+             AND ti.product_service_id = d.product_service_id AND COALESCE(ti.variant_id, '') = COALESCE(d.variant_id, '')
+         )
+       ORDER BY d.quantity_available DESC, p.name ASC
+       LIMIT 15
+    `).all(orgId, orgId) as any[];
+    for (const g of gradeFurada) {
+      const variantLabel = [g.size, g.color].filter(Boolean).join(" / ") || g.variant_name;
+      pub({
+        domain: "inventory", signalType: "retail_transfer_suggested", severity: "attention",
+        impactAmount: Number(g.donor_qty), impactUnit: "units", sourceEntityType: "retail_store", sourceEntityId: g.donor_store_id,
+        evidence: {
+          originStoreId: g.donor_store_id, originStore: g.donor_store,
+          destStoreId: g.needy_store_id, destStore: g.needy_store,
+          productId: g.product_service_id, product: g.product_name,
+          variantId: g.variant_id, variant: variantLabel,
+          donorQty: Number(g.donor_qty), quantitySuggested: 1,
+        },
+        dedupeKey: `retail_ops:transfer:${g.donor_store_id}:${g.needy_store_id}:${g.product_service_id}:${g.variant_id}`,
+      });
+    }
+
     // Concentração de vendas: um produto ≥ 50% do total online (dependência).
     const totalSales = round2(byProduct.reduce((a, p) => a + p.sales, 0));
     if (byProduct.length >= 2 && totalSales > 0) {

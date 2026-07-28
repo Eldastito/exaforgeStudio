@@ -224,6 +224,18 @@ router.get("/products", (req: AuthRequest, res): any => {
   const where: string[] = ["organization_id = ?", "type = 'product'"];
   const args: any[] = [orgId];
   if (q) { where.push("(name LIKE ? OR ean LIKE ? OR external_ref LIKE ?)"); const like = `%${q}%`; args.push(like, like, like); }
+  // ?inStock=1: esconde só produtos COM controle de estoque zerados (disponível −
+  // reservado ≤ 0); sem controle continuam. Cláusula correlata (vale lista+COUNT).
+  if (req.query.inStock === "1" || req.query.inStock === "true") {
+    where.push(`NOT (products_services.stock_control_enabled = 1 AND (
+      COALESCE((SELECT ii.quantity_available FROM inventory_items ii WHERE ii.product_service_id = products_services.id AND ii.variant_id IS NULL),
+               (SELECT SUM(ii.quantity_available) FROM inventory_items ii WHERE ii.product_service_id = products_services.id AND ii.variant_id IS NOT NULL),
+               (SELECT SUM(rsi.quantity_available) FROM retail_store_inventory rsi WHERE rsi.product_service_id = products_services.id), 0)
+    - COALESCE((SELECT ii.quantity_reserved FROM inventory_items ii WHERE ii.product_service_id = products_services.id AND ii.variant_id IS NULL),
+               (SELECT SUM(ii.quantity_reserved) FROM inventory_items ii WHERE ii.product_service_id = products_services.id AND ii.variant_id IS NOT NULL),
+               (SELECT SUM(rsi.quantity_reserved) FROM retail_store_inventory rsi WHERE rsi.product_service_id = products_services.id), 0)
+    ) <= 0)`);
+  }
   const total = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
   res.setHeader("X-Total-Count", String(total));
   const products = db.prepare(

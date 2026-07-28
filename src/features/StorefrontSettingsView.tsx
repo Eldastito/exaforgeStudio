@@ -199,6 +199,7 @@ export function StorefrontSettingsView() {
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [productQ, setProductQ] = useState('');
+  const [productsInStock, setProductsInStock] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [curating, setCurating] = useState(false);
   const [curationTips, setCurationTips] = useState<{ name: string; reason: string }[] | null>(null);
@@ -259,9 +260,10 @@ export function StorefrontSettingsView() {
       // SEM busca: mostra os 200 primeiros na ordem da vitrine (modo ordenar).
       // COM busca: consulta o servidor (?q=) e alcança QUALQUER item (modo achar).
       const term = productQ.trim();
+      const inStock = productsInStock ? '&inStock=1' : '';
       const url = term
-        ? `/api/storefront/products?limit=100&q=${encodeURIComponent(term)}`
-        : '/api/storefront/products?limit=200';
+        ? `/api/storefront/products?limit=100&q=${encodeURIComponent(term)}${inStock}`
+        : `/api/storefront/products?limit=200${inStock}`;
       const data = await apiFetch(url).then((r) => r.json());
       setProducts(Array.isArray(data) ? data.map(normalizeProduct) : []);
     } catch (e) {
@@ -271,12 +273,12 @@ export function StorefrontSettingsView() {
     }
   };
 
-  // Carga inicial (q vazio) + recarga ao buscar (server-side, alcança tudo).
+  // Carga inicial (q vazio) + recarga ao buscar/filtrar (server-side, alcança tudo).
   useEffect(() => {
     const t = setTimeout(() => loadProducts(), productQ ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productQ]);
+  }, [productQ, productsInStock]);
 
   // Curadoria de destaques pela IA: sugere e aplica os produtos em destaque com
   // base em vendas e margem. O dono pode ajustar depois com o toggle de cada item.
@@ -760,6 +762,9 @@ export function StorefrontSettingsView() {
             <input value={productQ} onChange={(e) => setProductQ(e.target.value)} placeholder="Buscar produto (nome, código, ref.)…"
               className="flex-1 min-w-[200px] bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
             {productQ && <button onClick={() => setProductQ('')} className="text-xs text-zinc-400 hover:text-zinc-200">limpar</button>}
+            <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer" title="Esconde produtos com controle de estoque zerado (sem controle continua aparecendo)">
+              <input type="checkbox" checked={productsInStock} onChange={(e) => setProductsInStock(e.target.checked)} /> Ocultar sem estoque
+            </label>
           </div>
           {loadingProducts ? (
             <div className="flex items-center gap-2 text-zinc-400 py-8 justify-center">

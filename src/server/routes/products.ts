@@ -739,6 +739,20 @@ router.get("/", (req: AuthRequest, res): any => {
       const like = `%${q}%`;
       args.push(like, like, like);
     }
+    // ?inStock=1: esconde só o que ESTÁ SEM ESTOQUE de verdade — produto com
+    // controle de estoque cujo disponível (menos reservado) é ≤ 0. Serviços e
+    // itens sem controle de estoque continuam aparecendo (não têm "estoque").
+    // Expressão correlata em `ps` para valer na LISTA e no COUNT (mesma cláusula).
+    if (req.query.inStock === "1" || req.query.inStock === "true") {
+      where.push(`NOT (ps.stock_control_enabled = 1 AND (
+        COALESCE((SELECT ii.quantity_available FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NULL),
+                 (SELECT SUM(ii.quantity_available) FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NOT NULL),
+                 (SELECT SUM(rsi.quantity_available) FROM retail_store_inventory rsi WHERE rsi.product_service_id = ps.id), 0)
+      - COALESCE((SELECT ii.quantity_reserved FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NULL),
+                 (SELECT SUM(ii.quantity_reserved) FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NOT NULL),
+                 (SELECT SUM(rsi.quantity_reserved) FROM retail_store_inventory rsi WHERE rsi.product_service_id = ps.id), 0)
+      ) <= 0)`);
+    }
     const total = Number((db.prepare(`SELECT COUNT(*) c FROM products_services ps WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
     res.setHeader("X-Total-Count", String(total));
 

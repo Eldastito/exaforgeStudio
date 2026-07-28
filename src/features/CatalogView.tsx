@@ -85,9 +85,10 @@ export function CatalogView() {
   // o navegador). Busca no servidor (nome/EAN/ref.) + "Carregar mais".
   const PAGE_SIZE = 60;
   const [search, setSearch] = useState('');
+  const [inStock, setInStock] = useState(false);
   const [total, setTotal] = useState(0);
-  const loadProducts = (q: string = search, offset = 0) => {
-    apiFetch(`/api/products?limit=${PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(q)}`)
+  const loadProducts = (q: string = search, offset = 0, onlyInStock: boolean = inStock) => {
+    apiFetch(`/api/products?limit=${PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(q)}${onlyInStock ? '&inStock=1' : ''}`)
       .then(async r => ({ rows: await r.json(), count: Number(r.headers.get('X-Total-Count') || 0) }))
       .then(({ rows, count }) => {
         setTotal(count);
@@ -98,10 +99,10 @@ export function CatalogView() {
   };
 
   useEffect(() => {
-    const t = setTimeout(() => loadProducts(search, 0), 300); // debounce da busca
+    const t = setTimeout(() => loadProducts(search, 0, inStock), 300); // debounce da busca + filtro
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, inStock]);
 
   const openNew = () => { setEditing(null); setForm(emptyForm); setSuggestedTitle(''); setShowModal(true); };
   const openEdit = (p: Product) => {
@@ -418,7 +419,10 @@ export function CatalogView() {
           placeholder="Buscar por nome, EAN ou referência…"
           className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100"
         />
-        {total > 0 && <span className="text-xs text-zinc-500">{products.length} de {total} itens</span>}
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer" title="Esconde produtos com controle de estoque zerado (serviços e itens sem controle continuam aparecendo)">
+          <input type="checkbox" checked={inStock} onChange={e => setInStock(e.target.checked)} /> Ocultar sem estoque
+        </label>
+        {total > 0 && <span className="text-xs text-zinc-500">{products.length} de {total} itens{inStock ? ' com estoque' : ''}</span>}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -455,7 +459,7 @@ export function CatalogView() {
                 {p.stock_control_enabled ? (
                   <span className={`inline-flex items-center gap-1 text-xs font-medium rounded px-2 py-0.5 ${isLow(p) ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
                     {isLow(p) && <AlertTriangle className="w-3 h-3" />}
-                    {p.sellable ?? 0} em estoque
+                    {(p.sellable ?? 0) <= 0 ? 'Sem estoque' : `${p.sellable} em estoque`}
                   </span>
                 ) : (
                   <span className="text-xs text-zinc-600">sem controle</span>

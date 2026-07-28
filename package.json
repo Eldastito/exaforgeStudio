@@ -95,6 +95,7 @@
     "test:retail-seller-sales-manual": "tsx scripts/test-retail-seller-sales-manual.ts",
     "test:retail-erp-seller-sales": "tsx scripts/test-retail-erp-seller-sales.ts",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
+    "test:product-instock": "tsx scripts/test-product-instock.ts",
     "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",
     "test:retail-transfer-signal": "tsx scripts/test-retail-transfer-signal.ts",
     "test:retail-transfer-geo": "tsx scripts/test-retail-transfer-geo.ts",

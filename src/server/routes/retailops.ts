@@ -14,6 +14,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
+import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
@@ -801,7 +802,9 @@ router.get("/replenishment", (req: AuthRequest, res): any => {
         HAVING tot > 0
       )
       SELECT p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color,
-             sn.name AS needy_store, sd.name AS donor_store, d.quantity_available AS donor_qty
+             sn.name AS needy_store, sd.name AS donor_store, d.quantity_available AS donor_qty,
+             c.store_id AS needy_store_id, d.store_id AS donor_store_id,
+             d.product_service_id, d.variant_id
         FROM retail_store_inventory d
         JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
         JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
@@ -816,6 +819,47 @@ router.get("/replenishment", (req: AuthRequest, res): any => {
     `).all(orgId, orgId, minDonor, limit) as any[];
     res.json({ count: rows.length, suggestions: rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Transferências entre lojas (ADR-083, Fase G) ---
+// Gated pelo módulo `retail` (como todo /api/retailops). Mutações exigem
+// owner/admin, igual às demais operações da rede.
+router.get("/transfers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ transfers: RetailTransferService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }) }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/transfers/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const t = RetailTransferService.get(orgId, req.params.id);
+  if (!t) return res.status(404).json({ error: "transferência não encontrada" });
+  res.json(t);
+});
+
+router.post("/transfers", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const t = RetailTransferService.create(orgId, req.body || {}, req.user?.userId);
+    res.status(201).json(t);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/transfers/:id/receive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailTransferService.receive(orgId, req.params.id, { items: req.body?.items }, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/transfers/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailTransferService.cancel(orgId, req.params.id, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // --- Fechamentos ---

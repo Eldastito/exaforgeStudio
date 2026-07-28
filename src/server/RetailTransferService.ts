@@ -1,0 +1,156 @@
+/**
+ * Retail Ops — Transferência de estoque ENTRE LOJAS (ADR-083, Fase G).
+ *
+ * Move peças de uma loja para outra SEM perder o controle:
+ *   - despachar → dá baixa na loja de ORIGEM e a transferência fica `in_transit`
+ *     (as peças estão "na estrada", já saíram da origem mas não entraram no
+ *     destino — não some do sistema);
+ *   - receber → dá entrada na loja de DESTINO (a quantidade REALMENTE recebida,
+ *     que pode diferir do enviado — a diferença fica registrada);
+ *   - cancelar (em trânsito) → estorna a baixa da origem.
+ *
+ * Cada perna usa RetailInventoryService.applyMovement (estoque por loja, que
+ * PODE ficar negativo e abre alerta) e roda numa transação única. Isolado por
+ * organização, auditado. A sugestão da IA (Fase 2) só liga signal_id/
+ * decision_action_id e chama `create` com source='ai_suggested'.
+ */
+import { randomUUID } from "node:crypto";
+import db from "./db.js";
+import { logAuthEvent } from "./auditLog.js";
+import { RetailInventoryService } from "./RetailInventoryService.js";
+
+type NewItem = { productId: string; variantId?: string | null; quantity: number };
+type CreateInput = { originStoreId: string; destStoreId: string; note?: string; items: NewItem[]; source?: "manual" | "ai_suggested"; signalId?: string | null; decisionActionId?: string | null };
+
+const int = (n: any) => Math.trunc(Number(n) || 0);
+
+export class RetailTransferService {
+  private static store(orgId: string, storeId: string): any {
+    return db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, storeId);
+  }
+
+  /**
+   * Cria e DESPACHA a transferência: valida, dá baixa na origem de cada item e
+   * grava `in_transit`. Bloqueia enviar mais do que há na origem (não se
+   * "transfere" peça que não existe — é aí que se perde o controle).
+   */
+  static create(orgId: string, input: CreateInput, actorId?: string): any {
+    const origin = this.store(orgId, String(input.originStoreId || ""));
+    const dest = this.store(orgId, String(input.destStoreId || ""));
+    if (!origin) throw new Error("loja de origem inválida");
+    if (!dest) throw new Error("loja de destino inválida");
+    if (origin.id === dest.id) throw new Error("origem e destino não podem ser a mesma loja");
+
+    const items = (Array.isArray(input.items) ? input.items : [])
+      .map((it) => ({ productId: String(it.productId || ""), variantId: it.variantId ? String(it.variantId) : null, quantity: int(it.quantity) }))
+      .filter((it) => it.productId && it.quantity > 0);
+    if (!items.length) throw new Error("informe ao menos um item com quantidade > 0");
+
+    // Valida disponibilidade na ORIGEM antes de mexer em qualquer estoque.
+    for (const it of items) {
+      const cur = RetailInventoryService.get(orgId, origin.id, it.productId, it.variantId);
+      const avail = int(cur?.quantity_available);
+      if (it.quantity > avail) throw new Error(`estoque insuficiente na origem para ${it.productId} (disponível ${avail}, pedido ${it.quantity})`);
+    }
+
+    const transferId = randomUUID();
+    const run = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO retail_stock_transfers (id, organization_id, origin_store_id, dest_store_id, status, source, signal_id, decision_action_id, note, created_by, dispatched_at)
+         VALUES (?, ?, ?, ?, 'in_transit', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+      ).run(transferId, orgId, origin.id, dest.id, input.source || "manual", input.signalId || null, input.decisionActionId || null, input.note || null, actorId || null);
+      const insItem = db.prepare(
+        `INSERT INTO retail_stock_transfer_items (id, organization_id, transfer_id, product_service_id, variant_id, quantity_sent) VALUES (?, ?, ?, ?, ?, ?)`
+      );
+      for (const it of items) {
+        insItem.run(randomUUID(), orgId, transferId, it.productId, it.variantId, it.quantity);
+        // Baixa na ORIGEM (delta negativo).
+        RetailInventoryService.applyMovement(orgId, origin.id, it.productId, it.variantId, -it.quantity, actorId);
+      }
+    });
+    run();
+    try { logAuthEvent(orgId, actorId || "system", transferId, "RETAIL_TRANSFER_DISPATCH", { origin: origin.id, dest: dest.id, items: items.length }); } catch { /* noop */ }
+    return this.get(orgId, transferId);
+  }
+
+  /**
+   * RECEBE a transferência no destino: dá entrada da quantidade recebida (por
+   * padrão, o enviado; ou o informado por item na conferência) e fecha como
+   * `received`. Idempotente por estado (só age em 'in_transit').
+   */
+  static receive(orgId: string, transferId: string, opts: { items?: Array<{ itemId: string; quantityReceived: number }> } = {}, actorId?: string): any {
+    const t = db.prepare(`SELECT * FROM retail_stock_transfers WHERE organization_id = ? AND id = ?`).get(orgId, transferId) as any;
+    if (!t) throw new Error("transferência não encontrada");
+    if (t.status !== "in_transit") throw new Error(`transferência não está em trânsito (status: ${t.status})`);
+    const rows = db.prepare(`SELECT * FROM retail_stock_transfer_items WHERE organization_id = ? AND transfer_id = ?`).all(orgId, transferId) as any[];
+    const override = new Map((opts.items || []).map((i) => [String(i.itemId), int(i.quantityReceived)]));
+
+    const run = db.transaction(() => {
+      for (const it of rows) {
+        const recv = override.has(it.id) ? Math.max(0, override.get(it.id)!) : int(it.quantity_sent);
+        db.prepare(`UPDATE retail_stock_transfer_items SET quantity_received = ? WHERE id = ?`).run(recv, it.id);
+        if (recv > 0) RetailInventoryService.applyMovement(orgId, t.dest_store_id, it.product_service_id, it.variant_id, recv, actorId);
+      }
+      db.prepare(`UPDATE retail_stock_transfers SET status = 'received', received_by = ?, received_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(actorId || null, transferId);
+    });
+    run();
+    try { logAuthEvent(orgId, actorId || "system", transferId, "RETAIL_TRANSFER_RECEIVE", { dest: t.dest_store_id }); } catch { /* noop */ }
+    return this.get(orgId, transferId);
+  }
+
+  /** Cancela uma transferência EM TRÂNSITO: estorna a baixa da origem. */
+  static cancel(orgId: string, transferId: string, actorId?: string): any {
+    const t = db.prepare(`SELECT * FROM retail_stock_transfers WHERE organization_id = ? AND id = ?`).get(orgId, transferId) as any;
+    if (!t) throw new Error("transferência não encontrada");
+    if (t.status !== "in_transit") throw new Error(`só é possível cancelar em trânsito (status: ${t.status})`);
+    const rows = db.prepare(`SELECT * FROM retail_stock_transfer_items WHERE organization_id = ? AND transfer_id = ?`).all(orgId, transferId) as any[];
+    const run = db.transaction(() => {
+      for (const it of rows) {
+        // Estorna a baixa na ORIGEM (as peças não saíram de fato).
+        RetailInventoryService.applyMovement(orgId, t.origin_store_id, it.product_service_id, it.variant_id, int(it.quantity_sent), actorId);
+      }
+      db.prepare(`UPDATE retail_stock_transfers SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(transferId);
+    });
+    run();
+    try { logAuthEvent(orgId, actorId || "system", transferId, "RETAIL_TRANSFER_CANCEL", {}); } catch { /* noop */ }
+    return this.get(orgId, transferId);
+  }
+
+  static get(orgId: string, transferId: string): any | null {
+    const t = db.prepare(
+      `SELECT t.*, so.name AS origin_store, sd.name AS dest_store
+         FROM retail_stock_transfers t
+         LEFT JOIN retail_stores so ON so.id = t.origin_store_id
+         LEFT JOIN retail_stores sd ON sd.id = t.dest_store_id
+        WHERE t.organization_id = ? AND t.id = ?`
+    ).get(orgId, transferId) as any;
+    if (!t) return null;
+    t.items = db.prepare(
+      `SELECT i.*, p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color
+         FROM retail_stock_transfer_items i
+         LEFT JOIN products_services p ON p.id = i.product_service_id
+         LEFT JOIN product_variants v ON v.id = i.variant_id
+        WHERE i.organization_id = ? AND i.transfer_id = ?`
+    ).all(orgId, transferId) as any[];
+    return t;
+  }
+
+  static list(orgId: string, opts: { status?: string; limit?: number } = {}): any[] {
+    const where: string[] = ["t.organization_id = ?"];
+    const args: any[] = [orgId];
+    if (opts.status) { where.push("t.status = ?"); args.push(opts.status); }
+    const limit = Math.min(500, Math.max(1, int(opts.limit) || 100));
+    return db.prepare(
+      `SELECT t.*, so.name AS origin_store, sd.name AS dest_store,
+              (SELECT COUNT(*) FROM retail_stock_transfer_items i WHERE i.transfer_id = t.id) AS item_count,
+              (SELECT COALESCE(SUM(quantity_sent), 0) FROM retail_stock_transfer_items i WHERE i.transfer_id = t.id) AS total_sent
+         FROM retail_stock_transfers t
+         LEFT JOIN retail_stores so ON so.id = t.origin_store_id
+         LEFT JOIN retail_stores sd ON sd.id = t.dest_store_id
+        WHERE ${where.join(" AND ")}
+        ORDER BY CASE t.status WHEN 'in_transit' THEN 0 ELSE 1 END, t.dispatched_at DESC
+        LIMIT ${limit}`
+    ).all(...args) as any[];
+  }
+}

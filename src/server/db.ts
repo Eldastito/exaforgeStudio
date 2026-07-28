@@ -1841,6 +1841,42 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_retail_stock_alerts ON retail_stock_alerts (organization_id, status);
 
+      -- Transferência de estoque ENTRE LOJAS (ADR-083, Fase G — Reposição da
+      -- grade). Ao despachar, dá baixa na loja de ORIGEM e a transferência fica
+      -- 'in_transit' (peças "na estrada"); na RECEPÇÃO, dá entrada na loja de
+      -- DESTINO. Cancelar em trânsito estorna a baixa da origem. signal_id/
+      -- decision_action_id ligam à sugestão da IA (Fase 2, ainda nulos).
+      CREATE TABLE IF NOT EXISTS retail_stock_transfers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        origin_store_id TEXT NOT NULL,
+        dest_store_id TEXT NOT NULL,
+        status TEXT DEFAULT 'in_transit',   -- in_transit | received | cancelled
+        source TEXT DEFAULT 'manual',       -- manual | ai_suggested (Fase 2)
+        signal_id TEXT,                     -- vínculo com a sugestão da IA (Fase 2)
+        decision_action_id TEXT,            -- vínculo com propor/aprovar (Fase 2)
+        note TEXT,
+        created_by TEXT,
+        dispatched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        received_by TEXT,
+        received_at DATETIME,
+        cancelled_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_transfers ON retail_stock_transfers (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS retail_stock_transfer_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        transfer_id TEXT NOT NULL,
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        quantity_sent INTEGER NOT NULL DEFAULT 0,
+        quantity_received INTEGER              -- null enquanto não recebido
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_transfer_items ON retail_stock_transfer_items (organization_id, transfer_id);
+
       -- Vendas do PDV (conector Alterdata Fase 4): venda a venda do caixa, com
       -- a MATRÍCULA do vendedor — base da comissão por vendedor e dos rankings
       -- reais da rede. Upsert pela chave natural (filial+boleta+dia).

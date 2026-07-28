@@ -95,6 +95,7 @@
     "test:retail-seller-sales-manual": "tsx scripts/test-retail-seller-sales-manual.ts",
     "test:retail-erp-seller-sales": "tsx scripts/test-retail-erp-seller-sales.ts",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
+    "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",
     "test:seed-reference-autonomos": "tsx scripts/test-seed-reference-autonomos.ts",
     "test:quickstart-servicos": "tsx scripts/test-quickstart-servicos.ts",
     "seed:reference-autonomos": "tsx scripts/seed-reference-autonomos.cli.ts",

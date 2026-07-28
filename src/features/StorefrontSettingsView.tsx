@@ -977,6 +977,7 @@ function ManualCollectionModal({ products, editing, onClose, onSaved }: {
   const [title, setTitle] = useState(editing?.title || '');
   const [selected, setSelected] = useState<string[]>(editing?.productIds || []);
   const [saving, setSaving] = useState(false);
+  const [q, setQ] = useState('');
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -1010,10 +1011,13 @@ function ManualCollectionModal({ products, editing, onClose, onSaved }: {
           <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Promoções da semana" autoFocus />
         </Field>
         <p className="text-xs text-zinc-400 mt-4 mb-2">Produtos da coleção ({selected.length} selecionado(s)):</p>
+        {products.length > 8 && (
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar produto…" className={`${inputClass} mb-2`} />
+        )}
         <div className="flex-1 overflow-auto space-y-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
           {products.length === 0 ? (
             <p className="text-sm text-zinc-500 p-3">Nenhum produto cadastrado ainda.</p>
-          ) : products.map((p) => (
+          ) : products.filter((p) => !q.trim() || String(p.name || '').toLowerCase().includes(q.trim().toLowerCase())).map((p) => (
             <label key={p.id} className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-zinc-800/50 cursor-pointer">
               <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggle(p.id)} className="accent-indigo-500" />
               <span className="text-sm text-zinc-200 flex-1">{p.name}</span>
@@ -1677,9 +1681,15 @@ function VitrineLooksKanban() {
 // Checklist de produtos da vitrine (até 5) — compartilhado pelo composer de
 // look manual e pela edição de peças de um look.
 function ProductPickList({ products, ids, onToggle }: { products: any[]; ids: string[]; onToggle: (pid: string) => void }) {
+  const [q, setQ] = useState('');
+  const shown = q.trim() ? products.filter((p: any) => String(p.name || '').toLowerCase().includes(q.trim().toLowerCase())) : products;
   return (
+    <>
+    {products.length > 8 && (
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar produto…" className="mb-1 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] text-zinc-100" />
+    )}
     <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
-      {products.map((p: any) => {
+      {shown.map((p: any) => {
         const on = ids.includes(p.id);
         const full = !on && ids.length >= 5;
         return (
@@ -1692,7 +1702,9 @@ function ProductPickList({ products, ids, onToggle }: { products: any[]; ids: st
         );
       })}
       {products.length === 0 && <p className="text-[10px] text-zinc-600 py-1">Sem produtos publicados na vitrine.</p>}
+      {products.length > 0 && shown.length === 0 && <p className="text-[10px] text-zinc-600 py-1">Nenhum produto casa com “{q}”.</p>}
     </div>
+    </>
   );
 }
 

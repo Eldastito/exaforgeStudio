@@ -1372,8 +1372,11 @@ function TopProductsTab() {
       .catch(() => toast.error('Falha ao carregar os mais vendidos.'))
       .finally(() => setLoading(false));
   };
+  const [q, setQ] = useState('');
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
   const maxPecas = rows.reduce((m, r) => Math.max(m, Number(r.pecas || 0)), 0) || 1;
+  const shown = rows.map((r, i) => ({ ...r, _rank: i + 1 }))
+    .filter(r => !q.trim() || String(r.nome || r.produto || '').toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <div>
       <div className="mb-3 flex items-center gap-2 flex-wrap">
@@ -1382,8 +1385,9 @@ function TopProductsTab() {
         <span className="text-xs text-zinc-500">até</span>
         <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><RefreshCw className="w-4 h-4" /> Gerar</button>
-        <span className="text-xs text-zinc-500">Ranking pelos itens vendidos no PDV (peças e faturamento).</span>
+        {rows.length > 0 && <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar produto…" className="flex-1 min-w-[140px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />}
       </div>
+      {rows.length >= 100 && <p className="mb-2 text-[11px] text-amber-300/80">Mostrando os 100 produtos mais vendidos do período. Use o filtro para encontrar um item específico.</p>}
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
       ) : rows.length === 0 ? (
@@ -1399,9 +1403,9 @@ function TopProductsTab() {
               <th className="px-3 py-2 text-left font-medium w-40">Volume</th>
             </tr></thead>
             <tbody>
-              {rows.map((r, i) => (
+              {shown.map((r) => (
                 <tr key={r.produto} className="border-t border-zinc-800/70">
-                  <td className="px-3 py-2 text-zinc-500">{i + 1}</td>
+                  <td className="px-3 py-2 text-zinc-500">{r._rank}</td>
                   <td className="px-3 py-2 text-zinc-200">{r.nome || <span className="font-mono text-zinc-400">{r.produto}</span>}</td>
                   <td className="px-3 py-2 text-right text-zinc-100">{r.pecas}</td>
                   <td className="px-3 py-2 text-right text-emerald-300">{brl(r.valor)}</td>
@@ -1436,6 +1440,7 @@ function CommissionTab() {
   const [sellerSales, setSellerSales] = useState<any[]>([]);
   const [sellerSalesModal, setSellerSalesModal] = useState(false);
   const [editSale, setEditSale] = useState<any | null>(null);
+  const [folhaQ, setFolhaQ] = useState('');
   // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
   // vendedor" ativa, a apuração oficial passa a usar esse nome.
   const nomearVendedor = async (v: any) => {
@@ -1603,7 +1608,12 @@ function CommissionTab() {
                 permite conferir e remover cada folha lançada. */}
             {sellerSales.length > 0 && (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Folhas de vendas lançadas (manual/foto)</p>
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Folhas de vendas lançadas (manual/foto)</p>
+                  {sellerSales.length > 8 && (
+                    <input value={folhaQ} onChange={e => setFolhaQ(e.target.value)} placeholder="Filtrar vendedor/loja…" className="min-w-[180px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-100" />
+                  )}
+                </div>
                 <div className="overflow-x-auto rounded-xl border border-zinc-800">
                   <table className="w-full text-sm">
                     <thead className="bg-zinc-900/60 text-zinc-400"><tr>
@@ -1616,7 +1626,7 @@ function CommissionTab() {
                       <th className="px-3 py-2 text-right font-medium"></th>
                     </tr></thead>
                     <tbody>
-                      {sellerSales.map((v: any) => (
+                      {sellerSales.filter((v: any) => { const s = folhaQ.trim().toLowerCase(); return !s || [v.seller_name, v.store_name].filter(Boolean).some((x: string) => String(x).toLowerCase().includes(s)); }).map((v: any) => (
                         <tr key={v.id} className="border-t border-zinc-800/70">
                           <td className="px-3 py-2 text-zinc-300">{v.sale_date}</td>
                           <td className="px-3 py-2 text-zinc-100">{v.seller_name}</td>
@@ -1925,6 +1935,8 @@ function ReconciliationTab() {
 function NegativeStockTab() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [storeFilter, setStoreFilter] = useState('');
+  const [q, setQ] = useState('');
   const load = async () => {
     setLoading(true);
     try {
@@ -1933,6 +1945,8 @@ function NegativeStockTab() {
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+  const stores = useMemo(() => Array.from(new Set(items.map(i => i.store_name).filter(Boolean))).sort(), [items]);
+  const shown = items.filter(i => (!storeFilter || i.store_name === storeFilter) && (!q.trim() || String(i.product_name || i.product_service_id || '').toLowerCase().includes(q.trim().toLowerCase())));
 
   return (
     <div>
@@ -1940,6 +1954,16 @@ function NegativeStockTab() {
         <p className="text-[12px] text-zinc-400">Itens com saldo <strong className="text-red-300">negativo</strong> por loja — normalmente venda lançada sem entrada correspondente. Corrija a entrada no estoque.</p>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
       </div>
+      {items.length > 0 && (
+        <div className="mb-3 flex items-center gap-2 flex-wrap">
+          <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+            <option value="">Todas as lojas</option>
+            {stores.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar produto…" className="flex-1 min-w-[160px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          <span className="text-xs text-zinc-500">{shown.length} de {items.length}</span>
+        </div>
+      )}
       {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
         : items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-emerald-800/40 bg-emerald-500/5 p-8 text-center text-sm text-emerald-300/80"><Check className="mx-auto mb-2 h-5 w-5" /> Nenhum item com estoque negativo. 🎉</div>
@@ -1952,7 +1976,7 @@ function NegativeStockTab() {
                 <th className="px-3 py-2 text-right font-medium">Saldo</th>
               </tr></thead>
               <tbody>
-                {items.map((it: any) => (
+                {shown.map((it: any) => (
                   <tr key={it.id} className="border-t border-zinc-800/70">
                     <td className="px-3 py-2 text-zinc-200">{it.store_name}</td>
                     <td className="px-3 py-2 text-zinc-300">{it.product_name || it.product_service_id}</td>

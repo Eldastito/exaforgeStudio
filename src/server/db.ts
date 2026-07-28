@@ -2386,6 +2386,61 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar Ficha do Paciente (Clínica)', e); }
 
+  // Módulo Escola (ADR-144, Fatia 1) — a camada que conecta a escola à família.
+  // Aluno é ENTIDADE PRÓPRIA (menor, sem telefone; molde de clinic_professionals,
+  // ADR-080 D2): não vira contato do CRM. O responsável é um `contacts` (tem
+  // WhatsApp). O vínculo student_guardians carrega o CONSENTIMENTO-DE-MENOR
+  // (porta: sem ele nada é enviado) e o dedupe do envio diário. student_agenda_items
+  // é a "nossa agenda" da Fatia 1 (sem depender de conector) — fonte determinística
+  // do resumo diário.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS student_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        birth_date TEXT,
+        turma TEXT,                 -- classe/série (ex.: "3º ano B")
+        enrollment_code TEXT,       -- matrícula
+        status TEXT DEFAULT 'active', -- active, inactive
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_student_profiles_org ON student_profiles (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS student_guardians (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        student_id TEXT NOT NULL,           -- -> student_profiles.id
+        guardian_contact_id TEXT NOT NULL,  -- -> contacts.id (tem WhatsApp)
+        relationship TEXT,                  -- mãe/pai/responsável
+        is_primary INTEGER DEFAULT 0,
+        digest_consent INTEGER DEFAULT 0,   -- PORTA: só envia se 1 (consentimento-de-menor)
+        digest_consent_at DATETIME,
+        digest_consent_by TEXT,             -- quem registrou o consentimento
+        last_digest_date TEXT,              -- dedupe por dia SP do resumo diário
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, student_id, guardian_contact_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_student_guardians_student ON student_guardians (organization_id, student_id);
+
+      CREATE TABLE IF NOT EXISTS student_agenda_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        student_id TEXT NOT NULL,           -- -> student_profiles.id
+        date TEXT NOT NULL,                 -- YYYY-MM-DD (dia SP)
+        kind TEXT DEFAULT 'notice',         -- class, activity, notice, pickup
+        title TEXT NOT NULL,
+        time_label TEXT,                    -- ex.: "16h" (livre, sem parsing)
+        status TEXT,                        -- ex.: "pending" para avisos que aguardam ação
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_student_agenda_day ON student_agenda_items (organization_id, student_id, date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar Módulo Escola (ADR-144)', e); }
+
   // Módulo Clínica (ADR-080, Fase C) — Agenda Clínica. Profissionais como
   // entidade própria (D2, desacoplada de login, link opcional para user) e
   // salas. Duração por consulta (sem teto de 150 min), check-in/início/saída e

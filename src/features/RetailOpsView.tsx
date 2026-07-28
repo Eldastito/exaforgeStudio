@@ -62,7 +62,9 @@ function InsightsTab() {
     if (res.ok && d.ok) {
       const st = d.action?.status;
       setActed(prev => ({ ...prev, [p.signalId]: st }));
-      toast.success(st === 'approved' ? 'Ação criada e aprovada.' : 'Ação criada — aguardando aprovação.');
+      if (d.transfer && d.transfer.id) toast.success('Transferência despachada — acompanhe na aba Transferências.');
+      else if (d.transfer && d.transfer.error) toast.error(`Ação criada, mas a transferência falhou: ${d.transfer.error}`);
+      else toast.success(st === 'approved' ? 'Ação criada e aprovada.' : 'Ação criada — aguardando aprovação.');
       loadActions();
     } else toast.error(d.error || 'Falha ao criar a ação.');
   };

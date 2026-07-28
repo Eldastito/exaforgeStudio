@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailInventoryService } from "./RetailInventoryService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 type NewItem = { productId: string; variantId?: string | null; quantity: number };
 type CreateInput = { originStoreId: string; destStoreId: string; note?: string; items: NewItem[]; source?: "manual" | "ai_suggested"; signalId?: string | null; decisionActionId?: string | null };
@@ -115,6 +116,30 @@ export class RetailTransferService {
     run();
     try { logAuthEvent(orgId, actorId || "system", transferId, "RETAIL_TRANSFER_CANCEL", {}); } catch { /* noop */ }
     return this.get(orgId, transferId);
+  }
+
+  /**
+   * Cria a transferência a partir de um SINAL de sugestão da IA
+   * (`retail_transfer_suggested`): lê origem/destino/produto/variante e a
+   * quantidade sugerida da evidência, despacha (baixa na origem) marcando
+   * source='ai_suggested' + o vínculo com o sinal/ação, e RESOLVE o sinal (a
+   * oportunidade passou a ser tratada). Fase 2 do maestro de transferências.
+   */
+  static fromSignal(orgId: string, signalId: string, actorId?: string, decisionActionId?: string | null): any {
+    const sig = db.prepare(`SELECT * FROM business_signals WHERE organization_id = ? AND id = ?`).get(orgId, signalId) as any;
+    if (!sig) throw new Error("sinal não encontrado");
+    if (sig.signal_type !== "retail_transfer_suggested") throw new Error("o sinal não é uma sugestão de transferência");
+    let ev: any = {};
+    try { ev = JSON.parse(sig.evidence_json || "{}"); } catch { ev = {}; }
+    const qty = Math.max(1, int(ev.quantitySuggested) || 1);
+    const t = this.create(orgId, {
+      originStoreId: ev.originStoreId, destStoreId: ev.destStoreId,
+      items: [{ productId: ev.productId, variantId: ev.variantId, quantity: qty }],
+      source: "ai_suggested", signalId, decisionActionId: decisionActionId || null,
+      note: "Sugestão da IA — reposição da grade (loja com sobra → loja com falta)",
+    }, actorId);
+    try { BusinessSignalService.resolve(orgId, signalId); } catch { /* noop */ }
+    return t;
   }
 
   static get(orgId: string, transferId: string): any | null {

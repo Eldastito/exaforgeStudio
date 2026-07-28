@@ -115,7 +115,15 @@ router.post("/insights/act", requireRole("owner", "admin"), (req: AuthRequest, r
       expectedImpact: sig.impact_amount != null ? Number(sig.impact_amount) : null, impactUnit: sig.impact_unit || null,
       basis: sig.basis || "estimate", confidence: Number(sig.confidence) || 0.7, createdBy: (req as any).userId || "user",
     });
-    res.status(201).json({ ok: true, action: proposed });
+    // Fase 2: sugestão de transferência da IA vira uma transferência REAL (em
+    // trânsito, baixa na origem), ligada ao sinal/ação, e o sinal é resolvido.
+    // Falha aqui NÃO derruba a ação já proposta (fica só a recomendação).
+    let transfer: any = null;
+    if (action.actionType === "retail_transfer") {
+      try { transfer = RetailTransferService.fromSignal(orgId, sig.id, req.user?.userId, proposed.id); }
+      catch (e: any) { transfer = { error: e?.message || "não foi possível criar a transferência" }; }
+    }
+    res.status(201).json({ ok: true, action: proposed, transfer });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: e?.message || "Falha ao criar a ação." });
   }

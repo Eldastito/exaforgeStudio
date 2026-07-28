@@ -263,19 +263,23 @@ function Balcao({ onChange }: { onChange: () => void }) {
   const [pix, setPix] = useState<{ txid: string; qrPayload: string } | null>(null);
   // Produto por peso aguardando o vendedor informar os kg (peixaria/açougue).
   const [weighing, setWeighing] = useState<Product | null>(null);
+  // Esconde produtos zerados da grade (server-side): não dá pra vender o que
+  // não tem. Serviços e itens sem controle de estoque seguem aparecendo.
+  const [hideEmpty, setHideEmpty] = useState(false);
 
   const loadSuggest = useCallback((pid?: string) => {
     apiFetch(`/api/comigo/suggest${pid ? `?productId=${pid}` : ''}`).then((r) => r.json())
       .then((r: any) => setSuggest({ alsoBought: r?.alsoBought || [], top: r?.top || [] })).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    apiFetch('/api/products').then((r) => r.json()).then((rows: any) => {
+  const loadProducts = useCallback(() => {
+    apiFetch(`/api/products${hideEmpty ? '?inStock=1' : ''}`).then((r) => r.json()).then((rows: any) => {
       const list = Array.isArray(rows) ? rows : (rows?.products || []);
       setProducts(list.filter((p: Product) => p.active !== 0 && p.price != null));
     }).catch(() => {});
-    loadSuggest();
-  }, [loadSuggest]);
+  }, [hideEmpty]);
+
+  useEffect(() => { loadProducts(); loadSuggest(); }, [loadProducts, loadSuggest]);
 
   const refresh = useCallback((id: string) => {
     apiFetch(`/api/comigo/orders/${id}`).then((r) => r.json()).then((r: any) => {
@@ -391,7 +395,12 @@ function Balcao({ onChange }: { onChange: () => void }) {
             </div>
           );
         })()}
-        <div className="text-xs text-zinc-500 mb-2">Toque para adicionar</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs text-zinc-500">Toque para adicionar</div>
+          <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer" title="Esconde produtos com estoque zerado. Serviços e itens sem controle de estoque continuam aparecendo.">
+            <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} /> Ocultar sem estoque
+          </label>
+        </div>
         {products.length === 0 ? (
           <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Cadastre produtos no Catálogo para vender aqui.</div>
         ) : (

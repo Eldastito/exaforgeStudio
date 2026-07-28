@@ -1159,14 +1159,17 @@ function TransfersTab() {
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Foca no que precisa de AÇÃO por padrão (em trânsito); recebidas/canceladas
+  // acumulam com o tempo — o filtro (que o backend já suporta) evita a lista sem fim.
+  const [status, setStatus] = useState('in_transit');
   const load = () => {
     setLoading(true);
-    apiFetch('/api/retailops/transfers').then(r => r.json())
+    apiFetch(`/api/retailops/transfers${status ? `?status=${status}` : ''}`).then(r => r.json())
       .then(d => setList(Array.isArray(d?.transfers) ? d.transfers : []))
       .catch(() => toast.error('Falha ao carregar as transferências.'))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
   const act = async (id: string, action: 'receive' | 'cancel') => {
     if (action === 'cancel' && !window.confirm('Cancelar a transferência e estornar a baixa na origem?')) return;
     setBusyId(id);
@@ -1185,14 +1188,20 @@ function TransfersTab() {
     : <span className="inline-flex items-center gap-1 text-zinc-400 bg-zinc-500/10 border border-zinc-500/30 rounded-full px-2 py-0.5 text-[11px]"><X className="w-3 h-3" /> Cancelada</span>;
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <select value={status} onChange={e => setStatus(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+          <option value="in_transit">Em trânsito</option>
+          <option value="received">Recebidas</option>
+          <option value="cancelled">Canceladas</option>
+          <option value="">Todas</option>
+        </select>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
         <span className="text-xs text-zinc-500">Peças em trânsito entre lojas: baixa lançada na origem; a entrada no destino sai na recepção.</span>
       </div>
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
       ) : list.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhuma transferência ainda. Crie uma na aba <span className="text-zinc-300">Reposição (grade)</span>.</div>
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">{status === 'in_transit' ? 'Nenhuma transferência em trânsito. Crie uma na aba ' : 'Nenhuma transferência neste filtro. Crie uma na aba '}<span className="text-zinc-300">Reposição (grade)</span>.</div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
           <table className="w-full text-sm">
@@ -1237,19 +1246,28 @@ function TransfersTab() {
 
 // ---- Clientes do PDV (Fase 3, opt-in) ---------------------------------------
 function PdvCustomersTab() {
+  const PAGE = 100;
   const [q, setQ] = useState('');
   const [bMonth, setBMonth] = useState('');
-  const [data, setData] = useState<{ total: number; customers: any[] } | null>(null);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const load = () => {
-    setLoading(true);
-    apiFetch(`/api/retailops/pdv-customers?q=${encodeURIComponent(q)}&birthdayMonth=${bMonth}&limit=100`)
+  const [loadingMore, setLoadingMore] = useState(false);
+  const load = (offset: number, append: boolean) => {
+    append ? setLoadingMore(true) : setLoading(true);
+    apiFetch(`/api/retailops/pdv-customers?q=${encodeURIComponent(q)}&birthdayMonth=${bMonth}&limit=${PAGE}&offset=${offset}`)
       .then(r => r.json())
-      .then(d => setData(d && !d.error ? d : null))
+      .then(d => {
+        if (d && !d.error) {
+          setTotal(Number(d.total) || 0);
+          setCustomers(prev => append ? [...prev, ...(d.customers || [])] : (d.customers || []));
+        }
+      })
       .catch(() => toast.error('Falha ao carregar clientes.'))
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); setLoadingMore(false); });
   };
-  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, bMonth]);
+  useEffect(() => { const t = setTimeout(() => load(0, false), 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, bMonth]);
+  const data = { total, customers };
   const MESES = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   return (
     <div>
@@ -1259,11 +1277,11 @@ function PdvCustomersTab() {
         <select value={bMonth} onChange={e => setBMonth(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-2 text-sm text-zinc-100" title="Aniversariantes do mês">
           {MESES.map((m, i) => <option key={i} value={i === 0 ? '' : String(i).padStart(2, '0')}>{i === 0 ? 'Aniversário: todos os meses' : `Aniversário: ${m}`}</option>)}
         </select>
-        {data && <span className="text-xs text-zinc-500">{data.total} cliente(s)</span>}
+        {total > 0 && <span className="text-xs text-zinc-500">{customers.length < total ? `${customers.length} de ${total}` : total} cliente(s)</span>}
       </div>
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
-      ) : !data || data.customers.length === 0 ? (
+      ) : customers.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum cliente do PDV {q || bMonth ? 'para este filtro' : 'importado ainda'}. Ligue "Importar clientes do PDV" em Integrações → Alterdata e sincronize.</div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -1287,6 +1305,14 @@ function PdvCustomersTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {customers.length > 0 && customers.length < total && (
+        <div className="mt-3 text-center">
+          <button onClick={() => load(customers.length, true)} disabled={loadingMore}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Carregar mais ({total - customers.length} restantes)
+          </button>
         </div>
       )}
     </div>

@@ -848,8 +848,17 @@ router.get("/replenishment", (req: AuthRequest, res): any => {
 router.get("/transfers", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json({ transfers: RetailTransferService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }) }); }
-  catch (e: any) { res.status(500).json({ error: e.message }); }
+  const status = req.query.status ? String(req.query.status) : undefined;
+  try {
+    res.json({
+      transfers: RetailTransferService.list(orgId, {
+        status,
+        limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+        offset: req.query.offset ? parseInt(String(req.query.offset), 10) : undefined,
+      }),
+      total: RetailTransferService.count(orgId, { status }),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get("/transfers/:id", (req: AuthRequest, res): any => {
@@ -988,7 +997,13 @@ router.post("/tasks/:id/mark-submitted", (req: AuthRequest, res): any => {
 router.get("/stock/negative", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ items: RetailInventoryService.listNegative(orgId) });
+  const { total, items } = RetailInventoryService.listNegative(orgId, {
+    storeId: req.query.storeId ? String(req.query.storeId) : undefined,
+    q: req.query.q ? String(req.query.q) : undefined,
+    limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+    offset: req.query.offset ? parseInt(String(req.query.offset), 10) : undefined,
+  });
+  res.json({ total, items });
 });
 
 router.get("/stock/by-store/:storeId", (req: AuthRequest, res): any => {

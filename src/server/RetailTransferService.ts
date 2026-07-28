@@ -188,11 +188,12 @@ export class RetailTransferService {
     return `por volta das ${String(bestH).padStart(2, "0")}h (horário mais tranquilo da loja)`;
   }
 
-  static list(orgId: string, opts: { status?: string; limit?: number } = {}): any[] {
+  static list(orgId: string, opts: { status?: string; limit?: number; offset?: number } = {}): any[] {
     const where: string[] = ["t.organization_id = ?"];
     const args: any[] = [orgId];
     if (opts.status) { where.push("t.status = ?"); args.push(opts.status); }
     const limit = Math.min(500, Math.max(1, int(opts.limit) || 100));
+    const offset = Math.max(0, int(opts.offset) || 0);
     return db.prepare(
       `SELECT t.*, so.name AS origin_store, sd.name AS dest_store,
               (SELECT COUNT(*) FROM retail_stock_transfer_items i WHERE i.transfer_id = t.id) AS item_count,
@@ -202,7 +203,15 @@ export class RetailTransferService {
          LEFT JOIN retail_stores sd ON sd.id = t.dest_store_id
         WHERE ${where.join(" AND ")}
         ORDER BY CASE t.status WHEN 'in_transit' THEN 0 ELSE 1 END, t.dispatched_at DESC
-        LIMIT ${limit}`
+        LIMIT ${limit} OFFSET ${offset}`
     ).all(...args) as any[];
+  }
+
+  /** Total de transferências (para paginação), com o mesmo filtro de status. */
+  static count(orgId: string, opts: { status?: string } = {}): number {
+    const where: string[] = ["organization_id = ?"];
+    const args: any[] = [orgId];
+    if (opts.status) { where.push("status = ?"); args.push(opts.status); }
+    return Number((db.prepare(`SELECT COUNT(*) c FROM retail_stock_transfers WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
   }
 }

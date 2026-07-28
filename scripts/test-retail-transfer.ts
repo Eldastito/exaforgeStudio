@@ -86,6 +86,14 @@ async function main() {
   check("recepção parcial: entra só o recebido (3)", qtyAt(s2.id) === destBefore + 3, `${destBefore}→${qtyAt(s2.id)}`);
   check("guarda o recebido (3) diferente do enviado (4)", recv3.items[0].quantity_received === 3 && recv3.items[0].quantity_sent === 4, JSON.stringify(recv3.items));
 
+  // ===== 6b. Paginação/contagem/filtro de status (Fase 3 UX) =====
+  const allCount = RetailTransferService.count(A);
+  check("count reflete o total de transferências (3)", allCount === 3, String(allCount));
+  check("count filtra por status (received = 2)", RetailTransferService.count(A, { status: "received" }) === 2, String(RetailTransferService.count(A, { status: "received" })));
+  check("list respeita limit", RetailTransferService.list(A, { limit: 1 }).length === 1);
+  check("list respeita offset (limit 2 + offset 2 = última)", RetailTransferService.list(A, { limit: 2, offset: 2 }).length === 1);
+  check("list filtra por status (cancelled = 1)", RetailTransferService.list(A, { status: "cancelled" }).length === 1);
+
   // ===== 7. Isolamento por organização =====
   const B = `org_${randomUUID().slice(0, 8)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Outra', 'active')`).run(randomUUID(), B);

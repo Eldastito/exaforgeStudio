@@ -17,7 +17,6 @@
  */
 import bcrypt from "bcrypt";
 import { randomUUID } from "node:crypto";
-import { pathToFileURL } from "node:url";
 
 type SeededProduct = { name: string; type?: "product" | "service"; price: number; saleMode?: "unit" | "weight"; steps?: number[]; category?: string };
 type RefSpec = {
@@ -133,8 +132,8 @@ export async function seedReferenceAutonomos(password: string): Promise<Array<{ 
   return out;
 }
 
-async function main() {
-  const password = process.env.REF_ACCOUNT_PASSWORD || "Referencia@2026";
+/** Roda o seed e imprime os logins. Chamado pelo CLI (seed-reference-autonomos.cli). */
+export async function runSeed(password = process.env.REF_ACCOUNT_PASSWORD || "Referencia@2026") {
   const summary = await seedReferenceAutonomos(password);
   console.log("\n=== Contas de referência de autônomos ===");
   for (const s of summary) {
@@ -146,9 +145,5 @@ async function main() {
     console.log(`  personas: ${s.personas}`);
   }
   console.log("\nPronto. As contas usam o plano Autônomo com o Balcão (copiloto) ligado.");
-  process.exit(0);
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((e) => { console.error(e); process.exit(1); });
+  return summary;
 }

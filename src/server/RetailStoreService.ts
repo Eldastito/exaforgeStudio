@@ -17,20 +17,25 @@ export type StoreInput = {
   managerUserId?: string | null;
   managerContactId?: string | null;
   active?: boolean;
+  address?: string | null;
+  city?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
+
+const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, created_at, updated_at`;
+const numOrNull = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 export class RetailStoreService {
   static list(orgId: string): any[] {
     return db.prepare(
-      `SELECT id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, created_at, updated_at
-         FROM retail_stores WHERE organization_id = ? ORDER BY active DESC, name ASC`
+      `SELECT ${STORE_COLS} FROM retail_stores WHERE organization_id = ? ORDER BY active DESC, name ASC`
     ).all(orgId) as any[];
   }
 
   static get(orgId: string, id: string): any | null {
     return (db.prepare(
-      `SELECT id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, created_at, updated_at
-         FROM retail_stores WHERE organization_id = ? AND id = ?`
+      `SELECT ${STORE_COLS} FROM retail_stores WHERE organization_id = ? AND id = ?`
     ).get(orgId, id) as any) || null;
   }
 
@@ -59,15 +64,19 @@ export class RetailStoreService {
     this.assertCodeFree(orgId, input.code);
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, orgId, name,
       input.code ? String(input.code).trim() : null,
       input.whatsappIdentifier ? String(input.whatsappIdentifier).trim() : null,
       input.managerUserId || null,
       input.managerContactId || null,
-      input.active === false ? 0 : 1
+      input.active === false ? 0 : 1,
+      input.address ? String(input.address).trim() : null,
+      input.city ? String(input.city).trim() : null,
+      numOrNull(input.latitude),
+      numOrNull(input.longitude)
     );
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_CREATED", { name }); } catch { /* noop */ }
     return this.get(orgId, id);
@@ -145,6 +154,10 @@ export class RetailStoreService {
       manager_user_id: patch.managerUserId !== undefined ? (patch.managerUserId || null) : undefined,
       manager_contact_id: patch.managerContactId !== undefined ? (patch.managerContactId || null) : undefined,
       active: patch.active !== undefined ? (patch.active ? 1 : 0) : undefined,
+      address: patch.address !== undefined ? (patch.address ? String(patch.address).trim() : null) : undefined,
+      city: patch.city !== undefined ? (patch.city ? String(patch.city).trim() : null) : undefined,
+      latitude: patch.latitude !== undefined ? numOrNull(patch.latitude) : undefined,
+      longitude: patch.longitude !== undefined ? numOrNull(patch.longitude) : undefined,
     };
     // Guarda de código único entre lojas ATIVAS: cobre troca de código e
     // REATIVAÇÃO de loja cujo código já está em uso por outra ativa.

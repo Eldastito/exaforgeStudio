@@ -161,6 +161,33 @@ export class RetailTransferService {
     return t;
   }
 
+  /**
+   * Sugere o MELHOR HORÁRIO para separar/despachar a transferência: a hora mais
+   * TRANQUILA da loja (menos vendas no PDV), dentro do horário em que ela opera.
+   * Baseado em dados (retail_pdv_sales, casado pela `filial` = código da loja);
+   * cai num padrão sensato quando não há histórico. Determinístico.
+   */
+  static suggestBestWindow(orgId: string, storeCode?: string | null): string {
+    const fallback = "início da manhã, antes do movimento";
+    const code = String(storeCode || "").trim();
+    if (!code) return fallback;
+    const rows = db.prepare(
+      `SELECT CAST(substr(sale_time, 1, 2) AS INTEGER) AS h, COUNT(*) AS n
+         FROM retail_pdv_sales
+        WHERE organization_id = ? AND filial = ? AND sale_time IS NOT NULL AND sale_time <> ''
+          AND sale_date >= date('now', '-60 days')
+        GROUP BY h`
+    ).all(orgId, code) as any[];
+    let bestH: number | null = null, bestN = Infinity;
+    for (const r of rows) {
+      const h = Number(r.h);
+      if (!Number.isFinite(h) || h < 6 || h > 22) continue; // só horas de operação plausíveis
+      if (Number(r.n) < bestN) { bestN = Number(r.n); bestH = h; }
+    }
+    if (bestH == null) return fallback;
+    return `por volta das ${String(bestH).padStart(2, "0")}h (horário mais tranquilo da loja)`;
+  }
+
   static list(orgId: string, opts: { status?: string; limit?: number } = {}): any[] {
     const where: string[] = ["t.organization_id = ?"];
     const args: any[] = [orgId];

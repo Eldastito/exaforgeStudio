@@ -714,13 +714,22 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
   const [name, setName] = useState(store?.name || '');
   const [code, setCode] = useState(store?.code || '');
   const [wa, setWa] = useState(store?.whatsapp_identifier || '');
+  const [address, setAddress] = useState(store?.address || '');
+  const [city, setCity] = useState(store?.city || '');
+  const [lat, setLat] = useState(store?.latitude != null ? String(store.latitude) : '');
+  const [lng, setLng] = useState(store?.longitude != null ? String(store.longitude) : '');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     if (!name.trim()) { toast.error('Dê um nome à loja.'); return; }
     setSaving(true);
     try {
-      const body = JSON.stringify({ name: name.trim(), code: code.trim() || null, whatsappIdentifier: wa.replace(/\D/g, '') || null });
+      const body = JSON.stringify({
+        name: name.trim(), code: code.trim() || null, whatsappIdentifier: wa.replace(/\D/g, '') || null,
+        address: address.trim() || null, city: city.trim() || null,
+        latitude: lat.trim() === '' ? null : Number(lat.replace(',', '.')),
+        longitude: lng.trim() === '' ? null : Number(lng.replace(',', '.')),
+      });
       const res = editing
         ? await apiFetch(`/api/retailops/stores/${store.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
         : await apiFetch('/api/retailops/stores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
@@ -748,6 +757,21 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             <input value={wa} onChange={e => setWa(e.target.value)} placeholder="Ex.: 5511987654321" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
             <span className="mt-1 block text-[11px] text-zinc-500">Recebe a cobrança de pendências (fechamento, malote) e permite dar baixa respondendo.</span>
           </label>
+          <label className="block text-xs text-zinc-400">Endereço (opcional)
+            <input value={address} onChange={e => setAddress(e.target.value)} placeholder="Rua, nº, bairro" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="block text-xs text-zinc-400 col-span-1">Cidade
+              <input value={city} onChange={e => setCity(e.target.value)} placeholder="Cidade" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            </label>
+            <label className="block text-xs text-zinc-400">Latitude
+              <input value={lat} onChange={e => setLat(e.target.value)} placeholder="-22.90" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            </label>
+            <label className="block text-xs text-zinc-400">Longitude
+              <input value={lng} onChange={e => setLng(e.target.value)} placeholder="-43.17" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            </label>
+          </div>
+          <span className="block text-[11px] text-zinc-500 -mt-1">As coordenadas (lat/long) permitem sugerir a transferência entre as lojas <strong>mais próximas</strong>. Pegue no Google Maps: clique com o botão direito no ponto → o primeiro item copia “lat, long”.</span>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
@@ -1052,6 +1076,7 @@ function ReplenishmentTab() {
                 <th className="px-3 py-2 text-left font-medium">Falta em</th>
                 <th className="px-3 py-2 text-left font-medium">Sobra em</th>
                 <th className="px-3 py-2 text-right font-medium">Qtd disponível</th>
+                <th className="px-3 py-2 text-right font-medium">Distância</th>
                 <th className="px-3 py-2 text-right font-medium">Ação</th>
               </tr>
             </thead>
@@ -1063,6 +1088,7 @@ function ReplenishmentTab() {
                   <td className="px-3 py-2 text-rose-300">{r.needy_store}</td>
                   <td className="px-3 py-2 text-emerald-300">{r.donor_store}</td>
                   <td className="px-3 py-2 text-right text-zinc-100">{r.donor_qty}</td>
+                  <td className="px-3 py-2 text-right text-zinc-400">{r.distance_km != null ? `${r.distance_km} km` : '—'}</td>
                   <td className="px-3 py-2 text-right">
                     <button onClick={() => setXfer(r)} disabled={!r.donor_store_id || !r.needy_store_id}
                       className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-600/20 text-indigo-200 px-2.5 py-1 text-xs hover:bg-indigo-600/30 disabled:opacity-40">
@@ -1111,7 +1137,9 @@ function TransferModal({ row, onClose, onDone }: { row: any; onClose: () => void
           <span className="text-emerald-300">{row.donor_store}</span>
           <ArrowLeftRight className="w-4 h-4 text-zinc-500" />
           <span className="text-rose-300">{row.needy_store}</span>
+          {row.distance_km != null && <span className="text-[11px] text-zinc-500">· {row.distance_km} km</span>}
         </div>
+        {row.best_time && <div className="mt-2 text-[11px] text-amber-300/90">🕐 Melhor horário para separar: {row.best_time}</div>}
         <label className="text-xs text-zinc-500 mt-3 block">Quantidade a transferir (máx. {max})</label>
         <input autoFocus type="number" min={1} max={max} value={qty}
           onChange={e => setQty(Math.min(max, Math.max(1, Math.trunc(Number(e.target.value) || 1))))}

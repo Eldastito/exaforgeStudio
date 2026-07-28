@@ -25,6 +25,7 @@ async function main() {
   const db = (await import("../src/server/db.js")).default;
   const express = (await import("express")).default;
   const productsRouter = (await import("../src/server/routes/products.js")).default;
+  const storefrontRouter = (await import("../src/server/routes/storefront.js")).default;
 
   const orgId = `org_${randomUUID().slice(0, 8)}`;
   const userId = randomUUID();
@@ -35,11 +36,13 @@ async function main() {
   app.use(express.json());
   app.use((req: any, _res, next) => { req.organizationId = orgId; req.user = { userId }; next(); });
   app.use("/api/products", productsRouter);
+  app.use("/api/storefront", storefrontRouter);
   const server = await new Promise<any>((resolve) => { const s = app.listen(0, () => resolve(s)); });
   const port = (server.address() as any).port;
   const base = `http://127.0.0.1:${port}/api/products`;
   const post = (body: any) => fetch(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
   const get = async (qs: string) => { const r = await fetch(`${base}${qs}`); return { total: Number(r.headers.get("X-Total-Count") || 0), rows: await r.json() }; };
+  const getStore = async (qs: string) => { const r = await fetch(`http://127.0.0.1:${port}/api/storefront/products${qs}`); return { total: Number(r.headers.get("X-Total-Count") || 0), rows: await r.json() }; };
 
   try {
     // 4 itens: com estoque, SEM estoque (0), serviço, e produto sem controle.
@@ -60,6 +63,14 @@ async function main() {
     // Busca + filtro combinam (a contagem reflete os dois).
     const combo = await get("?limit=100&inStock=1&q=Camisa");
     check("inStock + busca combinam (só a Camisa)", combo.total === 1 && (combo.rows as any[])[0]?.name === "Camisa com estoque", JSON.stringify({ total: combo.total }));
+
+    // Vitrine: mesmo filtro (só type='product' — serviço nem entra).
+    const storeAll = await getStore("?limit=100");
+    check("vitrine sem filtro: 3 produtos (sem o serviço)", storeAll.total === 3, JSON.stringify({ total: storeAll.total }));
+    const storeIn = await getStore("?limit=100&inStock=1");
+    const sNames = (storeIn.rows as any[]).map(r => r.name);
+    check("vitrine inStock=1: esconde a zerada (2 produtos)", storeIn.total === 2 && !sNames.includes("Calça zerada"), JSON.stringify({ total: storeIn.total, sNames }));
+    check("vitrine inStock=1: mantém com-estoque e sem-controle", sNames.includes("Camisa com estoque") && sNames.includes("Boné sem controle"), JSON.stringify(sNames));
   } finally {
     server.close();
   }

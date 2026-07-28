@@ -45,14 +45,14 @@ async function main() {
   const row = RetailInventoryService.get(A, store.id, prod, null);
   check("Saldo por loja PODE ficar negativo (-5)", row.quantity_available === -5);
   const neg = RetailInventoryService.listNegative(A);
-  check("Item negativo listado", neg.length === 1 && neg[0].product_service_id === prod);
+  check("Item negativo listado", neg.total === 1 && neg.items.length === 1 && neg.items[0].product_service_id === prod);
   const alerts = RetailInventoryService.listAlerts(A);
   check("Alerta de estoque negativo aberto", alerts.length === 1 && alerts[0].quantity === -5 && alerts[0].status === "open");
   check("Alerta traz causas prováveis", Array.isArray(alerts[0].possibleCauses) && alerts[0].possibleCauses.length >= 3);
 
   // ---- 2. Normalizar → alerta resolvido ----
   RetailInventoryService.applyMovement(A, store.id, prod, null, 10); // -5 + 10 = 5
-  check("Ao normalizar, some dos negativos", RetailInventoryService.listNegative(A).length === 0);
+  check("Ao normalizar, some dos negativos", RetailInventoryService.listNegative(A).total === 0);
   check("Alerta é resolvido automaticamente", RetailInventoryService.listAlerts(A, "open").length === 0);
 
   // ---- 3. Cair de novo → reabre o mesmo alerta (sem duplicar) ----
@@ -67,7 +67,20 @@ async function main() {
   // ---- 5. Isolamento ----
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);
-  check("Isolamento: B não vê estoque/alertas de A", RetailInventoryService.listNegative(B).length === 0 && RetailInventoryService.listAlerts(B, "resolved").length === 0);
+  check("Isolamento: B não vê estoque/alertas de A", RetailInventoryService.listNegative(B).total === 0 && RetailInventoryService.listAlerts(B, "resolved").length === 0);
+
+  // ---- 6. Filtro/paginação server-side (Fase 3 UX) ----
+  // Neste ponto há 1 negativo (Camiseta@Barra = -3, do passo 3). Adiciona outro.
+  const store2 = RetailStoreService.create(A, { name: "Loja Centro" });
+  const prod2 = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price) VALUES (?, ?, 'product', 'Boné', 30)`).run(prod2, A);
+  RetailInventoryService.setQuantity(A, store2.id, prod2, null, -4);
+  check("Fase 3: total de negativos = 2", RetailInventoryService.listNegative(A).total === 2, String(RetailInventoryService.listNegative(A).total));
+  const byStore = RetailInventoryService.listNegative(A, { storeId: store2.id });
+  check("Fase 3: filtra por loja (Centro = 1)", byStore.total === 1 && byStore.items.every((i: any) => i.store_id === store2.id), JSON.stringify(byStore.items.map((i: any) => i.store_name)));
+  check("Fase 3: filtra por produto (q='Boné' = 1)", RetailInventoryService.listNegative(A, { q: "Boné" }).total === 1);
+  const page = RetailInventoryService.listNegative(A, { limit: 1 });
+  check("Fase 3: paginação (limit 1 → 1 item, total 2)", page.items.length === 1 && page.total === 2, JSON.stringify({ n: page.items.length, total: page.total }));
 
   console.log("\n=== Retail Ops — Fase F: estoque negativo por loja (ADR-083) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

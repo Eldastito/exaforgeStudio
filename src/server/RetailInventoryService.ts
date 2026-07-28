@@ -67,15 +67,25 @@ export class RetailInventoryService {
     }
   }
 
-  static listNegative(orgId: string): any[] {
-    return db.prepare(
-      `SELECT i.*, s.name AS store_name, p.name AS product_name
-         FROM retail_store_inventory i
-         JOIN retail_stores s ON s.id = i.store_id
-    LEFT JOIN products_services p ON p.id = i.product_service_id
-        WHERE i.organization_id = ? AND i.quantity_available < 0
-        ORDER BY i.quantity_available ASC`
-    ).all(orgId) as any[];
+  /** Negativos por loja, com filtro (loja/produto) e paginação server-side —
+   *  a lista pode ser grande numa rede com muitos SKUs. Retorna total + página. */
+  static listNegative(orgId: string, opts: { storeId?: string; q?: string; limit?: number; offset?: number } = {}): { total: number; items: any[] } {
+    const where: string[] = ["i.organization_id = ?", "i.quantity_available < 0"];
+    const args: any[] = [orgId];
+    if (opts.storeId) { where.push("i.store_id = ?"); args.push(String(opts.storeId)); }
+    const q = String(opts.q || "").trim();
+    if (q) { where.push("p.name LIKE ?"); args.push(`%${q}%`); }
+    const base = `FROM retail_store_inventory i
+                    JOIN retail_stores s ON s.id = i.store_id
+               LEFT JOIN products_services p ON p.id = i.product_service_id
+                   WHERE ${where.join(" AND ")}`;
+    const total = Number((db.prepare(`SELECT COUNT(*) c ${base}`).get(...args) as any)?.c || 0);
+    const limit = Math.min(500, Math.max(1, Math.trunc(Number(opts.limit) || 100)));
+    const offset = Math.max(0, Math.trunc(Number(opts.offset) || 0));
+    const items = db.prepare(
+      `SELECT i.*, s.name AS store_name, p.name AS product_name ${base} ORDER BY i.quantity_available ASC LIMIT ? OFFSET ?`
+    ).all(...args, limit, offset) as any[];
+    return { total, items };
   }
 
   static byStore(orgId: string, storeId: string): any[] {

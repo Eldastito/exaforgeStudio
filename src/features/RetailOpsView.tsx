@@ -1156,27 +1156,33 @@ function TransferModal({ row, onClose, onDone }: { row: any; onClose: () => void
 // Aba Transferências: lista as transferências (em trânsito no topo) e permite
 // RECEBER (dá entrada no destino) ou CANCELAR (estorna a origem) as em trânsito.
 function TransfersTab() {
+  const PAGE = 100;
   const [list, setList] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   // Foca no que precisa de AÇÃO por padrão (em trânsito); recebidas/canceladas
   // acumulam com o tempo — o filtro (que o backend já suporta) evita a lista sem fim.
   const [status, setStatus] = useState('in_transit');
-  const load = () => {
-    setLoading(true);
-    apiFetch(`/api/retailops/transfers${status ? `?status=${status}` : ''}`).then(r => r.json())
-      .then(d => setList(Array.isArray(d?.transfers) ? d.transfers : []))
+  const load = (offset = 0, append = false) => {
+    append ? setLoadingMore(true) : setLoading(true);
+    apiFetch(`/api/retailops/transfers${status ? `?status=${status}&` : '?'}limit=${PAGE}&offset=${offset}`).then(r => r.json())
+      .then(d => {
+        setTotal(Number(d?.total) || 0);
+        setList(prev => append ? [...prev, ...(Array.isArray(d?.transfers) ? d.transfers : [])] : (Array.isArray(d?.transfers) ? d.transfers : []));
+      })
       .catch(() => toast.error('Falha ao carregar as transferências.'))
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); setLoadingMore(false); });
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(0, false); /* eslint-disable-next-line */ }, [status]);
   const act = async (id: string, action: 'receive' | 'cancel') => {
     if (action === 'cancel' && !window.confirm('Cancelar a transferência e estornar a baixa na origem?')) return;
     setBusyId(id);
     try {
       const res = await apiFetch(`/api/retailops/transfers/${id}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const d = await res.json();
-      if (res.ok) { toast.success(action === 'receive' ? 'Recebido — entrada lançada no destino.' : 'Transferência cancelada.'); load(); }
+      if (res.ok) { toast.success(action === 'receive' ? 'Recebido — entrada lançada no destino.' : 'Transferência cancelada.'); load(0, false); }
       else toast.error(d?.error || 'Não foi possível concluir a ação.');
     } catch { toast.error('Falha na ação.'); }
     finally { setBusyId(null); }
@@ -1195,7 +1201,8 @@ function TransfersTab() {
           <option value="cancelled">Canceladas</option>
           <option value="">Todas</option>
         </select>
-        <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        <button onClick={() => load(0, false)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        {total > 0 && <span className="text-xs text-zinc-500">{list.length < total ? `${list.length} de ${total}` : total}</span>}
         <span className="text-xs text-zinc-500">Peças em trânsito entre lojas: baixa lançada na origem; a entrada no destino sai na recepção.</span>
       </div>
       {loading ? (
@@ -1235,6 +1242,14 @@ function TransfersTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {list.length > 0 && list.length < total && (
+        <div className="mt-3 text-center">
+          <button onClick={() => load(list.length, true)} disabled={loadingMore}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Carregar mais ({total - list.length} restantes)
+          </button>
         </div>
       )}
     </div>
@@ -1959,40 +1974,52 @@ function ReconciliationTab() {
 
 // ---- Estoque negativo -------------------------------------------------------
 function NegativeStockTab() {
+  const PAGE = 100;
   const [items, setItems] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [storeFilter, setStoreFilter] = useState('');
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState('');
   const [q, setQ] = useState('');
-  const load = async () => {
-    setLoading(true);
-    try {
-      const d = await apiFetch('/api/retailops/stock/negative').then(r => r.json()).catch(() => ({}));
-      setItems(Array.isArray(d?.items) ? d.items : []);
-    } finally { setLoading(false); }
+  const load = (offset: number, append: boolean) => {
+    append ? setLoadingMore(true) : setLoading(true);
+    apiFetch(`/api/retailops/stock/negative?storeId=${storeId}&q=${encodeURIComponent(q)}&limit=${PAGE}&offset=${offset}`)
+      .then(r => r.json())
+      .then(d => {
+        setTotal(Number(d?.total) || 0);
+        setItems(prev => append ? [...prev, ...(Array.isArray(d?.items) ? d.items : [])] : (Array.isArray(d?.items) ? d.items : []));
+      })
+      .catch(() => toast.error('Falha ao carregar o estoque negativo.'))
+      .finally(() => { setLoading(false); setLoadingMore(false); });
   };
-  useEffect(() => { load(); }, []);
-  const stores = useMemo(() => Array.from(new Set(items.map(i => i.store_name).filter(Boolean))).sort(), [items]);
-  const shown = items.filter(i => (!storeFilter || i.store_name === storeFilter) && (!q.trim() || String(i.product_name || i.product_service_id || '').toLowerCase().includes(q.trim().toLowerCase())));
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => setStores(Array.isArray(d?.stores) ? d.stores : [])).catch(() => {}); }, []);
+  useEffect(() => { const t = setTimeout(() => load(0, false), 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [storeId, q]);
+  const filtered = !!(storeId || q.trim());
 
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[12px] text-zinc-400">Itens com saldo <strong className="text-red-300">negativo</strong> por loja — normalmente venda lançada sem entrada correspondente. Corrija a entrada no estoque.</p>
-        <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+        <button onClick={() => load(0, false)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
       </div>
-      {items.length > 0 && (
+      {(total > 0 || filtered) && (
         <div className="mb-3 flex items-center gap-2 flex-wrap">
-          <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+          <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
             <option value="">Todas as lojas</option>
-            {stores.map(s => <option key={s} value={s}>{s}</option>)}
+            {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar produto…" className="flex-1 min-w-[160px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
-          <span className="text-xs text-zinc-500">{shown.length} de {items.length}</span>
+          {total > 0 && <span className="text-xs text-zinc-500">{items.length < total ? `${items.length} de ${total}` : total} item(ns)</span>}
         </div>
       )}
       {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
         : items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-emerald-800/40 bg-emerald-500/5 p-8 text-center text-sm text-emerald-300/80"><Check className="mx-auto mb-2 h-5 w-5" /> Nenhum item com estoque negativo. 🎉</div>
+          filtered ? (
+            <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum item negativo para este filtro.</div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-emerald-800/40 bg-emerald-500/5 p-8 text-center text-sm text-emerald-300/80"><Check className="mx-auto mb-2 h-5 w-5" /> Nenhum item com estoque negativo. 🎉</div>
+          )
         ) : (
           <div className="overflow-x-auto rounded-xl border border-zinc-800">
             <table className="w-full text-sm">
@@ -2002,7 +2029,7 @@ function NegativeStockTab() {
                 <th className="px-3 py-2 text-right font-medium">Saldo</th>
               </tr></thead>
               <tbody>
-                {shown.map((it: any) => (
+                {items.map((it: any) => (
                   <tr key={it.id} className="border-t border-zinc-800/70">
                     <td className="px-3 py-2 text-zinc-200">{it.store_name}</td>
                     <td className="px-3 py-2 text-zinc-300">{it.product_name || it.product_service_id}</td>
@@ -2013,6 +2040,14 @@ function NegativeStockTab() {
             </table>
           </div>
         )}
+      {items.length > 0 && items.length < total && (
+        <div className="mt-3 text-center">
+          <button onClick={() => load(items.length, true)} disabled={loadingMore}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Carregar mais ({total - items.length} restantes)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

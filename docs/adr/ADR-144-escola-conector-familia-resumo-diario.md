@@ -1,6 +1,6 @@
 # ADR-144 — Módulo Escola: a camada que conecta a escola à família (resumo diário no WhatsApp)
 
-**Status:** Aceito — Fatia 1 em implementação (resumo diário ao responsável + 1 sinal de coordenação). Fatias 2–5 planejadas.
+**Status:** Aceito — Fatia 1 entregue (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 entregue (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatias 3–5 planejadas.
 
 **Data:** 2026-07
 
@@ -55,7 +55,7 @@ O aluno é **menor**: não tem telefone e não é um contato do CRM. Forçá-lo 
 - **`student_profiles`** (entidade própria, id próprio, **sem** vínculo a `contacts`): `full_name`, `birth_date`, `turma` (classe/série), `enrollment_code` (matrícula), `status` (`active`/`inactive`), `notes`. Escopado por `organization_id`, auditado.
 - **Responsável** é um `contacts` normal (tem `identifier`/telefone → canal WhatsApp). Não gasta o molde de `users` (quem só recebe não precisa de login).
 - **`student_guardians`** (vínculo N:N aluno↔responsável): `student_id`, `guardian_contact_id`, `relationship` (mãe/pai/responsável), `is_primary`, e o **consentimento** desta relação: `digest_consent` (0/1), `digest_consent_at`, `digest_consent_by`, e o dedupe do envio (`last_digest_date`). É aqui que mora o **consentimento-de-menor** (D3).
-- **`student_agenda_items`** (a "nossa agenda" da Fatia 1, sem depender de conector): `student_id`, `date` (YYYY-MM-DD), `kind` (`class`/`activity`/`notice`/`pickup`), `title`, `time_label`, `status`. Alimentada por secretaria/import; é a fonte determinística do resumo diário. A grade completa por turma/professor (reuso de `appointments`) fica para a Fatia 2.
+- **`student_agenda_items`** (a "nossa agenda" da Fatia 1, sem depender de conector): `student_id`, `date` (YYYY-MM-DD), `kind` (`class`/`activity`/`notice`/`pickup`), `title`, `time_label`, `status`. Alimentada por secretaria/import; é a fonte determinística do resumo diário. A grade recorrente por turma/professor (Fatia 2) é modelada à parte (`class_schedule_items`), sem forçar o molde de `appointments` — ver D7.
 
 Trocar de turma **não apaga** o aluno nem seu histórico — atualiza a ficha (mesma lição do "trocar plano não apaga o paciente" do ADR-080 D6).
 
@@ -88,14 +88,23 @@ A mensagem-alvo da Fatia 1 (a "mensagem diária ideal"):
 
 Determinístico (zero-token no caminho quente), isolado por `organization_id`, opt-in por consentimento do responsável. Nada é empurrado sem consentimento explícito.
 
+### D7 — Agenda do professor (Fatia 2): entidade própria + grade recorrente + confirmação → sinal
+
+Adapta a Agenda Clínica (ADR-080), mas sem forçar o molde de `appointments` (que é centrado em `contacts`/consulta): a grade da escola é **recorrente por turma**, não uma sequência de eventos com contato.
+
+- **`teacher_profiles`** — o professor é **entidade própria** (molde de `clinic_professionals`, D2), desacoplado de `users` (`user_id` opcional p/ portal futuro). Diferente do aluno, o professor **recebe** mensagens: tem `phone` próprio e `notify_opt_in` como **porta** (D6) — adulto/colaborador, opt-in explícito, não consentimento-de-menor. Dedupe do resumo em `last_agenda_date`.
+- **`class_schedule_items`** — grade **recorrente**: `teacher_id`, `turma`, `weekday` (0–6), `time_label`, `subject`. Resolvida para um dia sob demanda (weekday determinístico da data, sem `Date.now` no caminho). A grade por turma agrega professores (base da visão da coordenação).
+- **`TeacherDigestService`** — o **"resumo antes da aula"**: espelha o `SchoolDigestService`/tutor (texto determinístico da grade do dia, janela da manhã SP, dedupe por dia, envio injetável). Professor sem aulas no dia não recebe (e não marca dedupe).
+- **Confirmação pós-aula** (`class_confirmations`, idempotente por item+data): `held`/`not_held`. `not_held` publica sinal `class_not_held` no domínio `education` (coordenação, ADR-132/136); reconfirmar como `held` **resolve** o sinal. É a prova da trilha "pós-aula → coordenação" da Fatia 2 (o conjunto maior de sinais fica para a Fatia 4).
+
 ---
 
 ## Faseamento (cada fatia = um PR fechado e testado)
 
 | Fatia | Entrega | Novo × reuso |
 |---|---|---|
-| **1 — Resumo diário ⭐ (esta ADR)** | modelo aluno/responsável + consentimento-porta + resumo diário ao responsável (da nossa agenda) + 1 sinal de coordenação (faltas) | modelo NOVO; envio/consentimento/sinais REUSO |
-| **2 — Agenda do professor** | professores (entidade própria) + grade por turma; "resumo antes da aula" + confirmação pós-aula | ADAPTA Agenda Clínica |
+| **1 — Resumo diário ⭐ (esta ADR)** ✅ | modelo aluno/responsável + consentimento-porta + resumo diário ao responsável (da nossa agenda) + 1 sinal de coordenação (faltas) | modelo NOVO; envio/consentimento/sinais REUSO |
+| **2 — Agenda do professor** ✅ | professores (entidade própria) + grade recorrente por turma; "resumo antes da aula" ao professor + confirmação pós-aula → sinal | ADAPTA Agenda Clínica (D7) |
 | **3 — Extracurriculares** | matrícula/vagas/lista de espera/presença + aviso ao responsável | ADAPTA `reservations` |
 | **4 — Painel da coordenação** | mais sinais (nota não lançada, turma sem professor…) no Pareto/briefing | REUSO do kernel de sinais |
 | **5 — Conectores reais** | import de planilha estruturada + 1º webhook/API por cliente | por cliente |
@@ -119,4 +128,8 @@ A Fatia 1 sozinha prova a tese: reusa envio, consentimento, priorização e RAG 
 
 ## Testes
 
-`test:escola-digest` (novo): fuso de São Paulo e janela da manhã; consentimento como porta (sem `digest_consent` não envia e não marca dedupe); texto determinístico do resumo (bom dia + nome do aluno + agenda do dia); envia 1×/dia por relação responsável↔aluno e deduplica; fora da janela/desligado não envia; múltiplos responsáveis do mesmo aluno recebem; `sendNow` ignora janela/dedupe; sinal de faltas emitido no domínio `education`; isolamento por `organization_id`.
+`test:escola-digest` (Fatia 1): fuso de São Paulo e janela da manhã; consentimento como porta (sem `digest_consent` não envia e não marca dedupe); texto determinístico do resumo (bom dia + nome do aluno + agenda do dia); envia 1×/dia por relação responsável↔aluno e deduplica; fora da janela/desligado não envia; múltiplos responsáveis do mesmo aluno recebem; `sendNow` ignora janela/dedupe; sinal de faltas emitido no domínio `education`; isolamento por `organization_id`.
+
+`test:escola-teacher` (Fatia 2): professor como entidade própria (não é contato); `weekday` determinístico; grade recorrente resolvida por dia e grade da turma agregando professores; opt-in como porta (sem `notify_opt_in` não envia e não marca dedupe); texto determinístico do "resumo antes da aula"; janela da manhã; sem aulas no dia não envia e não marca dedupe; dedupe 1×/dia por professor; confirmação pós-aula `not_held` publica `class_not_held` e `held` resolve o sinal (idempotente por item+data); `sendNow` ignora janela/dedupe mas respeita opt-in e existência de aulas; isolamento por `organization_id`.
+
+Ambas as suítes entram no matrix do CI (`.github/workflows/ci.yml`).

@@ -67,6 +67,7 @@
     "test:retail-store-result": "tsx scripts/test-retail-store-result.ts",
     "test:retail-store-variable-costs": "tsx scripts/test-retail-store-variable-costs.ts",
     "test:retail-store-cmv-real": "tsx scripts/test-retail-store-cmv-real.ts",
+    "test:retail-pricing": "tsx scripts/test-retail-pricing.ts",
     "test:clinic-patient": "tsx scripts/test-clinic-patient.ts",
     "test:clinic-agenda": "tsx scripts/test-clinic-agenda.ts",
     "test:clinic-portal": "tsx scripts/test-clinic-portal.ts",

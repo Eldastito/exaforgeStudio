@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -310,12 +310,13 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'resultado' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'resultado', label: 'Resultado por loja', icon: DollarSign },
+  { key: 'precificar', label: 'Precificar', icon: Tag },
   { key: 'maisvendidos', label: 'Mais vendidos', icon: TrendingUp },
   { key: 'cartao', label: 'Recebíveis (cartão)', icon: CreditCard },
   { key: 'clientes', label: 'Clientes (PDV)', icon: Users },
@@ -490,6 +491,191 @@ export function RetailOpsView() {
       {tab === 'equipe' && <ResponsiblesTab />}
       {tab === 'padroes' && <PatternsTab />}
       {tab === 'lojavirtual' && <OnlineReserveTab />}
+      {tab === 'precificar' && <PricingTab />}
+    </div>
+  );
+}
+
+// ---- Precificar (ADR-083 E7): revisar/simular markup e aplicar em lote -----
+function PricingTab() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [markup, setMarkup] = useState<string>('');
+  const [filter, setFilter] = useState<'all' | 'risk' | 'no_cost'>('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const qs = markup ? `?markup=${encodeURIComponent(markup)}` : '';
+      const r = await apiFetch(`/api/retailops/pricing/products${qs}`);
+      setData(r.ok ? await r.json() : null);
+    } catch { setData(null); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const items: any[] = Array.isArray(data?.items) ? data.items : [];
+  const filtered = items.filter((it) => {
+    if (filter === 'risk') return it.riskLevel === 'loss' || it.riskLevel === 'thin';
+    if (filter === 'no_cost') return !it.hasCost;
+    return true;
+  });
+  const withCost = filtered.filter((it) => it.hasCost);
+  const allChecked = withCost.length > 0 && withCost.every((it) => selected.has(it.productId));
+
+  const toggleAll = () => {
+    if (allChecked) setSelected(new Set());
+    else setSelected(new Set(withCost.map((it) => it.productId)));
+  };
+  const toggleOne = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+  const applySuggested = async () => {
+    const chosen = withCost.filter((it) => selected.has(it.productId) && Math.abs(it.suggestedPrice - it.currentPrice) >= 0.01);
+    if (chosen.length === 0) { toast.error('Nenhum produto selecionado com sugestão diferente do preço atual.'); return; }
+    if (!window.confirm(`Aplicar o preço sugerido em ${chosen.length} ${chosen.length === 1 ? 'produto' : 'produtos'}? Isso muda o preço no catálogo — os pedidos abertos não são refeitos.`)) return;
+    setSaving(true);
+    try {
+      const body = JSON.stringify({ items: chosen.map((it) => ({ productId: it.productId, newPrice: it.suggestedPrice })) });
+      const res = await apiFetch('/api/retailops/pricing/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(out?.error || 'Falha ao aplicar preços.'); return; }
+      toast.success(`${out.appliedCount} aplicado(s)${out.skippedCount ? ` · ${out.skippedCount} pulado(s)` : ''}.`);
+      setSelected(new Set());
+      load();
+    } finally { setSaving(false); }
+  };
+
+  const nLoss = items.filter((it) => it.riskLevel === 'loss').length;
+  const nThin = items.filter((it) => it.riskLevel === 'thin').length;
+  const nNoCost = items.filter((it) => !it.hasCost).length;
+
+  return (
+    <div>
+      <div className="mb-4">
+        <p className="text-sm text-zinc-300">Revê o preço dos produtos usando o <strong>custo real</strong> das notas de compra (avg_cost). Ajuste o markup pra simular; aplique só nos que fizerem sentido.</p>
+        <p className="text-[11px] text-zinc-500">Produtos sem custo cadastrado só ganham sugestão quando você registrar a nota de entrada (XML/foto no <em>Catálogo → escanear nota</em>).</p>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-zinc-400">
+            Markup para simular
+            <div className="flex items-center rounded-lg bg-zinc-950 border border-zinc-800 px-2 w-24">
+              <input inputMode="decimal" value={markup} onChange={(e) => setMarkup(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+                placeholder={String(data?.defaultMarkup ?? 40)}
+                className="w-full bg-transparent px-1 py-1 text-sm text-zinc-100 outline-none" />
+              <span className="text-[11px] text-zinc-600">%</span>
+            </div>
+          </label>
+          <button onClick={load} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Recalcular
+          </button>
+        </div>
+        <div className="inline-flex rounded-lg border border-zinc-800 overflow-hidden">
+          {[
+            { k: 'all', label: `Todos (${items.length})` },
+            { k: 'risk', label: `Risco (${nLoss + nThin})` },
+            { k: 'no_cost', label: `Sem custo (${nNoCost})` },
+          ].map((o) => (
+            <button key={o.k} onClick={() => setFilter(o.k as any)}
+              className={`px-2.5 py-1 text-xs ${filter === o.k ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {(nLoss > 0 || nThin > 0) && (
+        <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+          {nLoss > 0 && <><strong>{nLoss}</strong> {nLoss === 1 ? 'produto está sendo vendido' : 'produtos estão sendo vendidos'} <strong>abaixo do custo</strong>. </>}
+          {nThin > 0 && <><strong>{nThin}</strong> com margem magra (&lt; 10%) — qualquer imposto/taxa da maquininha vira prejuízo.</>}
+        </p>
+      )}
+
+      {loading && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+
+      {!loading && filtered.length === 0 && (
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum produto no filtro atual.</p>
+      )}
+
+      {!loading && filtered.length > 0 && (
+        <>
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400">
+                <tr className="text-left">
+                  <th className="px-2 py-2 w-8">
+                    <input type="checkbox" checked={allChecked} onChange={toggleAll} title="Marcar/desmarcar todos com custo" />
+                  </th>
+                  <th className="px-3 py-2 font-medium">Produto</th>
+                  <th className="px-3 py-2 font-medium text-right">Custo médio</th>
+                  <th className="px-3 py-2 font-medium text-right">Preço atual</th>
+                  <th className="px-3 py-2 font-medium text-right">Margem</th>
+                  <th className="px-3 py-2 font-medium text-right">Sugerido</th>
+                  <th className="px-3 py-2 font-medium text-right" title="Faturamento do produto no mês">Venda no mês</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((it) => {
+                  const diff = it.suggestedPrice - it.currentPrice;
+                  const diffColor = diff > 0.005 ? 'text-emerald-300' : diff < -0.005 ? 'text-red-300' : 'text-zinc-500';
+                  return (
+                    <tr key={it.productId} className="border-t border-zinc-800/70">
+                      <td className="px-2 py-2">
+                        <input type="checkbox" disabled={!it.hasCost} checked={selected.has(it.productId)} onChange={() => toggleOne(it.productId)} />
+                      </td>
+                      <td className="px-3 py-2 text-zinc-200">
+                        <div className="flex items-center gap-1.5">
+                          <span>{it.name}</span>
+                          {it.riskLevel === 'loss' && <span className="text-[9px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5" title="Preço abaixo do custo">perda</span>}
+                          {it.riskLevel === 'thin' && <span className="text-[9px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5" title="Margem menor que 10%">magra</span>}
+                          {!it.hasCost && <span className="text-[9px] rounded-full bg-zinc-800 text-zinc-500 border border-zinc-700 px-1.5" title="Cadastre a nota de compra para o app saber o custo">sem custo</span>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-300">{it.hasCost ? brl(it.avgCost) : <span className="text-zinc-600">—</span>}</td>
+                      <td className="px-3 py-2 text-right text-zinc-300">{brl(it.currentPrice)}</td>
+                      <td className="px-3 py-2 text-right">
+                        {it.marginPercent == null ? <span className="text-zinc-600">—</span> : (
+                          <span className={it.riskLevel === 'loss' ? 'text-red-300' : it.riskLevel === 'thin' ? 'text-amber-300' : 'text-emerald-300'}>
+                            {it.marginPercent.toFixed(1).replace('.', ',')}%
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {it.hasCost ? (
+                          <span className="inline-flex items-center gap-1.5 justify-end">
+                            <span className="text-zinc-100 font-medium">{brl(it.suggestedPrice)}</span>
+                            <span className={`text-[10px] ${diffColor}`}>
+                              {diff > 0 ? '+' : ''}{brl(diff)}
+                            </span>
+                          </span>
+                        ) : <span className="text-zinc-600">—</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right text-zinc-400">{it.revenueMonth > 0 ? brl(it.revenueMonth) : <span className="text-zinc-600">—</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between">
+            <p className="text-[11px] text-zinc-500">
+              Sugestão via <code>suggestSalePrice(custo × (1 + markup%))</code> com arredondamento psicológico (termina em ,99).
+              Custo médio: quando você registra uma nota, ele é <strong>recalculado</strong> junto com o estoque.
+            </p>
+            <button onClick={applySuggested} disabled={saving || selected.size === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Aplicar sugerido nos selecionados ({selected.size})
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # ADR-144 — Módulo Escola: a camada que conecta a escola à família (resumo diário no WhatsApp)
 
-**Status:** Aceito — Fatia 1 entregue (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 entregue (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatia 3 entregue (extracurriculares: vagas + matrícula atômica + lista de espera + presença + aviso ao responsável). Fatia 4 entregue (painel da coordenação: sinais derivados no domínio `education` + `education` first-class no Pareto). Fatia 5 planejada.
+**Status:** Aceito — **implementado (Fatias 1-5)**. Fatia 1 (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatia 3 (extracurriculares: vagas + matrícula atômica + lista de espera + presença + aviso ao responsável). Fatia 4 (painel da coordenação: sinais derivados no domínio `education` + `education` first-class no Pareto). Fatia 5 (conectores reais: motor de import idempotente alimentado por planilha e por webhook por token).
 
 **Data:** 2026-07
 
@@ -114,6 +114,14 @@ Não cria tabela nova. O `SchoolCoordinationService.runSignalsPass(orgId)` **der
 - **`education` first-class no kernel**: peso estratégico próprio, dono sugerido `coordenacao`, e `ACTION_MAP` para todos os tipos `education` (Fatias 1-4), para o painel/Pareto renderem a **ação recomendada** em vez do rótulo genérico.
 - `panel(orgId)` devolve os sinais abertos de `education` com a ação recomendada + as prioridades do domínio. O `schoolCoordinationPass` recomputa no `Scheduler` (gated pelo módulo). O conjunto de sinais é extensível sem tocar o kernel — novos tipos entram no `MANAGED_TYPES` + `ACTION_MAP`.
 
+### D10 — Conectores reais (Fatia 5): um motor de import, dois caminhos de entrega
+
+O que mata projetos assim é depender de integrar o sistema acadêmico de cada escola (Contexto). A decisão de escopo se concretiza aqui: **um único motor de import determinístico e idempotente** (`SchoolImportService`) alimenta o modelo das Fatias 1-4 a partir do que a escola já produz; a integração específica por fornecedor é apenas um **caminho de entrega**, nunca pré-requisito do valor.
+
+- **Motor** (`SchoolImportService.importData`): seções opcionais `students` / `guardians` / `schedule` / `agenda`, cada uma **idempotente** — aluno casa por `enrollment_code` (senão nome+turma); responsável casa o contato por telefone (dígitos) no canal da org, com vínculo idempotente e consentimento opt-in (D3); grade deduplica por (professor, turma, weekday, horário); agenda deduplica por (aluno, data, título). Linhas inválidas são puladas, não derrubam o lote. Só ingere — o valor (resumo/agenda/sinais) já roda por cima.
+- **Caminho 1 — planilha (secretaria)**: `POST /api/escola/import` (JWT), para o fluxo "a secretaria alimenta em segundos" quando não há integração.
+- **Caminho 2 — webhook/API por cliente**: `POST /api/connector-in/escola` autenticado pelo **token de integração da org** (reuso do conector agnóstico já existente, ADR do connector), gated pelo módulo `escola`. É o "1º conector": qualquer sistema externo empurra o **payload normalizado** e cai no mesmo motor. Conectores específicos (mapear o formato de cada fornecedor → payload normalizado) entram por cliente, sem tocar o núcleo.
+
 ---
 
 ## Faseamento (cada fatia = um PR fechado e testado)
@@ -124,7 +132,7 @@ Não cria tabela nova. O `SchoolCoordinationService.runSignalsPass(orgId)` **der
 | **2 — Agenda do professor** ✅ | professores (entidade própria) + grade recorrente por turma; "resumo antes da aula" ao professor + confirmação pós-aula → sinal | ADAPTA Agenda Clínica (D7) |
 | **3 — Extracurriculares** ✅ | vagas + matrícula atômica + lista de espera (com promoção) + presença + aviso ao responsável | ADAPTA o padrão de `reservations` (D8) |
 | **4 — Painel da coordenação** ✅ | sinais derivados (turma sem professor, falta recorrente, aula cancelada recorrente, lista de espera) no Pareto/briefing + `education` first-class | REUSO do kernel de sinais (D9) |
-| **5 — Conectores reais** | import de planilha estruturada + 1º webhook/API por cliente | por cliente |
+| **5 — Conectores reais** ✅ | motor de import idempotente (alunos/responsáveis/grade/agenda) + planilha (JWT) + webhook por token (payload normalizado) | reuso do conector agnóstico (D10) |
 | **Pack Quick-Start `educacao`** | personas (secretaria/coordenação) + cadências + FAQ do regimento | autoria (sem código) |
 
 A Fatia 1 sozinha prova a tese: reusa envio, consentimento, priorização e RAG **sem tocar no kernel**, e entrega valor demoável (a mensagem diária ao responsável).
@@ -135,7 +143,7 @@ A Fatia 1 sozinha prova a tese: reusa envio, consentimento, priorização e RAG 
 
 **Positivas:** posiciona a vertical como camada de conexão (não concorre com o sistema acadêmico); reusa ~70% da plataforma (push, consentimento, sinais, RAG, agenda, import); valor demoável já na Fatia 1; caminho de integração desacoplado do valor (não morre no conector).
 
-**Escopo/limites:** Fatia 1 é resumo diário + 1 sinal. Sem agenda de professor, extracurricular, nem conectores reais (fatias seguintes). O conteúdo do resumo vem da **nossa** agenda + inputs manuais até os conectores existirem — promessa comercial honesta: "conectamos o que a escola já produz e entregamos à família; onde houver integração, puxamos automático; onde não, a secretaria alimenta em segundos".
+**Escopo/limites:** Fatias 1-5 entregues (resumo diário + agenda do professor + extracurriculares + painel da coordenação + motor de import por planilha/webhook). O que fica por cliente é o **mapeamento de cada fornecedor** (formato do sistema acadêmico → payload normalizado do D10) — nunca o valor. O conteúdo entra pela **nossa** agenda + inputs manuais/planilha até o conector específico existir — promessa comercial honesta: "conectamos o que a escola já produz e entregamos à família; onde houver integração, puxamos automático; onde não, a secretaria alimenta em segundos".
 
 ## Guardas
 
@@ -153,4 +161,6 @@ A Fatia 1 sozinha prova a tese: reusa envio, consentimento, priorização e RAG 
 
 `test:escola-coordenacao` (Fatia 4): `turma_sem_professor` dispara e **resolve** quando a turma ganha grade; `falta_recorrente` só conta faltas não justificadas (limiar 3); `aula_cancelada_recorrente` no limiar 2; `atividade_lista_espera` dispara e resolve ao abrir vaga; passe idempotente; painel com ação recomendada + prioridades do domínio; `education` first-class no Pareto (dono `coordenacao`); isolamento por `organization_id`.
 
-As quatro suítes escola entram no matrix do CI (`.github/workflows/ci.yml`).
+`test:escola-import` (Fatia 5): import casa aluno por matrícula e por nome+turma; reimport idempotente (atualiza, não duplica) em todas as seções; responsável cria/reusa contato por telefone (dígitos), vincula e consente; grade cria professor e deduplica; agenda alimenta a fonte do resumo e deduplica; linhas inválidas são puladas; ponta a ponta (o resumo diário sai do que foi importado); isolamento por `organization_id`.
+
+As cinco suítes escola entram no matrix do CI (`.github/workflows/ci.yml`).

@@ -62,6 +62,7 @@
     "test:escola-teacher": "tsx scripts/test-escola-teacher.ts",
     "test:escola-extracurricular": "tsx scripts/test-escola-extracurricular.ts",
     "test:escola-coordenacao": "tsx scripts/test-escola-coordenacao.ts",
+    "test:escola-import": "tsx scripts/test-escola-import.ts",
     "test:clinic-patient": "tsx scripts/test-clinic-patient.ts",
     "test:clinic-agenda": "tsx scripts/test-clinic-agenda.ts",
     "test:clinic-portal": "tsx scripts/test-clinic-portal.ts",

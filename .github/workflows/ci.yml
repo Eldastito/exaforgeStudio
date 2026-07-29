@@ -84,6 +84,7 @@ jobs:
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }
           - { name: 'escola-coordenacao', script: 'test:escola-coordenacao' }
+          - { name: 'escola-import', script: 'test:escola-import' }
           - { name: 'continuity-fase0', script: 'test:continuity-fase0' }
           - { name: 'continuity-fase1', script: 'test:continuity-fase1' }
           - { name: 'continuity-outbox', script: 'test:continuity-outbox' }

@@ -7,6 +7,7 @@ import { TeacherDigestService } from "../TeacherDigestService.js";
 import { ExtracurricularService } from "../ExtracurricularService.js";
 import { ExtracurricularNoticeService } from "../ExtracurricularNoticeService.js";
 import { SchoolCoordinationService } from "../SchoolCoordinationService.js";
+import { SchoolImportService } from "../SchoolImportService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import db from "../db.js";
 
@@ -318,6 +319,15 @@ router.get("/coordenacao/panel", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SchoolCoordinationService.panel(orgId));
+});
+
+// ── Import de planilha (Fatia 5) — secretaria (JWT) ──────────────────────
+// body: { students?, guardians?, schedule?, agenda? } — idempotente.
+router.post("/import", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SchoolImportService.importData(orgId, req.body || {}, { source: "planilha", actorId: actor(req) })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

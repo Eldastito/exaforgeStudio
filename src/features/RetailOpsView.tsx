@@ -1468,8 +1468,9 @@ function CommissionTab() {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
-  const [ruleForm, setRuleForm] = useState<null | { name: string; scope: string; calculationType: string; percent: string; amount: string; bonus: string; quota: string }>(null);
+  const [ruleForm, setRuleForm] = useState<null | { name: string; scope: string; calculationType: string; percent: string; amount: string; bonus: string; quota: string; storeId: string }>(null);
   const [savingRule, setSavingRule] = useState(false);
+  const [stores, setStores] = useState<any[]>([]);
   const firstOfMonth = todayStr().slice(0, 8) + '01';
   const [start, setStart] = useState(firstOfMonth);
   const [end, setEnd] = useState(todayStr());
@@ -1482,6 +1483,36 @@ function CommissionTab() {
   const [sellerSalesModal, setSellerSalesModal] = useState(false);
   const [editSale, setEditSale] = useState<any | null>(null);
   const [folhaQ, setFolhaQ] = useState('');
+
+  // Extrato por LOJA e por VENDEDOR ("rodar o comando" do dono da rede):
+  // escolhe a loja (ou todas), o vendedor (ou todos) e o período — inclusive
+  // parcial dentro do mês, pra saber quanto já acumulou antes do fechamento.
+  const [exStoreId, setExStoreId] = useState('');
+  const [exSellerKey, setExSellerKey] = useState('');
+  const [exStart, setExStart] = useState(firstOfMonth);
+  const [exEnd, setExEnd] = useState(todayStr());
+  const [extract, setExtract] = useState<any | null>(null);
+  const [loadingExtract, setLoadingExtract] = useState(false);
+  const applyExShortcut = (kind: 'today' | 'week' | 'fortnight' | 'month') => {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    const iso = (dt: Date) => dt.toISOString().slice(0, 10);
+    if (kind === 'today') { setExStart(iso(now)); setExEnd(iso(now)); }
+    else if (kind === 'week') { const monday = new Date(now); monday.setDate(d - ((now.getDay() + 6) % 7)); setExStart(iso(monday)); setExEnd(iso(now)); }
+    else if (kind === 'fortnight') { setExStart(iso(new Date(y, m, d <= 15 ? 1 : 16))); setExEnd(iso(now)); }
+    else { setExStart(iso(new Date(y, m, 1))); setExEnd(iso(now)); }
+  };
+  const generateExtract = async (opts?: { keepSeller?: boolean }) => {
+    setLoadingExtract(true);
+    try {
+      const params = new URLSearchParams({ start: exStart, end: exEnd });
+      if (exStoreId) params.set('storeId', exStoreId);
+      if (opts?.keepSeller && exSellerKey) params.set('sellerKey', exSellerKey);
+      else setExSellerKey('');
+      const d = await apiFetch(`/api/retailops/commission/store-report?${params}`).then(r => r.json()).catch(() => null);
+      if (d && !d.error) setExtract(d); else toast.error(d?.error || 'Falha ao gerar o extrato.');
+    } finally { setLoadingExtract(false); }
+  };
   // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
   // vendedor" ativa, a apuração oficial passa a usar esse nome.
   const nomearVendedor = async (v: any) => {
@@ -1529,12 +1560,14 @@ function CommissionTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const [r, ru] = await Promise.all([
+      const [r, ru, st] = await Promise.all([
         apiFetch('/api/retailops/commission/runs').then(x => x.json()).catch(() => ({})),
         apiFetch('/api/retailops/commission/rules').then(x => x.json()).catch(() => ({})),
+        apiFetch('/api/retailops/stores').then(x => x.json()).catch(() => ({})),
       ]);
       setRuns(Array.isArray(r?.runs) ? r.runs : (Array.isArray(r) ? r : []));
       setRules(Array.isArray(ru?.rules) ? ru.rules : (Array.isArray(ru) ? ru : []));
+      setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -1570,7 +1603,7 @@ function CommissionTab() {
     try {
       const res = await apiFetch('/api/retailops/commission/rules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, scope: ruleForm.scope, period: 'monthly', calculationType: ruleForm.calculationType, config }),
+        body: JSON.stringify({ name, scope: ruleForm.scope, period: 'monthly', calculationType: ruleForm.calculationType, config, storeId: ruleForm.scope === 'store' ? (ruleForm.storeId || null) : null }),
       });
       if (res.ok) { toast.success('Regra de comissão criada.'); setRuleForm(null); load(); }
       else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao criar regra.'); }
@@ -1598,7 +1631,7 @@ function CommissionTab() {
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-indigo-400" /> Regras de comissão</div>
           <div className="flex items-center gap-2">
             <NewStoreButton onCreated={load} />
-            <button onClick={() => setRuleForm({ name: '', scope: 'store', calculationType: 'percent_sales', percent: '5', amount: '', bonus: '', quota: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20">
+            <button onClick={() => setRuleForm({ name: '', scope: 'store', calculationType: 'percent_sales', percent: '5', amount: '', bonus: '', quota: '', storeId: '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20">
               <Plus className="w-3.5 h-3.5" /> Nova regra
             </button>
           </div>
@@ -1611,7 +1644,7 @@ function CommissionTab() {
             {rules.map(r => (
               <div key={r.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm text-zinc-100">{r.name} <span className="text-zinc-500">· {r.scope === 'global' ? 'rede toda' : r.scope === 'seller' ? 'por vendedor' : r.scope === 'product' ? 'por produto' : 'por loja'}</span></div>
+                  <div className="truncate text-sm text-zinc-100">{r.name} <span className="text-zinc-500">· {r.scope === 'global' ? 'rede toda' : r.scope === 'seller' ? 'por vendedor' : r.scope === 'product' ? 'por produto' : r.store_id ? `loja: ${stores.find((s: any) => s.id === r.store_id)?.name || 'loja removida'}` : 'todas as lojas'}</span></div>
                   <div className="text-[11px] text-indigo-300">{ruleSummary(r)}</div>
                 </div>
                 <button onClick={() => toggleRule(r)} className={`ml-3 shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${r.active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400'}`}>{r.active ? 'Ativa' : 'Inativa'}</button>
@@ -1741,6 +1774,101 @@ function CommissionTab() {
         )}
       </div>
 
+      {/* Extrato por LOJA e por VENDEDOR — "rodar o comando" do dono da rede:
+          escolhe a loja (ou todas) e o vendedor (ou todos), num período
+          qualquer (inclusive parcial dentro do mês), e gera quanto cada um
+          vendeu e tem a receber de comissão até aquela data. */}
+      <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Store className="w-4 h-4 text-indigo-400" /> Extrato por loja e por vendedor</div>
+        <p className="mt-1 text-[11px] text-zinc-500">Escolha a loja (ou todas), o vendedor (ou todos) e o período — inclusive parcial, tipo "1º ao dia 15" — pra ver quanto cada vendedor vendeu (valor e peças) e quanto já tem a receber de comissão até essa data.</p>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="text-xs text-zinc-400">Loja
+            <select value={exStoreId} onChange={e => { setExStoreId(e.target.value); setExSellerKey(''); }} className="mt-1 block bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 min-w-[160px]">
+              <option value="">Todas as lojas</option>
+              {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-zinc-400">Vendedor
+            <select value={exSellerKey} onChange={e => setExSellerKey(e.target.value)} className="mt-1 block bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 min-w-[160px]" disabled={!extract?.sellers?.length}>
+              <option value="">Todos os vendedores</option>
+              {(extract?.sellers || []).map((s: any) => <option key={`${s.storeId}:${s.sellerKey}`} value={s.sellerKey}>{s.sellerName}{!exStoreId ? ` (${s.storeName})` : ''}</option>)}
+            </select>
+          </label>
+          <div className="flex items-center gap-1">
+            {([['today', 'Hoje'], ['week', 'Esta semana'], ['fortnight', 'Esta quinzena'], ['month', 'Este mês']] as const).map(([k, label]) => (
+              <button key={k} onClick={() => applyExShortcut(k)} className="rounded-lg border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-800">{label}</button>
+            ))}
+          </div>
+          <label className="text-xs text-zinc-400">De<input type="date" value={exStart} onChange={e => setExStart(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" /></label>
+          <label className="text-xs text-zinc-400">até<input type="date" value={exEnd} onChange={e => setExEnd(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" /></label>
+          <button onClick={() => generateExtract({ keepSeller: true })} disabled={loadingExtract} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+            {loadingExtract ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Gerar extrato
+          </button>
+        </div>
+
+        {extract && (
+          <div className="mt-3 space-y-3">
+            <div className="text-sm text-zinc-300">Total do filtro: <span className="font-semibold text-emerald-300">{brl(extract.totals?.commission)}</span>
+              <span className="text-zinc-500"> · vendas {brl(extract.totals?.sales)} · {Number(extract.totals?.pecas || 0)} peças · {extract.totals?.sellerCount || 0} vendedor(es)</span>
+            </div>
+
+            {!exStoreId && extract.byStore?.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                    <th className="px-3 py-1.5 text-left font-medium">Loja</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Vendas</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Peças</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Comissão</th>
+                  </tr></thead>
+                  <tbody>
+                    {extract.byStore.map((s: any) => (
+                      <tr key={s.storeId || s.storeName} className="border-t border-zinc-800/60">
+                        <td className="px-3 py-1.5 text-zinc-200">{s.storeName}</td>
+                        <td className="px-3 py-1.5 text-right text-zinc-200">{brl(s.sales)}</td>
+                        <td className="px-3 py-1.5 text-right text-zinc-300">{s.pecas}</td>
+                        <td className="px-3 py-1.5 text-right text-emerald-300">{brl(s.commission)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {extract.sellers?.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-[12px] text-zinc-500">Nenhuma venda por vendedor nesse filtro/período.</div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                    <th className="px-3 py-1.5 text-left font-medium">Vendedor</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Loja</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Vendas</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Peças</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Nº vendas</th>
+                    <th className="px-3 py-1.5 text-right font-medium">%</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Comissão</th>
+                  </tr></thead>
+                  <tbody>
+                    {(extract.sellers || []).map((s: any, i: number) => (
+                      <tr key={i} className="border-t border-zinc-800/60">
+                        <td className="px-3 py-1.5 text-zinc-100">{s.sellerName}</td>
+                        <td className="px-3 py-1.5 text-zinc-300">{s.storeName}</td>
+                        <td className="px-3 py-1.5 text-right text-zinc-200">{brl(s.sales)}</td>
+                        <td className="px-3 py-1.5 text-right text-zinc-300">{s.pecas}</td>
+                        <td className="px-3 py-1.5 text-right text-zinc-300">{s.orders}</td>
+                        <td className="px-3 py-1.5 text-right text-zinc-400">{s.commissionPercent != null ? `${s.commissionPercent}%` : '—'}</td>
+                        <td className="px-3 py-1.5 text-right text-emerald-300">{brl(s.commission)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {sellerSalesModal && <SellerSalesModal defaultDate={end} onClose={() => setSellerSalesModal(false)} onSaved={() => { setSellerSalesModal(false); loadReport(); }} />}
       {editSale && <EditSellerSaleModal sale={editSale} onClose={() => setEditSale(null)} onSaved={() => { setEditSale(null); loadReport(); }} />}
 
@@ -1764,6 +1892,15 @@ function CommissionTab() {
                 </select>
                 {(ruleForm.scope === 'seller' || ruleForm.scope === 'product') && <span className="mt-1 block text-[11px] text-zinc-500">Apura sobre as vendas feitas pelo ZappFlow (WhatsApp/loja virtual). Vendas do balcão físico entram por loja.</span>}
               </label>
+              {ruleForm.scope === 'store' && (
+                <label className="block text-xs text-zinc-400">Loja específica (opcional)
+                  <select value={ruleForm.storeId} onChange={e => setRuleForm({ ...ruleForm, storeId: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+                    <option value="">Todas as lojas (rede)</option>
+                    {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <span className="mt-1 block text-[11px] text-zinc-500">Deixe em branco pra um percentual único pra rede toda; escolha uma loja pra dar a ela um percentual PRÓPRIO (ex.: Loja X paga 7%, as demais continuam com a regra de rede).</span>
+                </label>
+              )}
               <label className="block text-xs text-zinc-400">Como calcular
                 <select value={ruleForm.calculationType} onChange={e => setRuleForm({ ...ruleForm, calculationType: e.target.value })} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
                   <option value="percent_sales">Percentual sobre as vendas</option>

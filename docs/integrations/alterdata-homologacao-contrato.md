@@ -125,12 +125,32 @@ Nomes em **negrito** são os principais; os demais são alternativas aceitas
 > **Relatório oficial por vendedor.** As vendas do PDV por CAI_USUARIO agora
 > entram na base do relatório oficial (`combinedSalesBySeller` → seção **"Por
 > vendedor"** de `GET /commission/report` e a apuração `createRun`), somadas a
-> ZappFlow + lançamentos manuais/foto + ERP. Quando o gestor tem só uma regra
-> **"por loja"** (sem regra de escopo *vendedor*), a comissão por vendedor sai por
-> **fallback** dessa mesma % sobre o que cada vendedor vendeu — e a linha **"por
-> loja" vira referência** (não soma no total, para não pagar a verba duas vezes).
-> Criando uma regra própria de escopo *vendedor*, as duas passam a ser distintas e
-> somam normalmente.
+> ZappFlow + lançamentos manuais/foto + ERP. Quando o gestor tem só regra(s)
+> **"por loja"** (sem regra de escopo *vendedor*), a comissão por vendedor sai
+> pela **% EFETIVA DA LOJA** onde cada venda aconteceu (loja específica > rede >
+> global — não uma % plana, ver próximo item) — e a linha **"por loja" vira
+> referência** (não soma no total, para não pagar a verba duas vezes). Criando
+> uma regra própria de escopo *vendedor*, as duas passam a ser distintas e somam
+> normalmente.
+>
+> **Comissão individualizada por LOJA (pedido Toulon).** Cada loja pode ter o
+> seu **próprio percentual**, definido pelo dono da rede: uma regra de escopo
+> "loja" pode mirar UMA loja específica (`store_id` na regra) com uma % só dela;
+> sem loja específica, vale pra rede toda. Quando uma loja tem regra própria, a
+> regra de rede NÃO se aplica a ela (sem pagar duas vezes).
+>
+> **Extrato por loja e por vendedor (o "comando" do dono da rede).** A rota
+> `GET /commission/store-report?start=&end=&storeId=&sellerKey=`
+> (`RetailCommissionService.storeSellerExtract`) funde as 4 fontes de venda
+> (ZappFlow, manual/foto, ERP, PDV/CAI_USUARIO) **mantendo a loja de cada
+> venda** — o mesmo vendedor que vendeu em duas lojas aparece em duas linhas,
+> cada uma com a % daquela loja. Filtra por loja (ou todas), por vendedor (ou
+> todos) e por qualquer intervalo de datas — inclusive **parcial dentro do
+> mês** (ex.: 1º ao dia 15), pra o vendedor saber quanto já acumulou de
+> comissão antes do fechamento (dia 30/31). Na tela *Operação da Rede*, a seção
+> **"Extrato por loja e por vendedor"** tem os seletores de loja/vendedor,
+> atalhos de período (Hoje / Esta semana / Esta quinzena / Este mês) e datas
+> personalizadas.
 
 ### Venda/ComissaoVendasPorPeriodo → comissão do ERP (conferência)
 Relatório agregado por vendedor no período (`data.metaVendedorRealizado[]`),

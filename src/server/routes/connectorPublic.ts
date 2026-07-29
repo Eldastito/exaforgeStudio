@@ -1,6 +1,8 @@
 import { Router } from "express";
 import db from "../db.js";
 import { ReservationService } from "../ReservationService.js";
+import { SchoolImportService } from "../SchoolImportService.js";
+import { ModuleService } from "../ModuleService.js";
 import { EncryptionService } from "../EncryptionService.js";
 
 /**
@@ -39,6 +41,19 @@ router.post("/resources", (req, res): any => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : (Array.isArray(req.body) ? req.body : []);
     res.json({ success: true, report: ReservationService.importResources(orgId, rows) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/connector-in/escola — o "1º conector por cliente" (ADR-144 Fatia 5).
+// Payload NORMALIZADO { students?, guardians?, schedule?, agenda? } que qualquer
+// sistema externo (acadêmico/planilha/middleware) empurra por token. Idempotente.
+// Gated pelo módulo "escola" da org.
+router.post("/escola", (req, res): any => {
+  const orgId = orgByToken(req);
+  if (!orgId) return res.status(401).json({ error: "Token de integração inválido." });
+  if (!ModuleService.isEnabled(orgId, "escola")) return res.status(403).json({ error: "Módulo Escola não habilitado para esta organização." });
+  try {
+    res.json({ success: true, report: SchoolImportService.importData(orgId, req.body || {}, { source: "webhook" }) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

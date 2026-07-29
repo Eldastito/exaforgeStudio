@@ -26,11 +26,21 @@ export type StoreInput = {
    * compartilhado/anômalo) — a fonte de verdade passa a ser o lançamento
    * manual/foto (retail_seller_sales) feito no fechamento de caixa. */
   sellerSource?: "pdv" | "manual" | null;
+  /** Margem bruta média da loja em % (0..100) — premissa gerencial usada para
+   * estimar o LUCRO e o PONTO DE EQUILÍBRIO por loja (faturamento − custo da
+   * mercadoria). null = não informada; nesse caso o resultado não é calculado. */
+  grossMarginPercent?: number | null;
 };
 
-const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, created_at, updated_at`;
+const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, created_at, updated_at`;
 const numOrNull = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const sellerSourceOrNull = (v: any): string | null => (v === "manual" ? "manual" : null);
+// Margem em %: aceita 0..100; fora disso (ou vazio) vira null (não informada).
+const marginOrNull = (v: any): number | null => {
+  const n = numOrNull(v);
+  if (n === null) return null;
+  return Math.min(100, Math.max(0, Math.round(n * 100) / 100));
+};
 
 export class RetailStoreService {
   static list(orgId: string): any[] {
@@ -70,8 +80,8 @@ export class RetailStoreService {
     this.assertCodeFree(orgId, input.code);
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, orgId, name,
       input.code ? String(input.code).trim() : null,
@@ -83,7 +93,8 @@ export class RetailStoreService {
       input.city ? String(input.city).trim() : null,
       numOrNull(input.latitude),
       numOrNull(input.longitude),
-      sellerSourceOrNull(input.sellerSource)
+      sellerSourceOrNull(input.sellerSource),
+      marginOrNull(input.grossMarginPercent)
     );
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_CREATED", { name }); } catch { /* noop */ }
     return this.get(orgId, id);
@@ -166,6 +177,7 @@ export class RetailStoreService {
       latitude: patch.latitude !== undefined ? numOrNull(patch.latitude) : undefined,
       longitude: patch.longitude !== undefined ? numOrNull(patch.longitude) : undefined,
       seller_source: patch.sellerSource !== undefined ? sellerSourceOrNull(patch.sellerSource) : undefined,
+      gross_margin_percent: patch.grossMarginPercent !== undefined ? marginOrNull(patch.grossMarginPercent) : undefined,
     };
     // Guarda de código único entre lojas ATIVAS: cobre troca de código e
     // REATIVAÇÃO de loja cujo código já está em uso por outra ativa.

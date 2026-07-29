@@ -81,3 +81,31 @@ Ordem escolhida por **valor para a dor do lojista × dependência** (a fonte con
 
 Pode: ler fechamento (texto/foto/documento), extrair valores, pedir correção, calcular total, comparar com cota, resumir divergência, cobrar pendência, sugerir causa de estoque negativo, gerar prévia de premiação.
 Não pode: aprovar fechamento divergente sozinha, alterar/pagar premiação sem aprovação, inventar valor ilegível, dar baixa em estoque sem regra, ignorar loja/responsável não identificado.
+
+## Extensão — Custos fixos + Resultado/Lucro por loja (2026-07)
+
+**Pergunta que originou:** o dono das lojas perguntou onde informa os custos fixos de cada loja (aluguel, luz, condomínio de shopping...) e onde isso entra no cálculo do lucro por loja. Até aqui **não existia**: custo fixo só agregado da organização (`comigo_fixed_costs_monthly`) e contas a pagar sem `store_id` (`payables`); a DRE (`ManagerialDreService`, ADR-128) e o resultado eram só no nível org, nunca por filial.
+
+### E1. Custos DISCRIMINADOS por tipo, por loja
+Nova tabela `retail_store_fixed_costs (organization_id, store_id, category, amount)` com `UNIQUE(organization_id, store_id, category)`. Categorias fixas: `aluguel|energia|condominio|agua|internet|folha|outros`. Upsert em lote (`RetailStoreCostService.setMany`) a partir da tela "Editar loja"; valor `<= 0` zera a categoria; categoria fora da lista é ignorada. Escolha por **tabela keyed** (não colunas em `retail_stores`) para somar fácil e permitir evoluir a lista sem novas migrações de coluna.
+
+### E2. Lucro por loja precisa de margem — não dá pra subtrair só o custo fixo do faturamento
+O único dado de venda por loja é o **faturamento** (fechamentos de caixa) — não há CMV por loja. Subtrair custo fixo direto do faturamento ignoraria o custo da mercadoria e **mentiria pra cima**. Decisão: nova coluna nullable `retail_stores.gross_margin_percent` (margem bruta média da loja, premissa gerencial, clampeada 0..100). O resultado é:
+
+```
+Faturamento      = Σ fechamentos do mês (system_total do PDV quando houver, senão informed_total; exclui 'rejected')
+Margem contrib.  = Faturamento × (margem bruta % / 100)
+Resultado        = Margem de contribuição − custos fixos da loja
+Ponto equilíbrio = custos fixos ÷ (margem bruta % / 100)   [em faturamento]
+```
+
+**Guardrail (E2a):** sem a margem cadastrada, `resultado` e `pontoEquilibrio` ficam **NULL** (a UI mostra faturamento e custos, marca a loja como "falta margem" e **não inventa lucro**). O total de lucro da rede soma só as lojas com margem informada.
+
+### E3. Consistência de faturamento
+Usa a **mesma régua** de valor da Ponte de Faturamento (`RetailRevenueBridgeService`: `COALESCE(NULLIF(system_total,0), informed_total)`), garantindo que o número bata com o que a aba "Operação da Rede" já mostra por loja. Determinístico, zero-token, isolado por `organization_id`.
+
+### E4. Superfície
+- Serviço: `RetailStoreCostService` (`list`, `setMany`, `monthlyRevenue`, `storeResult`, `allStoresResult`).
+- Rotas (gated pelo módulo `retail`): `GET/PUT /api/retailops/stores/:id/costs`, `GET /api/retailops/stores/:id/result`, `GET /api/retailops/stores-result` (mutação só owner/admin, via `requireRole`).
+- UI: campos de custo + margem em "Editar loja"; nova aba **"Resultado por loja"** (faturamento, custos, margem, lucro estimado, ponto de equilíbrio; total da rede).
+- Teste: `test:retail-store-result` (31 verificações — upsert por tipo, faturamento por fechamento, guardrail sem margem, lucro/prejuízo/PE com margem, totais da rede, isolamento).

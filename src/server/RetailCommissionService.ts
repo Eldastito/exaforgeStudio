@@ -138,6 +138,10 @@ export class RetailCommissionService {
     for (const s of this.onlineSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, 0, s.orders, "zappflow");
     for (const s of RetailSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "manual");
     for (const s of RetailErpSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "erp", s.erpCommission);
+    // PDV físico por VENDEDOR (VendaMalote → CAI_USUARIO/`vendedor_codigo`): é a
+    // base real da comissão por vendedor da rede. Entra por último; casa por
+    // userId/nome com as demais fontes quando for a mesma pessoa.
+    for (const s of this.pdvSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "pdv");
     return Array.from(map.values())
       .map((v) => ({ sellerUserId: v.sellerUserId, sellerName: v.sellerName, sales: v.sales, pecas: v.pecas, orders: v.orders, erpCommission: v.erpCommission, source: Array.from(v.sources).sort().join("+") }))
       .sort((a, b) => b.sales - a.sales);
@@ -172,12 +176,18 @@ export class RetailCommissionService {
 
     const sellerRules = byScope("seller"), productRules = byScope("product"), storeRules = byScope("store"), globalRules = byScope("global");
 
-    // Por vendedor = vendas do ZappFlow (pedidos com vendedor) + lançamentos
-    // manuais/foto do Cenário B (retail_seller_sales). O PDV físico NÃO entra
-    // aqui automaticamente: o VendaMalote só traz o `matricula` do CAIXA
-    // (operador, que cruza lojas) — não o vendedor por item; por isso a folha
-    // por vendedor é lançada à mão (ou lida por foto) e somada aqui.
-    const bySeller = this.combinedSalesBySeller(orgId, start, end).map((s) => ({ ...s, commission: commissionOf(sellerRules, s.sales, 0) }));
+    // Por vendedor = ZappFlow (pedidos com vendedor) + lançamentos manuais/foto +
+    // ERP + PDV físico (VendaMalote → CAI_USUARIO). Quando NÃO há regra própria por
+    // vendedor, a comissão por vendedor sai da MESMA regra percentual da loja/global
+    // (fallback, igual a /pdv-sellers): assim o gestor que só criou uma regra "por
+    // loja" ainda vê a comissão individualizada por vendedor sobre o que cada um
+    // vendeu — que é o que "individualizar por vendedor" significa.
+    const fbRule = sellerRules.length ? null : this.sellerFallbackRule(orgId);
+    const fbPct = fbRule ? Number(safeParse(fbRule.config_json)?.percent || 0) : 0;
+    const bySeller = this.combinedSalesBySeller(orgId, start, end).map((s) => ({
+      ...s,
+      commission: sellerRules.length ? commissionOf(sellerRules, s.sales, 0) : round2(s.sales * fbPct / 100),
+    }));
     const byProduct = this.onlineSalesByProduct(orgId, start, end).map((p) => ({ ...p, commission: commissionOf(productRules, p.sales, 0) }));
 
     const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
@@ -191,14 +201,41 @@ export class RetailCommissionService {
     const globalCommission = globalRules.length ? commissionOf(globalRules, globalBase, this.periodQuota(orgId, null, start, end)) : 0;
 
     const sum = (arr: any[], k: string) => round2(arr.reduce((a, x) => a + Number(x[k] || 0), 0));
-    const totalCommission = round2(sum(bySeller, "commission") + sum(byProduct, "commission") + sum(byStore, "commission") + globalCommission);
+    const sellerCommission = sum(bySeller, "commission");
+    const productCommission = sum(byProduct, "commission");
+    const storeCommission = round2(sum(byStore, "commission") + globalCommission);
+    // Fallback ativo: a comissão por vendedor saiu da MESMA verba da regra da
+    // loja/global, então a linha "por loja" é só REFERÊNCIA e NÃO soma no total
+    // (senão pagaria 5% duas vezes). Com regra própria por vendedor, as duas são
+    // distintas e somam normalmente.
+    const storeIsReference = fbPct > 0 && sellerCommission > 0;
+    const totalCommission = round2(sellerCommission + productCommission + (storeIsReference ? 0 : storeCommission));
     return {
       period: { start, end },
       bySeller, byProduct, byStore, globalCommission,
-      totals: { sellerCommission: sum(bySeller, "commission"), productCommission: sum(byProduct, "commission"), storeCommission: round2(sum(byStore, "commission") + globalCommission), totalCommission, sellerErpCommission: sum(bySeller, "erpCommission") },
+      totals: { sellerCommission, productCommission, storeCommission, totalCommission, sellerErpCommission: sum(bySeller, "erpCommission") },
       hasRules: { seller: sellerRules.length > 0, product: productRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
+      sellerCommissionSource: sellerRules.length ? "seller_rule" : (fbPct > 0 ? "store_fallback" : null),
+      sellerCommissionPercent: sellerRules.length ? null : (fbPct || null),
+      storeIsReference,
       hasErpSellerSales: bySeller.some((s: any) => Number(s.erpCommission) > 0 || String(s.source || "").includes("erp")),
     };
+  }
+
+  /**
+   * Regra percentual ativa usada como FALLBACK da comissão por vendedor quando o
+   * gestor não criou uma regra de escopo "vendedor": pega a regra `percent_sales`
+   * de loja (ou, na falta, global) — a mesma preferência de /pdv-sellers. Retorna
+   * a linha da regra (ou null) para reaproveitar id/percentual na apuração.
+   */
+  private static sellerFallbackRule(orgId: string): any | null {
+    try {
+      return db.prepare(
+        `SELECT * FROM retail_commission_rules
+          WHERE organization_id = ? AND active = 1 AND calculation_type = 'percent_sales' AND scope IN ('store','global')
+          ORDER BY CASE scope WHEN 'store' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`
+      ).get(orgId) || null;
+    } catch { return null; }
   }
 
   /**
@@ -209,11 +246,11 @@ export class RetailCommissionService {
    * código do vendedor quando presente e cai no operador só quando ausente
    * (retrocompatível: bases antigas sem `vendedor_codigo` mantêm o comportamento).
    */
-  static pdvSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; matricula: string; sales: number; orders: number; source: string }> {
+  static pdvSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; matricula: string; sales: number; pecas: number; orders: number; source: string }> {
     try {
       const rows = db.prepare(
         `SELECT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) AS matricula, rs.name AS mapped_name, rs.user_id AS user_id,
-                SUM(s.valor) AS sales, COUNT(*) AS orders
+                SUM(s.valor) AS sales, COALESCE(SUM(s.pecas), 0) AS pecas, COUNT(*) AS orders
            FROM retail_pdv_sales s
            LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)
           WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
@@ -225,6 +262,7 @@ export class RetailCommissionService {
         sellerName: r.mapped_name || `Matrícula ${r.matricula}`,
         matricula: String(r.matricula),
         sales: round2(Number(r.sales || 0)),
+        pecas: Number(r.pecas || 0),
         orders: Number(r.orders || 0),
         source: "pdv",
       }));
@@ -298,6 +336,31 @@ export class RetailCommissionService {
           items.push({ storeId: s.id, sellerName: s.name, base, commission: amount, ruleId: rule.id, detail });
           totalCommission += amount;
         }
+      }
+    }
+
+    // "Por vendedor vira o oficial" (decisão do gestor): quando NÃO há regra
+    // própria por vendedor mas há uma regra percentual de loja/global, a comissão
+    // por VENDEDOR (PDV/CAI_USUARIO + ZappFlow + manual + ERP) sai por essa mesma
+    // % e as linhas por loja/global geradas por ela viram REFERÊNCIA (comissão 0)
+    // para não pagar a mesma verba duas vezes.
+    const hasSellerRule = rules.some((r) => r.scope === "seller");
+    const fbRule = hasSellerRule ? null : this.sellerFallbackRule(orgId);
+    const fbPct = fbRule ? Number(safeParse(fbRule.config_json)?.percent || 0) : 0;
+    if (fbRule && fbPct > 0) {
+      const sellerItems = this.combinedSalesBySeller(orgId, periodStart, periodEnd)
+        .map((sv) => ({ storeId: null, sellerUserId: sv.sellerUserId, sellerName: sv.sellerName, base: sv.sales, commission: round2(sv.sales * fbPct / 100), ruleId: fbRule.id, detail: { type: "percent_sales_seller_fallback", percent: fbPct, base: sv.sales } }))
+        .filter((it) => it.commission > 0);
+      // Só vira "por vendedor oficial" se HÁ comissão por vendedor a pagar; senão
+      // a linha por loja continua valendo (não há o que individualizar).
+      if (sellerItems.length) {
+        const referenceRuleIds = new Set(
+          rules.filter((r) => (r.scope === "store" || r.scope === "global") && r.calculation_type === "percent_sales").map((r) => r.id)
+        );
+        for (const it of items) {
+          if (referenceRuleIds.has(it.ruleId)) { totalCommission -= it.commission; it.commission = 0; it.detail = { ...(it.detail || {}), reference: true }; }
+        }
+        for (const it of sellerItems) { items.push(it); totalCommission += it.commission; }
       }
     }
     totalSales = this.periodSales(orgId, null, periodStart, periodEnd);

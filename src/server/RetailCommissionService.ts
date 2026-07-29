@@ -201,17 +201,24 @@ export class RetailCommissionService {
     };
   }
 
-  /** Vendas do PDV por VENDEDOR (matrícula do ERP) — nome vem do mapeamento retail_sellers. */
+  /**
+   * Vendas do PDV por VENDEDOR — nome vem do mapeamento retail_sellers.
+   *
+   * Homologação Toulon (ADR-105): o vendedor da comissão é o CAI_USUARIO
+   * (`vendedor_codigo`), NÃO a matrícula do operador de caixa (`vendedor`). Usa o
+   * código do vendedor quando presente e cai no operador só quando ausente
+   * (retrocompatível: bases antigas sem `vendedor_codigo` mantêm o comportamento).
+   */
   static pdvSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; matricula: string; sales: number; orders: number; source: string }> {
     try {
       const rows = db.prepare(
-        `SELECT s.vendedor AS matricula, rs.name AS mapped_name, rs.user_id AS user_id,
+        `SELECT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) AS matricula, rs.name AS mapped_name, rs.user_id AS user_id,
                 SUM(s.valor) AS sales, COUNT(*) AS orders
            FROM retail_pdv_sales s
-           LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = s.vendedor
+           LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)
           WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
-            AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(s.vendedor, '') <> ''
-          GROUP BY s.vendedor ORDER BY sales DESC`
+            AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor, '') <> ''
+          GROUP BY COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) ORDER BY sales DESC`
       ).all(orgId, start, end) as any[];
       return rows.map((r) => ({
         sellerUserId: r.user_id || null,

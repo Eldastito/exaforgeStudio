@@ -1893,8 +1893,9 @@ const initDb = () => {
         boleta TEXT NOT NULL,
         sale_date TEXT NOT NULL,
         sale_time TEXT,
-        vendedor TEXT,                           -- matrícula no caixa (operador — ver usuario)
-        usuario TEXT,                            -- 2º id de pessoa no caixa (investigação da anomalia)
+        vendedor TEXT,                           -- matrícula no caixa (OPERADOR de caixa — não é o vendedor)
+        usuario TEXT,                            -- CAI_USUARIO (id de pessoa no caixa; base do vendedor)
+        vendedor_codigo TEXT,                    -- CÓDIGO DO VENDEDOR (CAI_USUARIO → VENDEDORES.VEN_CODIGO); base da comissão individual
         valor REAL DEFAULT 0,
         pecas REAL DEFAULT 0,
         status TEXT,                             -- 'N' normal (contrato ModaUp)
@@ -1903,6 +1904,10 @@ const initDb = () => {
         UNIQUE(organization_id, filial, boleta, sale_date)
       );
       CREATE INDEX IF NOT EXISTS idx_retail_pdv_sales ON retail_pdv_sales (organization_id, sale_date);
+      -- Homologação Toulon (ADR-105): o vendedor da comissão é o CAI_USUARIO
+      -- (relação com VENDEDORES por VEN_CODIGO = CAI_CODIGO), não a matrícula do
+      -- operador de caixa. Coluna aditiva para bases já existentes.
+      -- @ts-migration vendedor_codigo
 
       -- Itens de venda do PDV (linhas do array vendas[] de cada VendaMalote):
       -- produto, quantidade, valor e o VENDEDOR POR LINHA — base dos
@@ -5426,6 +5431,9 @@ const initDb = () => {
   // Conector Alterdata Fase 4 — 2º id de pessoa do caixa (investigação do
   // vendedor real; a tabela pode já existir sem a coluna).
   try { db.exec(`ALTER TABLE retail_pdv_sales ADD COLUMN usuario TEXT`); } catch(e){}
+  // Homologação Toulon (ADR-105) — código do VENDEDOR (CAI_USUARIO → VENDEDORES),
+  // base da comissão individual, distinto do operador de caixa (matrícula).
+  try { db.exec(`ALTER TABLE retail_pdv_sales ADD COLUMN vendedor_codigo TEXT`); } catch(e){}
 };
 
 initDb();

@@ -284,11 +284,11 @@ export class AlterdataSyncRunner {
     const vendas = { imported: 0 };
     try {
       const insVenda = db.prepare(
-        `INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, sale_time, vendedor, usuario, valor, pecas, status, payments_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, sale_time, vendedor, usuario, vendedor_codigo, valor, pecas, status, payments_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(organization_id, filial, boleta, sale_date) DO UPDATE SET
-           sale_time = excluded.sale_time, vendedor = excluded.vendedor, usuario = excluded.usuario, valor = excluded.valor,
-           pecas = excluded.pecas, status = excluded.status, payments_json = excluded.payments_json`
+           sale_time = excluded.sale_time, vendedor = excluded.vendedor, usuario = excluded.usuario, vendedor_codigo = excluded.vendedor_codigo,
+           valor = excluded.valor, pecas = excluded.pecas, status = excluded.status, payments_json = excluded.payments_json`
       );
       // Itens de venda (vendas[]): produto, quantidade, valor, comissão e o
       // vendedor POR LINHA (nome do campo varia — tenta os candidatos).
@@ -326,9 +326,14 @@ export class AlterdataSyncRunner {
               creditoParcelado: Number(cx?.creditoParcelado || 0), cheque: Number(cx?.cheque || 0),
               vale: Number(cx?.vale || 0), deposito: Number(cx?.deposito || 0), crediario: Number(cx?.crediario || 0),
             };
+            // Homologação Toulon (ADR-105): a `matricula` do caixa é o OPERADOR;
+            // o VENDEDOR da comissão é o CAI_USUARIO (relação com VENDEDORES via
+            // VEN_CODIGO = CAI_CODIGO). No payload da ModaUp o CAI_USUARIO chega
+            // como `usuario`; aceitamos candidatos explícitos por robustez.
+            const vendedorCodigo = str(cx?.vendedorCodigo ?? cx?.codigoVendedor ?? cx?.venCodigo ?? cx?.caiUsuario ?? cx?.usuario) || null;
             insVenda.run(
               randomUUID(), orgId, filial, boleta, date, str(cx?.hora) || null, str(cx?.matricula) || null,
-              str(cx?.usuario) || null, Number(cx?.valor || 0), Number(cx?.vendidas || 0), str(cx?.status) || null, JSON.stringify(payments)
+              str(cx?.usuario) || null, vendedorCodigo, Number(cx?.valor || 0), Number(cx?.vendidas || 0), str(cx?.status) || null, JSON.stringify(payments)
             );
             // Itens vendidos (linhas): mais-vendidos + vendedor por linha.
             const linhas = Array.isArray(it?.vendas) ? it.vendas : (Array.isArray(cx?.vendas) ? cx.vendas : []);

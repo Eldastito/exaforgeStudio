@@ -93,6 +93,38 @@ Nomes em **negrito** são os principais; os demais são alternativas aceitas
 | **`preco1`** (ou `preco`) | preço de venda aplicado à variante/produto |
 | `controleVersao` | cursor delta |
 
+### VendaMalote → venda do PDV + VENDEDOR (comissão individual)
+| Campo | Uso no ZappFlow |
+|---|---|
+| **`caixa.filial`** | loja da venda (casa com o Código da loja) |
+| **`caixa.boleta`** + **`caixa.data`** | chave natural da venda (upsert idempotente) |
+| **`caixa.matricula`** | **OPERADOR de caixa** (não é o vendedor) → coluna `vendedor` |
+| **`caixa.usuario`** (= **CAI_USUARIO**) | **VENDEDOR** da comissão → coluna `vendedor_codigo` (aceita `vendedorCodigo`/`codigoVendedor`/`venCodigo`/`caiUsuario`) |
+| `caixa.valor`, `caixa.vendidas` | valor e peças da venda |
+| `vendas[]` (produto/quantidade/valor/comissão) | itens da venda (mais-vendidos) |
+| `parcelasCartao[]` | recebíveis de cartão (líquido/taxa/vencimento) |
+
+> **Homologação Toulon — Q1 (RESOLVIDA).** A pergunta era "onde fica o vendedor
+> por venda, já que `matricula` é o operador de caixa". Resposta da Alterdata: o
+> vendedor é o **CAI_USUARIO**, em relação com a tabela **VENDEDORES** por
+> **`VEN_CODIGO = CAI_CODIGO`**. No conector, o CAI_USUARIO (campo `usuario`) é
+> gravado em `retail_pdv_sales.vendedor_codigo` e a **comissão individual passa a
+> ser atribuída por ele** (`RetailCommissionService.pdvSalesBySeller`), com
+> fallback para o operador quando ausente. Para os nomes aparecerem, mapear os
+> vendedores em *retail_sellers* usando o **código do vendedor (CAI_USUARIO)** como
+> matrícula.
+
+### Venda/ComissaoVendasPorPeriodo → comissão do ERP (conferência)
+Relatório agregado por vendedor no período (`data.metaVendedorRealizado[]`),
+usado só para **conferir** a comissão já calculada pelo ERP (não é a base).
+
+> **Homologação Toulon — Q2 (ESCLARECIDA).** O endpoint volta **vazio** quando
+> **não há metas cadastradas por vendedor** no ERP (confirmado pela Alterdata:
+> *"como não tem metas cadastrada o campo não vai conter informação"*). Não é bug:
+> o conector trata o vazio como esperado (importa 0, sem erro) e a comissão sai
+> normalmente pela venda a venda (VendaMalote + CAI_USUARIO, acima). Assim que as
+> metas forem cadastradas, o relatório passa a preencher a conferência sozinho.
+
 ## Dois pontos críticos de casamento (mais prováveis de divergir)
 
 1. **Chave do produto consistente entre os três recursos.** O `produto` de
@@ -118,6 +150,8 @@ precisam existir (CodigoDeBarras) antes de Saldo/Preco casarem por `produto`.
 - [ ] Campo de versão é **`controleVersao`**? Onde vem o total de páginas?
 - [ ] Nomes dos campos batem, em especial `produto`, `saldoAtual`, `preco1`, `ean`, `cor`, `tamanho`, `referenciaId`, `descricao`?
 - [ ] A chave `produto` (Saldo/Preco) é idêntica ao `codigo` (CodigoDeBarras)?
+- [x] **Vendedor da comissão** = `caixa.usuario` (CAI_USUARIO → VENDEDORES por `VEN_CODIGO = CAI_CODIGO`), não a `matricula` (operador). *(Q1 resolvida)*
+- [x] `Venda/ComissaoVendasPorPeriodo` vazio = **sem metas cadastradas** (esperado; comissão sai por VendaMalote). *(Q2 esclarecida)*
 
 > Divergência encontrada? Basta informar o **nome real do campo** (ou colar um
 > JSON de exemplo de cada endpoint) que o mapeador correspondente é ajustado.

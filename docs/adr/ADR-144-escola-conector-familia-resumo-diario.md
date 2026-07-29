@@ -1,6 +1,6 @@
 # ADR-144 — Módulo Escola: a camada que conecta a escola à família (resumo diário no WhatsApp)
 
-**Status:** Aceito — Fatia 1 entregue (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 entregue (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatias 3–5 planejadas.
+**Status:** Aceito — Fatia 1 entregue (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 entregue (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatia 3 entregue (extracurriculares: vagas + matrícula atômica + lista de espera + presença + aviso ao responsável). Fatias 4–5 planejadas.
 
 **Data:** 2026-07
 
@@ -97,6 +97,15 @@ Adapta a Agenda Clínica (ADR-080), mas sem forçar o molde de `appointments` (q
 - **`TeacherDigestService`** — o **"resumo antes da aula"**: espelha o `SchoolDigestService`/tutor (texto determinístico da grade do dia, janela da manhã SP, dedupe por dia, envio injetável). Professor sem aulas no dia não recebe (e não marca dedupe).
 - **Confirmação pós-aula** (`class_confirmations`, idempotente por item+data): `held`/`not_held`. `not_held` publica sinal `class_not_held` no domínio `education` (coordenação, ADR-132/136); reconfirmar como `held` **resolve** o sinal. É a prova da trilha "pós-aula → coordenação" da Fatia 2 (o conjunto maior de sinais fica para a Fatia 4).
 
+### D8 — Extracurriculares (Fatia 3): adapta o PADRÃO de reservas, não a tabela
+
+Adapta o `ReservationService` (capacidade/vagas + matrícula **atômica** anti-overbooking + lista de espera), mas em tabelas próprias da escola — o `reservations` é centrado em `contacts` + período de hotel, e o aluno é entidade própria (D2).
+
+- **`extracurricular_activities`** — a atividade recorrente com `capacity` **vagas**, `day_label`/`time_label` livres, `location` e `teacher_id` opcional (reuso da Fatia 2).
+- **`extracurricular_enrollments`** (único por atividade+aluno) — `enroll` entra como `enrolled` enquanto `enrolled < capacity`, senão `waitlisted` com `position`. A operação é **atômica** (transação), como o `ReservationService.create`, para não estourar a vaga. Cancelar uma matrícula `enrolled` **promove** o 1º da lista de espera (menor `position`).
+- **`extracurricular_attendance`** (único por atividade+aluno+data) — presença/falta por sessão; só para aluno `enrolled`.
+- **Aviso ao responsável** (`ExtracurricularNoticeService`): texto **determinístico** (matrícula confirmada / lista de espera / vaga liberada / falta), fan-out com envio **injetado**, **gated pela mesma porta de consentimento da Fatia 1** (`student_guardians.digest_consent`, D3) — nada sobre o menor sem consentimento do responsável. É evento pontual (não passe diário), então não toca o `Scheduler`.
+
 ---
 
 ## Faseamento (cada fatia = um PR fechado e testado)
@@ -105,7 +114,7 @@ Adapta a Agenda Clínica (ADR-080), mas sem forçar o molde de `appointments` (q
 |---|---|---|
 | **1 — Resumo diário ⭐ (esta ADR)** ✅ | modelo aluno/responsável + consentimento-porta + resumo diário ao responsável (da nossa agenda) + 1 sinal de coordenação (faltas) | modelo NOVO; envio/consentimento/sinais REUSO |
 | **2 — Agenda do professor** ✅ | professores (entidade própria) + grade recorrente por turma; "resumo antes da aula" ao professor + confirmação pós-aula → sinal | ADAPTA Agenda Clínica (D7) |
-| **3 — Extracurriculares** | matrícula/vagas/lista de espera/presença + aviso ao responsável | ADAPTA `reservations` |
+| **3 — Extracurriculares** ✅ | vagas + matrícula atômica + lista de espera (com promoção) + presença + aviso ao responsável | ADAPTA o padrão de `reservations` (D8) |
 | **4 — Painel da coordenação** | mais sinais (nota não lançada, turma sem professor…) no Pareto/briefing | REUSO do kernel de sinais |
 | **5 — Conectores reais** | import de planilha estruturada + 1º webhook/API por cliente | por cliente |
 | **Pack Quick-Start `educacao`** | personas (secretaria/coordenação) + cadências + FAQ do regimento | autoria (sem código) |
@@ -132,4 +141,6 @@ A Fatia 1 sozinha prova a tese: reusa envio, consentimento, priorização e RAG 
 
 `test:escola-teacher` (Fatia 2): professor como entidade própria (não é contato); `weekday` determinístico; grade recorrente resolvida por dia e grade da turma agregando professores; opt-in como porta (sem `notify_opt_in` não envia e não marca dedupe); texto determinístico do "resumo antes da aula"; janela da manhã; sem aulas no dia não envia e não marca dedupe; dedupe 1×/dia por professor; confirmação pós-aula `not_held` publica `class_not_held` e `held` resolve o sinal (idempotente por item+data); `sendNow` ignora janela/dedupe mas respeita opt-in e existência de aulas; isolamento por `organization_id`.
 
-Ambas as suítes entram no matrix do CI (`.github/workflows/ci.yml`).
+`test:escola-extracurricular` (Fatia 3): atividade com vagas (não é reserva/contato); matrícula atômica que preenche vagas e depois vira lista de espera com posição; idempotência da matrícula; cancelar promove o 1º da espera; roster (matriculados + espera ordenada); presença por sessão idempotente e só para aluno matriculado; texto determinístico do aviso (matrícula/espera/promoção/falta); porta de consentimento (sem `digest_consent` não avisa); isolamento por `organization_id`.
+
+As três suítes escola entram no matrix do CI (`.github/workflows/ci.yml`).

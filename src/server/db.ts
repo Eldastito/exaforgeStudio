@@ -2497,6 +2497,63 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar Agenda do Professor (ADR-144 Fatia 2)', e); }
 
+  // Módulo Escola (ADR-144, Fatia 3) — Extracurriculares (ADAPTA o padrão de
+  // reservations: capacidade/vagas + matrícula ATÔMICA anti-overbooking + lista
+  // de espera), mas em tabelas próprias da escola (o aluno é entidade própria,
+  // não um contato/período de hotel — D8). A atividade tem `capacity` vagas; a
+  // matrícula vira `enrolled` enquanto houver vaga, senão `waitlisted` com
+  // `position`; cancelar uma vaga promove o 1º da espera. A presença é por
+  // sessão (data). O "aviso ao responsável" reusa a porta de consentimento da
+  // Fatia 1 (student_guardians.digest_consent).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS extracurricular_activities (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        capacity INTEGER DEFAULT 1,         -- vagas simultâneas
+        day_label TEXT,                     -- ex.: "Terça e Quinta" (livre)
+        time_label TEXT,                    -- ex.: "16h" (livre)
+        location TEXT,
+        teacher_id TEXT,                    -- -> teacher_profiles.id (opcional)
+        status TEXT DEFAULT 'active',       -- active, inactive
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_extracur_activities_org ON extracurricular_activities (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS extracurricular_enrollments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        activity_id TEXT NOT NULL,          -- -> extracurricular_activities.id
+        student_id TEXT NOT NULL,           -- -> student_profiles.id
+        status TEXT NOT NULL DEFAULT 'enrolled', -- enrolled | waitlisted | cancelled
+        position INTEGER,                   -- ordem na lista de espera (só waitlisted)
+        enrolled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, activity_id, student_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_extracur_enroll_activity ON extracurricular_enrollments (organization_id, activity_id, status);
+
+      CREATE TABLE IF NOT EXISTS extracurricular_attendance (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        activity_id TEXT NOT NULL,          -- -> extracurricular_activities.id
+        student_id TEXT NOT NULL,           -- -> student_profiles.id
+        date TEXT NOT NULL,                 -- YYYY-MM-DD (dia SP da sessão)
+        status TEXT NOT NULL,               -- present | absent
+        note TEXT,
+        recorded_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, activity_id, student_id, date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_extracur_attendance_day ON extracurricular_attendance (organization_id, activity_id, date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar Extracurriculares (ADR-144 Fatia 3)', e); }
+
   // Módulo Clínica (ADR-080, Fase C) — Agenda Clínica. Profissionais como
   // entidade própria (D2, desacoplada de login, link opcional para user) e
   // salas. Duração por consulta (sem teto de 150 min), check-in/início/saída e

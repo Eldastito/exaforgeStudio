@@ -4,6 +4,8 @@ import { StudentService } from "../StudentService.js";
 import { SchoolDigestService } from "../SchoolDigestService.js";
 import { TeacherService } from "../TeacherService.js";
 import { TeacherDigestService } from "../TeacherDigestService.js";
+import { ExtracurricularService } from "../ExtracurricularService.js";
+import { ExtracurricularNoticeService } from "../ExtracurricularNoticeService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import db from "../db.js";
 
@@ -14,6 +16,14 @@ import db from "../db.js";
  */
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
+
+// Resolve uma função de envio pelo canal conectado da org (evolution primeiro).
+// Retorna null se não houver canal — o chamador decide se o aviso é obrigatório.
+const channelSend = (orgId: string): ((target: string, message: string) => any) | null => {
+  const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+  if (!channel) return null;
+  return (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+};
 
 // ── Alunos ──────────────────────────────────────────────────────────────
 router.get("/students", (req: AuthRequest, res): any => {
@@ -197,6 +207,98 @@ router.post("/teachers/:teacherId/agenda/send-test", async (req: AuthRequest, re
   try {
     const r = await TeacherDigestService.sendNow(orgId, req.params.teacherId, { send });
     if (!r.sent) return res.status(400).json({ error: "Professor sem opt-in, telefone válido ou aulas hoje." });
+    res.json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Extracurriculares (Fatia 3) ──────────────────────────────────────────
+router.get("/activities", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ExtracurricularService.listActivities(orgId, { q: req.query.q as string }));
+});
+
+router.post("/activities", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExtracurricularService.createActivity(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/activities/:activityId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExtracurricularService.getActivity(orgId, req.params.activityId)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.put("/activities/:activityId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExtracurricularService.updateActivity(orgId, req.params.activityId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/activities/:activityId/roster", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExtracurricularService.roster(orgId, req.params.activityId)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+// Matrícula → aviso ao responsável (matrícula confirmada ou lista de espera)
+router.post("/activities/:activityId/enroll", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const studentId = String((req.body || {}).studentId || "");
+  try {
+    const r = ExtracurricularService.enroll(orgId, req.params.activityId, studentId, actor(req));
+    if (!r.deduped) {
+      const send = channelSend(orgId);
+      if (send) {
+        const { activity } = ExtracurricularService.getActivity(orgId, req.params.activityId);
+        const name = ExtracurricularNoticeService.studentName(orgId, studentId);
+        await ExtracurricularNoticeService.notifyGuardians(orgId, studentId, ExtracurricularNoticeService.enrollmentText(name, activity, r.status, r.position), { send });
+      }
+    }
+    res.json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Cancelar matrícula → se promoveu alguém da espera, avisa o responsável do promovido
+router.post("/activities/:activityId/cancel", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const studentId = String((req.body || {}).studentId || "");
+  try {
+    const r = ExtracurricularService.cancelEnrollment(orgId, req.params.activityId, studentId, actor(req));
+    if (r.promotedStudentId) {
+      const send = channelSend(orgId);
+      if (send) {
+        const { activity } = ExtracurricularService.getActivity(orgId, req.params.activityId);
+        const name = ExtracurricularNoticeService.studentName(orgId, r.promotedStudentId);
+        await ExtracurricularNoticeService.notifyGuardians(orgId, r.promotedStudentId, ExtracurricularNoticeService.promotionText(name, activity), { send });
+      }
+    }
+    res.json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Presença → falta avisa o responsável
+router.post("/activities/:activityId/attendance", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { studentId, date, status, note } = req.body || {};
+  try {
+    const r = ExtracurricularService.recordAttendance(orgId, { activityId: req.params.activityId, studentId: String(studentId || ""), date: String(date || ""), status: String(status || ""), note }, actor(req));
+    if (r.status === "absent") {
+      const send = channelSend(orgId);
+      if (send) {
+        const { activity } = ExtracurricularService.getActivity(orgId, req.params.activityId);
+        const name = ExtracurricularNoticeService.studentName(orgId, String(studentId));
+        await ExtracurricularNoticeService.notifyGuardians(orgId, String(studentId), ExtracurricularNoticeService.absenceText(name, activity, String(date)), { send });
+      }
+    }
     res.json(r);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

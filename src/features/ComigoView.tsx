@@ -48,7 +48,7 @@ export function ComigoView() {
   // Sem arquétipo definido: o tutor abre com as 3 perguntas (ADR-120).
   if (arch && arch.configured === false) {
     return (
-      <div className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
+      <div className="flex-1 min-w-0 overflow-y-auto p-3 md:p-6">
         <div className="max-w-lg mx-auto">
           <ArchetypeOnboarding onDone={() => { loadArch(); loadOverview(); }} />
         </div>
@@ -62,7 +62,7 @@ export function ComigoView() {
   const activeTab = tab === 'mesa' && mesaHidden ? 'balcao' : tab;
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto p-4 md:p-6">
+    <div className="flex-1 min-w-0 overflow-y-auto p-3 md:p-6">
       <div className="max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-1">
         <span className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
@@ -373,9 +373,11 @@ function Balcao({ onChange }: { onChange: () => void }) {
 
   return (
     <>
-    <div className="grid md:grid-cols-2 gap-4">
+    {/* Mobile: pedido no topo (botões de pagamento sempre à mão do polegar), grade abaixo com scroll. */}
+    {/* Desktop: layout 2 colunas — grade à esquerda, pedido à direita, como antes. */}
+    <div className="grid md:grid-cols-2 gap-3 md:gap-4">
       {/* Grade por toque */}
-      <div>
+      <div className="order-2 md:order-1 min-w-0">
         {/* Sugestão zero-token (ADR-117): combina com o último item, ou mais pedidos */}
         {(() => {
           const chips = (items.length > 0 ? suggest.alsoBought : suggest.top)
@@ -395,34 +397,38 @@ function Balcao({ onChange }: { onChange: () => void }) {
             </div>
           );
         })()}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2">
           <div className="text-xs text-zinc-500">Toque para adicionar</div>
-          <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer" title="Esconde produtos com estoque zerado. Serviços e itens sem controle de estoque continuam aparecendo.">
+          <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer shrink-0" title="Esconde produtos com estoque zerado. Serviços e itens sem controle de estoque continuam aparecendo.">
             <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} /> Ocultar sem estoque
           </label>
         </div>
         {products.length === 0 ? (
           <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Cadastre produtos no Catálogo para vender aqui.</div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {products.map((p) => (
-              <button key={p.id} disabled={busy} onClick={() => addProduct(p)}
-                className="text-left rounded-xl border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 p-3 disabled:opacity-50">
-                <div className="text-sm text-zinc-100 line-clamp-2">{p.name}</div>
-                <div className="text-emerald-300 text-sm mt-1">{brl(p.price)}{p.sale_mode === 'weight' ? '/kg' : ''}</div>
-              </button>
-            ))}
+          // Barra de rolagem interna no mobile: catálogos grandes não empurram o pedido pra fora do fold.
+          <div className="max-h-[60vh] overflow-y-auto md:max-h-none md:overflow-visible pr-1 -mr-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {products.map((p) => (
+                <button key={p.id} disabled={busy} onClick={() => addProduct(p)}
+                  className="text-left rounded-xl border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 p-3 disabled:opacity-50">
+                  <div className="text-sm text-zinc-100 line-clamp-2">{p.name}</div>
+                  <div className="text-emerald-300 text-sm mt-1">{brl(p.price)}{p.sale_mode === 'weight' ? '/kg' : ''}</div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Pedido da vez */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 flex flex-col">
+      {/* Pedido da vez — no mobile fica ANTES da grade pra os botões de pagamento não escaparem do polegar. */}
+      <div className="order-1 md:order-2 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 flex flex-col min-w-0">
         <div className="text-xs text-zinc-500 mb-2">Pedido da vez</div>
         {items.length === 0 ? (
           <div className="text-sm text-zinc-500 flex-1">Nenhum item ainda.</div>
         ) : (
-          <div className="flex-1 space-y-1">
+          // Lista de itens com altura máxima no mobile: rola dentro do card, não empurra os botões de pagamento pra baixo.
+          <div className="flex-1 space-y-1 max-h-40 md:max-h-none overflow-y-auto pr-1 -mr-1">
             {items.map((it) => {
               const wp = products.find((x) => x.id === it.product_id);
               const isWeight = wp?.sale_mode === 'weight';
@@ -834,19 +840,19 @@ function Caderneta({ onChange }: { onChange: () => void }) {
 
   return (
     <div className="space-y-4">
-      {/* Caixa × a receber (ADR-112 D3) */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-emerald-400/80">Caixa hoje</div>
-          <div className="text-lg font-semibold text-emerald-200 mt-1">{summary ? brl(summary.caixaHoje) : '—'}</div>
+      {/* Caixa × a receber (ADR-112 D3) — cards compactos no mobile (menos padding e fonte menor) pra caber melhor no celular. */}
+      <div className="grid grid-cols-3 gap-2 md:gap-3">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-2 md:p-3 min-w-0">
+          <div className="text-[10px] md:text-[11px] uppercase tracking-wide text-emerald-400/80">Caixa hoje</div>
+          <div className="text-base md:text-lg font-semibold text-emerald-200 mt-1 truncate">{summary ? brl(summary.caixaHoje) : '—'}</div>
         </div>
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-amber-400/80">A receber (fiado)</div>
-          <div className="text-lg font-semibold text-amber-200 mt-1">{summary ? brl(summary.aReceber) : '—'}</div>
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-2 md:p-3 min-w-0">
+          <div className="text-[10px] md:text-[11px] uppercase tracking-wide text-amber-400/80">A receber</div>
+          <div className="text-base md:text-lg font-semibold text-amber-200 mt-1 truncate">{summary ? brl(summary.aReceber) : '—'}</div>
         </div>
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500">Ticket médio</div>
-          <div className="text-lg font-semibold text-zinc-100 mt-1">{summary ? brl(summary.ticketMedio) : '—'}</div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-2 md:p-3 min-w-0">
+          <div className="text-[10px] md:text-[11px] uppercase tracking-wide text-zinc-500">Ticket médio</div>
+          <div className="text-base md:text-lg font-semibold text-zinc-100 mt-1 truncate">{summary ? brl(summary.ticketMedio) : '—'}</div>
         </div>
       </div>
 
@@ -856,7 +862,8 @@ function Caderneta({ onChange }: { onChange: () => void }) {
       {customers.length === 0 ? (
         <div className="text-sm text-zinc-500 rounded-xl border border-zinc-800 p-4">Ninguém no fiado ainda.</div>
       ) : (
-        <div className="space-y-2">
+        // Fiado com muita gente: rola dentro do próprio bloco no mobile, ao invés de virar uma tela sem fim.
+        <div className="space-y-2 max-h-[60vh] overflow-y-auto md:max-h-none md:overflow-visible pr-1 -mr-1">
           {customers.map((c) => (
             <div key={c.contact_id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
               <div className="flex items-start justify-between gap-2">

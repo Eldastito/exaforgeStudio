@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -310,11 +310,12 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'resultado' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
+  { key: 'resultado', label: 'Resultado por loja', icon: DollarSign },
   { key: 'maisvendidos', label: 'Mais vendidos', icon: TrendingUp },
   { key: 'cartao', label: 'Recebíveis (cartão)', icon: CreditCard },
   { key: 'clientes', label: 'Clientes (PDV)', icon: Users },
@@ -334,6 +335,98 @@ const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
   refuted: { label: 'Refutado', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
 };
 
+// ---- Resultado / lucro por loja (custos fixos + margem) ---------------------
+function StoreResultTab() {
+  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/retailops/stores-result?period=${period}`);
+      setData(r.ok ? await r.json() : null);
+    } catch { setData(null); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [period]);
+
+  const perStore: any[] = Array.isArray(data?.perStore) ? data.perStore : [];
+  const totals = data?.totals || { faturamento: 0, custosFixos: 0, resultado: 0 };
+  const semMargem = perStore.filter(s => !s.hasMargin).length;
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm text-zinc-300">Lucro estimado e ponto de equilíbrio de cada loja no mês.</p>
+          <p className="text-[11px] text-zinc-500">Faturamento (dos fechamentos) × margem bruta − custos fixos cadastrados na loja.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="month" value={period} onChange={e => setPeriod(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+        </div>
+      </div>
+
+      {loading && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+
+      {!loading && perStore.length === 0 && (
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhuma loja ativa com dados no mês. Cadastre custos fixos e a margem bruta em <strong>Editar loja</strong> para ver o lucro por loja.</p>
+      )}
+
+      {!loading && perStore.length > 0 && (
+        <>
+          {semMargem > 0 && (
+            <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+              {semMargem === 1 ? '1 loja está' : `${semMargem} lojas estão`} sem a <strong>margem bruta média</strong> informada — pra elas o lucro e o ponto de equilíbrio não são calculados (só faturamento e custos). Informe em “Editar loja”.
+            </p>
+          )}
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400">
+                <tr className="text-left">
+                  <th className="px-3 py-2 font-medium">Loja</th>
+                  <th className="px-3 py-2 font-medium text-right">Faturamento</th>
+                  <th className="px-3 py-2 font-medium text-right">Custos fixos</th>
+                  <th className="px-3 py-2 font-medium text-right">Margem</th>
+                  <th className="px-3 py-2 font-medium text-right">Lucro estimado</th>
+                  <th className="px-3 py-2 font-medium text-right">Ponto de equilíbrio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {perStore.map((s: any) => (
+                  <tr key={s.storeId} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-zinc-200">{s.storeName}</td>
+                    <td className="px-3 py-2 text-right text-zinc-300">{brl(s.faturamento)}</td>
+                    <td className="px-3 py-2 text-right text-zinc-300">{s.hasCustos ? brl(s.custosFixos.total) : <span className="text-zinc-600">—</span>}</td>
+                    <td className="px-3 py-2 text-right text-zinc-400">{s.hasMargin ? `${s.grossMarginPercent}%` : <span className="text-amber-300/80" title="Informe a margem bruta em Editar loja">falta</span>}</td>
+                    <td className={`px-3 py-2 text-right font-medium ${s.resultado == null ? 'text-zinc-600' : s.resultado >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{s.resultado == null ? '—' : brl(s.resultado)}</td>
+                    <td className="px-3 py-2 text-right text-zinc-300">
+                      {s.pontoEquilibrio == null ? <span className="text-zinc-600">—</span> : (
+                        <span title={s.progressoEquilibrio != null ? `Faturou ${Math.round(s.progressoEquilibrio * 100)}% do necessário para empatar` : ''}>{brl(s.pontoEquilibrio)}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-zinc-700 bg-zinc-900/40 font-medium text-zinc-200">
+                  <td className="px-3 py-2">Rede (total)</td>
+                  <td className="px-3 py-2 text-right">{brl(totals.faturamento)}</td>
+                  <td className="px-3 py-2 text-right">{brl(totals.custosFixos)}</td>
+                  <td className="px-3 py-2 text-right text-zinc-500">—</td>
+                  <td className={`px-3 py-2 text-right ${totals.resultado >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{brl(totals.resultado)}</td>
+                  <td className="px-3 py-2 text-right text-zinc-500">—</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] text-zinc-500">{data?.disclaimer || 'Resultado gerencial e estimado — não substitui a contabilidade oficial.'} O total de lucro da rede soma só as lojas com margem informada.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function RetailOpsView() {
   const [tab, setTab] = useState<RetailTab>('insights');
   return (
@@ -351,6 +444,7 @@ export function RetailOpsView() {
       {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'comissao' && <CommissionTab />}
+      {tab === 'resultado' && <StoreResultTab />}
       {tab === 'maisvendidos' && <TopProductsTab />}
       {tab === 'cartao' && <CardReceivablesTab />}
       {tab === 'clientes' && <PdvCustomersTab />}
@@ -708,6 +802,17 @@ function ClosingsTab() {
   );
 }
 
+// Categorias de custo fixo por loja (espelha o servidor: RetailStoreCostService).
+const STORE_COST_CATEGORIES: { key: string; label: string; hint?: string }[] = [
+  { key: 'aluguel', label: 'Aluguel' },
+  { key: 'energia', label: 'Energia (luz)' },
+  { key: 'condominio', label: 'Condomínio' },
+  { key: 'agua', label: 'Água' },
+  { key: 'internet', label: 'Internet/telefone' },
+  { key: 'folha', label: 'Folha (salários)' },
+  { key: 'outros', label: 'Outros' },
+];
+
 // ---- Cadastro/edição de loja (reutilizável nas abas) ------------------------
 function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClose: () => void; onSaved: () => void }) {
   const editing = !!store;
@@ -719,7 +824,25 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
   const [lat, setLat] = useState(store?.latitude != null ? String(store.latitude) : '');
   const [lng, setLng] = useState(store?.longitude != null ? String(store.longitude) : '');
   const [sellerSource, setSellerSource] = useState(store?.seller_source === 'manual' ? 'manual' : 'pdv');
+  const [margin, setMargin] = useState(store?.gross_margin_percent != null ? String(store.gross_margin_percent) : '');
+  const [costs, setCosts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+
+  // Custos fixos já cadastrados (só ao editar): preenche o formulário.
+  useEffect(() => {
+    if (!editing) return;
+    apiFetch(`/api/retailops/stores/${store.id}/costs`).then(r => r.json()).then(d => {
+      const by = d?.costs?.byCategory || {};
+      const next: Record<string, string> = {};
+      for (const c of STORE_COST_CATEGORIES) next[c.key] = by[c.key] > 0 ? String(by[c.key]) : '';
+      setCosts(next);
+    }).catch(() => {});
+  }, [editing, store?.id]);
+
+  const costsTotal = useMemo(
+    () => STORE_COST_CATEGORIES.reduce((a, c) => a + (Number(String(costs[c.key] || '').replace(',', '.')) || 0), 0),
+    [costs]
+  );
 
   const save = async () => {
     if (!name.trim()) { toast.error('Dê um nome à loja.'); return; }
@@ -731,12 +854,22 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
         latitude: lat.trim() === '' ? null : Number(lat.replace(',', '.')),
         longitude: lng.trim() === '' ? null : Number(lng.replace(',', '.')),
         sellerSource: sellerSource === 'manual' ? 'manual' : null,
+        grossMarginPercent: margin.trim() === '' ? null : Number(margin.replace(',', '.')),
       });
       const res = editing
         ? await apiFetch(`/api/retailops/stores/${store.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
         : await apiFetch('/api/retailops/stores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      if (res.ok) { toast.success(editing ? 'Loja atualizada.' : 'Loja cadastrada.'); onSaved(); }
-      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar a loja.'); }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar a loja.'); return; }
+      const saved = await res.json().catch(() => ({}));
+      const storeId = editing ? store.id : saved?.id;
+      // Persiste os custos fixos (mesmo na criação, agora que temos o id).
+      if (storeId) {
+        const costsPayload: Record<string, number> = {};
+        for (const c of STORE_COST_CATEGORIES) costsPayload[c.key] = Number(String(costs[c.key] || '').replace(',', '.')) || 0;
+        await apiFetch(`/api/retailops/stores/${storeId}/costs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ costs: costsPayload }) }).catch(() => {});
+      }
+      toast.success(editing ? 'Loja atualizada.' : 'Loja cadastrada.');
+      onSaved();
     } finally { setSaving(false); }
   };
 
@@ -781,6 +914,31 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             </select>
             <span className="mt-1 block text-[11px] text-zinc-500">Se o código de vendedor que vem do PDV/ERP dessa loja NÃO identifica cada pessoa de verdade (ex.: um código só, compartilhado pra loja inteira), escolha "Lançamento manual" — o PDV dessa loja deixa de contar na comissão por vendedor, e passa a valer o que o gestor lançar em "Vendas por vendedor" no fechamento diário.</span>
           </label>
+
+          {/* Custos fixos + margem → lucro e ponto de equilíbrio por loja */}
+          <div className="mt-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+            <p className="text-xs font-medium text-zinc-300">Custos fixos mensais desta loja</p>
+            <p className="mt-0.5 text-[11px] text-zinc-500">Quanto esta loja gasta por mês. Junto com a margem, vira o <strong>lucro</strong> e o <strong>ponto de equilíbrio</strong> na aba “Resultado por loja”.</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {STORE_COST_CATEGORIES.map(c => (
+                <label key={c.key} className="text-[11px] text-zinc-400">{c.label}
+                  <div className="mt-0.5 flex items-center rounded-lg bg-zinc-950 border border-zinc-800 px-2">
+                    <span className="text-[11px] text-zinc-600">R$</span>
+                    <input inputMode="decimal" value={costs[c.key] || ''} onChange={e => setCosts(p => ({ ...p, [c.key]: e.target.value }))}
+                      placeholder="0,00" className="w-full bg-transparent px-1.5 py-1.5 text-sm text-zinc-100 outline-none" />
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[11px]">
+              <span className="text-zinc-500">Total de custo fixo/mês</span>
+              <span className="font-medium text-zinc-300">{brl(costsTotal)}</span>
+            </div>
+            <label className="mt-3 block text-xs text-zinc-400">Margem bruta média da loja (%)
+              <input inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)} placeholder="Ex.: 55" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+              <span className="mt-1 block text-[11px] text-zinc-500">Quanto sobra de cada R$ 100 vendidos DEPOIS de pagar o custo da mercadoria (sem contar os custos fixos acima). É uma estimativa — sem ela, o app mostra faturamento e custos mas <strong>não calcula o lucro</strong> (não dá pra descontar a mercadoria).</span>
+            </label>
+          </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>

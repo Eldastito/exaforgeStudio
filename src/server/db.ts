@@ -5447,6 +5447,33 @@ const initDb = () => {
   // pro total da loja via fechamento) — a fonte de verdade passa a ser o
   // lançamento manual/foto (retail_seller_sales) feito no fechamento de caixa.
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN seller_source TEXT`); } catch(e){}
+
+  // Custos fixos POR LOJA (aluguel, luz, condomínio, água, internet, folha,
+  // outros) — habilita o RESULTADO/LUCRO e o PONTO DE EQUILÍBRIO por filial.
+  // Antes só existia custo fixo AGREGADO da organização inteira
+  // (comigo_fixed_costs_monthly) e contas a pagar sem loja (payables), então o
+  // lucro nunca era segmentável por loja. Uma linha por (loja, categoria); o
+  // gestor lança na tela "Editar loja". Isolado por organização.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_store_fixed_costs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        category TEXT NOT NULL,          -- aluguel|energia|condominio|agua|internet|folha|outros
+        amount REAL NOT NULL DEFAULT 0,  -- valor MENSAL do custo
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, store_id, category)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_store_costs ON retail_store_fixed_costs (organization_id, store_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_store_fixed_costs', e); }
+  // Margem bruta média (%) por loja — premissa GERENCIAL para estimar o lucro
+  // (faturamento − custo da mercadoria) e o ponto de equilíbrio. Nullable de
+  // propósito: sem ela, o app mostra faturamento e custos mas NÃO inventa
+  // lucro/PE (guardrail — faturamento menos custo fixo, sem o CMV, mentiria).
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN gross_margin_percent REAL`); } catch(e){}
 };
 
 initDb();

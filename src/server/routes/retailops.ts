@@ -12,6 +12,7 @@ import path from "path";
 import { randomUUID } from "node:crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
+import { RetailStoreCostService, FIXED_COST_CATEGORIES } from "../RetailStoreCostService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
@@ -439,6 +440,46 @@ router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, r
   try {
     res.json(RetailStoreService.remove(orgId, req.params.id, req.user?.userId));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// --- Custos fixos + RESULTADO/LUCRO por loja ---
+// Custos fixos cadastrados da loja (aluguel, luz, condomínio...) por categoria.
+router.get("/stores/:id/costs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
+  try { res.json({ costs: RetailStoreCostService.list(orgId, req.params.id), categories: FIXED_COST_CATEGORIES }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Salva os custos fixos da loja (só owner/admin). Body: { costs: { aluguel: 1200, ... } }.
+router.put("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const costs = (req.body && req.body.costs) || {};
+    res.json({ costs: RetailStoreCostService.setMany(orgId, req.params.id, costs) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Resultado gerencial + ponto de equilíbrio de UMA loja no mês (?period=YYYY-MM).
+router.get("/stores/:id/result", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const period = String(req.query.period || "").slice(0, 7) || undefined;
+  const result = RetailStoreCostService.storeResult(orgId, req.params.id, period);
+  if (!result) return res.status(404).json({ error: "store_not_found" });
+  res.json(result);
+});
+
+// Resultado de TODAS as lojas + totais da rede (?period=YYYY-MM). Hífen no path
+// para não colidir com /stores/:id (senão :id capturaria "result").
+router.get("/stores-result", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const period = String(req.query.period || "").slice(0, 7) || undefined;
+  try { res.json(RetailStoreCostService.allStoresResult(orgId, period)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // MAIS VENDIDOS por produto (PDV — itens das vendas): quantidade e valor por

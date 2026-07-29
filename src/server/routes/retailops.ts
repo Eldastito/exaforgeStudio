@@ -37,6 +37,7 @@ import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { DecisionActionService } from "../DecisionActionService.js";
 import { isAIConfigured } from "../llm.js";
+import { RetailPricingService } from "../RetailPricingService.js";
 
 const router = Router();
 
@@ -1304,6 +1305,37 @@ router.get("/dashboard/monthly/export", (req: AuthRequest, res): any => {
     return res.send(csv);
   }
   res.json({ month, rows });
+});
+
+// --- Precificação em lote (ADR-083 E7) — tela "Precificar" no varejo ---
+// GET lista: produto + custo médio (notas) + preço + sugestão do motor + venda
+// do mês, com semáforo de risco. POST aplica em lote (só owner/admin), com
+// histórico versionado (ADR-033) e sem abortar o batch por linha ruim.
+router.get("/pricing/products", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(
+      RetailPricingService.listProducts(orgId, {
+        markup: req.query.markup != null ? Number(req.query.markup) : undefined,
+        period: req.query.period ? String(req.query.period) : undefined,
+        limit: req.query.limit != null ? Number(req.query.limit) : undefined,
+      })
+    );
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/pricing/apply", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId;
+  if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (raw.length === 0) return res.status(400).json({ error: "items_required" });
+  if (raw.length > 500) return res.status(400).json({ error: "too_many_items" });
+  try {
+    const out = RetailPricingService.applyBulk(orgId, userId, raw);
+    res.json({ ok: true, ...out });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

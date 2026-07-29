@@ -160,3 +160,31 @@ Ponto equilíb.  = custos fixos ÷ MC% efetiva
 - Teste: `test:retail-store-cmv-real` (25 verificações — REAL 100%, BLENDED 80% com fallback proporcional, FALLBACK puro, guardrail sem margem, regressão do PR anterior, isolamento).
 
 **Nota operacional:** `AlterdataStockMapper` NÃO popula `avg_cost` hoje — quem só usa PDV via ERP fica em `source='estimate'`. Populando via NF-e de entrada (XML/foto → `invoice-scan`) a loja migra pra `real`/`blended` automaticamente na virada do próximo cálculo.
+
+### E7. Tela "Precificar" no varejo (2026-07)
+
+**Pergunta que originou (Fatia 3, última):** o motor `suggestSalePrice` (`src/server/pricing.ts`) e o `avg_cost` já existiam, mas faltava a TELA pra fechar o ciclo — o gestor precisava revisar produto a produto, ver custo × preço atual × sugestão e aplicar em lote. Sem isso, a Fatia 2 (CMV real) ficava só como "número no painel" — não virava ação.
+
+**Serviço** `RetailPricingService`:
+- `listProducts(orgId, {markup, period, limit})` — junta em uma tacada `products_services` (preço atual, min_price) × `inventory_items.avg_cost` × soma agregada de `retail_pdv_sale_items` do mês (mesma resolução produto→catálogo do E6/`/pdv-top-products`). Devolve por produto: `currentPrice`, `avgCost`, `suggestedPrice` (via `suggestSalePrice(cost, targetMarkup)`), `marginAmount`, `marginPercent`, `unitsSoldMonth`, `revenueMonth`, `stockQty`, `hasCost` e um **semáforo de risco** `riskLevel`:
+  - `loss` — preço abaixo do custo (`marginAmount < 0`);
+  - `thin` — margem < 10% (qualquer imposto/taxa da maquininha da Fatia 1 vira prejuízo);
+  - `ok` — margem ≥ 10% ou sem custo (`hasCost=false`, nunca marcado como risco).
+- `applyBulk(orgId, userId, items)` — batch de até 500 linhas em transação. Cada UPDATE gera registro em `ProductEditHistory` (ADR-033, versionamento). **Não aborta o batch por linha ruim** — linhas inválidas vão pra `skipped` com razão explícita: `missing_id | invalid_price | not_found | unchanged`. `unchanged` (diff < R$ 0,005) evita histórico ruidoso quando o gestor reaplica o mesmo preço.
+
+**Markup default** vem de `storefront_settings.default_markup_percent` (o mesmo campo já usado pelo `suggestSalePrice` no `/api/products`). O `markup` do parâmetro sobrescreve (clamp 0–500). Consistência garantida: a sugestão da nova tela bate com a sugestão que já aparece no cadastro de produto por foto/XML da nota.
+
+**Rotas:**
+- `GET /api/retailops/pricing/products?markup=&period=&limit=` — leitura pra qualquer usuário do módulo `retail`.
+- `POST /api/retailops/pricing/apply` — body `{items: [{productId, newPrice}]}`, só `owner`/`admin` (`requireRole`).
+
+**UI:** nova aba **"Precificar"** no `RetailOpsView` (ícone `Tag`). Tabela com checkbox por linha, filtros `todos | risco | sem custo`, ajuste de markup pra simular ao vivo (recalcula sugestão pra tudo), badges de risco por linha (`perda` vermelho, `magra` amarelo, `sem custo` cinza), coluna Venda no mês (contexto pra priorizar quais revisar primeiro), botão "Aplicar sugerido nos selecionados". Confirmação `window.confirm` antes de aplicar em lote.
+
+**Nada de tabela/migração nova.** Cálculo derivado de índices existentes (`idx_retail_pdv_sale_items_prod`, `idx_inventory_org_product`) + `storefront_settings` já criado.
+
+**Teste:** `test:retail-pricing` (40 verificações — listProducts com semáforo (loss/thin/ok), produto sem custo (`hasCost=false`, suggested=0), markup do parâmetro sobrescreve default, clamp 0..500, ordenação por revenue DESC, applyBulk misto (aplicado + inválido + inexistente + unchanged + missing_id) atualizando o BD e o `product_edit_history`, isolamento multi-tenant).
+
+**Ciclo fechado — as 3 fatias juntas:**
+1. Custos variáveis (E5) — o que a venda perde além do CMV.
+2. CMV real (E6) — quanto de fato custou a mercadoria (via `avg_cost` das notas).
+3. Precificar (E7) — a tela que fecha: revisar preços com base no custo real, semáforo pra "vazamentos" e aplicação em lote com histórico.

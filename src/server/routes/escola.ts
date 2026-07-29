@@ -6,6 +6,7 @@ import { TeacherService } from "../TeacherService.js";
 import { TeacherDigestService } from "../TeacherDigestService.js";
 import { ExtracurricularService } from "../ExtracurricularService.js";
 import { ExtracurricularNoticeService } from "../ExtracurricularNoticeService.js";
+import { SchoolCoordinationService } from "../SchoolCoordinationService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import db from "../db.js";
 
@@ -301,6 +302,22 @@ router.post("/activities/:activityId/attendance", async (req: AuthRequest, res):
     }
     res.json(r);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Painel da coordenação (Fatia 4) ──────────────────────────────────────
+// Recomputa os sinais de coordenação (turma sem professor, faltas recorrentes,
+// aulas não realizadas crônicas, lista de espera) e devolve o painel.
+router.post("/coordenacao/scan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SchoolCoordinationService.runSignalsPass(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/coordenacao/panel", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SchoolCoordinationService.panel(orgId));
 });
 
 export default router;

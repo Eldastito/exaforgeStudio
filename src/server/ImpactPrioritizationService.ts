@@ -24,7 +24,7 @@ const WEIGHTS = { impact: 0.4, urgency: 0.2, confidence: 0.15, strategic: 0.15, 
 // ultrapassar o financeiro via override abaixo).
 const STRATEGIC: Record<string, number> = {
   security: 1.0, compliance: 1.0,
-  finance: 1.0, procurement: 0.85, inventory: 0.85, sales: 0.8, retail_ops: 0.7, tasks: 0.55,
+  finance: 1.0, procurement: 0.85, inventory: 0.85, sales: 0.8, education: 0.8, retail_ops: 0.7, tasks: 0.55,
 };
 const STRATEGIC_DEFAULT = 0.6;
 
@@ -66,13 +66,20 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   horario_no_show_recorrente: { actionType: "create_task", label: "Reforçar lembrete / rever encaixe no horário de faltas" },
   produto_queda_giro_recorrente: { actionType: "create_task", label: "Reagir à queda de giro do produto (preço/vitrine/campanha)" },
   categoria_queda_giro_recorrente: { actionType: "create_task", label: "Rever mix e exposição da categoria em queda" },
+  // Módulo Escola (ADR-144) — sinais de coordenação no domínio `education`.
+  student_absence: { actionType: "create_task", label: "Falar com a família sobre a falta do aluno" },
+  class_not_held: { actionType: "create_task", label: "Cobrir a aula não realizada (professor/substituto)" },
+  turma_sem_professor: { actionType: "create_task", label: "Alocar professor para a turma sem grade" },
+  falta_recorrente: { actionType: "create_task", label: "Acionar a família do aluno com faltas recorrentes" },
+  aula_cancelada_recorrente: { actionType: "create_task", label: "Resolver a lacuna crônica de professor na turma" },
+  atividade_lista_espera: { actionType: "create_task", label: "Abrir vaga/turma para a atividade com lista de espera" },
 };
 
 // Prazo sugerido por severidade (determinístico; sem calendário).
 const DUE_HINT: Record<string, string> = { critical: "hoje", risk: "esta semana", attention: "este mês", info: "sem prazo" };
 
 // Responsável sugerido por domínio (perfil, não pessoa).
-const OWNER_HINT: Record<string, string> = { finance: "owner", procurement: "admin", inventory: "admin", sales: "admin", retail_ops: "admin", tasks: "admin" };
+const OWNER_HINT: Record<string, string> = { finance: "owner", procurement: "admin", inventory: "admin", sales: "admin", retail_ops: "admin", education: "coordenacao", tasks: "admin" };
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, Number(n) || 0));
 const round4 = (n: number) => Math.round((Number(n) || 0) * 10000) / 10000;

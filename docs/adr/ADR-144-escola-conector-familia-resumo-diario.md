@@ -1,6 +1,6 @@
 # ADR-144 — Módulo Escola: a camada que conecta a escola à família (resumo diário no WhatsApp)
 
-**Status:** Aceito — Fatia 1 entregue (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 entregue (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatia 3 entregue (extracurriculares: vagas + matrícula atômica + lista de espera + presença + aviso ao responsável). Fatias 4–5 planejadas.
+**Status:** Aceito — Fatia 1 entregue (resumo diário ao responsável + 1 sinal de coordenação). Fatia 2 entregue (agenda do professor: professor como entidade própria + grade por turma + "resumo antes da aula" + "confirmação pós-aula" → sinal). Fatia 3 entregue (extracurriculares: vagas + matrícula atômica + lista de espera + presença + aviso ao responsável). Fatia 4 entregue (painel da coordenação: sinais derivados no domínio `education` + `education` first-class no Pareto). Fatia 5 planejada.
 
 **Data:** 2026-07
 
@@ -106,6 +106,14 @@ Adapta o `ReservationService` (capacidade/vagas + matrícula **atômica** anti-o
 - **`extracurricular_attendance`** (único por atividade+aluno+data) — presença/falta por sessão; só para aluno `enrolled`.
 - **Aviso ao responsável** (`ExtracurricularNoticeService`): texto **determinístico** (matrícula confirmada / lista de espera / vaga liberada / falta), fan-out com envio **injetado**, **gated pela mesma porta de consentimento da Fatia 1** (`student_guardians.digest_consent`, D3) — nada sobre o menor sem consentimento do responsável. É evento pontual (não passe diário), então não toca o `Scheduler`.
 
+### D9 — Painel da coordenação (Fatia 4): REUSA o kernel de sinais; `education` first-class no Pareto
+
+Não cria tabela nova. O `SchoolCoordinationService.runSignalsPass(orgId)` **deriva** de forma determinística (zero-token), a partir dos dados das Fatias 1-3, os sinais que a coordenação precisa atacar, e os publica no domínio `education` via `BusinessSignalService` — o `ImpactPrioritizationService` já os leva ao Pareto/briefing (ADR-132/136).
+
+- Sinais derivados (idempotentes por `dedupe_key`, com **resolução automática** quando a condição deixa de valer): `turma_sem_professor` (turma com alunos ativos e sem grade de professor ativo), `falta_recorrente` (aluno com N+ faltas **não justificadas** — limiar 3), `aula_cancelada_recorrente` (item de grade com N+ aulas não realizadas — limiar 2), `atividade_lista_espera` (extracurricular com fila).
+- **`education` first-class no kernel**: peso estratégico próprio, dono sugerido `coordenacao`, e `ACTION_MAP` para todos os tipos `education` (Fatias 1-4), para o painel/Pareto renderem a **ação recomendada** em vez do rótulo genérico.
+- `panel(orgId)` devolve os sinais abertos de `education` com a ação recomendada + as prioridades do domínio. O `schoolCoordinationPass` recomputa no `Scheduler` (gated pelo módulo). O conjunto de sinais é extensível sem tocar o kernel — novos tipos entram no `MANAGED_TYPES` + `ACTION_MAP`.
+
 ---
 
 ## Faseamento (cada fatia = um PR fechado e testado)
@@ -115,7 +123,7 @@ Adapta o `ReservationService` (capacidade/vagas + matrícula **atômica** anti-o
 | **1 — Resumo diário ⭐ (esta ADR)** ✅ | modelo aluno/responsável + consentimento-porta + resumo diário ao responsável (da nossa agenda) + 1 sinal de coordenação (faltas) | modelo NOVO; envio/consentimento/sinais REUSO |
 | **2 — Agenda do professor** ✅ | professores (entidade própria) + grade recorrente por turma; "resumo antes da aula" ao professor + confirmação pós-aula → sinal | ADAPTA Agenda Clínica (D7) |
 | **3 — Extracurriculares** ✅ | vagas + matrícula atômica + lista de espera (com promoção) + presença + aviso ao responsável | ADAPTA o padrão de `reservations` (D8) |
-| **4 — Painel da coordenação** | mais sinais (nota não lançada, turma sem professor…) no Pareto/briefing | REUSO do kernel de sinais |
+| **4 — Painel da coordenação** ✅ | sinais derivados (turma sem professor, falta recorrente, aula cancelada recorrente, lista de espera) no Pareto/briefing + `education` first-class | REUSO do kernel de sinais (D9) |
 | **5 — Conectores reais** | import de planilha estruturada + 1º webhook/API por cliente | por cliente |
 | **Pack Quick-Start `educacao`** | personas (secretaria/coordenação) + cadências + FAQ do regimento | autoria (sem código) |
 
@@ -143,4 +151,6 @@ A Fatia 1 sozinha prova a tese: reusa envio, consentimento, priorização e RAG 
 
 `test:escola-extracurricular` (Fatia 3): atividade com vagas (não é reserva/contato); matrícula atômica que preenche vagas e depois vira lista de espera com posição; idempotência da matrícula; cancelar promove o 1º da espera; roster (matriculados + espera ordenada); presença por sessão idempotente e só para aluno matriculado; texto determinístico do aviso (matrícula/espera/promoção/falta); porta de consentimento (sem `digest_consent` não avisa); isolamento por `organization_id`.
 
-As três suítes escola entram no matrix do CI (`.github/workflows/ci.yml`).
+`test:escola-coordenacao` (Fatia 4): `turma_sem_professor` dispara e **resolve** quando a turma ganha grade; `falta_recorrente` só conta faltas não justificadas (limiar 3); `aula_cancelada_recorrente` no limiar 2; `atividade_lista_espera` dispara e resolve ao abrir vaga; passe idempotente; painel com ação recomendada + prioridades do domínio; `education` first-class no Pareto (dono `coordenacao`); isolamento por `organization_id`.
+
+As quatro suítes escola entram no matrix do CI (`.github/workflows/ci.yml`).

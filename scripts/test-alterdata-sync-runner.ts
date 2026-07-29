@@ -98,8 +98,11 @@ async function main() {
   const s2 = await AlterdataSyncRunner.runOrg(A);
   check("runOrg concilia o fechamento do PDV (caixas.applied=1)", s2.caixas?.applied === 1, JSON.stringify(s2.caixas));
   check("vendas do PDV importadas (VendaMalote)", s2.vendas?.imported === 1, JSON.stringify(s2.vendas));
-  const pdvSale = db.prepare(`SELECT vendedor, valor, pecas FROM retail_pdv_sales WHERE organization_id=? AND filial='1' AND boleta='010908'`).get(A) as any;
-  check("venda gravada com vendedor/valor/peças (matrícula 10050015)", pdvSale?.vendedor === "10050015" && Number(pdvSale?.valor) === 889.7 && Number(pdvSale?.pecas) === 4, JSON.stringify(pdvSale));
+  const pdvSale = db.prepare(`SELECT vendedor, usuario, vendedor_codigo, valor, pecas FROM retail_pdv_sales WHERE organization_id=? AND filial='1' AND boleta='010908'`).get(A) as any;
+  check("venda gravada com operador/valor/peças (matrícula 10050015)", pdvSale?.vendedor === "10050015" && Number(pdvSale?.valor) === 889.7 && Number(pdvSale?.pecas) === 4, JSON.stringify(pdvSale));
+  // Homologação Toulon (ADR-105): o vendedor da comissão é o CAI_USUARIO (usuario),
+  // não a matrícula do operador de caixa.
+  check("vendedor_codigo capturado do CAI_USUARIO (usuario 10660010)", pdvSale?.vendedor_codigo === "10660010" && pdvSale?.usuario === "10660010", JSON.stringify(pdvSale));
   const saleItems = db.prepare(`SELECT produto, quantidade, valor, vendedor FROM retail_pdv_sale_items WHERE organization_id=? AND filial='1' AND boleta='010908' ORDER BY item_seq`).all(A) as any[];
   check("itens da venda (vendas[]) gravados com produto/vendedor por linha", saleItems.length === 2 && saleItems[0].produto === "0822930941201" && saleItems[0].vendedor === "10050026" && Number(saleItems[1].quantidade) === 3, JSON.stringify(saleItems));
   const cardInst = db.prepare(`SELECT parcela, valor, liquido, taxa, vencimento FROM retail_pdv_card_installments WHERE organization_id=? AND filial='1' AND numero='000574' ORDER BY seq`).all(A) as any[];

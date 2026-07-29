@@ -22,6 +22,9 @@ export type CommissionRuleInput = {
   calculationType: "percent_sales" | "quota_bonus" | "tiered" | "fixed";
   config: any;
   active?: boolean;
+  /** Só vale p/ scope='store': mira UMA loja específica (percentual próprio da
+   * Loja X, diferente da Loja Y). Ausente/null = vale pra rede toda (default). */
+  storeId?: string | null;
 };
 
 function safeParse(s: any): any { try { return JSON.parse(s ?? "null"); } catch { return null; } }
@@ -57,12 +60,26 @@ export class RetailCommissionService {
   // ── Regras ─────────────────────────────────────────────────────────────────
   static createRule(orgId: string, input: CommissionRuleInput, actorId?: string): any {
     const id = randomUUID();
+    // storeId só faz sentido pra regra de escopo 'store' (mira UMA loja); em
+    // qualquer outro escopo é ignorado (evita configuração sem efeito).
+    const storeId = input.scope === "store" && input.storeId ? String(input.storeId) : null;
     db.prepare(
-      `INSERT INTO retail_commission_rules (id, organization_id, name, scope, period, calculation_type, config_json, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, orgId, String(input.name || "Regra"), input.scope || "store", input.period || "monthly", input.calculationType, JSON.stringify(input.config || {}), input.active === false ? 0 : 1);
-    try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_COMMISSION_RULE_CREATED", { calc: input.calculationType }); } catch { /* noop */ }
+      `INSERT INTO retail_commission_rules (id, organization_id, name, scope, period, calculation_type, config_json, active, store_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, orgId, String(input.name || "Regra"), input.scope || "store", input.period || "monthly", input.calculationType, JSON.stringify(input.config || {}), input.active === false ? 0 : 1, storeId);
+    try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_COMMISSION_RULE_CREATED", { calc: input.calculationType, storeId }); } catch { /* noop */ }
     return db.prepare(`SELECT * FROM retail_commission_rules WHERE id = ?`).get(id);
+  }
+
+  /**
+   * Regras efetivas de escopo LOJA para uma loja específica: se existir uma
+   * regra que MIRA essa loja (`store_id` = a loja), ela tem precedência e as
+   * regras de rede (`store_id` NULL) NÃO se aplicam a essa loja (evita pagar a
+   * mesma verba duas vezes); sem regra específica, cai nas regras de rede.
+   */
+  private static effectiveStoreRules(storeId: string, storeRules: any[]): any[] {
+    const specific = storeRules.filter((r) => r.store_id === storeId);
+    return specific.length ? specific : storeRules.filter((r) => !r.store_id);
   }
 
   static listRules(orgId: string): any[] {
@@ -178,22 +195,29 @@ export class RetailCommissionService {
 
     // Por vendedor = ZappFlow (pedidos com vendedor) + lançamentos manuais/foto +
     // ERP + PDV físico (VendaMalote → CAI_USUARIO). Quando NÃO há regra própria por
-    // vendedor, a comissão por vendedor sai da MESMA regra percentual da loja/global
-    // (fallback, igual a /pdv-sellers): assim o gestor que só criou uma regra "por
-    // loja" ainda vê a comissão individualizada por vendedor sobre o que cada um
-    // vendeu — que é o que "individualizar por vendedor" significa.
+    // vendedor, a comissão por vendedor sai da % EFETIVA DA LOJA onde cada venda
+    // aconteceu (loja específica > rede > global) — não uma % plana, que ficaria
+    // errada quando as lojas pagam percentuais diferentes: assim o gestor que só
+    // criou regra(s) "por loja" ainda vê a comissão individualizada por vendedor
+    // sobre o que cada um vendeu — que é o que "individualizar por vendedor" e
+    // "o percentual definido pelo dono de cada loja" significam juntos.
     const fbRule = sellerRules.length ? null : this.sellerFallbackRule(orgId);
     const fbPct = fbRule ? Number(safeParse(fbRule.config_json)?.percent || 0) : 0;
+    const fb = sellerRules.length ? null : this.sellerFallbackCommission(orgId, start, end);
+    const hasStoreSpecificRules = storeRules.some((r) => r.store_id);
     const bySeller = this.combinedSalesBySeller(orgId, start, end).map((s) => ({
       ...s,
-      commission: sellerRules.length ? commissionOf(sellerRules, s.sales, 0) : round2(s.sales * fbPct / 100),
+      commission: sellerRules.length
+        ? commissionOf(sellerRules, s.sales, 0)
+        : round2(fb?.bySellerKey.get(this.sellerMatchKey(s.sellerUserId, s.sellerName)) || 0),
     }));
     const byProduct = this.onlineSalesByProduct(orgId, start, end).map((p) => ({ ...p, commission: commissionOf(productRules, p.sales, 0) }));
 
     const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
     const byStore = stores.map((s) => {
       const base = this.periodSales(orgId, s.id, start, end);
-      const commission = commissionOf(storeRules, base, this.periodQuota(orgId, s.id, start, end));
+      const effRules = this.effectiveStoreRules(s.id, storeRules);
+      const commission = commissionOf(effRules, base, this.periodQuota(orgId, s.id, start, end));
       return { storeId: s.id, storeName: s.name, sales: round2(base), commission };
     });
 
@@ -204,19 +228,21 @@ export class RetailCommissionService {
     const sellerCommission = sum(bySeller, "commission");
     const productCommission = sum(byProduct, "commission");
     const storeCommission = round2(sum(byStore, "commission") + globalCommission);
-    // Fallback ativo: a comissão por vendedor saiu da MESMA verba da regra da
-    // loja/global, então a linha "por loja" é só REFERÊNCIA e NÃO soma no total
-    // (senão pagaria 5% duas vezes). Com regra própria por vendedor, as duas são
-    // distintas e somam normalmente.
-    const storeIsReference = fbPct > 0 && sellerCommission > 0;
+    // Fallback ativo: a comissão por vendedor saiu da MESMA verba da(s) regra(s)
+    // de loja/global (só que respeitando o % de CADA loja), então a linha "por
+    // loja" é só REFERÊNCIA e NÃO soma no total (senão pagaria a comissão duas
+    // vezes). Com regra própria por vendedor, as duas são distintas e somam.
+    const storeIsReference = !!fb?.anyPercent && sellerCommission > 0;
     const totalCommission = round2(sellerCommission + productCommission + (storeIsReference ? 0 : storeCommission));
     return {
       period: { start, end },
       bySeller, byProduct, byStore, globalCommission,
       totals: { sellerCommission, productCommission, storeCommission, totalCommission, sellerErpCommission: sum(bySeller, "erpCommission") },
       hasRules: { seller: sellerRules.length > 0, product: productRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
-      sellerCommissionSource: sellerRules.length ? "seller_rule" : (fbPct > 0 ? "store_fallback" : null),
-      sellerCommissionPercent: sellerRules.length ? null : (fbPct || null),
+      // "store_fallback_mixed": há lojas com % PRÓPRIO diferente da rede — não dá
+      // pra mostrar um único percentual representativo (cada loja tem o seu).
+      sellerCommissionSource: sellerRules.length ? "seller_rule" : (fb?.anyPercent ? (hasStoreSpecificRules ? "store_fallback_mixed" : "store_fallback") : null),
+      sellerCommissionPercent: sellerRules.length || hasStoreSpecificRules ? null : (fbPct || null),
       storeIsReference,
       hasErpSellerSales: bySeller.some((s: any) => Number(s.erpCommission) > 0 || String(s.source || "").includes("erp")),
     };
@@ -230,12 +256,53 @@ export class RetailCommissionService {
    */
   private static sellerFallbackRule(orgId: string): any | null {
     try {
+      // Prefere a regra de loja de REDE (store_id NULL) — representa a rede
+      // toda; só cai numa regra de loja ESPECÍFICA (% de uma única loja) na
+      // falta de uma de rede, o que é uma estimativa, não o valor exato por
+      // vendedor (esse é o job de `storeSellerExtract`, que respeita a loja
+      // de cada vendedor).
       return db.prepare(
         `SELECT * FROM retail_commission_rules
           WHERE organization_id = ? AND active = 1 AND calculation_type = 'percent_sales' AND scope IN ('store','global')
-          ORDER BY CASE scope WHEN 'store' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`
+          ORDER BY CASE WHEN scope = 'store' AND store_id IS NULL THEN 0 WHEN scope = 'store' THEN 1 ELSE 2 END, created_at DESC LIMIT 1`
       ).get(orgId) || null;
     } catch { return null; }
+  }
+
+  /** Chave p/ reconciliar `combinedSalesBySeller` (sem loja/matrícula) com
+   * `salesBySellerStore` (com loja): userId quando houver, senão NOME
+   * normalizado — a mesma convenção que `combinedSalesBySeller.add()` usa, já
+   * que "Matrícula X" (nome de fallback) sai idêntico dos dois lados. */
+  private static sellerMatchKey(userId: string | null, name: string): string {
+    return userId ? `user:${userId}` : `nom:${String(name || "").trim().toLowerCase()}`;
+  }
+
+  /**
+   * Comissão por VENDEDOR usada como FALLBACK (sem regra própria de escopo
+   * "vendedor"): ao invés de aplicar uma % PLANA pra todo mundo (o que fica
+   * ERRADO quando as lojas têm percentuais diferentes — ex.: Loja X 7%, Loja Y
+   * 5%), soma por vendedor a comissão calculada com a % EFETIVA da loja onde
+   * cada venda aconteceu (loja específica > rede > global). `anyPercent`
+   * indica se alguma regra percentual se aplicou (gate do fallback).
+   */
+  private static sellerFallbackCommission(orgId: string, start: string, end: string): { bySellerKey: Map<string, number>; anyPercent: boolean } {
+    const rules = db.prepare(`SELECT * FROM retail_commission_rules WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const storeRules = rules.filter((r) => r.scope === "store");
+    const globalRules = rules.filter((r) => r.scope === "global");
+    const bySellerKey = new Map<string, number>();
+    let anyPercent = false;
+    for (const row of this.salesBySellerStore(orgId, start, end)) {
+      const eff = row.storeId ? this.effectiveStoreRules(row.storeId, storeRules) : storeRules.filter((r) => !r.store_id);
+      const rulesToUse = eff.length ? eff : globalRules;
+      if (rulesToUse.some((r) => r.calculation_type === "percent_sales")) anyPercent = true;
+      const commission = round2(rulesToUse.reduce((acc, r) => {
+        const cfg = safeParse(r.config_json) || {};
+        return acc + computeCommission(r.calculation_type, cfg, row.sales, 0).amount;
+      }, 0));
+      const key = this.sellerMatchKey(row.sellerUserId, row.sellerName);
+      bySellerKey.set(key, round2((bySellerKey.get(key) || 0) + commission));
+    }
+    return { bySellerKey, anyPercent };
   }
 
   /**
@@ -267,6 +334,172 @@ export class RetailCommissionService {
         source: "pdv",
       }));
     } catch { return []; }
+  }
+
+  /** Chave estável de um vendedor p/ filtrar/casar entre chamadas (userId > matrícula > nome). */
+  private static sellerKeyOf(userId: string | null, matricula: string | null, name: string): string {
+    if (userId) return `user:${userId}`;
+    if (matricula) return `mat:${matricula}`;
+    return `nom:${String(name || "").trim().toLowerCase()}`;
+  }
+
+  /**
+   * Vendas por (LOJA, VENDEDOR) no período — funde as quatro fontes mantendo a
+   * LOJA de cada venda: ZappFlow (orders.store_id), lançamentos manuais/foto
+   * (retail_seller_sales.store_id), ERP (retail_erp_seller_sales.store_id) e o
+   * PDV físico (retail_pdv_sales.filial → retail_stores.code). É a base para
+   * "individualizar as equipes por loja": um vendedor que vendeu em duas lojas
+   * aparece com uma linha PARA CADA loja (a comissão de cada uma usa a regra
+   * efetiva daquela loja). Dedup por (loja + userId/matrícula/nome) dentro da
+   * MESMA loja — não funde a mesma pessoa entre lojas diferentes.
+   */
+  static salesBySellerStore(orgId: string, start: string, end: string): Array<{ storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; source: string }> {
+    const norm = (name: string) => String(name || "").trim().toLowerCase();
+    type Row = { storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; sources: Set<string> };
+    const map = new Map<string, Row>();
+    const nameToKey = new Map<string, string>();
+
+    const add = (storeId: string | null, storeName: string, userId: string | null, matricula: string | null, name: string, sales: number, pecas: number, orders: number, source: string) => {
+      const storeKey = storeId || `semLoja:${norm(storeName)}`;
+      const n = norm(name);
+      const nk = `${storeKey}::${n}`;
+      const k = (userId && `${storeKey}::user:${userId}`) || (matricula && `${storeKey}::mat:${matricula}`) || nameToKey.get(nk) || `${storeKey}::nom:${n}`;
+      const cur = map.get(k) || { storeId, storeName, sellerUserId: userId || null, sellerName: name, matricula: matricula || null, sales: 0, pecas: 0, orders: 0, sources: new Set<string>() };
+      cur.sales = round2(cur.sales + (Number(sales) || 0));
+      cur.pecas += Number(pecas) || 0;
+      cur.orders += Number(orders) || 0;
+      if (userId && !cur.sellerUserId) cur.sellerUserId = userId;
+      if (matricula && !cur.matricula) cur.matricula = matricula;
+      cur.sources.add(source);
+      map.set(k, cur);
+      if (n && !nameToKey.has(nk)) nameToKey.set(nk, k);
+    };
+
+    const zf = db.prepare(
+      `SELECT o.store_id AS store_id, COALESCE(st.name, 'Sem loja') AS store_name, o.seller_user_id AS sid,
+              COALESCE(SUM(o.total_amount),0) AS s, COUNT(*) AS n
+         FROM orders o
+         LEFT JOIN retail_stores st ON st.id = o.store_id
+        WHERE o.organization_id = ? AND o.seller_user_id IS NOT NULL
+          AND o.status IN ${this.FULFILLED} AND date(o.created_at) BETWEEN ? AND ?
+        GROUP BY o.store_id, o.seller_user_id`
+    ).all(orgId, start, end) as any[];
+    for (const r of zf) add(r.store_id || null, r.store_name, String(r.sid), null, this.sellerName(orgId, String(r.sid)), Number(r.s) || 0, 0, Number(r.n) || 0, "zappflow");
+
+    const manual = db.prepare(
+      `SELECT ss.store_id AS store_id, COALESCE(st.name, 'Sem loja') AS store_name, ss.seller_name, ss.matricula,
+              rs.name AS mapped_name, rs.user_id AS user_id, SUM(ss.valor) AS s, SUM(ss.pecas) AS p, COUNT(*) AS n
+         FROM retail_seller_sales ss
+         LEFT JOIN retail_stores st ON st.id = ss.store_id
+         LEFT JOIN retail_sellers rs ON rs.organization_id = ss.organization_id AND rs.matricula = ss.matricula
+        WHERE ss.organization_id = ? AND ss.sale_date BETWEEN ? AND ?
+        GROUP BY ss.store_id, COALESCE(NULLIF(ss.matricula, ''), LOWER(TRIM(ss.seller_name)))`
+    ).all(orgId, start, end) as any[];
+    for (const r of manual) add(r.store_id || null, r.store_name, r.user_id || null, r.matricula || null, r.mapped_name || r.seller_name, Number(r.s) || 0, Number(r.p) || 0, Number(r.n) || 0, "manual");
+
+    const erp = db.prepare(
+      `SELECT es.store_id AS store_id, COALESCE(st.name, 'Sem loja') AS store_name, es.matricula, es.seller_name,
+              rs.name AS mapped_name, rs.user_id AS user_id, SUM(es.valor) AS s, SUM(es.pecas) AS p, COUNT(*) AS n
+         FROM retail_erp_seller_sales es
+         LEFT JOIN retail_stores st ON st.id = es.store_id
+         LEFT JOIN retail_sellers rs ON rs.organization_id = es.organization_id AND rs.matricula = es.matricula
+        WHERE es.organization_id = ? AND es.sale_date BETWEEN ? AND ?
+        GROUP BY es.store_id, COALESCE(NULLIF(es.matricula, ''), LOWER(TRIM(es.seller_name)))`
+    ).all(orgId, start, end) as any[];
+    for (const r of erp) {
+      const realMat = r.matricula && !String(r.matricula).startsWith("nome:") ? r.matricula : null;
+      add(r.store_id || null, r.store_name, r.user_id || null, realMat, r.mapped_name || r.seller_name || (realMat ? `Matrícula ${realMat}` : "vendedor"), Number(r.s) || 0, Number(r.p) || 0, Number(r.n) || 0, "erp");
+    }
+
+    const pdv = db.prepare(
+      `SELECT st.id AS store_id, COALESCE(st.name, 'Filial ' || s.filial) AS store_name,
+              COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) AS matricula, rs.name AS mapped_name, rs.user_id AS user_id,
+              SUM(s.valor) AS sv, SUM(s.pecas) AS p, COUNT(*) AS n
+         FROM retail_pdv_sales s
+         LEFT JOIN retail_stores st ON st.organization_id = s.organization_id AND st.code = s.filial AND st.active = 1
+         LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)
+        WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
+          AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor, '') <> ''
+        GROUP BY st.id, s.filial, COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)`
+    ).all(orgId, start, end) as any[];
+    for (const r of pdv) add(r.store_id || null, r.store_name, r.user_id || null, String(r.matricula), r.mapped_name || `Matrícula ${r.matricula}`, Number(r.sv) || 0, Number(r.p) || 0, Number(r.n) || 0, "pdv");
+
+    return Array.from(map.values())
+      .map((v) => ({ storeId: v.storeId, storeName: v.storeName, sellerUserId: v.sellerUserId, sellerName: v.sellerName, matricula: v.matricula, sales: v.sales, pecas: v.pecas, orders: v.orders, source: Array.from(v.sources).sort().join("+") }))
+      .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.sales - a.sales);
+  }
+
+  /**
+   * Extrato de comissão por LOJA e por VENDEDOR (comando do dono da rede):
+   * escolhe uma loja (ou todas) e, opcionalmente, um vendedor específico, num
+   * intervalo de datas QUALQUER — inclusive parcial dentro do mês (ex.: 1º ao
+   * dia 15, pra saber quanto já acumulou antes do fechamento). Cada vendedor
+   * recebe a comissão pela regra EFETIVA da loja onde vendeu (regra específica
+   * daquela loja > regra de rede > regra global) — a menos que exista uma
+   * regra própria de escopo "vendedor" (essa vale igual pra todo mundo).
+   * Retorna a lista de vendedores (com loja, vendas, peças e comissão), os
+   * totais por loja e o total geral do filtro aplicado.
+   */
+  static storeSellerExtract(orgId: string, start: string, end: string, opts?: { storeId?: string | null; sellerKey?: string | null }): any {
+    const rules = db.prepare(`SELECT * FROM retail_commission_rules WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const sellerRules = rules.filter((r) => r.scope === "seller");
+    const storeRules = rules.filter((r) => r.scope === "store");
+    const globalRules = rules.filter((r) => r.scope === "global");
+
+    const applyRules = (ruleList: any[], base: number) =>
+      round2(ruleList.reduce((acc, r) => {
+        const cfg = safeParse(r.config_json) || {};
+        return acc + computeCommission(r.calculation_type, cfg, base, Number(cfg.quota || 0)).amount;
+      }, 0));
+    const percentOf = (ruleList: any[]) => {
+      const r = ruleList.find((x) => x.calculation_type === "percent_sales");
+      return r ? Number(safeParse(r.config_json)?.percent || 0) : null;
+    };
+
+    const rows = this.salesBySellerStore(orgId, start, end);
+    const filtered = rows.filter((r) => {
+      if (opts?.storeId && r.storeId !== opts.storeId) return false;
+      if (opts?.sellerKey && this.sellerKeyOf(r.sellerUserId, r.matricula, r.sellerName) !== opts.sellerKey) return false;
+      return true;
+    });
+
+    const sellers = filtered.map((r) => {
+      let commission: number, percent: number | null, commissionSource: string;
+      if (sellerRules.length) {
+        commission = applyRules(sellerRules, r.sales);
+        percent = percentOf(sellerRules);
+        commissionSource = "seller_rule";
+      } else {
+        const eff = r.storeId ? this.effectiveStoreRules(r.storeId, storeRules) : storeRules.filter((x) => !x.store_id);
+        const rulesToUse = eff.length ? eff : globalRules;
+        commission = applyRules(rulesToUse, r.sales);
+        percent = percentOf(rulesToUse);
+        commissionSource = eff.length ? (eff.some((x: any) => x.store_id) ? "store_specific_rule" : "store_network_rule") : (globalRules.length ? "global_rule" : "none");
+      }
+      return { ...r, sellerKey: this.sellerKeyOf(r.sellerUserId, r.matricula, r.sellerName), commission, commissionPercent: percent, commissionSource };
+    });
+
+    const byStoreMap = new Map<string, { storeId: string | null; storeName: string; sales: number; pecas: number; orders: number; commission: number; sellerCount: number }>();
+    for (const s of sellers) {
+      const k = s.storeId || `semLoja:${s.storeName}`;
+      const cur = byStoreMap.get(k) || { storeId: s.storeId, storeName: s.storeName, sales: 0, pecas: 0, orders: 0, commission: 0, sellerCount: 0 };
+      cur.sales = round2(cur.sales + s.sales); cur.pecas += s.pecas; cur.orders += s.orders; cur.commission = round2(cur.commission + s.commission); cur.sellerCount += 1;
+      byStoreMap.set(k, cur);
+    }
+
+    return {
+      period: { start, end },
+      filters: { storeId: opts?.storeId || null, sellerKey: opts?.sellerKey || null },
+      sellers,
+      byStore: Array.from(byStoreMap.values()).sort((a, b) => a.storeName.localeCompare(b.storeName)),
+      totals: {
+        sales: round2(sellers.reduce((a, s) => a + s.sales, 0)),
+        pecas: sellers.reduce((a, s) => a + s.pecas, 0),
+        commission: round2(sellers.reduce((a, s) => a + s.commission, 0)),
+        sellerCount: sellers.length,
+      },
+      hasRules: { seller: sellerRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
+    };
   }
 
   private static sellerName(orgId: string, userId: string): string {
@@ -302,6 +535,13 @@ export class RetailCommissionService {
     let totalSales = 0, totalCommission = 0;
     const items: any[] = [];
 
+    // Precedência por loja: quando uma loja tem regra ESPECÍFICA (store_id =
+    // a loja), as regras de REDE (store_id NULL) não valem pra ela (não paga a
+    // mesma verba duas vezes). Calculado uma vez, fora do loop por regra.
+    const storeRules = rules.filter((r) => r.scope === "store");
+    const effectiveStoreRuleIds = new Map<string, Set<string>>();
+    for (const s of stores) effectiveStoreRuleIds.set(s.id, new Set(this.effectiveStoreRules(s.id, storeRules).map((r: any) => r.id)));
+
     for (const rule of rules) {
       const config = safeParse(rule.config_json);
       // Cota para vendedor/produto vem da regra (config.quota) — não há cota
@@ -328,8 +568,11 @@ export class RetailCommissionService {
           totalCommission += amount;
         }
       } else {
-        // store (default): base = realizado da loja (fechamentos).
+        // store (default): base = realizado da loja (fechamentos). Pula a loja
+        // que tem uma regra ESPECÍFICA própria quando esta é a regra de REDE
+        // (senão pagaria a verba da loja duas vezes).
         for (const s of stores) {
+          if (!effectiveStoreRuleIds.get(s.id)?.has(rule.id)) continue;
           const base = this.periodSales(orgId, s.id, periodStart, periodEnd);
           const quota = this.periodQuota(orgId, s.id, periodStart, periodEnd);
           const { amount, detail } = computeCommission(rule.calculation_type, config, base, quota);
@@ -340,16 +583,21 @@ export class RetailCommissionService {
     }
 
     // "Por vendedor vira o oficial" (decisão do gestor): quando NÃO há regra
-    // própria por vendedor mas há uma regra percentual de loja/global, a comissão
-    // por VENDEDOR (PDV/CAI_USUARIO + ZappFlow + manual + ERP) sai por essa mesma
-    // % e as linhas por loja/global geradas por ela viram REFERÊNCIA (comissão 0)
-    // para não pagar a mesma verba duas vezes.
+    // própria por vendedor mas há regra(s) percentual(is) de loja/global, a
+    // comissão por VENDEDOR (PDV/CAI_USUARIO + ZappFlow + manual + ERP) sai pela
+    // % EFETIVA DA LOJA onde cada venda aconteceu (loja específica > rede >
+    // global — não uma % plana, que ficaria errada com lojas em percentuais
+    // diferentes) e as linhas por loja/global geradas por essas regras viram
+    // REFERÊNCIA (comissão 0) para não pagar a mesma verba duas vezes.
     const hasSellerRule = rules.some((r) => r.scope === "seller");
     const fbRule = hasSellerRule ? null : this.sellerFallbackRule(orgId);
-    const fbPct = fbRule ? Number(safeParse(fbRule.config_json)?.percent || 0) : 0;
-    if (fbRule && fbPct > 0) {
+    const fb = hasSellerRule ? null : this.sellerFallbackCommission(orgId, periodStart, periodEnd);
+    if (fb?.anyPercent) {
       const sellerItems = this.combinedSalesBySeller(orgId, periodStart, periodEnd)
-        .map((sv) => ({ storeId: null, sellerUserId: sv.sellerUserId, sellerName: sv.sellerName, base: sv.sales, commission: round2(sv.sales * fbPct / 100), ruleId: fbRule.id, detail: { type: "percent_sales_seller_fallback", percent: fbPct, base: sv.sales } }))
+        .map((sv) => {
+          const commission = round2(fb.bySellerKey.get(this.sellerMatchKey(sv.sellerUserId, sv.sellerName)) || 0);
+          return { storeId: null, sellerUserId: sv.sellerUserId, sellerName: sv.sellerName, base: sv.sales, commission, ruleId: fbRule?.id || null, detail: { type: "seller_fallback_by_store_rate", base: sv.sales } };
+        })
         .filter((it) => it.commission > 0);
       // Só vira "por vendedor oficial" se HÁ comissão por vendedor a pagar; senão
       // a linha por loja continua valendo (não há o que individualizar).

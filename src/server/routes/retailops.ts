@@ -1055,9 +1055,9 @@ router.get("/commission/rules", (req: AuthRequest, res): any => {
 router.post("/commission/rules", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { name, scope, period, calculationType, config } = req.body || {};
+  const { name, scope, period, calculationType, config, storeId } = req.body || {};
   if (!name || !calculationType) return res.status(400).json({ error: "name e calculationType são obrigatórios" });
-  res.status(201).json(RetailCommissionService.createRule(orgId, { name, scope, period, calculationType, config }, req.user?.userId));
+  res.status(201).json(RetailCommissionService.createRule(orgId, { name, scope, period, calculationType, config, storeId }, req.user?.userId));
 });
 
 router.patch("/commission/rules/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
@@ -1081,6 +1081,19 @@ router.get("/commission/report", (req: AuthRequest, res): any => {
   const start = String(req.query.start || ""), end = String(req.query.end || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "start e end (YYYY-MM-DD) obrigatórios" });
   res.json(RetailCommissionService.report(orgId, start, end));
+});
+
+// Extrato por LOJA e por VENDEDOR ("rodar o comando" do dono da rede): loja e
+// vendedor opcionais (sem filtro = rede toda); período qualquer, inclusive
+// parcial dentro do mês (ex.: 1º ao dia 15) para saber o quanto já acumulou.
+router.get("/commission/store-report", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || ""), end = String(req.query.end || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "start e end (YYYY-MM-DD) obrigatórios" });
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  const sellerKey = req.query.sellerKey ? String(req.query.sellerKey) : null;
+  res.json(RetailCommissionService.storeSellerExtract(orgId, start, end, { storeId, sellerKey }));
 });
 
 router.get("/commission/runs/:id", (req: AuthRequest, res): any => {

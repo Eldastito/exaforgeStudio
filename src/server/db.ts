@@ -5434,6 +5434,10 @@ const initDb = () => {
   // Homologação Toulon (ADR-105) — código do VENDEDOR (CAI_USUARIO → VENDEDORES),
   // base da comissão individual, distinto do operador de caixa (matrícula).
   try { db.exec(`ALTER TABLE retail_pdv_sales ADD COLUMN vendedor_codigo TEXT`); } catch(e){}
+  // Toulon — comissão individualizada por loja: uma regra "por loja" pode mirar
+  // UMA loja específica (percentual próprio); NULL = vale pra rede toda (default
+  // retrocompatível — bases antigas continuam com o mesmo comportamento).
+  try { db.exec(`ALTER TABLE retail_commission_rules ADD COLUMN store_id TEXT`); } catch(e){}
 };
 
 initDb();

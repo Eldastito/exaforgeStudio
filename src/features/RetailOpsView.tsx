@@ -496,6 +496,69 @@ export function RetailOpsView() {
   );
 }
 
+// ---- Ajuda inline: resumo do fluxo de cadastro de nota (ADR-083 E7) --------
+// Guia completo em docs/GUIA-CADASTRAR-NOTAS.md; aqui vai a versão curta pra
+// destravar o usuário sem tirar ele da tela de Precificar. Sem link externo:
+// muita conta não tem acesso ao repo GitHub.
+function PricingHelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100 flex items-center gap-2"><Tag className="w-4 h-4 text-sky-300" /> Como cadastrar as notas de compra</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+
+        <p className="mt-3 text-xs text-zinc-400">
+          Cadastrar a nota é o que faz o app <strong>saber quanto cada produto custou</strong>. Depois disso, esta tela sai de "sem custo" e passa a mostrar o preço sugerido de verdade, e a aba <em>Resultado por loja</em> passa a usar o CMV real em vez da margem estimada.
+        </p>
+
+        <div className="mt-4 space-y-3 text-xs">
+          <div>
+            <div className="text-zinc-200 font-medium">1) Vá em Catálogo → Nota Fiscal</div>
+            <div className="text-zinc-500">Botão no topo da tela do Catálogo. Abre o modal com dois caminhos: XML e Foto.</div>
+          </div>
+
+          <div>
+            <div className="text-zinc-200 font-medium">2) Escolha o caminho</div>
+            <ul className="mt-1 space-y-1.5 text-zinc-500">
+              <li>
+                <span className="text-emerald-300 font-medium">XML da NF-e (preferido)</span> — peça pro fornecedor o arquivo <code className="text-zinc-400">.xml</code>. Manda até 20 de uma vez, o app dedupe pela chave da nota (não deixa importar 2× a mesma).
+              </li>
+              <li>
+                <span className="text-amber-300 font-medium">Foto</span> — só quando o fornecedor não te deu o XML. 1 por vez, IA lê os itens. iPhone: configure a câmera pra JPG (HEIC não é aceito). PDF: tire print/foto da tela.
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <div className="text-zinc-200 font-medium">3) Revise o rascunho</div>
+            <div className="text-zinc-500">Nada mexe no estoque ainda. Cada linha vira uma escolha:</div>
+            <ul className="mt-1 space-y-0.5 text-zinc-500">
+              <li>• <strong className="text-zinc-300">Criar</strong> — produto novo no catálogo.</li>
+              <li>• <strong className="text-zinc-300">Repor</strong> — casa com produto existente, aumenta o estoque.</li>
+              <li>• <strong className="text-zinc-300">Pular</strong> — ignora (útil pra frete/embalagem que às vezes vem como "item").</li>
+            </ul>
+          </div>
+
+          <div>
+            <div className="text-zinc-200 font-medium">4) Confirme</div>
+            <div className="text-zinc-500">Só agora o custo médio do produto é recalculado, o estoque sobe e esta aba passa a ter sugestão pra ele. Voltar aqui e clicar <em>Recalcular</em> mostra tudo atualizado.</div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] text-zinc-400">
+          <strong className="text-zinc-300">Bom saber:</strong> o custo médio é da organização inteira (não por loja). Se você tem duas lojas comprando o mesmo produto por preços diferentes, o app usa a média ponderada — o CMV real das duas lojas fica igual, mas ainda muito melhor que o chute anterior.
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-3 py-1.5">Entendi</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- Precificar (ADR-083 E7): revisar/simular markup e aplicar em lote -----
 function PricingTab() {
   const [data, setData] = useState<any>(null);
@@ -504,6 +567,7 @@ function PricingTab() {
   const [filter, setFilter] = useState<'all' | 'risk' | 'no_cost'>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -557,8 +621,13 @@ function PricingTab() {
     <div>
       <div className="mb-4">
         <p className="text-sm text-zinc-300">Revê o preço dos produtos usando o <strong>custo real</strong> das notas de compra (avg_cost). Ajuste o markup pra simular; aplique só nos que fizerem sentido.</p>
-        <p className="text-[11px] text-zinc-500">Produtos sem custo cadastrado só ganham sugestão quando você registrar a nota de entrada (XML/foto no <em>Catálogo → escanear nota</em>).</p>
+        <p className="text-[11px] text-zinc-500">
+          Produtos sem custo cadastrado só ganham sugestão quando você registrar a nota de entrada (XML/foto no <em>Catálogo → Nota Fiscal</em>).{' '}
+          <button onClick={() => setShowHelp(true)} className="text-sky-400 hover:text-sky-300 underline underline-offset-2">Como cadastrar as notas?</button>
+        </p>
       </div>
+
+      {showHelp && <PricingHelpModal onClose={() => setShowHelp(false)} />}
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">

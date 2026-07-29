@@ -37,7 +37,7 @@ function check(name: string, ok: boolean, detail = "") { results.push({ name, ok
 // Mesma query da rota (src/server/routes/retailops.ts, GET /pdv-seller-diagnosis).
 function byFilial(db: any, orgId: string) {
   const raw = db.prepare(
-    `SELECT s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS loja, COUNT(*) AS vendas,
+    `SELECT s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS loja, st.seller_source AS seller_source, COUNT(*) AS vendas,
             COUNT(DISTINCT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)) AS vendedores_distintos,
             COUNT(DISTINCT NULLIF(s.vendedor_codigo, '')) AS cai_usuario_distintos,
             COUNT(DISTINCT s.vendedor) AS operadores_distintos
@@ -46,7 +46,7 @@ function byFilial(db: any, orgId: string) {
       WHERE s.organization_id = ? AND COALESCE(s.status, 'N') <> 'C'
       GROUP BY s.filial ORDER BY vendas DESC`
   ).all(orgId) as any[];
-  return raw.map((r) => ({ ...r, risco: Number(r.vendedores_distintos) <= 1 && Number(r.vendas) > 5 }));
+  return raw.map((r) => ({ ...r, risco: r.seller_source !== "manual" && Number(r.vendedores_distintos) <= 1 && Number(r.vendas) > 5 }));
 }
 
 async function main() {
@@ -88,6 +88,16 @@ async function main() {
   const rowsPequena = byFilial(db, A);
   const rPequena = rowsPequena.find((r: any) => r.filial === "5");
   check("Loja pequena (3 vendas, 1 vendedor): risco = false (amostra pequena demais)", rPequena?.risco === false, JSON.stringify(rPequena));
+
+  // Loja marcada seller_source='manual' (o gestor já resolveu a anomalia
+  // lançando manualmente): mesmo com 1 código só e muitas vendas, NÃO é mais
+  // risco — o PDV dela nem entra na comissão por vendedor (ver
+  // test-retail-commission-store-seller-manual-override.ts).
+  const resolvida = RetailStoreService.create(A, { name: "Barra", code: "7", sellerSource: "manual" });
+  for (let i = 0; i < 10; i++) sale("7", `barra-${i}`, "V-UNICO3", "2026-07-05", 100);
+  const rowsResolvida = byFilial(db, A);
+  const rResolvida = rowsResolvida.find((r: any) => r.filial === "7");
+  check("Loja resolvida (seller_source=manual): risco = false mesmo com 1 código só", rResolvida?.risco === false && rResolvida?.seller_source === "manual", JSON.stringify(rResolvida));
 
   // ── Isolamento ─────────────────────────────────────────────────────────────
   const B = `org_B_${randomUUID().slice(0, 6)}`;

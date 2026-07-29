@@ -165,6 +165,18 @@ Nomes em **negrito** são os principais; os demais são alternativas aceitas
 > lojas) marca com um selo **"só 1 vendedor"** a loja que cai nesse caso, pra
 > o gestor não confiar cegamente no número sem checar.
 >
+> **Solução SEM depender da Alterdata: lançamento manual por loja.** Pra loja
+> onde o CAI_USUARIO não individualiza de verdade, o gestor pode marcar a loja
+> com `seller_source: 'manual'` (editar loja → "Comissão por vendedor vem
+> de" → "Lançamento manual da equipe") — uma decisão EXPLÍCITA dele, não uma
+> inferência automática por coincidência de data (evita apagar PDV bom de
+> lojas onde o campo individualiza certo). A partir daí, o PDV dessa loja
+> **não entra mais** na atribuição por vendedor (`pdvSalesBySeller`,
+> `salesBySellerStore`) — só o lançamento manual/foto (`retail_seller_sales`,
+> feito no fechamento de caixa) vale como comissão oficial daquele vendedor
+> naquela loja. O total da LOJA (fechamento, `report().byStore`) não muda —
+> a flag só afeta a atribuição por vendedor, nunca o total vendido.
+>
 > **Extrato por loja e por vendedor (o "comando" do dono da rede).** A rota
 > `GET /commission/store-report?start=&end=&storeId=&sellerKey=`
 > (`RetailCommissionService.storeSellerExtract`) funde as 4 fontes de venda

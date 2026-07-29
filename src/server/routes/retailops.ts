@@ -550,7 +550,7 @@ router.get("/pdv-seller-diagnosis", (req: AuthRequest, res): any => {
          FROM retail_pdv_sale_items WHERE organization_id = ?`
     ).get(orgId) as any;
     const byFilialRaw = db.prepare(
-      `SELECT s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS loja, COUNT(*) AS vendas,
+      `SELECT s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS loja, st.seller_source AS seller_source, COUNT(*) AS vendas,
               COUNT(DISTINCT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)) AS vendedores_distintos,
               COUNT(DISTINCT NULLIF(s.vendedor_codigo, '')) AS cai_usuario_distintos,
               COUNT(DISTINCT s.vendedor) AS operadores_distintos
@@ -561,7 +561,9 @@ router.get("/pdv-seller-diagnosis", (req: AuthRequest, res): any => {
     ).all(orgId) as any[];
     // risco = loja com volume razoável de vendas mas SÓ 1 código de vendedor —
     // sinal de que o campo não está individualizando (login/terminal comum).
-    const byFilial = byFilialRaw.map((r) => ({ ...r, risco: Number(r.vendedores_distintos) <= 1 && Number(r.vendas) > 5 }));
+    // Loja já marcada seller_source='manual' não é mais risco: o gestor já
+    // resolveu, o PDV dela nem entra na comissão por vendedor.
+    const byFilial = byFilialRaw.map((r) => ({ ...r, risco: r.seller_source !== "manual" && Number(r.vendedores_distintos) <= 1 && Number(r.vendas) > 5 }));
     res.json({ byMatricula, lineSellers, byFilial });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

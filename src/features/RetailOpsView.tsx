@@ -718,6 +718,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
   const [city, setCity] = useState(store?.city || '');
   const [lat, setLat] = useState(store?.latitude != null ? String(store.latitude) : '');
   const [lng, setLng] = useState(store?.longitude != null ? String(store.longitude) : '');
+  const [sellerSource, setSellerSource] = useState(store?.seller_source === 'manual' ? 'manual' : 'pdv');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -729,6 +730,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
         address: address.trim() || null, city: city.trim() || null,
         latitude: lat.trim() === '' ? null : Number(lat.replace(',', '.')),
         longitude: lng.trim() === '' ? null : Number(lng.replace(',', '.')),
+        sellerSource: sellerSource === 'manual' ? 'manual' : null,
       });
       const res = editing
         ? await apiFetch(`/api/retailops/stores/${store.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
@@ -772,6 +774,13 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             </label>
           </div>
           <span className="block text-[11px] text-zinc-500 -mt-1">As coordenadas (lat/long) permitem sugerir a transferência entre as lojas <strong>mais próximas</strong>. Pegue no Google Maps: clique com o botão direito no ponto → o primeiro item copia “lat, long”.</span>
+          <label className="block text-xs text-zinc-400">Comissão por vendedor vem de
+            <select value={sellerSource} onChange={e => setSellerSource(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+              <option value="pdv">PDV/ERP (padrão)</option>
+              <option value="manual">Lançamento manual da equipe (feito no fechamento de caixa)</option>
+            </select>
+            <span className="mt-1 block text-[11px] text-zinc-500">Se o código de vendedor que vem do PDV/ERP dessa loja NÃO identifica cada pessoa de verdade (ex.: um código só, compartilhado pra loja inteira), escolha "Lançamento manual" — o PDV dessa loja deixa de contar na comissão por vendedor, e passa a valer o que o gestor lançar em "Vendas por vendedor" no fechamento diário.</span>
+          </label>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>

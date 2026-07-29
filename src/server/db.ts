@@ -2600,6 +2600,59 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
 
+  // Prontuário/SOAP por consulta (ADR-080 Fase G). Uma linha por consulta
+  // (UNIQUE(org, appointment)) — evita duas anotações concorrentes na mesma
+  // sessão. Campos SOAP são colunas explícitas (Subjetivo/Objetivo/Avaliação/
+  // Plano), `form_data JSON` acomoda campos customizados por especialidade
+  // sem migração nova (Fatia 1b vai definir schemas por ficha). Encounter
+  // nasce 'draft' e vira 'signed' quando o profissional finaliza — depois
+  // disso, updates ficam bloqueados no service (só append em `addendum`, se
+  // preciso, numa próxima fatia). LGPD Art.11 (dado sensível de saúde) é
+  // exigido no service, não no DB.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_encounters (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        appointment_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        professional_id TEXT,
+        professional_name_snapshot TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',    -- draft | signed
+        subjective TEXT,                          -- S: queixa/história do paciente
+        objective TEXT,                           -- O: exame físico/mensurações
+        assessment TEXT,                          -- A: hipótese diagnóstica
+        plan TEXT,                                -- P: conduta/receita/retorno
+        form_data TEXT,                           -- JSON extensível (Fatia 1b: ficha por especialidade)
+        created_by TEXT,
+        signed_by TEXT,
+        signed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, appointment_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_encounters_patient ON clinical_encounters (organization_id, contact_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_clinical_encounters_prof ON clinical_encounters (organization_id, professional_id, created_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_encounters', e); }
+
+  // Histórico versionado do prontuário (padrão product_edit_history).
+  // Cada UPDATE registra o diff, mesmo depois de signed (addendum),
+  // pra auditoria clínica ficar rastreável.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_encounter_history (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        encounter_id TEXT NOT NULL,
+        changed_by TEXT,
+        changed_fields_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_encounter_history ON clinical_encounter_history (organization_id, encounter_id, created_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_history', e); }
+
   // Módulo Clínica (ADR-080, Fase D) — Portal do Profissional por link seguro.
   // Molde do Radar público: token aleatório forte, guardado só como hash
   // SHA-256, com expiração. O link dá acesso SOMENTE à agenda do próprio

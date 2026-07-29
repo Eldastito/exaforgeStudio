@@ -228,6 +228,14 @@ export class ClinicAgendaService {
     if (a.care_started_at) throw new Error("Atendimento já iniciado.");
     db.prepare("UPDATE appointments SET care_started_at = CURRENT_TIMESTAMP, status = 'in_care', continuation_status = 'pending' WHERE id = ? AND organization_id = ?").run(id, orgId);
     logAuthEvent(orgId, actorId, a.contact_id, "CLINIC_CARE_STARTED", { appointmentId: id });
+    // Prontuário (ADR-080 Fase G): tenta abrir encounter em rascunho de forma
+    // BEST-EFFORT — se faltar consentimento LGPD sensível ou paciente, não
+    // trava o início do atendimento. O profissional destrava pela UI depois.
+    try {
+      // Import lazy pra evitar ciclos (Encounter também lê `appointments`).
+      const { ClinicEncounterService } = require("./ClinicEncounterService.js");
+      ClinicEncounterService.open(orgId, id, actorId || null);
+    } catch { /* silencioso — front sinaliza a necessidade de consentimento */ }
     return this.hydrate(orgId, this.get(orgId, id));
   }
 

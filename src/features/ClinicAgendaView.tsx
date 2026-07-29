@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -185,6 +185,7 @@ export function ClinicAgendaView() {
   const [tick, setTick] = useState(Date.now()); // força re-render p/ recalcular a permanência
   const [busyId, setBusyId] = useState<string>(''); // id+ação em execução
   const [extendFor, setExtendFor] = useState<string>(''); // id do card com o menu "Estender" aberto
+  const [chartApptId, setChartApptId] = useState<string>(''); // appointment com modal de Prontuário aberto
 
   const loadAppointments = useCallback(() => {
     const params = new URLSearchParams({ date });
@@ -368,6 +369,7 @@ export function ClinicAgendaView() {
               onComplete={() => action(`${a.id}:complete`, `/api/clinic/appointments/${a.id}/complete`, 'Atendimento finalizado.')}
               onContinuation={(status) => action(`${a.id}:cont`, `/api/clinic/appointments/${a.id}/continuation`, status === 'continue' ? 'Marcado para continuar.' : status === 'finish' ? 'Marcado para finalizar.' : 'Marcado para remarcar.', { status })}
               onExtended={() => { setExtendFor(''); loadAppointments(); }}
+              onOpenChart={() => setChartApptId(a.id)}
             />
             </div>
           ))}
@@ -398,13 +400,20 @@ export function ClinicAgendaView() {
           onCreated={() => { setShowNew(false); loadAppointments(); }}
         />
       )}
+
+      {chartApptId && (
+        <EncounterModal
+          appointmentId={chartApptId}
+          onClose={() => setChartApptId('')}
+        />
+      )}
       </>)}
     </div>
   );
 }
 
 // ---- Card de agendamento ----
-function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onCheckin, onStartCare, onComplete, onContinuation, onExtended }: {
+function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onCheckin, onStartCare, onComplete, onContinuation, onExtended, onOpenChart }: {
   a: Appointment;
   overrun: OverrunState;
   busyId: string;
@@ -415,6 +424,7 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
   onComplete: () => void;
   onContinuation: (status: 'continue' | 'finish' | 'reschedule') => void;
   onExtended: () => void;
+  onOpenChart: () => void;
 }) {
   const st = STATUS_BADGE[a.status] || STATUS_BADGE.confirmed;
   const ov = OVERRUN_BADGE[overrun] || OVERRUN_BADGE.idle;
@@ -498,6 +508,13 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
               {busy('complete') ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Finalizar
             </button>
           </>
+        )}
+
+        {/* Prontuário — disponível durante o atendimento e após completed (leitura ou finalização). */}
+        {(inCare || a.status === 'completed' || a.status === 'in_care') && (
+          <button onClick={onOpenChart} className="text-[11px] px-2 py-1 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20 inline-flex items-center gap-1">
+            <ClipboardList className="w-3 h-3" /> Prontuário
+          </button>
         )}
 
         {a.continuation_status && a.continuation_status !== 'pending' && (
@@ -2086,6 +2103,249 @@ function OperatorReadinessRow({ operator, onSaved }: { operator: ConnectionOpera
         <button onClick={save} disabled={busy} className="text-[12px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Prontuário/SOAP (ADR-080 Fase G) --------------------------------------
+// Modal reusa o padrão dos outros modais do arquivo. 4 abas SOAP + placeholder
+// "Ficha" (extensível via `form_data` — Fatia 1b carrega schema por especialidade
+// a partir de foto de ficha em papel). Botão "Finalizar" bloqueia updates
+// futuros (server retorna ENCOUNTER_SIGNED em PATCH). Consentimento LGPD Art.11
+// (dado sensível) exigido antes de abrir: se falhar, a UI dispara o registro
+// no mesmo modal e reabre.
+type Encounter = {
+  id: string; appointmentId: string; contactId: string;
+  professionalId: string | null; professionalNameSnapshot: string | null;
+  status: 'draft' | 'signed';
+  subjective: string | null; objective: string | null; assessment: string | null; plan: string | null;
+  formData: any | null;
+  signedBy: string | null; signedAt: string | null;
+  createdAt: string; updatedAt: string;
+};
+
+function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onClose: () => void }) {
+  const [encounter, setEncounter] = useState<Encounter | null>(null);
+  const [contactId, setContactId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'S' | 'O' | 'A' | 'P' | 'F'>('S');
+  const [needConsent, setNeedConsent] = useState(false);
+  const [dirty, setDirty] = useState<{ subjective?: string; objective?: string; assessment?: string; plan?: string; formData?: string }>({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [encRes, aptRes] = await Promise.all([
+        apiFetch(`/api/clinic/appointments/${appointmentId}/encounter`).then(r => r.json()).catch(() => null),
+        apiFetch(`/api/clinic/agenda?date=${new Date().toISOString().slice(0, 10)}`).then(r => r.json()).catch(() => ({})),
+      ]);
+      // apt vem via encounter; se não veio, faz um GET direto (contacto pra consent)
+      if (encRes && encRes.id) {
+        setEncounter(encRes);
+        setContactId(encRes.contactId);
+        setDirty({});
+        setNeedConsent(false);
+      } else {
+        // Tenta abrir; se der LGPD 409, marca precisa consentimento.
+        await tryOpen();
+      }
+    } finally { setLoading(false); }
+  };
+
+  const tryOpen = async () => {
+    const res = await apiFetch(`/api/clinic/appointments/${appointmentId}/encounter`, { method: 'POST' });
+    const out = await res.json().catch(() => ({}));
+    if (res.status === 409 && out?.code === 'LGPD_CONSENT_REQUIRED') {
+      // Precisa do contactId pra registrar consentimento — pega da lista de appointments.
+      const list = await apiFetch(`/api/clinic/agenda?date=${new Date().toISOString().slice(0, 10)}`).then(r => r.json()).catch(() => []);
+      const apt = Array.isArray(list) ? list.find((x: any) => x.id === appointmentId) : null;
+      setContactId(apt?.contact_id || '');
+      setNeedConsent(true);
+      return;
+    }
+    if (!res.ok) { toast.error(out?.error || 'Não consegui abrir o prontuário.'); return; }
+    setEncounter(out);
+    setContactId(out.contactId);
+    setDirty({});
+    setNeedConsent(false);
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [appointmentId]);
+
+  const grantConsent = async () => {
+    if (!contactId) { toast.error('Paciente não identificado.'); return; }
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/clinic/patients/${contactId}/consent/sensitive`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'in_person', legalBasis: 'consent' }),
+      });
+      if (!res.ok) { toast.error('Falha ao registrar consentimento.'); return; }
+      toast.success('Consentimento registrado.');
+      await tryOpen();
+    } finally { setBusy(false); }
+  };
+
+  const save = async () => {
+    if (!encounter) return;
+    setBusy(true);
+    try {
+      const patch: any = {};
+      if (dirty.subjective !== undefined) patch.subjective = dirty.subjective;
+      if (dirty.objective !== undefined) patch.objective = dirty.objective;
+      if (dirty.assessment !== undefined) patch.assessment = dirty.assessment;
+      if (dirty.plan !== undefined) patch.plan = dirty.plan;
+      if (dirty.formData !== undefined) {
+        try { patch.formData = dirty.formData ? JSON.parse(dirty.formData) : null; }
+        catch { toast.error('Ficha: JSON inválido.'); return; }
+      }
+      if (Object.keys(patch).length === 0) { toast.error('Nada pra salvar.'); return; }
+      const res = await apiFetch(`/api/clinic/encounters/${encounter.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(out?.error || 'Falha ao salvar prontuário.'); return; }
+      setEncounter(out);
+      setDirty({});
+      toast.success('Prontuário salvo.');
+    } finally { setBusy(false); }
+  };
+
+  const finalize = async () => {
+    if (!encounter) return;
+    if (!(await confirmDialog('Finalizar (assinar) o prontuário? Depois disso não é possível editar sem addendum.'))) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/clinic/encounters/${encounter.id}/finalize`, { method: 'POST' });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(out?.error || 'Falha ao finalizar.'); return; }
+      setEncounter(out);
+      toast.success('Prontuário assinado.');
+    } finally { setBusy(false); }
+  };
+
+  const val = (field: 'subjective' | 'objective' | 'assessment' | 'plan') =>
+    dirty[field] !== undefined ? dirty[field]! : (encounter?.[field] ?? '');
+  const setVal = (field: 'subjective' | 'objective' | 'assessment' | 'plan') => (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+    setDirty(d => ({ ...d, [field]: e.target.value }));
+
+  const isSigned = encounter?.status === 'signed';
+  const hasDirty = Object.keys(dirty).length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-indigo-300" /> Prontuário
+            {isSigned && <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> assinado</span>}
+          </h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+
+        {loading && <div className="mt-4 flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+
+        {!loading && needConsent && (
+          <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+              <div>
+                <div className="text-sm text-amber-100 font-medium">Consentimento LGPD Art.11 necessário</div>
+                <p className="text-xs text-amber-200/90 mt-1">
+                  Prontuário contém <strong>dado sensível de saúde</strong>. Antes de abrir, o paciente precisa autorizar o registro (verbal ou por assinatura). Confirme com o paciente e registre abaixo — fica auditado.
+                </p>
+                <button onClick={grantConsent} disabled={busy} className="mt-3 text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                  {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />} Confirmar consentimento e abrir prontuário
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!loading && encounter && (
+          <>
+            <div className="mt-4 flex gap-1 border-b border-zinc-800 flex-wrap">
+              {([
+                { k: 'S', label: 'S · Anamnese' },
+                { k: 'O', label: 'O · Exame' },
+                { k: 'A', label: 'A · Avaliação' },
+                { k: 'P', label: 'P · Plano' },
+                { k: 'F', label: 'Ficha' },
+              ] as const).map(t => (
+                <button key={t.k} onClick={() => setTab(t.k)}
+                  className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === t.k ? 'border-indigo-400 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3">
+              {tab === 'S' && (
+                <textarea disabled={isSigned} value={val('subjective')} onChange={setVal('subjective')}
+                  rows={10} placeholder="Queixa principal, história da doença, antecedentes relatados pelo paciente…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'O' && (
+                <textarea disabled={isSigned} value={val('objective')} onChange={setVal('objective')}
+                  rows={10} placeholder="Sinais vitais, exame físico, achados mensuráveis…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'A' && (
+                <textarea disabled={isSigned} value={val('assessment')} onChange={setVal('assessment')}
+                  rows={10} placeholder="Hipóteses diagnósticas, evolução, análise clínica…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'P' && (
+                <textarea disabled={isSigned} value={val('plan')} onChange={setVal('plan')}
+                  rows={10} placeholder="Conduta, medicação, procedimentos, retorno, encaminhamentos…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'F' && (
+                <div>
+                  <p className="text-[11px] text-zinc-500 mb-1">Ficha personalizada da especialidade (JSON extensível). Assim que você mandar as imagens da ficha em papel, essa aba vira formulário com os campos exatos.</p>
+                  <textarea disabled={isSigned}
+                    value={dirty.formData !== undefined ? dirty.formData : (encounter.formData ? JSON.stringify(encounter.formData, null, 2) : '')}
+                    onChange={e => setDirty(d => ({ ...d, formData: e.target.value }))}
+                    rows={10} placeholder='{"escala_dor": 7, "sono": "ruim"}'
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 disabled:opacity-60" />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <div className="text-[11px] text-zinc-500">
+                {isSigned ? (
+                  <>Assinado em {new Date(encounter.signedAt!).toLocaleString('pt-BR')}</>
+                ) : hasDirty ? (
+                  <span className="text-amber-300">Alterações não salvas</span>
+                ) : (
+                  <>Rascunho — atualizado em {new Date(encounter.updatedAt).toLocaleString('pt-BR')}</>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {!isSigned && (
+                  <>
+                    <button onClick={save} disabled={busy || !hasDirty}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 inline-flex items-center gap-1 disabled:opacity-60">
+                      {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar rascunho
+                    </button>
+                    <button onClick={finalize} disabled={busy}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                      {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />} Finalizar (assinar)
+                    </button>
+                  </>
+                )}
+                {isSigned && (
+                  <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800">
+                    Fechar
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

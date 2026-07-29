@@ -80,6 +80,7 @@ jobs:
           - { name: 'clinic-portal', script: 'test:clinic-portal' }
           - { name: 'clinic-authorization', script: 'test:clinic-authorization' }
           - { name: 'clinic-connection', script: 'test:clinic-connection' }
+          - { name: 'clinic-encounter', script: 'test:clinic-encounter' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

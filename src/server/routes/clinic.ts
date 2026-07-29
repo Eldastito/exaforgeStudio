@@ -5,6 +5,8 @@ import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
 import { ClinicConnectionService } from "../ClinicConnectionService.js";
+import { ClinicEncounterService } from "../ClinicEncounterService.js";
+import { LgpdService } from "../LgpdService.js";
 
 /**
  * Módulo Clínica (ADR-080) — rotas sob /api/clinic, gated pelo módulo "clinica"
@@ -123,6 +125,83 @@ router.post("/appointments/:id/continuation", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicAgendaService.setContinuation(orgId, req.params.id, String(req.body?.status || ""), actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Prontuário / SOAP (ADR-080 Fase G) ──────────────────────────────────
+// Um encounter por consulta (UNIQUE(org, appointment_id)). Bloqueado por
+// consentimento LGPD Art.11 (dado sensível de saúde). Depois de signed,
+// updates ficam bloqueados aqui — a próxima fatia libera addendum.
+
+// GET encounter da consulta (null se ainda não foi aberto).
+router.get("/appointments/:id/encounter", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const enc = ClinicEncounterService.getByAppointment(orgId, req.params.id);
+  res.json(enc);
+});
+
+// POST abre encounter (idempotente). 409 se falta consentimento LGPD sensível.
+router.post("/appointments/:id/encounter", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicEncounterService.open(orgId, req.params.id, actor(req))); }
+  catch (e: any) {
+    if (e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// PATCH atualiza SOAP + form_data (extensível).
+router.patch("/encounters/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicEncounterService.update(orgId, req.params.id, actor(req), req.body || {})); }
+  catch (e: any) {
+    if (e.code === "ENCOUNTER_SIGNED") return res.status(409).json({ error: e.message, code: e.code });
+    if (e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST finaliza (assina) — idempotente, mesmo estado se já signed.
+router.post("/encounters/:id/finalize", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicEncounterService.finalize(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Histórico versionado (diff campo a campo de cada UPDATE + addendum futuro).
+router.get("/encounters/:id/history", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicEncounterService.history(orgId, req.params.id));
+});
+
+// Histórico clínico consolidado do paciente (todos os encounters).
+router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = Number(req.query.limit) || 50;
+  res.json(ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit));
+});
+
+// Consentimento LGPD Art.11 do paciente (dados sensíveis / saúde) — o gestor
+// registra quando o paciente autorizou (verbal, papel, aceite digital).
+// É o passo que destrava POST /encounter. Só owner/admin/atendente típico.
+router.post("/patients/:contactId/consent/sensitive", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { channel, legalBasis, policyVersion } = req.body || {};
+  try {
+    const consentId = LgpdService.grantConsent(orgId, req.params.contactId, "dados_sensiveis", {
+      channel: channel || "in_person",
+      legalBasis: legalBasis || "consent",
+      policyVersion: policyVersion || undefined,
+      actorId: actor(req),
+    });
+    res.json({ ok: true, consentId });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Portal do profissional (gestão do link) + export ─────────────────────

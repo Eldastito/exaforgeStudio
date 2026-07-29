@@ -12,7 +12,7 @@ import path from "path";
 import { randomUUID } from "node:crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
-import { RetailStoreCostService, FIXED_COST_CATEGORIES } from "../RetailStoreCostService.js";
+import { RetailStoreCostService, FIXED_COST_CATEGORIES, VARIABLE_COST_CATEGORIES } from "../RetailStoreCostService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
@@ -459,6 +459,25 @@ router.put("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest
   try {
     const costs = (req.body && req.body.costs) || {};
     res.json({ costs: RetailStoreCostService.setMany(orgId, req.params.id, costs) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Custos VARIÁVEIS da loja (taxa cartão, imposto, embalagem etc.) — ADR-083 E5.
+// Body salvo é {costs: {card_fee: {percent, fixedPerSale}, ...}}.
+router.get("/stores/:id/variable-costs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
+  try { res.json({ costs: RetailStoreCostService.listVariable(orgId, req.params.id), categories: VARIABLE_COST_CATEGORIES }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const costs = (req.body && req.body.costs) || {};
+    res.json({ costs: RetailStoreCostService.setManyVariable(orgId, req.params.id, costs) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

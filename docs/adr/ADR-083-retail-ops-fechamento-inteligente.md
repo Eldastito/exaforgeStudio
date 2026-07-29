@@ -109,3 +109,30 @@ Usa a **mesma régua** de valor da Ponte de Faturamento (`RetailRevenueBridgeSer
 - Rotas (gated pelo módulo `retail`): `GET/PUT /api/retailops/stores/:id/costs`, `GET /api/retailops/stores/:id/result`, `GET /api/retailops/stores-result` (mutação só owner/admin, via `requireRole`).
 - UI: campos de custo + margem em "Editar loja"; nova aba **"Resultado por loja"** (faturamento, custos, margem, lucro estimado, ponto de equilíbrio; total da rede).
 - Teste: `test:retail-store-result` (31 verificações — upsert por tipo, faturamento por fechamento, guardrail sem margem, lucro/prejuízo/PE com margem, totais da rede, isolamento).
+
+### E5. Custos VARIÁVEIS por loja — cadeia completa da precificação (2026-07)
+
+**Pergunta que originou (Fatia 1 de "fechar a precificação de ponta a ponta"):** o `gross_margin_percent` sozinho subestima o "lucro por loja" — ignora ralos proporcionais à venda (taxa de cartão/Pix, imposto sobre venda, embalagem, frete). O cálculo antigo tratava a margem bruta como se fosse margem líquida; qualquer loja com taxa de maquininha alta ficava com lucro empolado no painel.
+
+Nova tabela `retail_store_variable_costs (organization_id, store_id, category, percent, fixed_per_sale)` com `UNIQUE(organization_id, store_id, category)`. Categorias: `card_fee|pix_fee|tax_sale|packaging|freight|other`. Cada categoria carrega **duas naturezas** simultâneas: `percent` (% do faturamento, ex.: imposto/taxa cartão %) e `fixed_per_sale` (R$ por ticket, ex.: embalagem R$ 1,50/venda). Upsert em lote (`setManyVariable`) da tela "Editar loja"; percent > 100 é clampeado; valor `<= 0` zera a natureza.
+
+**Cadeia completa (E5a):**
+```
+Faturamento     = Σ fechamentos do mês (mesma régua da Ponte de Faturamento)
+Margem BRUTA    = Faturamento × (margem bruta % / 100)
+Custo Variável  = Faturamento × Σ(percent/100) + nº vendas × Σ(fixed_per_sale)
+Margem CONTRIB. = Margem BRUTA − Custo Variável
+MC% efetiva     = Margem CONTRIB. ÷ Faturamento
+Resultado       = Margem CONTRIB. − custos fixos da loja
+Ponto equilíb.  = custos fixos ÷ MC% efetiva
+```
+
+**Contagem de vendas do mês:** vem do PDV (`retail_pdv_sales` join por `filial = retail_stores.code`); fallback pra contagem de fechamentos aprovados quando não há PDV; `null` se nenhuma das duas fontes tem registro no mês. Sem contagem, `fixed_per_sale` é **ignorado** (não estimamos por cima quantas vendas ocorreram) — a UI marca a loja com um "⚠" e exibe aviso agregado. Os `percent` continuam valendo mesmo sem contagem (dependem só do faturamento).
+
+**Compatibilidade E1–E4:** quando nenhum custo variável está cadastrado, `Custo Variável = 0`, `Margem CONTRIB. = Margem BRUTA`, `MC% = grossMarginPercent`, `PE = fixos ÷ (grossMargin/100)` — cálculo idêntico ao antigo. O teste `test:retail-store-result` (31 verificações) segue verde na íntegra.
+
+**Superfície:**
+- Serviço: `RetailStoreCostService` ganha `listVariable`, `setManyVariable`, `monthlySalesCount`; `storeResult`/`allStoresResult` expõem `vendasCount`, `custoVariavelTotal`, `margemBruta`, `margemContribuicao`, `margemContribuicaoPercent`, `variableCostsWarning`, `totals.custosVariaveis`.
+- Rotas (`retail`): `GET/PUT /api/retailops/stores/:id/variable-costs` (mutação só owner/admin).
+- UI: novo bloco "Custos variáveis desta loja" em "Editar loja" (dois inputs por categoria: % e R$/venda). Aba "Resultado por loja" ganha colunas **Margem bruta** e **Custos variáveis** entre Faturamento e Custos fixos; aviso agregado quando a parte por ticket foi ignorada.
+- Teste: `test:retail-store-variable-costs` (33 verificações — upsert por categoria com duas naturezas, clamp 0..100, contagem PDV, fallback fechamentos, cadeia completa numérica, guardrail sem contagem, isolamento).

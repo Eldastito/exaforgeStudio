@@ -351,15 +351,16 @@ function StoreResultTab() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [period]);
 
   const perStore: any[] = Array.isArray(data?.perStore) ? data.perStore : [];
-  const totals = data?.totals || { faturamento: 0, custosFixos: 0, resultado: 0 };
+  const totals = data?.totals || { faturamento: 0, custosFixos: 0, custosVariaveis: 0, resultado: 0 };
   const semMargem = perStore.filter(s => !s.hasMargin).length;
+  const warnings = perStore.filter(s => s.variableCostsWarning).length;
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm text-zinc-300">Lucro estimado e ponto de equilíbrio de cada loja no mês.</p>
-          <p className="text-[11px] text-zinc-500">Faturamento (dos fechamentos) × margem bruta − custos fixos cadastrados na loja.</p>
+          <p className="text-[11px] text-zinc-500">Faturamento (dos fechamentos) − custo da mercadoria (via margem bruta) − custos variáveis (taxa cartão, imposto, embalagem) − custos fixos cadastrados na loja.</p>
         </div>
         <div className="flex items-center gap-2">
           <input type="month" value={period} onChange={e => setPeriod(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
@@ -380,14 +381,20 @@ function StoreResultTab() {
               {semMargem === 1 ? '1 loja está' : `${semMargem} lojas estão`} sem a <strong>margem bruta média</strong> informada — pra elas o lucro e o ponto de equilíbrio não são calculados (só faturamento e custos). Informe em “Editar loja”.
             </p>
           )}
+          {warnings > 0 && (
+            <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+              {warnings === 1 ? '1 loja tem' : `${warnings} lojas têm`} custo variável fixo por venda cadastrado, mas <strong>sem contagem de vendas no mês</strong> (sem PDV nem fechamentos aprovados). A parte por ticket foi ignorada para não inflar o custo — os % continuam valendo.
+            </p>
+          )}
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900/60 text-zinc-400">
                 <tr className="text-left">
                   <th className="px-3 py-2 font-medium">Loja</th>
                   <th className="px-3 py-2 font-medium text-right">Faturamento</th>
+                  <th className="px-3 py-2 font-medium text-right" title="Faturamento × margem bruta">Margem bruta</th>
+                  <th className="px-3 py-2 font-medium text-right" title="Taxa de cartão, imposto sobre venda, embalagem etc.">Custos variáveis</th>
                   <th className="px-3 py-2 font-medium text-right">Custos fixos</th>
-                  <th className="px-3 py-2 font-medium text-right">Margem</th>
                   <th className="px-3 py-2 font-medium text-right">Lucro estimado</th>
                   <th className="px-3 py-2 font-medium text-right">Ponto de equilíbrio</th>
                 </tr>
@@ -395,10 +402,18 @@ function StoreResultTab() {
               <tbody>
                 {perStore.map((s: any) => (
                   <tr key={s.storeId} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 text-zinc-200">{s.storeName}</td>
+                    <td className="px-3 py-2 text-zinc-200">
+                      {s.storeName}
+                      {s.variableCostsWarning && <span className="ml-1 text-[10px] text-amber-300/80" title={s.variableCostsWarning}>⚠</span>}
+                    </td>
                     <td className="px-3 py-2 text-right text-zinc-300">{brl(s.faturamento)}</td>
+                    <td className="px-3 py-2 text-right text-zinc-300">
+                      {s.margemBruta == null ? <span className="text-amber-300/80" title="Informe a margem bruta em Editar loja">falta</span> : brl(s.margemBruta)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-zinc-300">
+                      {s.custoVariavelTotal == null || s.custoVariavelTotal === 0 ? <span className="text-zinc-600">—</span> : brl(s.custoVariavelTotal)}
+                    </td>
                     <td className="px-3 py-2 text-right text-zinc-300">{s.hasCustos ? brl(s.custosFixos.total) : <span className="text-zinc-600">—</span>}</td>
-                    <td className="px-3 py-2 text-right text-zinc-400">{s.hasMargin ? `${s.grossMarginPercent}%` : <span className="text-amber-300/80" title="Informe a margem bruta em Editar loja">falta</span>}</td>
                     <td className={`px-3 py-2 text-right font-medium ${s.resultado == null ? 'text-zinc-600' : s.resultado >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{s.resultado == null ? '—' : brl(s.resultado)}</td>
                     <td className="px-3 py-2 text-right text-zinc-300">
                       {s.pontoEquilibrio == null ? <span className="text-zinc-600">—</span> : (
@@ -412,8 +427,9 @@ function StoreResultTab() {
                 <tr className="border-t border-zinc-700 bg-zinc-900/40 font-medium text-zinc-200">
                   <td className="px-3 py-2">Rede (total)</td>
                   <td className="px-3 py-2 text-right">{brl(totals.faturamento)}</td>
-                  <td className="px-3 py-2 text-right">{brl(totals.custosFixos)}</td>
                   <td className="px-3 py-2 text-right text-zinc-500">—</td>
+                  <td className="px-3 py-2 text-right">{brl(totals.custosVariaveis || 0)}</td>
+                  <td className="px-3 py-2 text-right">{brl(totals.custosFixos)}</td>
                   <td className={`px-3 py-2 text-right ${totals.resultado >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{brl(totals.resultado)}</td>
                   <td className="px-3 py-2 text-right text-zinc-500">—</td>
                 </tr>
@@ -813,6 +829,18 @@ const STORE_COST_CATEGORIES: { key: string; label: string; hint?: string }[] = [
   { key: 'outros', label: 'Outros' },
 ];
 
+// Categorias de custo VARIÁVEL por loja (ADR-083 E5). Cada categoria pode ter
+// as duas naturezas ao mesmo tempo: `percent` (% do faturamento) e/ou
+// `fixedPerSale` (R$ por venda/ticket). Ex.: taxa de cartão pode ter os dois.
+const STORE_VARIABLE_COST_CATEGORIES: { key: string; label: string; hint: string }[] = [
+  { key: 'card_fee', label: 'Taxa de cartão', hint: 'O que a maquininha desconta em cima do valor da venda.' },
+  { key: 'pix_fee', label: 'Taxa de Pix', hint: 'Tarifa cobrada por cada Pix recebido (se a sua conta cobra).' },
+  { key: 'tax_sale', label: 'Imposto sobre venda', hint: 'Simples Nacional ou outro imposto proporcional ao faturamento.' },
+  { key: 'packaging', label: 'Embalagem', hint: 'Sacola/caixa que sai a cada venda.' },
+  { key: 'freight', label: 'Frete', hint: 'Delivery ou entrega proporcional à venda.' },
+  { key: 'other', label: 'Outros variáveis', hint: 'Qualquer outro custo que sobe/desce junto com a venda.' },
+];
+
 // ---- Cadastro/edição de loja (reutilizável nas abas) ------------------------
 function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClose: () => void; onSaved: () => void }) {
   const editing = !!store;
@@ -826,6 +854,8 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
   const [sellerSource, setSellerSource] = useState(store?.seller_source === 'manual' ? 'manual' : 'pdv');
   const [margin, setMargin] = useState(store?.gross_margin_percent != null ? String(store.gross_margin_percent) : '');
   const [costs, setCosts] = useState<Record<string, string>>({});
+  // Custos VARIÁVEIS: uma entrada por categoria, com duas naturezas (percent e fixedPerSale).
+  const [varCosts, setVarCosts] = useState<Record<string, { percent: string; fixed: string }>>({});
   const [saving, setSaving] = useState(false);
 
   // Custos fixos já cadastrados (só ao editar): preenche o formulário.
@@ -837,12 +867,34 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
       for (const c of STORE_COST_CATEGORIES) next[c.key] = by[c.key] > 0 ? String(by[c.key]) : '';
       setCosts(next);
     }).catch(() => {});
+    // Custos variáveis (ADR-083 E5): mesma dinâmica, dois inputs por categoria.
+    apiFetch(`/api/retailops/stores/${store.id}/variable-costs`).then(r => r.json()).then(d => {
+      const by = d?.costs?.byCategory || {};
+      const next: Record<string, { percent: string; fixed: string }> = {};
+      for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+        const e = by[c.key] || { percent: 0, fixedPerSale: 0 };
+        next[c.key] = {
+          percent: e.percent > 0 ? String(e.percent) : '',
+          fixed: e.fixedPerSale > 0 ? String(e.fixedPerSale) : '',
+        };
+      }
+      setVarCosts(next);
+    }).catch(() => {});
   }, [editing, store?.id]);
 
   const costsTotal = useMemo(
     () => STORE_COST_CATEGORIES.reduce((a, c) => a + (Number(String(costs[c.key] || '').replace(',', '.')) || 0), 0),
     [costs]
   );
+  const varTotals = useMemo(() => {
+    let pct = 0, fix = 0;
+    for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+      const e = varCosts[c.key] || { percent: '', fixed: '' };
+      pct += Number(String(e.percent || '').replace(',', '.')) || 0;
+      fix += Number(String(e.fixed || '').replace(',', '.')) || 0;
+    }
+    return { pct, fix };
+  }, [varCosts]);
 
   const save = async () => {
     if (!name.trim()) { toast.error('Dê um nome à loja.'); return; }
@@ -867,6 +919,16 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
         const costsPayload: Record<string, number> = {};
         for (const c of STORE_COST_CATEGORIES) costsPayload[c.key] = Number(String(costs[c.key] || '').replace(',', '.')) || 0;
         await apiFetch(`/api/retailops/stores/${storeId}/costs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ costs: costsPayload }) }).catch(() => {});
+        // Custos variáveis (ADR-083 E5): percent e fixedPerSale por categoria.
+        const varPayload: Record<string, { percent: number; fixedPerSale: number }> = {};
+        for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+          const e = varCosts[c.key] || { percent: '', fixed: '' };
+          varPayload[c.key] = {
+            percent: Number(String(e.percent || '').replace(',', '.')) || 0,
+            fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0,
+          };
+        }
+        await apiFetch(`/api/retailops/stores/${storeId}/variable-costs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ costs: varPayload }) }).catch(() => {});
       }
       toast.success(editing ? 'Loja atualizada.' : 'Loja cadastrada.');
       onSaved();
@@ -938,6 +1000,49 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
               <input inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)} placeholder="Ex.: 55" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
               <span className="mt-1 block text-[11px] text-zinc-500">Quanto sobra de cada R$ 100 vendidos DEPOIS de pagar o custo da mercadoria (sem contar os custos fixos acima). É uma estimativa — sem ela, o app mostra faturamento e custos mas <strong>não calcula o lucro</strong> (não dá pra descontar a mercadoria).</span>
             </label>
+          </div>
+
+          {/* Custos VARIÁVEIS (ADR-083 E5): o que sai proporcional à venda. Fica separado dos fixos porque a natureza é outra: % do faturamento ou R$ por ticket. */}
+          <div className="mt-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+            <p className="text-xs font-medium text-zinc-300">Custos variáveis desta loja</p>
+            <p className="mt-0.5 text-[11px] text-zinc-500">O que sobe/desce junto com a venda: taxa da maquininha, imposto sobre o faturamento, embalagem que sai por ticket. Entra no cálculo do <strong>lucro real</strong> da loja depois da margem bruta.</p>
+            <div className="mt-2 space-y-2">
+              {STORE_VARIABLE_COST_CATEGORIES.map(c => (
+                <div key={c.key}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-zinc-400">{c.label}</span>
+                    <span className="text-[10px] text-zinc-600 hidden sm:inline">{c.hint}</span>
+                  </div>
+                  <div className="mt-0.5 grid grid-cols-2 gap-2">
+                    <label className="block text-[10px] text-zinc-500">% do faturamento
+                      <div className="mt-0.5 flex items-center rounded-lg bg-zinc-950 border border-zinc-800 px-2">
+                        <input inputMode="decimal"
+                          value={varCosts[c.key]?.percent || ''}
+                          onChange={e => setVarCosts(p => ({ ...p, [c.key]: { percent: e.target.value, fixed: p[c.key]?.fixed || '' } }))}
+                          placeholder="0"
+                          className="w-full bg-transparent px-1 py-1.5 text-sm text-zinc-100 outline-none" />
+                        <span className="text-[11px] text-zinc-600">%</span>
+                      </div>
+                    </label>
+                    <label className="block text-[10px] text-zinc-500">R$ por venda
+                      <div className="mt-0.5 flex items-center rounded-lg bg-zinc-950 border border-zinc-800 px-2">
+                        <span className="text-[11px] text-zinc-600">R$</span>
+                        <input inputMode="decimal"
+                          value={varCosts[c.key]?.fixed || ''}
+                          onChange={e => setVarCosts(p => ({ ...p, [c.key]: { percent: p[c.key]?.percent || '', fixed: e.target.value } }))}
+                          placeholder="0,00"
+                          className="w-full bg-transparent px-1.5 py-1.5 text-sm text-zinc-100 outline-none" />
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[11px]">
+              <span className="text-zinc-500">Somatório</span>
+              <span className="font-medium text-zinc-300">{varTotals.pct.toFixed(2).replace('.', ',')}% + {brl(varTotals.fix)}/venda</span>
+            </div>
+            <p className="mt-1 text-[10px] text-zinc-600">A parte por venda só entra no cálculo se a loja tem PDV ou fechamentos aprovados no mês — senão a gente ignora (não dá pra chutar quantas vendas ocorreram).</p>
           </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">

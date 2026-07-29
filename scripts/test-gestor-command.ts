@@ -90,12 +90,25 @@ async function main() {
   check("roteia 'saldo' de gestor conhecido p/ o Controller", G.shouldRoute(G.handle(orgA, "11999990001", "saldo")) === true);
   check("roteia 'aprovar 1' (ação diferida)", G.shouldRoute(G.handle(orgA, "11999990001", "aprovar 1")) === true);
   check("NÃO roteia 'oi' (menu → Coordenador/tarefas)", G.shouldRoute(G.handle(orgA, "11999990001", "oi")) === false);
-  check("NÃO roteia desconhecido (→ Coordenador)", G.shouldRoute(G.handle(orgA, "11999990001", "qualquer coisa")) === false);
   check("NÃO roteia número desconhecido (sem user)", G.shouldRoute(G.handle(orgA, "11888880000", "saldo")) === false);
   check("roteia denial de vendedor (Controller responde a negação)", G.shouldRoute(G.handle(orgA, "11999990002", "saldo")) === true);
   // 'prioridades' não sequestra pergunta de tarefas do colaborador.
   check("'o que tenho pra fazer hoje' NÃO vira prioridades", G.parse("o que tenho pra fazer hoje").intent === "desconhecido");
   check("desligado: shouldRoute=false (webhook segue p/ Coordenador)", G.shouldRoute(G.handle(mkOrg(), "11999990001", "saldo")) === false);
+
+  // ===== 9b. Pergunta livre de NEGÓCIO (dono) → Diretor Executivo IA =====
+  // `parse()` puro continua "desconhecido" (não muda) — é `handle()` quem, só
+  // para GESTOR (owner/admin), reclassifica pra `pergunta_negocio` e roteia pro
+  // Diretor IA (que o WEBHOOK chama, com LLM; `reply` sai vazio de propósito).
+  check("parse('qualquer coisa') continua 'desconhecido' (puro, sem RBAC)", G.parse("qualquer coisa").intent === "desconhecido");
+  const perguntaOwner = G.handle(orgA, "11999990001", "quanto o Marcos vendeu esse mês?");
+  check("owner: pergunta livre vira intent 'pergunta_negocio'", perguntaOwner.intent === "pergunta_negocio" && perguntaOwner.reply === "");
+  check("owner: pergunta livre É roteada (webhook chama o Diretor IA)", G.shouldRoute(perguntaOwner) === true);
+  // Colaborador comum (vendedor) NÃO ganha acesso ao Diretor — comportamento
+  // antigo preservado: cai no Coordenador (tarefas), como sempre.
+  const perguntaVendedor = G.handle(orgA, "11999990002", "quanto o Marcos vendeu esse mês?");
+  check("vendedor: pergunta livre continua 'desconhecido'", perguntaVendedor.intent === "desconhecido" && /Não entendi/.test(perguntaVendedor.reply));
+  check("vendedor: pergunta livre NÃO é roteada (→ Coordenador)", G.shouldRoute(perguntaVendedor) === false);
 
   // ===== 10. Ações governadas por WhatsApp (Fatia 3) =====
   const { DecisionActionService: D } = await import("../src/server/DecisionActionService.js");

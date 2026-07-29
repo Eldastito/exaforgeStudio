@@ -6,6 +6,8 @@ import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { PatternMemoryService } from "./PatternMemoryService.js";
+import { ModuleService } from "./ModuleService.js";
+import { RetailCommissionService } from "./RetailCommissionService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -31,7 +33,30 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId);
+    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId);
+  }
+
+  /**
+   * VENDAS POR VENDEDOR do mês corrente (Retail Ops): permite o Diretor
+   * responder "quanto o Marcos vendeu esse mês?" pelo WhatsApp com dado real —
+   * fusão de ZappFlow + lançamento manual/foto + ERP + PDV, já respeitando a
+   * loja de cada vendedor e a exclusão de PDV anômalo (`seller_source=manual`,
+   * ver RetailCommissionService.salesBySellerStore). Só entra quando o módulo
+   * `retail` está ativo; lista os TOP vendedores por venda (não o negócio
+   * inteiro) para não estourar o contexto do prompt.
+   */
+  static retailCommissionBlock(orgId: string): string {
+    try {
+      if (!ModuleService.isEnabled(orgId, "retail")) return "";
+      const now = new Date();
+      const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      const end = now.toISOString().slice(0, 10);
+      const rows = RetailCommissionService.salesBySellerStore(orgId, start, end);
+      if (!rows.length) return "";
+      const top = [...rows].sort((a, b) => b.sales - a.sales).slice(0, 20);
+      const lines = top.map((r) => `- ${r.sellerName} (${r.storeName}): R$ ${r.sales.toFixed(2)} em vendas, ${r.pecas} peça(s), ${r.orders} venda(s)`);
+      return `\n\n=== VENDAS POR VENDEDOR — mês corrente ${start} a ${end} (fatos reais; se o vendedor perguntado não estiver na lista, diga que não há dado dele nesse período, NUNCA invente valor) ===\n${lines.join("\n")}`;
+    } catch { return ""; }
   }
 
   /**

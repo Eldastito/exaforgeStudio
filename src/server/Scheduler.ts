@@ -21,6 +21,7 @@ import { InstagramService } from "./InstagramService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
 import { SchoolDigestService } from "./SchoolDigestService.js";
 import { TeacherDigestService } from "./TeacherDigestService.js";
+import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
@@ -202,6 +203,26 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Módulo Escola (ADR-144, Fatia 4): painel da coordenação. Recomputa os sinais
+   * de coordenação (determinísticos, sem envio) para as orgs com o módulo
+   * "escola" e alunos cadastrados. Best-effort, 1 loop.
+   */
+  static schoolCoordinationPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT DISTINCT organization_id FROM student_profiles WHERE status = 'active'`).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        if (!ModuleService.isEnabled(orgId, "escola")) continue; // módulo desligado p/ a org
+        SchoolCoordinationService.runSignalsPass(orgId);
+      } catch (e) { console.error("[Escola] passe da coordenação falhou", orgId, e); }
+    }
+  }
+
   static async tick() {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
@@ -234,6 +255,7 @@ export class Scheduler {
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));
     await this.teacherAgendaPass().catch(e => console.error('[Scheduler] agenda do professor falhou', e));
+    try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }
 

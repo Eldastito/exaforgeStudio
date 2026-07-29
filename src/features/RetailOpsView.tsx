@@ -1696,7 +1696,7 @@ function CommissionTab() {
                 isso o usuário acha que "não gerou"). */}
             {pdvSellers.length === 0 && (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por operador de caixa — PDV (matrícula)</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (CAI_USUARIO)</p>
                 <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-[13px] text-zinc-500">
                   Nenhuma venda do PDV importada para este período ainda. As vendas entram pela sincronização: vá em <span className="text-zinc-300">Integrações → Alterdata → Sincronizar agora</span> (a primeira carga traz o histórico; a mensagem mostra "N venda(s) PDV") e clique em <span className="text-zinc-300">Gerar</span> de novo.
                 </div>
@@ -1704,25 +1704,31 @@ function CommissionTab() {
             )}
             {pdvSellers.length > 0 && (
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por operador de caixa — PDV (matrícula)</p>
-                <p className="text-[12px] text-amber-300/80 mb-2">A matrícula do caixa é do OPERADOR (pode cobrir a rede toda) — não é o vendedor individual. A comissão por vendedor virá do relatório de comissão do próprio ERP (em construção). Use esta tabela como volume por caixa.</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Vendas por vendedor — PDV (CAI_USUARIO)</p>
+                <p className="text-[12px] text-zinc-500 mb-2">Vendedor pelo <strong className="text-zinc-300">CAI_USUARIO</strong> do PDV (código do vendedor), não pela matrícula do operador de caixa. Clique no código para dar nome ao vendedor (mapa <em>retail_sellers</em>); sem nome, sai como <em>Matrícula {'{'}código{'}'}</em>. Vendas antigas só passam a exibir o vendedor após um novo sync da Alterdata (bases sem o código caem no operador).{pdvPct != null && <> Comissão <strong className="text-zinc-300">estimada</strong> pela regra percentual ativa ({pdvPct}%).</>}</p>
                 <div className="overflow-x-auto rounded-xl border border-zinc-800">
                   <table className="w-full text-sm">
                     <thead className="bg-zinc-900/60 text-zinc-400"><tr>
-                      <th className="px-3 py-2 text-left font-medium">Matrícula (operador)</th>
+                      <th className="px-3 py-2 text-left font-medium">Vendedor</th>
                       <th className="px-3 py-2 text-left font-medium">Loja</th>
                       <th className="px-3 py-2 text-right font-medium">Vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Nº vendas</th>
                       <th className="px-3 py-2 text-right font-medium">Peças</th>
+                      {pdvPct != null && <th className="px-3 py-2 text-right font-medium">Comissão (est.)</th>}
                     </tr></thead>
                     <tbody>
                       {pdvSellers.map((v: any, i: number) => (
                         <tr key={i} className="border-t border-zinc-800/70">
-                          <td className="px-3 py-2 font-mono text-zinc-200">{v.vendedor}</td>
+                          <td className="px-3 py-2 text-zinc-100">
+                            <button onClick={() => nomearVendedor(v)} title="Dar nome a este vendedor" className="text-left hover:text-indigo-300">
+                              {v.seller_name || <span className="font-mono text-zinc-300">Matrícula {v.vendedor}</span>}
+                            </button>
+                          </td>
                           <td className="px-3 py-2 text-zinc-300">{v.store_name}</td>
                           <td className="px-3 py-2 text-right text-zinc-100">{brl(v.sales)}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{v.orders}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{Number(v.pecas || 0)}</td>
+                          {pdvPct != null && <td className="px-3 py-2 text-right text-emerald-300">{v.commission != null ? brl(v.commission) : '—'}</td>}
                         </tr>
                       ))}
                     </tbody>

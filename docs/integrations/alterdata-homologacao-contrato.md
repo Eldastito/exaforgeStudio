@@ -113,6 +113,14 @@ Nomes em **negrito** são os principais; os demais são alternativas aceitas
 > fallback para o operador quando ausente. Para os nomes aparecerem, mapear os
 > vendedores em *retail_sellers* usando o **código do vendedor (CAI_USUARIO)** como
 > matrícula.
+>
+> **Tela (última milha).** O painel *Operação da Rede* mostra a seção **"Vendas por
+> vendedor — PDV (CAI_USUARIO)"**: a rota `GET /pdv-sellers` agrega por
+> `COALESCE(vendedor_codigo, vendedor)` (mesma chave da apuração) e casa
+> *retail_sellers* por ela; clicar no código dá nome ao vendedor. A comissão sai
+> **estimada** pela regra percentual ativa. ⚠️ **Vendas já importadas antes desta
+> mudança só exibem o vendedor após um novo sync da Alterdata** (repopula
+> `vendedor_codigo` no período); até lá caem no operador (retrocompatível).
 
 ### Venda/ComissaoVendasPorPeriodo → comissão do ERP (conferência)
 Relatório agregado por vendedor no período (`data.metaVendedorRealizado[]`),

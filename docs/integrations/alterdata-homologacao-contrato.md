@@ -121,6 +121,16 @@ Nomes em **negrito** são os principais; os demais são alternativas aceitas
 > **estimada** pela regra percentual ativa. ⚠️ **Vendas já importadas antes desta
 > mudança só exibem o vendedor após um novo sync da Alterdata** (repopula
 > `vendedor_codigo` no período); até lá caem no operador (retrocompatível).
+>
+> **Relatório oficial por vendedor.** As vendas do PDV por CAI_USUARIO agora
+> entram na base do relatório oficial (`combinedSalesBySeller` → seção **"Por
+> vendedor"** de `GET /commission/report` e a apuração `createRun`), somadas a
+> ZappFlow + lançamentos manuais/foto + ERP. Quando o gestor tem só uma regra
+> **"por loja"** (sem regra de escopo *vendedor*), a comissão por vendedor sai por
+> **fallback** dessa mesma % sobre o que cada vendedor vendeu — e a linha **"por
+> loja" vira referência** (não soma no total, para não pagar a verba duas vezes).
+> Criando uma regra própria de escopo *vendedor*, as duas passam a ser distintas e
+> somam normalmente.
 
 ### Venda/ComissaoVendasPorPeriodo → comissão do ERP (conferência)
 Relatório agregado por vendedor no período (`data.metaVendedorRealizado[]`),

@@ -529,7 +529,12 @@ router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
 
 // DIAGNÓSTICO da anomalia do vendedor: por matrícula do CAIXA, mostra em quantas
 // LOJAS ela aparece e se há vendedor por-linha nos itens — para descobrir se a
-// matrícula é do operador (compartilhada) ou do vendedor real.
+// matrícula é do operador (compartilhada) ou do vendedor real. `byFilial`
+// (Toulon, pós-ADR-105) checa a MESMA anomalia agora pro CAI_USUARIO
+// (`vendedor_codigo`): quantos códigos de vendedor DISTINTOS aparecem em cada
+// loja — se uma loja com muitas vendas só tem 1 código, ele provavelmente não
+// está individualizando vendedor real ali (é um login/terminal compartilhado,
+// não a pessoa que atendeu) — dado concreto pra levar ao suporte da Alterdata.
 router.get("/pdv-seller-diagnosis", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -544,7 +549,20 @@ router.get("/pdv-seller-diagnosis", (req: AuthRequest, res): any => {
       `SELECT COUNT(*) AS itens, COUNT(vendedor) AS itens_com_vendedor, COUNT(DISTINCT vendedor) AS vendedores_distintos
          FROM retail_pdv_sale_items WHERE organization_id = ?`
     ).get(orgId) as any;
-    res.json({ byMatricula, lineSellers });
+    const byFilialRaw = db.prepare(
+      `SELECT s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS loja, COUNT(*) AS vendas,
+              COUNT(DISTINCT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)) AS vendedores_distintos,
+              COUNT(DISTINCT NULLIF(s.vendedor_codigo, '')) AS cai_usuario_distintos,
+              COUNT(DISTINCT s.vendedor) AS operadores_distintos
+         FROM retail_pdv_sales s
+         LEFT JOIN retail_stores st ON st.organization_id = s.organization_id AND st.code = s.filial AND st.active = 1
+        WHERE s.organization_id = ? AND COALESCE(s.status, 'N') <> 'C'
+        GROUP BY s.filial ORDER BY vendas DESC`
+    ).all(orgId) as any[];
+    // risco = loja com volume razoável de vendas mas SÓ 1 código de vendedor —
+    // sinal de que o campo não está individualizando (login/terminal comum).
+    const byFilial = byFilialRaw.map((r) => ({ ...r, risco: Number(r.vendedores_distintos) <= 1 && Number(r.vendas) > 5 }));
+    res.json({ byMatricula, lineSellers, byFilial });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

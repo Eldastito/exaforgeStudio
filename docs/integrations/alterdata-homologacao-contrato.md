@@ -139,6 +139,32 @@ Nomes em **negrito** são os principais; os demais são alternativas aceitas
 > sem loja específica, vale pra rede toda. Quando uma loja tem regra própria, a
 > regra de rede NÃO se aplica a ela (sem pagar duas vezes).
 >
+> **⚠️ ALERTA — CAI_USUARIO pode não individualizar em TODAS as lojas.** Depois
+> de ligar o CAI_USUARIO na comissão, o dono da Toulon reportou que o extrato
+> por loja/vendedor mostrava, na loja Nova Iguaçu, um **único** "vendedor"
+> cujo valor batia EXATAMENTE com o total da loja inteira — parecia que a
+> segmentação não era real ali. Investigação confirmou: **o `GROUP BY` da
+> apuração está correto** (prova: um vendedor que passou por 3 lojas diferentes
+> apareceu em 3 linhas distintas, cada uma com o valor certo daquela loja); o
+> problema é que o campo que a Alterdata manda como CAI_USUARIO **pode ser
+> constante numa loja inteira** (login/terminal compartilhado), reproduzindo —
+> com outro nome de campo — a mesma "anomalia do vendedor" já documentada
+> antes para a `matricula` do operador (que também repetia entre lojas antes
+> do ADR-105). Ou seja: a resposta da Alterdata ("o vendedor é o CAI_USUARIO")
+> descreve o MODELO DE DADOS do ERP, mas não garante que o campo `usuario` do
+> VendaMalote de fato varia por vendedor real dentro de cada loja — isso só se
+> confirma loja a loja, com dado real.
+>
+> **Ferramenta de diagnóstico.** `GET /pdv-seller-diagnosis` agora devolve
+> também `byFilial`: por loja, quantos códigos de vendedor DISTINTOS
+> (`vendedor_codigo`/CAI_USUARIO) apareceram no histórico, e um `risco: true`
+> quando uma loja com mais de 5 vendas só tem 1 código — dado concreto pra
+> levar de volta ao suporte da Alterdata ("Loja Nova Iguaçu: N vendas, só 1
+> CAI_USUARIO distinto — isso é esperado ou o campo não está vindo certo
+> aqui?"). Na tela, a tabela "Extrato por loja e por vendedor" (todas as
+> lojas) marca com um selo **"só 1 vendedor"** a loja que cai nesse caso, pra
+> o gestor não confiar cegamente no número sem checar.
+>
 > **Extrato por loja e por vendedor (o "comando" do dono da rede).** A rota
 > `GET /commission/store-report?start=&end=&storeId=&sellerKey=`
 > (`RetailCommissionService.storeSellerExtract`) funde as 4 fontes de venda

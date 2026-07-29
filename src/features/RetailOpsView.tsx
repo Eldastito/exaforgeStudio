@@ -1822,14 +1822,28 @@ function CommissionTab() {
                     <th className="px-3 py-1.5 text-right font-medium">Comissão</th>
                   </tr></thead>
                   <tbody>
-                    {extract.byStore.map((s: any) => (
-                      <tr key={s.storeId || s.storeName} className="border-t border-zinc-800/60">
-                        <td className="px-3 py-1.5 text-zinc-200">{s.storeName}</td>
-                        <td className="px-3 py-1.5 text-right text-zinc-200">{brl(s.sales)}</td>
-                        <td className="px-3 py-1.5 text-right text-zinc-300">{s.pecas}</td>
-                        <td className="px-3 py-1.5 text-right text-emerald-300">{brl(s.commission)}</td>
-                      </tr>
-                    ))}
+                    {extract.byStore.map((s: any) => {
+                      // Loja com bastante venda mas SÓ 1 "vendedor" identificado: o
+                      // campo que a Alterdata manda como vendedor (CAI_USUARIO) pode
+                      // não estar individualizando de verdade nessa loja (login/
+                      // terminal compartilhado) — vale confirmar com o suporte do PDV.
+                      const suspicious = s.sellerCount === 1 && s.orders > 5;
+                      return (
+                        <tr key={s.storeId || s.storeName} className="border-t border-zinc-800/60">
+                          <td className="px-3 py-1.5 text-zinc-200">
+                            {s.storeName}
+                            {suspicious && (
+                              <span title="Só 1 vendedor apareceu nessa loja no período. Se a loja tem mais gente na equipe, o código de vendedor que a Alterdata manda (CAI_USUARIO) pode não estar individualizando de verdade — confira com o suporte do PDV." className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300 align-middle">
+                                <AlertTriangle className="w-3 h-3" /> só 1 vendedor
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-zinc-200">{brl(s.sales)}</td>
+                          <td className="px-3 py-1.5 text-right text-zinc-300">{s.pecas}</td>
+                          <td className="px-3 py-1.5 text-right text-emerald-300">{brl(s.commission)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

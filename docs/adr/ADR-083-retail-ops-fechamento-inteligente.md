@@ -136,3 +136,27 @@ Ponto equilíb.  = custos fixos ÷ MC% efetiva
 - Rotas (`retail`): `GET/PUT /api/retailops/stores/:id/variable-costs` (mutação só owner/admin).
 - UI: novo bloco "Custos variáveis desta loja" em "Editar loja" (dois inputs por categoria: % e R$/venda). Aba "Resultado por loja" ganha colunas **Margem bruta** e **Custos variáveis** entre Faturamento e Custos fixos; aviso agregado quando a parte por ticket foi ignorada.
 - Teste: `test:retail-store-variable-costs` (33 verificações — upsert por categoria com duas naturezas, clamp 0..100, contagem PDV, fallback fechamentos, cadeia completa numérica, guardrail sem contagem, isolamento).
+
+### E6. CMV REAL por loja — deriva do avg_cost das notas de compra (2026-07)
+
+**Pergunta que originou (Fatia 2 de "fechar a precificação"):** o `gross_margin_percent` do E2 é um **chute** do gestor. Quando a operação já cadastra NF-e de entrada (`POST /api/products/invoice-scan/xml`), o app tem o **custo médio ponderado** dos produtos (`inventory_items.avg_cost`) — dá pra derivar o CMV DE VERDADE via `Σ (unidades vendidas no mês × avg_cost)` dos itens do PDV. Continuar chutando quando dá pra medir é desperdício.
+
+**Método (E6a):** `RetailStoreCostService.monthlyCogsBreakdown(orgId, storeId, period)` cruza `retail_pdv_sale_items` (item a item do PDV, join por `retail_stores.code = filial`) com `inventory_items.avg_cost` do catálogo, usando a **mesma resolução produto→catálogo** do `/pdv-top-products` (`product_variants.external_ref/sku` → `products_services.external_ref` → LIKE-prefix pra tolerar EAN 13 vs 12 dígitos). Retorna `{source, coverage, cmvReal, revenueCovered, revenueTotalPdv}`.
+
+**Fontes de CMV (`source`):**
+- `real` — 100% dos itens vendidos têm `avg_cost` cadastrado (`coverage ≥ 0.999`). Extrapola `cmvReal / revenueTotalPdv` pro faturamento oficial dos fechamentos (regra de três, cobre a parte de fechamento manual sem item detalhado).
+- `blended` — parte coberta. CMV = `cmvReal (parte coberta) + (uncoveredPdv + outsidePdv) × (1 − grossMargin/100)`. Fallback proporcional pro `gross_margin_percent` no que faltou. UI mostra `cmvWarning` com a % de cobertura.
+- `estimate` — nenhum item PDV tem `avg_cost` OU não há PDV item a item. Cai integralmente no fallback do E2 (`grossMargin` × faturamento) — comportamento antigo preservado.
+
+**Guardrail (E6b):** `blended` **só extrapola se `gross_margin_percent` estiver cadastrada** — sem ela, `margemBruta`/`resultado` continuam `NULL` (mesma regra do E2a). Nunca "chutamos" o CMV do que faltou sem consentimento explícito do gestor.
+
+**Nada de tabela nova.** Cálculo on-the-fly usando `idx_retail_pdv_sale_items_prod` e `idx_inventory_org_product` (já existiam).
+
+**Compatibilidade E1–E5:** loja sem PDV item a item → `source='estimate'` → cálculo idêntico ao PR anterior. Testes `test:retail-store-result` (31) e `test:retail-store-variable-costs` (33) seguem verdes.
+
+**Superfície:**
+- Serviço: novo `monthlyCogsBreakdown`; `storeResult` expõe `cmv`, `cmvBreakdown`, `cmvWarning`.
+- UI: aba "Resultado por loja" ganha aviso agregado ("CMV real aplicado em N lojas") e badges por linha (`real`, `87%` para blended); tooltip em "Margem bruta" mostra a fonte usada.
+- Teste: `test:retail-store-cmv-real` (25 verificações — REAL 100%, BLENDED 80% com fallback proporcional, FALLBACK puro, guardrail sem margem, regressão do PR anterior, isolamento).
+
+**Nota operacional:** `AlterdataStockMapper` NÃO popula `avg_cost` hoje — quem só usa PDV via ERP fica em `source='estimate'`. Populando via NF-e de entrada (XML/foto → `invoice-scan`) a loja migra pra `real`/`blended` automaticamente na virada do próximo cálculo.

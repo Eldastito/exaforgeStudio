@@ -386,6 +386,17 @@ function StoreResultTab() {
               {warnings === 1 ? '1 loja tem' : `${warnings} lojas têm`} custo variável fixo por venda cadastrado, mas <strong>sem contagem de vendas no mês</strong> (sem PDV nem fechamentos aprovados). A parte por ticket foi ignorada para não inflar o custo — os % continuam valendo.
             </p>
           )}
+          {(() => {
+            const nReal = perStore.filter(s => s.cmvBreakdown?.source === 'real').length;
+            const nBlended = perStore.filter(s => s.cmvBreakdown?.source === 'blended').length;
+            if (nReal === 0 && nBlended === 0) return null;
+            return (
+              <p className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-200">
+                CMV REAL (custo das notas de compra) aplicado em <strong>{nReal + nBlended}</strong> {nReal + nBlended === 1 ? 'loja' : 'lojas'}
+                {nBlended > 0 && ` — ${nBlended} ainda com cobertura parcial (o resto usa a margem estimada)`}. Cadastre as notas de entrada (XML/foto) das lojas que ainda usam só estimativa para o cálculo ficar mais fiel.
+              </p>
+            );
+          })()}
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900/60 text-zinc-400">
@@ -408,7 +419,15 @@ function StoreResultTab() {
                     </td>
                     <td className="px-3 py-2 text-right text-zinc-300">{brl(s.faturamento)}</td>
                     <td className="px-3 py-2 text-right text-zinc-300">
-                      {s.margemBruta == null ? <span className="text-amber-300/80" title="Informe a margem bruta em Editar loja">falta</span> : brl(s.margemBruta)}
+                      {s.margemBruta == null ? (
+                        <span className="text-amber-300/80" title="Informe a margem bruta em Editar loja">falta</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 justify-end" title={s.cmvWarning || (s.cmvBreakdown?.source === 'real' ? 'CMV via custo das notas de compra (100%)' : s.cmvBreakdown?.source === 'blended' ? `CMV misto: ${Math.round((s.cmvBreakdown.coverage || 0) * 100)}% pelas notas + resto pela margem estimada` : 'CMV via margem estimada (informada em Editar loja)')}>
+                          {brl(s.margemBruta)}
+                          {s.cmvBreakdown?.source === 'real' && <span className="text-[9px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5">real</span>}
+                          {s.cmvBreakdown?.source === 'blended' && <span className="text-[9px] rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5">{Math.round((s.cmvBreakdown.coverage || 0) * 100)}%</span>}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right text-zinc-300">
                       {s.custoVariavelTotal == null || s.custoVariavelTotal === 0 ? <span className="text-zinc-600">—</span> : brl(s.custoVariavelTotal)}

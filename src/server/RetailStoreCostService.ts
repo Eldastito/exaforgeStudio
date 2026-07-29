@@ -92,6 +92,22 @@ export interface StoreVariableCosts {
   totalFixedPerSale: number; // Σ fixed_per_sale (referência)
 }
 
+/** Detalhamento do CMV usado no cálculo da loja (ADR-083 E6).
+ *  source explica de onde veio o custo da mercadoria:
+ *    - 'estimate' → 100% via gross_margin_percent (nenhum item PDV tem avg_cost).
+ *    - 'blended'  → parte real (avg_cost × qtd) + parte estimada (fallback pra
+ *                   os itens sem avg_cost, usando gross_margin_percent).
+ *    - 'real'     → 100% real (todos os itens vendidos têm avg_cost).
+ *  coverage = R$ dos itens com avg_cost / R$ total de itens PDV do mês (0..1).
+ */
+export interface StoreCmvBreakdown {
+  source: "estimate" | "blended" | "real";
+  coverage: number;                     // 0..1
+  cmvReal: number;                      // Σ(qtd × avg_cost) dos itens cobertos
+  revenueCovered: number;               // Σ(valor dos itens cobertos)
+  revenueTotalPdv: number;              // Σ(valor de TODOS os itens PDV do mês)
+}
+
 export interface StoreResult {
   storeId: string;
   storeName: string;
@@ -102,7 +118,9 @@ export interface StoreResult {
   custosVariaveis: StoreVariableCosts;
   custoVariavelTotal: number | null;  // R$ estimado no mês (proporcionais + fixos×vendas)
   grossMarginPercent: number | null;
-  margemBruta: number | null;                  // Faturamento × margem bruta %
+  cmv: number | null;                          // CMV total usado (blended ou estimado)
+  cmvBreakdown: StoreCmvBreakdown | null;      // Detalhamento pra UI (fonte, cobertura, real)
+  margemBruta: number | null;                  // Faturamento − CMV
   margemContribuicao: number | null;           // Margem bruta − custo variável
   margemContribuicaoPercent: number | null;    // MC ÷ Faturamento (efetiva)
   resultado: number | null;
@@ -111,6 +129,7 @@ export interface StoreResult {
   hasMargin: boolean;
   hasCustos: boolean;
   variableCostsWarning: string | null;         // "fixed_per_sale ignorado — sem contagem de vendas" etc.
+  cmvWarning: string | null;                   // "só 40% dos itens vendidos têm custo cadastrado" etc.
   disclaimer: string;
 }
 
@@ -284,6 +303,81 @@ export class RetailStoreCostService {
     return null;
   }
 
+  /**
+   * CMV REAL da loja no mês, derivado dos itens do PDV (`retail_pdv_sale_items`)
+   * casados ao custo médio ponderado do produto no catálogo
+   * (`inventory_items.avg_cost`). Segue a MESMA resolução produto→catálogo do
+   * `/pdv-top-products` (variant.external_ref → variant.sku → product.external_ref
+   * → LIKE-prefix), pra tolerar EAN 13 vs 12 dígitos e código do ERP.
+   *
+   * O `avg_cost` é ORG-WIDE (não por loja) — hoje só é populado por
+   * `POST /api/products/invoice-scan/xml` (NF-e de entrada). Se a operação da
+   * loja for 100% Alterdata/PDV sem cadastro de nota, `avg_cost` fica 0 pra
+   * tudo e o CMV real é 0 — o fallback pro `gross_margin_percent` cobre
+   * (`source: 'estimate'`, `coverage: 0`).
+   *
+   * Retorna sempre um objeto: se a loja não vende via PDV item-a-item no mês
+   * (`revenueTotalPdv = 0`), `source = 'estimate'` e `coverage = 0` — o caller
+   * cai pro cálculo estimado inteiro.
+   */
+  static monthlyCogsBreakdown(orgId: string, storeId: string, period: string): StoreCmvBreakdown {
+    const empty: StoreCmvBreakdown = {
+      source: "estimate",
+      coverage: 0,
+      cmvReal: 0,
+      revenueCovered: 0,
+      revenueTotalPdv: 0,
+    };
+    try {
+      // Mesma resolução do /pdv-top-products (retailops.ts) — tolera EAN 13/12
+      // e código do ERP. LEFT JOIN garante que somamos até os que não casaram.
+      const rows = db
+        .prepare(
+          `SELECT
+             SUM(i.quantidade * COALESCE(inv.avg_cost, 0)) AS cogs,
+             SUM(CASE WHEN inv.avg_cost > 0 THEN i.valor ELSE 0 END) AS revenue_covered,
+             SUM(i.valor) AS revenue_total
+           FROM retail_pdv_sale_items i
+           JOIN retail_stores st
+             ON st.organization_id = i.organization_id
+            AND st.code = i.filial
+            AND st.active = 1
+           LEFT JOIN product_variants pv
+             ON pv.organization_id = i.organization_id
+            AND (pv.external_ref = i.produto OR pv.sku = i.produto)
+           LEFT JOIN products_services ps1
+             ON ps1.id = pv.product_service_id
+           LEFT JOIN products_services ps2
+             ON ps2.organization_id = i.organization_id
+            AND (ps2.external_ref = i.produto OR i.produto LIKE ps2.external_ref || '%')
+           LEFT JOIN inventory_items inv
+             ON inv.organization_id = i.organization_id
+            AND inv.product_service_id = COALESCE(ps1.id, ps2.id)
+            AND (inv.variant_id = pv.id OR inv.variant_id IS NULL)
+          WHERE i.organization_id = ?
+            AND st.id = ?
+            AND substr(i.sale_date, 1, 7) = ?`
+        )
+        .get(orgId, storeId, period) as any;
+      const cmvReal = round2(rows?.cogs);
+      const revenueCovered = round2(rows?.revenue_covered);
+      const revenueTotalPdv = round2(rows?.revenue_total);
+      if (revenueTotalPdv <= 0) return empty;
+      const coverage = revenueCovered / revenueTotalPdv;
+      const source: StoreCmvBreakdown["source"] =
+        coverage <= 0 ? "estimate" : coverage >= 0.999 ? "real" : "blended";
+      return {
+        source,
+        coverage: Math.round(coverage * 10000) / 10000,
+        cmvReal,
+        revenueCovered,
+        revenueTotalPdv,
+      };
+    } catch {
+      return empty;
+    }
+  }
+
   /** Resultado gerencial + ponto de equilíbrio da loja no mês. */
   static storeResult(
     orgId: string,
@@ -319,9 +413,52 @@ export class RetailStoreCostService {
         ? "Sem contagem de vendas no mês — a parte fixa por ticket dos custos variáveis foi ignorada."
         : null;
 
-    const margemBruta = hasMargin
-      ? round2(faturamento * (marginPct as number) / 100)
-      : null;
+    // CMV: prioriza o REAL (via avg_cost dos itens PDV do mês). Onde não há
+    // avg_cost cadastrado (produto que nunca entrou por NF-e), cai no fallback
+    // proporcional pelo `gross_margin_percent`. Sem margem cadastrada, o
+    // fallback não roda — se coverage < 100% e não há margem, o CMV real
+    // parcial não vira estimativa (guardrail).
+    const cmvBd = this.monthlyCogsBreakdown(orgId, storeId, period);
+    let cmvUsado: number | null = null;
+    let cmvBreakdown: StoreCmvBreakdown | null = null;
+    let cmvWarning: string | null = null;
+    let margemBruta: number | null = null;
+
+    const hasPdvItens = cmvBd.revenueTotalPdv > 0;
+    if (hasPdvItens && cmvBd.source === "real") {
+      // 100% via avg_cost — a margem bruta é (faturamento − CMV real).
+      // Se o CMV total do PDV não cobre o faturamento oficial (ex.: houve
+      // fechamento manual sem item detalhado), extrapolamos o CMV/receita
+      // do PDV pro faturamento total (regra de três) — melhor que ignorar
+      // a parte fora do PDV.
+      const ratio = cmvBd.revenueTotalPdv > 0 ? cmvBd.cmvReal / cmvBd.revenueTotalPdv : 0;
+      cmvUsado = round2(faturamento * ratio);
+      cmvBreakdown = cmvBd;
+      margemBruta = round2(faturamento - cmvUsado);
+    } else if (hasPdvItens && cmvBd.source === "blended" && hasMargin) {
+      // Blended: parte real (itens cobertos) + parte estimada (itens sem
+      // avg_cost, aplica gross_margin_percent) + parte fora do PDV (aplica
+      // gross_margin_percent também). A margem bruta sai do faturamento − CMV.
+      const uncoveredPdv = round2(cmvBd.revenueTotalPdv - cmvBd.revenueCovered);
+      const outsidePdv = round2(Math.max(0, faturamento - cmvBd.revenueTotalPdv));
+      const cmvEstimateTail =
+        (uncoveredPdv + outsidePdv) * (1 - (marginPct as number) / 100);
+      cmvUsado = round2(cmvBd.cmvReal + cmvEstimateTail);
+      cmvBreakdown = cmvBd;
+      margemBruta = round2(faturamento - cmvUsado);
+      cmvWarning = `Só ${Math.round(cmvBd.coverage * 100)}% do faturamento PDV tem custo de aquisição cadastrado — o resto usa a margem estimada.`;
+    } else if (hasMargin) {
+      // Fallback puro: estima CMV pela margem bruta informada.
+      margemBruta = round2(faturamento * (marginPct as number) / 100);
+      cmvUsado = round2(faturamento - margemBruta);
+      cmvBreakdown = hasPdvItens ? cmvBd : null;
+      if (hasPdvItens && cmvBd.source === "blended") {
+        cmvWarning = `Só ${Math.round(cmvBd.coverage * 100)}% do faturamento PDV tem custo de aquisição cadastrado — usando a margem estimada em 100%.`;
+      }
+    }
+    // Caso hasMargin=false e não há CMV real utilizável: margemBruta/cmv ficam null
+    // (guardrail já existente do PR anterior).
+
     const margemContribuicao =
       margemBruta !== null ? round2(margemBruta - custoVariavelTotal) : null;
     const margemContribuicaoPercent =
@@ -349,8 +486,10 @@ export class RetailStoreCostService {
       vendasCount,
       custosFixos,
       custosVariaveis,
-      custoVariavelTotal: hasMargin ? custoVariavelTotal : null,
+      custoVariavelTotal: margemBruta !== null ? custoVariavelTotal : null,
       grossMarginPercent: marginPct,
+      cmv: cmvUsado,
+      cmvBreakdown,
       margemBruta,
       margemContribuicao,
       margemContribuicaoPercent,
@@ -360,6 +499,7 @@ export class RetailStoreCostService {
       hasMargin,
       hasCustos: custosFixos.total > 0,
       variableCostsWarning,
+      cmvWarning,
       disclaimer: DISCLAIMER,
     };
   }

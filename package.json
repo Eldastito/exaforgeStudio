@@ -65,6 +65,8 @@
     "test:escola-import": "tsx scripts/test-escola-import.ts",
     "test:seller-commission-cai": "tsx scripts/test-seller-commission-cai.ts",
     "test:retail-store-result": "tsx scripts/test-retail-store-result.ts",
+    "test:retail-store-variable-costs": "tsx scripts/test-retail-store-variable-costs.ts",
+    "test:retail-store-cmv-real": "tsx scripts/test-retail-store-cmv-real.ts",
     "test:clinic-patient": "tsx scripts/test-clinic-patient.ts",
     "test:clinic-agenda": "tsx scripts/test-clinic-agenda.ts",
     "test:clinic-portal": "tsx scripts/test-clinic-portal.ts",

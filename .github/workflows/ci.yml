@@ -161,6 +161,8 @@ jobs:
           - { name: 'retail-scan-barcode', script: 'test:retail-scan-barcode' }
           - { name: 'retail-receiving', script: 'test:retail-receiving' }
           - { name: 'retail-store-result', script: 'test:retail-store-result' }
+          - { name: 'retail-store-variable-costs', script: 'test:retail-store-variable-costs' }
+          - { name: 'retail-store-cmv-real', script: 'test:retail-store-cmv-real' }
           - { name: 'rbac-audit', script: 'test:rbac-audit' }
           - { name: 'jwt-secret-persist', script: 'test:jwt-secret-persist' }
           - { name: 'admin-users', script: 'test:admin-users' }

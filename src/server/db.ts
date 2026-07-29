@@ -5474,6 +5474,28 @@ const initDb = () => {
   // propósito: sem ela, o app mostra faturamento e custos mas NÃO inventa
   // lucro/PE (guardrail — faturamento menos custo fixo, sem o CMV, mentiria).
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN gross_margin_percent REAL`); } catch(e){}
+
+  // Custos VARIÁVEIS por loja (ADR-083 E5) — o que sai proporcional à venda:
+  // taxa de cartão/Pix, imposto sobre venda (Simples), embalagem por pedido,
+  // frete. Duas naturezas por categoria: `percent` do faturamento e
+  // `fixed_per_sale` (R$ por venda/ticket, ex.: embalagem). Sem isso, o
+  // "lucro por loja" ignorava esses ralos e mentia pra cima. Isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_store_variable_costs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        category TEXT NOT NULL,             -- card_fee|pix_fee|tax_sale|packaging|freight|other
+        percent REAL NOT NULL DEFAULT 0,    -- % do faturamento (0..100)
+        fixed_per_sale REAL NOT NULL DEFAULT 0, -- R$ por venda/ticket
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, store_id, category)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_store_var_costs ON retail_store_variable_costs (organization_id, store_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_store_variable_costs', e); }
 };
 
 initDb();

@@ -109,3 +109,54 @@ Usa a **mesma régua** de valor da Ponte de Faturamento (`RetailRevenueBridgeSer
 - Rotas (gated pelo módulo `retail`): `GET/PUT /api/retailops/stores/:id/costs`, `GET /api/retailops/stores/:id/result`, `GET /api/retailops/stores-result` (mutação só owner/admin, via `requireRole`).
 - UI: campos de custo + margem em "Editar loja"; nova aba **"Resultado por loja"** (faturamento, custos, margem, lucro estimado, ponto de equilíbrio; total da rede).
 - Teste: `test:retail-store-result` (31 verificações — upsert por tipo, faturamento por fechamento, guardrail sem margem, lucro/prejuízo/PE com margem, totais da rede, isolamento).
+
+### E5. Custos VARIÁVEIS por loja — cadeia completa da precificação (2026-07)
+
+**Pergunta que originou (Fatia 1 de "fechar a precificação de ponta a ponta"):** o `gross_margin_percent` sozinho subestima o "lucro por loja" — ignora ralos proporcionais à venda (taxa de cartão/Pix, imposto sobre venda, embalagem, frete). O cálculo antigo tratava a margem bruta como se fosse margem líquida; qualquer loja com taxa de maquininha alta ficava com lucro empolado no painel.
+
+Nova tabela `retail_store_variable_costs (organization_id, store_id, category, percent, fixed_per_sale)` com `UNIQUE(organization_id, store_id, category)`. Categorias: `card_fee|pix_fee|tax_sale|packaging|freight|other`. Cada categoria carrega **duas naturezas** simultâneas: `percent` (% do faturamento, ex.: imposto/taxa cartão %) e `fixed_per_sale` (R$ por ticket, ex.: embalagem R$ 1,50/venda). Upsert em lote (`setManyVariable`) da tela "Editar loja"; percent > 100 é clampeado; valor `<= 0` zera a natureza.
+
+**Cadeia completa (E5a):**
+```
+Faturamento     = Σ fechamentos do mês (mesma régua da Ponte de Faturamento)
+Margem BRUTA    = Faturamento × (margem bruta % / 100)
+Custo Variável  = Faturamento × Σ(percent/100) + nº vendas × Σ(fixed_per_sale)
+Margem CONTRIB. = Margem BRUTA − Custo Variável
+MC% efetiva     = Margem CONTRIB. ÷ Faturamento
+Resultado       = Margem CONTRIB. − custos fixos da loja
+Ponto equilíb.  = custos fixos ÷ MC% efetiva
+```
+
+**Contagem de vendas do mês:** vem do PDV (`retail_pdv_sales` join por `filial = retail_stores.code`); fallback pra contagem de fechamentos aprovados quando não há PDV; `null` se nenhuma das duas fontes tem registro no mês. Sem contagem, `fixed_per_sale` é **ignorado** (não estimamos por cima quantas vendas ocorreram) — a UI marca a loja com um "⚠" e exibe aviso agregado. Os `percent` continuam valendo mesmo sem contagem (dependem só do faturamento).
+
+**Compatibilidade E1–E4:** quando nenhum custo variável está cadastrado, `Custo Variável = 0`, `Margem CONTRIB. = Margem BRUTA`, `MC% = grossMarginPercent`, `PE = fixos ÷ (grossMargin/100)` — cálculo idêntico ao antigo. O teste `test:retail-store-result` (31 verificações) segue verde na íntegra.
+
+**Superfície:**
+- Serviço: `RetailStoreCostService` ganha `listVariable`, `setManyVariable`, `monthlySalesCount`; `storeResult`/`allStoresResult` expõem `vendasCount`, `custoVariavelTotal`, `margemBruta`, `margemContribuicao`, `margemContribuicaoPercent`, `variableCostsWarning`, `totals.custosVariaveis`.
+- Rotas (`retail`): `GET/PUT /api/retailops/stores/:id/variable-costs` (mutação só owner/admin).
+- UI: novo bloco "Custos variáveis desta loja" em "Editar loja" (dois inputs por categoria: % e R$/venda). Aba "Resultado por loja" ganha colunas **Margem bruta** e **Custos variáveis** entre Faturamento e Custos fixos; aviso agregado quando a parte por ticket foi ignorada.
+- Teste: `test:retail-store-variable-costs` (33 verificações — upsert por categoria com duas naturezas, clamp 0..100, contagem PDV, fallback fechamentos, cadeia completa numérica, guardrail sem contagem, isolamento).
+
+### E6. CMV REAL por loja — deriva do avg_cost das notas de compra (2026-07)
+
+**Pergunta que originou (Fatia 2 de "fechar a precificação"):** o `gross_margin_percent` do E2 é um **chute** do gestor. Quando a operação já cadastra NF-e de entrada (`POST /api/products/invoice-scan/xml`), o app tem o **custo médio ponderado** dos produtos (`inventory_items.avg_cost`) — dá pra derivar o CMV DE VERDADE via `Σ (unidades vendidas no mês × avg_cost)` dos itens do PDV. Continuar chutando quando dá pra medir é desperdício.
+
+**Método (E6a):** `RetailStoreCostService.monthlyCogsBreakdown(orgId, storeId, period)` cruza `retail_pdv_sale_items` (item a item do PDV, join por `retail_stores.code = filial`) com `inventory_items.avg_cost` do catálogo, usando a **mesma resolução produto→catálogo** do `/pdv-top-products` (`product_variants.external_ref/sku` → `products_services.external_ref` → LIKE-prefix pra tolerar EAN 13 vs 12 dígitos). Retorna `{source, coverage, cmvReal, revenueCovered, revenueTotalPdv}`.
+
+**Fontes de CMV (`source`):**
+- `real` — 100% dos itens vendidos têm `avg_cost` cadastrado (`coverage ≥ 0.999`). Extrapola `cmvReal / revenueTotalPdv` pro faturamento oficial dos fechamentos (regra de três, cobre a parte de fechamento manual sem item detalhado).
+- `blended` — parte coberta. CMV = `cmvReal (parte coberta) + (uncoveredPdv + outsidePdv) × (1 − grossMargin/100)`. Fallback proporcional pro `gross_margin_percent` no que faltou. UI mostra `cmvWarning` com a % de cobertura.
+- `estimate` — nenhum item PDV tem `avg_cost` OU não há PDV item a item. Cai integralmente no fallback do E2 (`grossMargin` × faturamento) — comportamento antigo preservado.
+
+**Guardrail (E6b):** `blended` **só extrapola se `gross_margin_percent` estiver cadastrada** — sem ela, `margemBruta`/`resultado` continuam `NULL` (mesma regra do E2a). Nunca "chutamos" o CMV do que faltou sem consentimento explícito do gestor.
+
+**Nada de tabela nova.** Cálculo on-the-fly usando `idx_retail_pdv_sale_items_prod` e `idx_inventory_org_product` (já existiam).
+
+**Compatibilidade E1–E5:** loja sem PDV item a item → `source='estimate'` → cálculo idêntico ao PR anterior. Testes `test:retail-store-result` (31) e `test:retail-store-variable-costs` (33) seguem verdes.
+
+**Superfície:**
+- Serviço: novo `monthlyCogsBreakdown`; `storeResult` expõe `cmv`, `cmvBreakdown`, `cmvWarning`.
+- UI: aba "Resultado por loja" ganha aviso agregado ("CMV real aplicado em N lojas") e badges por linha (`real`, `87%` para blended); tooltip em "Margem bruta" mostra a fonte usada.
+- Teste: `test:retail-store-cmv-real` (25 verificações — REAL 100%, BLENDED 80% com fallback proporcional, FALLBACK puro, guardrail sem margem, regressão do PR anterior, isolamento).
+
+**Nota operacional:** `AlterdataStockMapper` NÃO popula `avg_cost` hoje — quem só usa PDV via ERP fica em `source='estimate'`. Populando via NF-e de entrada (XML/foto → `invoice-scan`) a loja migra pra `real`/`blended` automaticamente na virada do próximo cálculo.

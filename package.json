@@ -59,6 +59,7 @@
     "test:prospect-learning": "tsx scripts/test-prospect-learning.ts",
     "test:clinic-quickstart": "tsx scripts/test-clinic-quickstart.ts",
     "test:escola-digest": "tsx scripts/test-escola-digest.ts",
+    "test:escola-teacher": "tsx scripts/test-escola-teacher.ts",
     "test:clinic-patient": "tsx scripts/test-clinic-patient.ts",
     "test:clinic-agenda": "tsx scripts/test-clinic-agenda.ts",
     "test:clinic-portal": "tsx scripts/test-clinic-portal.ts",

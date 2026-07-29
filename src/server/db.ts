@@ -2441,6 +2441,62 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar Módulo Escola (ADR-144)', e); }
 
+  // Módulo Escola (ADR-144, Fatia 2) — Agenda do professor (ADAPTA a Agenda
+  // Clínica, ADR-080). O professor é ENTIDADE PRÓPRIA (molde de clinic_professionals,
+  // D2) — desacoplado de `users` (link opcional para portal futuro). Diferente do
+  // aluno, o professor RECEBE mensagens (o "resumo antes da aula"), então tem
+  // telefone próprio + opt-in como PORTA (D6). A grade é recorrente por turma
+  // (weekday+horário) e a confirmação pós-aula alimenta a coordenação (sinal).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS teacher_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        subject TEXT,               -- disciplina principal (ex.: "Matemática")
+        phone TEXT,                 -- WhatsApp do professor (recebe o resumo)
+        color TEXT,                 -- cor na grade
+        user_id TEXT,               -- link OPCIONAL para users (portal futuro)
+        status TEXT DEFAULT 'active', -- active, inactive
+        notify_opt_in INTEGER DEFAULT 0, -- PORTA do resumo antes da aula (opt-in, D6)
+        last_agenda_date TEXT,      -- dedupe por dia SP do resumo antes da aula
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_teacher_profiles_org ON teacher_profiles (organization_id, status);
+
+      CREATE TABLE IF NOT EXISTS class_schedule_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        teacher_id TEXT NOT NULL,           -- -> teacher_profiles.id
+        turma TEXT NOT NULL,                -- classe/série (ex.: "3º ano B")
+        weekday INTEGER NOT NULL,           -- 0=domingo .. 6=sábado (getUTCDay)
+        time_label TEXT,                    -- ex.: "7h30" (livre, sem parsing)
+        subject TEXT,                       -- disciplina/título da aula
+        status TEXT DEFAULT 'active',       -- active, inactive
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_class_schedule_teacher ON class_schedule_items (organization_id, teacher_id, weekday);
+      CREATE INDEX IF NOT EXISTS idx_class_schedule_turma ON class_schedule_items (organization_id, turma, weekday);
+
+      CREATE TABLE IF NOT EXISTS class_confirmations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        schedule_item_id TEXT NOT NULL,     -- -> class_schedule_items.id
+        date TEXT NOT NULL,                 -- YYYY-MM-DD (dia SP da ocorrência)
+        status TEXT NOT NULL,               -- held | not_held
+        note TEXT,
+        confirmed_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, schedule_item_id, date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_class_confirmations_day ON class_confirmations (organization_id, schedule_item_id, date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar Agenda do Professor (ADR-144 Fatia 2)', e); }
+
   // Módulo Clínica (ADR-080, Fase C) — Agenda Clínica. Profissionais como
   // entidade própria (D2, desacoplada de login, link opcional para user) e
   // salas. Duração por consulta (sem teto de 150 min), check-in/início/saída e

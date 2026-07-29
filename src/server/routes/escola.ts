@@ -2,6 +2,8 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { StudentService } from "../StudentService.js";
 import { SchoolDigestService } from "../SchoolDigestService.js";
+import { TeacherService } from "../TeacherService.js";
+import { TeacherDigestService } from "../TeacherDigestService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import db from "../db.js";
 
@@ -98,6 +100,103 @@ router.post("/students/:studentId/digest/send-test", async (req: AuthRequest, re
   try {
     const r = await SchoolDigestService.sendNow(orgId, req.params.studentId, { send });
     if (!r.sent) return res.status(400).json({ error: "Nenhum responsável com consentimento e telefone válido." });
+    res.json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Professores (Fatia 2) ────────────────────────────────────────────────
+router.get("/teachers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(TeacherService.listTeachers(orgId, { q: req.query.q as string, subject: req.query.subject as string }));
+});
+
+router.post("/teachers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TeacherService.createTeacher(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/teachers/:teacherId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TeacherService.getTeacher(orgId, req.params.teacherId)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.put("/teachers/:teacherId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TeacherService.updateTeacher(orgId, req.params.teacherId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Opt-in do resumo antes da aula (a porta do envio ao professor)
+router.put("/teachers/:teacherId/notify", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TeacherService.setNotifyOptIn(orgId, req.params.teacherId, !!(req.body || {}).optIn, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Grade por turma (recorrente) ─────────────────────────────────────────
+router.post("/teachers/:teacherId/schedule", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TeacherService.addScheduleItem(orgId, req.params.teacherId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete("/schedule/:scheduleItemId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(TeacherService.removeScheduleItem(orgId, req.params.scheduleItemId));
+});
+
+router.get("/teachers/:teacherId/schedule", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || "");
+  try { res.json(TeacherService.scheduleForDay(orgId, req.params.teacherId, date)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Grade de uma turma num dia (base p/ visão da coordenação)
+router.get("/turmas/:turma/schedule", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || "");
+  try { res.json(TeacherService.turmaScheduleForDay(orgId, req.params.turma, date)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Confirmação pós-aula (alimenta a coordenação) ────────────────────────
+router.post("/classes/confirm", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TeacherService.confirmClass(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Prévia + envio de teste do resumo antes da aula ──────────────────────
+router.get("/teachers/:teacherId/agenda/preview", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || TeacherDigestService.spParts(new Date()).dateSP);
+  try { res.json(TeacherDigestService.dailyAgenda(orgId, req.params.teacherId, date)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.post("/teachers/:teacherId/agenda/send-test", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+  if (!channel) return res.status(400).json({ error: "Nenhum canal conectado para enviar." });
+  const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+  try {
+    const r = await TeacherDigestService.sendNow(orgId, req.params.teacherId, { send });
+    if (!r.sent) return res.status(400).json({ error: "Professor sem opt-in, telefone válido ou aulas hoje." });
     res.json(r);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

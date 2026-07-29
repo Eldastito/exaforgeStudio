@@ -21,10 +21,16 @@ export type StoreInput = {
   city?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** null/'pdv' = comissão por vendedor vem do PDV normalmente (default). 'manual'
+   * = o PDV dessa loja NÃO individualiza vendedor de verdade (CAI_USUARIO
+   * compartilhado/anômalo) — a fonte de verdade passa a ser o lançamento
+   * manual/foto (retail_seller_sales) feito no fechamento de caixa. */
+  sellerSource?: "pdv" | "manual" | null;
 };
 
-const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, created_at, updated_at`;
+const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, created_at, updated_at`;
 const numOrNull = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+const sellerSourceOrNull = (v: any): string | null => (v === "manual" ? "manual" : null);
 
 export class RetailStoreService {
   static list(orgId: string): any[] {
@@ -64,8 +70,8 @@ export class RetailStoreService {
     this.assertCodeFree(orgId, input.code);
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, orgId, name,
       input.code ? String(input.code).trim() : null,
@@ -76,7 +82,8 @@ export class RetailStoreService {
       input.address ? String(input.address).trim() : null,
       input.city ? String(input.city).trim() : null,
       numOrNull(input.latitude),
-      numOrNull(input.longitude)
+      numOrNull(input.longitude),
+      sellerSourceOrNull(input.sellerSource)
     );
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_CREATED", { name }); } catch { /* noop */ }
     return this.get(orgId, id);
@@ -158,6 +165,7 @@ export class RetailStoreService {
       city: patch.city !== undefined ? (patch.city ? String(patch.city).trim() : null) : undefined,
       latitude: patch.latitude !== undefined ? numOrNull(patch.latitude) : undefined,
       longitude: patch.longitude !== undefined ? numOrNull(patch.longitude) : undefined,
+      seller_source: patch.sellerSource !== undefined ? sellerSourceOrNull(patch.sellerSource) : undefined,
     };
     // Guarda de código único entre lojas ATIVAS: cobre troca de código e
     // REATIVAÇÃO de loja cujo código já está em uso por outra ativa.

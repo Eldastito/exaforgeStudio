@@ -315,13 +315,22 @@ export class RetailCommissionService {
    */
   static pdvSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; matricula: string; sales: number; pecas: number; orders: number; source: string }> {
     try {
+      // Loja com seller_source='manual' (Toulon): o CAI_USUARIO dessa loja não
+      // individualiza vendedor de verdade (código único/compartilhado) — o
+      // gestor decidiu que a fonte de verdade por vendedor é o lançamento
+      // manual/foto (retail_seller_sales), então o PDV dela FICA DE FORA daqui
+      // (senão a mesma venda entraria duas vezes: uma pelo PDV genérico, outra
+      // pelo lançamento manual real). Loja sem loja resolvida (filial não
+      // casada) nunca é excluída — sem saber a loja, não dá pra decidir.
       const rows = db.prepare(
         `SELECT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) AS matricula, rs.name AS mapped_name, rs.user_id AS user_id,
                 SUM(s.valor) AS sales, COALESCE(SUM(s.pecas), 0) AS pecas, COUNT(*) AS orders
            FROM retail_pdv_sales s
            LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)
+           LEFT JOIN retail_stores st ON st.organization_id = s.organization_id AND st.code = s.filial AND st.active = 1
           WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
             AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor, '') <> ''
+            AND COALESCE(st.seller_source, 'pdv') <> 'manual'
           GROUP BY COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) ORDER BY sales DESC`
       ).all(orgId, start, end) as any[];
       return rows.map((r) => ({
@@ -420,6 +429,7 @@ export class RetailCommissionService {
          LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)
         WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
           AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor, '') <> ''
+          AND COALESCE(st.seller_source, 'pdv') <> 'manual'
         GROUP BY st.id, s.filial, COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)`
     ).all(orgId, start, end) as any[];
     for (const r of pdv) add(r.store_id || null, r.store_name, r.user_id || null, String(r.matricula), r.mapped_name || `Matrícula ${r.matricula}`, Number(r.sv) || 0, Number(r.p) || 0, Number(r.n) || 0, "pdv");

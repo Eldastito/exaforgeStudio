@@ -5438,6 +5438,15 @@ const initDb = () => {
   // UMA loja específica (percentual próprio); NULL = vale pra rede toda (default
   // retrocompatível — bases antigas continuam com o mesmo comportamento).
   try { db.exec(`ALTER TABLE retail_commission_rules ADD COLUMN store_id TEXT`); } catch(e){}
+  // Toulon — anomalia do CAI_USUARIO: nem toda loja tem o vendedor individualizado
+  // de verdade no PDV (às vezes é um código único/compartilhado pra loja inteira).
+  // `seller_source` é uma decisão EXPLÍCITA do gestor (não uma inferência
+  // automática por coincidência de data): NULL/'pdv' = comissão por vendedor
+  // dessa loja continua vindo do PDV normalmente (default, retrocompatível);
+  // 'manual' = o PDV dessa loja NÃO entra na atribuição por vendedor (só conta
+  // pro total da loja via fechamento) — a fonte de verdade passa a ser o
+  // lançamento manual/foto (retail_seller_sales) feito no fechamento de caixa.
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN seller_source TEXT`); } catch(e){}
 };
 
 initDb();

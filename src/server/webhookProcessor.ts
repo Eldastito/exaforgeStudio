@@ -26,6 +26,7 @@ import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
 import { GestorCommandService } from "./GestorCommandService.js";
+import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
 import { MaestroService } from "./MaestroService.js";
 import { ProspectExecutionService } from "./ProspectExecutionService.js";
@@ -173,6 +174,17 @@ export async function processIncomingMessage(
     try {
       const g = GestorCommandService.handle(orgId, payload.senderId, payload.text || '');
       if (GestorCommandService.shouldRoute(g)) {
+        // Pergunta livre de negócio ("quanto o Marcos vendeu esse mês?"): o
+        // Controller (síncrono/determinístico) só reconheceu que é uma pergunta
+        // de gestor sem comando fixo — quem responde é o Diretor Executivo IA
+        // (LLM sobre dados reais). Manda um "pensando" primeiro (a IA demora
+        // alguns segundos), igual ao Coordenador faz em "ajuda N".
+        if (g.intent === 'pergunta_negocio') {
+          await MessageProviderService.sendMessage(channel.id, payload.senderId, 'Deixa eu ver isso pra você… 💭');
+          const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '');
+          await MessageProviderService.sendMessage(channel.id, payload.senderId, answer);
+          return;
+        }
         await MessageProviderService.sendMessage(channel.id, payload.senderId, g.reply);
         return;
       }

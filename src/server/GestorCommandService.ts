@@ -23,7 +23,7 @@ import { logAuthEvent } from "./auditLog.js";
 
 const brl = (n: any) => `R$ ${(Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export type GestorIntent = "menu" | "saldo" | "a_receber" | "a_pagar" | "prioridades" | "aprovacoes" | "aprovar" | "rejeitar" | "acao_diferida" | "desconhecido";
+export type GestorIntent = "menu" | "saldo" | "a_receber" | "a_pagar" | "prioridades" | "aprovacoes" | "aprovar" | "rejeitar" | "acao_diferida" | "pergunta_negocio" | "desconhecido";
 
 export interface GestorResult { handled: boolean; reply: string; intent: GestorIntent; denied?: boolean; user?: { id: string; name: string } | null }
 
@@ -34,7 +34,10 @@ export class GestorCommandService {
 
   // Intents que o Controller "possui" no canal interno — o webhook roteia só
   // estes para cá; menu/greeting/desconhecido caem no Coordenador (tarefas).
-  static ROUTED_INTENTS: GestorIntent[] = ["saldo", "a_receber", "a_pagar", "prioridades", "aprovacoes", "aprovar", "rejeitar", "acao_diferida"];
+  // `pergunta_negocio` também é roteada: o webhook, ao ver esse intent, chama o
+  // Diretor Executivo IA (ExecutiveAdvisorService.ask) em vez de usar `reply`
+  // (que vem vazio aqui — quem gera a resposta com LLM é o webhook).
+  static ROUTED_INTENTS: GestorIntent[] = ["saldo", "a_receber", "a_pagar", "prioridades", "aprovacoes", "aprovar", "rejeitar", "acao_diferida", "pergunta_negocio"];
 
   /** O webhook deve entregar esta mensagem ao Controller (em vez do Coordenador)? */
   static shouldRoute(r: GestorResult): boolean {
@@ -180,6 +183,14 @@ export class GestorCommandService {
     }
 
     if (intent === "desconhecido") {
+      // Pergunta livre de NEGÓCIO (não bateu com nenhum comando fixo): só o
+      // GESTOR (dono/admin) tem acesso ao Diretor IA por aqui — mesma régua das
+      // consultas financeiras. Colaborador comum continua caindo no Coordenador
+      // (tarefas), como sempre. `reply` vem vazio de propósito: quem chama o
+      // Diretor IA (async, LLM) é o webhook, não este método (síncrono).
+      if (this.isManager(user)) {
+        return { handled: true, reply: "", intent: "pergunta_negocio", user: { id: user.id, name: user.name } };
+      }
       return { handled: true, reply: `Não entendi. 🤔\n${this.menu(name)}`, intent, user: { id: user.id, name: user.name } };
     }
 

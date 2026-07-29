@@ -114,6 +114,7 @@
     "test:retail-commission-store-seller": "tsx scripts/test-retail-commission-store-seller.ts",
     "test:pdv-seller-diagnosis-by-filial": "tsx scripts/test-pdv-seller-diagnosis-by-filial.ts",
     "test:retail-commission-store-seller-manual-override": "tsx scripts/test-retail-commission-store-seller-manual-override.ts",
+    "test:executive-retail-commission-block": "tsx scripts/test-executive-retail-commission-block.ts",
     "test:retail-ops-signals": "tsx scripts/test-retail-ops-signals.ts",
     "test:order-seller-attribution": "tsx scripts/test-order-seller-attribution.ts",
     "test:storefront-seller-attribution": "tsx scripts/test-storefront-seller-attribution.ts",

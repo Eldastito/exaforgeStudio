@@ -114,6 +114,7 @@ jobs:
           - { name: 'retail-commission-store-seller', script: 'test:retail-commission-store-seller' }
           - { name: 'pdv-seller-diagnosis-by-filial', script: 'test:pdv-seller-diagnosis-by-filial' }
           - { name: 'retail-commission-store-seller-manual-override', script: 'test:retail-commission-store-seller-manual-override' }
+          - { name: 'executive-retail-commission-block', script: 'test:executive-retail-commission-block' }
           - { name: 'retail-seller-sales-manual', script: 'test:retail-seller-sales-manual' }
           - { name: 'retail-erp-seller-sales', script: 'test:retail-erp-seller-sales' }
           - { name: 'retail-transfer', script: 'test:retail-transfer' }

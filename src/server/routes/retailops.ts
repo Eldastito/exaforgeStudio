@@ -554,10 +554,12 @@ router.get("/sellers", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const sellers = db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? ORDER BY name`).all(orgId) as any[];
+  // Chave = CÓDIGO DO VENDEDOR (CAI_USUARIO / `vendedor_codigo`) quando presente,
+  // caindo no operador só quando ausente — casa com a agregação de /pdv-sellers.
   const unmapped = (db.prepare(
-    `SELECT DISTINCT vendedor FROM retail_pdv_sales
-      WHERE organization_id = ? AND COALESCE(vendedor, '') <> ''
-        AND vendedor NOT IN (SELECT matricula FROM retail_sellers WHERE organization_id = ?)
+    `SELECT DISTINCT COALESCE(NULLIF(vendedor_codigo, ''), vendedor) AS vendedor FROM retail_pdv_sales
+      WHERE organization_id = ? AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor, '') <> ''
+        AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor) NOT IN (SELECT matricula FROM retail_sellers WHERE organization_id = ?)
       ORDER BY vendedor`
   ).all(orgId, orgId) as any[]).map((r) => r.vendedor);
   res.json({ sellers, unmapped });
@@ -579,8 +581,12 @@ router.put("/sellers/:matricula", requireRole("owner", "admin"), (req: AuthReque
   res.json(db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
 });
 
-// VENDAS POR VENDEDOR do PDV (Fase 4): agregado do stream VendaMalote —
-// matrícula, loja, total vendido, nº de vendas e peças no período.
+// VENDAS POR VENDEDOR do PDV (Fase 4 / Homologação Toulon ADR-105): agregado do
+// stream VendaMalote. O VENDEDOR da comissão é o CAI_USUARIO (`vendedor_codigo`),
+// NÃO a matrícula do operador de caixa (`vendedor`) — a matrícula é do operador e
+// pode cobrir a rede toda. Usa o código do vendedor quando presente e cai no
+// operador só quando ausente (retrocompatível: bases sem re-sync mantêm o
+// comportamento antigo). O alias `vendedor` continua sendo a CHAVE exibida.
 router.get("/pdv-sellers", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -589,15 +595,16 @@ router.get("/pdv-sellers", (req: AuthRequest, res): any => {
   if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
   try {
     const rows = db.prepare(
-      `SELECT s.vendedor, s.filial, COALESCE(st.name, 'Filial ' || s.filial) AS store_name,
+      `SELECT COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor) AS vendedor, s.filial,
+              COALESCE(st.name, 'Filial ' || s.filial) AS store_name,
               rs.name AS seller_name,
               SUM(s.valor) AS sales, COUNT(*) AS orders, SUM(s.pecas) AS pecas
          FROM retail_pdv_sales s
          LEFT JOIN retail_stores st ON st.organization_id = s.organization_id AND st.code = s.filial AND st.active = 1
-         LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = s.vendedor
+         LEFT JOIN retail_sellers rs ON rs.organization_id = s.organization_id AND rs.matricula = COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)
         WHERE s.organization_id = ? AND s.sale_date BETWEEN ? AND ?
-          AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(s.vendedor, '') <> ''
-        GROUP BY s.vendedor, s.filial
+          AND COALESCE(s.status, 'N') <> 'C' AND COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor, '') <> ''
+        GROUP BY COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor), s.filial
         ORDER BY sales DESC LIMIT 300`
     ).all(orgId, start, end) as any[];
     // Comissão ESTIMADA por vendedor: usa a regra percentual ativa (preferindo

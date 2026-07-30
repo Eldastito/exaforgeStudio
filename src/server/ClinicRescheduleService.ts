@@ -213,6 +213,11 @@ export class ClinicRescheduleService {
     // Cancela original + confirma o novo automaticamente.
     ClinicAgendaService.cancel(orgId, pending.sourceAppointmentId, { cancelledBy: "patient", reason: "rescheduled" }, null as any);
     ClinicAgendaService.confirmByPatient(orgId, created.id, null as any);
+    // Vaga do original: tenta oferecer pra próximo da fila (best-effort, lazy import).
+    Promise.resolve().then(async () => {
+      const { ClinicVacancyService } = await import("./ClinicVacancyService.js");
+      return ClinicVacancyService.tryOfferOnCancel(orgId, pending.sourceAppointmentId);
+    }).catch(() => {});
 
     db.prepare(
       `UPDATE clinical_reschedule_offers SET status='chosen', chosen_index=?, new_appointment_id=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?`

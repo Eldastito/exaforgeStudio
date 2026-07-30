@@ -74,6 +74,7 @@
     "test:clinic-authorization": "tsx scripts/test-clinic-authorization.ts",
     "test:clinic-connection": "tsx scripts/test-clinic-connection.ts",
     "test:clinic-encounter": "tsx scripts/test-clinic-encounter.ts",
+    "test:clinic-documents": "tsx scripts/test-clinic-documents.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

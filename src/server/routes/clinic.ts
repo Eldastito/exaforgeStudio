@@ -6,6 +6,7 @@ import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
 import { ClinicConnectionService } from "../ClinicConnectionService.js";
 import { ClinicEncounterService } from "../ClinicEncounterService.js";
+import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
 import { LgpdService } from "../LgpdService.js";
 
 /**
@@ -184,6 +185,84 @@ router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = Number(req.query.limit) || 50;
   res.json(ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit));
+});
+
+// ── Documentos clínicos: Receita + Atestado (ADR-080 Fase H) ────────────
+// Ciclo draft → issued (imutável após issued). LGPD Art.11 no service.
+// PDF é Buffer (padrão ReportPdfService.generateGovernancePdf).
+
+const docError = (res: any, e: any) => {
+  if (e?.code === "LGPD_CONSENT_REQUIRED" || e?.code === "DOCUMENT_ISSUED") {
+    return res.status(409).json({ error: e.message, code: e.code });
+  }
+  return res.status(400).json({ error: e.message });
+};
+
+// Listagem consolidada dos docs do encounter.
+router.get("/encounters/:id/documents", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicDocumentsService.listByEncounter(orgId, req.params.id));
+});
+
+// Receita
+router.post("/encounters/:id/prescriptions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicDocumentsService.createPrescription(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { docError(res, e); }
+});
+router.patch("/prescriptions/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicDocumentsService.updatePrescription(orgId, req.params.id, actor(req), req.body || {})); }
+  catch (e: any) { docError(res, e); }
+});
+router.post("/prescriptions/:id/issue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicDocumentsService.issuePrescription(orgId, req.params.id, actor(req))); }
+  catch (e: any) { docError(res, e); }
+});
+router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const pdf = await ClinicDocumentsService.renderPrescriptionPdf(orgId, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="receita-${req.params.id}.pdf"`);
+    return res.send(pdf);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Atestado
+router.post("/encounters/:id/certificates", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicDocumentsService.createCertificate(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { docError(res, e); }
+});
+router.patch("/certificates/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicDocumentsService.updateCertificate(orgId, req.params.id, actor(req), req.body || {})); }
+  catch (e: any) { docError(res, e); }
+});
+router.post("/certificates/:id/issue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicDocumentsService.issueCertificate(orgId, req.params.id, actor(req))); }
+  catch (e: any) { docError(res, e); }
+});
+router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const pdf = await ClinicDocumentsService.renderCertificatePdf(orgId, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="atestado-${req.params.id}.pdf"`);
+    return res.send(pdf);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Consentimento LGPD Art.11 do paciente (dados sensíveis / saúde) — o gestor

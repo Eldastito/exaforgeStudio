@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -2134,7 +2134,7 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
   const [contactId, setContactId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<'S' | 'O' | 'A' | 'P' | 'F' | 'D'>('S');
+  const [tab, setTab] = useState<'S' | 'O' | 'A' | 'P' | 'F' | 'D' | 'X'>('S');
   const [needConsent, setNeedConsent] = useState(false);
   const [dirty, setDirty] = useState<{ subjective?: string; objective?: string; assessment?: string; plan?: string; formData?: string }>({});
 
@@ -2278,6 +2278,7 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
                 { k: 'P', label: 'P · Plano' },
                 { k: 'F', label: 'Ficha' },
                 { k: 'D', label: 'Docs' },
+                { k: 'X', label: 'Anexos' },
               ] as const).map(t => (
                 <button key={t.k} onClick={() => setTab(t.k)}
                   className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === t.k ? 'border-indigo-400 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
@@ -2319,6 +2320,9 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
               )}
               {tab === 'D' && (
                 <EncounterDocsPanel encounterId={encounter.id} />
+              )}
+              {tab === 'X' && (
+                <EncounterAttachmentsPanel encounterId={encounter.id} isSigned={isSigned} />
               )}
             </div>
 
@@ -2751,6 +2755,162 @@ function FollowUpBlock({ encounter, onChanged }: { encounter: Encounter; onChang
         )}
       </div>
       <p className="text-[10px] text-zinc-500 mt-1">A recomendação fica na fila de retornos até que o retorno seja agendado. Editável mesmo depois de assinar o prontuário.</p>
+    </div>
+  );
+}
+
+// ---- Anexos ao prontuário (ADR-080 Fase J) --------------------------------
+// Upload multipart via FormData (padrão radar.ts / RadarView.tsx). Download
+// autenticado (Bearer) — imagens viram blob URL pra `<img>`; PDFs abrem em
+// nova aba via blob. Delete só quando encounter=draft (bloqueio no server
+// também: ATTACHMENT_FROZEN → 409).
+
+type AttachmentDto = {
+  id: string; encounterId: string; kind: 'image' | 'pdf' | 'other';
+  mimeType: string; originalFilename: string | null; label: string | null;
+  storageKey: string; sizeBytes: number; uploadedAt: string;
+};
+
+function AttachmentThumb({ att }: { att: AttachmentDto }) {
+  const [url, setUrl] = useState<string>('');
+  useEffect(() => {
+    let mounted = true;
+    let objectUrl = '';
+    (async () => {
+      const r = await apiFetch(`/api/clinic/attachments/${att.id}/download`);
+      if (!r.ok || !mounted) return;
+      const blob = await r.blob();
+      objectUrl = URL.createObjectURL(blob);
+      if (mounted) setUrl(objectUrl);
+    })();
+    return () => { mounted = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [att.id]);
+  if (att.kind !== 'image') return null;
+  if (!url) return <div className="w-24 h-24 rounded bg-zinc-900 border border-zinc-800 animate-pulse" />;
+  return <img src={url} alt={att.label || att.originalFilename || 'anexo'} className="w-24 h-24 rounded object-cover border border-zinc-800" />;
+}
+
+function EncounterAttachmentsPanel({ encounterId, isSigned }: { encounterId: string; isSigned: boolean }) {
+  const [items, setItems] = useState<AttachmentDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [label, setLabel] = useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/encounters/${encounterId}/attachments`);
+      const d = await r.json().catch(() => []);
+      setItems(Array.isArray(d) ? d : []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [encounterId]);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (label.trim()) fd.append('label', label.trim());
+      const r = await apiFetch(`/api/clinic/encounters/${encounterId}/attachments`, { method: 'POST', body: fd });
+      const out = await r.json().catch(() => ({}));
+      if (r.status === 409 && out?.code === 'LGPD_CONSENT_REQUIRED') {
+        toast.error('Consentimento LGPD sensível necessário — abra o prontuário e confirme antes.');
+        return;
+      }
+      if (!r.ok) { toast.error(out?.error || 'Falha no upload.'); return; }
+      toast.success('Anexo adicionado.');
+      setLabel('');
+      if (inputRef.current) inputRef.current.value = '';
+      await load();
+    } finally { setUploading(false); }
+  };
+
+  const remove = async (att: AttachmentDto) => {
+    if (!(await confirmDialog(`Remover "${att.label || att.originalFilename || att.storageKey}"?`))) return;
+    const r = await apiFetch(`/api/clinic/attachments/${att.id}`, { method: 'DELETE' });
+    const out = await r.json().catch(() => ({}));
+    if (r.status === 409 && out?.code === 'ATTACHMENT_FROZEN') {
+      toast.error('Prontuário assinado — anexo não pode ser removido.');
+      return;
+    }
+    if (!r.ok) { toast.error(out?.error || 'Falha ao remover.'); return; }
+    toast.success('Anexo removido.');
+    await load();
+  };
+
+  const openDownload = async (att: AttachmentDto) => {
+    // Novo blob URL a cada clique (evita cache stale e revoga sozinho).
+    const r = await apiFetch(`/api/clinic/attachments/${att.id}/download`);
+    if (!r.ok) { toast.error('Não consegui abrir o anexo.'); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+
+  return (
+    <div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Upload className="w-4 h-4 text-indigo-300" />
+          <span className="text-xs font-medium text-zinc-100">Adicionar anexo</span>
+          <span className="text-[10px] text-zinc-500">PNG, JPG, WEBP ou PDF — até 15 MB</span>
+        </div>
+        <input
+          type="text" value={label} onChange={e => setLabel(e.target.value)}
+          placeholder="Rótulo (opcional — ex.: 'Raio-X pré-tratamento')"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100 mb-2"
+        />
+        <input
+          ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf"
+          onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); }}
+          disabled={uploading}
+          className="text-xs text-zinc-300 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 disabled:opacity-60"
+        />
+        {uploading && <div className="mt-2 text-[11px] text-zinc-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Enviando…</div>}
+      </div>
+
+      {loading && <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</div>}
+      {!loading && items.length === 0 && (
+        <div className="text-xs text-zinc-500 py-4">Nenhum anexo. Adicione fotos de exame, PDFs de laudo, imagens antes/depois — ficam ligados a esta consulta.</div>
+      )}
+
+      <div className="space-y-2">
+        {items.map((att) => (
+          <div key={att.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-2">
+            {att.kind === 'image' ? (
+              <button onClick={() => openDownload(att)} className="shrink-0" title="Abrir em tamanho real">
+                <AttachmentThumb att={att} />
+              </button>
+            ) : (
+              <button onClick={() => openDownload(att)} className="w-24 h-24 shrink-0 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:bg-zinc-800" title="Abrir PDF">
+                <FileText className="w-8 h-8 text-zinc-400" />
+              </button>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-zinc-100 truncate">{att.label || att.originalFilename || att.storageKey}</div>
+              <div className="text-[11px] text-zinc-500">
+                {att.kind === 'image' ? 'Imagem' : att.kind === 'pdf' ? 'PDF' : att.mimeType} · {Math.max(1, Math.round(att.sizeBytes / 1024))} KB · {new Date(att.uploadedAt).toLocaleString('pt-BR')}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => openDownload(att)} className="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1">
+                <Download className="w-3 h-3" /> Abrir
+              </button>
+              {!isSigned && (
+                <button onClick={() => remove(att)} className="text-[11px] px-2 py-1 rounded border border-red-500/30 text-red-300 hover:bg-red-500/10 inline-flex items-center gap-1">
+                  <Trash2 className="w-3 h-3" /> Remover
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {isSigned && items.length > 0 && (
+        <p className="mt-2 text-[10px] text-zinc-500 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Prontuário assinado — anexos existentes ficam imutáveis (novos ainda podem ser adicionados).</p>
+      )}
     </div>
   );
 }

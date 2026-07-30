@@ -2599,6 +2599,11 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+  // Retorno em 1 clique (ADR-080 Fase I): rastreia a série de consultas do
+  // paciente com o mesmo profissional. Aditivo, opcional (consulta avulsa
+  // fica sem parent). Índice pra achar rápido "retornos desta consulta".
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN parent_appointment_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_parent ON appointments (organization_id, parent_appointment_id)`); } catch(e){}
 
   // Registro do conselho (CRM/COREN/CREFITO/…) do profissional — usado no
   // rodapé de receita/atestado. Aditivo, opcional (profissional pode ser
@@ -2659,6 +2664,10 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinical_encounter_history ON clinical_encounter_history (organization_id, encounter_id, created_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_history', e); }
+  // Recomendação de retorno (ADR-080 Fase I) — profissional marca "voltar em
+  // X dias" no plano; a secretaria confirma o agendamento depois. Aditivo,
+  // opcional (encounter sem recomendação = alta / caso encerrado).
+  try { db.exec(`ALTER TABLE clinical_encounters ADD COLUMN follow_up_recommended_days INTEGER`); } catch(e){}
 
   // Receita + Atestado (ADR-080 Fase H) — documentos clínicos emitidos a partir
   // de um encounter. Ciclo draft → issued (imutável após issued). Snapshots

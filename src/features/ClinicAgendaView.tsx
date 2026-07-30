@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2 } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -375,6 +375,9 @@ export function ClinicAgendaView() {
           ))}
         </div>
       )}
+
+      {/* Fila de retornos pendentes (ADR-080 Fase I) */}
+      <FollowUpQueuePanel />
 
       {/* Painel colapsável — Profissionais e salas */}
       <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/50 print:hidden">
@@ -2121,6 +2124,7 @@ type Encounter = {
   status: 'draft' | 'signed';
   subjective: string | null; objective: string | null; assessment: string | null; plan: string | null;
   formData: any | null;
+  followUpRecommendedDays: number | null;
   signedBy: string | null; signedAt: string | null;
   createdAt: string; updatedAt: string;
 };
@@ -2317,6 +2321,9 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
                 <EncounterDocsPanel encounterId={encounter.id} />
               )}
             </div>
+
+            {/* Retorno em 1 clique (ADR-080 Fase I) — não bloqueado por signed. */}
+            <FollowUpBlock encounter={encounter} onChanged={(next) => setEncounter(next)} />
 
             <div className="mt-4 flex items-center justify-between gap-2">
               <div className="text-[11px] text-zinc-500">
@@ -2658,6 +2665,172 @@ function NewCertificateModal({ encounterId, onClose, onCreated }: { encounterId:
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- Retorno em 1 clique (ADR-080 Fase I) ---------------------------------
+// Bloco embutido no rodapé do EncounterModal: profissional marca "voltar em
+// X dias" (intenção clínica, permanece editável mesmo pós-signed); botão
+// "Agendar retorno" cria appointment novo herdando profissional/duração e
+// vira parent-child rastreado por parent_appointment_id.
+
+function FollowUpBlock({ encounter, onChanged }: { encounter: Encounter; onChanged: (next: Encounter) => void }) {
+  const [days, setDays] = useState<string>(encounter.followUpRecommendedDays ? String(encounter.followUpRecommendedDays) : '');
+  const [busy, setBusy] = useState<'save' | 'schedule' | ''>('');
+  const [scheduledId, setScheduledId] = useState<string>('');
+
+  useEffect(() => { setDays(encounter.followUpRecommendedDays ? String(encounter.followUpRecommendedDays) : ''); }, [encounter.followUpRecommendedDays]);
+
+  const saveRec = async () => {
+    setBusy('save');
+    try {
+      const parsed = days.trim() === '' ? null : Math.floor(Number(days));
+      if (parsed !== null && (!Number.isFinite(parsed) || parsed < 1)) { toast.error('Informe ao menos 1 dia (ou deixe em branco pra limpar).'); return; }
+      const r = await apiFetch(`/api/clinic/encounters/${encounter.id}/follow-up-recommendation`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: parsed }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(out?.error || 'Falha ao salvar recomendação.'); return; }
+      onChanged(out);
+      toast.success(parsed ? `Retorno recomendado em ${parsed} dias.` : 'Recomendação removida.');
+    } finally { setBusy(''); }
+  };
+
+  const schedule = async () => {
+    const parsed = days.trim() === '' ? (encounter.followUpRecommendedDays || 0) : Math.floor(Number(days));
+    if (!parsed || parsed < 1) { toast.error('Defina em quantos dias primeiro.'); return; }
+    if (!(await confirmDialog(`Agendar retorno em ${parsed} dias no mesmo profissional?`))) return;
+    setBusy('schedule');
+    try {
+      const r = await apiFetch(`/api/clinic/appointments/${encounter.appointmentId}/follow-up`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inDays: parsed }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (r.status === 409 && out?.code === 'CONFLICT') {
+        const forceIt = await confirmDialog(`Conflito de horário: ${(out.conflicts || []).map((c: any) => c.title || 'agendamento').join(', ')}. Agendar mesmo assim?`);
+        if (!forceIt) return;
+        const r2 = await apiFetch(`/api/clinic/appointments/${encounter.appointmentId}/follow-up`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inDays: parsed, force: true }),
+        });
+        const out2 = await r2.json().catch(() => ({}));
+        if (!r2.ok) { toast.error(out2?.error || 'Falha ao agendar retorno.'); return; }
+        setScheduledId(out2.id);
+        toast.success('Retorno agendado (com override de conflito).');
+        return;
+      }
+      if (!r.ok) { toast.error(out?.error || 'Falha ao agendar retorno.'); return; }
+      setScheduledId(out.id);
+      const dt = new Date(out.scheduled_start).toLocaleString('pt-BR');
+      toast.success(`Retorno agendado para ${dt}.`);
+    } finally { setBusy(''); }
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <RotateCcw className="w-4 h-4 text-indigo-300" />
+        <span className="text-xs font-medium text-zinc-100">Retorno</span>
+        <span className="text-[10px] text-zinc-500">Recomendação clínica + agendamento em 1 clique</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-[11px] text-zinc-400">Voltar em</label>
+        <input type="number" min={1} value={days} onChange={e => setDays(e.target.value)}
+          className="w-16 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" placeholder="15" />
+        <span className="text-[11px] text-zinc-400">dias</span>
+        <button onClick={saveRec} disabled={busy !== ''} className="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1 disabled:opacity-60">
+          {busy === 'save' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar
+        </button>
+        <button onClick={schedule} disabled={busy !== '' || !!scheduledId} className="text-[11px] px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+          {busy === 'schedule' ? <Loader2 className="w-3 h-3 animate-spin" /> : <CalendarPlus className="w-3 h-3" />} Agendar retorno
+        </button>
+        {scheduledId && (
+          <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1">
+            <Check className="w-3 h-3" /> retorno agendado
+          </span>
+        )}
+      </div>
+      <p className="text-[10px] text-zinc-500 mt-1">A recomendação fica na fila de retornos até que o retorno seja agendado. Editável mesmo depois de assinar o prontuário.</p>
+    </div>
+  );
+}
+
+// ---- Fila de retornos pendentes (painel colapsável na Agenda) --------------
+function FollowUpQueuePanel() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/clinic/follow-up-queue');
+      const d = await r.json().catch(() => []);
+      setItems(Array.isArray(d) ? d : []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { if (open) load(); }, [open]);
+
+  const schedule = async (item: any) => {
+    if (!(await confirmDialog(`Agendar retorno de ${item.patientName} em ${item.recommendedDays} dias?`))) return;
+    setBusyId(item.encounterId);
+    try {
+      const r = await apiFetch(`/api/clinic/appointments/${item.sourceAppointmentId}/follow-up`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inDays: item.recommendedDays }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (r.status === 409 && out?.code === 'CONFLICT') {
+        const forceIt = await confirmDialog(`Conflito: ${(out.conflicts || []).map((c: any) => c.title || 'agendamento').join(', ')}. Agendar mesmo assim?`);
+        if (!forceIt) return;
+        const r2 = await apiFetch(`/api/clinic/appointments/${item.sourceAppointmentId}/follow-up`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inDays: item.recommendedDays, force: true }),
+        });
+        if (!r2.ok) { const o = await r2.json().catch(() => ({})); toast.error(o?.error || 'Falha ao agendar.'); return; }
+        toast.success('Retorno agendado (com override).');
+      } else if (!r.ok) {
+        toast.error(out?.error || 'Falha ao agendar retorno.');
+        return;
+      } else {
+        toast.success('Retorno agendado.');
+      }
+      await load();
+    } finally { setBusyId(''); }
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 print:hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-5 py-3 text-left">
+        <span className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+          <RotateCcw className="w-4 h-4 text-indigo-300" /> Fila de retornos
+          {items.length > 0 && (
+            <span className="text-[10px] rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5">{items.length}</span>
+          )}
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+      </button>
+      {open && (
+        <div className="px-5 pb-4 border-t border-zinc-800 pt-3">
+          {loading && <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</div>}
+          {!loading && items.length === 0 && (
+            <div className="text-xs text-zinc-500">Nenhum retorno pendente na fila. Quando o profissional marcar "voltar em X dias" no prontuário, o paciente aparece aqui pra confirmação.</div>
+          )}
+          {!loading && items.map((it) => (
+            <div key={it.encounterId} className="flex items-center justify-between gap-3 py-2 border-b border-zinc-800 last:border-b-0">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-zinc-100 truncate">{it.patientName}</div>
+                <div className="text-[11px] text-zinc-500">
+                  {it.professionalName ? `com ${it.professionalName} · ` : ''}
+                  sugerido para {new Date(it.suggestedAt).toLocaleDateString('pt-BR')} ({it.recommendedDays} dias)
+                </div>
+              </div>
+              <button onClick={() => schedule(it)} disabled={busyId === it.encounterId} className="text-[11px] px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                {busyId === it.encounterId ? <Loader2 className="w-3 h-3 animate-spin" /> : <CalendarPlus className="w-3 h-3" />} Agendar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

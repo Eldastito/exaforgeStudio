@@ -121,6 +121,33 @@ router.post("/appointments/:id/extend", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(e.code === "CONFLICT" ? 409 : 400).json({ error: e.message, conflicts: e.conflicts }); }
 });
 
+// Retorno em 1 clique + fila (ADR-080 Fase I).
+router.post("/appointments/:id/follow-up", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const created = ClinicAgendaService.scheduleFollowUp(orgId, req.params.id, req.body || {}, actor(req));
+    res.json(created);
+  } catch (e: any) {
+    res.status(e.code === "CONFLICT" ? 409 : 400).json({ error: e.message, conflicts: e.conflicts });
+  }
+});
+
+router.get("/follow-up-queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = Number(req.query.limit) || 100;
+  res.json(ClinicAgendaService.followUpQueue(orgId, limit));
+});
+
+router.patch("/encounters/:id/follow-up-recommendation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = req.body?.days === null || req.body?.days === undefined ? null : Number(req.body.days);
+  try { res.json(ClinicEncounterService.setFollowUpRecommendation(orgId, req.params.id, actor(req), days)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.post("/appointments/:id/continuation", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

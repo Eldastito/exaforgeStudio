@@ -2588,6 +2588,32 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinic_rooms_org ON clinic_rooms (organization_id, active);
     `);
   } catch(e){ console.error('[DB] Falha ao criar profissionais/salas (Clínica)', e); }
+
+  // Bloqueio de agenda por indisponibilidade do profissional (ADR-080 Fase 22).
+  // Férias / congresso / atestado / outro. `createAppointment` do
+  // ClinicAgendaService recusa slot que se sobrepõe (a menos que `force:true`,
+  // padrão dos demais gates). Timezone: as datas são armazenadas ISO no fuso
+  // que a UI enviar; comparação é lexicográfica (ISO 8601 ordena
+  // corretamente). Nunca APAGA appointments existentes — se o profissional
+  // marca ausência com consultas já agendadas, aquelas ficam (gestor decide
+  // cancelar/reagendar manualmente); só bloqueia CRIAÇÃO nova.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_professional_absences (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        starts_at DATETIME NOT NULL,
+        ends_at DATETIME NOT NULL,
+        reason TEXT NOT NULL,       -- vacation | conference | sick_leave | other
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_absences_prof ON clinic_professional_absences (organization_id, professional_id, starts_at, ends_at);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_professional_absences', e); }
+
   // Colunas clínicas em appointments (aditivas). professional_id substitui o
   // assigned_to morto; snapshots preservam nome mesmo se o cadastro mudar.
   try { db.exec(`ALTER TABLE appointments ADD COLUMN professional_id TEXT`); } catch(e){}

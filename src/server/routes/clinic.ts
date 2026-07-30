@@ -17,6 +17,7 @@ import { ClinicMetricsService } from "../ClinicMetricsService.js";
 import { ClinicVacancyService } from "../ClinicVacancyService.js";
 import { ClinicRetentionService } from "../ClinicRetentionService.js";
 import { ClinicMonthlyReportService } from "../ClinicMonthlyReportService.js";
+import { ClinicPatientTimelineService, TimelineKind } from "../ClinicPatientTimelineService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -299,6 +300,30 @@ router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {
   const limit = Number(req.query.limit) || 50;
   try { res.json(ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit)); }
   catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Timeline unificada do paciente (ADR-080 Fase 21). Cronologia única
+// misturando consultas, prontuário, addendums, receitas, atestados, anexos
+// e envios. LGPD Art.11 no service (403 em revoke). Query params opcionais:
+// ?from=ISO&to=ISO&limit=100&kinds=encounter_signed,prescription_issued
+router.get("/patients/:contactId/timeline", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const kindsParam = typeof req.query.kinds === "string" ? req.query.kinds : "";
+  const kinds = kindsParam
+    ? (kindsParam.split(",").map((s) => s.trim()).filter(Boolean) as TimelineKind[])
+    : undefined;
+  try {
+    res.json(ClinicPatientTimelineService.getTimeline(orgId, req.params.contactId, {
+      from: typeof req.query.from === "string" ? req.query.from : undefined,
+      to: typeof req.query.to === "string" ? req.query.to : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      kinds,
+    }));
+  } catch (e: any) {
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }

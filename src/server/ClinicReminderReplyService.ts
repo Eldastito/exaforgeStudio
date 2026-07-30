@@ -20,11 +20,13 @@
  */
 import db from "./db.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
+import { ClinicRescheduleService } from "./ClinicRescheduleService.js";
 
 const REPLY_WINDOW_HOURS = 26;
 
 const YES_PATTERNS = /^(?:sim|s|confirmo|confirma|confirmar|confirmado|ok|okay|okei|okei|k|yes|y|👍)$/;
-const NO_PATTERNS = /^(?:nao|n|não|nn|no|cancela|cancelar|cancelo|remarcar|remarca|nope|👎)$/;
+const NO_PATTERNS = /^(?:nao|n|não|nn|no|cancela|cancelar|cancelo|nope|👎)$/;
+const RESCHEDULE_PATTERNS = /^(?:remarcar|remarca|remarco|reagendar|reagenda|reagendo|mudar|mudar horario|mudar data|outro horario|outra data|outro dia)$/;
 
 function normalize(s: string): string {
   return String(s || "")
@@ -36,7 +38,7 @@ function normalize(s: string): string {
     .replace(/^[.!?,;:"'()\-—–…\s]+/g, ""); // pontuação no início
 }
 
-export type ReplyAction = "confirmed" | "cancelled" | null;
+export type ReplyAction = "confirmed" | "cancelled" | "reschedule_offered" | "rescheduled" | "reschedule_abandoned" | null;
 
 export interface ReplyResult {
   handled: boolean;
@@ -54,6 +56,7 @@ export class ClinicReminderReplyService {
     if (!norm) return null;
     if (YES_PATTERNS.test(norm)) return "confirmed";
     if (NO_PATTERNS.test(norm)) return "cancelled";
+    if (RESCHEDULE_PATTERNS.test(norm)) return "reschedule_offered";
     return null;
   }
 
@@ -83,6 +86,24 @@ export class ClinicReminderReplyService {
    * segue com o fluxo normal (IA, tickets, etc).
    */
   static tryHandle(orgId: string, contactId: string, text: string, nowMs = Date.now()): ReplyResult {
+    // (0) Offer de reagendamento pendente? Tenta 1/2/3/X primeiro — o número
+    // isolado só faz sentido quando há offer ativa, então prioriza sobre
+    // qualquer outra interpretação.
+    const pendingOffer = ClinicRescheduleService.pendingOffer(orgId, contactId);
+    if (pendingOffer) {
+      const choice = ClinicRescheduleService.handleChoice(orgId, contactId, text);
+      if (choice) {
+        return {
+          handled: true,
+          action: choice.newAppointmentId ? "rescheduled" : "reschedule_abandoned",
+          appointmentId: choice.newAppointmentId || pendingOffer.sourceAppointmentId,
+          reply: choice.message,
+        };
+      }
+      // Se não bateu como escolha (texto qualquer), cai no fluxo normal —
+      // permite paciente responder SIM/NÃO mesmo com offer pendente.
+    }
+
     const intent = this.parseIntent(text);
     if (!intent) return NOT_HANDLED;
     const pending = this.findPendingReminder(orgId, contactId, nowMs);
@@ -103,6 +124,17 @@ export class ClinicReminderReplyService {
       }
       ClinicAgendaService.confirmByPatient(orgId, apt.id, null);
       return { handled: true, action: "confirmed", appointmentId: apt.id, reply: "Perfeito! Consulta confirmada. Até logo!" };
+    }
+
+    if (intent === "reschedule_offered") {
+      if (apt.status === "cancelled") {
+        return { handled: true, action: null, appointmentId: apt.id, reply: "Sua consulta está cancelada. Se quiser marcar uma nova, entre em contato com a recepção." };
+      }
+      const offered = ClinicRescheduleService.createOffer(orgId, apt.id, contactId);
+      if (!offered) {
+        return { handled: true, action: null, appointmentId: apt.id, reply: "Não encontrei horários livres nos próximos dias — entre em contato com a recepção para remarcar." };
+      }
+      return { handled: true, action: "reschedule_offered", appointmentId: apt.id, reply: offered.message };
     }
 
     // intent === "cancelled"

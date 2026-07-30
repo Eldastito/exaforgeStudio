@@ -2599,6 +2599,30 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+  // Reagendamento em 1 clique via WhatsApp (ADR-080 Fase P). Guarda os
+  // slots oferecidos ao paciente entre "REMARCAR" e "1/2/3". Sem esta row,
+  // a segunda mensagem do paciente (o número) não teria contexto — o parser
+  // de intent não sabe distinguir "1" de resposta genérica. `expires_at` de
+  // curto prazo (ex.: 30 min) evita que "1" fique válido por horas.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_reschedule_offers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        source_appointment_id TEXT NOT NULL,
+        offered_slots_json TEXT NOT NULL,  -- [{startISO, durationMinutes}, ...]
+        status TEXT NOT NULL DEFAULT 'pending', -- pending | chosen | expired | abandoned
+        chosen_index INTEGER,
+        new_appointment_id TEXT,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_reschedule_pending ON clinical_reschedule_offers (organization_id, contact_id, status, expires_at);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_reschedule_offers', e); }
+
   // Confirmação pelo paciente (ADR-080 Fase N). `patient_confirmed_at` é
   // setado quando o paciente responde SIM ao lembrete; `cancelled_at`/`_by`/
   // `_reason` rastreiam quem cancelou (patient|staff|system) e por que. Sem

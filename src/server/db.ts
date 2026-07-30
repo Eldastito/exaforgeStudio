@@ -2937,6 +2937,16 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN signed_with_pin INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN signed_with_pin INTEGER DEFAULT 0`); } catch(e){}
 
+  // Assinatura visível no PDF (ADR-080 Fase 16). Hash SHA-256 do conteúdo
+  // canônico congelado no momento da emissão + timestamp em ISO. Aparecem
+  // no rodapé do PDF pra permitir que fiscalização/paciente confira a
+  // integridade sem depender do backend. Timestamp separado do issued_at
+  // pra permitir renderização em qualquer timezone sem reler o DB.
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN signature_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN signature_timestamp DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN signature_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN signature_timestamp DATETIME`); } catch(e){}
+
   // Módulo Clínica (ADR-080, Fase D) — Portal do Profissional por link seguro.
   // Molde do Radar público: token aleatório forte, guardado só como hash
   // SHA-256, com expiração. O link dá acesso SOMENTE à agenda do próprio

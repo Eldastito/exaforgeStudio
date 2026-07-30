@@ -50,6 +50,9 @@ export interface Prescription {
   status: DocStatus;
   issuedBy: string | null;
   issuedAt: string | null;
+  signedWithPin: boolean;
+  signatureHash: string | null;
+  signatureTimestamp: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -73,6 +76,9 @@ export interface Certificate {
   status: DocStatus;
   issuedBy: string | null;
   issuedAt: string | null;
+  signedWithPin: boolean;
+  signatureHash: string | null;
+  signatureTimestamp: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -147,6 +153,9 @@ function hydratePrescription(r: any): Prescription | null {
     status: r.status,
     issuedBy: r.issued_by ?? null,
     issuedAt: r.issued_at ?? null,
+    signedWithPin: Number(r.signed_with_pin || 0) === 1,
+    signatureHash: r.signature_hash ?? null,
+    signatureTimestamp: r.signature_timestamp ?? null,
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -173,6 +182,9 @@ function hydrateCertificate(r: any): Certificate | null {
     status: r.status,
     issuedBy: r.issued_by ?? null,
     issuedAt: r.issued_at ?? null,
+    signedWithPin: Number(r.signed_with_pin || 0) === 1,
+    signatureHash: r.signature_hash ?? null,
+    signatureTimestamp: r.signature_timestamp ?? null,
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -223,6 +235,41 @@ function drawSignatureBlock(doc: any, name: string | null, council: string | nul
     const reg = council ? `${council} ${registration}` : registration;
     doc.font("Helvetica").fontSize(10).fillColor("#374151").text(reg, { align: "center" });
   }
+}
+
+// Rodapé de assinatura eletrônica (ADR-080 Fase 16). Só é renderizado
+// quando o documento foi emitido com PIN — a validade legal vem do PIN
+// (Fase T); o rodapé é a PROVA VISUAL de que ele foi usado. Hash cobre
+// o conteúdo canônico (paciente + corpo + profissional + timestamp) —
+// qualquer alteração posterior no PDF impresso quebra a conferência.
+function longTimestampBR(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+function drawElectronicSignatureFooter(doc: any, hash: string | null, timestamp: string | null) {
+  if (!hash || !timestamp) return;
+  doc.moveDown(1.2);
+  const y = doc.y, startX = 48, endX = 547;
+  doc.moveTo(startX, y).lineTo(endX, y).strokeColor("#9ca3af").lineWidth(0.4).dash(2, { space: 2 }).stroke().undash();
+  doc.moveDown(0.4);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#0f766e")
+    .text("Assinado eletronicamente com PIN pessoal (ADR-080 · LGPD Art. 11)", { align: "center" });
+  doc.moveDown(0.15);
+  doc.font("Helvetica").fontSize(7.5).fillColor("#374151")
+    .text(`Emitido em: ${longTimestampBR(timestamp)}`, { align: "center" });
+  doc.moveDown(0.1);
+  doc.font("Courier").fontSize(7).fillColor("#4b5563")
+    .text(`Hash SHA-256: ${hash}`, { align: "center" });
+}
+
+// Hash do conteúdo canônico. Reprodução determinística: mesma entrada,
+// mesmo hash — permite conferência offline. Timestamp entra dentro pra
+// que dois docs idênticos emitidos em momentos distintos gerem hashes
+// distintos (senão colidem).
+function computeDocumentHash(payload: object): string {
+  const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+  return createHash("sha256").update(canonical).digest("hex");
 }
 
 export class ClinicDocumentsService {
@@ -304,6 +351,27 @@ export class ClinicDocumentsService {
     const signedWithPin = verifyPin(orgId, before.professionalId, opts.pin);
 
     const prof = loadProfessional(orgId, before.professionalId);
+    const nameSnap = prof?.name || before.professionalNameSnapshot || null;
+    const regSnap = prof?.registration_number || null;
+    const councilSnap = prof?.council || null;
+    // Hash+timestamp da assinatura eletrônica (ADR-080 Fase 16) — só gera
+    // quando o PIN foi realmente conferido; sem PIN, ficam null e o rodapé
+    // do PDF não é renderizado (mantém compat com clínicas sem PIN).
+    const signedAt = new Date().toISOString();
+    const signatureHash = signedWithPin ? computeDocumentHash({
+      kind: "prescription",
+      id,
+      orgId,
+      contactId: before.contactId,
+      professionalName: nameSnap,
+      professionalRegistration: regSnap,
+      professionalCouncil: councilSnap,
+      items: before.items,
+      headerNotes: before.headerNotes,
+      repeatsAllowed: before.repeatsAllowed,
+      validUntil: before.validUntil,
+      signedAt,
+    }) : null;
     db.prepare(
       `UPDATE clinical_prescriptions
          SET status = 'issued',
@@ -312,17 +380,19 @@ export class ClinicDocumentsService {
              professional_registration_snapshot = ?,
              professional_council_snapshot = ?,
              signed_with_pin = ?,
+             signature_hash = ?,
+             signature_timestamp = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     ).run(
       actorId,
-      prof?.name || before.professionalNameSnapshot || null,
-      prof?.registration_number || null,
-      prof?.council || null,
+      nameSnap, regSnap, councilSnap,
       signedWithPin ? 1 : 0,
+      signatureHash,
+      signedWithPin ? signedAt : null,
       id, orgId
     );
-    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", { prescriptionId: id, signedWithPin });
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", { prescriptionId: id, signedWithPin, signatureHash });
     return this.getPrescription(orgId, id)!;
   }
 
@@ -411,6 +481,25 @@ export class ClinicDocumentsService {
     const signedWithPin = verifyPin(orgId, before.professionalId, opts.pin);
 
     const prof = loadProfessional(orgId, before.professionalId);
+    const nameSnap = prof?.name || before.professionalNameSnapshot || null;
+    const regSnap = prof?.registration_number || null;
+    const councilSnap = prof?.council || null;
+    const signedAt = new Date().toISOString();
+    const signatureHash = signedWithPin ? computeDocumentHash({
+      kind: "certificate",
+      id,
+      orgId,
+      contactId: before.contactId,
+      professionalName: nameSnap,
+      professionalRegistration: regSnap,
+      professionalCouncil: councilSnap,
+      cid: before.cid,
+      cidDescription: before.cidDescription,
+      days: before.days,
+      purpose: before.purpose,
+      notes: before.notes,
+      signedAt,
+    }) : null;
     db.prepare(
       `UPDATE clinical_medical_certificates
          SET status = 'issued',
@@ -419,17 +508,19 @@ export class ClinicDocumentsService {
              professional_registration_snapshot = ?,
              professional_council_snapshot = ?,
              signed_with_pin = ?,
+             signature_hash = ?,
+             signature_timestamp = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     ).run(
       actorId,
-      prof?.name || before.professionalNameSnapshot || null,
-      prof?.registration_number || null,
-      prof?.council || null,
+      nameSnap, regSnap, councilSnap,
       signedWithPin ? 1 : 0,
+      signatureHash,
+      signedWithPin ? signedAt : null,
       id, orgId
     );
-    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_CERTIFICATE_ISSUED", { certificateId: id, signedWithPin });
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_CERTIFICATE_ISSUED", { certificateId: id, signedWithPin, signatureHash });
     return this.getCertificate(orgId, id)!;
   }
 
@@ -504,6 +595,7 @@ export class ClinicDocumentsService {
         if (footerBits.length) doc.font("Helvetica-Oblique").fontSize(9).fillColor("#6b7280").text(footerBits.join(" "));
 
         drawSignatureBlock(doc, rx.professionalNameSnapshot, rx.professionalCouncilSnapshot, rx.professionalRegistrationSnapshot);
+        drawElectronicSignatureFooter(doc, rx.signatureHash, rx.signatureTimestamp);
         doc.end();
       } catch (e) { reject(e as any); }
     });
@@ -554,6 +646,7 @@ export class ClinicDocumentsService {
         }
 
         drawSignatureBlock(doc, cert.professionalNameSnapshot, cert.professionalCouncilSnapshot, cert.professionalRegistrationSnapshot);
+        drawElectronicSignatureFooter(doc, cert.signatureHash, cert.signatureTimestamp);
         doc.end();
       } catch (e) { reject(e as any); }
     });

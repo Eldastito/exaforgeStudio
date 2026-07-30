@@ -10,6 +10,7 @@ import { ClinicEncounterService } from "../ClinicEncounterService.js";
 import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
 import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttachmentService.js";
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
+import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
 import { LgpdService } from "../LgpdService.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -388,6 +389,16 @@ router.get("/attachments/:id/download", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
+// Compartilhar/desmarcar anexo com o Portal do Paciente (ADR-080 Fase L).
+router.patch("/attachments/:id/share", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const share = !!req.body?.share;
+    res.json(ClinicAttachmentService.setSharedWithPatient(orgId, req.params.id, share, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.delete("/attachments/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -398,6 +409,36 @@ router.delete("/attachments/:id", (req: AuthRequest, res): any => {
     if (e.code === "ATTACHMENT_FROZEN" || e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
+});
+
+// ── Portal do Paciente — gestão (ADR-080 Fase L) ────────────────────────
+// Só gera token se LGPD sensível + comunicações concedidos. Link é o
+// que o gestor manda pro paciente (WhatsApp/e-mail); a rota pública que
+// consome o token vive em `clinicPublic.ts`.
+router.post("/patients/:contactId/portal-tokens", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const t = ClinicPatientPortalService.generateToken(orgId, req.params.contactId, actor(req), { ttlDays: req.body?.ttlDays });
+    res.json(t);
+  } catch (e: any) {
+    if (e.code === "LGPD_CONSENT_REQUIRED" || e.code === "LGPD_COMMS_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.get("/patients/:contactId/portal-tokens", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicPatientPortalService.listTokens(orgId, req.params.contactId));
+});
+
+router.delete("/patients/portal-tokens/:tokenId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ClinicPatientPortalService.revokeToken(orgId, req.params.tokenId, actor(req));
+  if (!ok) return res.status(404).json({ error: "Token não encontrado." });
+  res.json({ ok: true });
 });
 
 // Consentimento LGPD Art.11 do paciente (dados sensíveis / saúde) — o gestor

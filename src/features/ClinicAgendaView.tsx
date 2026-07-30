@@ -2829,6 +2829,7 @@ type AttachmentDto = {
   id: string; encounterId: string; kind: 'image' | 'pdf' | 'other';
   mimeType: string; originalFilename: string | null; label: string | null;
   storageKey: string; sizeBytes: number; uploadedAt: string;
+  shareWithPatient: boolean;
 };
 
 function AttachmentThumb({ att }: { att: AttachmentDto }) {
@@ -2885,6 +2886,20 @@ function EncounterAttachmentsPanel({ encounterId, isSigned }: { encounterId: str
       if (inputRef.current) inputRef.current.value = '';
       await load();
     } finally { setUploading(false); }
+  };
+
+  const toggleShare = async (att: AttachmentDto, share: boolean) => {
+    // Otimista: já reflete no UI, reverte em caso de erro.
+    setItems(arr => arr.map(a => a.id === att.id ? { ...a, shareWithPatient: share } : a));
+    const r = await apiFetch(`/api/clinic/attachments/${att.id}/share`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ share }),
+    });
+    if (!r.ok) {
+      toast.error('Falha ao atualizar visibilidade no portal.');
+      setItems(arr => arr.map(a => a.id === att.id ? { ...a, shareWithPatient: !share } : a));
+    } else {
+      toast.success(share ? 'Anexo compartilhado no portal.' : 'Removido do portal.');
+    }
   };
 
   const remove = async (att: AttachmentDto) => {
@@ -2956,6 +2971,10 @@ function EncounterAttachmentsPanel({ encounterId, isSigned }: { encounterId: str
               </div>
             </div>
             <div className="flex items-center gap-1.5">
+              <label className="text-[11px] text-zinc-400 inline-flex items-center gap-1 cursor-pointer select-none" title="Compartilhar com o Portal do Paciente">
+                <input type="checkbox" checked={att.shareWithPatient} onChange={(e) => toggleShare(att, e.target.checked)} className="accent-indigo-500" />
+                Portal
+              </label>
               <button onClick={() => openDownload(att)} className="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1">
                 <Download className="w-3 h-3" /> Abrir
               </button>

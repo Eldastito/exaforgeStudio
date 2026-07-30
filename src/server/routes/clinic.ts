@@ -20,6 +20,7 @@ import { ClinicMonthlyReportService } from "../ClinicMonthlyReportService.js";
 import { ClinicPatientTimelineService, TimelineKind } from "../ClinicPatientTimelineService.js";
 import { ClinicProfessionalAbsenceService, AbsenceReason } from "../ClinicProfessionalAbsenceService.js";
 import { Cid10Service } from "../Cid10Service.js";
+import { ClinicAddendumNoticeService } from "../ClinicAddendumNoticeService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -338,6 +339,43 @@ router.post("/encounters/:id/addendums", (req: AuthRequest, res): any => {
     if (e?.code === "ADDENDUM_EMPTY" || e?.code === "ADDENDUM_TOO_LONG") return res.status(400).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
+});
+
+// Notificação de addendum ao paciente (ADR-080 Fase 24). Auto-dispara no
+// addAddendum (best-effort, no service). Rotas manuais pra ver histórico e
+// re-enviar (paciente pode ter apagado a mensagem).
+router.get("/addendums/:id/notifications", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicAddendumNoticeService.list(orgId, req.params.id));
+});
+router.post("/addendums/:id/notify", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = await ClinicAddendumNoticeService.notifyForAddendum(orgId, req.params.id, {
+      actorId: actor(req),
+      force: !!req.body?.force,
+    });
+    if (!result) return res.status(404).json({ error: "Addendum não encontrado." });
+    res.json(result);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Toggle da notificação por org.
+router.get("/settings/addendum-notification", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = db.prepare(`SELECT clinic_addendum_notification_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  const enabled = r == null || r.clinic_addendum_notification_enabled == null || Number(r.clinic_addendum_notification_enabled) !== 0;
+  res.json({ enabled });
+});
+router.put("/settings/addendum-notification", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const enabled = req.body?.enabled === false ? 0 : 1;
+  db.prepare(`UPDATE organization_settings SET clinic_addendum_notification_enabled = ? WHERE organization_id = ?`).run(enabled, orgId);
+  res.json({ enabled: enabled === 1 });
 });
 
 // Histórico clínico consolidado do paciente (todos os encounters).

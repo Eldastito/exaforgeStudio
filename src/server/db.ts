@@ -2756,6 +2756,12 @@ const initDb = () => {
   } catch (e) { console.error('[DB] Falha ao criar clinical_appointment_reminders', e); }
   // Config por org — quantas horas antes o lembrete deve sair (default 24).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_reminder_hours INTEGER DEFAULT 24`); } catch(e){}
+  // Segundo lembrete "H-2" (ADR-080 Fase S) — só sai se paciente NÃO
+  // confirmou o primeiro. Escalada em H-1: se ainda não respondeu, marca
+  // a consulta pra recepção ligar (needs_manual_confirmation=1).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_second_reminder_hours INTEGER DEFAULT 2`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_second_reminder_enabled INTEGER DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN needs_manual_confirmation INTEGER DEFAULT 0`); } catch(e){}
 
   // Portal do Paciente (ADR-080 Fase L) — molde do portal do profissional
   // (professional_portal_tokens): token opaco de 32 bytes, no banco só o hash

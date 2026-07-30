@@ -457,17 +457,41 @@ router.post("/appointments/:id/remind", async (req: AuthRequest, res): Promise<a
 router.get("/settings/reminders", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const o = db.prepare(`SELECT clinic_reminder_hours FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
-  res.json({ hoursBefore: Number(o?.clinic_reminder_hours) || 24 });
+  const o = db.prepare(`SELECT clinic_reminder_hours, clinic_second_reminder_hours, clinic_second_reminder_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({
+    hoursBefore: Number(o?.clinic_reminder_hours) || 24,
+    secondHoursBefore: Number(o?.clinic_second_reminder_hours) || 2,
+    secondEnabled: o?.clinic_second_reminder_enabled !== 0,
+  });
 });
 
 router.put("/settings/reminders", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const h = Math.max(1, Math.min(168, Math.floor(Number(req.body?.hoursBefore))));
-  if (!Number.isFinite(h) || h < 1) return res.status(400).json({ error: "hoursBefore inválido (1..168)." });
-  db.prepare(`UPDATE organization_settings SET clinic_reminder_hours = ? WHERE organization_id = ?`).run(h, orgId);
-  res.json({ hoursBefore: h });
+  const body = req.body || {};
+  const patches: string[] = [];
+  const values: any[] = [];
+  if (body.hoursBefore !== undefined) {
+    const h = Math.max(1, Math.min(168, Math.floor(Number(body.hoursBefore))));
+    if (!Number.isFinite(h) || h < 1) return res.status(400).json({ error: "hoursBefore inválido (1..168)." });
+    patches.push("clinic_reminder_hours = ?"); values.push(h);
+  }
+  if (body.secondHoursBefore !== undefined) {
+    const h2 = Math.max(1, Math.min(12, Math.floor(Number(body.secondHoursBefore))));
+    if (!Number.isFinite(h2)) return res.status(400).json({ error: "secondHoursBefore inválido (1..12)." });
+    patches.push("clinic_second_reminder_hours = ?"); values.push(h2);
+  }
+  if (body.secondEnabled !== undefined) {
+    patches.push("clinic_second_reminder_enabled = ?"); values.push(body.secondEnabled ? 1 : 0);
+  }
+  if (patches.length === 0) return res.status(400).json({ error: "Nenhum campo pra atualizar." });
+  db.prepare(`UPDATE organization_settings SET ${patches.join(", ")} WHERE organization_id = ?`).run(...values, orgId);
+  const o = db.prepare(`SELECT clinic_reminder_hours, clinic_second_reminder_hours, clinic_second_reminder_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({
+    hoursBefore: Number(o?.clinic_reminder_hours) || 24,
+    secondHoursBefore: Number(o?.clinic_second_reminder_hours) || 2,
+    secondEnabled: o?.clinic_second_reminder_enabled !== 0,
+  });
 });
 
 // ── Portal do Paciente — gestão (ADR-080 Fase L) ────────────────────────

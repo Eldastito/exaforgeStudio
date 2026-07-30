@@ -39,6 +39,7 @@ export interface Encounter {
   createdBy: string | null;
   signedBy: string | null;
   signedAt: string | null;
+  followUpRecommendedDays: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +84,7 @@ function hydrate(r: any): Encounter | null {
     createdBy: r.created_by ?? null,
     signedBy: r.signed_by ?? null,
     signedAt: r.signed_at ?? null,
+    followUpRecommendedDays: r.follow_up_recommended_days ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -218,6 +220,30 @@ export class ClinicEncounterService {
   /** Diff versionado de um encounter (best-effort — nunca joga erro pra fora). */
   static history(orgId: string, encounterId: string) {
     return ClinicEncounterHistoryService.list(orgId, encounterId);
+  }
+
+  /**
+   * Marca (ou apaga) a recomendação de retorno do profissional (ADR-080
+   * Fase I). Diferente dos campos SOAP, NÃO é bloqueado por `signed` — a
+   * recomendação é intenção clínica e pode ser ajustada mesmo com prontuário
+   * assinado sem gerar addendum (não altera achado clínico, altera plano
+   * agendado). Passar `null` limpa.
+   */
+  static setFollowUpRecommendation(orgId: string, encounterId: string, actorId: string | null, days: number | null): Encounter {
+    const before = this.get(orgId, encounterId);
+    if (!before) throw new Error("Prontuário não encontrado.");
+    let value: number | null = null;
+    if (days !== null && days !== undefined) {
+      const d = Math.floor(Number(days));
+      if (!Number.isFinite(d) || d < 1) throw new Error("Recomendação: informe ao menos 1 dia (ou null pra limpar).");
+      value = d;
+    }
+    db.prepare(
+      `UPDATE clinical_encounters SET follow_up_recommended_days = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND organization_id = ?`
+    ).run(value, encounterId, orgId);
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_ENCOUNTER_FOLLOWUP_SET", { encounterId, days: value });
+    return this.get(orgId, encounterId)!;
   }
 }
 

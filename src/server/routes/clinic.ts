@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { PatientService } from "../PatientService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
@@ -7,7 +8,20 @@ import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
 import { ClinicConnectionService } from "../ClinicConnectionService.js";
 import { ClinicEncounterService } from "../ClinicEncounterService.js";
 import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
+import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttachmentService.js";
 import { LgpdService } from "../LgpdService.js";
+
+// Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
+// memoryStorage porque o service escreve em PRIVATE_MEDIA_DIR (fora do
+// /media estático — dado sensível LGPD Art.11).
+const attachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME[file.mimetype]) cb(null, true);
+    else cb(new Error("Formato não suportado (use PNG, JPG, WEBP ou PDF)."));
+  },
+});
 
 /**
  * Módulo Clínica (ADR-080) — rotas sob /api/clinic, gated pelo módulo "clinica"
@@ -119,6 +133,33 @@ router.post("/appointments/:id/extend", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicAgendaService.extend(orgId, req.params.id, Number(req.body?.addMinutes), !!req.body?.force, actor(req))); }
   catch (e: any) { res.status(e.code === "CONFLICT" ? 409 : 400).json({ error: e.message, conflicts: e.conflicts }); }
+});
+
+// Retorno em 1 clique + fila (ADR-080 Fase I).
+router.post("/appointments/:id/follow-up", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const created = ClinicAgendaService.scheduleFollowUp(orgId, req.params.id, req.body || {}, actor(req));
+    res.json(created);
+  } catch (e: any) {
+    res.status(e.code === "CONFLICT" ? 409 : 400).json({ error: e.message, conflicts: e.conflicts });
+  }
+});
+
+router.get("/follow-up-queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = Number(req.query.limit) || 100;
+  res.json(ClinicAgendaService.followUpQueue(orgId, limit));
+});
+
+router.patch("/encounters/:id/follow-up-recommendation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = req.body?.days === null || req.body?.days === undefined ? null : Number(req.body.days);
+  try { res.json(ClinicEncounterService.setFollowUpRecommendation(orgId, req.params.id, actor(req), days)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.post("/appointments/:id/continuation", (req: AuthRequest, res): any => {
@@ -263,6 +304,62 @@ router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> 
     res.setHeader("Content-Disposition", `attachment; filename="atestado-${req.params.id}.pdf"`);
     return res.send(pdf);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Anexos do prontuário (ADR-080 Fase J) ──────────────────────────────
+// Multipart. Arquivo fica em PRIVATE_MEDIA_DIR (fora do /media estático).
+// LGPD Art.11 e bloqueio pós-signed no service.
+
+router.get("/encounters/:id/attachments", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicAttachmentService.list(orgId, req.params.id));
+});
+
+router.post("/encounters/:id/attachments", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  attachmentUpload.single("file")(req, res, (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+    try {
+      const att = ClinicAttachmentService.add(orgId, req.params.id, {
+        buffer: file.buffer, mime: file.mimetype,
+        originalFilename: file.originalname,
+        label: req.body?.label || null,
+      }, actor(req));
+      res.status(201).json(att);
+    } catch (e: any) {
+      if (e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
+      res.status(400).json({ error: e.message });
+    }
+  });
+});
+
+router.get("/attachments/:id/download", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { buffer, mime, filename } = ClinicAttachmentService.read(orgId, req.params.id);
+    res.setHeader("Content-Type", mime);
+    // inline pra imagem (front renderiza), attachment pra PDF (download).
+    const disposition = mime.startsWith("image/") ? "inline" : "attachment";
+    res.setHeader("Content-Disposition", `${disposition}; filename="${filename.replace(/"/g, "")}"`);
+    return res.send(buffer);
+  } catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.delete("/attachments/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    ClinicAttachmentService.remove(orgId, req.params.id, actor(req));
+    res.json({ ok: true });
+  } catch (e: any) {
+    if (e.code === "ATTACHMENT_FROZEN" || e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Consentimento LGPD Art.11 do paciente (dados sensíveis / saúde) — o gestor

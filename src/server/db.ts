@@ -2599,6 +2599,11 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+  // Retorno em 1 clique (ADR-080 Fase I): rastreia a série de consultas do
+  // paciente com o mesmo profissional. Aditivo, opcional (consulta avulsa
+  // fica sem parent). Índice pra achar rápido "retornos desta consulta".
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN parent_appointment_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_parent ON appointments (organization_id, parent_appointment_id)`); } catch(e){}
 
   // Registro do conselho (CRM/COREN/CREFITO/…) do profissional — usado no
   // rodapé de receita/atestado. Aditivo, opcional (profissional pode ser
@@ -2659,6 +2664,38 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinical_encounter_history ON clinical_encounter_history (organization_id, encounter_id, created_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_history', e); }
+  // Recomendação de retorno (ADR-080 Fase I) — profissional marca "voltar em
+  // X dias" no plano; a secretaria confirma o agendamento depois. Aditivo,
+  // opcional (encounter sem recomendação = alta / caso encerrado).
+  try { db.exec(`ALTER TABLE clinical_encounters ADD COLUMN follow_up_recommended_days INTEGER`); } catch(e){}
+
+  // Anexos ao prontuário (ADR-080 Fase J). Dado sensível de saúde (LGPD
+  // Art.11) — arquivo físico fica em PRIVATE_MEDIA_DIR (fora do
+  // /media estático), acessível só via rota autenticada com streaming.
+  // storage_key é o basename do arquivo (uuid+ext), evita path traversal.
+  // Bloqueio de delete pós-signed é policy do service; o DB não impõe pra
+  // permitir purge de retenção sem knowing do status.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_encounter_attachments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        encounter_id TEXT NOT NULL,
+        appointment_id TEXT,
+        contact_id TEXT NOT NULL,
+        label TEXT,                       -- rótulo curto ("Ferida antes", "Raio-X esquerdo")
+        kind TEXT NOT NULL,               -- image | pdf | other (derivado do mime)
+        mime_type TEXT NOT NULL,
+        original_filename TEXT,
+        storage_key TEXT NOT NULL,        -- basename do arquivo em PRIVATE_MEDIA_DIR
+        size_bytes INTEGER NOT NULL,
+        uploaded_by TEXT,
+        uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_attach_encounter ON clinical_encounter_attachments (organization_id, encounter_id, uploaded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_clinical_attach_patient ON clinical_encounter_attachments (organization_id, contact_id, uploaded_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_attachments', e); }
 
   // Receita + Atestado (ADR-080 Fase H) — documentos clínicos emitidos a partir
   // de um encounter. Ciclo draft → issued (imutável após issued). Snapshots

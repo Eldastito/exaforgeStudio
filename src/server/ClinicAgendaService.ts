@@ -212,6 +212,113 @@ export class ClinicAgendaService {
     return this.hydrate(orgId, db.prepare("SELECT * FROM appointments WHERE id = ?").get(id));
   }
 
+  /**
+   * Agenda retorno a partir de uma consulta anterior (ADR-080 Fase I).
+   * Herda profissional, paciente e duração da consulta de origem; a data é
+   * calculada por `inDays` (delta) OU passada explicitamente via `atISO`.
+   * Rastreia a série via `parent_appointment_id`. Idempotente por design:
+   * se já existe um retorno futuro NÃO cancelado com o mesmo parent,
+   * devolve o existente (evita duas secretárias criando dois retornos).
+   * Reusa validação de conflito por profissional/sala; `force` propaga.
+   */
+  static scheduleFollowUp(orgId: string, sourceAppointmentId: string, opts: {
+    inDays?: number; atISO?: string; durationMinutes?: number; title?: string; force?: boolean;
+  }, actorId?: string): any {
+    const source = this.get(orgId, sourceAppointmentId);
+    if (!source.contact_id) throw new Error("Consulta de origem sem paciente.");
+
+    // Se já tem retorno futuro não cancelado, devolve o existente (idempotente).
+    const nowIso = new Date().toISOString();
+    const existing = db.prepare(
+      `SELECT * FROM appointments
+        WHERE organization_id = ? AND parent_appointment_id = ?
+          AND status NOT IN ('cancelled','no_show')
+          AND scheduled_start >= ?
+        ORDER BY scheduled_start ASC LIMIT 1`
+    ).get(orgId, sourceAppointmentId, nowIso) as any;
+    if (existing) return this.hydrate(orgId, existing);
+
+    // Calcula data alvo: `atISO` explícito ganha; senão, source.scheduled_start + inDays.
+    let targetIso = opts?.atISO ? String(opts.atISO).trim() : "";
+    if (!targetIso) {
+      const inDays = Math.max(1, Math.floor(Number(opts?.inDays)));
+      if (!Number.isFinite(inDays) || inDays < 1) throw new Error("Informe em quantos dias (mínimo 1) ou uma data explícita.");
+      const base = AppointmentService.ms(source.scheduled_start) ?? Date.now();
+      targetIso = new Date(base + inDays * 86400000).toISOString();
+    }
+
+    // Duração herda da consulta original se não passar explícita.
+    const durMinutes = Number.isFinite(Number(opts?.durationMinutes)) && Number(opts?.durationMinutes) > 0
+      ? Math.max(5, Math.floor(Number(opts.durationMinutes)))
+      : (source.expected_duration_minutes || undefined);
+
+    // Reusa createAppointment (mesma validação de conflito, mesmos snapshots).
+    const created = this.createAppointment(orgId, {
+      contactId: source.contact_id,
+      title: String(opts?.title || source.title || "Retorno").trim(),
+      scheduledStart: targetIso,
+      professionalId: source.professional_id || undefined,
+      roomId: source.room_id || undefined,
+      durationMinutes: durMinutes,
+      force: !!opts?.force,
+    }, actorId);
+
+    // Marca o parent (aditivo em UPDATE, pra não mudar assinatura do create).
+    db.prepare(`UPDATE appointments SET parent_appointment_id = ? WHERE id = ? AND organization_id = ?`)
+      .run(sourceAppointmentId, created.id, orgId);
+    logAuthEvent(orgId, actorId, source.contact_id, "CLINIC_FOLLOWUP_SCHEDULED", {
+      appointmentId: created.id, sourceAppointmentId, atISO: targetIso, professionalId: source.professional_id || null,
+    });
+    return this.hydrate(orgId, db.prepare("SELECT * FROM appointments WHERE id = ?").get(created.id));
+  }
+
+  /**
+   * Fila de retornos pendentes: encounters `signed` (consulta terminou) com
+   * `follow_up_recommended_days` marcado, cuja consulta de origem AINDA NÃO
+   * teve retorno agendado (sem row em `appointments` com `parent_appointment_id`
+   * ativo). É a lista pra a secretaria confirmar dia e hora — a intenção
+   * clínica vira agenda quando ela clicar "Agendar retorno".
+   */
+  static followUpQueue(orgId: string, limit = 100): any[] {
+    const rows = db.prepare(`
+      SELECT e.id AS encounter_id, e.appointment_id AS source_appointment_id,
+             e.contact_id, e.professional_id, e.professional_name_snapshot,
+             e.follow_up_recommended_days, e.signed_at,
+             a.scheduled_start AS source_scheduled_start,
+             c.name AS patient_name
+        FROM clinical_encounters e
+        JOIN appointments a ON a.id = e.appointment_id AND a.organization_id = e.organization_id
+        LEFT JOIN contacts c ON c.id = e.contact_id AND c.organization_id = e.organization_id
+       WHERE e.organization_id = ?
+         AND e.status = 'signed'
+         AND e.follow_up_recommended_days IS NOT NULL
+         AND e.follow_up_recommended_days > 0
+         AND NOT EXISTS (
+           SELECT 1 FROM appointments ret
+            WHERE ret.organization_id = e.organization_id
+              AND ret.parent_appointment_id = e.appointment_id
+              AND ret.status NOT IN ('cancelled','no_show')
+         )
+       ORDER BY e.signed_at DESC, e.rowid DESC
+       LIMIT ?
+    `).all(orgId, Math.max(1, Math.min(200, limit))) as any[];
+    return rows.map((r) => ({
+      encounterId: r.encounter_id,
+      sourceAppointmentId: r.source_appointment_id,
+      contactId: r.contact_id,
+      patientName: r.patient_name || "Paciente",
+      professionalId: r.professional_id,
+      professionalName: r.professional_name_snapshot,
+      recommendedDays: r.follow_up_recommended_days,
+      signedAt: r.signed_at,
+      sourceScheduledStart: r.source_scheduled_start,
+      suggestedAt: (() => {
+        const base = AppointmentService.ms(r.source_scheduled_start) ?? Date.now();
+        return new Date(base + Number(r.follow_up_recommended_days) * 86400000).toISOString();
+      })(),
+    }));
+  }
+
   private static get(orgId: string, id: string): any {
     const a = db.prepare("SELECT * FROM appointments WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) throw new Error("Agendamento não encontrado.");

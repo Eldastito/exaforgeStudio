@@ -2599,6 +2599,15 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+  // Confirmação pelo paciente (ADR-080 Fase N). `patient_confirmed_at` é
+  // setado quando o paciente responde SIM ao lembrete; `cancelled_at`/`_by`/
+  // `_reason` rastreiam quem cancelou (patient|staff|system) e por que. Sem
+  // relação com o status='cancelled' que já existia — os campos apenas
+  // enriquecem a trilha (o status continua sendo a fonte de verdade).
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN patient_confirmed_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN cancelled_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN cancelled_by TEXT`); } catch(e){} // patient | staff | system
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN cancellation_reason TEXT`); } catch(e){}
   // Retorno em 1 clique (ADR-080 Fase I): rastreia a série de consultas do
   // paciente com o mesmo profissional. Aditivo, opcional (consulta avulsa
   // fica sem parent). Índice pra achar rápido "retornos desta consulta".

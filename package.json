@@ -95,6 +95,7 @@
     "test:clinic-addendum": "tsx scripts/test-clinic-addendum.ts",
     "test:clinic-timeline": "tsx scripts/test-clinic-timeline.ts",
     "test:clinic-absence": "tsx scripts/test-clinic-absence.ts",
+    "test:clinic-cid10": "tsx scripts/test-clinic-cid10.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

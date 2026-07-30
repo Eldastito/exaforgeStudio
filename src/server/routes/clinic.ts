@@ -19,6 +19,7 @@ import { ClinicRetentionService } from "../ClinicRetentionService.js";
 import { ClinicMonthlyReportService } from "../ClinicMonthlyReportService.js";
 import { ClinicPatientTimelineService, TimelineKind } from "../ClinicPatientTimelineService.js";
 import { ClinicProfessionalAbsenceService, AbsenceReason } from "../ClinicProfessionalAbsenceService.js";
+import { Cid10Service } from "../Cid10Service.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -438,6 +439,22 @@ router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any>
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
+});
+
+// Catálogo CID-10 (ADR-080 Fase 23). Busca por prefixo de código ou
+// substring da descrição. Catálogo é GLOBAL (padrão OMS/DATASUS), não
+// depende de orgId — mas exige usuário autenticado, isolando de bots.
+router.get("/cid10/search", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const q = typeof req.query.q === "string" ? req.query.q : "";
+  const limit = req.query.limit ? Number(req.query.limit) : 20;
+  res.json(Cid10Service.search(q, limit));
+});
+router.get("/cid10/:code", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const found = Cid10Service.get(req.params.code);
+  if (!found) return res.status(404).json({ error: "CID não encontrado no catálogo." });
+  res.json(found);
 });
 
 // Atestado

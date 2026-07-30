@@ -2589,6 +2589,25 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar profissionais/salas (Clínica)', e); }
 
+  // Catálogo CID-10 (ADR-080 Fase 23). Ajuda o atestado (Fase H) a padronizar
+  // o CID: campo hoje é texto livre, então a mesma condição vira "H10.9",
+  // "H10", "H109", "conjuntivite" — impossível auditar/agregar. Catálogo é
+  // GLOBAL (não por org): CID-10 é padrão OMS/DATASUS, mesmo pra todas as
+  // clínicas. Não é policy — atestado ainda aceita CID fora do catálogo (não
+  // travar quem já tem seus códigos memorizados); catálogo é ajuda pra
+  // autocomplete e auto-preenchimento da descrição.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cid10_codes (
+        code TEXT PRIMARY KEY,       -- código no formato normalizado (uppercase, sem espaço)
+        description TEXT NOT NULL,
+        chapter TEXT,                -- rótulo opcional do capítulo (ex: "Doenças do olho")
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_cid10_desc ON cid10_codes (description);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar cid10_codes', e); }
+
   // Bloqueio de agenda por indisponibilidade do profissional (ADR-080 Fase 22).
   // Férias / congresso / atestado / outro. `createAppointment` do
   // ClinicAgendaService recusa slot que se sobrepõe (a menos que `force:true`,

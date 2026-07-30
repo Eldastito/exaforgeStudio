@@ -22,6 +22,7 @@ import PDFDocument from "pdfkit";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
+import { Cid10Service, normalizeCode as normalizeCid10 } from "./Cid10Service.js";
 
 export type DocStatus = "draft" | "issued";
 
@@ -444,6 +445,21 @@ export class ClinicDocumentsService {
     if (!Number.isFinite(days) || days < 1) throw new Error("Atestado precisa de ao menos 1 dia.");
     const purpose = ["rest", "comparecimento", "other"].includes(String(input?.purpose)) ? String(input!.purpose) : "rest";
 
+    // Fase 23: normaliza CID pro formato canônico do catálogo ("h109" → "H10.9")
+    // e, se a descrição não veio explícita, tenta puxar do catálogo (fonte
+    // única). Descrição explícita do usuário sempre vence — permite override
+    // pra clínicas com nomenclatura própria. CID fora do catálogo passa
+    // livre (não é policy, só ajuda).
+    let cidStored: string | null = null;
+    let cidDescStored: string | null = input?.cidDescription ? String(input.cidDescription).trim() : null;
+    if (input?.cid) {
+      cidStored = normalizeCid10(String(input.cid)) || null;
+      if (cidStored && !cidDescStored) {
+        const known = Cid10Service.get(cidStored);
+        if (known) cidDescStored = known.description;
+      }
+    }
+
     const id = randomUUID();
     db.prepare(
       `INSERT INTO clinical_medical_certificates
@@ -452,8 +468,8 @@ export class ClinicDocumentsService {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)`
     ).run(
       id, orgId, encounterId, enc.appointment_id, enc.contact_id, enc.professional_id || null,
-      input?.cid ? String(input.cid).trim() : null,
-      input?.cidDescription ? String(input.cidDescription).trim() : null,
+      cidStored,
+      cidDescStored,
       days, purpose,
       input?.notes ? String(input.notes) : null,
       actorId
@@ -479,9 +495,22 @@ export class ClinicDocumentsService {
     }
     requireConsent(orgId, before.contactId);
 
+    // Fase 23: mesmo tratamento do create — normaliza CID; se descrição não
+    // veio no patch e catálogo conhece, auto-preenche cid_description.
+    let normalizedCid: string | null | undefined = undefined;
+    if (patch.cid !== undefined) {
+      normalizedCid = patch.cid ? (normalizeCid10(String(patch.cid)) || null) : null;
+    }
+
     const fields: string[] = [], params: any[] = [];
-    if (patch.cid !== undefined) { fields.push("cid = ?"); params.push(patch.cid ? String(patch.cid).trim() : null); }
-    if (patch.cidDescription !== undefined) { fields.push("cid_description = ?"); params.push(patch.cidDescription ? String(patch.cidDescription).trim() : null); }
+    if (patch.cid !== undefined) { fields.push("cid = ?"); params.push(normalizedCid); }
+    if (patch.cidDescription !== undefined) {
+      fields.push("cid_description = ?");
+      params.push(patch.cidDescription ? String(patch.cidDescription).trim() : null);
+    } else if (patch.cid !== undefined && normalizedCid) {
+      const known = Cid10Service.get(normalizedCid);
+      if (known) { fields.push("cid_description = ?"); params.push(known.description); }
+    }
     if (patch.days !== undefined) {
       const days = Math.max(1, Math.floor(Number(patch.days)));
       if (!Number.isFinite(days) || days < 1) throw new Error("Atestado precisa de ao menos 1 dia.");

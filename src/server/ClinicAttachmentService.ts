@@ -112,7 +112,16 @@ function loadEncounter(orgId: string, encounterId: string): any {
 }
 
 export class ClinicAttachmentService {
+  /**
+   * Fase 19: exige consent LGPD SENSITIVE do paciente dono do encounter
+   * antes de listar anexos. Encounter inexistente → lista vazia (sem gate,
+   * nada a proteger). Foto de exame, laudo, imagem antes/depois = dado
+   * sensível.
+   */
   static list(orgId: string, encounterId: string): Attachment[] {
+    const enc = db.prepare(`SELECT contact_id FROM clinical_encounters WHERE organization_id = ? AND id = ?`).get(orgId, encounterId) as any;
+    if (!enc) return [];
+    requireConsent(orgId, enc.contact_id);
     const rows = db.prepare(
       `SELECT * FROM clinical_encounter_attachments
         WHERE organization_id = ? AND encounter_id = ?
@@ -121,7 +130,24 @@ export class ClinicAttachmentService {
     return rows.map((r) => hydrate(r)!).filter(Boolean);
   }
 
+  /**
+   * Fase 19: leitura de anexo isolado. Consent lookup usa o próprio row do
+   * anexo (contact_id). Row inexistente → null (não gata).
+   */
   static get(orgId: string, id: string): Attachment | null {
+    const r = db.prepare(`SELECT * FROM clinical_encounter_attachments WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!r) return null;
+    requireConsent(orgId, r.contact_id);
+    return hydrate(r);
+  }
+
+  /**
+   * Fase 19: irmã sem gate — uso interno por `remove()` (que já checa
+   * consent explicitamente) e por `setSharedWithPatient` (visibilidade
+   * não é achado clínico — decisão de compartilhar não muda com revoke,
+   * o próprio Portal já revalida). NÃO exportar.
+   */
+  private static getRaw(orgId: string, id: string): Attachment | null {
     const r = db.prepare(`SELECT * FROM clinical_encounter_attachments WHERE organization_id = ? AND id = ?`).get(orgId, id);
     return hydrate(r);
   }
@@ -170,10 +196,14 @@ export class ClinicAttachmentService {
     logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_ATTACHMENT_ADDED", {
       attachmentId: id, encounterId, kind: spec.kind, sizeBytes: input.buffer.length,
     });
-    return this.get(orgId, id)!;
+    return this.getRaw(orgId, id)!;
   }
 
-  /** Devolve buffer + mime + filename pra rota de download. */
+  /**
+   * Devolve buffer + mime + filename pra rota de download.
+   * Fase 19: `this.get` já gata consent SENSITIVE — leitura de anexo cai
+   * na mesma regra que `getPrescription`/`getCertificate`.
+   */
   static read(orgId: string, id: string): { buffer: Buffer; mime: string; filename: string } {
     const att = this.get(orgId, id);
     if (!att) throw new Error("Anexo não encontrado.");
@@ -194,7 +224,9 @@ export class ClinicAttachmentService {
    * emitidos). Se por retenção LGPD precisar remover, faz por job dedicado.
    */
   static remove(orgId: string, id: string, actorId: string | null): void {
-    const att = this.get(orgId, id);
+    // Fase 19: usa raw pra evitar erro duplo — o `requireConsent` abaixo
+    // faz o gate único, mesmo antes de decidir se pode remover.
+    const att = this.getRaw(orgId, id);
     if (!att) throw new Error("Anexo não encontrado.");
     const enc = db.prepare(`SELECT status FROM clinical_encounters WHERE organization_id = ? AND id = ?`)
       .get(orgId, att.encounterId) as any;
@@ -221,12 +253,14 @@ export class ClinicAttachmentService {
    * Não é bloqueado por encounter signed — visibilidade não é achado clínico.
    */
   static setSharedWithPatient(orgId: string, id: string, share: boolean, actorId: string | null): Attachment {
-    const att = this.get(orgId, id);
+    // Fase 19: usa raw — decisão de compartilhar não muda com revoke do
+    // paciente (o Portal já revalida consent em cada acesso após Fatia 18).
+    const att = this.getRaw(orgId, id);
     if (!att) throw new Error("Anexo não encontrado.");
     db.prepare(`UPDATE clinical_encounter_attachments SET share_with_patient = ? WHERE id = ? AND organization_id = ?`)
       .run(share ? 1 : 0, id, orgId);
     logAuthEvent(orgId, actorId, att.contactId, "CLINIC_ATTACHMENT_SHARE_CHANGED", { attachmentId: id, share });
-    return this.get(orgId, id)!;
+    return this.getRaw(orgId, id)!;
   }
 }
 

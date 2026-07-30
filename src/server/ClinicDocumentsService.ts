@@ -275,7 +275,26 @@ function computeDocumentHash(payload: object): string {
 export class ClinicDocumentsService {
   // ── Prescription ───────────────────────────────────────────────────────
 
+  /**
+   * Fase 19: leitura de receita exige consent LGPD Art.11 ATIVO. Doc é dado
+   * sensível — se o paciente revoga, o profissional/gestor perde acesso ao
+   * conteúdo até novo grant. Retorno `null` quando doc não existe NÃO gata
+   * (não há dado a proteger).
+   */
   static getPrescription(orgId: string, id: string): Prescription | null {
+    const r = db.prepare(`SELECT * FROM clinical_prescriptions WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!r) return null;
+    requireConsent(orgId, r.contact_id);
+    return hydratePrescription(r);
+  }
+
+  /**
+   * Fase 19: variante interna sem gate — uso exclusivo por `update/issue/
+   * render*Pdf` que já validam consent no próprio caller ou têm razão
+   * operacional (o `render*Pdf` já checa consent uma vez; internamente
+   * repete lookup só pra pegar dados frescos após update). NÃO exportar.
+   */
+  private static getPrescriptionRaw(orgId: string, id: string): Prescription | null {
     const r = db.prepare(`SELECT * FROM clinical_prescriptions WHERE organization_id = ? AND id = ?`).get(orgId, id);
     return hydratePrescription(r);
   }
@@ -307,7 +326,7 @@ export class ClinicDocumentsService {
     );
 
     logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_PRESCRIPTION_CREATED", { prescriptionId: id, encounterId });
-    return this.getPrescription(orgId, id)!;
+    return this.getPrescriptionRaw(orgId, id)!;
   }
 
   static updatePrescription(orgId: string, id: string, actorId: string | null, patch: {
@@ -316,7 +335,7 @@ export class ClinicDocumentsService {
     repeatsAllowed?: number;
     validUntil?: string | null;
   }): Prescription {
-    const before = this.getPrescription(orgId, id);
+    const before = this.getPrescriptionRaw(orgId, id);
     if (!before) throw new Error("Receita não encontrada.");
     if (before.status === "issued") {
       const e: any = new Error("Receita já emitida — não pode ser editada.");
@@ -339,11 +358,11 @@ export class ClinicDocumentsService {
     fields.push("updated_at = CURRENT_TIMESTAMP");
     db.prepare(`UPDATE clinical_prescriptions SET ${fields.join(", ")} WHERE id = ? AND organization_id = ?`).run(...params, id, orgId);
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_UPDATED", { prescriptionId: id });
-    return this.getPrescription(orgId, id)!;
+    return this.getPrescriptionRaw(orgId, id)!;
   }
 
   static issuePrescription(orgId: string, id: string, actorId: string | null, opts: { pin?: string } = {}): Prescription {
-    const before = this.getPrescription(orgId, id);
+    const before = this.getPrescriptionRaw(orgId, id);
     if (!before) throw new Error("Receita não encontrada.");
     if (before.status === "issued") return before;
     if (!before.items.length) throw new Error("Receita sem itens — não pode ser emitida.");
@@ -393,12 +412,21 @@ export class ClinicDocumentsService {
       id, orgId
     );
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", { prescriptionId: id, signedWithPin, signatureHash });
-    return this.getPrescription(orgId, id)!;
+    return this.getPrescriptionRaw(orgId, id)!;
   }
 
   // ── Certificate ────────────────────────────────────────────────────────
 
+  /** Fase 19: paralelo ao `getPrescription` — consent gate + hydrate. */
   static getCertificate(orgId: string, id: string): Certificate | null {
+    const r = db.prepare(`SELECT * FROM clinical_medical_certificates WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!r) return null;
+    requireConsent(orgId, r.contact_id);
+    return hydrateCertificate(r);
+  }
+
+  /** Fase 19: irmã da `getCertificate` sem gate — uso interno. */
+  private static getCertificateRaw(orgId: string, id: string): Certificate | null {
     const r = db.prepare(`SELECT * FROM clinical_medical_certificates WHERE organization_id = ? AND id = ?`).get(orgId, id);
     return hydrateCertificate(r);
   }
@@ -432,7 +460,7 @@ export class ClinicDocumentsService {
     );
 
     logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_CERTIFICATE_CREATED", { certificateId: id, encounterId });
-    return this.getCertificate(orgId, id)!;
+    return this.getCertificateRaw(orgId, id)!;
   }
 
   static updateCertificate(orgId: string, id: string, actorId: string | null, patch: {
@@ -442,7 +470,7 @@ export class ClinicDocumentsService {
     purpose?: "rest" | "comparecimento" | "other";
     notes?: string | null;
   }): Certificate {
-    const before = this.getCertificate(orgId, id);
+    const before = this.getCertificateRaw(orgId, id);
     if (!before) throw new Error("Atestado não encontrado.");
     if (before.status === "issued") {
       const e: any = new Error("Atestado já emitido — não pode ser editado.");
@@ -470,11 +498,11 @@ export class ClinicDocumentsService {
     fields.push("updated_at = CURRENT_TIMESTAMP");
     db.prepare(`UPDATE clinical_medical_certificates SET ${fields.join(", ")} WHERE id = ? AND organization_id = ?`).run(...params, id, orgId);
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_CERTIFICATE_UPDATED", { certificateId: id });
-    return this.getCertificate(orgId, id)!;
+    return this.getCertificateRaw(orgId, id)!;
   }
 
   static issueCertificate(orgId: string, id: string, actorId: string | null, opts: { pin?: string } = {}): Certificate {
-    const before = this.getCertificate(orgId, id);
+    const before = this.getCertificateRaw(orgId, id);
     if (!before) throw new Error("Atestado não encontrado.");
     if (before.status === "issued") return before;
     requireConsent(orgId, before.contactId);
@@ -521,12 +549,21 @@ export class ClinicDocumentsService {
       id, orgId
     );
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_CERTIFICATE_ISSUED", { certificateId: id, signedWithPin, signatureHash });
-    return this.getCertificate(orgId, id)!;
+    return this.getCertificateRaw(orgId, id)!;
   }
 
   // ── Listagem consolidada ───────────────────────────────────────────────
 
+  /**
+   * Fase 19: listagem consolidada dos docs de um encounter. Consent LGPD
+   * derivado do próprio encounter — sem encounter (id inválido / cross-
+   * tenant), devolve listas vazias (nada a expor). Com encounter, exige
+   * consent SENSITIVE ativo do paciente antes de qualquer row.
+   */
   static listByEncounter(orgId: string, encounterId: string): { prescriptions: Prescription[]; certificates: Certificate[] } {
+    const enc = db.prepare(`SELECT contact_id FROM clinical_encounters WHERE organization_id = ? AND id = ?`).get(orgId, encounterId) as any;
+    if (!enc) return { prescriptions: [], certificates: [] };
+    requireConsent(orgId, enc.contact_id);
     const rx = db.prepare(`SELECT * FROM clinical_prescriptions WHERE organization_id = ? AND encounter_id = ? ORDER BY created_at DESC, rowid DESC`)
       .all(orgId, encounterId) as any[];
     const cert = db.prepare(`SELECT * FROM clinical_medical_certificates WHERE organization_id = ? AND encounter_id = ? ORDER BY created_at DESC, rowid DESC`)

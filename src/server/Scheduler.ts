@@ -22,6 +22,7 @@ import { BusinessTutorService } from "./BusinessTutorService.js";
 import { SchoolDigestService } from "./SchoolDigestService.js";
 import { TeacherDigestService } from "./TeacherDigestService.js";
 import { ClinicReminderService } from "./ClinicReminderService.js";
+import { ClinicRetentionService } from "./ClinicRetentionService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
@@ -190,6 +191,24 @@ export class Scheduler {
    * `hoursBefore ± 1h` (default 24h), filtrando por consentimento LGPD
    * `comunicacoes` e canal ativo. Só orgs com o módulo `clinica` habilitado.
    */
+  /**
+   * Módulo Clínica (ADR-080 Fase U) — retenção LGPD. Roda uma vez por dia
+   * (o dispatch é idempotente — arquivo já ausente conta como sucesso).
+   * Percorre orgs com módulo `clinica` habilitado.
+   */
+  static clinicRetentionPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT DISTINCT organization_id FROM clinical_encounters`).all() as any[];
+    } catch { return; }
+    for (const o of orgs) {
+      try {
+        if (!ModuleService.isEnabled(o.organization_id, "clinica")) continue;
+        ClinicRetentionService.runForOrg(o.organization_id);
+      } catch (e) { console.error("[Clínica] retenção falhou", o.organization_id, e); }
+    }
+  }
+
   static async clinicReminderPass() {
     let orgs: any[] = [];
     try {
@@ -280,6 +299,7 @@ export class Scheduler {
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));
     await this.teacherAgendaPass().catch(e => console.error('[Scheduler] agenda do professor falhou', e));
     await this.clinicReminderPass().catch(e => console.error('[Scheduler] lembrete de consulta clínica falhou', e));
+    try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }

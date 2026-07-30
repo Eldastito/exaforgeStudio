@@ -2772,6 +2772,17 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_second_reminder_hours INTEGER DEFAULT 2`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_second_reminder_enabled INTEGER DEFAULT 1`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN needs_manual_confirmation INTEGER DEFAULT 0`); } catch(e){}
+  // Retenção LGPD (ADR-080 Fase U). LGPD Art.16 exige eliminar dado quando
+  // cumprida a finalidade. Apagamos ARQUIVOS derivados (PDFs de WhatsApp são
+  // cache — paciente já tem cópia; anexos velhos após 2 anos). Nunca DELETE
+  // de row clínica (prontuário/receita/atestado ficam por 20 anos conforme
+  // resolução CFM); só marcamos `purged_at` pra rastreio.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_retention_days_deliveries INTEGER DEFAULT 30`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_retention_days_attachments INTEGER DEFAULT 730`); } catch(e){} // 2 anos
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_retention_enabled INTEGER DEFAULT 1`); } catch(e){}
+  // Nota: ALTER TABLE clinical_document_deliveries ADD COLUMN file_purged_at
+  // e clinical_encounter_attachments ADD COLUMN purged_at ficam DEPOIS dos
+  // CREATEs dessas tabelas (padrão pego nas Fases L/T — ver mais abaixo).
 
   // Portal do Paciente (ADR-080 Fase L) — molde do portal do profissional
   // (professional_portal_tokens): token opaco de 32 bytes, no banco só o hash
@@ -2820,6 +2831,9 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinical_deliveries_patient ON clinical_document_deliveries (organization_id, contact_id, sent_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_document_deliveries', e); }
+  // Retenção LGPD (ADR-080 Fase U). Marca quando o PDF derivado foi apagado
+  // do disco. Sempre depois do CREATE — mesmo padrão pego nas Fases L/T.
+  try { db.exec(`ALTER TABLE clinical_document_deliveries ADD COLUMN file_purged_at DATETIME`); } catch(e){}
 
   // Anexos ao prontuário (ADR-080 Fase J). Dado sensível de saúde (LGPD
   // Art.11) — arquivo físico fica em PRIVATE_MEDIA_DIR (fora do
@@ -2853,6 +2867,8 @@ const initDb = () => {
   // trouxe, imagens de evolução compartilháveis). Foto de tratamento interno
   // (ex.: procedimento estético em progresso) fica invisível por default.
   try { db.exec(`ALTER TABLE clinical_encounter_attachments ADD COLUMN share_with_patient INTEGER DEFAULT 0`); } catch(e){}
+  // Retenção LGPD (ADR-080 Fase U). Marca quando o arquivo foi apagado.
+  try { db.exec(`ALTER TABLE clinical_encounter_attachments ADD COLUMN purged_at DATETIME`); } catch(e){}
 
   // Receita + Atestado (ADR-080 Fase H) — documentos clínicos emitidos a partir
   // de um encounter. Ciclo draft → issued (imutável após issued). Snapshots

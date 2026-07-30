@@ -375,6 +375,19 @@ export async function processIncomingMessage(
     }
   } catch (e) { console.error('[CSAT] Falha ao processar resposta de satisfação', e); }
 
+  // 4b. Confirmação SIM/NÃO em resposta a lembrete clínico (ADR-080 Fase N).
+  // Só age se o paciente recebeu lembrete `sent` nas últimas 26h; senão passa
+  // pra IA. Cai depois do CSAT pra "SIM/NÃO" não colidir com resposta esperada
+  // de nota de satisfação (que exige `pendingForContact` casar).
+  try {
+    const { ClinicReminderReplyService } = await import('./ClinicReminderReplyService.js');
+    const result = ClinicReminderReplyService.tryHandle(orgId, contact.id, payload.text || '');
+    if (result.handled && result.reply) {
+      await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: result.reply, io });
+      return;
+    }
+  } catch (e) { console.error('[Clínica] Falha no parser SIM/NÃO', e); }
+
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {
       try {

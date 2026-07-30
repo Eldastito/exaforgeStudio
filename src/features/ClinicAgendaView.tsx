@@ -34,6 +34,10 @@ type Appointment = {
   checkout_at?: string | null;
   continuation_status?: ContinuationStatus;
   reminder_sent_at?: string | null;
+  patient_confirmed_at?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancellation_reason?: string | null;
 };
 type Conflict = { id: string; title?: string; reason?: string; start?: string };
 
@@ -524,6 +528,16 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
         {a.reminder_sent_at && (
           <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1" title={`Lembrete enviado em ${new Date(a.reminder_sent_at).toLocaleString('pt-BR')}`}>
             <Bell className="w-3 h-3" /> lembrete enviado
+          </span>
+        )}
+        {a.patient_confirmed_at && (
+          <span className="text-[10px] rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 px-1.5 inline-flex items-center gap-1" title={`Paciente confirmou em ${new Date(a.patient_confirmed_at).toLocaleString('pt-BR')}`}>
+            <Check className="w-3 h-3" /> confirmado pelo paciente
+          </span>
+        )}
+        {a.cancelled_by === 'patient' && (
+          <span className="text-[10px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5 inline-flex items-center gap-1" title={`Cancelado pelo paciente em ${a.cancelled_at ? new Date(a.cancelled_at).toLocaleString('pt-BR') : ''}`}>
+            <Ban className="w-3 h-3" /> cancelado pelo paciente
           </span>
         )}
 

@@ -392,4 +392,33 @@ export class ClinicAgendaService {
     logAuthEvent(orgId, actorId, a.contact_id, "CLINIC_APPOINTMENT_COMPLETED", { appointmentId: id });
     return this.hydrate(orgId, this.get(orgId, id));
   }
+
+  /**
+   * Cancela consulta (ADR-080 Fase N). Preserva a linha (nunca DELETE) —
+   * consistente com o resto do módulo. `cancelledBy` explícito ('patient'
+   * quando vier do parser SIM/NÃO, 'staff' quando do painel, 'system' pra
+   * jobs de retenção). Idempotente: cancelar 2× devolve o mesmo estado
+   * sem mudar timestamps.
+   */
+  static cancel(orgId: string, id: string, opts: { reason?: string; cancelledBy?: "patient" | "staff" | "system" } = {}, actorId?: string): any {
+    const a = this.get(orgId, id);
+    if (a.status === "cancelled") return this.hydrate(orgId, a);
+    const by = opts.cancelledBy || "staff";
+    db.prepare(
+      `UPDATE appointments SET status='cancelled', cancelled_at = CURRENT_TIMESTAMP, cancelled_by = ?, cancellation_reason = ? WHERE id = ? AND organization_id = ?`
+    ).run(by, opts.reason ? String(opts.reason).slice(0, 200) : null, id, orgId);
+    logAuthEvent(orgId, actorId || null, a.contact_id, "CLINIC_APPOINTMENT_CANCELLED", { appointmentId: id, cancelledBy: by, reason: opts.reason || null });
+    return this.hydrate(orgId, this.get(orgId, id));
+  }
+
+  /** Confirmação pelo paciente (ADR-080 Fase N). Idempotente. */
+  static confirmByPatient(orgId: string, id: string, actorId?: string): any {
+    const a = this.get(orgId, id);
+    if (a.patient_confirmed_at) return this.hydrate(orgId, a);
+    db.prepare(
+      `UPDATE appointments SET patient_confirmed_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`
+    ).run(id, orgId);
+    logAuthEvent(orgId, actorId || null, a.contact_id, "CLINIC_APPOINTMENT_CONFIRMED_BY_PATIENT", { appointmentId: id });
+    return this.hydrate(orgId, this.get(orgId, id));
+  }
 }

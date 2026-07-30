@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -33,6 +33,7 @@ type Appointment = {
   care_started_at?: string | null;
   checkout_at?: string | null;
   continuation_status?: ContinuationStatus;
+  reminder_sent_at?: string | null;
 };
 type Conflict = { id: string; title?: string; reason?: string; start?: string };
 
@@ -518,6 +519,12 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
           <button onClick={onOpenChart} className="text-[11px] px-2 py-1 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20 inline-flex items-center gap-1">
             <ClipboardList className="w-3 h-3" /> Prontuário
           </button>
+        )}
+
+        {a.reminder_sent_at && (
+          <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1" title={`Lembrete enviado em ${new Date(a.reminder_sent_at).toLocaleString('pt-BR')}`}>
+            <Bell className="w-3 h-3" /> lembrete enviado
+          </span>
         )}
 
         {a.continuation_status && a.continuation_status !== 'pending' && (

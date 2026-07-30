@@ -86,6 +86,7 @@ jobs:
           - { name: 'clinic-attachments', script: 'test:clinic-attachments' }
           - { name: 'clinic-doc-send', script: 'test:clinic-doc-send' }
           - { name: 'clinic-patient-portal', script: 'test:clinic-patient-portal' }
+          - { name: 'clinic-reminder', script: 'test:clinic-reminder' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

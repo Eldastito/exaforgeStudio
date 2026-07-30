@@ -2669,6 +2669,33 @@ const initDb = () => {
   // opcional (encounter sem recomendação = alta / caso encerrado).
   try { db.exec(`ALTER TABLE clinical_encounters ADD COLUMN follow_up_recommended_days INTEGER`); } catch(e){}
 
+  // Lembrete automático de consulta (ADR-080 Fase M). Dedup por
+  // (org, appointment, template_key): mesmo lembrete de 24h só sai UMA vez
+  // por consulta, mesmo que o Scheduler rode várias vezes na janela. Não
+  // usa UNIQUE INDEX pra permitir tentativas failed serem reenviadas — a
+  // dedup é no service (skip se já existe row `sent` com mesmo template).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_appointment_reminders (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        appointment_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        to_identifier TEXT NOT NULL,
+        template_key TEXT NOT NULL DEFAULT '24h',
+        status TEXT NOT NULL,             -- queued | sent | failed
+        provider_message_id TEXT,
+        error TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_reminders_appt ON clinical_appointment_reminders (organization_id, appointment_id, template_key, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_reminders_patient ON clinical_appointment_reminders (organization_id, contact_id, sent_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_appointment_reminders', e); }
+  // Config por org — quantas horas antes o lembrete deve sair (default 24).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_reminder_hours INTEGER DEFAULT 24`); } catch(e){}
+
   // Portal do Paciente (ADR-080 Fase L) — molde do portal do profissional
   // (professional_portal_tokens): token opaco de 32 bytes, no banco só o hash
   // SHA-256 + expiração. Um paciente pode ter múltiplos tokens ativos (ex.:

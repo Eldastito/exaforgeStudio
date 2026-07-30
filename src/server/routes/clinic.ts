@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
+import db from "../db.js";
 import { PatientService } from "../PatientService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
@@ -11,6 +12,7 @@ import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
 import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttachmentService.js";
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
 import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
+import { ClinicReminderService } from "../ClinicReminderService.js";
 import { LgpdService } from "../LgpdService.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -409,6 +411,45 @@ router.delete("/attachments/:id", (req: AuthRequest, res): any => {
     if (e.code === "ATTACHMENT_FROZEN" || e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
+});
+
+// ── Lembretes automáticos (ADR-080 Fase M) ──────────────────────────────
+router.get("/appointments/:id/reminders", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicReminderService.list(orgId, req.params.id));
+});
+
+router.post("/appointments/:id/remind", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = await ClinicReminderService.sendForAppointment(orgId, req.params.id, {
+      actorId: actor(req),
+      force: !!req.body?.force,
+    });
+    if (!r) return res.status(202).json({ status: "skipped", reason: "no_active_channel" });
+    res.json(r);
+  } catch (e: any) {
+    if (e.code === "LGPD_COMMS_CONSENT_REQUIRED" || e.code === "APPT_NOT_ACTIVE") return res.status(409).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.get("/settings/reminders", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const o = db.prepare(`SELECT clinic_reminder_hours FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({ hoursBefore: Number(o?.clinic_reminder_hours) || 24 });
+});
+
+router.put("/settings/reminders", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const h = Math.max(1, Math.min(168, Math.floor(Number(req.body?.hoursBefore))));
+  if (!Number.isFinite(h) || h < 1) return res.status(400).json({ error: "hoursBefore inválido (1..168)." });
+  db.prepare(`UPDATE organization_settings SET clinic_reminder_hours = ? WHERE organization_id = ?`).run(h, orgId);
+  res.json({ hoursBefore: h });
 });
 
 // ── Portal do Paciente — gestão (ADR-080 Fase L) ────────────────────────

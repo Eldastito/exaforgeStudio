@@ -26,7 +26,7 @@ export class ClinicAgendaService {
     return db.prepare(`SELECT * FROM clinic_professionals WHERE organization_id = ?${includeInactive ? "" : " AND active = 1"} ORDER BY name`).all(orgId) as any[];
   }
 
-  static createProfessional(orgId: string, input: { name?: string; specialty?: string; color?: string; userId?: string }, actorId?: string): any {
+  static createProfessional(orgId: string, input: { name?: string; specialty?: string; color?: string; userId?: string; registrationNumber?: string; council?: string }, actorId?: string): any {
     const name = String(input?.name || "").trim();
     if (!name) throw new Error("Dê um nome ao profissional.");
     if (input?.userId) {
@@ -34,8 +34,9 @@ export class ClinicAgendaService {
       if (!u) throw new Error("Usuário para vincular não encontrado nesta organização.");
     }
     const id = randomUUID();
-    db.prepare(`INSERT INTO clinic_professionals (id, organization_id, name, specialty, color, user_id) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(id, orgId, name, String(input?.specialty || "").trim() || null, String(input?.color || "").trim() || null, input?.userId || null);
+    db.prepare(`INSERT INTO clinic_professionals (id, organization_id, name, specialty, color, user_id, registration_number, council) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, name, String(input?.specialty || "").trim() || null, String(input?.color || "").trim() || null, input?.userId || null,
+        String(input?.registrationNumber || "").trim() || null, String(input?.council || "").trim() || null);
     logAuthEvent(orgId, actorId, null, "CLINIC_PROFESSIONAL_CREATED", { professionalId: id, name });
     return db.prepare("SELECT * FROM clinic_professionals WHERE id = ?").get(id);
   }
@@ -48,6 +49,8 @@ export class ClinicAgendaService {
     if (patch.specialty !== undefined) { fields.push("specialty = ?"); params.push(String(patch.specialty || "").trim() || null); }
     if (patch.color !== undefined) { fields.push("color = ?"); params.push(String(patch.color || "").trim() || null); }
     if (patch.active !== undefined) { fields.push("active = ?"); params.push(patch.active ? 1 : 0); }
+    if (patch.registrationNumber !== undefined) { fields.push("registration_number = ?"); params.push(String(patch.registrationNumber || "").trim() || null); }
+    if (patch.council !== undefined) { fields.push("council = ?"); params.push(String(patch.council || "").trim() || null); }
     if (!fields.length) return db.prepare("SELECT * FROM clinic_professionals WHERE id = ?").get(id);
     params.push(id, orgId);
     db.prepare(`UPDATE clinic_professionals SET ${fields.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(...params);
@@ -228,6 +231,14 @@ export class ClinicAgendaService {
     if (a.care_started_at) throw new Error("Atendimento já iniciado.");
     db.prepare("UPDATE appointments SET care_started_at = CURRENT_TIMESTAMP, status = 'in_care', continuation_status = 'pending' WHERE id = ? AND organization_id = ?").run(id, orgId);
     logAuthEvent(orgId, actorId, a.contact_id, "CLINIC_CARE_STARTED", { appointmentId: id });
+    // Prontuário (ADR-080 Fase G): tenta abrir encounter em rascunho de forma
+    // BEST-EFFORT — se faltar consentimento LGPD sensível ou paciente, não
+    // trava o início do atendimento. O profissional destrava pela UI depois.
+    try {
+      // Import lazy pra evitar ciclos (Encounter também lê `appointments`).
+      const { ClinicEncounterService } = require("./ClinicEncounterService.js");
+      ClinicEncounterService.open(orgId, id, actorId || null);
+    } catch { /* silencioso — front sinaliza a necessidade de consentimento */ }
     return this.hydrate(orgId, this.get(orgId, id));
   }
 

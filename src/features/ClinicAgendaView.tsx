@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -185,6 +185,7 @@ export function ClinicAgendaView() {
   const [tick, setTick] = useState(Date.now()); // força re-render p/ recalcular a permanência
   const [busyId, setBusyId] = useState<string>(''); // id+ação em execução
   const [extendFor, setExtendFor] = useState<string>(''); // id do card com o menu "Estender" aberto
+  const [chartApptId, setChartApptId] = useState<string>(''); // appointment com modal de Prontuário aberto
 
   const loadAppointments = useCallback(() => {
     const params = new URLSearchParams({ date });
@@ -368,6 +369,7 @@ export function ClinicAgendaView() {
               onComplete={() => action(`${a.id}:complete`, `/api/clinic/appointments/${a.id}/complete`, 'Atendimento finalizado.')}
               onContinuation={(status) => action(`${a.id}:cont`, `/api/clinic/appointments/${a.id}/continuation`, status === 'continue' ? 'Marcado para continuar.' : status === 'finish' ? 'Marcado para finalizar.' : 'Marcado para remarcar.', { status })}
               onExtended={() => { setExtendFor(''); loadAppointments(); }}
+              onOpenChart={() => setChartApptId(a.id)}
             />
             </div>
           ))}
@@ -398,13 +400,20 @@ export function ClinicAgendaView() {
           onCreated={() => { setShowNew(false); loadAppointments(); }}
         />
       )}
+
+      {chartApptId && (
+        <EncounterModal
+          appointmentId={chartApptId}
+          onClose={() => setChartApptId('')}
+        />
+      )}
       </>)}
     </div>
   );
 }
 
 // ---- Card de agendamento ----
-function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onCheckin, onStartCare, onComplete, onContinuation, onExtended }: {
+function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onCheckin, onStartCare, onComplete, onContinuation, onExtended, onOpenChart }: {
   a: Appointment;
   overrun: OverrunState;
   busyId: string;
@@ -415,6 +424,7 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
   onComplete: () => void;
   onContinuation: (status: 'continue' | 'finish' | 'reschedule') => void;
   onExtended: () => void;
+  onOpenChart: () => void;
 }) {
   const st = STATUS_BADGE[a.status] || STATUS_BADGE.confirmed;
   const ov = OVERRUN_BADGE[overrun] || OVERRUN_BADGE.idle;
@@ -498,6 +508,13 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
               {busy('complete') ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Finalizar
             </button>
           </>
+        )}
+
+        {/* Prontuário — disponível durante o atendimento e após completed (leitura ou finalização). */}
+        {(inCare || a.status === 'completed' || a.status === 'in_care') && (
+          <button onClick={onOpenChart} className="text-[11px] px-2 py-1 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20 inline-flex items-center gap-1">
+            <ClipboardList className="w-3 h-3" /> Prontuário
+          </button>
         )}
 
         {a.continuation_status && a.continuation_status !== 'pending' && (
@@ -2086,6 +2103,560 @@ function OperatorReadinessRow({ operator, onSaved }: { operator: ConnectionOpera
         <button onClick={save} disabled={busy} className="text-[12px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 disabled:opacity-60">
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Prontuário/SOAP (ADR-080 Fase G) --------------------------------------
+// Modal reusa o padrão dos outros modais do arquivo. 4 abas SOAP + placeholder
+// "Ficha" (extensível via `form_data` — Fatia 1b carrega schema por especialidade
+// a partir de foto de ficha em papel). Botão "Finalizar" bloqueia updates
+// futuros (server retorna ENCOUNTER_SIGNED em PATCH). Consentimento LGPD Art.11
+// (dado sensível) exigido antes de abrir: se falhar, a UI dispara o registro
+// no mesmo modal e reabre.
+type Encounter = {
+  id: string; appointmentId: string; contactId: string;
+  professionalId: string | null; professionalNameSnapshot: string | null;
+  status: 'draft' | 'signed';
+  subjective: string | null; objective: string | null; assessment: string | null; plan: string | null;
+  formData: any | null;
+  signedBy: string | null; signedAt: string | null;
+  createdAt: string; updatedAt: string;
+};
+
+function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onClose: () => void }) {
+  const [encounter, setEncounter] = useState<Encounter | null>(null);
+  const [contactId, setContactId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'S' | 'O' | 'A' | 'P' | 'F' | 'D'>('S');
+  const [needConsent, setNeedConsent] = useState(false);
+  const [dirty, setDirty] = useState<{ subjective?: string; objective?: string; assessment?: string; plan?: string; formData?: string }>({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [encRes, aptRes] = await Promise.all([
+        apiFetch(`/api/clinic/appointments/${appointmentId}/encounter`).then(r => r.json()).catch(() => null),
+        apiFetch(`/api/clinic/agenda?date=${new Date().toISOString().slice(0, 10)}`).then(r => r.json()).catch(() => ({})),
+      ]);
+      // apt vem via encounter; se não veio, faz um GET direto (contacto pra consent)
+      if (encRes && encRes.id) {
+        setEncounter(encRes);
+        setContactId(encRes.contactId);
+        setDirty({});
+        setNeedConsent(false);
+      } else {
+        // Tenta abrir; se der LGPD 409, marca precisa consentimento.
+        await tryOpen();
+      }
+    } finally { setLoading(false); }
+  };
+
+  const tryOpen = async () => {
+    const res = await apiFetch(`/api/clinic/appointments/${appointmentId}/encounter`, { method: 'POST' });
+    const out = await res.json().catch(() => ({}));
+    if (res.status === 409 && out?.code === 'LGPD_CONSENT_REQUIRED') {
+      // Precisa do contactId pra registrar consentimento — pega da lista de appointments.
+      const list = await apiFetch(`/api/clinic/agenda?date=${new Date().toISOString().slice(0, 10)}`).then(r => r.json()).catch(() => []);
+      const apt = Array.isArray(list) ? list.find((x: any) => x.id === appointmentId) : null;
+      setContactId(apt?.contact_id || '');
+      setNeedConsent(true);
+      return;
+    }
+    if (!res.ok) { toast.error(out?.error || 'Não consegui abrir o prontuário.'); return; }
+    setEncounter(out);
+    setContactId(out.contactId);
+    setDirty({});
+    setNeedConsent(false);
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [appointmentId]);
+
+  const grantConsent = async () => {
+    if (!contactId) { toast.error('Paciente não identificado.'); return; }
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/clinic/patients/${contactId}/consent/sensitive`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'in_person', legalBasis: 'consent' }),
+      });
+      if (!res.ok) { toast.error('Falha ao registrar consentimento.'); return; }
+      toast.success('Consentimento registrado.');
+      await tryOpen();
+    } finally { setBusy(false); }
+  };
+
+  const save = async () => {
+    if (!encounter) return;
+    setBusy(true);
+    try {
+      const patch: any = {};
+      if (dirty.subjective !== undefined) patch.subjective = dirty.subjective;
+      if (dirty.objective !== undefined) patch.objective = dirty.objective;
+      if (dirty.assessment !== undefined) patch.assessment = dirty.assessment;
+      if (dirty.plan !== undefined) patch.plan = dirty.plan;
+      if (dirty.formData !== undefined) {
+        try { patch.formData = dirty.formData ? JSON.parse(dirty.formData) : null; }
+        catch { toast.error('Ficha: JSON inválido.'); return; }
+      }
+      if (Object.keys(patch).length === 0) { toast.error('Nada pra salvar.'); return; }
+      const res = await apiFetch(`/api/clinic/encounters/${encounter.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(out?.error || 'Falha ao salvar prontuário.'); return; }
+      setEncounter(out);
+      setDirty({});
+      toast.success('Prontuário salvo.');
+    } finally { setBusy(false); }
+  };
+
+  const finalize = async () => {
+    if (!encounter) return;
+    if (!(await confirmDialog('Finalizar (assinar) o prontuário? Depois disso não é possível editar sem addendum.'))) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/clinic/encounters/${encounter.id}/finalize`, { method: 'POST' });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(out?.error || 'Falha ao finalizar.'); return; }
+      setEncounter(out);
+      toast.success('Prontuário assinado.');
+    } finally { setBusy(false); }
+  };
+
+  const val = (field: 'subjective' | 'objective' | 'assessment' | 'plan') =>
+    dirty[field] !== undefined ? dirty[field]! : (encounter?.[field] ?? '');
+  const setVal = (field: 'subjective' | 'objective' | 'assessment' | 'plan') => (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+    setDirty(d => ({ ...d, [field]: e.target.value }));
+
+  const isSigned = encounter?.status === 'signed';
+  const hasDirty = Object.keys(dirty).length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-indigo-300" /> Prontuário
+            {isSigned && <span className="text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> assinado</span>}
+          </h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+
+        {loading && <div className="mt-4 flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+
+        {!loading && needConsent && (
+          <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+              <div>
+                <div className="text-sm text-amber-100 font-medium">Consentimento LGPD Art.11 necessário</div>
+                <p className="text-xs text-amber-200/90 mt-1">
+                  Prontuário contém <strong>dado sensível de saúde</strong>. Antes de abrir, o paciente precisa autorizar o registro (verbal ou por assinatura). Confirme com o paciente e registre abaixo — fica auditado.
+                </p>
+                <button onClick={grantConsent} disabled={busy} className="mt-3 text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                  {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />} Confirmar consentimento e abrir prontuário
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!loading && encounter && (
+          <>
+            <div className="mt-4 flex gap-1 border-b border-zinc-800 flex-wrap">
+              {([
+                { k: 'S', label: 'S · Anamnese' },
+                { k: 'O', label: 'O · Exame' },
+                { k: 'A', label: 'A · Avaliação' },
+                { k: 'P', label: 'P · Plano' },
+                { k: 'F', label: 'Ficha' },
+                { k: 'D', label: 'Docs' },
+              ] as const).map(t => (
+                <button key={t.k} onClick={() => setTab(t.k)}
+                  className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === t.k ? 'border-indigo-400 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3">
+              {tab === 'S' && (
+                <textarea disabled={isSigned} value={val('subjective')} onChange={setVal('subjective')}
+                  rows={10} placeholder="Queixa principal, história da doença, antecedentes relatados pelo paciente…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'O' && (
+                <textarea disabled={isSigned} value={val('objective')} onChange={setVal('objective')}
+                  rows={10} placeholder="Sinais vitais, exame físico, achados mensuráveis…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'A' && (
+                <textarea disabled={isSigned} value={val('assessment')} onChange={setVal('assessment')}
+                  rows={10} placeholder="Hipóteses diagnósticas, evolução, análise clínica…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'P' && (
+                <textarea disabled={isSigned} value={val('plan')} onChange={setVal('plan')}
+                  rows={10} placeholder="Conduta, medicação, procedimentos, retorno, encaminhamentos…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
+              )}
+              {tab === 'F' && (
+                <div>
+                  <p className="text-[11px] text-zinc-500 mb-1">Ficha personalizada da especialidade (JSON extensível). Assim que você mandar as imagens da ficha em papel, essa aba vira formulário com os campos exatos.</p>
+                  <textarea disabled={isSigned}
+                    value={dirty.formData !== undefined ? dirty.formData : (encounter.formData ? JSON.stringify(encounter.formData, null, 2) : '')}
+                    onChange={e => setDirty(d => ({ ...d, formData: e.target.value }))}
+                    rows={10} placeholder='{"escala_dor": 7, "sono": "ruim"}'
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 disabled:opacity-60" />
+                </div>
+              )}
+              {tab === 'D' && (
+                <EncounterDocsPanel encounterId={encounter.id} />
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <div className="text-[11px] text-zinc-500">
+                {isSigned ? (
+                  <>Assinado em {new Date(encounter.signedAt!).toLocaleString('pt-BR')}</>
+                ) : hasDirty ? (
+                  <span className="text-amber-300">Alterações não salvas</span>
+                ) : (
+                  <>Rascunho — atualizado em {new Date(encounter.updatedAt).toLocaleString('pt-BR')}</>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {!isSigned && (
+                  <>
+                    <button onClick={save} disabled={busy || !hasDirty}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 inline-flex items-center gap-1 disabled:opacity-60">
+                      {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar rascunho
+                    </button>
+                    <button onClick={finalize} disabled={busy}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                      {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />} Finalizar (assinar)
+                    </button>
+                  </>
+                )}
+                {isSigned && (
+                  <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800">
+                    Fechar
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- Docs: Receita + Atestado (ADR-080 Fase H) ----------------------------
+// Painel embutido na aba "Docs" do EncounterModal. Lista o que já existe,
+// deixa criar novo (draft), editar rascunho, emitir (imutável) e baixar PDF.
+
+type PrescriptionItemDto = { drug: string; dosage?: string; quantity?: string; instructions?: string; tarja?: string };
+type PrescriptionDto = {
+  id: string; status: 'draft' | 'issued';
+  headerNotes: string | null; items: PrescriptionItemDto[];
+  repeatsAllowed: number; validUntil: string | null;
+  professionalNameSnapshot: string | null; professionalRegistrationSnapshot: string | null; professionalCouncilSnapshot: string | null;
+  issuedAt: string | null; createdAt: string;
+};
+type CertificateDto = {
+  id: string; status: 'draft' | 'issued';
+  cid: string | null; cidDescription: string | null;
+  days: number; purpose: 'rest' | 'comparecimento' | 'other'; notes: string | null;
+  professionalNameSnapshot: string | null; professionalRegistrationSnapshot: string | null; professionalCouncilSnapshot: string | null;
+  issuedAt: string | null; createdAt: string;
+};
+
+function downloadPdf(url: string, filename: string) {
+  // Padrão do ExportAuditButton — apiFetch garante o Authorization header.
+  apiFetch(url).then(async (res) => {
+    if (!res.ok) { toast.error('Não consegui baixar o PDF.'); return; }
+    const blob = await res.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }).catch(() => toast.error('Falha na rede ao baixar PDF.'));
+}
+
+function EncounterDocsPanel({ encounterId }: { encounterId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [prescriptions, setPrescriptions] = useState<PrescriptionDto[]>([]);
+  const [certificates, setCertificates] = useState<CertificateDto[]>([]);
+  const [showRx, setShowRx] = useState(false);
+  const [showCert, setShowCert] = useState(false);
+  const [busyId, setBusyId] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/encounters/${encounterId}/documents`);
+      const d = await r.json().catch(() => ({}));
+      setPrescriptions(d?.prescriptions || []);
+      setCertificates(d?.certificates || []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [encounterId]);
+
+  const issue = async (kind: 'prescriptions' | 'certificates', id: string) => {
+    if (!(await confirmDialog(kind === 'prescriptions' ? 'Emitir receita? Depois disso ela vira imutável.' : 'Emitir atestado? Depois disso ele vira imutável.'))) return;
+    setBusyId(id);
+    try {
+      const r = await apiFetch(`/api/clinic/${kind}/${id}/issue`, { method: 'POST' });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(out?.error || 'Falha ao emitir.'); return; }
+      toast.success('Emitido.');
+      await load();
+    } finally { setBusyId(''); }
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <button onClick={() => setShowRx(true)} className="text-[11px] px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Nova receita
+        </button>
+        <button onClick={() => setShowCert(true)} className="text-[11px] px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 inline-flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Novo atestado
+        </button>
+      </div>
+
+      {loading && <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</div>}
+
+      {!loading && prescriptions.length === 0 && certificates.length === 0 && (
+        <div className="text-xs text-zinc-500 py-4">Nenhum documento emitido nesta consulta.</div>
+      )}
+
+      {prescriptions.map((rx) => (
+        <div key={rx.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-medium text-zinc-100 inline-flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5 text-indigo-300" /> Receita — {rx.items.length} item(ns)
+              {rx.status === 'issued' ? (
+                <span className="ml-1 text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> emitida</span>
+              ) : (
+                <span className="ml-1 text-[10px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5">rascunho</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {rx.status === 'draft' && (
+                <button onClick={() => issue('prescriptions', rx.id)} disabled={busyId === rx.id} className="text-[11px] px-2 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                  {busyId === rx.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />} Emitir
+                </button>
+              )}
+              <button onClick={() => downloadPdf(`/api/clinic/prescriptions/${rx.id}/pdf`, `receita-${rx.id}.pdf`)} className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1">
+                <Download className="w-3 h-3" /> PDF
+              </button>
+            </div>
+          </div>
+          <ul className="mt-2 text-[11px] text-zinc-400 space-y-0.5">
+            {rx.items.map((it, i) => (
+              <li key={i}>• <span className="text-zinc-200">{it.drug}</span>{it.dosage ? ` — ${it.dosage}` : ''}{it.quantity ? ` — ${it.quantity}` : ''}{it.instructions ? ` · ${it.instructions}` : ''}</li>
+            ))}
+          </ul>
+          {(rx.repeatsAllowed > 0 || rx.validUntil) && (
+            <div className="mt-1 text-[10px] text-zinc-500">
+              {rx.repeatsAllowed > 0 && `Uso continuado (${rx.repeatsAllowed}× repetição). `}
+              {rx.validUntil && `Válida até ${new Date(rx.validUntil).toLocaleDateString('pt-BR')}.`}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {certificates.map((c) => (
+        <div key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 mb-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-medium text-zinc-100 inline-flex items-center gap-1.5">
+              <FileCheck2 className="w-3.5 h-3.5 text-emerald-300" /> Atestado — {c.days} dia(s)
+              {c.status === 'issued' ? (
+                <span className="ml-1 text-[10px] rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> emitido</span>
+              ) : (
+                <span className="ml-1 text-[10px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5">rascunho</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {c.status === 'draft' && (
+                <button onClick={() => issue('certificates', c.id)} disabled={busyId === c.id} className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+                  {busyId === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />} Emitir
+                </button>
+              )}
+              <button onClick={() => downloadPdf(`/api/clinic/certificates/${c.id}/pdf`, `atestado-${c.id}.pdf`)} className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1">
+                <Download className="w-3 h-3" /> PDF
+              </button>
+            </div>
+          </div>
+          {c.cid && <div className="mt-1 text-[11px] text-zinc-300">CID: <span className="font-mono">{c.cid}</span>{c.cidDescription ? ` · ${c.cidDescription}` : ''}</div>}
+          {c.notes && <div className="mt-1 text-[11px] text-zinc-400">{c.notes}</div>}
+        </div>
+      ))}
+
+      {showRx && <NewPrescriptionModal encounterId={encounterId} onClose={() => setShowRx(false)} onCreated={() => { setShowRx(false); load(); }} />}
+      {showCert && <NewCertificateModal encounterId={encounterId} onClose={() => setShowCert(false)} onCreated={() => { setShowCert(false); load(); }} />}
+    </div>
+  );
+}
+
+function NewPrescriptionModal({ encounterId, onClose, onCreated }: { encounterId: string; onClose: () => void; onCreated: () => void }) {
+  const [items, setItems] = useState<PrescriptionItemDto[]>([{ drug: '', dosage: '', quantity: '', instructions: '', tarja: '' }]);
+  const [headerNotes, setHeaderNotes] = useState('');
+  const [repeats, setRepeats] = useState<number>(0);
+  const [validUntil, setValidUntil] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+
+  const setItem = (i: number, patch: Partial<PrescriptionItemDto>) => setItems(arr => arr.map((it, idx) => idx === i ? { ...it, ...patch } : it));
+  const addItem = () => setItems(arr => [...arr, { drug: '', dosage: '', quantity: '', instructions: '', tarja: '' }]);
+  const rmItem = (i: number) => setItems(arr => arr.length > 1 ? arr.filter((_, idx) => idx !== i) : arr);
+
+  const submit = async () => {
+    const clean = items.filter(i => i.drug.trim());
+    if (!clean.length) { toast.error('Adicione ao menos 1 item com nome do medicamento.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/encounters/${encounterId}/prescriptions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: clean, headerNotes: headerNotes || null, repeatsAllowed: repeats, validUntil: validUntil || null }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(out?.error || 'Falha ao criar receita.'); return; }
+      toast.success('Receita criada. Emita quando estiver pronta.');
+      onCreated();
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100 inline-flex items-center gap-2"><FileText className="w-4 h-4 text-indigo-300" /> Nova receita</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+
+        <label className="text-[11px] text-zinc-400 mt-3 block">Observações no topo (opcional)</label>
+        <input value={headerNotes} onChange={e => setHeaderNotes(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" placeholder="Uso conforme prescrição" />
+
+        <div className="mt-3 space-y-2">
+          {items.map((it, i) => (
+            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-zinc-500">Item {i + 1}</span>
+                {items.length > 1 && (
+                  <button onClick={() => rmItem(i)} className="text-[11px] text-red-300 hover:text-red-200 inline-flex items-center gap-1"><Trash2 className="w-3 h-3" /> Remover</button>
+                )}
+              </div>
+              <input value={it.drug} onChange={e => setItem(i, { drug: e.target.value })} placeholder="Medicamento (ex.: Amoxicilina 500mg)"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100 mb-1" />
+              <div className="grid grid-cols-2 gap-1">
+                <input value={it.dosage || ''} onChange={e => setItem(i, { dosage: e.target.value })} placeholder="Dose (ex.: 1 cápsula)" className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />
+                <input value={it.quantity || ''} onChange={e => setItem(i, { quantity: e.target.value })} placeholder="Qtde (ex.: 21 cápsulas)" className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />
+              </div>
+              <input value={it.instructions || ''} onChange={e => setItem(i, { instructions: e.target.value })} placeholder="Posologia (ex.: 1 cápsula de 8/8h por 7 dias)"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 mt-1" />
+              <input value={it.tarja || ''} onChange={e => setItem(i, { tarja: e.target.value })} placeholder="Tarja (opcional — livre / vermelha / preta)"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 mt-1" />
+            </div>
+          ))}
+          <button onClick={addItem} className="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800 inline-flex items-center gap-1"><Plus className="w-3 h-3" /> Adicionar item</button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[11px] text-zinc-400 block">Repetições permitidas</label>
+            <input type="number" min={0} value={repeats} onChange={e => setRepeats(Math.max(0, Number(e.target.value) || 0))} className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" />
+          </div>
+          <div>
+            <label className="text-[11px] text-zinc-400 block">Válida até (opcional)</label>
+            <input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" />
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={submit} disabled={busy} className="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar rascunho
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewCertificateModal({ encounterId, onClose, onCreated }: { encounterId: string; onClose: () => void; onCreated: () => void }) {
+  const [days, setDays] = useState<number>(1);
+  const [cid, setCid] = useState('');
+  const [cidDescription, setCidDescription] = useState('');
+  const [purpose, setPurpose] = useState<'rest' | 'comparecimento' | 'other'>('rest');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!(days >= 1)) { toast.error('Informe ao menos 1 dia.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/clinic/encounters/${encounterId}/certificates`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days, cid: cid || null, cidDescription: cidDescription || null, purpose, notes: notes || null }),
+      });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(out?.error || 'Falha ao criar atestado.'); return; }
+      toast.success('Atestado criado. Emita quando estiver pronto.');
+      onCreated();
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100 inline-flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-300" /> Novo atestado</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[11px] text-zinc-400 block">Dias de afastamento</label>
+            <input type="number" min={1} value={days} onChange={e => setDays(Math.max(1, Number(e.target.value) || 1))} className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" />
+          </div>
+          <div>
+            <label className="text-[11px] text-zinc-400 block">Motivo</label>
+            <select value={purpose} onChange={e => setPurpose(e.target.value as any)} className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100">
+              <option value="rest">Afastamento (repouso)</option>
+              <option value="comparecimento">Comparecimento à consulta</option>
+              <option value="other">Outro</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[11px] text-zinc-400 block">CID-10 (opcional)</label>
+            <input value={cid} onChange={e => setCid(e.target.value.toUpperCase())} placeholder="Ex.: J06.9" className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100 font-mono" />
+          </div>
+          <div>
+            <label className="text-[11px] text-zinc-400 block">Descrição do CID (opcional)</label>
+            <input value={cidDescription} onChange={e => setCidDescription(e.target.value)} placeholder="Ex.: Infecção aguda das vias aéreas" className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" />
+          </div>
+        </div>
+
+        <label className="text-[11px] text-zinc-400 mt-3 block">Observações (opcional)</label>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4} className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" placeholder="Repouso relativo, reavaliar em 5 dias…" />
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={submit} disabled={busy} className="text-xs px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar rascunho
+          </button>
+        </div>
       </div>
     </div>
   );

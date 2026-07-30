@@ -29,6 +29,24 @@ export interface MetricsOverview {
     confirmationRate: number;   // SIM / lembretes sent (%)
     cancellationRate: number;   // NÃO / lembretes sent (%)
   };
+  /** Automações do WhatsApp (Fases P, Q) — visibilidade das ofertas ativas
+   *  e do funil de aceite/recusa. Sem isto, o gestor não vê o que o sistema
+   *  fez sozinho e desconfia. */
+  automations: {
+    reschedule: {
+      offered: number;          // criadas no período
+      chosen: number;           // paciente escolheu 1/2/3
+      abandoned: number;        // paciente respondeu X ou nova REMARCAR
+      expired: number;
+    };
+    vacancy: {
+      offered: number;
+      accepted: number;         // paciente da fila aceitou a vaga aberta
+      declined: number;
+      expired: number;
+      recoveredMinutes: number; // duração total das vagas aceitas — "receita salva"
+    };
+  };
   cancellations: {
     total: number;
     byOrigin: { patient: number; staff: number; system: number };
@@ -126,6 +144,29 @@ export class ClinicMetricsService {
     const remConfirmed = Number(repliedRow?.confirmed || 0);
     const remCancelled = Number(repliedRow?.cancelledByPatient || 0);
 
+    // ── Automações (ADR-080 Fase R) ─────────────────────────────────────
+    const reschedRows = db.prepare(
+      `SELECT status, COUNT(*) AS c FROM clinical_reschedule_offers
+        WHERE organization_id = ? AND created_at >= ? AND created_at <= ?
+        GROUP BY status`
+    ).all(orgId, from, to) as any[];
+    const reschedMap: Record<string, number> = {};
+    for (const r of reschedRows) reschedMap[r.status] = Number(r.c);
+
+    const vacancyRows = db.prepare(
+      `SELECT status, COUNT(*) AS c FROM clinical_vacancy_offers
+        WHERE organization_id = ? AND created_at >= ? AND created_at <= ?
+        GROUP BY status`
+    ).all(orgId, from, to) as any[];
+    const vacancyMap: Record<string, number> = {};
+    for (const r of vacancyRows) vacancyMap[r.status] = Number(r.c);
+    // Minutos "recuperados": soma da duração das vagas aceitas — cada uma
+    // seria uma consulta perdida convertida em consulta faturada.
+    const recoveredRow = db.prepare(
+      `SELECT COALESCE(SUM(slot_duration_minutes), 0) AS m FROM clinical_vacancy_offers
+        WHERE organization_id = ? AND created_at >= ? AND created_at <= ? AND status = 'accepted'`
+    ).get(orgId, from, to) as any;
+
     // ── Cancelamentos no período (todos, não só via reply) ──────────────
     const cancelRows = db.prepare(
       `SELECT cancelled_by, COUNT(*) AS c FROM appointments
@@ -211,6 +252,21 @@ export class ClinicMetricsService {
         replied: remConfirmed + remCancelled,
         confirmationRate: pct(remConfirmed, remSent),
         cancellationRate: pct(remCancelled, remSent),
+      },
+      automations: {
+        reschedule: {
+          offered: (reschedMap.pending || 0) + (reschedMap.chosen || 0) + (reschedMap.abandoned || 0) + (reschedMap.expired || 0),
+          chosen: reschedMap.chosen || 0,
+          abandoned: reschedMap.abandoned || 0,
+          expired: reschedMap.expired || 0,
+        },
+        vacancy: {
+          offered: (vacancyMap.pending || 0) + (vacancyMap.accepted || 0) + (vacancyMap.declined || 0) + (vacancyMap.expired || 0) + (vacancyMap.superseded || 0),
+          accepted: vacancyMap.accepted || 0,
+          declined: vacancyMap.declined || 0,
+          expired: vacancyMap.expired || 0,
+          recoveredMinutes: Number(recoveredRow?.m || 0),
+        },
       },
       cancellations: {
         total: cancelTotal,

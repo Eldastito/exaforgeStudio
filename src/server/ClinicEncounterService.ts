@@ -91,11 +91,21 @@ function hydrate(r: any): Encounter | null {
 }
 
 export class ClinicEncounterService {
-  /** Pega o encounter de uma consulta (ou null se ainda não foi aberto). */
+  /**
+   * Pega o encounter de uma consulta (ou null se ainda não foi aberto).
+   *
+   * Fase 19: leitura de prontuário exige consent LGPD Art.11 ATIVO. Antes,
+   * `open()` já bloqueava a criação, mas `getByAppointment` seguia devolvendo
+   * dado sensível mesmo quando o paciente havia revogado — o titular
+   * revogava e o profissional continuava lendo. Se o encounter não existe
+   * (retorno null), NÃO gata — pode ser lookup pra saber se precisa abrir.
+   */
   static getByAppointment(orgId: string, appointmentId: string): Encounter | null {
     const r = db.prepare(
       `SELECT * FROM clinical_encounters WHERE organization_id = ? AND appointment_id = ?`
-    ).get(orgId, appointmentId);
+    ).get(orgId, appointmentId) as any;
+    if (!r) return null;
+    requireConsent(orgId, r.contact_id);
     return hydrate(r);
   }
 
@@ -103,7 +113,32 @@ export class ClinicEncounterService {
   static get(orgId: string, encounterId: string): Encounter | null {
     const r = db.prepare(
       `SELECT * FROM clinical_encounters WHERE organization_id = ? AND id = ?`
+    ).get(orgId, encounterId) as any;
+    if (!r) return null;
+    requireConsent(orgId, r.contact_id);
+    return hydrate(r);
+  }
+
+  /**
+   * Fase 19: variante `get` que NÃO exige consent — uso interno por chamadas
+   * do próprio service (`update`/`finalize`/`setFollowUpRecommendation`/
+   * `open` retornando o recém-criado) que já validam consent explicitamente
+   * ou são writes sem gate histórico. Mantém a semântica original sem
+   * duplicar checagem. Nunca exportar por rota HTTP.
+   */
+  private static getRaw(orgId: string, encounterId: string): Encounter | null {
+    const r = db.prepare(
+      `SELECT * FROM clinical_encounters WHERE organization_id = ? AND id = ?`
     ).get(orgId, encounterId);
+    return hydrate(r);
+  }
+
+  /** Fase 19: irmã da `getRaw`, mas por `appointment_id`. Só `open()` usa
+   *  — pra checar idempotência antes de criar o encounter novo. */
+  private static getByAppointmentRaw(orgId: string, appointmentId: string): Encounter | null {
+    const r = db.prepare(
+      `SELECT * FROM clinical_encounters WHERE organization_id = ? AND appointment_id = ?`
+    ).get(orgId, appointmentId);
     return hydrate(r);
   }
 
@@ -119,8 +154,12 @@ export class ClinicEncounterService {
     if (!apt) throw new Error("Agendamento não encontrado.");
     if (!apt.contact_id) throw new Error("Agendamento sem paciente associado.");
 
-    const existing = this.getByAppointment(orgId, appointmentId);
-    if (existing) return existing;
+    const existing = this.getByAppointmentRaw(orgId, appointmentId);
+    if (existing) {
+      // Fase 19: retorno via idempotência ainda precisa gatear leitura.
+      requireConsent(orgId, existing.contactId);
+      return existing;
+    }
 
     // LGPD Art.11 — dado sensível exige consentimento explícito antes de abrir.
     requireConsent(orgId, apt.contact_id);
@@ -137,7 +176,7 @@ export class ClinicEncounterService {
     );
 
     logAuthEvent(orgId, actorId, apt.contact_id, "CLINIC_ENCOUNTER_OPENED", { encounterId: id, appointmentId });
-    return this.get(orgId, id)!;
+    return this.getRaw(orgId, id)!;
   }
 
   /**
@@ -146,7 +185,9 @@ export class ClinicEncounterService {
    * Cada UPDATE registra diff em `clinical_encounter_history`.
    */
   static update(orgId: string, encounterId: string, actorId: string | null, patch: EncounterPatch): Encounter {
-    const before = this.get(orgId, encounterId);
+    // Fase 19: usa raw pra a checagem explícita de consent abaixo ser a
+    // única — evita duplicar erro se `get` também gatear.
+    const before = this.getRaw(orgId, encounterId);
     if (!before) throw new Error("Prontuário não encontrado.");
     if (before.status === "signed") {
       const e: any = new Error("Prontuário já assinado — não pode ser editado (use addendum).");
@@ -183,7 +224,7 @@ export class ClinicEncounterService {
       encounterId,
       changedFields: Object.keys(historyAfter),
     });
-    return this.get(orgId, encounterId)!;
+    return this.getRaw(orgId, encounterId)!;
   }
 
   /**
@@ -192,7 +233,7 @@ export class ClinicEncounterService {
    * A partir daqui, `update()` é bloqueado.
    */
   static finalize(orgId: string, encounterId: string, actorId: string | null): Encounter {
-    const before = this.get(orgId, encounterId);
+    const before = this.getRaw(orgId, encounterId);
     if (!before) throw new Error("Prontuário não encontrado.");
     if (before.status === "signed") return before;
 
@@ -203,11 +244,20 @@ export class ClinicEncounterService {
     ).run(actorId, encounterId, orgId);
 
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_ENCOUNTER_FINALIZED", { encounterId });
-    return this.get(orgId, encounterId)!;
+    return this.getRaw(orgId, encounterId)!;
   }
 
-  /** Histórico clínico do paciente — todos os encounters, mais recente primeiro. */
+  /**
+   * Histórico clínico do paciente — todos os encounters, mais recente primeiro.
+   *
+   * Fase 19: exige consent LGPD do próprio paciente cujo histórico está sendo
+   * pedido. `contactId` vem do caller, então o gate protege consulta pontual;
+   * quando o paciente revoga, o profissional perde acesso ao histórico até
+   * novo grant. Retenção CFM continua guardando as rows — só o TRATAMENTO
+   * (leitura) é bloqueado, alinhado a LGPD Art.8 §5.
+   */
   static listByPatient(orgId: string, contactId: string, limit = 50): Encounter[] {
+    requireConsent(orgId, contactId);
     const rows = db.prepare(
       `SELECT * FROM clinical_encounters
         WHERE organization_id = ? AND contact_id = ?
@@ -217,8 +267,20 @@ export class ClinicEncounterService {
     return rows.map((r) => hydrate(r)!).filter(Boolean);
   }
 
-  /** Diff versionado de um encounter (best-effort — nunca joga erro pra fora). */
+  /**
+   * Diff versionado de um encounter (best-effort — nunca joga erro pra fora).
+   *
+   * Fase 19: o histórico é dado sensível — cada versão é uma foto do SOAP.
+   * Deriva `contactId` do próprio encounter pra checar consent. Se o encounter
+   * não existe (id inválido / cross-tenant), devolve `[]` (comportamento
+   * histórico) — nada a esconder.
+   */
   static history(orgId: string, encounterId: string) {
+    const r = db.prepare(
+      `SELECT contact_id FROM clinical_encounters WHERE organization_id = ? AND id = ?`
+    ).get(orgId, encounterId) as any;
+    if (!r) return [];
+    requireConsent(orgId, r.contact_id);
     return ClinicEncounterHistoryService.list(orgId, encounterId);
   }
 
@@ -230,7 +292,7 @@ export class ClinicEncounterService {
    * agendado). Passar `null` limpa.
    */
   static setFollowUpRecommendation(orgId: string, encounterId: string, actorId: string | null, days: number | null): Encounter {
-    const before = this.get(orgId, encounterId);
+    const before = this.getRaw(orgId, encounterId);
     if (!before) throw new Error("Prontuário não encontrado.");
     let value: number | null = null;
     if (days !== null && days !== undefined) {
@@ -243,7 +305,7 @@ export class ClinicEncounterService {
         WHERE id = ? AND organization_id = ?`
     ).run(value, encounterId, orgId);
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_ENCOUNTER_FOLLOWUP_SET", { encounterId, days: value });
-    return this.get(orgId, encounterId)!;
+    return this.getRaw(orgId, encounterId)!;
   }
 }
 

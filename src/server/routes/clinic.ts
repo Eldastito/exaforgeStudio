@@ -203,11 +203,17 @@ router.post("/appointments/:id/continuation", (req: AuthRequest, res): any => {
 // updates ficam bloqueados aqui — a próxima fatia libera addendum.
 
 // GET encounter da consulta (null se ainda não foi aberto).
+// Fase 19: consent LGPD Art.11 é revalidado no read — sem consent, 403.
 router.get("/appointments/:id/encounter", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const enc = ClinicEncounterService.getByAppointment(orgId, req.params.id);
-  res.json(enc);
+  try {
+    const enc = ClinicEncounterService.getByAppointment(orgId, req.params.id);
+    res.json(enc);
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // POST abre encounter (idempotente). 409 se falta consentimento LGPD sensível.
@@ -242,18 +248,28 @@ router.post("/encounters/:id/finalize", (req: AuthRequest, res): any => {
 });
 
 // Histórico versionado (diff campo a campo de cada UPDATE + addendum futuro).
+// Fase 19: gate LGPD SENSITIVE — cada versão é foto do SOAP, dado sensível.
 router.get("/encounters/:id/history", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(ClinicEncounterService.history(orgId, req.params.id));
+  try { res.json(ClinicEncounterService.history(orgId, req.params.id)); }
+  catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Histórico clínico consolidado do paciente (todos os encounters).
+// Fase 19: gate LGPD SENSITIVE — paciente revogado → 403.
 router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = Number(req.query.limit) || 50;
-  res.json(ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit));
+  try { res.json(ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit)); }
+  catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ── Documentos clínicos: Receita + Atestado (ADR-080 Fase H) ────────────
@@ -271,10 +287,15 @@ const docError = (res: any, e: any) => {
 };
 
 // Listagem consolidada dos docs do encounter.
+// Fase 19: gate LGPD SENSITIVE (doc é dado sensível — mesmo o pack {rx, cert}).
 router.get("/encounters/:id/documents", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(ClinicDocumentsService.listByEncounter(orgId, req.params.id));
+  try { res.json(ClinicDocumentsService.listByEncounter(orgId, req.params.id)); }
+  catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Receita
@@ -308,7 +329,11 @@ router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any>
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="receita-${req.params.id}.pdf"`);
     return res.send(pdf);
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) {
+    // Fase 19: consent revogado no meio do fluxo → 403.
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Atestado
@@ -339,7 +364,10 @@ router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="atestado-${req.params.id}.pdf"`);
     return res.send(pdf);
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ── Envio de docs por WhatsApp (ADR-080 Fase K) ────────────────────────
@@ -383,10 +411,15 @@ router.get("/documents/:kind/:id/deliveries", (req: AuthRequest, res): any => {
 // Multipart. Arquivo fica em PRIVATE_MEDIA_DIR (fora do /media estático).
 // LGPD Art.11 e bloqueio pós-signed no service.
 
+// Fase 19: gate LGPD SENSITIVE — anexo é dado clínico.
 router.get("/encounters/:id/attachments", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(ClinicAttachmentService.list(orgId, req.params.id));
+  try { res.json(ClinicAttachmentService.list(orgId, req.params.id)); }
+  catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 router.post("/encounters/:id/attachments", (req: AuthRequest, res): any => {
@@ -420,7 +453,11 @@ router.get("/attachments/:id/download", (req: AuthRequest, res): any => {
     const disposition = mime.startsWith("image/") ? "inline" : "attachment";
     res.setHeader("Content-Disposition", `${disposition}; filename="${filename.replace(/"/g, "")}"`);
     return res.send(buffer);
-  } catch (e: any) { res.status(404).json({ error: e.message }); }
+  } catch (e: any) {
+    // Fase 19: consent revogado → 403 (não confundir com 404 "não encontrado").
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(404).json({ error: e.message });
+  }
 });
 
 // Compartilhar/desmarcar anexo com o Portal do Paciente (ADR-080 Fase L).

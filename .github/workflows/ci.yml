@@ -98,6 +98,7 @@ jobs:
           - { name: 'clinic-retention', script: 'test:clinic-retention' }
           - { name: 'clinic-monthly-report', script: 'test:clinic-monthly-report' }
           - { name: 'clinic-emergency', script: 'test:clinic-emergency' }
+          - { name: 'clinic-consent-reads', script: 'test:clinic-consent-reads' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

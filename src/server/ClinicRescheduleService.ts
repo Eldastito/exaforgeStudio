@@ -22,6 +22,13 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
 import { AppointmentService } from "./AppointmentService.js";
+import { LgpdService } from "./LgpdService.js";
+
+// Fase 19: consent LGPD `comunicacoes` obrigatório antes de enviar oferta
+// de reagendamento — assíncrona com o consentimento pra remarcação por
+// canal (mesmo padrão de `ClinicReminderService`/`ClinicDocumentDelivery
+// Service`). Se o paciente revogou, nem gera offer nem espera resposta.
+const COMMS_CONSENT = "comunicacoes";
 
 const OFFER_TTL_MIN = 30;
 const DAYS_TO_SCAN = 14;
@@ -129,6 +136,15 @@ export class ClinicRescheduleService {
    * ACK e retorna. Se não encontrou nenhum slot, devolve `null`.
    */
   static createOffer(orgId: string, sourceAppointmentId: string, contactId: string): { offer: RescheduleOffer; message: string } | null {
+    // Fase 19: sem consent pra comms, não oferece — economiza slots que o
+    // paciente não pode receber. Retorna null (comportamento existente
+    // pra "nada a oferecer") em vez de lançar — o caller (handler do
+    // parser SIM/NÃO/REMARCAR) trata null como "não fez nada".
+    if (!LgpdService.hasConsent(orgId, contactId, COMMS_CONSENT)) {
+      logAuthEvent(orgId, null, contactId, "CLINIC_RESCHEDULE_SKIPPED_NO_CONSENT", { sourceAppointmentId });
+      return null;
+    }
+
     // Expira offers anteriores desse paciente (garante 1 ativa por vez).
     db.prepare(
       `UPDATE clinical_reschedule_offers SET status='abandoned', resolved_at=CURRENT_TIMESTAMP

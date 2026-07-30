@@ -91,6 +91,7 @@
     "test:clinic-retention": "tsx scripts/test-clinic-retention.ts",
     "test:clinic-monthly-report": "tsx scripts/test-clinic-monthly-report.ts",
     "test:clinic-emergency": "tsx scripts/test-clinic-emergency.ts",
+    "test:clinic-consent-reads": "tsx scripts/test-clinic-consent-reads.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

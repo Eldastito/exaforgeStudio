@@ -259,6 +259,38 @@ router.get("/encounters/:id/history", (req: AuthRequest, res): any => {
   }
 });
 
+// Addendum ao prontuário assinado (ADR-080 Fase 20). CFM 1.821/2007 —
+// prontuário `signed` é imutável, addendum é APPEND-ONLY. Autoria +
+// timestamp por row. PIN opcional (reusa Fase T — profissional sem PIN
+// cadastrado assina sem PIN). LGPD Art.11 no service.
+router.get("/encounters/:id/addendums", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicEncounterService.listAddendums(orgId, req.params.id)); }
+  catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+router.post("/encounters/:id/addendums", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const body = req.body || {};
+  try {
+    res.json(ClinicEncounterService.addAddendum(orgId, req.params.id, actor(req), {
+      note: String(body.note || ""),
+      actorName: (req as any).user?.name ?? null,
+      pin: body.pin,
+    }));
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    if (e?.code === "ENCOUNTER_NOT_SIGNED") return res.status(409).json({ error: e.message, code: e.code });
+    if (e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID") return res.status(401).json({ error: e.message, code: e.code });
+    if (e?.code === "ADDENDUM_EMPTY" || e?.code === "ADDENDUM_TOO_LONG") return res.status(400).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Histórico clínico consolidado do paciente (todos os encounters).
 // Fase 19: gate LGPD SENSITIVE — paciente revogado → 403.
 router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {

@@ -103,7 +103,7 @@ function requireConsent(orgId: string, contactId: string) {
  * - Se bate, retorna `true` (marcar `signed_with_pin=1`).
  * Hash = SHA-256 de `salt + pin`. `salt` é UUID gerado no set.
  */
-function verifyPin(orgId: string, professionalId: string | null, providedPin: string | undefined): boolean {
+export function verifyPin(orgId: string, professionalId: string | null, providedPin: string | undefined): boolean {
   if (!professionalId) return false;
   const prof = db.prepare(`SELECT pin_hash, pin_salt FROM clinic_professionals WHERE id = ? AND organization_id = ?`)
     .get(professionalId, orgId) as any;

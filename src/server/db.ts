@@ -2735,6 +2735,32 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinical_encounter_history ON clinical_encounter_history (organization_id, encounter_id, created_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_history', e); }
+
+  // Addendum ao prontuário assinado (ADR-080 Fase 20). CFM 1.821/2007 exige
+  // que o prontuário original NÃO seja modificado após finalizado — mas o
+  // profissional precisa poder acrescentar informação relevante que apareceu
+  // depois (resultado de exame, correção de erro material, evolução tardia).
+  // Solução: encounter `signed` continua imutável; addendum é APPEND-ONLY,
+  // sempre com autoria e timestamp próprios. Nunca UPDATE nem DELETE de row.
+  // Só permitido em encounter `signed` (draft o profissional edita direto).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_encounter_addendums (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        encounter_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        author_id TEXT,
+        author_name_snapshot TEXT,
+        note TEXT NOT NULL,
+        signed_with_pin INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_addendums_encounter ON clinical_encounter_addendums (organization_id, encounter_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_clinical_addendums_patient ON clinical_encounter_addendums (organization_id, contact_id, created_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_addendums', e); }
+
   // Recomendação de retorno (ADR-080 Fase I) — profissional marca "voltar em
   // X dias" no plano; a secretaria confirma o agendamento depois. Aditivo,
   // opcional (encounter sem recomendação = alta / caso encerrado).

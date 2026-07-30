@@ -20,6 +20,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
 import { ClinicEncounterHistoryService } from "./ClinicEncounterHistoryService.js";
+import { verifyPin } from "./ClinicDocumentsService.js";
 
 export type EncounterStatus = "draft" | "signed";
 
@@ -42,6 +43,18 @@ export interface Encounter {
   followUpRecommendedDays: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface EncounterAddendum {
+  id: string;
+  organizationId: string;
+  encounterId: string;
+  contactId: string;
+  authorId: string | null;
+  authorNameSnapshot: string | null;
+  note: string;
+  signedWithPin: boolean;
+  createdAt: string;
 }
 
 export interface EncounterPatch {
@@ -291,6 +304,115 @@ export class ClinicEncounterService {
    * assinado sem gerar addendum (não altera achado clínico, altera plano
    * agendado). Passar `null` limpa.
    */
+  /**
+   * Fase 20 — Addendum ao prontuário assinado (CFM 1.821/2007).
+   *
+   * O prontuário original NÃO é modificado depois de `signed` (`update` fica
+   * bloqueado). Mas o profissional precisa poder acrescentar informação
+   * relevante que apareceu depois — resultado de exame, correção de erro
+   * material, evolução tardia. Solução: addendum APPEND-ONLY, cada linha
+   * com autoria e timestamp próprios. Nunca UPDATE nem DELETE de row de
+   * addendum — histórico clínico é imutável.
+   *
+   * Só permitido em encounter `signed` — em `draft` o profissional edita
+   * direto (`update`) e o diff cai em `clinical_encounter_history`.
+   *
+   * PIN é OPCIONAL (mesma regra da Fase T): se o profissional tem PIN
+   * cadastrado, precisa fornecer (401 PIN_REQUIRED / PIN_INVALID). Se não
+   * tem, addendum sai sem PIN (compat legado). Autoria fica gravada com
+   * `authorId` + snapshot de nome ainda que sem PIN.
+   *
+   * LGPD Art.11: addendum é dado sensível, exige consent ativo.
+   */
+  static addAddendum(orgId: string, encounterId: string, actorId: string | null, opts: { note: string; actorName?: string | null; pin?: string }): EncounterAddendum {
+    const enc = this.getRaw(orgId, encounterId);
+    if (!enc) throw new Error("Prontuário não encontrado.");
+    if (enc.status !== "signed") {
+      const e: any = new Error("Addendum só é permitido em prontuário assinado. Em rascunho, edite o SOAP diretamente.");
+      e.code = "ENCOUNTER_NOT_SIGNED";
+      throw e;
+    }
+    requireConsent(orgId, enc.contactId);
+
+    const note = String(opts.note || "").trim();
+    if (!note) {
+      const e: any = new Error("Texto do addendum é obrigatório.");
+      e.code = "ADDENDUM_EMPTY";
+      throw e;
+    }
+    if (note.length > 4000) {
+      const e: any = new Error("Texto do addendum excede 4000 caracteres.");
+      e.code = "ADDENDUM_TOO_LONG";
+      throw e;
+    }
+
+    // Reusa verifyPin da Fase T — mesma semântica de compat legado:
+    // profissional sem PIN cadastrado retorna false e addendum vai sem PIN.
+    // Com PIN cadastrado, lança PIN_REQUIRED/PIN_INVALID (401 na rota).
+    const signedWithPin = verifyPin(orgId, enc.professionalId, opts.pin);
+
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO clinical_encounter_addendums
+         (id, organization_id, encounter_id, contact_id, author_id, author_name_snapshot, note, signed_with_pin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, orgId, encounterId, enc.contactId,
+      actorId, opts.actorName ?? null,
+      note, signedWithPin ? 1 : 0
+    );
+
+    logAuthEvent(orgId, actorId, enc.contactId, "CLINIC_ENCOUNTER_ADDENDUM_ADDED", {
+      encounterId,
+      addendumId: id,
+      signedWithPin,
+      length: note.length,
+    });
+
+    return {
+      id,
+      organizationId: orgId,
+      encounterId,
+      contactId: enc.contactId,
+      authorId: actorId,
+      authorNameSnapshot: opts.actorName ?? null,
+      note,
+      signedWithPin,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Fase 20 — Lista os addendums de um encounter (mais recente primeiro).
+   * Consent LGPD gate: addendum contém observação clínica sensível.
+   * Encounter inexistente devolve `[]` — mesma semântica de `history`.
+   */
+  static listAddendums(orgId: string, encounterId: string): EncounterAddendum[] {
+    const enc = db.prepare(
+      `SELECT contact_id FROM clinical_encounters WHERE organization_id = ? AND id = ?`
+    ).get(orgId, encounterId) as any;
+    if (!enc) return [];
+    requireConsent(orgId, enc.contact_id);
+
+    const rows = db.prepare(
+      `SELECT * FROM clinical_encounter_addendums
+        WHERE organization_id = ? AND encounter_id = ?
+        ORDER BY created_at DESC, rowid DESC`
+    ).all(orgId, encounterId) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      organizationId: r.organization_id,
+      encounterId: r.encounter_id,
+      contactId: r.contact_id,
+      authorId: r.author_id ?? null,
+      authorNameSnapshot: r.author_name_snapshot ?? null,
+      note: r.note,
+      signedWithPin: r.signed_with_pin === 1,
+      createdAt: r.created_at,
+    }));
+  }
+
   static setFollowUpRecommendation(orgId: string, encounterId: string, actorId: string | null, days: number | null): Encounter {
     const before = this.getRaw(orgId, encounterId);
     if (!before) throw new Error("Prontuário não encontrado.");

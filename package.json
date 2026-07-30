@@ -81,6 +81,8 @@
     "test:clinic-patient-portal": "tsx scripts/test-clinic-patient-portal.ts",
     "test:clinic-reminder": "tsx scripts/test-clinic-reminder.ts",
     "test:clinic-reminder-reply": "tsx scripts/test-clinic-reminder-reply.ts",
+    "test:clinic-metrics": "tsx scripts/test-clinic-metrics.ts",
+    "test:clinic-reschedule": "tsx scripts/test-clinic-reschedule.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

@@ -13,6 +13,7 @@ import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttac
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
 import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
 import { ClinicReminderService } from "../ClinicReminderService.js";
+import { ClinicMetricsService } from "../ClinicMetricsService.js";
 import { LgpdService } from "../LgpdService.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -411,6 +412,14 @@ router.delete("/attachments/:id", (req: AuthRequest, res): any => {
     if (e.code === "ATTACHMENT_FROZEN" || e.code === "LGPD_CONSENT_REQUIRED") return res.status(409).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
+});
+
+// ── Dashboard / insights (ADR-080 Fase O) ───────────────────────────────
+router.get("/metrics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicMetricsService.overview(orgId, { from: req.query.from as string, to: req.query.to as string })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Lembretes automáticos (ADR-080 Fase M) ──────────────────────────────

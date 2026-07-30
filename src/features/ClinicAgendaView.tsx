@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell } from 'lucide-react';
+import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell, BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -380,6 +380,9 @@ export function ClinicAgendaView() {
           ))}
         </div>
       )}
+
+      {/* Indicadores da clínica (ADR-080 Fase O) */}
+      <ClinicMetricsPanel />
 
       {/* Fila de retornos pendentes (ADR-080 Fase I) */}
       <FollowUpQueuePanel />
@@ -3010,6 +3013,145 @@ function EncounterAttachmentsPanel({ encounterId, isSigned }: { encounterId: str
       </div>
       {isSigned && items.length > 0 && (
         <p className="mt-2 text-[10px] text-zinc-500 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Prontuário assinado — anexos existentes ficam imutáveis (novos ainda podem ser adicionados).</p>
+      )}
+    </div>
+  );
+}
+
+// ---- Indicadores da clínica (ADR-080 Fase O) -------------------------------
+// Painel colapsável na Agenda. Chama /api/clinic/metrics apenas quando aberto
+// (evita carregar dados que ninguém vai olhar). Cards visuais + linha por
+// profissional. Zero chart heavy — só números + barras CSS.
+
+type MetricsOverview = {
+  window: { from: string; to: string; days: number };
+  appointments: {
+    total: number; past: number;
+    byStatus: Record<string, number>;
+    noShowRate: number; completedRate: number; patientConfirmedRate: number;
+  };
+  reminders: { sent: number; failed: number; replied: number; confirmationRate: number; cancellationRate: number };
+  cancellations: { total: number; byOrigin: { patient: number; staff: number; system: number }; patientShare: number };
+  documents: { prescriptionsIssued: number; certificatesIssued: number; sentByChannel: number };
+  followUps: { recommended: number; scheduled: number; pending: number };
+  professionals: { id: string; name: string; appointments: number; completed: number; cancelled: number; occupationMinutes: number }[];
+};
+
+function ClinicMetricsPanel() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<MetricsOverview | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/clinic/metrics');
+      setData(r.ok ? await r.json() : null);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { if (open && !data) load(); /* eslint-disable-next-line */ }, [open]);
+
+  return (
+    <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 print:hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-5 py-3 text-left">
+        <span className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-emerald-300" /> Indicadores da clínica
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+      </button>
+      {open && (
+        <div className="px-5 pb-5 border-t border-zinc-800 pt-4">
+          {loading && <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Calculando…</div>}
+          {!loading && !data && <div className="text-xs text-zinc-500">Sem dados no período.</div>}
+          {!loading && data && <MetricsCards m={data} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'good' | 'bad' | 'neutral' }) {
+  const toneCls = tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-red-300' : 'text-zinc-100';
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+      <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div>
+      <div className={`text-xl font-semibold mt-0.5 ${toneCls}`}>{value}</div>
+      {hint && <div className="text-[10px] text-zinc-500 mt-0.5">{hint}</div>}
+    </div>
+  );
+}
+
+function MetricsCards({ m }: { m: MetricsOverview }) {
+  const noShowTone = m.appointments.noShowRate >= 20 ? 'bad' : m.appointments.noShowRate >= 10 ? 'neutral' : 'good';
+  const confirmTone = m.reminders.confirmationRate >= 60 ? 'good' : m.reminders.confirmationRate >= 30 ? 'neutral' : 'bad';
+  const days = m.window.days;
+
+  return (
+    <div>
+      <div className="text-[11px] text-zinc-500 mb-3 inline-flex items-center gap-1">
+        <Clock className="w-3 h-3" /> Janela: últimos {days} dias ({new Date(m.window.from).toLocaleDateString('pt-BR')} → {new Date(m.window.to).toLocaleDateString('pt-BR')})
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+        <StatCard label="Consultas" value={String(m.appointments.total)} hint={`${m.appointments.past} já passaram`} />
+        <StatCard label="No-show" value={`${m.appointments.noShowRate}%`} hint={`base: ${m.appointments.past} passadas`} tone={noShowTone} />
+        <StatCard label="Concluídas" value={`${m.appointments.completedRate}%`} hint={`${m.appointments.byStatus['completed'] || 0} completed`} tone="good" />
+        <StatCard label="Confirmadas pelo paciente" value={`${m.appointments.patientConfirmedRate}%`} hint="do total agendado" />
+      </div>
+
+      <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><Bell className="w-3 h-3" /> Lembretes automáticos</h4>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+        <StatCard label="Enviados" value={String(m.reminders.sent)} hint={m.reminders.failed ? `${m.reminders.failed} falharam` : 'nenhuma falha'} tone={m.reminders.failed ? 'bad' : 'neutral'} />
+        <StatCard label="Respondidos" value={String(m.reminders.replied)} hint={`${m.reminders.confirmationRate + m.reminders.cancellationRate}% de resposta`} />
+        <StatCard label="Confirmação SIM" value={`${m.reminders.confirmationRate}%`} tone={confirmTone} />
+        <StatCard label="Cancelamento NÃO" value={`${m.reminders.cancellationRate}%`} tone="neutral" />
+      </div>
+
+      <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><Ban className="w-3 h-3" /> Cancelamentos ({m.cancellations.total})</h4>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <StatCard label="Pelo paciente" value={String(m.cancellations.byOrigin.patient)} hint={`${m.cancellations.patientShare}% do total`} tone="neutral" />
+        <StatCard label="Pela equipe" value={String(m.cancellations.byOrigin.staff)} />
+        <StatCard label="Pelo sistema" value={String(m.cancellations.byOrigin.system)} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><FileText className="w-3 h-3" /> Documentos emitidos</h4>
+          <div className="grid grid-cols-3 gap-2">
+            <StatCard label="Receitas" value={String(m.documents.prescriptionsIssued)} />
+            <StatCard label="Atestados" value={String(m.documents.certificatesIssued)} />
+            <StatCard label="Enviados por canal" value={String(m.documents.sentByChannel)} />
+          </div>
+        </div>
+        <div>
+          <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><RotateCcw className="w-3 h-3" /> Retornos</h4>
+          <div className="grid grid-cols-3 gap-2">
+            <StatCard label="Recomendados" value={String(m.followUps.recommended)} />
+            <StatCard label="Agendados" value={String(m.followUps.scheduled)} tone="good" />
+            <StatCard label="Pendentes" value={String(m.followUps.pending)} tone={m.followUps.pending > 0 ? 'bad' : 'good'} hint="fila de retornos" />
+          </div>
+        </div>
+      </div>
+
+      {m.professionals.length > 0 && (
+        <>
+          <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><User className="w-3 h-3" /> Ocupação por profissional</h4>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800">
+            {m.professionals.map((p) => {
+              const hours = Math.round(p.occupationMinutes / 60 * 10) / 10;
+              const cancRate = p.appointments > 0 ? Math.round((p.cancelled / p.appointments) * 100) : 0;
+              return (
+                <div key={p.id || p.name} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <div className="flex-1 min-w-0 text-zinc-100 truncate">{p.name}</div>
+                  <div className="text-[11px] text-zinc-400 tabular-nums">{p.appointments} consultas</div>
+                  <div className="text-[11px] text-zinc-500 tabular-nums">{hours}h</div>
+                  <div className="text-[11px] text-emerald-300 tabular-nums">{p.completed} feitas</div>
+                  <div className={`text-[11px] tabular-nums ${cancRate >= 25 ? 'text-red-300' : 'text-zinc-500'}`}>{p.cancelled} canc ({cancRate}%)</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );

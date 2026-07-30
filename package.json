@@ -84,6 +84,7 @@
     "test:clinic-metrics": "tsx scripts/test-clinic-metrics.ts",
     "test:clinic-reschedule": "tsx scripts/test-clinic-reschedule.ts",
     "test:clinic-vacancy": "tsx scripts/test-clinic-vacancy.ts",
+    "test:clinic-automation-visibility": "tsx scripts/test-clinic-automation-visibility.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

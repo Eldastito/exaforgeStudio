@@ -197,6 +197,31 @@ export class ClinicVacancyService {
     return fb?.id || null;
   }
 
+  /**
+   * Lista as N ofertas mais recentes com nomes hidratados (candidato,
+   * profissional, paciente da consulta original). Pro painel do gestor
+   * — Fatia 12/Fase R — ver quem foi convidado e o que aconteceu.
+   */
+  static recent(orgId: string, limit = 20): (VacancyOffer & { candidateName: string | null; professionalName: string | null; sourcePatientName: string | null })[] {
+    const rows = db.prepare(
+      `SELECT vo.*, c.name AS candidate_name,
+              p.name AS professional_name,
+              (SELECT name FROM contacts WHERE id = (SELECT contact_id FROM appointments WHERE id = vo.source_appointment_id) AND organization_id = vo.organization_id) AS source_patient_name
+         FROM clinical_vacancy_offers vo
+         LEFT JOIN contacts c ON c.id = vo.candidate_contact_id AND c.organization_id = vo.organization_id
+         LEFT JOIN clinic_professionals p ON p.id = vo.professional_id AND p.organization_id = vo.organization_id
+        WHERE vo.organization_id = ?
+        ORDER BY vo.created_at DESC, vo.rowid DESC
+        LIMIT ?`
+    ).all(orgId, Math.max(1, Math.min(100, limit))) as any[];
+    return rows.map((r) => ({
+      ...hydrate(r)!,
+      candidateName: r.candidate_name ?? null,
+      professionalName: r.professional_name ?? null,
+      sourcePatientName: r.source_patient_name ?? null,
+    }));
+  }
+
   /** Devolve oferta pendente do contato (housekeeping expira antes). */
   static pendingOfferFor(orgId: string, contactId: string): VacancyOffer | null {
     db.prepare(

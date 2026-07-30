@@ -384,6 +384,9 @@ export function ClinicAgendaView() {
       {/* Indicadores da clínica (ADR-080 Fase O) */}
       <ClinicMetricsPanel />
 
+      {/* Ofertas de vaga automáticas (ADR-080 Fase R) */}
+      <VacancyOffersPanel />
+
       {/* Fila de retornos pendentes (ADR-080 Fase I) */}
       <FollowUpQueuePanel />
 
@@ -3031,6 +3034,10 @@ type MetricsOverview = {
     noShowRate: number; completedRate: number; patientConfirmedRate: number;
   };
   reminders: { sent: number; failed: number; replied: number; confirmationRate: number; cancellationRate: number };
+  automations: {
+    reschedule: { offered: number; chosen: number; abandoned: number; expired: number };
+    vacancy: { offered: number; accepted: number; declined: number; expired: number; recoveredMinutes: number };
+  };
   cancellations: { total: number; byOrigin: { patient: number; staff: number; system: number }; patientShare: number };
   documents: { prescriptionsIssued: number; certificatesIssued: number; sentByChannel: number };
   followUps: { recommended: number; scheduled: number; pending: number };
@@ -3107,6 +3114,15 @@ function MetricsCards({ m }: { m: MetricsOverview }) {
         <StatCard label="Cancelamento NÃO" value={`${m.reminders.cancellationRate}%`} tone="neutral" />
       </div>
 
+      <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><Send className="w-3 h-3" /> Automações WhatsApp</h4>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-1">
+        <StatCard label="Vagas oferecidas" value={String(m.automations.vacancy.offered)} hint={`${m.automations.vacancy.accepted} aceitas · ${m.automations.vacancy.declined} recusadas`} />
+        <StatCard label="Horário recuperado" value={`${Math.round(m.automations.vacancy.recoveredMinutes / 60 * 10) / 10}h`} hint="vagas aceitas × duração" tone={m.automations.vacancy.recoveredMinutes > 0 ? 'good' : 'neutral'} />
+        <StatCard label="Reagendamentos ofertados" value={String(m.automations.reschedule.offered)} hint={`${m.automations.reschedule.chosen} escolheu`} />
+        <StatCard label="Ofertas abandonadas/expiradas" value={String(m.automations.reschedule.abandoned + m.automations.reschedule.expired + m.automations.vacancy.expired)} hint="paciente não respondeu" tone="neutral" />
+      </div>
+      <p className="text-[10px] text-zinc-500 mb-4">Ofertas automáticas de vaga (para quem está na fila de retorno) e de reagendamento (quando o paciente responde REMARCAR).</p>
+
       <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><Ban className="w-3 h-3" /> Cancelamentos ({m.cancellations.total})</h4>
       <div className="grid grid-cols-3 gap-2 mb-4">
         <StatCard label="Pelo paciente" value={String(m.cancellations.byOrigin.patient)} hint={`${m.cancellations.patientShare}% do total`} tone="neutral" />
@@ -3152,6 +3168,91 @@ function MetricsCards({ m }: { m: MetricsOverview }) {
             })}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// ---- Ofertas de vaga (painel colapsável — ADR-080 Fase R) ------------------
+// Mostra as últimas ofertas automáticas de vaga: quem foi convidado, status,
+// se aceitou. Load on-demand (só ao expandir).
+
+type VacancyOfferDto = {
+  id: string;
+  sourceAppointmentId: string;
+  candidateContactId: string;
+  candidateName: string | null;
+  professionalName: string | null;
+  sourcePatientName: string | null;
+  slotStart: string;
+  slotDurationMinutes: number;
+  status: 'pending' | 'accepted' | 'declined' | 'expired' | 'superseded';
+  createdAt: string;
+  resolvedAt: string | null;
+};
+
+function VacancyOffersPanel() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<VacancyOfferDto[] | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/clinic/vacancies?limit=20');
+      setItems(r.ok ? await r.json() : []);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { if (open && items === null) load(); /* eslint-disable-next-line */ }, [open]);
+
+  const statusPill = (s: VacancyOfferDto['status']) => {
+    const map: Record<string, { label: string; cls: string }> = {
+      pending: { label: 'aguardando', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+      accepted: { label: 'aceita', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+      declined: { label: 'recusada', cls: 'bg-red-500/15 text-red-300 border-red-500/30' },
+      expired: { label: 'expirada', cls: 'bg-zinc-700/40 text-zinc-400 border-zinc-700' },
+      superseded: { label: 'substituída', cls: 'bg-zinc-700/40 text-zinc-400 border-zinc-700' },
+    };
+    const p = map[s] || map.pending;
+    return <span className={`text-[10px] rounded-full border px-1.5 py-0.5 ${p.cls}`}>{p.label}</span>;
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 print:hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-5 py-3 text-left">
+        <span className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+          <Send className="w-4 h-4 text-emerald-300" /> Ofertas de vaga (automáticas)
+          {items && items.length > 0 && (
+            <span className="text-[10px] text-zinc-400 font-normal">{items.length} recentes</span>
+          )}
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+      </button>
+      {open && (
+        <div className="px-5 pb-5 border-t border-zinc-800 pt-4">
+          {loading && <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</div>}
+          {!loading && (!items || items.length === 0) && (
+            <div className="text-xs text-zinc-500">Nenhuma vaga automática oferecida ainda. Quando alguém cancelar uma consulta futura, o sistema oferece o horário pra quem está na fila de retorno do mesmo profissional.</div>
+          )}
+          {!loading && items && items.length > 0 && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800">
+              {items.map((v) => (
+                <div key={v.id} className="p-3 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-zinc-100 font-medium">{v.candidateName || 'Paciente'}</span>
+                    {statusPill(v.status)}
+                    <span className="text-zinc-500">→ {new Date(v.slotStart).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {v.slotDurationMinutes}min</span>
+                  </div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5">
+                    Convidado por vaga aberta de <span className="text-zinc-400">{v.sourcePatientName || 'paciente'}</span>
+                    {v.professionalName && <> com <span className="text-zinc-400">{v.professionalName}</span></>}
+                    <> · ofertada em {new Date(v.createdAt).toLocaleString('pt-BR')}</>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

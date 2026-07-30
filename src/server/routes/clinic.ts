@@ -14,6 +14,7 @@ import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.
 import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
 import { ClinicReminderService } from "../ClinicReminderService.js";
 import { ClinicMetricsService } from "../ClinicMetricsService.js";
+import { ClinicVacancyService } from "../ClinicVacancyService.js";
 import { LgpdService } from "../LgpdService.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -420,6 +421,14 @@ router.get("/metrics", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicMetricsService.overview(orgId, { from: req.query.from as string, to: req.query.to as string })); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Automações WhatsApp — visibilidade das vagas (ADR-080 Fase R) ──────
+router.get("/vacancies", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
+  res.json(ClinicVacancyService.recent(orgId, limit));
 });
 
 // ── Lembretes automáticos (ADR-080 Fase M) ──────────────────────────────

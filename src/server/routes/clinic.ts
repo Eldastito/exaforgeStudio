@@ -9,6 +9,7 @@ import { ClinicConnectionService } from "../ClinicConnectionService.js";
 import { ClinicEncounterService } from "../ClinicEncounterService.js";
 import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
 import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttachmentService.js";
+import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
 import { LgpdService } from "../LgpdService.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -304,6 +305,43 @@ router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> 
     res.setHeader("Content-Disposition", `attachment; filename="atestado-${req.params.id}.pdf"`);
     return res.send(pdf);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Envio de docs por WhatsApp (ADR-080 Fase K) ────────────────────────
+// Doc precisa estar issued. LGPD sensível + comunicações. Sempre grava
+// linha em clinical_document_deliveries mesmo em falha (auditoria).
+const deliveryError = (res: any, e: any) => {
+  if (e?.code === "LGPD_CONSENT_REQUIRED" || e?.code === "LGPD_COMMS_CONSENT_REQUIRED" || e?.code === "DOCUMENT_NOT_ISSUED") {
+    return res.status(409).json({ error: e.message, code: e.code });
+  }
+  return res.status(400).json({ error: e.message });
+};
+
+router.post("/prescriptions/:id/send", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const delivery = await ClinicDocumentDeliveryService.send(orgId, "prescription", req.params.id, actor(req), { caption: req.body?.caption });
+    // Se status=failed, ainda retorna 200 — o histórico foi gravado e a UI
+    // trata pelo campo `status` (mostra "falha" e permite reenviar).
+    res.json(delivery);
+  } catch (e: any) { deliveryError(res, e); }
+});
+
+router.post("/certificates/:id/send", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const delivery = await ClinicDocumentDeliveryService.send(orgId, "certificate", req.params.id, actor(req), { caption: req.body?.caption });
+    res.json(delivery);
+  } catch (e: any) { deliveryError(res, e); }
+});
+
+router.get("/documents/:kind/:id/deliveries", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const kind = req.params.kind === "certificate" ? "certificate" : "prescription";
+  res.json(ClinicDocumentDeliveryService.list(orgId, kind as any, req.params.id));
 });
 
 // ── Anexos do prontuário (ADR-080 Fase J) ──────────────────────────────

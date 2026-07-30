@@ -1,5 +1,5 @@
 import db from "./db.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { AppointmentService } from "./AppointmentService.js";
 
@@ -39,6 +39,37 @@ export class ClinicAgendaService {
         String(input?.registrationNumber || "").trim() || null, String(input?.council || "").trim() || null);
     logAuthEvent(orgId, actorId, null, "CLINIC_PROFESSIONAL_CREATED", { professionalId: id, name });
     return db.prepare("SELECT * FROM clinic_professionals WHERE id = ?").get(id);
+  }
+
+  /**
+   * PIN de assinatura (ADR-080 Fase T). Aceita 4-8 dígitos. `pin=null|""`
+   * remove o PIN (volta pro modo compat "emite sem PIN"). Salt UUID novo
+   * a cada set — invalida hash anterior mesmo com o mesmo dígito.
+   */
+  static setProfessionalPin(orgId: string, id: string, rawPin: string | null, actorId?: string): { hasPin: boolean } {
+    const cur = db.prepare("SELECT id FROM clinic_professionals WHERE id = ? AND organization_id = ?").get(id, orgId);
+    if (!cur) throw new Error("Profissional não encontrado.");
+    if (!rawPin) {
+      db.prepare(`UPDATE clinic_professionals SET pin_salt=NULL, pin_hash=NULL, pin_updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).run(id, orgId);
+      logAuthEvent(orgId, actorId || null, null, "CLINIC_PROFESSIONAL_PIN_CLEARED", { professionalId: id });
+      return { hasPin: false };
+    }
+    const pin = String(rawPin).trim();
+    if (!/^\d{4,8}$/.test(pin)) {
+      const e: any = new Error("PIN inválido: use 4 a 8 dígitos numéricos.");
+      e.code = "PIN_INVALID_FORMAT"; throw e;
+    }
+    const salt = randomUUID();
+    const hash = createHash("sha256").update(salt + pin).digest("hex");
+    db.prepare(`UPDATE clinic_professionals SET pin_salt=?, pin_hash=?, pin_updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).run(salt, hash, id, orgId);
+    logAuthEvent(orgId, actorId || null, null, "CLINIC_PROFESSIONAL_PIN_SET", { professionalId: id });
+    return { hasPin: true };
+  }
+
+  /** True se o profissional tem PIN cadastrado (não expõe hash). */
+  static hasProfessionalPin(orgId: string, id: string): boolean {
+    const r = db.prepare("SELECT pin_hash FROM clinic_professionals WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    return !!r?.pin_hash;
   }
 
   static updateProfessional(orgId: string, id: string, patch: any, actorId?: string): any {

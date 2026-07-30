@@ -17,7 +17,7 @@
  * PDF é `Buffer` via `pdfkit` (padrão `ReportPdfService.generateGovernancePdf`).
  * Determinístico, zero-token, isolado por `organization_id`.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import PDFDocument from "pdfkit";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
@@ -86,6 +86,33 @@ function requireConsent(orgId: string, contactId: string) {
     e.code = "LGPD_CONSENT_REQUIRED";
     throw e;
   }
+}
+
+/**
+ * Verifica PIN do profissional antes de emitir (ADR-080 Fase T).
+ * - Se o profissional NÃO tem PIN cadastrado, retorna `false` (emitido
+ *   sem PIN — compat com clínicas que ainda não adotaram).
+ * - Se tem PIN e nenhum foi fornecido → PIN_REQUIRED.
+ * - Se tem PIN e o fornecido não bate → PIN_INVALID.
+ * - Se bate, retorna `true` (marcar `signed_with_pin=1`).
+ * Hash = SHA-256 de `salt + pin`. `salt` é UUID gerado no set.
+ */
+function verifyPin(orgId: string, professionalId: string | null, providedPin: string | undefined): boolean {
+  if (!professionalId) return false;
+  const prof = db.prepare(`SELECT pin_hash, pin_salt FROM clinic_professionals WHERE id = ? AND organization_id = ?`)
+    .get(professionalId, orgId) as any;
+  if (!prof?.pin_hash || !prof?.pin_salt) return false; // não configurou — compat: emite sem PIN
+  const pin = String(providedPin || "").trim();
+  if (!pin) {
+    const e: any = new Error("Este profissional exige PIN para emitir documentos clínicos.");
+    e.code = "PIN_REQUIRED"; throw e;
+  }
+  const attemptHash = createHash("sha256").update(prof.pin_salt + pin).digest("hex");
+  if (attemptHash !== prof.pin_hash) {
+    const e: any = new Error("PIN incorreto.");
+    e.code = "PIN_INVALID"; throw e;
+  }
+  return true;
 }
 
 function loadEncounter(orgId: string, encounterId: string): any {
@@ -268,12 +295,13 @@ export class ClinicDocumentsService {
     return this.getPrescription(orgId, id)!;
   }
 
-  static issuePrescription(orgId: string, id: string, actorId: string | null): Prescription {
+  static issuePrescription(orgId: string, id: string, actorId: string | null, opts: { pin?: string } = {}): Prescription {
     const before = this.getPrescription(orgId, id);
     if (!before) throw new Error("Receita não encontrada.");
     if (before.status === "issued") return before;
     if (!before.items.length) throw new Error("Receita sem itens — não pode ser emitida.");
     requireConsent(orgId, before.contactId);
+    const signedWithPin = verifyPin(orgId, before.professionalId, opts.pin);
 
     const prof = loadProfessional(orgId, before.professionalId);
     db.prepare(
@@ -283,6 +311,7 @@ export class ClinicDocumentsService {
              professional_name_snapshot = ?,
              professional_registration_snapshot = ?,
              professional_council_snapshot = ?,
+             signed_with_pin = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     ).run(
@@ -290,9 +319,10 @@ export class ClinicDocumentsService {
       prof?.name || before.professionalNameSnapshot || null,
       prof?.registration_number || null,
       prof?.council || null,
+      signedWithPin ? 1 : 0,
       id, orgId
     );
-    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", { prescriptionId: id });
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", { prescriptionId: id, signedWithPin });
     return this.getPrescription(orgId, id)!;
   }
 
@@ -373,11 +403,12 @@ export class ClinicDocumentsService {
     return this.getCertificate(orgId, id)!;
   }
 
-  static issueCertificate(orgId: string, id: string, actorId: string | null): Certificate {
+  static issueCertificate(orgId: string, id: string, actorId: string | null, opts: { pin?: string } = {}): Certificate {
     const before = this.getCertificate(orgId, id);
     if (!before) throw new Error("Atestado não encontrado.");
     if (before.status === "issued") return before;
     requireConsent(orgId, before.contactId);
+    const signedWithPin = verifyPin(orgId, before.professionalId, opts.pin);
 
     const prof = loadProfessional(orgId, before.professionalId);
     db.prepare(
@@ -387,6 +418,7 @@ export class ClinicDocumentsService {
              professional_name_snapshot = ?,
              professional_registration_snapshot = ?,
              professional_council_snapshot = ?,
+             signed_with_pin = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     ).run(
@@ -394,9 +426,10 @@ export class ClinicDocumentsService {
       prof?.name || before.professionalNameSnapshot || null,
       prof?.registration_number || null,
       prof?.council || null,
+      signedWithPin ? 1 : 0,
       id, orgId
     );
-    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_CERTIFICATE_ISSUED", { certificateId: id });
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_CERTIFICATE_ISSUED", { certificateId: id, signedWithPin });
     return this.getCertificate(orgId, id)!;
   }
 

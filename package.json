@@ -86,6 +86,7 @@
     "test:clinic-vacancy": "tsx scripts/test-clinic-vacancy.ts",
     "test:clinic-automation-visibility": "tsx scripts/test-clinic-automation-visibility.ts",
     "test:clinic-second-reminder": "tsx scripts/test-clinic-second-reminder.ts",
+    "test:clinic-signature-pin": "tsx scripts/test-clinic-signature-pin.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

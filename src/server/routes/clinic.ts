@@ -16,7 +16,9 @@ import { ClinicReminderService } from "../ClinicReminderService.js";
 import { ClinicMetricsService } from "../ClinicMetricsService.js";
 import { ClinicVacancyService } from "../ClinicVacancyService.js";
 import { ClinicRetentionService } from "../ClinicRetentionService.js";
+import { ClinicMonthlyReportService } from "../ClinicMonthlyReportService.js";
 import { LgpdService } from "../LgpdService.js";
+import { logAuthEvent } from "../auditLog.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
 // memoryStorage porque o service escreve em PRIVATE_MEDIA_DIR (fora do
@@ -441,6 +443,28 @@ router.get("/metrics", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicMetricsService.overview(orgId, { from: req.query.from as string, to: req.query.to as string })); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Relatório mensal em PDF (ADR-080 Fase 17) ───────────────────────────
+// GET /api/clinic/reports/monthly.pdf?month=YYYY-MM  (default: mês anterior).
+// Restrito a owner/admin — relatório expõe agregados sensíveis do negócio.
+router.get("/reports/monthly.pdf", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const payload = ClinicMonthlyReportService.buildPayload(orgId, (req.query.month as string) || null);
+    const pdf = await ClinicMonthlyReportService.renderPdfFromPayload(payload);
+    logAuthEvent(orgId, actor(req) ?? null, null, "CLINIC_MONTHLY_REPORT_GENERATED", {
+      month: payload.month,
+      totalAppointments: payload.metrics.appointments.total,
+      recoveredMinutes: payload.metrics.automations.vacancy.recoveredMinutes,
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="relatorio-mensal-${payload.month}.pdf"`);
+    res.send(pdf);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ── Retenção LGPD (ADR-080 Fase U) ──────────────────────────────────────

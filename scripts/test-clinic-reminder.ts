@@ -49,7 +49,10 @@ async function main() {
 
   function seedOrg(tag: string, opts: { hoursBefore?: number; channelStatus?: string } = {}) {
     const orgId = `org_${tag}_${randomUUID().slice(0, 6)}`;
-    db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, clinic_reminder_hours) VALUES (?, ?, ?, 'active', ?)`)
+    // Segundo lembrete desabilitado no seed do teste da Fase M — este teste
+    // não conhece a Fase S; o teste próprio (test:clinic-second-reminder)
+    // cobre o comportamento com secondEnabled=true.
+    db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, clinic_reminder_hours, clinic_second_reminder_enabled) VALUES (?, ?, ?, 'active', ?, 0)`)
       .run(randomUUID(), orgId, `Clínica ${tag}`, opts.hoursBefore ?? 24);
     const channelId = `ch_${tag}`;
     db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'whatsapp_cloud', ?, ?, ?)`)

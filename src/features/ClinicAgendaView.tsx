@@ -38,6 +38,7 @@ type Appointment = {
   cancelled_at?: string | null;
   cancelled_by?: string | null;
   cancellation_reason?: string | null;
+  needs_manual_confirmation?: number | boolean | null;
 };
 type Conflict = { id: string; title?: string; reason?: string; start?: string };
 
@@ -544,6 +545,11 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
         {a.cancelled_by === 'patient' && (
           <span className="text-[10px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5 inline-flex items-center gap-1" title={`Cancelado pelo paciente em ${a.cancelled_at ? new Date(a.cancelled_at).toLocaleString('pt-BR') : ''}`}>
             <Ban className="w-3 h-3" /> cancelado pelo paciente
+          </span>
+        )}
+        {Number(a.needs_manual_confirmation) === 1 && !a.patient_confirmed_at && a.status !== 'cancelled' && a.status !== 'completed' && a.status !== 'no_show' && (
+          <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 inline-flex items-center gap-1" title="Paciente não confirmou nos lembretes automáticos — recepção precisa ligar ou liberar a vaga.">
+            <AlertTriangle className="w-3 h-3" /> aguarda confirmação
           </span>
         )}
 

@@ -26,7 +26,7 @@ import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 
-export type ReminderTemplateKey = "24h";
+export type ReminderTemplateKey = "24h" | "2h";
 
 export interface Reminder {
   id: string;
@@ -68,9 +68,14 @@ function fmtWhen(iso: string): string {
   return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
 }
 
-function renderMessage(patientName: string, whenISO: string, professionalName: string | null, clinicName: string): string {
+function renderMessage(patientName: string, whenISO: string, professionalName: string | null, clinicName: string, templateKey: ReminderTemplateKey): string {
   const when = fmtWhen(whenISO);
   const withProf = professionalName ? ` com ${professionalName}` : "";
+  if (templateKey === "2h") {
+    // Segundo lembrete — tom mais urgente, texto mais curto (paciente deveria
+    // já saber; é uma cutucada final pra confirmar).
+    return `Oi, ${patientName}! Ainda vamos te ver hoje às ${when.split("às ")[1] || when}${withProf}? Responda SIM pra confirmar ou NÃO pra cancelar. — ${clinicName}`;
+  }
   return `Olá, ${patientName}! Lembramos que você tem consulta em ${when}${withProf}. Se puder confirmar, responda SIM. Se precisar cancelar, responda NÃO. — ${clinicName}`;
 }
 
@@ -90,6 +95,16 @@ export class ClinicReminderService {
       const h = Number(o?.clinic_reminder_hours);
       return Number.isFinite(h) && h >= 1 ? Math.floor(h) : DEFAULT_HOURS_BEFORE;
     } catch { return DEFAULT_HOURS_BEFORE; }
+  }
+
+  /** Config do segundo lembrete (Fase S). Devolve `null` se desabilitado. */
+  private static secondReminderHoursFor(orgId: string): number | null {
+    try {
+      const o = db.prepare(`SELECT clinic_second_reminder_hours, clinic_second_reminder_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      if (o?.clinic_second_reminder_enabled === 0) return null;
+      const h = Number(o?.clinic_second_reminder_hours);
+      return Number.isFinite(h) && h >= 1 ? Math.floor(h) : 2;
+    } catch { return 2; }
   }
 
   private static resolveChannel(orgId: string, contactChannelId: string | null): string | null {
@@ -125,6 +140,12 @@ export class ClinicReminderService {
       const e: any = new Error("Consulta não está em status ativo (confirmed/arrived).");
       e.code = "APPT_NOT_ACTIVE"; throw e;
     }
+    // Segundo lembrete (2h): só sai se paciente ainda NÃO confirmou o 24h.
+    // Sem esse guard, mandaria SIM/NÃO de novo pra quem já respondeu SIM —
+    // usuário odiaria receber "confirma?" logo depois de confirmar.
+    if (templateKey === "2h" && apt.patient_confirmed_at && !opts.force) {
+      return null;
+    }
 
     // Dedup: já enviado com sucesso ou em fila com o mesmo template.
     if (!opts.force) {
@@ -154,7 +175,8 @@ export class ClinicReminderService {
       contact.name || "paciente",
       apt.scheduled_start,
       apt.professional_name_snapshot || null,
-      org?.business_name || "Clínica"
+      org?.business_name || "Clínica",
+      templateKey
     );
 
     const id = randomUUID();
@@ -201,31 +223,57 @@ export class ClinicReminderService {
     }
 
     for (const orgId of orgs) {
-      const hoursBefore = this.reminderHoursFor(orgId);
-      const windowStart = new Date(nowMs + (hoursBefore - WINDOW_TOLERANCE_MIN / 60) * 3600_000).toISOString();
-      const windowEnd = new Date(nowMs + (hoursBefore + WINDOW_TOLERANCE_MIN / 60) * 3600_000).toISOString();
-
-      const appts = db.prepare(
-        `SELECT id FROM appointments
-          WHERE organization_id = ? AND status IN ('confirmed','arrived')
-            AND scheduled_start >= ? AND scheduled_start <= ?`
-      ).all(orgId, windowStart, windowEnd) as any[];
-
-      for (const a of appts) {
-        try {
-          const r = await this.sendForAppointment(orgId, a.id, { sender: opts.sender });
-          if (!r) stats.skipped++;
-          else if (r.status === "sent") stats.sent++;
-          else if (r.status === "failed") stats.failed++;
-          else stats.skipped++;
-        } catch (e: any) {
-          // Erros de negócio (sem paciente, sem identifier, sem consentimento) contam como skipped —
-          // não travam o pass, mas ficam no log da app pro operador ver na fila de deliveries.
-          stats.skipped++;
-        }
-      }
+      // 1ª janela: primeiro lembrete (default 24h)
+      await this.dispatchWindow(orgId, nowMs, this.reminderHoursFor(orgId), "24h", stats, opts.sender);
+      // 2ª janela: segundo lembrete (default 2h, se habilitado). Só sai pra
+      // quem NÃO confirmou ainda (guard no sendForAppointment).
+      const h2 = this.secondReminderHoursFor(orgId);
+      if (h2 !== null) await this.dispatchWindow(orgId, nowMs, h2, "2h", stats, opts.sender);
+      // Escalada H-1: seta needs_manual_confirmation=1 pras appts que ainda
+      // não confirmaram e estão a menos de 1h. Recepção liga pra confirmar
+      // ou libera vaga. Idempotente (UPDATE WHERE needs_manual_confirmation=0).
+      this.escalateNearAppointments(orgId, nowMs);
     }
     return stats;
+  }
+
+  private static async dispatchWindow(orgId: string, nowMs: number, hoursBefore: number, templateKey: ReminderTemplateKey, stats: { sent: number; failed: number; skipped: number }, sender?: MessageSender) {
+    const windowStart = new Date(nowMs + (hoursBefore - WINDOW_TOLERANCE_MIN / 60) * 3600_000).toISOString();
+    const windowEnd = new Date(nowMs + (hoursBefore + WINDOW_TOLERANCE_MIN / 60) * 3600_000).toISOString();
+    const appts = db.prepare(
+      `SELECT id FROM appointments
+        WHERE organization_id = ? AND status IN ('confirmed','arrived')
+          AND scheduled_start >= ? AND scheduled_start <= ?`
+    ).all(orgId, windowStart, windowEnd) as any[];
+    for (const a of appts) {
+      try {
+        const r = await this.sendForAppointment(orgId, a.id, { sender, templateKey });
+        if (!r) stats.skipped++;
+        else if (r.status === "sent") stats.sent++;
+        else if (r.status === "failed") stats.failed++;
+        else stats.skipped++;
+      } catch { stats.skipped++; }
+    }
+  }
+
+  /**
+   * Escalada H-1 (Fase S): consultas que começam em menos de 1h e o paciente
+   * ainda não confirmou — marca `needs_manual_confirmation=1` pra recepção
+   * decidir (ligar / liberar vaga). Idempotente e não envia mensagem.
+   */
+  private static escalateNearAppointments(orgId: string, nowMs: number) {
+    const cutoff = new Date(nowMs + 60 * 60_000).toISOString(); // 1h no futuro
+    try {
+      db.prepare(
+        `UPDATE appointments SET needs_manual_confirmation = 1
+          WHERE organization_id = ?
+            AND status IN ('confirmed','arrived')
+            AND scheduled_start > CURRENT_TIMESTAMP
+            AND scheduled_start <= ?
+            AND patient_confirmed_at IS NULL
+            AND COALESCE(needs_manual_confirmation, 0) = 0`
+      ).run(orgId, cutoff);
+    } catch { /* best-effort */ }
   }
 }
 

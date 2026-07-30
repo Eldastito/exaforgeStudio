@@ -2669,6 +2669,28 @@ const initDb = () => {
   // opcional (encounter sem recomendação = alta / caso encerrado).
   try { db.exec(`ALTER TABLE clinical_encounters ADD COLUMN follow_up_recommended_days INTEGER`); } catch(e){}
 
+  // Portal do Paciente (ADR-080 Fase L) — molde do portal do profissional
+  // (professional_portal_tokens): token opaco de 32 bytes, no banco só o hash
+  // SHA-256 + expiração. Um paciente pode ter múltiplos tokens ativos (ex.:
+  // gerou pra celular, gerou pra tablet do familiar); revogação individual.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS patient_portal_tokens (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        expires_at DATETIME,
+        last_access_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_patient_portal_hash ON patient_portal_tokens (token_hash);
+      CREATE INDEX IF NOT EXISTS idx_patient_portal_contact ON patient_portal_tokens (organization_id, contact_id, active);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar patient_portal_tokens', e); }
+
   // Envio de docs clínicos por canal (ADR-080 Fase K). Histórico de tentativas
   // — dado sensível transita por WhatsApp com URL assinada (HMAC + exp curto).
   // status: queued | sent | failed. `provider_message_id` quando o provider
@@ -2722,6 +2744,11 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinical_attach_patient ON clinical_encounter_attachments (organization_id, contact_id, uploaded_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_encounter_attachments', e); }
+  // Compartilhar anexo com paciente (ADR-080 Fase L) — default: NÃO compartilha.
+  // Profissional marca por anexo o que o paciente vê no portal (exames que ele
+  // trouxe, imagens de evolução compartilháveis). Foto de tratamento interno
+  // (ex.: procedimento estético em progresso) fica invisível por default.
+  try { db.exec(`ALTER TABLE clinical_encounter_attachments ADD COLUMN share_with_patient INTEGER DEFAULT 0`); } catch(e){}
 
   // Receita + Atestado (ADR-080 Fase H) — documentos clínicos emitidos a partir
   // de um encounter. Ciclo draft → issued (imutável após issued). Snapshots

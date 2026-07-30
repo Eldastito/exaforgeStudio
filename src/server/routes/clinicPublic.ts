@@ -2,6 +2,9 @@ import { Router } from "express";
 import fs from "node:fs";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
+import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
+import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
+import { ClinicAttachmentService } from "../ClinicAttachmentService.js";
 
 /**
  * Rotas PÚBLICAS (sem login) do módulo Clínica. Montada em /api/public/clinic.
@@ -29,6 +32,58 @@ router.get("/documents/:key", (req, res): any => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="${req.params.key}"`);
   return fs.createReadStream(filePath).pipe(res);
+});
+
+// ── Portal do Paciente — rotas PÚBLICAS via token (ADR-080 Fase L) ─────
+// Token opaco no path. Cada rota resolve o token e valida ownership por
+// paciente antes de qualquer dado. Nenhum id interno vaza pra quem não
+// tem o token — path traversal em ids é impossível porque cada `assertOwns`
+// exige match `contact_id + status='issued' | share_with_patient=1`.
+
+function resolveOr404(res: any, token: string) {
+  const ctx = ClinicPatientPortalService.resolveToken(token);
+  if (!ctx) { res.status(404).json({ error: "Link inválido ou expirado. Peça um novo à recepção." }); return null; }
+  return ctx;
+}
+
+router.get("/patient/:token", (req, res): any => {
+  const ctx = resolveOr404(res, req.params.token); if (!ctx) return;
+  try { res.json(ClinicPatientPortalService.getPortalData(ctx.orgId, ctx.contactId)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.get("/patient/:token/prescriptions/:id/pdf", async (req, res): Promise<any> => {
+  const ctx = resolveOr404(res, req.params.token); if (!ctx) return;
+  if (!ClinicPatientPortalService.assertOwnsPrescription(ctx.orgId, ctx.contactId, req.params.id)) return res.status(404).json({ error: "not_found" });
+  try {
+    const pdf = await ClinicDocumentsService.renderPrescriptionPdf(ctx.orgId, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="receita-${req.params.id.slice(0, 8)}.pdf"`);
+    return res.send(pdf);
+  } catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.get("/patient/:token/certificates/:id/pdf", async (req, res): Promise<any> => {
+  const ctx = resolveOr404(res, req.params.token); if (!ctx) return;
+  if (!ClinicPatientPortalService.assertOwnsCertificate(ctx.orgId, ctx.contactId, req.params.id)) return res.status(404).json({ error: "not_found" });
+  try {
+    const pdf = await ClinicDocumentsService.renderCertificatePdf(ctx.orgId, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="atestado-${req.params.id.slice(0, 8)}.pdf"`);
+    return res.send(pdf);
+  } catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.get("/patient/:token/attachments/:id/download", (req, res): any => {
+  const ctx = resolveOr404(res, req.params.token); if (!ctx) return;
+  if (!ClinicPatientPortalService.assertOwnsSharedAttachment(ctx.orgId, ctx.contactId, req.params.id)) return res.status(404).json({ error: "not_found" });
+  try {
+    const { buffer, mime, filename } = ClinicAttachmentService.read(ctx.orgId, req.params.id);
+    res.setHeader("Content-Type", mime);
+    const disposition = mime.startsWith("image/") ? "inline" : "attachment";
+    res.setHeader("Content-Disposition", `${disposition}; filename="${filename.replace(/"/g, "")}"`);
+    return res.send(buffer);
+  } catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
 export default router;

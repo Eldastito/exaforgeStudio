@@ -54,6 +54,7 @@ export interface Attachment {
   originalFilename: string | null;
   storageKey: string;
   sizeBytes: number;
+  shareWithPatient: boolean;
   uploadedBy: string | null;
   uploadedAt: string;
 }
@@ -98,6 +99,7 @@ function hydrate(r: any): Attachment | null {
     originalFilename: r.original_filename ?? null,
     storageKey: r.storage_key,
     sizeBytes: Number(r.size_bytes || 0),
+    shareWithPatient: !!Number(r.share_with_patient || 0),
     uploadedBy: r.uploaded_by ?? null,
     uploadedAt: r.uploaded_at,
   };
@@ -212,6 +214,19 @@ export class ClinicAttachmentService {
     } catch { /* noop */ }
 
     logAuthEvent(orgId, actorId, att.contactId, "CLINIC_ATTACHMENT_REMOVED", { attachmentId: id, encounterId: att.encounterId });
+  }
+
+  /**
+   * Compartilhar/desmarcar anexo com o Portal do Paciente (ADR-080 Fase L).
+   * Não é bloqueado por encounter signed — visibilidade não é achado clínico.
+   */
+  static setSharedWithPatient(orgId: string, id: string, share: boolean, actorId: string | null): Attachment {
+    const att = this.get(orgId, id);
+    if (!att) throw new Error("Anexo não encontrado.");
+    db.prepare(`UPDATE clinical_encounter_attachments SET share_with_patient = ? WHERE id = ? AND organization_id = ?`)
+      .run(share ? 1 : 0, id, orgId);
+    logAuthEvent(orgId, actorId, att.contactId, "CLINIC_ATTACHMENT_SHARE_CHANGED", { attachmentId: id, share });
+    return this.get(orgId, id)!;
   }
 }
 

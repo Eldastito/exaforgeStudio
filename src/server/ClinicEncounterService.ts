@@ -369,6 +369,17 @@ export class ClinicEncounterService {
       length: note.length,
     });
 
+    // Fase 24: dispara notificação ao paciente best-effort (nunca lança —
+    // dado clínico já foi gravado; comunicação é secundária). Rodamos via
+    // microtask pra não segurar o request. Import dinâmico evita ciclo
+    // (NoticeService importa este módulo indiretamente através de outros).
+    Promise.resolve().then(async () => {
+      try {
+        const mod = await import("./ClinicAddendumNoticeService.js");
+        await mod.ClinicAddendumNoticeService.notifyForAddendum(orgId, id, { actorId });
+      } catch { /* nunca propaga — best-effort */ }
+    });
+
     return {
       id,
       organizationId: orgId,

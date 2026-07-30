@@ -103,6 +103,7 @@ jobs:
           - { name: 'clinic-timeline', script: 'test:clinic-timeline' }
           - { name: 'clinic-absence', script: 'test:clinic-absence' }
           - { name: 'clinic-cid10', script: 'test:clinic-cid10' }
+          - { name: 'clinic-addendum-notice', script: 'test:clinic-addendum-notice' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

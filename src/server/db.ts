@@ -2589,6 +2589,36 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar profissionais/salas (Clínica)', e); }
 
+  // Notificação de addendum ao paciente (ADR-080 Fase 24). Quando o
+  // profissional adiciona addendum ao prontuário assinado (Fase 20), o
+  // paciente recebe WhatsApp curto avisando que o prontuário foi atualizado
+  // + link do portal (Fase L) pra ler a evolução. Fecha o loop: sem esta
+  // fatia o paciente só descobre no próximo atendimento. Dedup por
+  // (addendum, status IN sent|queued) — mesma nota não é enviada 2x sem
+  // `force:true`. Config por org: `clinic_addendum_notification_enabled`
+  // (default 1) — permite desligar em clínicas que preferem contato manual.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_addendum_notifications (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        addendum_id TEXT NOT NULL,
+        encounter_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        channel_id TEXT,
+        to_identifier TEXT,
+        status TEXT NOT NULL,             -- queued | sent | failed | skipped
+        provider_message_id TEXT,
+        error TEXT,
+        portal_token_id TEXT,             -- token curto gerado só pra esta notificação
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_addendum_notif ON clinical_addendum_notifications (organization_id, addendum_id, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_addendum_notif_contact ON clinical_addendum_notifications (organization_id, contact_id, sent_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_addendum_notifications', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_addendum_notification_enabled INTEGER DEFAULT 1`); } catch(e){}
+
   // Catálogo CID-10 (ADR-080 Fase 23). Ajuda o atestado (Fase H) a padronizar
   // o CID: campo hoje é texto livre, então a mesma condição vira "H10.9",
   // "H10", "H109", "conjuntivite" — impossível auditar/agregar. Catálogo é

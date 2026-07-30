@@ -125,7 +125,10 @@ async function main() {
   const ctx = ClinicPatientPortalService.resolveToken(t1.token);
   check("resolveToken devolve orgId/contactId corretos", ctx?.orgId === A.orgId && ctx?.contactId === A.patient);
   check("resolveToken de string vazia → null", ClinicPatientPortalService.resolveToken("") === null);
-  check("resolveToken de token tampered → null", ClinicPatientPortalService.resolveToken(t1.token.replace(/.$/, "0")) === null);
+  // Garante que o último char REALMENTE muda (t1.token.replace(/.$/, "0") era
+  // flaky quando o token terminava em '0' — 1/16 de chance de falso PASS).
+  const tampered = t1.token.slice(0, -1) + (t1.token.slice(-1) === "0" ? "1" : "0");
+  check("resolveToken de token tampered → null", ClinicPatientPortalService.resolveToken(tampered) === null);
   check("resolveToken atualiza last_access_at",
     !!(db.prepare(`SELECT last_access_at FROM patient_portal_tokens WHERE id = ?`).get(t1.id) as any).last_access_at);
 

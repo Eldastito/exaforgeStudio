@@ -118,6 +118,15 @@ export class ClinicPatientPortalService {
   /**
    * Resolve um token cru e devolve `{orgId, contactId}` ou null (não lança —
    * quem chama decide a resposta HTTP). Registra `last_access_at`.
+   *
+   * Fase 18: revalida o consentimento LGPD Art.11 em CADA acesso. Antes,
+   * um paciente que revogava `dados_sensiveis` ou `comunicacoes` continuava
+   * exposto pelos links já entregues (WhatsApp cacheia URL no celular) por
+   * até 30 dias — o guardrail só bloqueava a EMISSÃO de token novo. A
+   * revogação também dispara `LgpdService.revokeConsent` que já marca os
+   * tokens `active = 0` em cascata; este re-check é a segunda camada de
+   * defesa caso a cascade tenha falhado ou o consent tenha sido revogado
+   * fora dos endpoints (script, migration).
    */
   static resolveToken(rawToken: string): { orgId: string; contactId: string; tokenId: string } | null {
     const raw = String(rawToken || "").trim();
@@ -127,6 +136,10 @@ export class ClinicPatientPortalService {
         WHERE token_hash = ? AND active = 1 AND expires_at > CURRENT_TIMESTAMP`
     ).get(hashToken(raw)) as any;
     if (!row) return null;
+    // Re-check LGPD: se o paciente revogou o consentimento sensível OU o de
+    // comunicações depois que o token foi emitido, o portal cala.
+    if (!LgpdService.hasConsent(row.organization_id, row.contact_id, SENSITIVE_CONSENT)) return null;
+    if (!LgpdService.hasConsent(row.organization_id, row.contact_id, COMMS_CONSENT)) return null;
     db.prepare(`UPDATE patient_portal_tokens SET last_access_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
     return { orgId: row.organization_id, contactId: row.contact_id, tokenId: row.id };
   }

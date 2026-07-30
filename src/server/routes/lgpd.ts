@@ -1,6 +1,6 @@
 import { Router } from "express";
 import db from "../db.js";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { LgpdService } from "../LgpdService.js";
 
 const router = Router();
@@ -14,7 +14,8 @@ router.get("/settings", (req: AuthRequest, res): any => {
 });
 
 // PUT /api/lgpd/settings — liga/desliga + janela de retenção (mínimo 30 dias).
-router.put("/settings", (req: AuthRequest, res): any => {
+// Fase 18: gate `owner|admin` — zerar retention é decisão de gestor.
+router.put("/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { enabled, days } = req.body || {};
@@ -36,7 +37,9 @@ router.get("/contact/:id/export", (req: AuthRequest, res): any => {
 });
 
 // POST /api/lgpd/contact/:id/forget — direito ao esquecimento (anonimiza).
-router.post("/contact/:id/forget", (req: AuthRequest, res): any => {
+// Fase 18: esquecer contato é irreversível — restrito a owner/admin. Um
+// agent poderia apagar (por engano ou má fé) qualquer paciente do sistema.
+router.post("/contact/:id/forget", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ok = LgpdService.forgetContact(orgId, req.params.id);
@@ -54,7 +57,9 @@ router.get("/consent-config", (req: AuthRequest, res): any => {
 });
 
 // PUT /api/lgpd/consent-config — atualiza categorias + banner + versão.
-router.put("/consent-config", (req: AuthRequest, res): any => {
+// Fase 18: banner e categorias de consentimento são política pública da
+// clínica — só gestor edita.
+router.put("/consent-config", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {

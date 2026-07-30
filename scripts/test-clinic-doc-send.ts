@@ -118,17 +118,22 @@ async function main() {
   check("sender recebeu canal ativo do contato", sendCalls[0].channelId === A.channelId);
 
   // ── 4. Arquivo PDF persiste em disco e é PDF válido ────────────────────
-  const filesInDocsDir = fs.readdirSync(CLINIC_DOCS_DIR);
-  check("PDF salvo em CLINIC_DOCS_DIR", filesInDocsDir.length >= 1);
-  const savedFile = path.join(CLINIC_DOCS_DIR, filesInDocsDir[filesInDocsDir.length - 1]);
+  // Fase 18: PDFs vivem em `CLINIC_DOCS_DIR/{orgId}/{uuid}.pdf` — subpasta
+  // por org isola tenants na hora do purge.
+  const orgDir = path.join(CLINIC_DOCS_DIR, A.orgId);
+  check("subpasta {orgId} criada em CLINIC_DOCS_DIR", fs.existsSync(orgDir));
+  const filesInOrgDir = fs.readdirSync(orgDir);
+  check("PDF salvo em CLINIC_DOCS_DIR/{orgId}", filesInOrgDir.length >= 1);
+  const savedFile = path.join(orgDir, filesInOrgDir[filesInOrgDir.length - 1]);
   const head = fs.readFileSync(savedFile).slice(0, 5).toString();
   check("PDF começa com '%PDF-'", head === "%PDF-");
 
   // ── 5. signedUrl HMAC roundtrip ────────────────────────────────────────
-  const key = filesInDocsDir[0];
+  const key = `${A.orgId}/${filesInOrgDir[0]}`;
   const goodUrl = ClinicDocumentDeliveryService.signedUrl(key);
   const match = /\?exp=(\d+)&sig=([a-f0-9]+)$/.exec(goodUrl);
   check("signedUrl tem exp+sig", !!match);
+  check("signedUrl embute {orgId}/{file} no path", goodUrl.includes(`/documents/${encodeURIComponent(A.orgId)}/`));
   if (match) {
     const [, exp, sig] = match;
     const resolved = ClinicDocumentDeliveryService.resolveSignedFile(key, exp, sig);
@@ -142,9 +147,17 @@ async function main() {
     const expired = ClinicDocumentDeliveryService.resolveSignedFile(key, String(Date.now() - 1000), sig);
     check("resolveSignedFile recusa exp expirado", expired === null);
 
-    // key com path traversal
-    const traversal = ClinicDocumentDeliveryService.resolveSignedFile("../secret", exp, sig);
-    check("resolveSignedFile recusa path traversal", traversal === null);
+    // key com path traversal (2 segmentos, ".." bloqueado por regex)
+    const traversal = ClinicDocumentDeliveryService.resolveSignedFile("../etc/passwd", exp, sig);
+    check("resolveSignedFile recusa path traversal (segmento inválido)", traversal === null);
+
+    // key sem barra: forma antiga rejeitada (só orgId sozinho é inválido)
+    const noSlash = ClinicDocumentDeliveryService.resolveSignedFile("only-one-segment.pdf", exp, sig);
+    check("resolveSignedFile recusa key legada sem {orgId}/", noSlash === null);
+
+    // key com barras extras
+    const doubleSlash = ClinicDocumentDeliveryService.resolveSignedFile(`${A.orgId}/sub/file.pdf`, exp, sig);
+    check("resolveSignedFile recusa key com barras extras", doubleSlash === null);
   }
 
   // ── 6. Falha do provider grava 'failed' mas NÃO relança ────────────────

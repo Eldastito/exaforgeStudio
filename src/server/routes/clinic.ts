@@ -107,7 +107,10 @@ router.put("/professionals/:id/pin", requireRole("owner", "admin"), (req: AuthRe
     res.status(400).json({ error: e.message });
   }
 });
-router.get("/professionals/:id/pin-status", (req: AuthRequest, res): any => {
+// Fase 18: restrito a owner/admin — expor "qual profissional tem PIN?" a
+// qualquer `agent` autenticado facilita brute-force direcionado (agent
+// enumera, tenta emitir sem PIN em nome do profissional sem PIN).
+router.get("/professionals/:id/pin-status", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ hasPin: ClinicAgendaService.hasProfessionalPin(orgId, req.params.id) });
@@ -287,7 +290,11 @@ router.patch("/prescriptions/:id", (req: AuthRequest, res): any => {
   try { res.json(ClinicDocumentsService.updatePrescription(orgId, req.params.id, actor(req), req.body || {})); }
   catch (e: any) { docError(res, e); }
 });
-router.post("/prescriptions/:id/issue", (req: AuthRequest, res): any => {
+// Fase 18: emissão restrita a owner/admin. Antes, qualquer `agent` (recepção,
+// estagiário, atendente) podia emitir receita em nome de qualquer profissional
+// se ele nunca tivesse configurado PIN — `verifyPin` degrada pra `false` no
+// legado sem PIN. Restringir role fecha o vetor sem exigir migração de PIN.
+router.post("/prescriptions/:id/issue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicDocumentsService.issuePrescription(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
@@ -317,7 +324,8 @@ router.patch("/certificates/:id", (req: AuthRequest, res): any => {
   try { res.json(ClinicDocumentsService.updateCertificate(orgId, req.params.id, actor(req), req.body || {})); }
   catch (e: any) { docError(res, e); }
 });
-router.post("/certificates/:id/issue", (req: AuthRequest, res): any => {
+// Fase 18: mesmo racional de prescriptions — emissão restrita a owner/admin.
+router.post("/certificates/:id/issue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicDocumentsService.issueCertificate(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
@@ -585,7 +593,10 @@ router.put("/settings/reminders", requireRole("owner", "admin"), (req: AuthReque
 // Só gera token se LGPD sensível + comunicações concedidos. Link é o
 // que o gestor manda pro paciente (WhatsApp/e-mail); a rota pública que
 // consome o token vive em `clinicPublic.ts`.
-router.post("/patients/:contactId/portal-tokens", (req: AuthRequest, res): any => {
+// Fase 18: gerar link do portal expõe TODAS as receitas/atestados emitidos e
+// anexos compartilhados do paciente. Restrito a owner/admin — um agent
+// malicioso podia gerar, copiar o token cru e sair antes de qualquer revoke.
+router.post("/patients/:contactId/portal-tokens", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -603,7 +614,8 @@ router.get("/patients/:contactId/portal-tokens", (req: AuthRequest, res): any =>
   res.json(ClinicPatientPortalService.listTokens(orgId, req.params.contactId));
 });
 
-router.delete("/patients/portal-tokens/:tokenId", (req: AuthRequest, res): any => {
+// Fase 18: par com a rota de generate — só quem gera pode revogar.
+router.delete("/patients/portal-tokens/:tokenId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ok = ClinicPatientPortalService.revokeToken(orgId, req.params.tokenId, actor(req));

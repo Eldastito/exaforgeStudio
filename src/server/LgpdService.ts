@@ -1,6 +1,13 @@
 import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { CONSENT_BY_VERTICAL } from "./verticals.js";
+import { logAuthEvent } from "./auditLog.js";
+
+// Fase 18: consentimentos cujo revoke dispara cascade em tokens do Portal do
+// Paciente (LGPD Art.8 §5 — revogação facilitada). Se o titular tira o
+// consentimento sensível OU o de comunicações, todo link ativo do portal
+// dele vira inerte imediatamente, sem depender do TTL.
+const PORTAL_CASCADE_CONSENTS = new Set(["dados_sensiveis", "comunicacoes"]);
 
 /**
  * LGPD — retenção de dados e direitos do titular.
@@ -101,6 +108,21 @@ export class LgpdService {
   static revokeConsent(orgId: string, contactId: string, consentType: string, actorId?: string): boolean {
     const r = db.prepare(`UPDATE contact_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND contact_id = ? AND consent_type = ? AND granted = 1`)
       .run(orgId, contactId, consentType);
+    // Fase 18: cascade pra portal token. Sem isso, o token gerado antes
+    // continuava servindo receita/atestado/anexos por até 30 dias mesmo
+    // depois de o paciente revogar. Faz por SQL direto pra evitar
+    // dependência circular com `ClinicPatientPortalService`.
+    if ((r.changes || 0) > 0 && PORTAL_CASCADE_CONSENTS.has(consentType)) {
+      try {
+        const revoke = db.prepare(`UPDATE patient_portal_tokens SET active = 0 WHERE organization_id = ? AND contact_id = ? AND active = 1`).run(orgId, contactId);
+        if ((revoke.changes || 0) > 0) {
+          logAuthEvent(orgId, actorId || null, contactId, "CLINIC_PATIENT_PORTAL_REVOKED_CASCADE", {
+            trigger: consentType,
+            tokensRevoked: Number(revoke.changes),
+          });
+        }
+      } catch { /* tabela inexistente em orgs sem clínica — silencia */ }
+    }
     return (r.changes || 0) > 0;
   }
 

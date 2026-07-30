@@ -19,18 +19,27 @@ router.get("/portal/:token", (req, res): any => {
   catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
-// GET /api/public/clinic/documents/:key?exp=&sig=  → PDF binário se HMAC ok.
-// `:key` é o basename do arquivo em PRIVATE_MEDIA_DIR/clinical_docs/ —
-// nunca vira path de sistema porque o service valida basename.
-router.get("/documents/:key", (req, res): any => {
+// GET /api/public/clinic/documents/:orgId/:file?exp=&sig=  → PDF binário se
+// HMAC bater. Fase 18: o par (orgId, file) é a `storage_key` completa; o
+// service valida cada segmento contra `^[a-zA-Z0-9._-]+$` (impossível
+// injetar "..", barras extras, ou basename escondido). Antes desta fatia,
+// `:key` era só o basename e todos os PDFs viviam numa raiz global — o que
+// deixava a retention da Fase U apagar arquivos entre tenants.
+router.get("/documents/:orgId/:file", (req, res): any => {
+  const key = `${req.params.orgId}/${req.params.file}`;
   const filePath = ClinicDocumentDeliveryService.resolveSignedFile(
-    req.params.key,
+    key,
     String(req.query.exp || ""),
     String(req.query.sig || "")
   );
   if (!filePath) return res.status(404).json({ error: "not_found" });
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${req.params.key}"`);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  // Fase 18: `filename` do `Content-Disposition` sanitiza `\r\n` (CRLF
+  // injection) e aspas — o `req.params.file` já bate o whitelist do service,
+  // mas defesa em profundidade custa uma linha.
+  const safeName = req.params.file.replace(/[^\w.\- ]/g, "_");
+  res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
   return fs.createReadStream(filePath).pipe(res);
 });
 

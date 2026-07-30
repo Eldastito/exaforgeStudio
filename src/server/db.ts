@@ -2669,6 +2669,32 @@ const initDb = () => {
   // opcional (encounter sem recomendação = alta / caso encerrado).
   try { db.exec(`ALTER TABLE clinical_encounters ADD COLUMN follow_up_recommended_days INTEGER`); } catch(e){}
 
+  // Envio de docs clínicos por canal (ADR-080 Fase K). Histórico de tentativas
+  // — dado sensível transita por WhatsApp com URL assinada (HMAC + exp curto).
+  // status: queued | sent | failed. `provider_message_id` quando o provider
+  // devolve id (útil pra rastrear entrega no BSP). `to_identifier` snapshot
+  // do número (paciente pode trocar de telefone; o histórico congela).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_document_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        doc_kind TEXT NOT NULL,           -- prescription | certificate
+        doc_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        to_identifier TEXT NOT NULL,
+        status TEXT NOT NULL,             -- queued | sent | failed
+        provider_message_id TEXT,
+        error TEXT,
+        sent_by TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_deliveries_doc ON clinical_document_deliveries (organization_id, doc_kind, doc_id, sent_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_clinical_deliveries_patient ON clinical_document_deliveries (organization_id, contact_id, sent_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_document_deliveries', e); }
+
   // Anexos ao prontuário (ADR-080 Fase J). Dado sensível de saúde (LGPD
   // Art.11) — arquivo físico fica em PRIVATE_MEDIA_DIR (fora do
   // /media estático), acessível só via rota autenticada com streaming.

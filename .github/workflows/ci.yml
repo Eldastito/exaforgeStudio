@@ -84,6 +84,7 @@ jobs:
           - { name: 'clinic-documents', script: 'test:clinic-documents' }
           - { name: 'clinic-followup', script: 'test:clinic-followup' }
           - { name: 'clinic-attachments', script: 'test:clinic-attachments' }
+          - { name: 'clinic-doc-send', script: 'test:clinic-doc-send' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

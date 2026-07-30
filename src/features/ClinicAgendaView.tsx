@@ -2401,6 +2401,64 @@ function downloadPdf(url: string, filename: string) {
   }).catch(() => toast.error('Falha na rede ao baixar PDF.'));
 }
 
+// ---- Enviar doc por WhatsApp (ADR-080 Fase K) ----------------------------
+// Botão embutido nos cards issued. Guarda estado local do último delivery
+// pra badge (sent/failed). Sem polling — próxima abertura da aba recarrega.
+
+type DeliveryDto = { id: string; status: 'queued' | 'sent' | 'failed'; providerMessageId: string | null; error: string | null; sentAt: string };
+
+function DocSendButton({ kind, docId }: { kind: 'prescription' | 'certificate'; docId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState<DeliveryDto | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const loadHistory = async () => {
+    const r = await apiFetch(`/api/clinic/documents/${kind}/${docId}/deliveries`);
+    const list: DeliveryDto[] = await r.json().catch(() => []);
+    setLast(Array.isArray(list) && list.length ? list[0] : null);
+    setLoaded(true);
+  };
+  useEffect(() => { loadHistory(); /* eslint-disable-next-line */ }, [kind, docId]);
+
+  const send = async () => {
+    if (!(await confirmDialog(kind === 'prescription' ? 'Enviar receita por WhatsApp para o paciente?' : 'Enviar atestado por WhatsApp para o paciente?'))) return;
+    setBusy(true);
+    try {
+      const path = kind === 'prescription' ? 'prescriptions' : 'certificates';
+      const r = await apiFetch(`/api/clinic/${path}/${docId}/send`, { method: 'POST' });
+      const out: any = await r.json().catch(() => ({}));
+      if (r.status === 409 && (out?.code === 'LGPD_COMMS_CONSENT_REQUIRED' || out?.code === 'LGPD_CONSENT_REQUIRED')) {
+        toast.error(out?.error || 'Consentimento LGPD necessário — abra a Ficha do paciente e registre.');
+        return;
+      }
+      if (!r.ok) { toast.error(out?.error || 'Falha ao enviar.'); return; }
+      // status pode ser 'sent' ou 'failed' — o service não relança falha do provider.
+      setLast(out);
+      if (out?.status === 'sent') toast.success('Enviado por WhatsApp.');
+      else if (out?.status === 'failed') toast.error(`Falha ao enviar: ${out?.error || 'provider indisponível'}`);
+    } finally { setBusy(false); }
+  };
+
+  const badge = loaded && last && (
+    <span className={`text-[10px] rounded-full px-1.5 inline-flex items-center gap-1 border ${
+      last.status === 'sent' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+        : last.status === 'failed' ? 'bg-red-500/15 text-red-300 border-red-500/30'
+          : 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30'
+    }`} title={`Última tentativa: ${new Date(last.sentAt).toLocaleString('pt-BR')}${last.error ? ` — ${last.error}` : ''}`}>
+      {last.status === 'sent' ? 'enviado' : last.status === 'failed' ? 'falhou' : 'enfileirado'}
+    </span>
+  );
+
+  return (
+    <>
+      <button onClick={send} disabled={busy} className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center gap-1 disabled:opacity-60" title="Enviar por WhatsApp">
+        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} {last?.status === 'sent' ? 'Reenviar' : 'WhatsApp'}
+      </button>
+      {badge}
+    </>
+  );
+}
+
 function EncounterDocsPanel({ encounterId }: { encounterId: string }) {
   const [loading, setLoading] = useState(true);
   const [prescriptions, setPrescriptions] = useState<PrescriptionDto[]>([]);
@@ -2469,6 +2527,7 @@ function EncounterDocsPanel({ encounterId }: { encounterId: string }) {
               <button onClick={() => downloadPdf(`/api/clinic/prescriptions/${rx.id}/pdf`, `receita-${rx.id}.pdf`)} className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1">
                 <Download className="w-3 h-3" /> PDF
               </button>
+              {rx.status === 'issued' && <DocSendButton kind="prescription" docId={rx.id} />}
             </div>
           </div>
           <ul className="mt-2 text-[11px] text-zinc-400 space-y-0.5">
@@ -2505,6 +2564,7 @@ function EncounterDocsPanel({ encounterId }: { encounterId: string }) {
               <button onClick={() => downloadPdf(`/api/clinic/certificates/${c.id}/pdf`, `atestado-${c.id}.pdf`)} className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 text-zinc-200 hover:bg-zinc-800 inline-flex items-center gap-1">
                 <Download className="w-3 h-3" /> PDF
               </button>
+              {c.status === 'issued' && <DocSendButton kind="certificate" docId={c.id} />}
             </div>
           </div>
           {c.cid && <div className="mt-1 text-[11px] text-zinc-300">CID: <span className="font-mono">{c.cid}</span>{c.cidDescription ? ` · ${c.cidDescription}` : ''}</div>}

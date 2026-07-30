@@ -18,6 +18,7 @@ import { ClinicVacancyService } from "../ClinicVacancyService.js";
 import { ClinicRetentionService } from "../ClinicRetentionService.js";
 import { ClinicMonthlyReportService } from "../ClinicMonthlyReportService.js";
 import { ClinicPatientTimelineService, TimelineKind } from "../ClinicPatientTimelineService.js";
+import { ClinicProfessionalAbsenceService, AbsenceReason } from "../ClinicProfessionalAbsenceService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -117,6 +118,48 @@ router.get("/professionals/:id/pin-status", requireRole("owner", "admin"), (req:
   res.json({ hasPin: ClinicAgendaService.hasProfessionalPin(orgId, req.params.id) });
 });
 
+// ── Indisponibilidade do profissional (ADR-080 Fase 22) ─────────────────
+// Bloqueia CRIAÇÃO nova de appointment que se sobrepõe à ausência
+// (createAppointment devolve 409 PROFESSIONAL_UNAVAILABLE). NÃO cancela
+// appts pré-existentes — gestor decide caso a caso.
+router.get("/professionals/:id/absences", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicProfessionalAbsenceService.list(orgId, {
+    professionalId: req.params.id,
+    activeAt: typeof req.query.activeAt === "string" ? req.query.activeAt : undefined,
+    from: typeof req.query.from === "string" ? req.query.from : undefined,
+    to: typeof req.query.to === "string" ? req.query.to : undefined,
+    limit: req.query.limit ? Number(req.query.limit) : undefined,
+  }));
+});
+
+router.post("/professionals/:id/absences", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const body = req.body || {};
+  try {
+    res.json(ClinicProfessionalAbsenceService.create(orgId, req.params.id, {
+      startsAt: String(body.startsAt || ""),
+      endsAt: String(body.endsAt || ""),
+      reason: body.reason as AbsenceReason,
+      notes: body.notes ?? null,
+    }, actor(req)));
+  } catch (e: any) {
+    if (e?.code === "ABSENCE_INVALID_RANGE" || e?.code === "ABSENCE_INVALID_REASON") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.delete("/absences/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { ClinicProfessionalAbsenceService.remove(orgId, req.params.id, actor(req)); res.json({ ok: true }); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
 router.get("/rooms", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -143,7 +186,11 @@ router.post("/appointments", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicAgendaService.createAppointment(orgId, req.body || {}, actor(req))); }
-  catch (e: any) { res.status(e.code === "CONFLICT" ? 409 : 400).json({ error: e.message, conflicts: e.conflicts }); }
+  catch (e: any) {
+    if (e.code === "CONFLICT") return res.status(409).json({ error: e.message, code: e.code, conflicts: e.conflicts });
+    if (e.code === "PROFESSIONAL_UNAVAILABLE") return res.status(409).json({ error: e.message, code: e.code, absence: e.absence });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 const lifecycle = (fn: (orgId: string, id: string, actorId?: string) => any) => (req: AuthRequest, res: any): any => {

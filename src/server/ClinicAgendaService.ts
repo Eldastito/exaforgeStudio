@@ -2,6 +2,7 @@ import db from "./db.js";
 import { randomUUID, createHash } from "node:crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { AppointmentService } from "./AppointmentService.js";
+import { ClinicProfessionalAbsenceService } from "./ClinicProfessionalAbsenceService.js";
 
 /**
  * Módulo Clínica — Agenda Clínica (ADR-080, Fase C).
@@ -236,6 +237,22 @@ export class ClinicAgendaService {
       if (conflicts.length && !input?.force) {
         const e: any = new Error(`Conflito de horário: ${conflicts.map(c => c.title || "agendamento").join(", ")}. Envie force=true para manter mesmo assim.`);
         e.conflicts = conflicts; e.code = "CONFLICT";
+        throw e;
+      }
+    }
+
+    // Bloqueio por indisponibilidade do profissional (ADR-080 Fase 22).
+    // Ausências previamente registradas (férias/congresso/atestado/outro)
+    // interceptam a criação; `force:true` bypassa (mesmo padrão do CONFLICT).
+    if (professional && !input?.force) {
+      const abs = ClinicProfessionalAbsenceService.overlaps(orgId, professional.id, startMs, endMs);
+      if (abs) {
+        const label = abs.reason === "vacation" ? "férias"
+          : abs.reason === "conference" ? "congresso"
+          : abs.reason === "sick_leave" ? "atestado"
+          : "indisponibilidade";
+        const e: any = new Error(`Profissional em ${label} de ${abs.startsAt} até ${abs.endsAt}. Envie force=true para manter mesmo assim.`);
+        e.absence = abs; e.code = "PROFESSIONAL_UNAVAILABLE";
         throw e;
       }
     }

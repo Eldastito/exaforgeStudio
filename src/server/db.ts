@@ -2672,6 +2672,16 @@ const initDb = () => {
   // alteração aqui não muda um doc já emitido.
   try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN registration_number TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN council TEXT`); } catch(e){} // "CRM/SP", "COREN/RJ", …
+  // Assinatura eletrônica com PIN (ADR-080 Fase T). Não é ICP-Brasil (não
+  // tem valor jurídico de assinatura digital), mas é PROVA DE AUTORIA
+  // INTERNA: sem o PIN do profissional, ninguém emite receita/atestado
+  // em nome dele. Guardamos hash SHA-256 com salt UUID — nunca o PIN
+  // cru. `pin_updated_at` pra fila de "reset PIN após N dias" no futuro.
+  try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_salt TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_updated_at DATETIME`); } catch(e){}
+  // Nota: ALTER TABLE clinical_prescriptions/certificates ADD COLUMN
+  // signed_with_pin fica DEPOIS dos CREATEs dessas tabelas (linhas 2865/2893).
 
   // Prontuário/SOAP por consulta (ADR-080 Fase G). Uma linha por consulta
   // (UNIQUE(org, appointment)) — evita duas anotações concorrentes na mesma
@@ -2905,6 +2915,11 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinical_certificates_patient ON clinical_medical_certificates (organization_id, contact_id, created_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_medical_certificates', e); }
+  // Rastro de emissão assistida por PIN (ADR-080 Fase T). Sempre depois
+  // dos CREATEs acima — em banco novo o CREATE roda primeiro; em banco
+  // existente o ALTER adiciona a coluna (idempotente pelo try/catch).
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN signed_with_pin INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN signed_with_pin INTEGER DEFAULT 0`); } catch(e){}
 
   // Módulo Clínica (ADR-080, Fase D) — Portal do Profissional por link seguro.
   // Molde do Radar público: token aleatório forte, guardado só como hash

@@ -93,6 +93,7 @@ jobs:
           - { name: 'clinic-vacancy', script: 'test:clinic-vacancy' }
           - { name: 'clinic-automation-visibility', script: 'test:clinic-automation-visibility' }
           - { name: 'clinic-second-reminder', script: 'test:clinic-second-reminder' }
+          - { name: 'clinic-signature-pin', script: 'test:clinic-signature-pin' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

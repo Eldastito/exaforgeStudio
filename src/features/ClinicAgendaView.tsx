@@ -2515,10 +2515,28 @@ function EncounterDocsPanel({ encounterId }: { encounterId: string }) {
     if (!(await confirmDialog(kind === 'prescriptions' ? 'Emitir receita? Depois disso ela vira imutável.' : 'Emitir atestado? Depois disso ele vira imutável.'))) return;
     setBusyId(id);
     try {
-      const r = await apiFetch(`/api/clinic/${kind}/${id}/issue`, { method: 'POST' });
-      const out = await r.json().catch(() => ({}));
+      // 1ª tentativa sem PIN — se profissional não tem PIN cadastrado, emite direto.
+      let r = await apiFetch(`/api/clinic/${kind}/${id}/issue`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      });
+      let out = await r.json().catch(() => ({}));
+      // 401 com code PIN_REQUIRED → pede PIN e reenvia (Fatia 14 / ADR-080 Fase T).
+      if (r.status === 401 && (out?.code === 'PIN_REQUIRED' || out?.code === 'PIN_INVALID')) {
+        // Loop simples: prompt até acertar ou cancelar. window.prompt é
+        // suficiente pra fricção mínima; modal proper vem depois se preciso.
+        while (true) {
+          const pin = window.prompt(out?.code === 'PIN_INVALID' ? 'PIN incorreto. Tente de novo:' : 'Digite o PIN do profissional pra assinar:');
+          if (pin === null || !pin.trim()) { setBusyId(''); return; }
+          r = await apiFetch(`/api/clinic/${kind}/${id}/issue`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: pin.trim() }),
+          });
+          out = await r.json().catch(() => ({}));
+          if (r.ok) break;
+          if (r.status !== 401 || (out?.code !== 'PIN_INVALID' && out?.code !== 'PIN_REQUIRED')) break;
+        }
+      }
       if (!r.ok) { toast.error(out?.error || 'Falha ao emitir.'); return; }
-      toast.success('Emitido.');
+      toast.success(out?.signed_with_pin ? 'Emitido e assinado com PIN.' : 'Emitido.');
       await load();
     } finally { setBusyId(''); }
   };

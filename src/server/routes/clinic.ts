@@ -94,6 +94,22 @@ router.patch("/professionals/:id", requireRole("owner", "admin"), (req: AuthRequ
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// PIN de assinatura (ADR-080 Fase T). Owner/admin controla; body {pin: string|null}.
+router.put("/professionals/:id/pin", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicAgendaService.setProfessionalPin(orgId, req.params.id, req.body?.pin ?? null, actor(req))); }
+  catch (e: any) {
+    if (e.code === "PIN_INVALID_FORMAT") return res.status(400).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+router.get("/professionals/:id/pin-status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ hasPin: ClinicAgendaService.hasProfessionalPin(orgId, req.params.id) });
+});
+
 router.get("/rooms", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -242,6 +258,9 @@ const docError = (res: any, e: any) => {
   if (e?.code === "LGPD_CONSENT_REQUIRED" || e?.code === "DOCUMENT_ISSUED") {
     return res.status(409).json({ error: e.message, code: e.code });
   }
+  if (e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID") {
+    return res.status(401).json({ error: e.message, code: e.code });
+  }
   return res.status(400).json({ error: e.message });
 };
 
@@ -268,7 +287,7 @@ router.patch("/prescriptions/:id", (req: AuthRequest, res): any => {
 router.post("/prescriptions/:id/issue", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(ClinicDocumentsService.issuePrescription(orgId, req.params.id, actor(req))); }
+  try { res.json(ClinicDocumentsService.issuePrescription(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
   catch (e: any) { docError(res, e); }
 });
 router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
@@ -298,7 +317,7 @@ router.patch("/certificates/:id", (req: AuthRequest, res): any => {
 router.post("/certificates/:id/issue", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(ClinicDocumentsService.issueCertificate(orgId, req.params.id, actor(req))); }
+  try { res.json(ClinicDocumentsService.issueCertificate(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
   catch (e: any) { docError(res, e); }
 });
 router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> => {

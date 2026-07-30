@@ -15,6 +15,7 @@ import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
 import { ClinicReminderService } from "../ClinicReminderService.js";
 import { ClinicMetricsService } from "../ClinicMetricsService.js";
 import { ClinicVacancyService } from "../ClinicVacancyService.js";
+import { ClinicRetentionService } from "../ClinicRetentionService.js";
 import { LgpdService } from "../LgpdService.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -440,6 +441,49 @@ router.get("/metrics", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicMetricsService.overview(orgId, { from: req.query.from as string, to: req.query.to as string })); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Retenção LGPD (ADR-080 Fase U) ──────────────────────────────────────
+router.get("/settings/retention", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const o = db.prepare(`SELECT clinic_retention_enabled, clinic_retention_days_deliveries, clinic_retention_days_attachments FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({
+    enabled: o?.clinic_retention_enabled !== 0,
+    deliveryDays: Number(o?.clinic_retention_days_deliveries) || 30,
+    attachmentDays: Number(o?.clinic_retention_days_attachments) || 730,
+  });
+});
+router.put("/settings/retention", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const body = req.body || {};
+  const patches: string[] = []; const values: any[] = [];
+  if (body.enabled !== undefined) { patches.push("clinic_retention_enabled = ?"); values.push(body.enabled ? 1 : 0); }
+  if (body.deliveryDays !== undefined) {
+    const d = Math.max(7, Math.min(3650, Math.floor(Number(body.deliveryDays))));
+    if (!Number.isFinite(d)) return res.status(400).json({ error: "deliveryDays inválido (7..3650)." });
+    patches.push("clinic_retention_days_deliveries = ?"); values.push(d);
+  }
+  if (body.attachmentDays !== undefined) {
+    const d = Math.max(7, Math.min(7300, Math.floor(Number(body.attachmentDays)))); // até 20 anos
+    if (!Number.isFinite(d)) return res.status(400).json({ error: "attachmentDays inválido (7..7300)." });
+    patches.push("clinic_retention_days_attachments = ?"); values.push(d);
+  }
+  if (!patches.length) return res.status(400).json({ error: "Nenhum campo pra atualizar." });
+  db.prepare(`UPDATE organization_settings SET ${patches.join(", ")} WHERE organization_id = ?`).run(...values, orgId);
+  const o = db.prepare(`SELECT clinic_retention_enabled, clinic_retention_days_deliveries, clinic_retention_days_attachments FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({
+    enabled: o?.clinic_retention_enabled !== 0,
+    deliveryDays: Number(o?.clinic_retention_days_deliveries) || 30,
+    attachmentDays: Number(o?.clinic_retention_days_attachments) || 730,
+  });
+});
+// Rodar manualmente (útil pra debug ou "limpar agora" pelo gestor)
+router.post("/settings/retention/run", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicRetentionService.runForOrg(orgId));
 });
 
 // ── Automações WhatsApp — visibilidade das vagas (ADR-080 Fase R) ──────

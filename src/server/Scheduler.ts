@@ -21,6 +21,7 @@ import { InstagramService } from "./InstagramService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
 import { SchoolDigestService } from "./SchoolDigestService.js";
 import { TeacherDigestService } from "./TeacherDigestService.js";
+import { ClinicReminderService } from "./ClinicReminderService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
@@ -183,6 +184,29 @@ export class Scheduler {
    * WhatsApp. Só orgs com o módulo "escola" habilitado; o serviço decide
    * janela/dedupe/opt-in e só envia a quem tem aulas hoje. Best-effort, 1 loop.
    */
+  /**
+   * Módulo Clínica (ADR-080 Fase M) — lembrete automático de consulta.
+   * Roda a cada tick do loop principal; dispara pra appointments na janela
+   * `hoursBefore ± 1h` (default 24h), filtrando por consentimento LGPD
+   * `comunicacoes` e canal ativo. Só orgs com o módulo `clinica` habilitado.
+   */
+  static async clinicReminderPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM appointments
+           WHERE status IN ('confirmed','arrived') AND scheduled_start > CURRENT_TIMESTAMP`
+      ).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    for (const o of orgs) {
+      try {
+        if (!ModuleService.isEnabled(o.organization_id, "clinica")) continue;
+        await ClinicReminderService.dispatch({ orgId: o.organization_id });
+      } catch (e) { console.error("[Clínica] lembrete falhou", o.organization_id, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -255,6 +279,7 @@ export class Scheduler {
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));
     await this.teacherAgendaPass().catch(e => console.error('[Scheduler] agenda do professor falhou', e));
+    await this.clinicReminderPass().catch(e => console.error('[Scheduler] lembrete de consulta clínica falhou', e));
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }

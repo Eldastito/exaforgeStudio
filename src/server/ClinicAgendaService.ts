@@ -151,13 +151,18 @@ export class ClinicAgendaService {
     let sql = `
       SELECT a.*, c.name AS contact_name, c.identifier AS contact_identifier,
              p.name AS professional_name, p.color AS professional_color,
-             pp.insurance_name, pp.current_plan_name
+             pp.insurance_name, pp.current_plan_name,
+             rem.sent_at AS reminder_sent_at
       FROM appointments a
       LEFT JOIN contacts c ON c.id = a.contact_id AND c.organization_id = a.organization_id
       LEFT JOIN clinic_professionals p ON p.id = a.professional_id AND p.organization_id = a.organization_id
       LEFT JOIN patient_profiles pp ON pp.contact_id = a.contact_id AND pp.organization_id = a.organization_id
+      LEFT JOIN (
+        SELECT appointment_id, MAX(sent_at) AS sent_at FROM clinical_appointment_reminders
+         WHERE organization_id = ? AND status = 'sent' GROUP BY appointment_id
+      ) rem ON rem.appointment_id = a.id
       WHERE a.organization_id = ? AND substr(a.scheduled_start, 1, 10) = ?`;
-    const params: any[] = [orgId, day];
+    const params: any[] = [orgId, orgId, day];
     if (opts.professionalId) { sql += " AND a.professional_id = ?"; params.push(opts.professionalId); }
     if (opts.roomId) { sql += " AND a.room_id = ?"; params.push(opts.roomId); }
     if (opts.status) { sql += " AND a.status = ?"; params.push(opts.status); }

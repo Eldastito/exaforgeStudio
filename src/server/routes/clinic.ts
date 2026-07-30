@@ -21,6 +21,7 @@ import { ClinicPatientTimelineService, TimelineKind } from "../ClinicPatientTime
 import { ClinicProfessionalAbsenceService, AbsenceReason } from "../ClinicProfessionalAbsenceService.js";
 import { Cid10Service } from "../Cid10Service.js";
 import { ClinicAddendumNoticeService } from "../ClinicAddendumNoticeService.js";
+import { ClinicPatientAllergyService } from "../ClinicPatientAllergyService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -378,6 +379,71 @@ router.put("/settings/addendum-notification", requireRole("owner", "admin"), (re
   res.json({ enabled: enabled === 1 });
 });
 
+// Alergias do paciente (ADR-080 Fase 25). Dado sensível (LGPD Art.11) — o
+// service faz gate; 403 diferencia "consent revogado" de "não achou" (404).
+// CRUD aberto pra qualquer usuário autenticado do org (mesmo padrão do
+// encounter — o profissional que atende precisa registrar; RBAC granular
+// por profissional foge do escopo desta fatia). Soft delete via DELETE.
+router.get("/patients/:contactId/allergies", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const includeInactive = req.query.includeInactive === "true" || req.query.includeInactive === "1";
+    res.json(ClinicPatientAllergyService.list(orgId, req.params.contactId, { includeInactive }));
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+router.post("/patients/:contactId/allergies", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(ClinicPatientAllergyService.add(orgId, req.params.contactId, actor(req), req.body || {}));
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    if (e?.code === "ALLERGY_INVALID_KIND" || e?.code === "ALLERGY_INVALID_SEVERITY") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    res.status(400).json({ error: e.message });
+  }
+});
+router.patch("/allergies/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(ClinicPatientAllergyService.update(orgId, req.params.id, actor(req), req.body || {}));
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    if (e?.code === "ALLERGY_INVALID_KIND" || e?.code === "ALLERGY_INVALID_SEVERITY") {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    res.status(400).json({ error: e.message });
+  }
+});
+router.delete("/allergies/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(ClinicPatientAllergyService.deactivate(orgId, req.params.id, actor(req)));
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+// Checagem manual (a UI usa antes de submeter a receita pra avisar cedo).
+// Não persiste nada — só devolve o `alerts[]`. NÃO gata consent aqui: o
+// hook em createPrescription já gata via requireConsent na chamada real.
+router.post("/patients/:contactId/allergy-check", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  try {
+    const alerts = ClinicPatientAllergyService.checkPrescription(orgId, req.params.contactId, items);
+    res.json({ alerts, hasSevere: ClinicPatientAllergyService.hasSevere(alerts) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // Histórico clínico consolidado do paciente (todos os encounters).
 // Fase 19: gate LGPD SENSITIVE — paciente revogado → 403.
 router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {
@@ -426,6 +492,13 @@ const docError = (res: any, e: any) => {
   if (e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID") {
     return res.status(401).json({ error: e.message, code: e.code });
   }
+  // Fase 25: ALLERGY_ALERT vem com payload {alerts} pra UI oferecer opção
+  // "confirmar mesmo assim" (envia de novo com force:true) OU decidir por
+  // outro medicamento. 409 (conflito), não 400 (bad request) — a receita
+  // não está mal-formada; o CONTEXTO clínico é que trava.
+  if (e?.code === "ALLERGY_ALERT") {
+    return res.status(409).json({ error: e.message, code: e.code, alerts: e.payload?.alerts || [] });
+  }
   return res.status(400).json({ error: e.message });
 };
 
@@ -461,7 +534,7 @@ router.patch("/prescriptions/:id", (req: AuthRequest, res): any => {
 router.post("/prescriptions/:id/issue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(ClinicDocumentsService.issuePrescription(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
+  try { res.json(ClinicDocumentsService.issuePrescription(orgId, req.params.id, actor(req), { pin: req.body?.pin, force: req.body?.force === true })); }
   catch (e: any) { docError(res, e); }
 });
 router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any> => {

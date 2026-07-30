@@ -21,6 +21,7 @@
 import db from "./db.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
 import { ClinicRescheduleService } from "./ClinicRescheduleService.js";
+import { ClinicVacancyService } from "./ClinicVacancyService.js";
 
 const REPLY_WINDOW_HOURS = 26;
 
@@ -38,7 +39,7 @@ function normalize(s: string): string {
     .replace(/^[.!?,;:"'()\-—–…\s]+/g, ""); // pontuação no início
 }
 
-export type ReplyAction = "confirmed" | "cancelled" | "reschedule_offered" | "rescheduled" | "reschedule_abandoned" | null;
+export type ReplyAction = "confirmed" | "cancelled" | "reschedule_offered" | "rescheduled" | "reschedule_abandoned" | "vacancy_accepted" | "vacancy_declined" | null;
 
 export interface ReplyResult {
   handled: boolean;
@@ -104,6 +105,25 @@ export class ClinicReminderReplyService {
       // permite paciente responder SIM/NÃO mesmo com offer pendente.
     }
 
+    // (0.5) Oferta de VAGA pendente pro contato (Fase Q)? SIM/NÃO aqui vale
+    // pra vaga, não pra lembrete — vaga é evento raro, o texto SIM logo
+    // após "abriu uma vaga" refere-se a ela.
+    const pendingVacancy = ClinicVacancyService.pendingOfferFor(orgId, contactId);
+    if (pendingVacancy) {
+      const intentForVacancy = this.parseIntent(text);
+      if (intentForVacancy === "confirmed" || intentForVacancy === "cancelled") {
+        const r = ClinicVacancyService.handleReply(orgId, contactId, intentForVacancy === "confirmed");
+        if (r) {
+          return {
+            handled: true,
+            action: intentForVacancy === "confirmed" ? "vacancy_accepted" : "vacancy_declined",
+            appointmentId: r.newAppointmentId || pendingVacancy.sourceAppointmentId,
+            reply: r.reply,
+          };
+        }
+      }
+    }
+
     const intent = this.parseIntent(text);
     if (!intent) return NOT_HANDLED;
     const pending = this.findPendingReminder(orgId, contactId, nowMs);
@@ -142,6 +162,8 @@ export class ClinicReminderReplyService {
       return { handled: true, action: "cancelled", appointmentId: apt.id, reply: "Ok, sua consulta já estava cancelada. Se quiser reagendar, é só nos avisar." };
     }
     ClinicAgendaService.cancel(orgId, apt.id, { cancelledBy: "patient", reason: "patient_reply" }, null);
+    // Vaga aberta: tenta oferecer pra próximo da fila (best-effort, não bloqueia resposta ao paciente atual).
+    Promise.resolve().then(() => ClinicVacancyService.tryOfferOnCancel(orgId, apt.id)).catch(() => {});
     return { handled: true, action: "cancelled", appointmentId: apt.id, reply: "Consulta cancelada. Obrigado por avisar! Se quiser reagendar, é só nos chamar." };
   }
 }

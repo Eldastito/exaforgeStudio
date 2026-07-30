@@ -2599,6 +2599,34 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+  // Aviso de vaga na fila (ADR-080 Fase Q). Quando alguém cancela, guarda a
+  // oferta de vaga enviada pra 1 candidato (o mais antigo signed encounter
+  // com retorno recomendado pendente do MESMO profissional). Se o candidato
+  // não responde OU declina, o Scheduler expira e tenta o próximo. Uma oferta
+  // ativa por vez POR VAGA — não bombardeia N pacientes ao mesmo tempo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_vacancy_offers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        source_appointment_id TEXT NOT NULL,           -- appt cancelado que abriu a vaga
+        candidate_contact_id TEXT NOT NULL,
+        candidate_encounter_id TEXT NOT NULL,          -- encounter signed que gerou a candidatura
+        professional_id TEXT,
+        slot_start DATETIME NOT NULL,
+        slot_duration_minutes INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',        -- pending | accepted | declined | expired | superseded
+        new_appointment_id TEXT,
+        provider_message_id TEXT,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_vacancy_pending_contact ON clinical_vacancy_offers (organization_id, candidate_contact_id, status, expires_at);
+      CREATE INDEX IF NOT EXISTS idx_vacancy_source ON clinical_vacancy_offers (organization_id, source_appointment_id, status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_vacancy_offers', e); }
+
   // Reagendamento em 1 clique via WhatsApp (ADR-080 Fase P). Guarda os
   // slots oferecidos ao paciente entre "REMARCAR" e "1/2/3". Sem esta row,
   // a segunda mensagem do paciente (o número) não teria contexto — o parser

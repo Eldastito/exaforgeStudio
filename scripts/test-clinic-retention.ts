@@ -84,10 +84,14 @@ async function main() {
   check("arquivo do anexo velho existe (pré-purge)", fs.existsSync(oldPath));
   check("arquivo do anexo recente existe (pré-purge)", fs.existsSync(recPath));
 
-  // PDFs de delivery: cria 2 arquivos no CLINIC_DOCS_DIR, um velho outro novo
-  fs.mkdirSync(CLINIC_DOCS_DIR, { recursive: true });
-  const oldPdf = path.join(CLINIC_DOCS_DIR, `${randomUUID()}.pdf`);
-  const newPdf = path.join(CLINIC_DOCS_DIR, `${randomUUID()}.pdf`);
+  // PDFs de delivery: cria 2 arquivos em CLINIC_DOCS_DIR/{orgId}/ — Fase 18
+  // isolou cada tenant em subpasta pra fechar o bug cross-tenant da varredura
+  // por mtime. Arquivos soltos na raiz ficaram sob responsabilidade do
+  // `migrateLegacyPdfs()` (movidos pra _legacy_orphans/).
+  const orgDocsDir = path.join(CLINIC_DOCS_DIR, A.orgId);
+  fs.mkdirSync(orgDocsDir, { recursive: true });
+  const oldPdf = path.join(orgDocsDir, `${randomUUID()}.pdf`);
+  const newPdf = path.join(orgDocsDir, `${randomUUID()}.pdf`);
   fs.writeFileSync(oldPdf, "%PDF-old");
   fs.writeFileSync(newPdf, "%PDF-new");
   // Backdatea mtime do oldPdf pra fora da janela 30 dias

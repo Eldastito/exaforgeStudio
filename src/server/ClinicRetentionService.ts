@@ -66,16 +66,20 @@ export class ClinicRetentionService {
     const attachCutoff = new Date(nowMs - cfg.attachmentDays * 86400_000).toISOString();
 
     // --- Deliveries (PDFs enviados pelo canal) ------------------------------
-    // Storage key vem do file gravado em CLINIC_DOCS_DIR/{uuid}.pdf.
-    // Guardamos o key na tabela `clinical_document_deliveries` como parte do
-    // provider_message_id? Não — o key só existia no filesystem. Como recuperar?
-    // O ClinicDocumentDeliveryService salva sob CLINIC_DOCS_DIR/{doc_id}-{deliveryId}.pdf?
-    // Vamos ler o diretório e apagar por mtime (fonte de verdade do FS).
+    // Fase 18 — BUGFIX cross-tenant: até então esta iteração lia a RAIZ de
+    // `CLINIC_DOCS_DIR` (uma pasta única compartilhada por todas as orgs) e
+    // apagava por `mtime` sem saber a qual org o arquivo pertencia. Uma org
+    // com `deliveryDays=7` apagava PDFs de OUTRA com `deliveryDays=730` —
+    // destruição silenciosa de dado clínico entre clínicas, violando CFM
+    // 1.821 (guarda de 20 anos). A partir da Fase K reescrita, cada PDF vive
+    // em `CLINIC_DOCS_DIR/{orgId}/{uuid}.pdf`; aqui só varremos a pasta da
+    // própria org, garantindo isolamento estrito.
     try {
-      if (fs.existsSync(CLINIC_DOCS_DIR)) {
-        for (const name of fs.readdirSync(CLINIC_DOCS_DIR)) {
+      const orgDir = path.join(CLINIC_DOCS_DIR, orgId);
+      if (fs.existsSync(orgDir)) {
+        for (const name of fs.readdirSync(orgDir)) {
           if (!name.endsWith(".pdf")) continue;
-          const filePath = path.join(CLINIC_DOCS_DIR, name);
+          const filePath = path.join(orgDir, name);
           try {
             const st = fs.statSync(filePath);
             if (st.mtimeMs < nowMs - cfg.deliveryDays * 86400_000) {
@@ -118,6 +122,32 @@ export class ClinicRetentionService {
     if (stats.deliveriesPurged || stats.attachmentsPurged) {
       logAuthEvent(orgId, null, null, "CLINIC_RETENTION_PURGE", stats);
     }
+    return stats;
+  }
+
+  /**
+   * Fase 18 — Migra PDFs órfãos herdados do modelo pré-Fatia-18 (arquivos
+   * soltos na raiz de `CLINIC_DOCS_DIR`, sem subpasta por org). NÃO temos
+   * mapeamento arquivo→org pra esses casos (o `storage_key` nunca era
+   * persistido no DB antes desta fatia), então NÃO podemos re-alocar por
+   * tenant. Movemos tudo pra `_legacy_orphans/` — fica fora do alcance de
+   * qualquer `runForOrg` e o gestor pode limpar manualmente quando quiser.
+   * Idempotente e best-effort: chamada uma vez no boot do Scheduler basta.
+   */
+  static migrateLegacyPdfs(): { moved: number; errors: number } {
+    const stats = { moved: 0, errors: 0 };
+    try {
+      if (!fs.existsSync(CLINIC_DOCS_DIR)) return stats;
+      const orphanDir = path.join(CLINIC_DOCS_DIR, "_legacy_orphans");
+      for (const name of fs.readdirSync(CLINIC_DOCS_DIR, { withFileTypes: true })) {
+        if (!name.isFile() || !name.name.endsWith(".pdf")) continue;
+        try {
+          fs.mkdirSync(orphanDir, { recursive: true });
+          fs.renameSync(path.join(CLINIC_DOCS_DIR, name.name), path.join(orphanDir, name.name));
+          stats.moved++;
+        } catch { stats.errors++; }
+      }
+    } catch { stats.errors++; }
     return stats;
   }
 

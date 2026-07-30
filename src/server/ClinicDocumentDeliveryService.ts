@@ -32,11 +32,15 @@ import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
 import { ClinicDocumentsService } from "./ClinicDocumentsService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+// Fase 18: usar o segredo resolvido pelo bootstrap (env → persistido em disco →
+// aleatório efêmero). O anterior `process.env.JWT_SECRET || ""` colapsava para
+// `sha256(":clinical_document_v1")` — reproduzível publicamente — quando a env
+// não estava setada, permitindo forjar URL de qualquer PDF clínico.
+import { JWT_SECRET } from "./config/secret.js";
 
 export type DocKind = "prescription" | "certificate";
 
 const APP_URL = (process.env.APP_URL || "").replace(/\/$/, "");
-const JWT_SECRET = process.env.JWT_SECRET || "";
 // Segredo derivado só pra assinar essas URLs — se JWT_SECRET rotacionar,
 // URLs assinadas antigas param de funcionar (comportamento desejado).
 const MEDIA_SIGNING_SECRET = crypto.createHash("sha256")
@@ -95,12 +99,23 @@ function hydrate(r: any): Delivery | null {
   };
 }
 
+// Fase 18: a key passou a ter forma `{orgId}/{uuid}.pdf` — subpasta por org
+// isola PDFs entre tenants (a retention da Fase U apagava PDFs de OUTRAS orgs
+// porque lia o diretório raiz). Aceita exatamente UMA barra separando dois
+// segmentos válidos; recusa `..`, barras extras, ou basename escondido.
 function safeStorageKey(storageKey: string): string {
-  const base = path.basename(storageKey);
-  if (base !== storageKey || !/^[a-zA-Z0-9._-]+$/.test(base)) {
+  const s = String(storageKey || "");
+  const parts = s.split("/");
+  if (parts.length !== 2) throw new Error("Chave de arquivo inválida.");
+  const [orgSeg, fileSeg] = parts;
+  if (!/^[a-zA-Z0-9._-]+$/.test(orgSeg) || !/^[a-zA-Z0-9._-]+$/.test(fileSeg)) {
     throw new Error("Chave de arquivo inválida.");
   }
-  return base;
+  // basename() blinda contra segmentos que parecem inertes mas escondem "/".
+  if (path.basename(orgSeg) !== orgSeg || path.basename(fileSeg) !== fileSeg) {
+    throw new Error("Chave de arquivo inválida.");
+  }
+  return `${orgSeg}/${fileSeg}`;
 }
 
 export class ClinicDocumentDeliveryService {
@@ -109,7 +124,10 @@ export class ClinicDocumentDeliveryService {
     const key = safeStorageKey(storageKey);
     const exp = now + ttlMs;
     const sig = crypto.createHmac("sha256", MEDIA_SIGNING_SECRET).update(`${key}:${exp}`).digest("hex");
-    const rel = `/api/public/clinic/documents/${encodeURIComponent(key)}?exp=${exp}&sig=${sig}`;
+    // key = "{orgId}/{uuid}.pdf". Cada segmento é encodado, mas a `/` interna
+    // é preservada — a rota pública é `/documents/:orgId/:file`.
+    const [orgSeg, fileSeg] = key.split("/");
+    const rel = `/api/public/clinic/documents/${encodeURIComponent(orgSeg)}/${encodeURIComponent(fileSeg)}?exp=${exp}&sig=${sig}`;
     return APP_URL ? `${APP_URL}${rel}` : rel;
   }
 
@@ -191,10 +209,17 @@ export class ClinicDocumentDeliveryService {
     }
 
     // 4) Renderiza PDF em bytes → salva em disco privado.
+    // Fase 18: caminho é `{orgId}/{uuid}.pdf` — subpasta por org protege a
+    // retention (`ClinicRetentionService.runForOrg`) de apagar arquivo de outra
+    // clínica. `orgId` já é UUID controlado pelo servidor, mas passa pelo
+    // `safeStorageKey` como defesa em profundidade.
     const pdfBuffer: Buffer = kind === "prescription"
       ? await ClinicDocumentsService.renderPrescriptionPdf(orgId, docId)
       : await ClinicDocumentsService.renderCertificatePdf(orgId, docId);
-    const storageKey = `${randomUUID()}.pdf`;
+    const orgDir = path.join(CLINIC_DOCS_DIR, orgId);
+    try { fs.mkdirSync(orgDir, { recursive: true }); } catch { /* noop */ }
+    const pdfBasename = `${randomUUID()}.pdf`;
+    const storageKey = safeStorageKey(`${orgId}/${pdfBasename}`);
     const filePath = path.join(CLINIC_DOCS_DIR, storageKey);
     fs.writeFileSync(filePath, pdfBuffer);
 

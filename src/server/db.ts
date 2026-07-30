@@ -2619,6 +2619,40 @@ const initDb = () => {
   } catch (e) { console.error('[DB] Falha ao criar clinical_addendum_notifications', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_addendum_notification_enabled INTEGER DEFAULT 1`); } catch(e){}
 
+  // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
+  // droga/substância/alimento/latex/outros — insumo direto pra travar receita
+  // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):
+  // ler/gravar exige consent `dados_sensiveis`. `active=0` funciona como soft
+  // delete (retenção CFM: histórico de alergia é dado clínico, não some do
+  // banco, só perde a força de bloqueio); `deactivated_at`/`deactivated_by`
+  // preservam autoria da baixa.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_patient_allergies (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        substance TEXT NOT NULL,                     -- forma normalizada (lower, trim)
+        substance_display TEXT NOT NULL,             -- forma original digitada (mostrar na UI)
+        kind TEXT NOT NULL DEFAULT 'drug',           -- drug | food | latex | other
+        severity TEXT NOT NULL DEFAULT 'moderate',   -- mild | moderate | severe
+        reaction TEXT,                               -- descrição da reação (urticária, anafilaxia)
+        notes TEXT,                                  -- observação livre
+        active INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deactivated_by TEXT,
+        deactivated_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_allergies_patient_active ON clinical_patient_allergies (organization_id, contact_id, active);
+      CREATE INDEX IF NOT EXISTS idx_clinic_allergies_substance ON clinical_patient_allergies (organization_id, contact_id, substance);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_patient_allergies', e); }
+  // Nota: ALTER TABLE clinical_prescriptions ADD COLUMN allergy_warnings/
+  // allergy_alert_forced ficam DEPOIS do CREATE de clinical_prescriptions
+  // (padrão pego nas Fases L/T/U — ALTER antes de CREATE em banco novo
+  // falha silenciosamente e a coluna não existe).
+
   // Catálogo CID-10 (ADR-080 Fase 23). Ajuda o atestado (Fase H) a padronizar
   // o CID: campo hoje é texto livre, então a mesma condição vira "H10.9",
   // "H10", "H109", "conjuntivite" — impossível auditar/agregar. Catálogo é
@@ -3047,6 +3081,14 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN signature_timestamp DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN signature_hash TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN signature_timestamp DATETIME`); } catch(e){}
+
+  // Alerta de alergia gravado na receita (ADR-080 Fase 25). JSON com
+  // {alerts: [{substance, severity, matchedItem}]}; mild/moderate passam mas
+  // ficam na row (rastro pro auditor); severe só entra com force:true (nesse
+  // caso `allergy_alert_forced=1` também é gravado). NULL quando checagem
+  // devolveu vazio. SEMPRE depois do CREATE de clinical_prescriptions.
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN allergy_warnings TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN allergy_alert_forced INTEGER DEFAULT 0`); } catch(e){}
 
   // Módulo Clínica (ADR-080, Fase D) — Portal do Profissional por link seguro.
   // Molde do Radar público: token aleatório forte, guardado só como hash

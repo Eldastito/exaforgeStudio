@@ -23,6 +23,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
 import { Cid10Service, normalizeCode as normalizeCid10 } from "./Cid10Service.js";
+import { ClinicPatientAllergyService, AllergyAlert } from "./ClinicPatientAllergyService.js";
 
 export type DocStatus = "draft" | "issued";
 
@@ -54,6 +55,8 @@ export interface Prescription {
   signedWithPin: boolean;
   signatureHash: string | null;
   signatureTimestamp: string | null;
+  allergyWarnings: AllergyAlert[] | null;
+  allergyAlertForced: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -137,6 +140,13 @@ function hydratePrescription(r: any): Prescription | null {
   if (!r) return null;
   let items: PrescriptionItem[] = [];
   try { items = JSON.parse(r.items_json || "[]"); } catch { /* ignora */ }
+  let allergyWarnings: AllergyAlert[] | null = null;
+  if (r.allergy_warnings) {
+    try {
+      const parsed = JSON.parse(r.allergy_warnings);
+      if (Array.isArray(parsed) && parsed.length) allergyWarnings = parsed;
+    } catch { /* ignora */ }
+  }
   return {
     id: r.id,
     organizationId: r.organization_id,
@@ -157,6 +167,8 @@ function hydratePrescription(r: any): Prescription | null {
     signedWithPin: Number(r.signed_with_pin || 0) === 1,
     signatureHash: r.signature_hash ?? null,
     signatureTimestamp: r.signature_timestamp ?? null,
+    allergyWarnings,
+    allergyAlertForced: Number(r.allergy_alert_forced || 0) === 1,
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -305,28 +317,60 @@ export class ClinicDocumentsService {
     items: PrescriptionItem[];
     repeatsAllowed?: number;
     validUntil?: string | null;
+    force?: boolean;
   }, actorId: string | null): Prescription {
     const enc = loadEncounter(orgId, encounterId);
     requireConsent(orgId, enc.contact_id);
     const items = normalizeItems(input?.items);
     if (!items.length) throw new Error("Receita precisa de pelo menos 1 item.");
 
+    // Fase 25: cruza items com alergias ativas. Severe SEM force:true trava
+    // a criação (paciente entra na urgência com receita de dipirona no bolso
+    // do médico enquanto tem histórico de anafilaxia por dipirona — o produto
+    // recusa mesmo em rascunho, evita o clique fatal). Mild/moderate grava
+    // warning na row: profissional viu o alerta ao emitir e decidiu manter
+    // (rastro pro auditor). `force:true` bypassa e marca `allergy_alert_forced`.
+    const alerts = ClinicPatientAllergyService.checkPrescription(orgId, enc.contact_id, items);
+    const hasSevere = ClinicPatientAllergyService.hasSevere(alerts);
+    if (hasSevere && !input?.force) {
+      logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_ALLERGY_ALERT_TRIGGERED", {
+        encounterId, severe: true, alertCount: alerts.length,
+      });
+      const e: any = new Error("Receita bloqueada — item cruzou com alergia grave conhecida do paciente.");
+      e.code = "ALLERGY_ALERT";
+      e.payload = { alerts };
+      throw e;
+    }
+    const forced = hasSevere && !!input?.force;
+
     const id = randomUUID();
     db.prepare(
       `INSERT INTO clinical_prescriptions
          (id, organization_id, encounter_id, appointment_id, contact_id, professional_id,
-          header_notes, items_json, repeats_allowed, valid_until, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)`
+          header_notes, items_json, repeats_allowed, valid_until, status, created_by,
+          allergy_warnings, allergy_alert_forced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
     ).run(
       id, orgId, encounterId, enc.appointment_id, enc.contact_id, enc.professional_id || null,
       input?.headerNotes ? String(input.headerNotes) : null,
       JSON.stringify(items),
       Math.max(0, Math.floor(Number(input?.repeatsAllowed || 0))),
       input?.validUntil || null,
-      actorId
+      actorId,
+      alerts.length ? JSON.stringify(alerts) : null,
+      forced ? 1 : 0,
     );
 
-    logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_PRESCRIPTION_CREATED", { prescriptionId: id, encounterId });
+    logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_PRESCRIPTION_CREATED", {
+      prescriptionId: id, encounterId,
+      allergyWarningCount: alerts.length,
+      allergyAlertForced: forced,
+    });
+    if (alerts.length && !hasSevere) {
+      logAuthEvent(orgId, actorId, enc.contact_id, "CLINIC_ALLERGY_WARNING", {
+        prescriptionId: id, alertCount: alerts.length,
+      });
+    }
     return this.getPrescriptionRaw(orgId, id)!;
   }
 
@@ -335,6 +379,7 @@ export class ClinicDocumentsService {
     items?: PrescriptionItem[];
     repeatsAllowed?: number;
     validUntil?: string | null;
+    force?: boolean;
   }): Prescription {
     const before = this.getPrescriptionRaw(orgId, id);
     if (!before) throw new Error("Receita não encontrada.");
@@ -346,11 +391,29 @@ export class ClinicDocumentsService {
     requireConsent(orgId, before.contactId);
 
     const fields: string[] = [], params: any[] = [];
+    let alertsAfter: AllergyAlert[] | null = null;
+    let itemsForcedAfter = false;
     if (patch.headerNotes !== undefined) { fields.push("header_notes = ?"); params.push(patch.headerNotes ? String(patch.headerNotes) : null); }
     if (patch.items !== undefined) {
       const items = normalizeItems(patch.items);
       if (!items.length) throw new Error("Receita precisa de pelo menos 1 item.");
+      // Fase 25: re-checa alergia contra os itens NOVOS (troca da droga da
+      // receita reabre o risco). Mesma semântica do `createPrescription`.
+      const alerts = ClinicPatientAllergyService.checkPrescription(orgId, before.contactId, items);
+      const hasSevere = ClinicPatientAllergyService.hasSevere(alerts);
+      if (hasSevere && !patch.force) {
+        logAuthEvent(orgId, actorId, before.contactId, "CLINIC_ALLERGY_ALERT_TRIGGERED", {
+          prescriptionId: id, severe: true, alertCount: alerts.length,
+        });
+        const e: any = new Error("Alteração bloqueada — item cruzou com alergia grave conhecida do paciente.");
+        e.code = "ALLERGY_ALERT"; e.payload = { alerts };
+        throw e;
+      }
+      itemsForcedAfter = hasSevere && !!patch.force;
+      alertsAfter = alerts;
       fields.push("items_json = ?"); params.push(JSON.stringify(items));
+      fields.push("allergy_warnings = ?"); params.push(alerts.length ? JSON.stringify(alerts) : null);
+      fields.push("allergy_alert_forced = ?"); params.push(itemsForcedAfter ? 1 : 0);
     }
     if (patch.repeatsAllowed !== undefined) { fields.push("repeats_allowed = ?"); params.push(Math.max(0, Math.floor(Number(patch.repeatsAllowed)))); }
     if (patch.validUntil !== undefined) { fields.push("valid_until = ?"); params.push(patch.validUntil || null); }
@@ -358,16 +421,41 @@ export class ClinicDocumentsService {
 
     fields.push("updated_at = CURRENT_TIMESTAMP");
     db.prepare(`UPDATE clinical_prescriptions SET ${fields.join(", ")} WHERE id = ? AND organization_id = ?`).run(...params, id, orgId);
-    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_UPDATED", { prescriptionId: id });
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_UPDATED", {
+      prescriptionId: id,
+      ...(alertsAfter ? { allergyWarningCount: alertsAfter.length, allergyAlertForced: itemsForcedAfter } : {}),
+    });
+    if (alertsAfter && alertsAfter.length && !itemsForcedAfter && !alertsAfter.some((a) => a.severity === "severe")) {
+      logAuthEvent(orgId, actorId, before.contactId, "CLINIC_ALLERGY_WARNING", {
+        prescriptionId: id, alertCount: alertsAfter.length,
+      });
+    }
     return this.getPrescriptionRaw(orgId, id)!;
   }
 
-  static issuePrescription(orgId: string, id: string, actorId: string | null, opts: { pin?: string } = {}): Prescription {
+  static issuePrescription(orgId: string, id: string, actorId: string | null, opts: { pin?: string; force?: boolean } = {}): Prescription {
     const before = this.getPrescriptionRaw(orgId, id);
     if (!before) throw new Error("Receita não encontrada.");
     if (before.status === "issued") return before;
     if (!before.items.length) throw new Error("Receita sem itens — não pode ser emitida.");
     requireConsent(orgId, before.contactId);
+
+    // Fase 25: última linha de defesa. Alergia pode ter sido cadastrada DEPOIS
+    // do draft — re-checa aqui. `allergy_alert_forced` já gravado no draft
+    // preserva a decisão anterior (não obriga re-forçar); só bloqueia se
+    // alerta NOVO apareceu e não veio `force:true` na chamada de issue.
+    const alerts = ClinicPatientAllergyService.checkPrescription(orgId, before.contactId, before.items);
+    const hasSevere = ClinicPatientAllergyService.hasSevere(alerts);
+    if (hasSevere && !before.allergyAlertForced && !opts.force) {
+      logAuthEvent(orgId, actorId, before.contactId, "CLINIC_ALLERGY_ALERT_TRIGGERED", {
+        prescriptionId: id, severe: true, alertCount: alerts.length, stage: "issue",
+      });
+      const e: any = new Error("Emissão bloqueada — item cruzou com alergia grave conhecida do paciente.");
+      e.code = "ALLERGY_ALERT"; e.payload = { alerts };
+      throw e;
+    }
+    const forcedNow = hasSevere && !before.allergyAlertForced && !!opts.force;
+
     const signedWithPin = verifyPin(orgId, before.professionalId, opts.pin);
 
     const prof = loadProfessional(orgId, before.professionalId);
@@ -392,6 +480,11 @@ export class ClinicDocumentsService {
       validUntil: before.validUntil,
       signedAt,
     }) : null;
+    // Fase 25: atualiza warnings/forced no momento da emissão pra refletir
+    // exatamente o estado de alergia usado na decisão de emitir (auditor cruza
+    // com `issued_at`). Se alertas novos apareceram e o profissional forçou,
+    // grava; se nenhum alerta, zera warnings antigos que estavam no draft.
+    const finalForced = forcedNow || before.allergyAlertForced;
     db.prepare(
       `UPDATE clinical_prescriptions
          SET status = 'issued',
@@ -402,6 +495,8 @@ export class ClinicDocumentsService {
              signed_with_pin = ?,
              signature_hash = ?,
              signature_timestamp = ?,
+             allergy_warnings = ?,
+             allergy_alert_forced = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     ).run(
@@ -410,9 +505,15 @@ export class ClinicDocumentsService {
       signedWithPin ? 1 : 0,
       signatureHash,
       signedWithPin ? signedAt : null,
+      alerts.length ? JSON.stringify(alerts) : null,
+      finalForced ? 1 : 0,
       id, orgId
     );
-    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", { prescriptionId: id, signedWithPin, signatureHash });
+    logAuthEvent(orgId, actorId, before.contactId, "CLINIC_PRESCRIPTION_ISSUED", {
+      prescriptionId: id, signedWithPin, signatureHash,
+      allergyWarningCount: alerts.length,
+      allergyAlertForced: finalForced,
+    });
     return this.getPrescriptionRaw(orgId, id)!;
   }
 

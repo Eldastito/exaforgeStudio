@@ -209,7 +209,7 @@ async function main() {
   check("antes de startCare: patient_plan_snapshot é null", apptBeforeStart?.patient_plan_snapshot == null);
 
   // startCare congela o snapshot
-  ClinicAgendaService.startCare(A.orgId, apt2.id, A.actorId);
+  await ClinicAgendaService.startCare(A.orgId, apt2.id, A.actorId);
   const rawApt2After = db.prepare(`SELECT patient_plan_snapshot_json FROM appointments WHERE id = ?`).get(apt2.id) as any;
   check("startCare gravou patient_plan_snapshot_json", !!rawApt2After?.patient_plan_snapshot_json);
   const snap = JSON.parse(rawApt2After.patient_plan_snapshot_json);
@@ -260,7 +260,7 @@ async function main() {
     scheduledStart: "2026-12-04T10:00:00-03:00",
     professionalId: profB.id, durationMinutes: 30, force: true,
   }, B.actorId);
-  ClinicAgendaService.startCare(B.orgId, aptB.id, B.actorId);
+  await ClinicAgendaService.startCare(B.orgId, aptB.id, B.actorId);
   const rawB = db.prepare(`SELECT patient_plan_snapshot_json FROM appointments WHERE id = ?`).get(aptB.id) as any;
   check("startCare sem patient_profiles: snapshot fica null (não crasha)", rawB?.patient_plan_snapshot_json === null);
   const dayB = ClinicAgendaService.agendaForDay(B.orgId, "2026-12-04");

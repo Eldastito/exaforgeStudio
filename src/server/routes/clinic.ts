@@ -9,7 +9,7 @@ import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
 import { ClinicConnectionService } from "../ClinicConnectionService.js";
 import { ClinicEncounterService } from "../ClinicEncounterService.js";
 import { ClinicDocumentsService, resetPinLockout } from "../ClinicDocumentsService.js";
-import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttachmentService.js";
+import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES, safeFilename } from "../ClinicAttachmentService.js";
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
 import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
 import { ClinicReminderService } from "../ClinicReminderService.js";
@@ -210,10 +210,10 @@ router.post("/appointments", (req: AuthRequest, res): any => {
   }
 });
 
-const lifecycle = (fn: (orgId: string, id: string, actorId?: string) => any) => (req: AuthRequest, res: any): any => {
+const lifecycle = (fn: (orgId: string, id: string, actorId?: string) => any) => async (req: AuthRequest, res: any): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(fn(orgId, req.params.id, actor(req))); }
+  try { res.json(await fn(orgId, req.params.id, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 };
 
@@ -653,6 +653,7 @@ router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any>
   try {
     const pdf = await ClinicDocumentsService.renderPrescriptionPdf(orgId, req.params.id);
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", `attachment; filename="receita-${req.params.id}.pdf"`);
     return res.send(pdf);
   } catch (e: any) {
@@ -704,6 +705,7 @@ router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> 
   try {
     const pdf = await ClinicDocumentsService.renderCertificatePdf(orgId, req.params.id);
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", `attachment; filename="atestado-${req.params.id}.pdf"`);
     return res.send(pdf);
   } catch (e: any) {
@@ -751,6 +753,7 @@ router.get("/receipts/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
   try {
     const pdf = await ClinicReceiptService.renderPdf(orgId, req.params.id);
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", `attachment; filename="recibo-${req.params.id}.pdf"`);
     return res.send(pdf);
   } catch (e: any) {
@@ -848,9 +851,21 @@ router.get("/attachments/:id/download", (req: AuthRequest, res): any => {
   try {
     const { buffer, mime, filename } = ClinicAttachmentService.read(orgId, req.params.id);
     res.setHeader("Content-Type", mime);
-    // inline pra imagem (front renderiza), attachment pra PDF (download).
+    // Fase 30: nosniff impede o browser de "adivinhar" o tipo real do
+    // arquivo pelo conteúdo (defesa em profundidade contra content-type
+    // confusion). O add() já valida magic-byte real, mas nosniff garante
+    // que o browser não vai reclassificar mesmo se algum bypass passar.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // Fase 30: sanitiza filename via safeFilename (CRLF/aspas/;/= viram _)
+    // e serve tanto `filename=` (fallback ASCII) quanto `filename*=UTF-8''`
+    // (moderno, permite acentos) — RFC 6266.
+    const clean = safeFilename(filename);
+    const encoded = encodeURIComponent(clean);
     const disposition = mime.startsWith("image/") ? "inline" : "attachment";
-    res.setHeader("Content-Disposition", `${disposition}; filename="${filename.replace(/"/g, "")}"`);
+    res.setHeader(
+      "Content-Disposition",
+      `${disposition}; filename="${clean}"; filename*=UTF-8''${encoded}`
+    );
     return res.send(buffer);
   } catch (e: any) {
     // Fase 19: consent revogado → 403 (não confundir com 404 "não encontrado").
@@ -904,6 +919,7 @@ router.get("/reports/monthly.pdf", requireRole("owner", "admin"), async (req: Au
       recoveredMinutes: payload.metrics.automations.vacancy.recoveredMinutes,
     });
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Disposition", `inline; filename="relatorio-mensal-${payload.month}.pdf"`);
     res.send(pdf);
   } catch (e: any) {

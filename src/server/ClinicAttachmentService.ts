@@ -42,6 +42,65 @@ export const ALLOWED_MIME: Record<string, { ext: string; kind: "image" | "pdf" }
 };
 export const MAX_BYTES = 15 * 1024 * 1024;
 
+/**
+ * Magic-byte sniffing dos 4 formatos permitidos (ADR-080 Fase 30).
+ * Fecha buraco H4 da auditoria: `multer` só olha o Content-Type declarado
+ * pelo cliente — atacante manda `<script>alert(1)</script>` com
+ * `Content-Type: image/png` e o storage aceita; browser executa como HTML
+ * se `X-Content-Type-Options: nosniff` estiver ausente ou se algum caminho
+ * de download servir o buffer com mime baseado só na extensão. Assinatura
+ * binária real é fonte de verdade — se o buffer não bate com nenhum dos
+ * 4 formatos, `add()` rejeita `INVALID_FILE_CONTENT`.
+ *
+ * Sniffing manual (sem dep externa `file-type`, que puxaria centenas de
+ * KB pra 4 casos):
+ *   - PNG:  89 50 4E 47 0D 0A 1A 0A
+ *   - JPEG: FF D8 FF
+ *   - WEBP: "RIFF"...."WEBP" (bytes 0-3 = 'RIFF', 8-11 = 'WEBP')
+ *   - PDF:  %PDF- (25 50 44 46 2D)
+ */
+export function detectMime(buf: Buffer): string | null {
+  if (!buf || buf.length < 4) return null;
+  // PNG
+  if (buf.length >= 8 &&
+      buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 &&
+      buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A) {
+    return "image/png";
+  }
+  // JPEG
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return "image/jpeg";
+  // WEBP: RIFF....WEBP
+  if (buf.length >= 12 &&
+      buf.toString("ascii", 0, 4) === "RIFF" &&
+      buf.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  // PDF: %PDF-
+  if (buf.length >= 5 &&
+      buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46 && buf[4] === 0x2D) {
+    return "application/pdf";
+  }
+  return null;
+}
+
+/**
+ * Sanitiza nome de arquivo pra ir em `Content-Disposition` — remove CRLF
+ * (header injection), aspas, `;` (delimitador de header), path traversal.
+ * ADR-080 Fase 30. Preserva caracteres seguros: letras/dígitos/underscore/
+ * ponto/hífen/espaço. Vazio → fallback. Truncado a 120 chars.
+ */
+export function safeFilename(name: string | null | undefined): string {
+  const raw = String(name || "").trim();
+  if (!raw) return "anexo";
+  const cleaned = raw
+    .replace(/[\r\n\t]/g, " ")           // CRLF injection defense
+    .replace(/[^A-Za-z0-9._\- ]/g, "_")  // resto vira _ (mesmo aspas/;/=)
+    .replace(/_+/g, "_")
+    .replace(/^\.+/, "")                 // sem dot-file
+    .slice(0, 120);
+  return cleaned || "anexo";
+}
+
 export interface Attachment {
   id: string;
   organizationId: string;
@@ -166,10 +225,25 @@ export class ClinicAttachmentService {
     const enc = loadEncounter(orgId, encounterId);
     requireConsent(orgId, enc.contact_id);
 
-    const spec = ALLOWED_MIME[input.mime];
-    if (!spec) throw new Error("Formato não suportado (use PNG, JPG, WEBP ou PDF).");
     if (!input.buffer || input.buffer.length === 0) throw new Error("Arquivo vazio.");
     if (input.buffer.length > MAX_BYTES) throw new Error(`Arquivo maior que ${Math.floor(MAX_BYTES / 1024 / 1024)} MB.`);
+    // Fase 30: sniffing binário — sempre confia no CONTEÚDO REAL, nunca no
+    // `Content-Type` declarado pelo cliente. Se magic byte não bate com
+    // nenhum dos 4 formatos permitidos, rejeita. Se bate mas o mime
+    // declarado é diferente, sobrescreve pro real (protege downstream que
+    // possa depender de `mime_type` gravado).
+    const detected = detectMime(input.buffer);
+    if (!detected) {
+      const e: any = new Error("Formato não suportado (use PNG, JPG, WEBP ou PDF).");
+      e.code = "INVALID_FILE_CONTENT"; throw e;
+    }
+    const spec = ALLOWED_MIME[detected];
+    if (!spec) {
+      const e: any = new Error("Formato não suportado (use PNG, JPG, WEBP ou PDF).");
+      e.code = "INVALID_FILE_CONTENT"; throw e;
+    }
+    // mime gravado = real detectado (não o declarado do multer)
+    const actualMime = detected;
 
     const id = randomUUID();
     const storageKey = `${id}${spec.ext}`;
@@ -186,8 +260,8 @@ export class ClinicAttachmentService {
       id, orgId, encounterId, enc.appointment_id, enc.contact_id,
       input.label ? String(input.label).trim().slice(0, 200) : null,
       spec.kind,
-      input.mime,
-      input.originalFilename ? String(input.originalFilename).slice(0, 200) : null,
+      actualMime,
+      input.originalFilename ? safeFilename(input.originalFilename) : null,
       storageKey,
       input.buffer.length,
       actorId

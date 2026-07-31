@@ -335,9 +335,35 @@ export class ClinicAgendaService {
       force: !!opts?.force,
     }, actorId);
 
-    // Marca o parent (aditivo em UPDATE, pra não mudar assinatura do create).
-    db.prepare(`UPDATE appointments SET parent_appointment_id = ? WHERE id = ? AND organization_id = ?`)
-      .run(sourceAppointmentId, created.id, orgId);
+    // Fase 30: unique index parcial em (org, parent_appointment_id) WHERE
+    // status NOT IN ('cancelled','no_show') protege contra race de duas
+    // secretárias clicando "agendar retorno" simultaneamente. Se o UPDATE
+    // falha por SQLITE_CONSTRAINT_UNIQUE, cancela o appt que acabou de ser
+    // criado (rollback lógico) e devolve o retorno que a corrida vencedora
+    // já criou. Sem transaction porque cada statement do better-sqlite3 já
+    // é atômico; o padrão try/catch + fallback SELECT resolve o race.
+    try {
+      db.prepare(`UPDATE appointments SET parent_appointment_id = ? WHERE id = ? AND organization_id = ?`)
+        .run(sourceAppointmentId, created.id, orgId);
+    } catch (e: any) {
+      const isUnique = String(e?.code || "").includes("SQLITE_CONSTRAINT") || String(e?.message || "").toLowerCase().includes("unique");
+      if (isUnique) {
+        // Rollback lógico: cancela o appt "perdedor" da race pra liberar slot
+        db.prepare(`UPDATE appointments SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, cancelled_by = 'system', cancellation_reason = 'race_lost_to_concurrent_followup' WHERE id = ? AND organization_id = ?`)
+          .run(created.id, orgId);
+        const winner = db.prepare(
+          `SELECT * FROM appointments
+            WHERE organization_id = ? AND parent_appointment_id = ?
+              AND status NOT IN ('cancelled','no_show')
+            ORDER BY scheduled_start ASC LIMIT 1`
+        ).get(orgId, sourceAppointmentId) as any;
+        logAuthEvent(orgId, actorId, source.contact_id, "CLINIC_FOLLOWUP_RACE_LOST", {
+          losingAppointmentId: created.id, winningAppointmentId: winner?.id || null, sourceAppointmentId,
+        });
+        if (winner) return this.hydrate(orgId, winner);
+      }
+      throw e;
+    }
     logAuthEvent(orgId, actorId, source.contact_id, "CLINIC_FOLLOWUP_SCHEDULED", {
       appointmentId: created.id, sourceAppointmentId, atISO: targetIso, professionalId: source.professional_id || null,
     });
@@ -405,7 +431,7 @@ export class ClinicAgendaService {
     return this.hydrate(orgId, this.get(orgId, id));
   }
 
-  static startCare(orgId: string, id: string, actorId?: string): any {
+  static async startCare(orgId: string, id: string, actorId?: string): Promise<any> {
     const a = this.get(orgId, id);
     if (a.care_started_at) throw new Error("Atendimento já iniciado.");
     // Fase 29: snapshot imutável do plano/convênio DO PACIENTE no momento
@@ -442,10 +468,13 @@ export class ClinicAgendaService {
     // Prontuário (ADR-080 Fase G): tenta abrir encounter em rascunho de forma
     // BEST-EFFORT — se faltar consentimento LGPD sensível ou paciente, não
     // trava o início do atendimento. O profissional destrava pela UI depois.
+    // Fase 30: dynamic `import()` em vez de `require()` — require em contexto
+    // ESM é anti-pattern (funciona por acaso via tsx interop; quebra em
+    // bundle diferente). O `await` mantém a semântica best-effort — se o
+    // import ou o open falhar, o try/catch silencia sem travar o startCare.
     try {
-      // Import lazy pra evitar ciclos (Encounter também lê `appointments`).
-      const { ClinicEncounterService } = require("./ClinicEncounterService.js");
-      ClinicEncounterService.open(orgId, id, actorId || null);
+      const mod = await import("./ClinicEncounterService.js");
+      mod.ClinicEncounterService.open(orgId, id, actorId || null);
     } catch { /* silencioso — front sinaliza a necessidade de consentimento */ }
     return this.hydrate(orgId, this.get(orgId, id));
   }

@@ -2817,6 +2817,22 @@ const initDb = () => {
   // fica sem parent). Índice pra achar rápido "retornos desta consulta".
   try { db.exec(`ALTER TABLE appointments ADD COLUMN parent_appointment_id TEXT`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_parent ON appointments (organization_id, parent_appointment_id)`); } catch(e){}
+  // Race protection (ADR-080 Fase 30). scheduleFollowUp já é idempotente
+  // via SELECT prévio, mas duas secretárias clicando "Agendar retorno"
+  // no mesmo encounter simultaneamente contornariam o check (2 SELECTs
+  // ambos vazios → 2 INSERTs). Unique index parcial garante que, na
+  // corrida, o 2º INSERT falha com UNIQUE constraint — o service catch
+  // devolve o existente e loga o conflito. Escopo: só retornos ATIVOS
+  // (cancelled/no_show liberam re-agendamento). Só rows com parent
+  // preenchido (partial WHERE) — appt sem parent não é retorno.
+  try {
+    db.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_appointments_parent_unique
+         ON appointments (organization_id, parent_appointment_id)
+         WHERE parent_appointment_id IS NOT NULL
+           AND status NOT IN ('cancelled','no_show')`
+    );
+  } catch(e){ console.error('[DB] Falha ao criar idx_appointments_parent_unique', e); }
 
   // Registro do conselho (CRM/COREN/CREFITO/…) do profissional — usado no
   // rodapé de receita/atestado. Aditivo, opcional (profissional pode ser

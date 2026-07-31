@@ -24,6 +24,7 @@ import { TeacherDigestService } from "./TeacherDigestService.js";
 import { ClinicReminderService } from "./ClinicReminderService.js";
 import { ClinicRetentionService } from "./ClinicRetentionService.js";
 import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
+import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
@@ -249,6 +250,19 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Módulo Clínica (ADR-080 Fase 33) — envio automático do relatório mensal.
+   * Percorre orgs com `clinic_monthly_report_enabled=1` e envia o PDF do mês
+   * anterior pro destinatário configurado no dia definido. Dedup por
+   * (org, month) — o próprio service protege contra re-envio dentro do dia.
+   * Best-effort por-org; falha de 1 não trava as demais.
+   */
+  static async clinicMonthlyReportPass() {
+    try {
+      await ClinicMonthlyReportDeliveryService.dispatchAll();
+    } catch (e) { console.error("[Clínica] passe relatório mensal falhou", e); }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -323,6 +337,7 @@ export class Scheduler {
     await this.teacherAgendaPass().catch(e => console.error('[Scheduler] agenda do professor falhou', e));
     await this.clinicReminderPass().catch(e => console.error('[Scheduler] lembrete de consulta clínica falhou', e));
     await this.clinicFollowUpNoticePass().catch(e => console.error('[Scheduler] aviso de retorno clínica falhou', e));
+    await this.clinicMonthlyReportPass().catch(e => console.error('[Scheduler] relatório mensal clínica falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

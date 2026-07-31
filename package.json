@@ -99,6 +99,7 @@
     "test:clinic-addendum-notice": "tsx scripts/test-clinic-addendum-notice.ts",
     "test:clinic-allergies": "tsx scripts/test-clinic-allergies.ts",
     "test:clinic-followup-notice": "tsx scripts/test-clinic-followup-notice.ts",
+    "test:clinic-receipt": "tsx scripts/test-clinic-receipt.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

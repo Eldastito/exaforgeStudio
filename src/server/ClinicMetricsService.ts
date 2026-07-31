@@ -55,6 +55,8 @@ export interface MetricsOverview {
   documents: {
     prescriptionsIssued: number;
     certificatesIssued: number;
+    receiptsIssued: number;
+    receiptsTotalCents: number;  // soma do amount_cents dos receipts issued na janela
     sentByChannel: number;      // deliveries com status='sent'
   };
   followUps: {
@@ -194,6 +196,12 @@ export class ClinicMetricsService {
       `SELECT COUNT(*) AS c FROM clinical_document_deliveries
         WHERE organization_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at <= ?`
     ).get(orgId, from, to) as any;
+    // Fase 27: receitas particulares emitidas + faturamento total no período.
+    const rcptRow = db.prepare(
+      `SELECT COUNT(*) AS c, COALESCE(SUM(amount_cents), 0) AS t
+         FROM clinical_receipts
+        WHERE organization_id = ? AND status = 'issued' AND issued_at >= ? AND issued_at <= ?`
+    ).get(orgId, from, to) as any;
 
     // ── Retornos ─────────────────────────────────────────────────────────
     const recRow = db.prepare(
@@ -276,6 +284,8 @@ export class ClinicMetricsService {
       documents: {
         prescriptionsIssued: Number(rxRow?.c || 0),
         certificatesIssued: Number(certRow?.c || 0),
+        receiptsIssued: Number(rcptRow?.c || 0),
+        receiptsTotalCents: Number(rcptRow?.t || 0),
         sentByChannel: Number(sentDocsRow?.c || 0),
       },
       followUps: {

@@ -23,6 +23,7 @@ import { Cid10Service } from "../Cid10Service.js";
 import { ClinicAddendumNoticeService } from "../ClinicAddendumNoticeService.js";
 import { ClinicPatientAllergyService } from "../ClinicPatientAllergyService.js";
 import { ClinicFollowUpNoticeService } from "../ClinicFollowUpNoticeService.js";
+import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -667,6 +668,53 @@ router.get("/certificates/:id/pdf", async (req: AuthRequest, res): Promise<any> 
   }
 });
 
+// Recibo particular (ADR-080 Fase 27). Ciclo draft → issued imutável.
+// Valor sempre em CENTAVOS (INTEGER). LGPD sensível obrigatório
+// (recibo diz que CPF X pagou consulta médica). PIN opcional (reusa
+// verifyPin da Fase T) — issue restrita a owner/admin (mesmo racional
+// de prescriptions da Fase 18: sem PIN configurado, verifyPin degrada
+// pra false; RBAC fecha o vetor).
+router.get("/encounters/:id/receipts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicReceiptService.listByEncounter(orgId, req.params.id)); }
+  catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+router.post("/encounters/:id/receipts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicReceiptService.create(orgId, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { docError(res, e); }
+});
+router.patch("/receipts/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicReceiptService.update(orgId, req.params.id, actor(req), req.body || {})); }
+  catch (e: any) { docError(res, e); }
+});
+router.post("/receipts/:id/issue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicReceiptService.issue(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
+  catch (e: any) { docError(res, e); }
+});
+router.get("/receipts/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const pdf = await ClinicReceiptService.renderPdf(orgId, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="recibo-${req.params.id}.pdf"`);
+    return res.send(pdf);
+  } catch (e: any) {
+    if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ── Envio de docs por WhatsApp (ADR-080 Fase K) ────────────────────────
 // Doc precisa estar issued. LGPD sensível + comunicações. Sempre grava
 // linha em clinical_document_deliveries mesmo em falha (auditoria).
@@ -697,10 +745,20 @@ router.post("/certificates/:id/send", async (req: AuthRequest, res): Promise<any
   } catch (e: any) { deliveryError(res, e); }
 });
 
+router.post("/receipts/:id/send", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const delivery = await ClinicDocumentDeliveryService.send(orgId, "receipt", req.params.id, actor(req), { caption: req.body?.caption });
+    res.json(delivery);
+  } catch (e: any) { deliveryError(res, e); }
+});
+
 router.get("/documents/:kind/:id/deliveries", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const kind = req.params.kind === "certificate" ? "certificate" : "prescription";
+  const k = req.params.kind;
+  const kind = k === "certificate" || k === "receipt" ? k : "prescription";
   res.json(ClinicDocumentDeliveryService.list(orgId, kind as any, req.params.id));
 });
 

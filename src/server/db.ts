@@ -3125,6 +3125,59 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN allergy_warnings TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN allergy_alert_forced INTEGER DEFAULT 0`); } catch(e){}
 
+  // Recibo particular (ADR-080 Fase 27). Consulta particular (fora de convênio)
+  // gera recibo PDF do valor pago. Molde de `clinical_prescriptions` — mesmo
+  // ciclo draft → issued imutável, mesmos snapshots do profissional, mesma
+  // assinatura visível (hash SHA-256 + timestamp da Fase 16) quando PIN. Valor
+  // em CENTAVOS (INTEGER) — nunca float, evita erro de arredondamento clássico
+  // em dinheiro. `payment_method` whitelist: pix|debit|credit|cash|transfer|
+  // other. Dados fiscais opcionais (paciente/negócio) — recibo simples sem
+  // esses campos é o caso comum; MEI/PJ preenche pra usar em contabilidade.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_receipts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        encounter_id TEXT NOT NULL,
+        appointment_id TEXT,
+        contact_id TEXT NOT NULL,
+        professional_id TEXT,
+        professional_name_snapshot TEXT,
+        professional_registration_snapshot TEXT,
+        professional_council_snapshot TEXT,
+        business_name_snapshot TEXT,                 -- congelado no issue
+        business_document_snapshot TEXT,             -- CNPJ/CPF do prestador
+        business_document_type_snapshot TEXT,        -- 'cnpj' | 'cpf'
+        patient_name_snapshot TEXT,                  -- congelado no issue
+        patient_document TEXT,                       -- CPF do paciente (opcional)
+        patient_document_type TEXT,                  -- 'cpf' (por ora só cpf)
+        amount_cents INTEGER NOT NULL,               -- SEMPRE em centavos
+        payment_method TEXT NOT NULL,                -- pix|debit|credit|cash|transfer|other
+        description TEXT,                            -- ex.: "Consulta clínica particular"
+        notes TEXT,                                  -- observação livre
+        status TEXT NOT NULL DEFAULT 'draft',        -- draft | issued
+        signed_with_pin INTEGER NOT NULL DEFAULT 0,
+        signature_hash TEXT,
+        signature_timestamp DATETIME,
+        issued_by TEXT,
+        issued_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_receipts_encounter ON clinical_receipts (organization_id, encounter_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_clinical_receipts_patient ON clinical_receipts (organization_id, contact_id, created_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_receipts', e); }
+  // Pré-preenchimento do documento do negócio no recibo — evita a clínica
+  // digitar o CNPJ toda vez. Só o TIPO e o NÚMERO (default do fluxo); o
+  // `businessName` do recibo puxa do `organization_settings.business_name`
+  // que já existe. Ambos opcionais — clínica que não quer emitir com CNPJ
+  // (ex.: profissional pessoa física) deixa em branco e o campo fica NULL
+  // no recibo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_receipt_business_document TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_receipt_business_document_type TEXT`); } catch(e){}
+
   // Módulo Clínica (ADR-080, Fase D) — Portal do Profissional por link seguro.
   // Molde do Radar público: token aleatório forte, guardado só como hash
   // SHA-256, com expiração. O link dá acesso SOMENTE à agenda do próprio

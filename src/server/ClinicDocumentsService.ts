@@ -231,14 +231,14 @@ function patientName(orgId: string, contactId: string): string {
 
 const PT_DAYS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 const PT_MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-function longDateBR(iso?: string | null): string {
+export function longDateBR(iso?: string | null): string {
   const d = iso ? new Date(iso) : new Date();
   return `${d.getDate()} de ${PT_MONTHS[d.getMonth()]} de ${d.getFullYear()}`;
 }
 
 // Escreve rodapé de assinatura ("________ / Nome / CRM/SP 12345"). Deixa espaço
 // pra assinatura física (papel) — mesmo que o profissional imprima e assine.
-function drawSignatureBlock(doc: any, name: string | null, council: string | null, registration: string | null) {
+export function drawSignatureBlock(doc: any, name: string | null, council: string | null, registration: string | null) {
   doc.moveDown(3);
   const startX = 150, endX = 445, y = doc.y;
   doc.moveTo(startX, y).lineTo(endX, y).strokeColor("#111827").lineWidth(0.7).stroke();
@@ -255,12 +255,12 @@ function drawSignatureBlock(doc: any, name: string | null, council: string | nul
 // (Fase T); o rodapé é a PROVA VISUAL de que ele foi usado. Hash cobre
 // o conteúdo canônico (paciente + corpo + profissional + timestamp) —
 // qualquer alteração posterior no PDF impresso quebra a conferência.
-function longTimestampBR(iso: string): string {
+export function longTimestampBR(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
 }
-function drawElectronicSignatureFooter(doc: any, hash: string | null, timestamp: string | null) {
+export function drawElectronicSignatureFooter(doc: any, hash: string | null, timestamp: string | null) {
   if (!hash || !timestamp) return;
   doc.moveDown(1.2);
   const y = doc.y, startX = 48, endX = 547;
@@ -280,7 +280,7 @@ function drawElectronicSignatureFooter(doc: any, hash: string | null, timestamp:
 // mesmo hash — permite conferência offline. Timestamp entra dentro pra
 // que dois docs idênticos emitidos em momentos distintos gerem hashes
 // distintos (senão colidem).
-function computeDocumentHash(payload: object): string {
+export function computeDocumentHash(payload: object): string {
   const canonical = JSON.stringify(payload, Object.keys(payload).sort());
   return createHash("sha256").update(canonical).digest("hex");
 }

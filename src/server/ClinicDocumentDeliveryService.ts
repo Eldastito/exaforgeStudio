@@ -31,6 +31,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
 import { ClinicDocumentsService } from "./ClinicDocumentsService.js";
+import { ClinicReceiptService } from "./ClinicReceiptService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 // Fase 18: usar o segredo resolvido pelo bootstrap (env → persistido em disco →
 // aleatório efêmero). O anterior `process.env.JWT_SECRET || ""` colapsava para
@@ -38,7 +39,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 // não estava setada, permitindo forjar URL de qualquer PDF clínico.
 import { JWT_SECRET } from "./config/secret.js";
 
-export type DocKind = "prescription" | "certificate";
+export type DocKind = "prescription" | "certificate" | "receipt";
 
 const APP_URL = (process.env.APP_URL || "").replace(/\/$/, "");
 // Segredo derivado só pra assinar essas URLs — se JWT_SECRET rotacionar,
@@ -167,10 +168,18 @@ export class ClinicDocumentDeliveryService {
     opts?: { caption?: string; sender?: DocSender }
   ): Promise<Delivery> {
     // 1) Doc issued e do próprio org
+    // Fase 27: 'receipt' passa a ser um kind válido — mesma máquina de estado
+    // e mesmos guardrails LGPD dos demais docs (dado sensível: recibo diz
+    // que aquele CPF pagou consulta médica).
     const doc: any = kind === "prescription"
       ? ClinicDocumentsService.getPrescription(orgId, docId)
-      : ClinicDocumentsService.getCertificate(orgId, docId);
-    if (!doc) throw new Error(kind === "prescription" ? "Receita não encontrada." : "Atestado não encontrado.");
+      : kind === "certificate"
+        ? ClinicDocumentsService.getCertificate(orgId, docId)
+        : ClinicReceiptService.get(orgId, docId);
+    if (!doc) {
+      const label = kind === "prescription" ? "Receita" : kind === "certificate" ? "Atestado" : "Recibo";
+      throw new Error(`${label} não encontrado.`);
+    }
     if (doc.status !== "issued") {
       const e: any = new Error("Documento em rascunho — emita antes de enviar.");
       e.code = "DOCUMENT_NOT_ISSUED"; throw e;
@@ -215,7 +224,9 @@ export class ClinicDocumentDeliveryService {
     // `safeStorageKey` como defesa em profundidade.
     const pdfBuffer: Buffer = kind === "prescription"
       ? await ClinicDocumentsService.renderPrescriptionPdf(orgId, docId)
-      : await ClinicDocumentsService.renderCertificatePdf(orgId, docId);
+      : kind === "certificate"
+        ? await ClinicDocumentsService.renderCertificatePdf(orgId, docId)
+        : await ClinicReceiptService.renderPdf(orgId, docId);
     const orgDir = path.join(CLINIC_DOCS_DIR, orgId);
     try { fs.mkdirSync(orgDir, { recursive: true }); } catch { /* noop */ }
     const pdfBasename = `${randomUUID()}.pdf`;
@@ -231,11 +242,18 @@ export class ClinicDocumentDeliveryService {
        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)`
     ).run(id, orgId, kind, docId, doc.contactId, channelId, contact.identifier, actorId);
 
-    const filename = kind === "prescription" ? `receita-${docId.slice(0, 8)}.pdf` : `atestado-${docId.slice(0, 8)}.pdf`;
+    const filename = kind === "prescription"
+      ? `receita-${docId.slice(0, 8)}.pdf`
+      : kind === "certificate"
+        ? `atestado-${docId.slice(0, 8)}.pdf`
+        : `recibo-${docId.slice(0, 8)}.pdf`;
     const fileUrl = this.signedUrl(storageKey);
-    const caption = opts?.caption || (kind === "prescription"
+    const defaultCaption = kind === "prescription"
       ? `Sua receita — ${contact.name || "paciente"}. Guarde este arquivo.`
-      : `Seu atestado — ${contact.name || "paciente"}. Guarde este arquivo.`);
+      : kind === "certificate"
+        ? `Seu atestado — ${contact.name || "paciente"}. Guarde este arquivo.`
+        : `Seu recibo — ${contact.name || "paciente"}. Guarde este arquivo.`;
+    const caption = opts?.caption || defaultCaption;
 
     const sender: DocSender = opts?.sender || MessageProviderService.sendDocument.bind(MessageProviderService);
     try {

@@ -26,6 +26,7 @@ export type TimelineKind =
   | "encounter_addendum"
   | "prescription_issued"
   | "certificate_issued"
+  | "receipt_issued"
   | "attachment_added"
   | "document_sent";
 
@@ -203,6 +204,28 @@ export class ClinicPatientTimelineService {
       });
     }
 
+    // 5b. Receipts issued (Fase 27). Só emitidos — rascunho é privado.
+    const rcpt = db.prepare(
+      `SELECT id, encounter_id, appointment_id, issued_at, issued_by,
+              professional_name_snapshot, signed_with_pin, amount_cents, payment_method
+         FROM clinical_receipts
+        WHERE organization_id = ? AND contact_id = ? AND status = 'issued' AND issued_at IS NOT NULL`
+    ).all(orgId, contactId) as any[];
+    for (const r of rcpt) {
+      const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" })
+        .format(Number(r.amount_cents || 0) / 100);
+      items.push({
+        kind: "receipt_issued",
+        at: r.issued_at,
+        encounterId: r.encounter_id ?? null,
+        appointmentId: r.appointment_id ?? null,
+        refId: r.id,
+        actorId: r.issued_by ?? null,
+        actorName: r.professional_name_snapshot ?? null,
+        summary: `Recibo emitido (${brl})${r.signed_with_pin ? " (assinado com PIN)" : ""}`,
+      });
+    }
+
     // 6. Attachments (Fase J). Rows purgadas pela retenção (Fase U) ficam
     //    com `purged_at`; ainda aparecem na timeline (auditoria diz que
     //    existiu) mas o summary sinaliza.
@@ -235,7 +258,7 @@ export class ClinicPatientTimelineService {
         WHERE organization_id = ? AND contact_id = ? AND status = 'sent'`
     ).all(orgId, contactId) as any[];
     for (const d of dlv) {
-      const what = d.doc_kind === "prescription" ? "Receita" : "Atestado";
+      const what = d.doc_kind === "prescription" ? "Receita" : d.doc_kind === "certificate" ? "Atestado" : "Recibo";
       const suffix = d.file_purged_at ? " [PDF purgado]" : "";
       items.push({
         kind: "document_sent",
@@ -245,7 +268,7 @@ export class ClinicPatientTimelineService {
         refId: d.doc_id,
         actorId: d.sent_by ?? null,
         actorName: null,
-        summary: `${what} enviada por WhatsApp${suffix}`,
+        summary: `${what} enviado por WhatsApp${suffix}`,
       });
     }
 
@@ -265,6 +288,7 @@ export class ClinicPatientTimelineService {
       encounter_opened: 1,
       prescription_issued: 2,
       certificate_issued: 3,
+      receipt_issued: 3,      // mesmo peso narrativo dos outros docs do encounter
       attachment_added: 4,
       document_sent: 5,
       encounter_signed: 6,

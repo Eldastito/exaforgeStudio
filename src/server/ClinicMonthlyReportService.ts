@@ -153,9 +153,13 @@ export class ClinicMonthlyReportService {
 
         // ── Bloco 5 — Documentos emitidos ────────────────────────────────
         writeSectionTitle(doc, "Documentos emitidos");
+        const brlReceipts = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" })
+          .format(Number(m.documents.receiptsTotalCents || 0) / 100);
         writeKV(doc, [
           ["Receitas", fmtInt(m.documents.prescriptionsIssued)],
           ["Atestados", fmtInt(m.documents.certificatesIssued)],
+          ["Recibos particulares", fmtInt(m.documents.receiptsIssued)],
+          ["Faturamento particular", brlReceipts],
           ["Enviados por canal (WhatsApp/email)", fmtInt(m.documents.sentByChannel)],
         ]);
 

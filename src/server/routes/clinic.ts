@@ -28,6 +28,7 @@ import { ClinicSpecialtyService } from "../ClinicSpecialtyService.js";
 import { ClinicCareEpisodeService } from "../ClinicCareEpisodeService.js";
 import { ClinicTreatmentCycleService } from "../ClinicTreatmentCycleService.js";
 import { ClinicCareJourneyMetricsService, QueueFilter } from "../ClinicCareJourneyMetricsService.js";
+import { ClinicScheduleSessionService } from "../ClinicScheduleSessionService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -977,6 +978,82 @@ router.post("/treatment-cycles/:id/renew", requireRole("owner", "admin"), (req: 
     const result = ClinicTreatmentCycleService.renew(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json(result);
   } catch (e: any) { cycleError(res, e); }
+});
+
+// Sessões de agenda compartilhadas (ADR-145 D6, Fatia 41). Habilita
+// grupo como primeira classe. Escrita autenticada (recepção monta grupo);
+// cancelamento coletivo requer owner|admin (impacto múltiplo).
+function sessionError(res: any, e: any) {
+  const code = e?.code;
+  const status = code === "SESSION_CAPACITY_REACHED" ? 409
+              : code === "SESSION_NOT_ACCEPTING" ? 409
+              : code === "SESSION_SPECIALTY_MISMATCH" ? 400
+              : code === "PARTICIPANT_ALREADY_IN_SESSION" ? 409
+              : code === "PROFESSIONAL_NOT_IN_SPECIALTY" ? 400
+              : code === "EPISODE_NOT_ACTIVE" ? 409
+              : 400;
+  res.status(status).json({ error: e.message, code: code || null,
+    current: e.current, capacity: e.capacity, appointmentId: e.appointmentId });
+}
+
+router.get("/schedule-sessions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || "");
+  const professionalId = String(req.query.professionalId || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !professionalId) {
+    return res.status(400).json({ error: "date (YYYY-MM-DD) e professionalId são obrigatórios." });
+  }
+  res.json({ sessions: ClinicScheduleSessionService.listByProfessionalDay(orgId, professionalId, date) });
+});
+
+router.post("/schedule-sessions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const session = ClinicScheduleSessionService.create(orgId, req.body || {}, actor(req) ?? null);
+    res.json({ session });
+  } catch (e: any) { sessionError(res, e); }
+});
+
+router.get("/schedule-sessions/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const session = ClinicScheduleSessionService.get(orgId, req.params.id);
+  if (!session) return res.status(404).json({ error: "Sessão não encontrada." });
+  res.json({
+    session,
+    participants: ClinicScheduleSessionService.listParticipants(orgId, req.params.id),
+  });
+});
+
+router.post("/schedule-sessions/:id/participants", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = ClinicScheduleSessionService.addParticipant(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json(result);
+  } catch (e: any) { sessionError(res, e); }
+});
+
+router.delete("/schedule-sessions/:id/participants/:appointmentId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = ClinicScheduleSessionService.removeParticipant(
+      orgId, req.params.id, req.params.appointmentId, req.body || {}, actor(req) ?? null
+    );
+    res.json(result);
+  } catch (e: any) { sessionError(res, e); }
+});
+
+router.post("/schedule-sessions/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = ClinicScheduleSessionService.cancelSession(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json(result);
+  } catch (e: any) { sessionError(res, e); }
 });
 
 // Jornada de Tratamento — métricas + fila operacional + counts pra badge

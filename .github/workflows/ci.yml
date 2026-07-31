@@ -119,6 +119,7 @@ jobs:
           - { name: 'clinic-treatment-cycles', script: 'test:clinic-treatment-cycles' }
           - { name: 'clinic-discharge-reopen', script: 'test:clinic-discharge-reopen' }
           - { name: 'clinic-care-journey-metrics', script: 'test:clinic-care-journey-metrics' }
+          - { name: 'clinic-group-sessions', script: 'test:clinic-group-sessions' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

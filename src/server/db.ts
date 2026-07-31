@@ -2879,6 +2879,61 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN cycle_sequence_number INTEGER`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_cycle ON appointments (organization_id, treatment_cycle_id) WHERE treatment_cycle_id IS NOT NULL`); } catch(e){}
 
+  // Sessões de agenda compartilhadas (ADR-145 D6, Fatia 41). Habilita
+  // "vários pacientes no mesmo horário" (dor #3 do cliente, áudio 1)
+  // como PRIMEIRA CLASSE — não gambiarra com force=true. Cada participante
+  // continua tendo appointment PRÓPRIO (prontuário/lembrete/presença
+  // individuais); todos apontam pra mesma schedule_session_id.
+  //
+  // session_type ENUM('individual','group'): apenas grupo por ora
+  // (cliente confirmou 2026-07 — "parallel" fica pra futuro se aparecer
+  // necessidade, aditivo sem breaking). 'individual' entra pra permitir
+  // reusar essa tabela como wrapper opcional em consulta 1:1 no futuro.
+  //
+  // capacity 1..100 valida no service. Estados: scheduled|in_care|
+  // completed|cancelled — controla ciclo de vida do BLOCO (não dos
+  // participantes individuais).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_schedule_sessions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        specialty_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        room_id TEXT,
+        procedure_id TEXT,
+        session_type TEXT NOT NULL DEFAULT 'group',
+        title TEXT,
+        scheduled_start DATETIME NOT NULL,
+        scheduled_end DATETIME NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        capacity INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        cancelled_at DATETIME,
+        cancelled_reason TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_schedule_session_prof
+        ON clinic_schedule_sessions
+        (organization_id, professional_id, scheduled_start, scheduled_end, status);
+      CREATE INDEX IF NOT EXISTS idx_schedule_session_specialty
+        ON clinic_schedule_sessions
+        (organization_id, specialty_id, scheduled_start, status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_schedule_sessions', e); }
+
+  // Aditivo: appointment liga à sessão. NULL = appointment individual
+  // legado (compat 100%). Índice parcial pra query "quem está no grupo".
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN schedule_session_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_schedule_session ON appointments (organization_id, schedule_session_id) WHERE schedule_session_id IS NOT NULL`); } catch(e){}
+
+  // Aditivo: sala tem limite de pessoas (RF-040 §5). Default 1 preserva
+  // comportamento legado (sala pra consulta 1:1). O service da Fatia 42
+  // (refactor conflict) usa isso pra bloquear grupo maior que a sala.
+  try { db.exec(`ALTER TABLE clinic_rooms ADD COLUMN capacity INTEGER DEFAULT 1`); } catch(e){}
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

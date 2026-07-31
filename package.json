@@ -106,6 +106,7 @@
     "test:clinic-ux-actions": "tsx scripts/test-clinic-ux-actions.ts",
     "test:clinic-config-ui": "tsx scripts/test-clinic-config-ui.ts",
     "test:clinic-monthly-report-delivery": "tsx scripts/test-clinic-monthly-report-delivery.ts",
+    "test:clinic-specialties": "tsx scripts/test-clinic-specialties.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

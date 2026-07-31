@@ -175,10 +175,40 @@ export class ClinicAgendaService {
   }
 
   // ── Conflito por profissional / sala ─────────────────────────────────────
-  /** Agendamentos ativos do profissional OU da sala que colidem com a janela. */
-  static findConflicts(orgId: string, opts: { professionalId?: string | null; roomId?: string | null; startMs: number; endMs: number; ignoreId?: string }): any[] {
+  /**
+   * Agendamentos ativos do profissional OU da sala que colidem com a janela.
+   *
+   * ADR-145 D6 / RN-006 (Fatia 42): appointments da MESMA schedule_session_id
+   * NÃO conflitam entre si — grupo de 5 pacientes = 1 ocupação de agenda do
+   * profissional, não 5. Quando `scheduleSessionId` é passado, ignora appts
+   * daquela sessão no cálculo de conflito.
+   *
+   * Também retorna motivo "room-capacity" quando outra ocupação da sala
+   * excede `clinic_rooms.capacity` — pra sala compartilhada onde 2 grupos
+   * pequenos caberiam juntos, mas 2 grupos grandes não.
+   */
+  static findConflicts(orgId: string, opts: {
+    professionalId?: string | null;
+    roomId?: string | null;
+    startMs: number;
+    endMs: number;
+    ignoreId?: string;
+    scheduleSessionId?: string | null;
+  }): any[] {
+    // Se sala tem capacity>1 (sala compartilhada), o conflito por sala
+    // é delegado pro checkRoomCapacity — findConflicts SÓ reporta quando
+    // a sala tem capacity=1 (legado 1:1). Isso evita falso positivo em
+    // clínica que usa sala grande pra múltiplos atendimentos paralelos.
+    let roomCapacity = 1;
+    if (opts.roomId) {
+      const room = db.prepare(
+        `SELECT capacity FROM clinic_rooms WHERE organization_id = ? AND id = ?`
+      ).get(orgId, opts.roomId) as any;
+      roomCapacity = Number(room?.capacity) || 1;
+    }
     const rows = db.prepare(`
-      SELECT id, title, professional_id, room_id, scheduled_start, scheduled_end, expected_duration_minutes
+      SELECT id, title, professional_id, room_id, schedule_session_id,
+             scheduled_start, scheduled_end, expected_duration_minutes
       FROM appointments
       WHERE organization_id = ? AND status NOT IN ('cancelled','no_show','completed')
         AND (professional_id = ? OR room_id = ?)${opts.ignoreId ? " AND id != ?" : ""}
@@ -189,10 +219,61 @@ export class ClinicAgendaService {
       if (st == null) continue;
       const en = AppointmentService.ms(r.scheduled_end) ?? (st + this.durationMin(orgId, r) * 60000);
       if (en > opts.startMs && st < opts.endMs) {
-        out.push({ id: r.id, title: r.title, reason: r.professional_id === opts.professionalId ? "professional" : "room", start: r.scheduled_start });
+        // Se estamos criando/atualizando um appointment DA MESMA sessão, ignora
+        // outros participantes da mesma sessão — RN-006. Isso elimina o falso
+        // conflito "profissional já ocupado" quando adicionamos o 2º, 3º, ...
+        // participante de um grupo já existente.
+        if (opts.scheduleSessionId && r.schedule_session_id === opts.scheduleSessionId) continue;
+        const byProf = r.professional_id === opts.professionalId;
+        const byRoom = !byProf && r.room_id === opts.roomId;
+        // Conflito por sala só reporta quando capacity=1. Capacity>1 fica
+        // pro checkRoomCapacity que sabe contar N ocupações paralelas.
+        if (byRoom && roomCapacity > 1) continue;
+        out.push({
+          id: r.id, title: r.title,
+          reason: byProf ? "professional" : "room",
+          start: r.scheduled_start,
+          scheduleSessionId: r.schedule_session_id || null,
+        });
       }
     }
     return out;
+  }
+
+  /**
+   * Valida capacity da sala pra um horário. Retorna null se OK ou
+   * `{code:"ROOM_CAPACITY_EXCEEDED", current, capacity}` se excede.
+   * Chamado pelo createAppointment sempre que roomId presente.
+   */
+  private static checkRoomCapacity(orgId: string, roomId: string, startMs: number, endMs: number, ignoreAppointmentId?: string): { code: string; current: number; capacity: number } | null {
+    const room = db.prepare(
+      `SELECT id, capacity FROM clinic_rooms WHERE organization_id = ? AND id = ?`
+    ).get(orgId, roomId) as any;
+    if (!room) return null; // já bate no createAppointment antes; defesa
+    const capacity = Number(room.capacity) || 1;
+    if (capacity <= 1) return null; // sala 1:1 já é validada por findConflicts
+
+    const rows = db.prepare(
+      `SELECT id, scheduled_start, scheduled_end, expected_duration_minutes
+         FROM appointments
+        WHERE organization_id = ? AND room_id = ?
+          AND status NOT IN ('cancelled','no_show','completed')
+          ${ignoreAppointmentId ? "AND id != ?" : ""}`
+    ).all(...(ignoreAppointmentId ? [orgId, roomId, ignoreAppointmentId] : [orgId, roomId])) as any[];
+
+    let overlapping = 0;
+    for (const r of rows) {
+      const st = AppointmentService.ms(r.scheduled_start);
+      if (st == null) continue;
+      const en = AppointmentService.ms(r.scheduled_end) ?? (st + this.durationMin(orgId, r) * 60000);
+      if (en > startMs && st < endMs) overlapping++;
+    }
+
+    // +1 pra contar o próprio que vamos criar
+    if (overlapping + 1 > capacity) {
+      return { code: "ROOM_CAPACITY_EXCEEDED", current: overlapping, capacity };
+    }
+    return null;
   }
 
   // ── Agenda do dia / por profissional ─────────────────────────────────────
@@ -227,6 +308,9 @@ export class ClinicAgendaService {
   static createAppointment(orgId: string, input: {
     contactId?: string; title?: string; scheduledStart?: string; professionalId?: string; roomId?: string; durationMinutes?: number; force?: boolean;
     careEpisodeId?: string; professionalOverrideReason?: string;
+    /** ADR-145 D6 Fatia 42: quando setado, appointment vira participante da
+     *  sessão — findConflicts ignora outros participantes da MESMA sessão. */
+    scheduleSessionId?: string | null;
   }, actorId?: string): any {
     const contactId = String(input?.contactId || "");
     if (!contactId) throw new Error("Selecione o paciente.");
@@ -301,11 +385,29 @@ export class ClinicAgendaService {
     const endMs = startMs + (durationMinutes ?? AppointmentService.config(orgId).slotMin) * 60000;
 
     // Conflito por profissional/sala — não bloqueia sem profissional nem sala.
+    // Fatia 42: passa scheduleSessionId pro findConflicts ignorar outros
+    // participantes da mesma sessão (RN-006).
     if (professional || room) {
-      const conflicts = this.findConflicts(orgId, { professionalId: professional?.id, roomId: room?.id, startMs, endMs });
+      const conflicts = this.findConflicts(orgId, {
+        professionalId: professional?.id, roomId: room?.id,
+        startMs, endMs, scheduleSessionId: input?.scheduleSessionId || null,
+      });
       if (conflicts.length && !input?.force) {
         const e: any = new Error(`Conflito de horário: ${conflicts.map(c => c.title || "agendamento").join(", ")}. Envie force=true para manter mesmo assim.`);
         e.conflicts = conflicts; e.code = "CONFLICT";
+        throw e;
+      }
+    }
+
+    // Fatia 42: capacity da sala. Se sala tem capacity > 1 (ex.: sala de
+    // grupo), findConflicts sozinho não protege contra ocupações paralelas
+    // que estouram a capacidade. checkRoomCapacity conta appointments
+    // ativos no intervalo e bloqueia se +1 exceder.
+    if (room?.id) {
+      const overflow = this.checkRoomCapacity(orgId, room.id, startMs, endMs);
+      if (overflow && !input?.force) {
+        const e: any = new Error(`Sala ${room.name} lotada (${overflow.current}/${overflow.capacity}) no horário.`);
+        e.code = overflow.code; e.current = overflow.current; e.capacity = overflow.capacity;
         throw e;
       }
     }
@@ -328,8 +430,8 @@ export class ClinicAgendaService {
 
     const id = randomUUID();
     const endISO = new Date(endMs).toISOString();
-    db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_id, professional_name_snapshot, room_id, room_name_snapshot, expected_duration_minutes, care_episode_id, specialty_id, professional_override_reason) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, orgId, contactId, String(input?.title || "Consulta").trim() || "Consulta", start, endISO, professional?.id || null, professional?.name || null, room?.id || null, room?.name || null, durationMinutes, episode?.id || null, episodeSpecialtyId, overrideReason);
+    db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_id, professional_name_snapshot, room_id, room_name_snapshot, expected_duration_minutes, care_episode_id, specialty_id, professional_override_reason, schedule_session_id) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, contactId, String(input?.title || "Consulta").trim() || "Consulta", start, endISO, professional?.id || null, professional?.name || null, room?.id || null, room?.name || null, durationMinutes, episode?.id || null, episodeSpecialtyId, overrideReason, input?.scheduleSessionId || null);
     logAuthEvent(orgId, actorId, contactId, "CLINIC_APPOINTMENT_CREATED", {
       appointmentId: id, professionalId: professional?.id || null, roomId: room?.id || null,
       durationMinutes, careEpisodeId: episode?.id || null, specialtyId: episodeSpecialtyId,

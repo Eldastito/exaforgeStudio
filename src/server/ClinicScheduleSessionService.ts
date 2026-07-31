@@ -347,10 +347,8 @@ export class ClinicScheduleSessionService {
       }
       // Cria o appointment via ClinicAgendaService — reusa toda a lógica
       // de validações + gate EPISODE_PROFESSIONAL_MISMATCH + snapshots.
-      // Passa force=true pra bypassar findConflicts (grupo vai gerar
-      // conflito falso com outros participantes até a Fatia 42 refactorar
-      // o findConflicts pra ignorar mesma session_id). Isso é bug conhecido
-      // que a Fatia 42 fecha estruturalmente.
+      // Fatia 42: passa scheduleSessionId direto — findConflicts agora
+      // ignora outros participantes da mesma sessão (RN-006). Sem force=true.
       const appt = ClinicAgendaService.createAppointment(orgId, {
         contactId: input.contactId,
         title: input.title || session.title || "Sessão em grupo",
@@ -359,17 +357,17 @@ export class ClinicScheduleSessionService {
         roomId: session.roomId || undefined,
         durationMinutes: session.durationMinutes,
         careEpisodeId: input.careEpisodeId || undefined,
-        force: true, // ver comentário acima — Fatia 42 remove essa necessidade
+        scheduleSessionId: sessionId,
       }, actorId ?? undefined);
 
-      // Amarra o appointment à sessão + treatment_cycle_id se veio
-      const updateSql = input.treatmentCycleId
-        ? `UPDATE appointments SET schedule_session_id = ?, treatment_cycle_id = ? WHERE id = ? AND organization_id = ?`
-        : `UPDATE appointments SET schedule_session_id = ? WHERE id = ? AND organization_id = ?`;
+      // treatment_cycle_id (se veio) precisa ser amarrado depois — o
+      // createAppointment não conhece esse campo direto ainda. Fatia 38
+      // liga via care_episode_id automaticamente, mas se o operador quer
+      // um ciclo específico (ex.: renovado), o service registra explícito.
       if (input.treatmentCycleId) {
-        db.prepare(updateSql).run(sessionId, input.treatmentCycleId, appt.id, orgId);
-      } else {
-        db.prepare(updateSql).run(sessionId, appt.id, orgId);
+        db.prepare(
+          `UPDATE appointments SET treatment_cycle_id = ? WHERE id = ? AND organization_id = ?`
+        ).run(input.treatmentCycleId, appt.id, orgId);
       }
       appointmentId = appt.id;
     });

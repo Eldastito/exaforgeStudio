@@ -17,7 +17,7 @@
  * PDF é `Buffer` via `pdfkit` (padrão `ReportPdfService.generateGovernancePdf`).
  * Determinístico, zero-token, isolado por `organization_id`.
  */
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import PDFDocument from "pdfkit";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
@@ -99,30 +99,110 @@ function requireConsent(orgId: string, contactId: string) {
 }
 
 /**
- * Verifica PIN do profissional antes de emitir (ADR-080 Fase T).
+ * Verifica PIN do profissional antes de emitir (ADR-080 Fase T + Fase 28).
  * - Se o profissional NÃO tem PIN cadastrado, retorna `false` (emitido
  *   sem PIN — compat com clínicas que ainda não adotaram).
  * - Se tem PIN e nenhum foi fornecido → PIN_REQUIRED.
- * - Se tem PIN e o fornecido não bate → PIN_INVALID.
- * - Se bate, retorna `true` (marcar `signed_with_pin=1`).
- * Hash = SHA-256 de `salt + pin`. `salt` é UUID gerado no set.
+ * - Se `pin_locked_until > now` → PIN_LOCKED (Fase 28).
+ * - Se tem PIN e o fornecido não bate → PIN_INVALID + incremento do
+ *   contador; ao chegar em `PIN_LOCKOUT_MAX_ATTEMPTS` lockeia por
+ *   `PIN_LOCKOUT_WINDOW_MS` (Fase 28).
+ * - Se bate, retorna `true` (marcar `signed_with_pin=1`) + zera contador.
+ * Hash = SHA-256 de `salt + pin`. Comparação com `timingSafeEqual`
+ * (constante-tempo, evita side-channel de latência — Fase 28).
  */
+const PIN_LOCKOUT_MAX_ATTEMPTS = 5;
+const PIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15 min
+
 export function verifyPin(orgId: string, professionalId: string | null, providedPin: string | undefined): boolean {
   if (!professionalId) return false;
-  const prof = db.prepare(`SELECT pin_hash, pin_salt FROM clinic_professionals WHERE id = ? AND organization_id = ?`)
-    .get(professionalId, orgId) as any;
+  const prof = db.prepare(
+    `SELECT pin_hash, pin_salt, pin_failed_count, pin_locked_until
+       FROM clinic_professionals WHERE id = ? AND organization_id = ?`
+  ).get(professionalId, orgId) as any;
   if (!prof?.pin_hash || !prof?.pin_salt) return false; // não configurou — compat: emite sem PIN
+
+  // Fase 28: lockout ativo bloqueia antes de tudo. Comparação em ms via
+  // Date.parse (ISO 8601 preserva ordem).
+  if (prof.pin_locked_until) {
+    const untilMs = Date.parse(prof.pin_locked_until);
+    if (Number.isFinite(untilMs) && untilMs > Date.now()) {
+      const e: any = new Error("PIN bloqueado por excesso de tentativas erradas. Aguarde ou peça ao admin desbloquear.");
+      e.code = "PIN_LOCKED";
+      e.until = prof.pin_locked_until;
+      throw e;
+    }
+    // Lockout expirou naturalmente — limpa timestamp, mantém counter em
+    // 0 (o próximo erro começa do zero).
+    if (Number.isFinite(untilMs) && untilMs <= Date.now()) {
+      db.prepare(`UPDATE clinic_professionals SET pin_locked_until = NULL, pin_failed_count = 0 WHERE id = ? AND organization_id = ?`)
+        .run(professionalId, orgId);
+    }
+  }
+
   const pin = String(providedPin || "").trim();
   if (!pin) {
     const e: any = new Error("Este profissional exige PIN para emitir documentos clínicos.");
     e.code = "PIN_REQUIRED"; throw e;
   }
-  const attemptHash = createHash("sha256").update(prof.pin_salt + pin).digest("hex");
-  if (attemptHash !== prof.pin_hash) {
+
+  // Fase 28: timingSafeEqual em vez de `===` — não vaza qual byte falhou
+  // via tempo de resposta. Ambos buffers precisam do mesmo comprimento;
+  // hash SHA-256 sempre 32 bytes (64 hex), então comparação é segura.
+  const attemptHash = createHash("sha256").update(prof.pin_salt + pin).digest();
+  const storedHash = Buffer.from(String(prof.pin_hash), "hex");
+  let match = false;
+  try {
+    match = storedHash.length === attemptHash.length && timingSafeEqual(storedHash, attemptHash);
+  } catch {
+    match = false;
+  }
+
+  if (!match) {
+    // Incrementa contador; se atingiu o máximo, lockeia + audit
+    const nextCount = Number(prof.pin_failed_count || 0) + 1;
+    if (nextCount >= PIN_LOCKOUT_MAX_ATTEMPTS) {
+      const untilIso = new Date(Date.now() + PIN_LOCKOUT_WINDOW_MS).toISOString();
+      db.prepare(
+        `UPDATE clinic_professionals
+            SET pin_failed_count = ?, pin_locked_until = ?
+          WHERE id = ? AND organization_id = ?`
+      ).run(nextCount, untilIso, professionalId, orgId);
+      logAuthEvent(orgId, null, professionalId, "CLINIC_PIN_LOCKED", {
+        professionalId, attempts: nextCount, lockedUntil: untilIso,
+      });
+      const e: any = new Error("PIN bloqueado por excesso de tentativas erradas. Aguarde ou peça ao admin desbloquear.");
+      e.code = "PIN_LOCKED"; e.until = untilIso; throw e;
+    }
+    db.prepare(`UPDATE clinic_professionals SET pin_failed_count = ? WHERE id = ? AND organization_id = ?`)
+      .run(nextCount, professionalId, orgId);
+    logAuthEvent(orgId, null, professionalId, "CLINIC_PIN_FAILED", {
+      professionalId, attempts: nextCount,
+    });
     const e: any = new Error("PIN incorreto.");
     e.code = "PIN_INVALID"; throw e;
   }
+
+  // PIN certo — zera contador se estava em algum valor
+  if (Number(prof.pin_failed_count || 0) > 0) {
+    db.prepare(`UPDATE clinic_professionals SET pin_failed_count = 0, pin_locked_until = NULL WHERE id = ? AND organization_id = ?`)
+      .run(professionalId, orgId);
+  }
   return true;
+}
+
+/**
+ * Reset manual do lockout de PIN por owner/admin — usado quando o
+ * profissional pede pra destravar antes dos 15 min naturais expirarem
+ * (ADR-080 Fase 28).
+ */
+export function resetPinLockout(orgId: string, professionalId: string, actorId: string | null): void {
+  const prof = db.prepare(`SELECT id FROM clinic_professionals WHERE id = ? AND organization_id = ?`)
+    .get(professionalId, orgId) as any;
+  if (!prof) throw new Error("Profissional não encontrado.");
+  db.prepare(`UPDATE clinic_professionals SET pin_failed_count = 0, pin_locked_until = NULL WHERE id = ? AND organization_id = ?`)
+    .run(professionalId, orgId);
+  logAuthEvent(orgId, actorId, professionalId, "CLINIC_PIN_LOCKOUT_RESET", { professionalId });
 }
 
 function loadEncounter(orgId: string, encounterId: string): any {

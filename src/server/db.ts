@@ -2824,6 +2824,13 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_salt TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_hash TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_updated_at DATETIME`); } catch(e){}
+  // Lockout de PIN (ADR-080 Fase 28). Contador de tentativas erradas e
+  // timestamp de destravamento — evita brute-force de PIN 4-8 dígitos (max
+  // 10^8 = 100M combinações, mas com lockout 5-em-15min o custo cresce pra
+  // ~30 anos pra 1M tentativas). timingSafeEqual no service fecha o
+  // side-channel de tempo (medir latência da comparação byte-a-byte).
+  try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_failed_count INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinic_professionals ADD COLUMN pin_locked_until DATETIME`); } catch(e){}
   // Nota: ALTER TABLE clinical_prescriptions/certificates ADD COLUMN
   // signed_with_pin fica DEPOIS dos CREATEs dessas tabelas (linhas 2865/2893).
 

@@ -23,8 +23,22 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
 import { ClinicTreatmentCycleService } from "./ClinicTreatmentCycleService.js";
+import { verifyPin } from "./ClinicDocumentsService.js";
 
 export type EpisodeStatus = "active" | "on_hold" | "discharged" | "cancelled";
+
+export type DischargeType =
+  | "clinical_discharge"    // alta clínica (objetivos atingidos, evolução completa)
+  | "goals_met"             // metas terapêuticas alcançadas
+  | "patient_request"       // paciente solicitou encerramento
+  | "abandonment"           // paciente abandonou (>N faltas + sem contato)
+  | "transfer_out"          // transferido pra outra clínica/profissional externo
+  | "other";                // outros — texto no summary explica
+
+const DISCHARGE_TYPES: DischargeType[] = [
+  "clinical_discharge", "goals_met", "patient_request",
+  "abandonment", "transfer_out", "other",
+];
 
 export interface CareEpisode {
   id: string;
@@ -481,9 +495,166 @@ export class ClinicCareEpisodeService {
   }
 
   /**
-   * Cancela episódio aberto por engano (não é alta). Reversível na Fatia 39
-   * via reopen. Difere de discharge (Fatia 39) por não exigir PIN — é
-   * ação administrativa da recepção, não decisão clínica.
+   * ALTA EXPLÍCITA (ADR-145 D5, Fatia 39). Única forma de fechar um
+   * episódio (RN-007). Consumir 10 sessões NÃO dá alta. Deixar de
+   * recomendar retorno NÃO dá alta. Só esta rota fecha.
+   *
+   * Cliente confirmou 2026-07: PIN OBRIGATÓRIO do profissional. Reusa
+   * `verifyPin` da Fase 28 (timingSafeEqual + lockout 5×/15min). Se
+   * o profissional não tem PIN configurado → PIN_REQUIRED (cliente
+   * foi explícito — alta é decisão clínica que exige autoria comprovada).
+   *
+   * Regras:
+   *   - Episódio precisa estar `active` ou `on_hold` (discharged 2x = noop).
+   *   - `professionalId` deve ser o `primary_professional_id` OU
+   *     override explícito na rota (owner|admin com override auditado).
+   *   - `dischargeType` obrigatório, precisa estar no enum.
+   *   - `summary` obrigatório (não vazio, trimado, min 3 chars — evita
+   *     "ok"/"." pra proteger auditoria).
+   *   - Appointments futuros do episódio NÃO são cancelados
+   *     automaticamente (RF-070 §8). A UI decide (Fatia 40).
+   *   - Grava discharge_signed_with_pin=1 pra rastreabilidade.
+   */
+  static discharge(
+    orgId: string,
+    episodeId: string,
+    input: {
+      professionalId: string;
+      pin: string;
+      dischargeType: DischargeType;
+      summary: string;
+    },
+    actorId: string | null = null
+  ): CareEpisode {
+    const ep = this.get(orgId, episodeId);
+    if (!ep) throw new Error("Episódio não encontrado.");
+    if (ep.status === "discharged") {
+      const e: any = new Error("Episódio já teve alta.");
+      e.code = "EPISODE_ALREADY_DISCHARGED"; e.dischargedAt = ep.dischargedAt; throw e;
+    }
+    if (ep.status !== "active" && ep.status !== "on_hold") {
+      const e: any = new Error("Episódio não está ativo.");
+      e.code = "EPISODE_NOT_ACTIVE"; throw e;
+    }
+
+    if (!input.professionalId) throw new Error("Profissional que dá alta é obrigatório.");
+    if (!DISCHARGE_TYPES.includes(input.dischargeType)) {
+      throw new Error(`Tipo de alta inválido. Aceitos: ${DISCHARGE_TYPES.join(", ")}.`);
+    }
+    const summary = String(input.summary || "").trim();
+    if (summary.length < 3) {
+      throw new Error("Resumo da alta é obrigatório (mínimo 3 caracteres).");
+    }
+
+    // Profissional precisa existir e estar ativo
+    const prof = db.prepare(
+      `SELECT id, active, pin_hash FROM clinic_professionals
+        WHERE organization_id = ? AND id = ?`
+    ).get(orgId, input.professionalId) as any;
+    if (!prof) throw new Error("Profissional não encontrado.");
+    if (Number(prof.active) === 0) throw new Error("Profissional está desativado.");
+    if (!prof.pin_hash) {
+      const e: any = new Error("Profissional não tem PIN configurado. Alta exige PIN.");
+      e.code = "PIN_REQUIRED"; throw e;
+    }
+
+    // verifyPin lança PIN_REQUIRED/PIN_INVALID/PIN_LOCKED com códigos estáveis.
+    // Aqui só interessa true/false porque já garantimos pin_hash acima.
+    const ok = verifyPin(orgId, input.professionalId, input.pin);
+    if (!ok) {
+      const e: any = new Error("PIN inválido.");
+      e.code = "PIN_INVALID"; throw e;
+    }
+
+    db.prepare(
+      `UPDATE clinic_care_episodes
+          SET status='discharged',
+              discharged_at=CURRENT_TIMESTAMP,
+              discharge_type=?,
+              discharge_summary=?,
+              discharged_by_professional_id=?,
+              discharge_signed_with_pin=1,
+              updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND organization_id=?`
+    ).run(input.dischargeType, summary, input.professionalId, episodeId, orgId);
+
+    logAuthEvent(orgId, actorId, ep.contactId, "CLINIC_CARE_EPISODE_DISCHARGED", {
+      episodeId, dischargeType: input.dischargeType,
+      dischargedByProfessionalId: input.professionalId,
+      signedWithPin: true,
+      // NÃO logamos o summary completo (pode ter dado clínico) — só marca
+      // "houve texto" pra auditor saber que compliance mínimo foi respeitado.
+      summaryLength: summary.length,
+    });
+
+    return this.get(orgId, episodeId)!;
+  }
+
+  /**
+   * REOPEN de episódio com alta. Restrito — cliente foi explícito no
+   * áudio 5: alta é ponto final. Só reabrimos se paciente voltar com
+   * novo quadro clínico (não é continuação — é retomada).
+   *
+   * Também exige PIN (mesma decisão consciente da alta). Motivo
+   * OBRIGATÓRIO em texto livre (audit-of-audit precisa reconstruir
+   * "por que reabriu"). Não altera a discharge anterior — só transiciona
+   * status pra 'active' e registra reopened_at + reopen_reason.
+   */
+  static reopen(
+    orgId: string,
+    episodeId: string,
+    input: { professionalId: string; pin: string; reason: string },
+    actorId: string | null = null
+  ): CareEpisode {
+    const ep = this.get(orgId, episodeId);
+    if (!ep) throw new Error("Episódio não encontrado.");
+    if (ep.status !== "discharged") {
+      const e: any = new Error("Só é possível reabrir episódio com alta.");
+      e.code = "EPISODE_NOT_DISCHARGED"; throw e;
+    }
+    if (!input.professionalId) throw new Error("Profissional é obrigatório.");
+    const reason = String(input.reason || "").trim();
+    if (reason.length < 3) {
+      throw new Error("Motivo da reabertura é obrigatório (mínimo 3 caracteres).");
+    }
+
+    const prof = db.prepare(
+      `SELECT id, active, pin_hash FROM clinic_professionals
+        WHERE organization_id = ? AND id = ?`
+    ).get(orgId, input.professionalId) as any;
+    if (!prof) throw new Error("Profissional não encontrado.");
+    if (Number(prof.active) === 0) throw new Error("Profissional está desativado.");
+    if (!prof.pin_hash) {
+      const e: any = new Error("Profissional não tem PIN configurado. Reabertura exige PIN.");
+      e.code = "PIN_REQUIRED"; throw e;
+    }
+    const ok = verifyPin(orgId, input.professionalId, input.pin);
+    if (!ok) { const e: any = new Error("PIN inválido."); e.code = "PIN_INVALID"; throw e; }
+
+    db.prepare(
+      `UPDATE clinic_care_episodes
+          SET status='active',
+              reopened_at=CURRENT_TIMESTAMP,
+              reopen_reason=?,
+              updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND organization_id=?`
+    ).run(reason, episodeId, orgId);
+
+    logAuthEvent(orgId, actorId, ep.contactId, "CLINIC_CARE_EPISODE_REOPENED", {
+      episodeId, reopenByProfessionalId: input.professionalId,
+      previousDischargedAt: ep.dischargedAt,
+      previousDischargeType: ep.dischargeType,
+      reasonLength: reason.length,
+    });
+
+    return this.get(orgId, episodeId)!;
+  }
+
+  /**
+   * Cancela episódio aberto por engano (não é alta). Reversível via
+   * reopen com PIN (mesmo fluxo da alta). Difere de discharge por não
+   * exigir PIN no CANCEL — é ação administrativa da recepção, não
+   * decisão clínica.
    */
   static cancel(
     orgId: string,

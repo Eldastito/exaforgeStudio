@@ -79,8 +79,28 @@ export class ClinicVacancyService {
    * lança pra não bloquear o cancelamento em si. Devolve a oferta criada
    * ou `null` (sem candidato elegível, sem canal, sem consentimento, etc).
    */
-  static async tryOfferOnCancel(orgId: string, cancelledAppointmentId: string, opts: { sender?: MessageSender; nowMs?: number } = {}): Promise<VacancyOffer | null> {
+  static async tryOfferOnCancel(orgId: string, cancelledAppointmentId: string, opts: { sender?: MessageSender; nowMs?: number; graceMs?: number } = {}): Promise<VacancyOffer | null> {
     try {
+      // Fase 31: grace window. Recepção clica "Cancelar" sem querer → tem
+      // `graceMs` (default 5min via rota) pra re-ativar o appt sem já ter
+      // bombardeado ofertas de vaga pra outros pacientes. Quando `graceMs > 0`,
+      // adia a execução via setTimeout e re-checa o status ANTES de disparar.
+      // `graceMs <= 0` (default do service, pra não quebrar callers antigos)
+      // executa imediatamente. Fluxos internos (Fase P/N) continuam passando
+      // graceMs:0; só a rota nova /appointments/:id/cancel usa 5min.
+      const graceMs = Math.max(0, Number(opts.graceMs) || 0);
+      if (graceMs > 0) {
+        return await new Promise<VacancyOffer | null>((resolve) => {
+          setTimeout(() => {
+            // Re-checa: pode ter sido reativada pelo staff no grace period.
+            const now = db.prepare(`SELECT status FROM appointments WHERE organization_id = ? AND id = ?`).get(orgId, cancelledAppointmentId) as any;
+            if (!now || now.status !== "cancelled") return resolve(null);
+            this.tryOfferOnCancel(orgId, cancelledAppointmentId, { sender: opts.sender, nowMs: opts.nowMs, graceMs: 0 })
+              .then(resolve).catch(() => resolve(null));
+          }, graceMs);
+        });
+      }
+
       const apt = db.prepare(`SELECT * FROM appointments WHERE organization_id = ? AND id = ?`).get(orgId, cancelledAppointmentId) as any;
       if (!apt || apt.status !== "cancelled") return null;
       if (!apt.professional_id) return null; // vaga sem profissional não faz match com a fila

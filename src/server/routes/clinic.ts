@@ -27,6 +27,7 @@ import { ClinicMonthlyReportDeliveryService } from "../ClinicMonthlyReportDelive
 import { ClinicSpecialtyService } from "../ClinicSpecialtyService.js";
 import { ClinicCareEpisodeService } from "../ClinicCareEpisodeService.js";
 import { ClinicTreatmentCycleService } from "../ClinicTreatmentCycleService.js";
+import { ClinicCareJourneyMetricsService, QueueFilter } from "../ClinicCareJourneyMetricsService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -976,6 +977,42 @@ router.post("/treatment-cycles/:id/renew", requireRole("owner", "admin"), (req: 
     const result = ClinicTreatmentCycleService.renew(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json(result);
   } catch (e: any) { cycleError(res, e); }
+});
+
+// Jornada de Tratamento — métricas + fila operacional + counts pra badge
+// (ADR-145 Fatia 40, RF-100 §5). Fecha a Fase 2.
+router.get("/care-journey/metrics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({
+    metrics: ClinicCareJourneyMetricsService.overview(orgId, {
+      from: (req.query.from as string) || undefined,
+      to: (req.query.to as string) || undefined,
+    }),
+  });
+});
+
+// GET /clinic/care-journey/queue?filter=active-without-schedule|renewal-pending|
+//                                       transfers-recent|futures-after-discharge
+router.get("/care-journey/queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const filter = String(req.query.filter || "") as QueueFilter;
+  const allowed: QueueFilter[] = ["active-without-schedule", "renewal-pending", "transfers-recent", "futures-after-discharge"];
+  if (!allowed.includes(filter)) {
+    return res.status(400).json({
+      error: `filter inválido. Aceitos: ${allowed.join(", ")}.`,
+    });
+  }
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json({ filter, items: ClinicCareJourneyMetricsService.queue(orgId, filter, { limit }) });
+});
+
+// Counts pra badge do sidebar
+router.get("/care-journey/counts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ counts: ClinicCareJourneyMetricsService.counts(orgId) });
 });
 
 router.post("/treatment-cycles/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

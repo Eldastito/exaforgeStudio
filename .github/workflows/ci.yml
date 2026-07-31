@@ -105,6 +105,7 @@ jobs:
           - { name: 'clinic-cid10', script: 'test:clinic-cid10' }
           - { name: 'clinic-addendum-notice', script: 'test:clinic-addendum-notice' }
           - { name: 'clinic-allergies', script: 'test:clinic-allergies' }
+          - { name: 'clinic-followup-notice', script: 'test:clinic-followup-notice' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

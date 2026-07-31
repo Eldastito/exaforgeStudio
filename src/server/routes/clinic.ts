@@ -22,6 +22,7 @@ import { ClinicProfessionalAbsenceService, AbsenceReason } from "../ClinicProfes
 import { Cid10Service } from "../Cid10Service.js";
 import { ClinicAddendumNoticeService } from "../ClinicAddendumNoticeService.js";
 import { ClinicPatientAllergyService } from "../ClinicPatientAllergyService.js";
+import { ClinicFollowUpNoticeService } from "../ClinicFollowUpNoticeService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -377,6 +378,70 @@ router.put("/settings/addendum-notification", requireRole("owner", "admin"), (re
   const enabled = req.body?.enabled === false ? 0 : 1;
   db.prepare(`UPDATE organization_settings SET clinic_addendum_notification_enabled = ? WHERE organization_id = ?`).run(enabled, orgId);
   res.json({ enabled: enabled === 1 });
+});
+
+// Notificação automática de retorno (ADR-080 Fase 26). Auto-dispara via
+// Scheduler; rotas manuais pra ver histórico, re-enviar (paciente apagou
+// mensagem) e configurar o toggle + lead-days por org.
+router.get("/encounters/:id/follow-up-notifications", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ClinicFollowUpNoticeService.list(orgId, req.params.id));
+});
+router.post("/encounters/:id/notify-follow-up", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = await ClinicFollowUpNoticeService.notifyForEncounter(orgId, req.params.id, {
+      actorId: actor(req),
+      force: !!req.body?.force,
+    });
+    if (!result) return res.status(404).json({ error: "Prontuário não encontrado ou sem recomendação de retorno." });
+    res.json(result);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/settings/followup-notification", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = db.prepare(
+    `SELECT clinic_followup_notification_enabled AS en,
+            clinic_followup_notification_lead_days AS lead
+       FROM organization_settings WHERE organization_id = ?`
+  ).get(orgId) as any;
+  const enabled = r == null || r.en == null || Number(r.en) !== 0;
+  const leadDays = r?.lead != null ? Number(r.lead) : 3;
+  res.json({ enabled, leadDays });
+});
+router.put("/settings/followup-notification", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const patches: string[] = [];
+  const params: any[] = [];
+  if (req.body?.enabled !== undefined) {
+    patches.push("clinic_followup_notification_enabled = ?");
+    params.push(req.body.enabled === false ? 0 : 1);
+  }
+  if (req.body?.leadDays !== undefined) {
+    const n = Math.floor(Number(req.body.leadDays));
+    if (!Number.isFinite(n) || n < 1 || n > 30) {
+      return res.status(400).json({ error: "leadDays deve estar entre 1 e 30." });
+    }
+    patches.push("clinic_followup_notification_lead_days = ?");
+    params.push(n);
+  }
+  if (patches.length) {
+    db.prepare(`UPDATE organization_settings SET ${patches.join(", ")} WHERE organization_id = ?`).run(...params, orgId);
+  }
+  const r = db.prepare(
+    `SELECT clinic_followup_notification_enabled AS en,
+            clinic_followup_notification_lead_days AS lead
+       FROM organization_settings WHERE organization_id = ?`
+  ).get(orgId) as any;
+  res.json({
+    enabled: r == null || r.en == null || Number(r.en) !== 0,
+    leadDays: r?.lead != null ? Number(r.lead) : 3,
+  });
 });
 
 // Alergias do paciente (ADR-080 Fase 25). Dado sensível (LGPD Art.11) — o

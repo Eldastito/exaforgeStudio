@@ -2619,6 +2619,41 @@ const initDb = () => {
   } catch (e) { console.error('[DB] Falha ao criar clinical_addendum_notifications', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_addendum_notification_enabled INTEGER DEFAULT 1`); } catch(e){}
 
+  // Notificação automática de retorno (ADR-080 Fase 26). Complementa a fila
+  // da Fase I: em vez de esperar a recepção olhar a fila, o Scheduler
+  // varre encounters signed com follow_up_recommended_days e avisa o
+  // paciente N dias ANTES da data sugerida ("é hora do retorno") com link
+  // do portal pra escolher horário. Dedup por (encounter, status IN
+  // sent|queued) — 1 lembrete por retorno recomendado; force:true bypassa.
+  // Encounters cujo retorno JÁ foi agendado (parent_appointment_id ativo)
+  // não entram — a Fase M cuida do lembrete de consulta agendada.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_follow_up_notifications (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        encounter_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        source_appointment_id TEXT,
+        recommended_days INTEGER,          -- snapshot do valor no momento do envio
+        suggested_at DATETIME,             -- data-alvo do retorno (rastro)
+        channel_id TEXT,
+        to_identifier TEXT,
+        status TEXT NOT NULL,              -- queued | sent | failed | skipped
+        provider_message_id TEXT,
+        error TEXT,
+        portal_token_id TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_followup_notif ON clinical_follow_up_notifications (organization_id, encounter_id, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_followup_notif_contact ON clinical_follow_up_notifications (organization_id, contact_id, sent_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_follow_up_notifications', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_followup_notification_enabled INTEGER DEFAULT 1`); } catch(e){}
+  // Antecedência default: aviso vai 3 dias antes da data sugerida do retorno.
+  // Faixa razoável 1..30 dias (o service clipa).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_followup_notification_lead_days INTEGER DEFAULT 3`); } catch(e){}
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

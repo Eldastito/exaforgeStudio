@@ -2684,6 +2684,62 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_monthly_report_day INTEGER DEFAULT 5`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_monthly_report_recipient_contact_id TEXT`); } catch(e){}
 
+  // Especialidades normalizadas + vínculo N:N com profissional (ADR-145 Fase 1,
+  // Fatia 35). Substitui o uso EXCLUSIVO do texto livre `clinic_professionals
+  // .specialty` para decisões de negócio (listar profissionais qualificados
+  // pra uma especialidade, configurar duração/ciclo default por área). O texto
+  // legado permanece durante transição (padrão fases 25/29 — coluna nunca
+  // apagada; backfill idempotente cria specialty + vínculo a partir dele).
+  // `default_duration_minutes` alimenta `AddSpecialtyWizard` (Fatia 37);
+  // `default_cycle_sessions` alimenta a Fatia 38 (default 10, mas cliente
+  // pode configurar 6 pra Fono e 20 pra Fisio, por exemplo). Unique parcial
+  // por (org, name) protege contra duplicata; case-sensitive intencional
+  // (o operador vê o nome que digitou). Isolamento por organization_id.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_specialties (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT,
+        color TEXT,
+        default_duration_minutes INTEGER DEFAULT 60,
+        default_cycle_sessions INTEGER DEFAULT 10,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_clinic_specialty_name
+        ON clinic_specialties (organization_id, name);
+      CREATE INDEX IF NOT EXISTS idx_clinic_specialty_active
+        ON clinic_specialties (organization_id, active);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_specialties', e); }
+
+  // Vínculo N:N profissional↔especialidade. `is_primary=1` marca a
+  // especialidade principal do profissional (usada quando a Fatia 37
+  // sugerir default pro AddSpecialtyWizard). `active=0` desativa vínculo
+  // sem apagar (o profissional pode voltar a atender aquela área depois).
+  // UNIQUE evita vincular 2× o mesmo par.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_professional_specialties (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        specialty_id TEXT NOT NULL,
+        is_primary INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, professional_id, specialty_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_spec_by_prof
+        ON clinic_professional_specialties (organization_id, professional_id, active);
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_spec_by_spec
+        ON clinic_professional_specialties (organization_id, specialty_id, active);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_professional_specialties', e); }
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

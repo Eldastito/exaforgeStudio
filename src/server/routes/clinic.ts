@@ -24,6 +24,7 @@ import { ClinicAddendumNoticeService } from "../ClinicAddendumNoticeService.js";
 import { ClinicPatientAllergyService } from "../ClinicPatientAllergyService.js";
 import { ClinicFollowUpNoticeService } from "../ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "../ClinicMonthlyReportDeliveryService.js";
+import { ClinicSpecialtyService } from "../ClinicSpecialtyService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -701,6 +702,83 @@ router.get("/prescriptions/:id/pdf", async (req: AuthRequest, res): Promise<any>
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
+});
+
+// Especialidades normalizadas (ADR-145 Fase 1 / Fatia 35). CRUD +
+// vínculos profissional↔especialidade + backfill idempotente do texto
+// legado clinic_professionals.specialty. Escrita restrita a owner|admin
+// (gestor cadastra; recepção só consulta). Backfill exposto como POST
+// dedicado — não roda automaticamente pra dar controle do momento.
+router.get("/specialties", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const includeInactive = String(req.query.includeInactive || "") === "1";
+  res.json({ specialties: ClinicSpecialtyService.list(orgId, { includeInactive }) });
+});
+
+router.post("/specialties", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const specialty = ClinicSpecialtyService.create(orgId, req.body || {}, actor(req) ?? null);
+    res.json({ specialty });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/specialties/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const s = ClinicSpecialtyService.get(orgId, req.params.id);
+  if (!s) return res.status(404).json({ error: "Especialidade não encontrada." });
+  res.json({ specialty: s });
+});
+
+router.patch("/specialties/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const s = ClinicSpecialtyService.update(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    if (!s) return res.status(404).json({ error: "Especialidade não encontrada." });
+    res.json({ specialty: s });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/specialties/:id/professionals", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const activeOnly = String(req.query.activeOnly || "1") !== "0";
+  res.json({
+    professionals: ClinicSpecialtyService.listProfessionalsForSpecialty(orgId, req.params.id, { activeOnly }),
+  });
+});
+
+// Especialidades de UM profissional + substituição atômica do conjunto.
+router.get("/professionals/:id/specialties", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const activeOnly = String(req.query.activeOnly || "1") !== "0";
+  res.json({
+    specialties: ClinicSpecialtyService.listSpecialtiesForProfessional(orgId, req.params.id, { activeOnly }),
+  });
+});
+
+router.put("/professionals/:id/specialties", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const items = Array.isArray(req.body?.specialties) ? req.body.specialties : [];
+  try {
+    const links = ClinicSpecialtyService.setProfessionalSpecialties(orgId, req.params.id, items, actor(req) ?? null);
+    res.json({ links });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/specialties/backfill", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const summary = ClinicSpecialtyService.backfillFromLegacy(orgId, actor(req) ?? null);
+    res.json({ summary });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Catálogo CID-10 (ADR-080 Fase 23). Busca por prefixo de código ou

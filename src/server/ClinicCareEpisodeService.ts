@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
+import { ClinicTreatmentCycleService } from "./ClinicTreatmentCycleService.js";
 
 export type EpisodeStatus = "active" | "on_hold" | "discharged" | "cancelled";
 
@@ -405,26 +406,37 @@ export class ClinicCareEpisodeService {
       durationMinutes?: number | null;
       title?: string | null;
       roomId?: string | null;
+      /** Fatia 38: cria ciclo inicial no mesmo fluxo. Default: sim. */
+      createInitialCycle?: boolean;
+      plannedSessions?: number | null;
     },
     actorId: string | null = null
-  ): { episode: CareEpisode; firstAppointment: any | null } {
+  ): { episode: CareEpisode; firstAppointment: any | null; initialCycle: any | null } {
     let firstAppointment: any = null;
     let episode: CareEpisode | null = null;
+    let initialCycle: any = null;
+    const wantCycle = input.createInitialCycle !== false; // default true
 
-    // Se firstAppointmentAt não vem, só abrimos o episódio (sem transação
-    // composta) — mantém código simples e evita transação de 1 statement.
+    // Se firstAppointmentAt não vem, só abrimos o episódio (+ ciclo opcional).
     if (!input.firstAppointmentAt) {
-      episode = this.open(orgId, contactId, {
-        specialtyId: input.specialtyId,
-        primaryProfessionalId: input.primaryProfessionalId,
-        startedAt: input.startedAt,
-      }, actorId);
-      return { episode, firstAppointment: null };
+      const tx = db.transaction(() => {
+        episode = this.open(orgId, contactId, {
+          specialtyId: input.specialtyId,
+          primaryProfessionalId: input.primaryProfessionalId,
+          startedAt: input.startedAt,
+        }, actorId);
+        if (wantCycle) {
+          initialCycle = ClinicTreatmentCycleService.create(orgId, episode.id, {
+            plannedSessions: input.plannedSessions ?? null,
+          }, actorId);
+        }
+      });
+      tx();
+      return { episode: episode!, firstAppointment: null, initialCycle };
     }
 
-    // Fluxo composto: abrir episódio + primeiro appointment em 1 transação.
-    // Se createAppointment lançar (conflito, ausência, sala inválida), rollback
-    // desfaz o INSERT do episódio inteiro.
+    // Fluxo composto: abrir episódio + ciclo + primeiro appointment em 1 transação.
+    // Rollback total se qualquer parte falhar.
     let durationMinutes = input.durationMinutes ?? undefined;
     if (durationMinutes == null || durationMinutes <= 0) {
       const spec = db.prepare(
@@ -439,6 +451,11 @@ export class ClinicCareEpisodeService {
         primaryProfessionalId: input.primaryProfessionalId,
         startedAt: input.startedAt,
       }, actorId);
+      if (wantCycle) {
+        initialCycle = ClinicTreatmentCycleService.create(orgId, episode.id, {
+          plannedSessions: input.plannedSessions ?? null,
+        }, actorId);
+      }
       firstAppointment = ClinicAgendaService.createAppointment(orgId, {
         contactId,
         title: input.title || undefined,
@@ -448,10 +465,19 @@ export class ClinicCareEpisodeService {
         durationMinutes,
         careEpisodeId: episode.id,
       }, actorId ?? undefined);
+      // Amarra o appointment ao ciclo inicial (sequência 1)
+      if (initialCycle && firstAppointment?.id) {
+        db.prepare(
+          `UPDATE appointments SET treatment_cycle_id = ?, cycle_sequence_number = 1
+            WHERE id = ? AND organization_id = ?`
+        ).run(initialCycle.id, firstAppointment.id, orgId);
+        firstAppointment.treatmentCycleId = initialCycle.id;
+        firstAppointment.cycleSequenceNumber = 1;
+      }
     });
     tx();
 
-    return { episode: episode!, firstAppointment };
+    return { episode: episode!, firstAppointment, initialCycle };
   }
 
   /**

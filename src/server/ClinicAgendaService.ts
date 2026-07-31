@@ -571,6 +571,15 @@ export class ClinicAgendaService {
     const a = this.get(orgId, id);
     db.prepare("UPDATE appointments SET checkout_at = CURRENT_TIMESTAMP, status = 'completed', continuation_status = 'finish' WHERE id = ? AND organization_id = ?").run(id, orgId);
     logAuthEvent(orgId, actorId, a.contact_id, "CLINIC_APPOINTMENT_COMPLETED", { appointmentId: id });
+    // Fatia 38 (ADR-145 D4/RN-005): se o appointment está vinculado a um
+    // ciclo, recalcula uso e transiciona pra renewal_due quando esgota.
+    // Import dinâmico evita ciclo de import (CareEpisodeService → AgendaService).
+    try {
+      import("./ClinicTreatmentCycleService.js").then((m) => {
+        try { m.ClinicTreatmentCycleService.transitionOnAppointmentCompleted(orgId, id); }
+        catch (err) { console.error("[Clínica] transition on complete falhou", id, err); }
+      });
+    } catch { /* noop */ }
     return this.hydrate(orgId, this.get(orgId, id));
   }
 

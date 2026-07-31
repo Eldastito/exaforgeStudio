@@ -104,6 +104,7 @@
     "test:clinic-immutability": "tsx scripts/test-clinic-immutability.ts",
     "test:clinic-hardening": "tsx scripts/test-clinic-hardening.ts",
     "test:clinic-ux-actions": "tsx scripts/test-clinic-ux-actions.ts",
+    "test:clinic-config-ui": "tsx scripts/test-clinic-config-ui.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

@@ -71,12 +71,17 @@ function fmtWhen(iso: string): string {
 function renderMessage(patientName: string, whenISO: string, professionalName: string | null, clinicName: string, templateKey: ReminderTemplateKey): string {
   const when = fmtWhen(whenISO);
   const withProf = professionalName ? ` com ${professionalName}` : "";
+  // Fase 32: rodapé com REMARCAR (Fase P já reconhecia, faltava explicitar
+  // pro paciente) + PARAR (opt-out LGPD Art.8 §5 — Fatia 32 grava audit e
+  // revoga consent `comunicacoes`). Uma linha em branco separa o rodapé do
+  // corpo pra ficar visível.
+  const footer = `\n\nResponda REMARCAR pra trocar horário, ou PARAR pra não receber mais lembretes.`;
   if (templateKey === "2h") {
     // Segundo lembrete — tom mais urgente, texto mais curto (paciente deveria
     // já saber; é uma cutucada final pra confirmar).
-    return `Oi, ${patientName}! Ainda vamos te ver hoje às ${when.split("às ")[1] || when}${withProf}? Responda SIM pra confirmar ou NÃO pra cancelar. — ${clinicName}`;
+    return `Oi, ${patientName}! Ainda vamos te ver hoje às ${when.split("às ")[1] || when}${withProf}? Responda SIM pra confirmar ou NÃO pra cancelar. — ${clinicName}${footer}`;
   }
-  return `Olá, ${patientName}! Lembramos que você tem consulta em ${when}${withProf}. Se puder confirmar, responda SIM. Se precisar cancelar, responda NÃO. — ${clinicName}`;
+  return `Olá, ${patientName}! Lembramos que você tem consulta em ${when}${withProf}. Se puder confirmar, responda SIM. Se precisar cancelar, responda NÃO. — ${clinicName}${footer}`;
 }
 
 export class ClinicReminderService {

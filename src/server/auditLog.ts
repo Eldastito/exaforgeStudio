@@ -1,6 +1,26 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 
+/**
+ * Mascara identificador pra ir no metadata de audit (ADR-080 Fase 32).
+ * Motivação: audit é lido em telas por operadores/gestor/master admin;
+ * expor telefone completo do paciente em toda linha de log é
+ * proporcionalidade ruim (LGPD Art.6 III — necessidade). O identifier
+ * fica traceável (primeiros 4 + últimos 4) mas não legível na íntegra.
+ *
+ * Exemplos:
+ *   "5511987654321"           → "5511***4321"
+ *   "user@example.com"        → "user***.com"   (fallback genérico)
+ *   ""/null                   → null
+ *   "12345"                   → "12345"          (curto demais pra mascarar)
+ */
+export function maskIdentifier(id: string | null | undefined): string | null {
+  if (!id) return null;
+  const s = String(id);
+  if (s.length <= 8) return s; // curto demais — mascarar deixaria ilegível
+  return `${s.slice(0, 4)}***${s.slice(-4)}`;
+}
+
 // Trilha de auditoria única do ZappFlow. Apesar do nome histórico da tabela
 // (`auth_audit_logs`), ela já cobre toda mutação relevante do produto, não só
 // login/segurança — eventos como PRODUCT_UPDATED, STOCK_MOVEMENT,

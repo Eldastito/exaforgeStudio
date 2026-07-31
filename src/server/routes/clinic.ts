@@ -23,6 +23,7 @@ import { Cid10Service } from "../Cid10Service.js";
 import { ClinicAddendumNoticeService } from "../ClinicAddendumNoticeService.js";
 import { ClinicPatientAllergyService } from "../ClinicPatientAllergyService.js";
 import { ClinicFollowUpNoticeService } from "../ClinicFollowUpNoticeService.js";
+import { ClinicMonthlyReportDeliveryService } from "../ClinicMonthlyReportDeliveryService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -977,6 +978,99 @@ router.get("/reports/monthly.pdf", requireRole("owner", "admin"), async (req: Au
   }
 });
 
+// ── Envio automático do relatório mensal (ADR-080 Fase 33) ─────────────
+// Configuração + histórico + re-envio manual. `enabled` default 0 (opt-in
+// estrito): envio automático de PDF financeiro exige decisão consciente do
+// gestor. `day` limitado a 1..28 (evita 30/31 em fev). `recipientContactId`
+// aponta pra um contato da org (owner/sócio/contador) — a mensagem sai pelo
+// canal WhatsApp desse contato (ou fallback pro 1º canal ativo).
+router.get("/settings/monthly-report", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = db.prepare(
+    `SELECT clinic_monthly_report_enabled AS en,
+            clinic_monthly_report_day AS day,
+            clinic_monthly_report_recipient_contact_id AS recipient
+       FROM organization_settings WHERE organization_id = ?`
+  ).get(orgId) as any;
+  res.json({
+    enabled: r != null && Number(r.en) === 1,
+    day: r?.day != null ? Number(r.day) : 5,
+    recipientContactId: r?.recipient || null,
+  });
+});
+
+router.put("/settings/monthly-report", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const patches: string[] = [];
+  const params: any[] = [];
+  if (req.body?.enabled !== undefined) {
+    patches.push("clinic_monthly_report_enabled = ?");
+    params.push(req.body.enabled === true || req.body.enabled === 1 ? 1 : 0);
+  }
+  if (req.body?.day !== undefined) {
+    const n = Math.floor(Number(req.body.day));
+    if (!Number.isFinite(n) || n < 1 || n > 28) {
+      return res.status(400).json({ error: "day deve estar entre 1 e 28." });
+    }
+    patches.push("clinic_monthly_report_day = ?");
+    params.push(n);
+  }
+  if (req.body?.recipientContactId !== undefined) {
+    const rc = req.body.recipientContactId;
+    if (rc !== null && rc !== "") {
+      const exists = db.prepare(`SELECT 1 FROM contacts WHERE id = ? AND organization_id = ?`).get(rc, orgId);
+      if (!exists) return res.status(400).json({ error: "Destinatário não encontrado." });
+    }
+    patches.push("clinic_monthly_report_recipient_contact_id = ?");
+    params.push(rc || null);
+  }
+  if (patches.length) {
+    db.prepare(`UPDATE organization_settings SET ${patches.join(", ")} WHERE organization_id = ?`).run(...params, orgId);
+    logAuthEvent(orgId, actor(req) ?? null, null, "CLINIC_MONTHLY_REPORT_CONFIG_UPDATED", {
+      changes: Object.keys(req.body || {}),
+    });
+  }
+  const r = db.prepare(
+    `SELECT clinic_monthly_report_enabled AS en,
+            clinic_monthly_report_day AS day,
+            clinic_monthly_report_recipient_contact_id AS recipient
+       FROM organization_settings WHERE organization_id = ?`
+  ).get(orgId) as any;
+  res.json({
+    enabled: r != null && Number(r.en) === 1,
+    day: r?.day != null ? Number(r.day) : 5,
+    recipientContactId: r?.recipient || null,
+  });
+});
+
+// GET /clinic/monthly-report-deliveries?month=YYYY-MM&limit=N  → histórico
+router.get("/monthly-report-deliveries", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = req.query.month ? String(req.query.month) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json({ deliveries: ClinicMonthlyReportDeliveryService.list(orgId, { month, limit }) });
+});
+
+// POST /clinic/monthly-report/send-now  { month?, force? }  → re-envio manual
+router.post("/monthly-report/send-now", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const delivery = await ClinicMonthlyReportDeliveryService.sendForMonth(
+      orgId,
+      req.body?.month || null,
+      { actorId: actor(req) ?? null, force: req.body?.force === true }
+    );
+    if (!delivery) return res.status(400).json({ error: "Não foi possível preparar o envio." });
+    res.json({ delivery });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ── Retenção LGPD (ADR-080 Fase U) ──────────────────────────────────────
 // Fase 32: rota agregada — aba "Configurações" no front carrega todas as
 // configs do módulo Clínica em 1 request só (evita 5 requests em cascata
@@ -994,7 +1088,8 @@ router.get("/settings", (req: AuthRequest, res): any => {
             clinic_reminder_hours, clinic_second_reminder_enabled, clinic_second_reminder_hours,
             clinic_addendum_notification_enabled,
             clinic_followup_notification_enabled, clinic_followup_notification_lead_days,
-            clinic_receipt_business_document, clinic_receipt_business_document_type
+            clinic_receipt_business_document, clinic_receipt_business_document_type,
+            clinic_monthly_report_enabled, clinic_monthly_report_day, clinic_monthly_report_recipient_contact_id
        FROM organization_settings WHERE organization_id = ?`
   ).get(orgId) as any;
   res.json({
@@ -1020,6 +1115,11 @@ router.get("/settings", (req: AuthRequest, res): any => {
     receipt: {
       businessDocument: o?.clinic_receipt_business_document || null,
       businessDocumentType: o?.clinic_receipt_business_document_type || null,
+    },
+    monthlyReport: {
+      enabled: o != null && Number(o.clinic_monthly_report_enabled) === 1,
+      day: o?.clinic_monthly_report_day != null ? Number(o.clinic_monthly_report_day) : 5,
+      recipientContactId: o?.clinic_monthly_report_recipient_contact_id || null,
     },
   });
 });

@@ -2654,6 +2654,36 @@ const initDb = () => {
   // Faixa razoável 1..30 dias (o service clipa).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_followup_notification_lead_days INTEGER DEFAULT 3`); } catch(e){}
 
+  // Envio automático do relatório mensal (ADR-080 Fase 33). Complementa a
+  // Fatia 17 (rota manual do PDF) — o Scheduler decide se está no dia certo
+  // do mês e dispara sozinho pra um destinatário configurado (owner/sócio/
+  // contador). Dedup por (org, month, status IN sent|queued) — mesmo relatório
+  // do mesmo mês só sai UMA vez, mesmo com o Scheduler rodando várias vezes
+  // dentro do dia; `force:true` bypassa (re-envio manual do painel).
+  // Config `enabled` default 0 (OPT-IN): envio automático de PDF financeiro
+  // exige decisão consciente do gestor — sem opt-in explícito, nada dispara.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_monthly_report_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        month TEXT NOT NULL,                -- 'YYYY-MM' (mês do relatório)
+        contact_id TEXT,                    -- destinatário
+        channel_id TEXT,
+        to_identifier TEXT,
+        status TEXT NOT NULL,               -- queued | sent | failed | skipped
+        provider_message_id TEXT,
+        error TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_monthly_report_dedup ON clinical_monthly_report_deliveries (organization_id, month, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_monthly_report_recent ON clinical_monthly_report_deliveries (organization_id, sent_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_monthly_report_deliveries', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_monthly_report_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_monthly_report_day INTEGER DEFAULT 5`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_monthly_report_recipient_contact_id TEXT`); } catch(e){}
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

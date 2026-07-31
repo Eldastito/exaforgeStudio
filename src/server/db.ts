@@ -2743,6 +2743,14 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN care_started_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN checkout_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN continuation_status TEXT`); } catch(e){} // pending | continue | finish | reschedule
+  // Snapshot imutável do plano/convênio do paciente no momento do startCare
+  // (ADR-080 Fase 29). Congela {plan, insurance, planNumber, planValidUntil,
+  // snapshotAt} lendo do patient_profiles — se o gestor mudar o plano do
+  // paciente DEPOIS, appts em andamento e visões do dia continuam mostrando
+  // o plano que valia quando o atendimento começou (auditoria do que foi
+  // cobrado / autorizado). NULL em appts pré-Fatia-29 e em appts que ainda
+  // não iniciaram atendimento (agendaForDay cai no plano atual).
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN patient_plan_snapshot_json TEXT`); } catch(e){}
   // Aviso de vaga na fila (ADR-080 Fase Q). Quando alguém cancela, guarda a
   // oferta de vaga enviada pra 1 candidato (o mais antigo signed encounter
   // com retorno recomendado pendente do MESMO profissional). Se o candidato
@@ -3131,6 +3139,19 @@ const initDb = () => {
   // devolveu vazio. SEMPRE depois do CREATE de clinical_prescriptions.
   try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN allergy_warnings TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN allergy_alert_forced INTEGER DEFAULT 0`); } catch(e){}
+
+  // Snapshots imutáveis de nome do paciente e nome do negócio (ADR-080 Fase 29).
+  // Fecha bug documentado: `computeDocumentHash` incluía `patientName` derivado
+  // de lookup live no PDF. Se o gestor renomeasse o contato depois, o PDF
+  // renderizava com o nome novo mas o hash não recomputava — quebrava
+  // conferência de integridade. Snapshot no issue → PDF re-lê snapshot → hash
+  // bate. Prescription + Certificate ganham as duas colunas; Receipt já tem
+  // `patient_name_snapshot` e `business_name_snapshot` desde a Fase 27.
+  // ALTER SEMPRE depois do CREATE das tabelas (padrão L/T/U).
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN patient_name_snapshot TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_prescriptions ADD COLUMN business_name_snapshot TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN patient_name_snapshot TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE clinical_medical_certificates ADD COLUMN business_name_snapshot TEXT`); } catch(e){}
 
   // Recibo particular (ADR-080 Fase 27). Consulta particular (fora de convênio)
   // gera recibo PDF do valor pago. Molde de `clinical_prescriptions` — mesmo

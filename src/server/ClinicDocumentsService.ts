@@ -55,6 +55,8 @@ export interface Prescription {
   signedWithPin: boolean;
   signatureHash: string | null;
   signatureTimestamp: string | null;
+  patientNameSnapshot: string | null;
+  businessNameSnapshot: string | null;
   allergyWarnings: AllergyAlert[] | null;
   allergyAlertForced: boolean;
   createdBy: string | null;
@@ -83,6 +85,8 @@ export interface Certificate {
   signedWithPin: boolean;
   signatureHash: string | null;
   signatureTimestamp: string | null;
+  patientNameSnapshot: string | null;
+  businessNameSnapshot: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -247,6 +251,8 @@ function hydratePrescription(r: any): Prescription | null {
     signedWithPin: Number(r.signed_with_pin || 0) === 1,
     signatureHash: r.signature_hash ?? null,
     signatureTimestamp: r.signature_timestamp ?? null,
+    patientNameSnapshot: r.patient_name_snapshot ?? null,
+    businessNameSnapshot: r.business_name_snapshot ?? null,
     allergyWarnings,
     allergyAlertForced: Number(r.allergy_alert_forced || 0) === 1,
     createdBy: r.created_by ?? null,
@@ -278,6 +284,8 @@ function hydrateCertificate(r: any): Certificate | null {
     signedWithPin: Number(r.signed_with_pin || 0) === 1,
     signatureHash: r.signature_hash ?? null,
     signatureTimestamp: r.signature_timestamp ?? null,
+    patientNameSnapshot: r.patient_name_snapshot ?? null,
+    businessNameSnapshot: r.business_name_snapshot ?? null,
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -360,8 +368,40 @@ export function drawElectronicSignatureFooter(doc: any, hash: string | null, tim
 // mesmo hash — permite conferência offline. Timestamp entra dentro pra
 // que dois docs idênticos emitidos em momentos distintos gerem hashes
 // distintos (senão colidem).
+/**
+ * Canonicaliza um valor recursivamente pra hashing determinístico:
+ *   - objetos: keys ordenadas alfabeticamente, aplicado recursivamente
+ *     em cada valor;
+ *   - arrays: ordem preservada (ordem é significativa em items de receita,
+ *     lista de anexos, etc.), mas cada elemento é canonicalizado;
+ *   - primitivos: como estão.
+ *
+ * Fecha bug documentado da Fase 16 (auditoria): `JSON.stringify(payload,
+ * Object.keys(payload).sort())` só ordenava o nível raiz — objetos aninhados
+ * saíam na ordem de inserção, então dois payloads semanticamente idênticos
+ * gerados por caminhos diferentes davam hashes distintos e falso alerta de
+ * "documento adulterado".
+ */
+export function canonicalize(value: any): any {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(canonicalize);
+  const out: Record<string, any> = {};
+  for (const k of Object.keys(value).sort()) {
+    out[k] = canonicalize(value[k]);
+  }
+  return out;
+}
+
+/**
+ * Hash SHA-256 do conteúdo canônico (recursivo — Fase 29). Mesma entrada
+ * semântica sempre gera mesmo hash, independente da ordem em que as chaves
+ * foram inseridas no objeto. Fase 29 também moveu `patientName` e
+ * `businessName` pra dentro do canonical: docs emitidos usam snapshots
+ * congelados no issue (não fazem lookup live no PDF), então renomear
+ * contato/negócio depois NÃO afeta a conferência do documento.
+ */
 export function computeDocumentHash(payload: object): string {
-  const canonical = JSON.stringify(payload, Object.keys(payload).sort());
+  const canonical = JSON.stringify(canonicalize(payload));
   return createHash("sha256").update(canonical).digest("hex");
 }
 
@@ -542,15 +582,24 @@ export class ClinicDocumentsService {
     const nameSnap = prof?.name || before.professionalNameSnapshot || null;
     const regSnap = prof?.registration_number || null;
     const councilSnap = prof?.council || null;
-    // Hash+timestamp da assinatura eletrônica (ADR-080 Fase 16) — só gera
-    // quando o PIN foi realmente conferido; sem PIN, ficam null e o rodapé
-    // do PDF não é renderizado (mantém compat com clínicas sem PIN).
+    // Fase 29: snapshots imutáveis de nome do paciente e nome do negócio.
+    // O PDF re-lê esses snapshots (não faz lookup live via patientName()/
+    // businessName()) — se o gestor renomear contato/negócio depois, o PDF
+    // continua mostrando o nome que valia NO MOMENTO da emissão e o hash
+    // canônico continua batendo.
+    const patientNameSnap = patientName(orgId, before.contactId);
+    const businessNameSnap = businessName(orgId);
+    // Hash+timestamp da assinatura eletrônica (ADR-080 Fase 16 + Fase 29).
+    // Só gera quando o PIN foi realmente conferido; sem PIN, ficam null e o
+    // rodapé do PDF não é renderizado (compat com clínicas sem PIN).
     const signedAt = new Date().toISOString();
     const signatureHash = signedWithPin ? computeDocumentHash({
       kind: "prescription",
       id,
       orgId,
       contactId: before.contactId,
+      patientName: patientNameSnap,
+      businessName: businessNameSnap,
       professionalName: nameSnap,
       professionalRegistration: regSnap,
       professionalCouncil: councilSnap,
@@ -572,6 +621,8 @@ export class ClinicDocumentsService {
              professional_name_snapshot = ?,
              professional_registration_snapshot = ?,
              professional_council_snapshot = ?,
+             patient_name_snapshot = ?,
+             business_name_snapshot = ?,
              signed_with_pin = ?,
              signature_hash = ?,
              signature_timestamp = ?,
@@ -582,6 +633,7 @@ export class ClinicDocumentsService {
     ).run(
       actorId,
       nameSnap, regSnap, councilSnap,
+      patientNameSnap, businessNameSnap,
       signedWithPin ? 1 : 0,
       signatureHash,
       signedWithPin ? signedAt : null,
@@ -722,12 +774,17 @@ export class ClinicDocumentsService {
     const nameSnap = prof?.name || before.professionalNameSnapshot || null;
     const regSnap = prof?.registration_number || null;
     const councilSnap = prof?.council || null;
+    // Fase 29: snapshots imutáveis (mesmo racional de issuePrescription).
+    const patientNameSnap = patientName(orgId, before.contactId);
+    const businessNameSnap = businessName(orgId);
     const signedAt = new Date().toISOString();
     const signatureHash = signedWithPin ? computeDocumentHash({
       kind: "certificate",
       id,
       orgId,
       contactId: before.contactId,
+      patientName: patientNameSnap,
+      businessName: businessNameSnap,
       professionalName: nameSnap,
       professionalRegistration: regSnap,
       professionalCouncil: councilSnap,
@@ -745,6 +802,8 @@ export class ClinicDocumentsService {
              professional_name_snapshot = ?,
              professional_registration_snapshot = ?,
              professional_council_snapshot = ?,
+             patient_name_snapshot = ?,
+             business_name_snapshot = ?,
              signed_with_pin = ?,
              signature_hash = ?,
              signature_timestamp = ?,
@@ -753,6 +812,7 @@ export class ClinicDocumentsService {
     ).run(
       actorId,
       nameSnap, regSnap, councilSnap,
+      patientNameSnap, businessNameSnap,
       signedWithPin ? 1 : 0,
       signatureHash,
       signedWithPin ? signedAt : null,
@@ -789,8 +849,10 @@ export class ClinicDocumentsService {
   static renderPrescriptionPdf(orgId: string, id: string): Promise<Buffer> {
     const rx = this.getPrescription(orgId, id);
     if (!rx) throw new Error("Receita não encontrada.");
-    const biz = businessName(orgId);
-    const patient = patientName(orgId, rx.contactId);
+    // Fase 29: PDF de doc issued re-lê snapshots imutáveis; rascunho continua
+    // com lookup live (dados podem mudar até emitir).
+    const biz = (rx.status === "issued" && rx.businessNameSnapshot) ? rx.businessNameSnapshot : businessName(orgId);
+    const patient = (rx.status === "issued" && rx.patientNameSnapshot) ? rx.patientNameSnapshot : patientName(orgId, rx.contactId);
     const issued = rx.status === "issued";
     const dateStr = issued && rx.issuedAt ? longDateBR(rx.issuedAt) : longDateBR();
 
@@ -851,8 +913,9 @@ export class ClinicDocumentsService {
   static renderCertificatePdf(orgId: string, id: string): Promise<Buffer> {
     const cert = this.getCertificate(orgId, id);
     if (!cert) throw new Error("Atestado não encontrado.");
-    const biz = businessName(orgId);
-    const patient = patientName(orgId, cert.contactId);
+    // Fase 29: mesmo racional do prescription.
+    const biz = (cert.status === "issued" && cert.businessNameSnapshot) ? cert.businessNameSnapshot : businessName(orgId);
+    const patient = (cert.status === "issued" && cert.patientNameSnapshot) ? cert.patientNameSnapshot : patientName(orgId, cert.contactId);
     const issued = cert.status === "issued";
     const dateStr = issued && cert.issuedAt ? longDateBR(cert.issuedAt) : longDateBR();
 

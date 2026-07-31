@@ -146,8 +146,27 @@ export class ClinicAgendaService {
   static hydrate(orgId: string, appt: any, nowMs = Date.now()): any {
     const w = this.warningMin(orgId);
     const endMs = this.effectiveEndMs(orgId, appt);
+    // Fase 29: se o appt tem snapshot de plano (gravado no startCare),
+    // hydrate sobrescreve `insurance_name`/`current_plan_name` pela versão
+    // congelada. Isso garante que agenda/painel/relatório mostrem sempre
+    // "o plano vigente NO DIA da consulta", mesmo que o gestor mude o
+    // cadastro do paciente depois. Snapshot NÃO shadowa nome/telefone do
+    // paciente — só o plano/convênio (que é o dado auditável do faturamento).
+    let insurance = appt.insurance_name ?? null;
+    let plan = appt.current_plan_name ?? null;
+    let planSnapshot: any = null;
+    if (appt.patient_plan_snapshot_json) {
+      try {
+        planSnapshot = JSON.parse(appt.patient_plan_snapshot_json);
+        if (planSnapshot?.insurance != null) insurance = planSnapshot.insurance;
+        if (planSnapshot?.plan != null) plan = planSnapshot.plan;
+      } catch { /* JSON quebrado — cai no fallback */ }
+    }
     return {
       ...appt,
+      insurance_name: insurance,
+      current_plan_name: plan,
+      patient_plan_snapshot: planSnapshot,
       duration_minutes: this.durationMin(orgId, appt),
       effective_end: endMs ? new Date(endMs).toISOString() : null,
       overrun_state: this.overrunState(orgId, appt, nowMs, w),
@@ -389,8 +408,37 @@ export class ClinicAgendaService {
   static startCare(orgId: string, id: string, actorId?: string): any {
     const a = this.get(orgId, id);
     if (a.care_started_at) throw new Error("Atendimento já iniciado.");
-    db.prepare("UPDATE appointments SET care_started_at = CURRENT_TIMESTAMP, status = 'in_care', continuation_status = 'pending' WHERE id = ? AND organization_id = ?").run(id, orgId);
-    logAuthEvent(orgId, actorId, a.contact_id, "CLINIC_CARE_STARTED", { appointmentId: id });
+    // Fase 29: snapshot imutável do plano/convênio DO PACIENTE no momento
+    // do startCare. Congela plan_name/insurance/plan_number/plan_valid_until
+    // — se o gestor mudar o plano depois, o appt em andamento e visões do
+    // dia continuam refletindo o plano que valia quando o atendimento
+    // começou. Sem row em patient_profiles, snapshot fica `null` (paciente
+    // particular sem cadastro de plano; agendaForDay cai no fallback).
+    let planSnapshotJson: string | null = null;
+    try {
+      const pp = db.prepare(
+        `SELECT current_plan_name, insurance_name, insurance_card_number, insurance_valid_until
+           FROM patient_profiles WHERE organization_id = ? AND contact_id = ?`
+      ).get(orgId, a.contact_id) as any;
+      if (pp) {
+        planSnapshotJson = JSON.stringify({
+          plan: pp.current_plan_name ?? null,
+          insurance: pp.insurance_name ?? null,
+          planNumber: pp.insurance_card_number ?? null,
+          planValidUntil: pp.insurance_valid_until ?? null,
+          snapshotAt: new Date().toISOString(),
+        });
+      }
+    } catch { /* patient_profiles pode não existir no schema — noop */ }
+    db.prepare(
+      `UPDATE appointments
+          SET care_started_at = CURRENT_TIMESTAMP,
+              status = 'in_care',
+              continuation_status = 'pending',
+              patient_plan_snapshot_json = COALESCE(patient_plan_snapshot_json, ?)
+        WHERE id = ? AND organization_id = ?`
+    ).run(planSnapshotJson, id, orgId);
+    logAuthEvent(orgId, actorId, a.contact_id, "CLINIC_CARE_STARTED", { appointmentId: id, planSnapshot: !!planSnapshotJson });
     // Prontuário (ADR-080 Fase G): tenta abrir encounter em rascunho de forma
     // BEST-EFFORT — se faltar consentimento LGPD sensível ou paciente, não
     // trava o início do atendimento. O profissional destrava pela UI depois.

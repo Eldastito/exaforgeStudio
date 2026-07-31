@@ -226,6 +226,7 @@ export class ClinicAgendaService {
   /** Cria consulta clínica com profissional/sala/duração, checando conflito. */
   static createAppointment(orgId: string, input: {
     contactId?: string; title?: string; scheduledStart?: string; professionalId?: string; roomId?: string; durationMinutes?: number; force?: boolean;
+    careEpisodeId?: string; professionalOverrideReason?: string;
   }, actorId?: string): any {
     const contactId = String(input?.contactId || "");
     if (!contactId) throw new Error("Selecione o paciente.");
@@ -235,11 +236,56 @@ export class ClinicAgendaService {
     const contact = db.prepare("SELECT name FROM contacts WHERE id = ? AND organization_id = ?").get(contactId, orgId) as any;
     if (!contact) throw new Error("Paciente não encontrado.");
 
+    // Jornada de Tratamento (ADR-145 D1/D3, Fatia 37): quando o body traz
+    // careEpisodeId, buscamos o episódio, injetamos specialty_id, e travamos
+    // o profissional pra ser o mesmo do episódio (primary_professional_id).
+    // Divergência → EPISODE_PROFESSIONAL_MISMATCH; override precisa de
+    // force=true + professionalOverrideReason (motivo obrigatório) + audit.
+    let episode: any = null;
+    let episodeSpecialtyId: string | null = null;
+    if (input?.careEpisodeId) {
+      episode = db.prepare(
+        `SELECT id, contact_id, specialty_id, primary_professional_id, status
+           FROM clinic_care_episodes WHERE organization_id = ? AND id = ?`
+      ).get(orgId, input.careEpisodeId) as any;
+      if (!episode) throw new Error("Episódio de cuidado não encontrado.");
+      if (episode.contact_id !== contactId) {
+        throw new Error("Episódio pertence a outro paciente.");
+      }
+      if (episode.status !== "active" && episode.status !== "on_hold") {
+        const e: any = new Error("Episódio não está ativo — não pode receber agendamento novo.");
+        e.code = "EPISODE_NOT_ACTIVE"; throw e;
+      }
+      episodeSpecialtyId = episode.specialty_id;
+      // Se professionalId não veio, preenche automaticamente do episódio
+      if (!input.professionalId) {
+        input = { ...input, professionalId: episode.primary_professional_id };
+      }
+    }
+
     let professional: any = null;
     if (input?.professionalId) {
       professional = db.prepare("SELECT id, name FROM clinic_professionals WHERE id = ? AND organization_id = ?").get(input.professionalId, orgId);
       if (!professional) throw new Error("Profissional não encontrado.");
     }
+
+    // Gate: professional do appointment deve ser o do episódio, exceto
+    // override explícito. Sem force → EPISODE_PROFESSIONAL_MISMATCH.
+    // Com force → exige motivo obrigatório + registra audit específico.
+    let overrideReason: string | null = null;
+    if (episode && professional && professional.id !== episode.primary_professional_id) {
+      if (!input.force) {
+        const e: any = new Error("Profissional divergente do responsável pelo episódio.");
+        e.code = "EPISODE_PROFESSIONAL_MISMATCH";
+        e.expectedProfessionalId = episode.primary_professional_id;
+        throw e;
+      }
+      overrideReason = String(input.professionalOverrideReason || "").trim();
+      if (!overrideReason) {
+        throw new Error("Motivo do override do profissional é obrigatório quando force=true.");
+      }
+    }
+
     let room: any = null;
     if (input?.roomId) {
       room = db.prepare("SELECT id, name FROM clinic_rooms WHERE id = ? AND organization_id = ?").get(input.roomId, orgId);
@@ -278,9 +324,19 @@ export class ClinicAgendaService {
 
     const id = randomUUID();
     const endISO = new Date(endMs).toISOString();
-    db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_id, professional_name_snapshot, room_id, room_name_snapshot, expected_duration_minutes) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`)
-      .run(id, orgId, contactId, String(input?.title || "Consulta").trim() || "Consulta", start, endISO, professional?.id || null, professional?.name || null, room?.id || null, room?.name || null, durationMinutes);
-    logAuthEvent(orgId, actorId, contactId, "CLINIC_APPOINTMENT_CREATED", { appointmentId: id, professionalId: professional?.id || null, roomId: room?.id || null, durationMinutes });
+    db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_id, professional_name_snapshot, room_id, room_name_snapshot, expected_duration_minutes, care_episode_id, specialty_id, professional_override_reason) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, contactId, String(input?.title || "Consulta").trim() || "Consulta", start, endISO, professional?.id || null, professional?.name || null, room?.id || null, room?.name || null, durationMinutes, episode?.id || null, episodeSpecialtyId, overrideReason);
+    logAuthEvent(orgId, actorId, contactId, "CLINIC_APPOINTMENT_CREATED", {
+      appointmentId: id, professionalId: professional?.id || null, roomId: room?.id || null,
+      durationMinutes, careEpisodeId: episode?.id || null, specialtyId: episodeSpecialtyId,
+    });
+    if (overrideReason) {
+      logAuthEvent(orgId, actorId, contactId, "CLINIC_PROFESSIONAL_OVERRIDE_USED", {
+        appointmentId: id, careEpisodeId: episode.id,
+        expectedProfessionalId: episode.primary_professional_id,
+        usedProfessionalId: professional.id, reason: overrideReason,
+      });
+    }
     return this.hydrate(orgId, db.prepare("SELECT * FROM appointments WHERE id = ?").get(id));
   }
 

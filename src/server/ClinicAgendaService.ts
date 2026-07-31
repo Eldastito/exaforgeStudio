@@ -252,6 +252,10 @@ export class ClinicAgendaService {
       if (episode.contact_id !== contactId) {
         throw new Error("Episódio pertence a outro paciente.");
       }
+      if (episode.status === "discharged") {
+        const e: any = new Error("Episódio já teve alta — não pode receber agendamento novo. Reabra o episódio antes.");
+        e.code = "EPISODE_DISCHARGED"; throw e;
+      }
       if (episode.status !== "active" && episode.status !== "on_hold") {
         const e: any = new Error("Episódio não está ativo — não pode receber agendamento novo.");
         e.code = "EPISODE_NOT_ACTIVE"; throw e;

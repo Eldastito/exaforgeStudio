@@ -797,10 +797,18 @@ function episodeError(res: any, e: any) {
               : code === "TRANSFER_NOOP" ? 409
               : code === "PROFESSIONAL_NOT_IN_SPECIALTY" ? 400
               : code === "EPISODE_PROFESSIONAL_MISMATCH" ? 409
+              : code === "EPISODE_ALREADY_DISCHARGED" ? 409
+              : code === "EPISODE_NOT_DISCHARGED" ? 409
+              : code === "EPISODE_DISCHARGED" ? 409
+              : code === "PIN_REQUIRED" ? 400
+              : code === "PIN_INVALID" ? 401
+              : code === "PIN_LOCKED" ? 423
               : 400;
   res.status(status).json({ error: e.message, code: code || null,
     existingEpisodeId: e.existingEpisodeId || undefined,
-    expectedProfessionalId: e.expectedProfessionalId || undefined });
+    expectedProfessionalId: e.expectedProfessionalId || undefined,
+    dischargedAt: e.dischargedAt || undefined,
+    until: e.until || undefined });
 }
 
 router.get("/patients/:contactId/care-episodes", (req: AuthRequest, res): any => {
@@ -873,6 +881,30 @@ router.post("/care-episodes/:id/resume", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const episode = ClinicCareEpisodeService.resume(orgId, req.params.id, actor(req) ?? null);
+    res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
+});
+
+// Alta explícita (ADR-145 D5, Fatia 39). PIN OBRIGATÓRIO — cliente
+// confirmou. NÃO cancela appointments futuros; NÃO apaga dados. Só esta
+// rota fecha episódio. Reusa verifyPin da Fase 28 (timingSafeEqual +
+// lockout 5×/15min). Body: {professionalId, pin, dischargeType, summary}.
+router.post("/care-episodes/:id/discharge", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const episode = ClinicCareEpisodeService.discharge(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
+});
+
+// Reabertura (RN-007 §"reabertura não altera a alta anterior"). Restrito
+// a owner|admin (decisão gerencial + PIN do prof).
+router.post("/care-episodes/:id/reopen", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const episode = ClinicCareEpisodeService.reopen(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json({ episode });
   } catch (e: any) { episodeError(res, e); }
 });

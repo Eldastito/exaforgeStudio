@@ -26,7 +26,7 @@
  */
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
-import { logAuthEvent } from "./auditLog.js";
+import { logAuthEvent, maskIdentifier } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { ClinicPatientPortalService } from "./ClinicPatientPortalService.js";
@@ -384,6 +384,7 @@ export class ClinicFollowUpNoticeService {
       logAuthEvent(orgId, opts.actorId ?? null, enc.contact_id, "CLINIC_FOLLOWUP_NOTIFIED", {
         encounterId, notificationId: id, channelId, portalTokenId: tokenInfo.id,
         recommendedDays, suggestedAt,
+        toIdentifier: maskIdentifier(contact.identifier),
       });
     } catch (e: any) {
       const err = String(e?.message || e).slice(0, 500);

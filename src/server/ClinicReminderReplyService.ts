@@ -22,12 +22,27 @@ import db from "./db.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
 import { ClinicRescheduleService } from "./ClinicRescheduleService.js";
 import { ClinicVacancyService } from "./ClinicVacancyService.js";
+import { LgpdService } from "./LgpdService.js";
+import { logAuthEvent } from "./auditLog.js";
 
 const REPLY_WINDOW_HOURS = 26;
 
-const YES_PATTERNS = /^(?:sim|s|confirmo|confirma|confirmar|confirmado|ok|okay|okei|okei|k|yes|y|👍)$/;
-const NO_PATTERNS = /^(?:nao|n|não|nn|no|cancela|cancelar|cancelo|nope|👎)$/;
-const RESCHEDULE_PATTERNS = /^(?:remarcar|remarca|remarco|reagendar|reagenda|reagendo|mudar|mudar horario|mudar data|outro horario|outra data|outro dia)$/;
+// Fase 32: patterns relaxadas — aceitam repetição de vogal/consoante final
+// e "OK!!!" etc. Motivação: paciente digita "simm", "cancelaaaa", "nãooo",
+// "confirmou", "confirmada" e o produto entende. Sem inventar palavra nova
+// (esse é escopo de outra fatia — aqui é só flexibilidade das existentes).
+// `+` no final permite repetição da última letra; `!*` no fim absorve
+// exclamação restante (o `normalize` já retira pontuação de canto, mas
+// deixa no meio).
+const YES_PATTERNS = /^(?:si+m+|s|confirm(?:o|a|ar|ado|ada|ou)|ok+(?:ay|ei|zin)?|k|yes|y|👍)$/;
+const NO_PATTERNS = /^(?:n+a+o+|n(?:n+)?|nao+|no+pe?|cancel(?:a+|ar|o|ei|amos)|👎)$/;
+const RESCHEDULE_PATTERNS = /^(?:remarc(?:ar|a+r?|o)|reagend(?:ar|a+r?|o)|mudar|mudar horario|mudar data|outro horario|outra data|outro dia)$/;
+// Fase 32: opt-out explícito no rodapé do lembrete ("Responda PARAR pra não
+// receber mais lembretes"). Reconhece PARAR/STOP/CANCELAR TUDO/SAIR — LGPD
+// Art.8 §5 (revogação facilitada). Revoga consent `comunicacoes` do paciente
+// via LgpdService.revokeConsent (Fase L cascata pra portal tokens; Fase 18
+// já garante que o portal para de resolver token depois do revoke).
+const OPTOUT_PATTERNS = /^(?:parar|para|pare|stop|sair|cancelar tudo|nao quero mais|nao me mande mais|nao me manda mais)$/;
 
 function normalize(s: string): string {
   return String(s || "")
@@ -39,7 +54,7 @@ function normalize(s: string): string {
     .replace(/^[.!?,;:"'()\-—–…\s]+/g, ""); // pontuação no início
 }
 
-export type ReplyAction = "confirmed" | "cancelled" | "reschedule_offered" | "rescheduled" | "reschedule_abandoned" | "vacancy_accepted" | "vacancy_declined" | null;
+export type ReplyAction = "confirmed" | "cancelled" | "reschedule_offered" | "rescheduled" | "reschedule_abandoned" | "vacancy_accepted" | "vacancy_declined" | "optout" | null;
 
 export interface ReplyResult {
   handled: boolean;
@@ -55,6 +70,7 @@ export class ClinicReminderReplyService {
   static parseIntent(text: string): ReplyAction {
     const norm = normalize(text);
     if (!norm) return null;
+    if (OPTOUT_PATTERNS.test(norm)) return "optout";
     if (YES_PATTERNS.test(norm)) return "confirmed";
     if (NO_PATTERNS.test(norm)) return "cancelled";
     if (RESCHEDULE_PATTERNS.test(norm)) return "reschedule_offered";
@@ -126,6 +142,23 @@ export class ClinicReminderReplyService {
 
     const intent = this.parseIntent(text);
     if (!intent) return NOT_HANDLED;
+
+    // (0.7) Opt-out (Fase 32): "PARAR"/"STOP"/"SAIR" revoga consent
+    // `comunicacoes` do paciente — LGPD Art.8 §5. Não exige lembrete
+    // pendente (paciente pode pedir pra parar a qualquer momento).
+    // Idempotente: se já revogado, só devolve reply amigável.
+    if (intent === "optout") {
+      const already = !LgpdService.hasConsent(orgId, contactId, "comunicacoes");
+      if (!already) {
+        try { LgpdService.revokeConsent(orgId, contactId, "comunicacoes", null as any); } catch { /* noop */ }
+        logAuthEvent(orgId, null, contactId, "CLINIC_REMINDER_OPTOUT", { via: "whatsapp_reply" });
+      }
+      return { handled: true, action: "optout", appointmentId: null,
+        reply: already
+          ? "Você já não recebe mais nossos avisos. Se mudar de ideia, é só falar com a recepção."
+          : "Ok, não vamos mais te mandar avisos automáticos. Se precisar remarcar ou tirar dúvidas, fale direto com a recepção." };
+    }
+
     const pending = this.findPendingReminder(orgId, contactId, nowMs);
     if (!pending) return NOT_HANDLED;
 

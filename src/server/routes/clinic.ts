@@ -888,24 +888,35 @@ router.get("/attachments/:id/download", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const { buffer, mime, filename } = ClinicAttachmentService.read(orgId, req.params.id);
-    res.setHeader("Content-Type", mime);
+    // Fase 32: usa stream (pipe) em vez de ler o buffer inteiro pra memória.
+    // Anexos até 15MB * N requests concorrentes = pico de RAM sério; stream
+    // corta pra ~64KB por chunk. O service.get() faz o gate LGPD antes.
+    const meta = ClinicAttachmentService.get(orgId, req.params.id);
+    if (!meta) return res.status(404).json({ error: "Anexo não encontrado." });
+    res.setHeader("Content-Type", meta.mimeType);
     // Fase 30: nosniff impede o browser de "adivinhar" o tipo real do
     // arquivo pelo conteúdo (defesa em profundidade contra content-type
-    // confusion). O add() já valida magic-byte real, mas nosniff garante
-    // que o browser não vai reclassificar mesmo se algum bypass passar.
+    // confusion). O add() já valida magic-byte real.
     res.setHeader("X-Content-Type-Options", "nosniff");
     // Fase 30: sanitiza filename via safeFilename (CRLF/aspas/;/= viram _)
     // e serve tanto `filename=` (fallback ASCII) quanto `filename*=UTF-8''`
     // (moderno, permite acentos) — RFC 6266.
-    const clean = safeFilename(filename);
+    const clean = safeFilename(meta.originalFilename || meta.storageKey);
     const encoded = encodeURIComponent(clean);
-    const disposition = mime.startsWith("image/") ? "inline" : "attachment";
+    const disposition = meta.mimeType.startsWith("image/") ? "inline" : "attachment";
     res.setHeader(
       "Content-Disposition",
       `${disposition}; filename="${clean}"; filename*=UTF-8''${encoded}`
     );
-    return res.send(buffer);
+    // Stream do disco privado direto pro cliente
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const { PRIVATE_CLINICAL_DIR } = require("../ClinicAttachmentService.js");
+    const filePath = path.join(PRIVATE_CLINICAL_DIR, meta.organizationId, meta.encounterId, meta.storageKey);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Arquivo do anexo não está mais disponível." });
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => { try { res.end(); } catch { /* noop */ } });
+    stream.pipe(res);
   } catch (e: any) {
     // Fase 19: consent revogado → 403 (não confundir com 404 "não encontrado").
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
@@ -967,6 +978,52 @@ router.get("/reports/monthly.pdf", requireRole("owner", "admin"), async (req: Au
 });
 
 // ── Retenção LGPD (ADR-080 Fase U) ──────────────────────────────────────
+// Fase 32: rota agregada — aba "Configurações" no front carrega todas as
+// configs do módulo Clínica em 1 request só (evita 5 requests em cascata
+// quando a tela abre). Cada campo já tem endpoint dedicado pra escrita
+// (PUT /settings/{retention,reminders,addendum-notification,followup-notification}),
+// então esta rota é read-only agregado. Timezone/businessName vêm do
+// organization_settings core (não são específicos de clínica mas o front
+// da aba precisa mostrar).
+router.get("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const o = db.prepare(
+    `SELECT business_name,
+            clinic_retention_enabled, clinic_retention_days_deliveries, clinic_retention_days_attachments,
+            clinic_reminder_hours, clinic_second_reminder_enabled, clinic_second_reminder_hours,
+            clinic_addendum_notification_enabled,
+            clinic_followup_notification_enabled, clinic_followup_notification_lead_days,
+            clinic_receipt_business_document, clinic_receipt_business_document_type
+       FROM organization_settings WHERE organization_id = ?`
+  ).get(orgId) as any;
+  res.json({
+    businessName: o?.business_name || null,
+    timezone: "America/Sao_Paulo", // fixo por ora — não temos coluna dedicada em organization_settings
+    retention: {
+      enabled: o?.clinic_retention_enabled !== 0,
+      deliveryDays: Number(o?.clinic_retention_days_deliveries) || 30,
+      attachmentDays: Number(o?.clinic_retention_days_attachments) || 730,
+    },
+    reminders: {
+      hoursBefore: Number(o?.clinic_reminder_hours) || 24,
+      secondEnabled: o?.clinic_second_reminder_enabled !== 0,
+      secondHoursBefore: Number(o?.clinic_second_reminder_hours) || 2,
+    },
+    addendumNotification: {
+      enabled: o == null || o.clinic_addendum_notification_enabled == null || Number(o.clinic_addendum_notification_enabled) !== 0,
+    },
+    followupNotification: {
+      enabled: o == null || o.clinic_followup_notification_enabled == null || Number(o.clinic_followup_notification_enabled) !== 0,
+      leadDays: o?.clinic_followup_notification_lead_days != null ? Number(o.clinic_followup_notification_lead_days) : 3,
+    },
+    receipt: {
+      businessDocument: o?.clinic_receipt_business_document || null,
+      businessDocumentType: o?.clinic_receipt_business_document_type || null,
+    },
+  });
+});
+
 router.get("/settings/retention", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

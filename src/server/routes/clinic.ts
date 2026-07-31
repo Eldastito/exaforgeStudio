@@ -228,6 +228,36 @@ router.post("/appointments/:id/extend", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(e.code === "CONFLICT" ? 409 : 400).json({ error: e.message, conflicts: e.conflicts }); }
 });
 
+// Cancelamento pela recepção (ADR-080 Fase 31 — UX blocker H1).
+// Botão "Cancelar" no painel dispara aqui. `cancelledBy='staff'` distingue
+// da cancelamento via SIM/NÃO WhatsApp (patient) e via retenção (system).
+// Grace window de 5min antes de disparar tryOfferOnCancel — se a recepção
+// re-ativar o appt dentro desse intervalo (raro mas real: "opa, cliquei
+// errado"), a vaga não é ofertada e o Scheduler não bombardeia outros
+// pacientes. Passar `graceMs:0` no body pra bypassar (ex.: cancel
+// definitivo já confirmado). Idempotente — service.cancel() 2× devolve
+// mesmo estado sem mudar timestamps.
+router.post("/appointments/:id/cancel", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const cancelled = ClinicAgendaService.cancel(
+      orgId, req.params.id,
+      { reason: req.body?.reason, cancelledBy: "staff" },
+      actor(req)
+    );
+    // Fire-and-forget: não bloqueia response da UI.
+    const graceMs = req.body?.graceMs === 0 ? 0 : 5 * 60_000;
+    Promise.resolve().then(() =>
+      ClinicVacancyService.tryOfferOnCancel(orgId, req.params.id, { graceMs })
+    ).catch(() => { /* best-effort */ });
+    res.json(cancelled);
+  } catch (e: any) {
+    if (e?.message?.includes("não encontrado")) return res.status(404).json({ error: e.message });
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Retorno em 1 clique + fila (ADR-080 Fase I).
 router.post("/appointments/:id/follow-up", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
@@ -245,6 +275,15 @@ router.get("/follow-up-queue", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = Number(req.query.limit) || 100;
   res.json(ClinicAgendaService.followUpQueue(orgId, limit));
+});
+// Fase 31: contagem-só pra badge do menu ("Fila (3)"). Evita front baixar
+// array grande só pra saber se tem item. Reusa a mesma query da lista
+// (limit alto pra count aproximado real; 200 é o teto do service).
+router.get("/follow-up-queue/count", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const list = ClinicAgendaService.followUpQueue(orgId, 200);
+  res.json({ count: Array.isArray(list) ? list.length : 0 });
 });
 
 router.patch("/encounters/:id/follow-up-recommendation", (req: AuthRequest, res): any => {
@@ -976,6 +1015,18 @@ router.get("/vacancies", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
   res.json(ClinicVacancyService.recent(orgId, limit));
+});
+// Fase 31: contagem-só de ofertas de vaga pending pra badge do menu
+// ("Vagas oferecidas (3)"). SELECT direto — o service.recent() já hidrata
+// nomes, o que é caro pro caso do badge.
+router.get("/vacancies/pending-count", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = db.prepare(
+    `SELECT COUNT(*) AS c FROM clinical_vacancy_offers
+      WHERE organization_id = ? AND status = 'pending'`
+  ).get(orgId) as any;
+  res.json({ count: Number(r?.c || 0) });
 });
 
 // ── Lembretes automáticos (ADR-080 Fase M) ──────────────────────────────

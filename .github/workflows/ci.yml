@@ -110,6 +110,7 @@ jobs:
           - { name: 'clinic-portability-audit-pin', script: 'test:clinic-portability-audit-pin' }
           - { name: 'clinic-immutability', script: 'test:clinic-immutability' }
           - { name: 'clinic-hardening', script: 'test:clinic-hardening' }
+          - { name: 'clinic-ux-actions', script: 'test:clinic-ux-actions' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

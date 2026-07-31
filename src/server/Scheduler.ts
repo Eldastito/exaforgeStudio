@@ -23,6 +23,7 @@ import { SchoolDigestService } from "./SchoolDigestService.js";
 import { TeacherDigestService } from "./TeacherDigestService.js";
 import { ClinicReminderService } from "./ClinicReminderService.js";
 import { ClinicRetentionService } from "./ClinicRetentionService.js";
+import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
@@ -226,6 +227,28 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Módulo Clínica (ADR-080 Fase 26) — notificação automática de retorno.
+   * Percorre orgs com encounter `signed` marcado com follow_up_recommended_days.
+   * Best-effort por-org; falha de 1 não trava as demais.
+   */
+  static async clinicFollowUpNoticePass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM clinical_encounters
+           WHERE status = 'signed' AND follow_up_recommended_days IS NOT NULL AND follow_up_recommended_days > 0`
+      ).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    for (const o of orgs) {
+      try {
+        if (!ModuleService.isEnabled(o.organization_id, "clinica")) continue;
+        await ClinicFollowUpNoticeService.dispatchForOrg(o.organization_id);
+      } catch (e) { console.error("[Clínica] aviso de retorno falhou", o.organization_id, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -299,6 +322,7 @@ export class Scheduler {
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));
     await this.teacherAgendaPass().catch(e => console.error('[Scheduler] agenda do professor falhou', e));
     await this.clinicReminderPass().catch(e => console.error('[Scheduler] lembrete de consulta clínica falhou', e));
+    await this.clinicFollowUpNoticePass().catch(e => console.error('[Scheduler] aviso de retorno clínica falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

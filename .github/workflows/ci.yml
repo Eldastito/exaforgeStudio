@@ -114,6 +114,7 @@ jobs:
           - { name: 'clinic-config-ui', script: 'test:clinic-config-ui' }
           - { name: 'clinic-monthly-report-delivery', script: 'test:clinic-monthly-report-delivery' }
           - { name: 'clinic-specialties', script: 'test:clinic-specialties' }
+          - { name: 'clinic-care-episodes', script: 'test:clinic-care-episodes' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

@@ -2740,6 +2740,83 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinic_professional_specialties', e); }
 
+  // Episódio de cuidado / tratamento longitudinal (ADR-145 D1, Fatia 36).
+  // Entidade CENTRAL da Jornada de Tratamento — sem ela, "profissional
+  // fixo", "multi-especialidades sem recadastro", "10 sessões renováveis"
+  // e "alta explícita" viram combinações frágeis de appointments soltos.
+  // Amarra paciente + especialidade + profissional responsável + estado.
+  //
+  // Unique parcial WHERE status IN ('active','on_hold') garante 1 episódio
+  // ativo por (org, paciente, especialidade) — o paciente pode ter Psico
+  // ATIVO e Fono ATIVO ao mesmo tempo (multi-especialidade), mas não pode
+  // ter 2 episódios de Psico ativos ao mesmo tempo. `discharged` e
+  // `cancelled` NÃO entram no índice — permite reabrir depois com novo
+  // episódio (histórico preservado, retenção CFM 20 anos).
+  //
+  // Colunas de alta (discharge_*) já entram aqui na Fatia 36 (evita ALTER
+  // na Fatia 39 — padrão ADR-145 D9), mas ficam NULL até Fatia 39 plugar
+  // o fluxo com PIN. Isolamento por organization_id.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_care_episodes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        specialty_id TEXT NOT NULL,
+        primary_professional_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        started_at DATETIME NOT NULL,
+        on_hold_at DATETIME,
+        on_hold_reason TEXT,
+        discharged_at DATETIME,
+        discharge_type TEXT,
+        discharge_summary TEXT,
+        discharged_by_professional_id TEXT,
+        discharge_signed_with_pin INTEGER DEFAULT 0,
+        reopened_at DATETIME,
+        reopen_reason TEXT,
+        cancelled_at DATETIME,
+        cancelled_reason TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_care_episode_patient
+        ON clinic_care_episodes (organization_id, contact_id, status);
+      CREATE INDEX IF NOT EXISTS idx_care_episode_prof
+        ON clinic_care_episodes (organization_id, primary_professional_id, status);
+      CREATE INDEX IF NOT EXISTS idx_care_episode_specialty
+        ON clinic_care_episodes (organization_id, specialty_id, status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_care_episode_active_specialty
+        ON clinic_care_episodes (organization_id, contact_id, specialty_id)
+        WHERE status IN ('active','on_hold');
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_care_episodes', e); }
+
+  // Histórico de transferências do profissional responsável. Cada
+  // transfer é uma linha imutável (append-only) — permite auditoria
+  // completa de "quem passou a atender o paciente e por quê". O snapshot
+  // do episódio (primary_professional_id atual) fica em clinic_care_
+  // episodes; esta tabela é o log. Regra: transfer só entre profissionais
+  // da MESMA especialidade do episódio (service valida).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_care_episode_transfers (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        episode_id TEXT NOT NULL,
+        from_professional_id TEXT NOT NULL,
+        to_professional_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        effective_at DATETIME NOT NULL,
+        changed_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_care_episode_transfers_episode
+        ON clinic_care_episode_transfers (organization_id, episode_id, effective_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_care_episode_transfers', e); }
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

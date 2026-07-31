@@ -25,6 +25,7 @@ import { ClinicPatientAllergyService } from "../ClinicPatientAllergyService.js";
 import { ClinicFollowUpNoticeService } from "../ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "../ClinicMonthlyReportDeliveryService.js";
 import { ClinicSpecialtyService } from "../ClinicSpecialtyService.js";
+import { ClinicCareEpisodeService } from "../ClinicCareEpisodeService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -779,6 +780,92 @@ router.post("/specialties/backfill", requireRole("owner", "admin"), (req: AuthRe
     const summary = ClinicSpecialtyService.backfillFromLegacy(orgId, actor(req) ?? null);
     res.json({ summary });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Episódio de cuidado / tratamento (ADR-145 D1 / Fatia 36). Entidade
+// CENTRAL da Jornada de Tratamento. Abrir/listar/transferir/hold/resume/
+// cancel — SEM alta ou reopen (Fatia 39, exige PIN). Ação de escrita
+// aberta a qualquer autenticado (a recepção precisa abrir episódios), mas
+// transfer é owner|admin (troca de responsável é decisão gerencial).
+function episodeError(res: any, e: any) {
+  const code = e?.code;
+  const status = code === "EPISODE_ALREADY_ACTIVE" ? 409
+              : code === "EPISODE_NOT_ACTIVE" ? 409
+              : code === "EPISODE_NOT_ON_HOLD" ? 409
+              : code === "EPISODE_ALREADY_DISCHARGED" ? 409
+              : code === "TRANSFER_NOOP" ? 409
+              : code === "PROFESSIONAL_NOT_IN_SPECIALTY" ? 400
+              : 400;
+  res.status(status).json({ error: e.message, code: code || null,
+    existingEpisodeId: e.existingEpisodeId || undefined });
+}
+
+router.get("/patients/:contactId/care-episodes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const activeOnly = String(req.query.activeOnly || "") === "1";
+  res.json({
+    episodes: ClinicCareEpisodeService.listByPatient(orgId, req.params.contactId, { activeOnly }),
+  });
+});
+
+router.post("/patients/:contactId/care-episodes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const episode = ClinicCareEpisodeService.open(orgId, req.params.contactId, req.body || {}, actor(req) ?? null);
+    res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
+});
+
+router.get("/care-episodes/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ep = ClinicCareEpisodeService.get(orgId, req.params.id);
+  if (!ep) return res.status(404).json({ error: "Episódio não encontrado." });
+  res.json({ episode: ep, transfers: ClinicCareEpisodeService.listTransfers(orgId, req.params.id) });
+});
+
+router.get("/care-episodes/:id/transfers", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ transfers: ClinicCareEpisodeService.listTransfers(orgId, req.params.id) });
+});
+
+router.post("/care-episodes/:id/transfer", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = ClinicCareEpisodeService.transfer(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json(result);
+  } catch (e: any) { episodeError(res, e); }
+});
+
+router.post("/care-episodes/:id/hold", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const episode = ClinicCareEpisodeService.hold(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
+});
+
+router.post("/care-episodes/:id/resume", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const episode = ClinicCareEpisodeService.resume(orgId, req.params.id, actor(req) ?? null);
+    res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
+});
+
+router.post("/care-episodes/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const episode = ClinicCareEpisodeService.cancel(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
 });
 
 // Catálogo CID-10 (ADR-080 Fase 23). Busca por prefixo de código ou

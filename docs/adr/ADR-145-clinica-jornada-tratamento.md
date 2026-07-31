@@ -1,6 +1,6 @@
 # ADR-145 — Módulo Clínica: Jornada de Tratamento (episódio + ciclos + grupo + guia)
 
-**Status:** Aceito — **em implementação**. Fatia 34 (esta ADR + travamento de enums/contratos + confirmação com o cliente). **Fatia 35 (Especialidades normalizadas + backfill do texto legado + vínculos N:N profissional↔especialidade) — MERGED.** Fatias 36-48 são o roadmap incremental.
+**Status:** Aceito — **em implementação**. Fatia 34 (esta ADR + travamento de enums/contratos + confirmação com o cliente). **Fatia 35 (Especialidades normalizadas + backfill do texto legado + vínculos N:N profissional↔especialidade) — MERGED.** **Fatia 36 (Episódio de cuidado + transfer/hold/resume/cancel; alta com PIN fica pra Fatia 39) — MERGED.** Fatias 37-48 são o roadmap incremental.
 
 **Data:** 2026-07
 

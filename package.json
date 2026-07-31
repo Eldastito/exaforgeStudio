@@ -100,6 +100,7 @@
     "test:clinic-allergies": "tsx scripts/test-clinic-allergies.ts",
     "test:clinic-followup-notice": "tsx scripts/test-clinic-followup-notice.ts",
     "test:clinic-receipt": "tsx scripts/test-clinic-receipt.ts",
+    "test:clinic-portability-audit-pin": "tsx scripts/test-clinic-portability-audit-pin.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

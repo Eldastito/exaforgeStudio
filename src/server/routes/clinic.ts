@@ -8,7 +8,7 @@ import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
 import { ClinicConnectionService } from "../ClinicConnectionService.js";
 import { ClinicEncounterService } from "../ClinicEncounterService.js";
-import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
+import { ClinicDocumentsService, resetPinLockout } from "../ClinicDocumentsService.js";
 import { ClinicAttachmentService, ALLOWED_MIME, MAX_BYTES } from "../ClinicAttachmentService.js";
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
 import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
@@ -121,6 +121,18 @@ router.get("/professionals/:id/pin-status", requireRole("owner", "admin"), (req:
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ hasPin: ClinicAgendaService.hasProfessionalPin(orgId, req.params.id) });
+});
+// Fase 28: destravar PIN antes dos 15 min naturais do lockout. Só owner|admin —
+// prevê o cenário legítimo (profissional confirmou identidade por outro
+// canal e precisa emitir agora) sem abrir vetor pro `agent` bypassar o
+// brute-force protection.
+router.post("/professionals/:id/pin/reset-lockout", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    resetPinLockout(orgId, req.params.id, actor(req));
+    res.json({ reset: true });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Indisponibilidade do profissional (ADR-080 Fase 22) ─────────────────
@@ -262,6 +274,13 @@ router.get("/appointments/:id/encounter", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const enc = ClinicEncounterService.getByAppointment(orgId, req.params.id);
+    // Fase 28: read-audit LGPD Art.9 — só quando existe encounter (row null
+    // não é leitura de dado sensível). Actor sempre vem do JWT (rota autenticada).
+    if (enc) {
+      logAuthEvent(orgId, actor(req), enc.contactId, "CLINIC_ENCOUNTER_VIEWED", {
+        encounterId: enc.id, appointmentId: req.params.id, via: "appointment",
+      });
+    }
     res.json(enc);
   } catch (e: any) {
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
@@ -305,7 +324,17 @@ router.post("/encounters/:id/finalize", (req: AuthRequest, res): any => {
 router.get("/encounters/:id/history", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(ClinicEncounterService.history(orgId, req.params.id)); }
+  try {
+    const rows = ClinicEncounterService.history(orgId, req.params.id);
+    // Fase 28: read-audit LGPD Art.9 — histórico é dado sensível.
+    const enc = ClinicEncounterService.get(orgId, req.params.id);
+    if (enc) {
+      logAuthEvent(orgId, actor(req), enc.contactId, "CLINIC_ENCOUNTER_VIEWED", {
+        encounterId: enc.id, via: "history", entries: Array.isArray(rows) ? rows.length : 0,
+      });
+    }
+    res.json(rows);
+  }
   catch (e: any) {
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
@@ -339,6 +368,7 @@ router.post("/encounters/:id/addendums", (req: AuthRequest, res): any => {
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
     if (e?.code === "ENCOUNTER_NOT_SIGNED") return res.status(409).json({ error: e.message, code: e.code });
     if (e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID") return res.status(401).json({ error: e.message, code: e.code });
+    if (e?.code === "PIN_LOCKED") return res.status(423).json({ error: e.message, code: e.code, until: e.until || null });
     if (e?.code === "ADDENDUM_EMPTY" || e?.code === "ADDENDUM_TOO_LONG") return res.status(400).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
   }
@@ -516,7 +546,14 @@ router.get("/patients/:contactId/encounters", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = Number(req.query.limit) || 50;
-  try { res.json(ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit)); }
+  try {
+    const list = ClinicEncounterService.listByPatient(orgId, req.params.contactId, limit);
+    // Fase 28: read-audit LGPD Art.9 — lista completa é dado sensível.
+    logAuthEvent(orgId, actor(req), req.params.contactId, "CLINIC_ENCOUNTER_VIEWED", {
+      via: "patient-list", count: Array.isArray(list) ? list.length : 0,
+    });
+    res.json(list);
+  }
   catch (e: any) {
     if (e?.code === "LGPD_CONSENT_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
     res.status(400).json({ error: e.message });
@@ -557,6 +594,13 @@ const docError = (res: any, e: any) => {
   }
   if (e?.code === "PIN_REQUIRED" || e?.code === "PIN_INVALID") {
     return res.status(401).json({ error: e.message, code: e.code });
+  }
+  // Fase 28: PIN_LOCKED — 5 tentativas erradas em 15min bloqueiam o
+  // profissional. 423 Locked deixa a UI diferenciar de PIN_INVALID pra
+  // mostrar "aguarde X min ou peça pra owner destravar" em vez de
+  // insistir na tentativa. `e.until` carrega ISO do desbloqueio automático.
+  if (e?.code === "PIN_LOCKED") {
+    return res.status(423).json({ error: e.message, code: e.code, until: e.until || null });
   }
   // Fase 25: ALLERGY_ALERT vem com payload {alerts} pra UI oferecer opção
   // "confirmar mesmo assim" (envia de novo com force:true) OU decidir por

@@ -26,6 +26,7 @@ import { ClinicFollowUpNoticeService } from "../ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "../ClinicMonthlyReportDeliveryService.js";
 import { ClinicSpecialtyService } from "../ClinicSpecialtyService.js";
 import { ClinicCareEpisodeService } from "../ClinicCareEpisodeService.js";
+import { ClinicTreatmentCycleService } from "../ClinicTreatmentCycleService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -883,6 +884,75 @@ router.post("/care-episodes/:id/cancel", requireRole("owner", "admin"), (req: Au
     const episode = ClinicCareEpisodeService.cancel(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json({ episode });
   } catch (e: any) { episodeError(res, e); }
+});
+
+// Ciclos de sessões renováveis (ADR-145 D4 / Fatia 38). Reusa episodeError
+// pra códigos de negócio consistentes na UI (CYCLE_ALREADY_ACTIVE, etc.).
+function cycleError(res: any, e: any) {
+  const code = e?.code;
+  const status = code === "CYCLE_ALREADY_ACTIVE" ? 409
+              : code === "CYCLE_NOT_RENEWABLE" ? 409
+              : code === "CYCLE_NOT_CANCELLABLE" ? 409
+              : code === "EPISODE_NOT_ACTIVE" ? 409
+              : 400;
+  res.status(status).json({ error: e.message, code: code || null,
+    existingCycleId: e.existingCycleId || undefined });
+}
+
+router.get("/care-episodes/:id/cycles", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ cycles: ClinicTreatmentCycleService.listByEpisode(orgId, req.params.id) });
+});
+
+router.post("/care-episodes/:id/cycles", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const cycle = ClinicTreatmentCycleService.create(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ cycle });
+  } catch (e: any) { cycleError(res, e); }
+});
+
+// renewal-queue vem ANTES de /:id — senão o param captura a string literal
+router.get("/treatment-cycles/renewal-queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const threshold = req.query.threshold ? Number(req.query.threshold) : undefined;
+  res.json({ queue: ClinicTreatmentCycleService.renewalQueue(orgId, { threshold }) });
+});
+
+router.get("/treatment-cycles/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const cycle = ClinicTreatmentCycleService.get(orgId, req.params.id);
+  if (!cycle) return res.status(404).json({ error: "Ciclo não encontrado." });
+  res.json({ cycle, usage: ClinicTreatmentCycleService.usage(orgId, req.params.id) });
+});
+
+router.get("/treatment-cycles/:id/usage", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ usage: ClinicTreatmentCycleService.usage(orgId, req.params.id) }); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.post("/treatment-cycles/:id/renew", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = ClinicTreatmentCycleService.renew(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json(result);
+  } catch (e: any) { cycleError(res, e); }
+});
+
+router.post("/treatment-cycles/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const cycle = ClinicTreatmentCycleService.cancel(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ cycle });
+  } catch (e: any) { cycleError(res, e); }
 });
 
 // Catálogo CID-10 (ADR-080 Fase 23). Busca por prefixo de código ou

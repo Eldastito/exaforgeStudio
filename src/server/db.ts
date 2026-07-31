@@ -2817,6 +2817,68 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinic_care_episode_transfers', e); }
 
+  // Ciclos de sessões renováveis (ADR-145 D4, Fatia 38). Um episódio ativo
+  // tem N ciclos ao longo do tempo (10 sessões → renova → mais 10 → …
+  // até alta). Cada ciclo é um bloco administrativo/assistencial fechado.
+  //
+  // UNIQUE (org, episode_id, cycle_number) garante numeração sequencial
+  // sem duplicata. previous_cycle_id encadeia (ciclo 2 aponta pro 1,
+  // ciclo 3 pro 2). planned_sessions é imutável após create (mudanças
+  // vira novo ciclo com renew). no_show_consumes_session default 0 —
+  // regra clínica varia por org/convênio (RN-004: derivado por query,
+  // NÃO contador mutável).
+  //
+  // Estados: draft (rascunho antes de autorizar), pending_authorization
+  // (aguardando OK do convênio), active (em uso), renewal_due (esgotado
+  // mas não renovado — episódio continua active), exhausted (equivalente
+  // a renewal_due, semântica opcional), renewed (fechado por renovação —
+  // imutável), cancelled (aberto por engano), expired (venceu antes de
+  // consumir tudo).
+  //
+  // authorization_id / guide_id ficam NULL até Fatias 44-46 (guia da
+  // recepção) — colunas já entram aqui pra evitar ALTER futuro (D9).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_treatment_cycles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        episode_id TEXT NOT NULL,
+        cycle_number INTEGER NOT NULL,
+        previous_cycle_id TEXT,
+        planned_sessions INTEGER NOT NULL DEFAULT 10,
+        no_show_consumes_session INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        authorization_id TEXT,
+        guide_id TEXT,
+        starts_at DATETIME,
+        expires_at DATETIME,
+        renewal_requested_at DATETIME,
+        renewed_at DATETIME,
+        cancelled_at DATETIME,
+        cancelled_reason TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, episode_id, cycle_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_treatment_cycle_episode
+        ON clinic_treatment_cycles (organization_id, episode_id, status);
+      CREATE INDEX IF NOT EXISTS idx_treatment_cycle_status
+        ON clinic_treatment_cycles (organization_id, status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_treatment_cycle_active
+        ON clinic_treatment_cycles (organization_id, episode_id)
+        WHERE status IN ('active','renewal_due','pending_authorization');
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinic_treatment_cycles', e); }
+
+  // Aditivos p/ appointments ligarem a ciclo (ADR-145 Fatia 38).
+  // treatment_cycle_id opcional (compat legado). cycle_sequence_number
+  // grava "esta é a 3ª sessão do ciclo" (contador local ao ciclo, útil
+  // pra exibir "3/10" no card do appointment).
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN treatment_cycle_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN cycle_sequence_number INTEGER`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_cycle ON appointments (organization_id, treatment_cycle_id) WHERE treatment_cycle_id IS NOT NULL`); } catch(e){}
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

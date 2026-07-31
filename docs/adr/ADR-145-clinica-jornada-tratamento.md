@@ -1,6 +1,6 @@
 # ADR-145 — Módulo Clínica: Jornada de Tratamento (episódio + ciclos + grupo + guia)
 
-**Status:** Aceito — **em implementação**. Fatia 34 (esta ADR + travamento de enums/contratos + confirmação com o cliente). **Fatia 35 (Especialidades normalizadas + backfill do texto legado + vínculos N:N profissional↔especialidade) — MERGED.** **Fatia 36 (Episódio de cuidado + transfer/hold/resume/cancel; alta com PIN fica pra Fatia 39) — MERGED.** **Fatia 37 (Aditivos em appointments + gate EPISODE_PROFESSIONAL_MISMATCH + assistente Adicionar Especialidade atômico) — MERGED.** Fatias 38-48 são o roadmap incremental.
+**Status:** Aceito — **em implementação**. Fatia 34 (esta ADR + travamento de enums/contratos + confirmação com o cliente). **Fatia 35 (Especialidades normalizadas + backfill do texto legado + vínculos N:N profissional↔especialidade) — MERGED.** **Fatia 36 (Episódio de cuidado + transfer/hold/resume/cancel; alta com PIN fica pra Fatia 39) — MERGED.** **Fatia 37 (Aditivos em appointments + gate EPISODE_PROFESSIONAL_MISMATCH + assistente Adicionar Especialidade atômico) — MERGED.** **Fatia 38 (Ciclos de sessões renováveis, saldo derivado por query — RN-004, renewalQueue, hook de transição on completion, ciclo inicial no addSpecialtyForPatient) — MERGED.** Fatias 39-48 são o roadmap incremental.
 
 **Data:** 2026-07
 

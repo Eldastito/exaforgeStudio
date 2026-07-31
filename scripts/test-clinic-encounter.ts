@@ -76,7 +76,7 @@ async function main() {
   check("open() sem consentimento LGPD → LGPD_CONSENT_REQUIRED", threw?.code === "LGPD_CONSENT_REQUIRED", String(threw?.code));
 
   // startCare tenta abrir mas é best-effort — não pode travar o atendimento.
-  const started = ClinicAgendaService.startCare(A.orgId, apt.id, A.actorId);
+  const started = await ClinicAgendaService.startCare(A.orgId, apt.id, A.actorId);
   check("startCare NÃO trava quando falta consentimento", started.status === "in_care");
   check("encounter NÃO foi aberto ainda (sem consentimento)", ClinicEncounterService.getByAppointment(A.orgId, apt.id) === null);
 

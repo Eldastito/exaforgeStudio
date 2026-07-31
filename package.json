@@ -102,6 +102,7 @@
     "test:clinic-receipt": "tsx scripts/test-clinic-receipt.ts",
     "test:clinic-portability-audit-pin": "tsx scripts/test-clinic-portability-audit-pin.ts",
     "test:clinic-immutability": "tsx scripts/test-clinic-immutability.ts",
+    "test:clinic-hardening": "tsx scripts/test-clinic-hardening.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

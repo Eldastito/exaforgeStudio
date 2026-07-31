@@ -96,7 +96,7 @@ async function main() {
   // Check-in / início / estender / concluir num agendamento normal.
   const flow = ClinicAgendaService.createAppointment(A.orgId, { contactId: A.c2, title: "Fluxo", scheduledStart: "2026-08-03T10:00:00-03:00", professionalId: dr.id, durationMinutes: 30 }, A.actorId);
   ClinicAgendaService.checkIn(A.orgId, flow.id, A.actorId);
-  ClinicAgendaService.startCare(A.orgId, flow.id, A.actorId);
+  await ClinicAgendaService.startCare(A.orgId, flow.id, A.actorId);
   const extended = ClinicAgendaService.extend(A.orgId, flow.id, 15, false, A.actorId);
   check("Estender soma à duração (30 → 45), sem recriar", extended.duration_minutes === 45 && extended.id === flow.id);
   const cont = ClinicAgendaService.setContinuation(A.orgId, flow.id, "continue", A.actorId);

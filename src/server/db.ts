@@ -3485,6 +3485,21 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE appointments ADD COLUMN procedure_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN patient_plan_snapshot TEXT`); } catch(e){}
 
+  // Aditivos p/ Jornada de Tratamento (ADR-145 D1/D3, Fatia 37). Amarram
+  // o appointment ao episódio de cuidado e à especialidade — quando o
+  // appointment nasce a partir de um episódio (fluxo Adicionar Especialidade),
+  // essas colunas preenchem automaticamente e o gate EPISODE_PROFESSIONAL_
+  // MISMATCH garante que o profissional agendado é o mesmo do episódio.
+  // Nullable: appointments legados (sem episódio) continuam operando
+  // normalmente — compat 100%. professional_override_reason só entra
+  // quando force=true bypassa o gate (padrão Fase 31), preservando motivo
+  // pra auditoria.
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN care_episode_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN specialty_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN professional_override_reason TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_episode ON appointments (organization_id, care_episode_id) WHERE care_episode_id IS NOT NULL`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_appointments_specialty ON appointments (organization_id, specialty_id) WHERE specialty_id IS NOT NULL`); } catch(e){}
+
   // Módulo Clínica (ADR-081, Fase F0) — Onboarding de Conexão TISS. A clínica
   // preenche o questionário no próprio sistema (self-service); o backend valida
   // os itens BLOQUEANTES e calcula a prontidão por operadora. Perfil no nível da

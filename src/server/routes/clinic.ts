@@ -795,9 +795,11 @@ function episodeError(res: any, e: any) {
               : code === "EPISODE_ALREADY_DISCHARGED" ? 409
               : code === "TRANSFER_NOOP" ? 409
               : code === "PROFESSIONAL_NOT_IN_SPECIALTY" ? 400
+              : code === "EPISODE_PROFESSIONAL_MISMATCH" ? 409
               : 400;
   res.status(status).json({ error: e.message, code: code || null,
-    existingEpisodeId: e.existingEpisodeId || undefined });
+    existingEpisodeId: e.existingEpisodeId || undefined,
+    expectedProfessionalId: e.expectedProfessionalId || undefined });
 }
 
 router.get("/patients/:contactId/care-episodes", (req: AuthRequest, res): any => {
@@ -815,6 +817,21 @@ router.post("/patients/:contactId/care-episodes", (req: AuthRequest, res): any =
   try {
     const episode = ClinicCareEpisodeService.open(orgId, req.params.contactId, req.body || {}, actor(req) ?? null);
     res.json({ episode });
+  } catch (e: any) { episodeError(res, e); }
+});
+
+// Assistente "Adicionar Especialidade" (ADR-145 RF-010, Fatia 37). Abre
+// episódio + agenda 1º appointment em UMA transação — se qualquer parte
+// falhar, nada persiste. firstAppointmentAt opcional (sem ele, só abre
+// o episódio e o operador agenda depois).
+router.post("/patients/:contactId/add-specialty", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const result = ClinicCareEpisodeService.addSpecialtyForPatient(
+      orgId, req.params.contactId, req.body || {}, actor(req) ?? null
+    );
+    res.json(result);
   } catch (e: any) { episodeError(res, e); }
 });
 

@@ -21,6 +21,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { ClinicAgendaService } from "./ClinicAgendaService.js";
 
 export type EpisodeStatus = "active" | "on_hold" | "discharged" | "cancelled";
 
@@ -380,6 +381,77 @@ export class ClinicCareEpisodeService {
       episodeId, previousHoldReason: ep.onHoldReason,
     });
     return this.get(orgId, episodeId)!;
+  }
+
+  /**
+   * Assistente "Adicionar especialidade" (ADR-145 Fatia 37, RF-010). Consolida
+   * em UM fluxo o abrir episódio + criar primeiro appointment — evita o pátio
+   * de erros de fluxos manuais (abrir episódio e esquecer de agendar; agendar
+   * com profissional divergente). Transação atômica: se o appointment falhar
+   * (conflito, ausência, etc.), NADA persiste — o episódio também é rollbackado.
+   *
+   * Duração do primeiro appointment usa specialty.default_duration_minutes se
+   * durationMinutes não vier. firstAppointmentAt é opcional — sem ele, só
+   * abre o episódio (o operador marca depois).
+   */
+  static addSpecialtyForPatient(
+    orgId: string,
+    contactId: string,
+    input: {
+      specialtyId: string;
+      primaryProfessionalId: string;
+      startedAt?: string | null;
+      firstAppointmentAt?: string | null;
+      durationMinutes?: number | null;
+      title?: string | null;
+      roomId?: string | null;
+    },
+    actorId: string | null = null
+  ): { episode: CareEpisode; firstAppointment: any | null } {
+    let firstAppointment: any = null;
+    let episode: CareEpisode | null = null;
+
+    // Se firstAppointmentAt não vem, só abrimos o episódio (sem transação
+    // composta) — mantém código simples e evita transação de 1 statement.
+    if (!input.firstAppointmentAt) {
+      episode = this.open(orgId, contactId, {
+        specialtyId: input.specialtyId,
+        primaryProfessionalId: input.primaryProfessionalId,
+        startedAt: input.startedAt,
+      }, actorId);
+      return { episode, firstAppointment: null };
+    }
+
+    // Fluxo composto: abrir episódio + primeiro appointment em 1 transação.
+    // Se createAppointment lançar (conflito, ausência, sala inválida), rollback
+    // desfaz o INSERT do episódio inteiro.
+    let durationMinutes = input.durationMinutes ?? undefined;
+    if (durationMinutes == null || durationMinutes <= 0) {
+      const spec = db.prepare(
+        `SELECT default_duration_minutes FROM clinic_specialties WHERE organization_id = ? AND id = ?`
+      ).get(orgId, input.specialtyId) as any;
+      durationMinutes = Number(spec?.default_duration_minutes) || 60;
+    }
+
+    const tx = db.transaction(() => {
+      episode = this.open(orgId, contactId, {
+        specialtyId: input.specialtyId,
+        primaryProfessionalId: input.primaryProfessionalId,
+        startedAt: input.startedAt,
+      }, actorId);
+      firstAppointment = ClinicAgendaService.createAppointment(orgId, {
+        contactId,
+        title: input.title || undefined,
+        scheduledStart: input.firstAppointmentAt!,
+        professionalId: input.primaryProfessionalId,
+        roomId: input.roomId || undefined,
+        durationMinutes,
+        careEpisodeId: episode.id,
+      }, actorId ?? undefined);
+    });
+    tx();
+
+    return { episode: episode!, firstAppointment };
   }
 
   /**

@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { LegalTip } from '@/src/features/LegalAdvisorView';
@@ -1318,7 +1318,97 @@ function Saude() {
         </div>
       )}
 
+      <MonthlyReport />
       <Graduacao />
+    </div>
+  );
+}
+
+// ── Relatório mensal em PDF (Gap C do levantamento — ADR-088 D8 embrionário) ─
+function MonthlyReport() {
+  // Últimos 6 meses fechados (do anterior ao atual, indo pra trás).
+  const options = useMemo(() => {
+    const now = new Date();
+    const arr: { value: string; label: string }[] = [];
+    for (let i = 1; i <= 6; i++) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const label = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+      arr.push({ value: `${y}-${m}`, label: label[0].toUpperCase() + label.slice(1) });
+    }
+    return arr;
+  }, []);
+  const [month, setMonth] = useState<string>(options[0].value);
+  const [preview, setPreview] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setPreview(null);
+    apiFetch(`/api/comigo/reports/monthly.json?month=${month}`).then(r => r.json()).then((r: any) => {
+      if (r && !r.error) setPreview(r);
+    }).catch(() => {});
+  }, [month]);
+
+  const download = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/comigo/reports/monthly.pdf?month=${month}`);
+      if (!res.ok) { toast.error('Erro ao gerar o relatório.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `comigo-relatorio-mensal-${month}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Relatório baixado!');
+    } catch { toast.error('Erro ao baixar.'); }
+    finally { setBusy(false); }
+  };
+
+  const hasData = preview && (preview.sales?.orders > 0 || preview.fiado?.balanceEndOfMonth > 0 || preview.agenda?.total > 0);
+
+  return (
+    <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+      <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-200 mb-2">
+        <FileDown className="w-4 h-4" /> Relatório do mês (PDF)
+      </div>
+      <p className="text-xs text-zinc-400 mb-3">Consolida vendas, fiado e agenda num PDF pra guardar, mostrar pro contador ou pro banco.</p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={month} onChange={e => setMonth(e.target.value)}
+          className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200">
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <button disabled={busy} onClick={download}
+          className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 disabled:opacity-40">
+          {busy ? 'Gerando…' : 'Baixar PDF'}
+        </button>
+      </div>
+
+      {preview && (
+        <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <div className="rounded-lg bg-zinc-900/60 p-2">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Vendas</div>
+            <div className="text-zinc-100 font-medium">{brl(preview.sales?.revenue)}</div>
+          </div>
+          <div className="rounded-lg bg-zinc-900/60 p-2">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Sobrou</div>
+            <div className="text-emerald-300 font-medium">{brl(preview.sales?.profit)}</div>
+          </div>
+          <div className="rounded-lg bg-zinc-900/60 p-2">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Pedidos</div>
+            <div className="text-zinc-100 font-medium">{preview.sales?.orders || 0}</div>
+          </div>
+          <div className="rounded-lg bg-zinc-900/60 p-2">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">Fiado (fim do mês)</div>
+            <div className="text-zinc-100 font-medium">{brl(preview.fiado?.balanceEndOfMonth)}</div>
+          </div>
+        </div>
+      )}
+      {preview && !hasData && (
+        <p className="text-xs text-zinc-500 mt-2">Sem movimento nesse mês — o PDF sai vazio, mas dá pra baixar assim mesmo.</p>
+      )}
     </div>
   );
 }

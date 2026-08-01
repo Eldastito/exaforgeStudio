@@ -22,22 +22,36 @@ export async function enqueueMessage(commandId: string, payload: { contactId: st
   try { await getOutbox().enqueue({ commandId, type: "SEND_MESSAGE", payload }); } catch (e) { console.error("[Outbox] enqueue falhou", e); }
 }
 
-/** Sender de SEND_MESSAGE: 'sent' se 2xx; 'failed' se o servidor rejeitou (não adianta reenviar); 'retry' se rede caiu. */
-function makeMessageSender(): CommandSender {
+/**
+ * Registry de senders por `cmd.type`. Cada feature registra seu handler
+ * (ex.: SEND_MESSAGE — chat; COMIGO_OPEN_ORDER / COMIGO_ADD_ITEM / COMIGO_PAY —
+ * Balcão offline). Se o tipo não tem sender registrado, o comando é marcado
+ * como `failed` (não fica pendurado eternamente).
+ */
+const senders: Record<string, CommandSender> = {};
+export function registerCommandSender(type: string, sender: CommandSender) { senders[type] = sender; }
+
+// Sender de SEND_MESSAGE — o handler original. Registrado eagerly aqui pra
+// não quebrar quem já dependia do sync sem se registrar.
+registerCommandSender("SEND_MESSAGE", async (cmd: OutboxCommand) => {
+  try {
+    const res = await apiFetch("/api/messages/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...cmd.payload, commandId: cmd.commandId }),
+    });
+    return res.ok ? "sent" : "failed";
+  } catch {
+    return "retry";
+  }
+});
+
+/** Sender roteador — despacha por cmd.type ao handler correto. */
+function makeRoutingSender(): CommandSender {
   return async (cmd: OutboxCommand) => {
-    if (cmd.type !== "SEND_MESSAGE") return "failed";
-    try {
-      const res = await apiFetch("/api/messages/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...cmd.payload, commandId: cmd.commandId }),
-      });
-      // 2xx (inclui deduped) = entregue. 4xx/5xx = rejeição do servidor/provedor
-      // → não reenvia (falha real). Só exceção de rede vira 'retry' (abaixo).
-      return res.ok ? "sent" : "failed";
-    } catch {
-      return "retry"; // rede indisponível → tenta de novo na próxima rodada
-    }
+    const handler = senders[cmd.type];
+    if (!handler) { console.warn("[Outbox] sem sender para type", cmd.type); return "failed"; }
+    return handler(cmd);
   };
 }
 
@@ -48,7 +62,7 @@ function makeMessageSender(): CommandSender {
 export async function flushOutbox(onChange?: (commandId: string, status: "sent" | "failed") => void): Promise<void> {
   const ob = getOutbox();
   const before = await ob.all();
-  await ob.flush(makeMessageSender());
+  await ob.flush(makeRoutingSender());
   if (onChange) {
     const after = new Map((await ob.all()).map(c => [c.commandId, c] as const));
     for (const c of before) {

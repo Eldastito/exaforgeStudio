@@ -1,8 +1,25 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown } from 'lucide-react';
-import { apiFetch } from '@/src/lib/api';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown, WifiOff, RefreshCw } from 'lucide-react';
+import { apiFetch, currentOrgId } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { LegalTip } from '@/src/features/LegalAdvisorView';
+import { enqueueOpenOrder, enqueueAddItem, enqueuePay, pendingComigoCount, isNetworkError } from '@/src/lib/comigo/offlineQueue';
+import { loadProductsWithCache } from '@/src/lib/comigo/productsCache';
+
+// Hook simples de conectividade — reage a online/offline do navegador. Usado
+// pelo Balcão pra decidir se enfileira no outbox ou vai direto pra rede, e
+// pra esconder o Pix dinâmico (que precisa de PSP).
+function useOnline() {
+  const [online, setOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+  return online;
+}
 
 // ============================================================================
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
@@ -872,6 +889,7 @@ function ArchetypeOnboarding({ onDone }: { onDone: () => void }) {
 // ── Balcão PDV por toque ─────────────────────────────────────────────────────
 function Balcao({ onChange }: { onChange: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [productsFromCache, setProductsFromCache] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -884,6 +902,20 @@ function Balcao({ onChange }: { onChange: () => void }) {
   // Esconde produtos zerados da grade (server-side): não dá pra vender o que
   // não tem. Serviços e itens sem controle de estoque seguem aparecendo.
   const [hideEmpty, setHideEmpty] = useState(false);
+  // Offline (Gap D): tanto rede quanto contador de comandos pendentes no outbox.
+  const online = useOnline();
+  const [pendingSync, setPendingSync] = useState(0);
+  // Marca do pedido atual como "criado offline" — mostra chip no cartão.
+  const [orderPendingSync, setOrderPendingSync] = useState(false);
+
+  // Poll leve do outbox pra atualizar o chip "sincronizando N pedidos" —
+  // navigator online/offline não pega quando o flusher está no meio do trabalho.
+  useEffect(() => {
+    const tick = () => { pendingComigoCount().then(setPendingSync).catch(() => {}); };
+    tick();
+    const iv = window.setInterval(tick, 3000);
+    return () => window.clearInterval(iv);
+  }, []);
 
   const loadSuggest = useCallback((pid?: string) => {
     apiFetch(`/api/comigo/suggest${pid ? `?productId=${pid}` : ''}`).then((r) => r.json())
@@ -891,9 +923,13 @@ function Balcao({ onChange }: { onChange: () => void }) {
   }, []);
 
   const loadProducts = useCallback(() => {
-    apiFetch(`/api/products${hideEmpty ? '?inStock=1' : ''}`).then((r) => r.json()).then((rows: any) => {
-      const list = Array.isArray(rows) ? rows : (rows?.products || []);
-      setProducts(list.filter((p: Product) => p.active !== 0 && p.price != null));
+    // Cache-aware (Gap D): tenta rede, cai no snapshot IDB quando offline.
+    // A grade nunca fica vazia se o catálogo já foi visto ao menos 1 vez.
+    const orgId = currentOrgId() || 'unknown';
+    const path = `/api/products${hideEmpty ? '?inStock=1' : ''}`;
+    loadProductsWithCache(orgId, (p) => apiFetch(p), path).then(({ products, fromCache }) => {
+      setProducts((products as any[]).filter((p: any) => p.active !== 0 && p.price != null) as Product[]);
+      setProductsFromCache(fromCache);
     }).catch(() => {});
   }, [hideEmpty]);
 
@@ -906,23 +942,58 @@ function Balcao({ onChange }: { onChange: () => void }) {
     }).catch(() => {});
   }, []);
 
-  // Grava uma linha no pedido. `qty` é fracionário para venda por peso (kg) e o
-  // total = qty × unit_price (o backend já aceita qty REAL). Para peso, unitPrice
-  // é o preço POR KG e qty são os quilos informados.
+  // Aplica um item local (usado quando estamos offline: o server não vai
+  // responder o `refresh`, então mantemos o total no cliente).
+  const applyItemLocal = (p: Product, qty: number, unitPrice: number, localId: string) => {
+    setItems((prev) => [...prev, { id: localId, name: p.name, qty, unit_price: unitPrice, product_id: p.id }]);
+    setTotal((prev) => Math.round((prev + qty * unitPrice) * 100) / 100);
+  };
+
+  // Grava uma linha no pedido. Se estamos offline (ou a chamada falhar por
+  // rede), enfileira no outbox — o commandId estável garante que replays não
+  // dupliquem no server. Peso: `qty` fracionário; total = qty × unit_price.
   const addLine = async (p: Product, qty: number, unitPrice: number) => {
     if (busy) return;
     setBusy(true);
     try {
+      // Se não temos orderId, GERAMOS UM aqui — offline não pode esperar o server.
       let id = orderId;
-      if (!id) {
-        const r = await apiFetch('/api/comigo/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).then((x) => x.json());
-        id = r.id; setOrderId(id);
+      let isNewOrder = false;
+      if (!id) { id = crypto.randomUUID(); setOrderId(id); isNewOrder = true; }
+      const itemCmdId = crypto.randomUUID();
+      const localItemId = crypto.randomUUID();
+
+      // Fast-path: se online, tenta rede direto.
+      if (online) {
+        try {
+          if (isNewOrder) {
+            await apiFetch('/api/comigo/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+          }
+          await apiFetch(`/api/comigo/orders/${id}/items`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: p.id, name: p.name, unitPrice, qty, commandId: itemCmdId }),
+          });
+          refresh(id);
+          loadSuggest(p.id);
+          setOrderPendingSync(false);
+          return;
+        } catch (e) {
+          if (!isNetworkError(e)) { toast.error('Não consegui adicionar o item.'); return; }
+          // Rede caiu no meio — cai pro caminho offline abaixo.
+        }
       }
-      await apiFetch(`/api/comigo/orders/${id}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: p.id, name: p.name, unitPrice, qty }) });
-      refresh(id!);
-      loadSuggest(p.id); // "quem levou isso também levou"
-    } catch { toast.error('Não consegui adicionar o item.'); }
-    finally { setBusy(false); }
+
+      // Caminho offline: aplica local + enfileira no outbox.
+      if (isNewOrder) {
+        const openCmdId = crypto.randomUUID();
+        await enqueueOpenOrder(openCmdId, { orderId: id });
+      }
+      await enqueueAddItem(itemCmdId, { orderId: id, productId: p.id, name: p.name, qty, unitPrice });
+      applyItemLocal(p, qty, unitPrice, localItemId);
+      setOrderPendingSync(true);
+      loadSuggest(p.id);
+      pendingComigoCount().then(setPendingSync).catch(() => {});
+    } finally { setBusy(false); }
   };
 
   const addProduct = (p: Product) => {
@@ -938,7 +1009,7 @@ function Balcao({ onChange }: { onChange: () => void }) {
     if (p) addProduct(p);
   };
 
-  const reset = () => { setOrderId(null); setItems([]); setTotal(0); setFiado(null); setPix(null); loadSuggest(); onChange(); };
+  const reset = () => { setOrderId(null); setItems([]); setTotal(0); setFiado(null); setPix(null); setOrderPendingSync(false); loadSuggest(); onChange(); };
 
   // Pix dinâmico (ADR-118): gera a cobrança; a confirmação vem do PSP por webhook.
   const startPix = async () => {
@@ -969,24 +1040,45 @@ function Balcao({ onChange }: { onChange: () => void }) {
     if (!orderId || busy) return;
     setBusy(true);
     try {
-      const body: any = { paidVia, override };
+      const body: any = { paidVia, override, commandId: crypto.randomUUID() };
       if (paidVia === 'fiado' && fiado) body.customer = fiado;
-      const res = await apiFetch(`/api/comigo/orders/${orderId}/pay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const out = await res.json();
-      if (out.ok) {
-        toast.success(out.receivable ? 'Anotado no fiado.' : 'Recebido!');
-        reset();
-      } else if (out.needsOverride) {
-        if (window.confirm(`${out.message}\n\nLiberar mesmo assim?`)) await pay(paidVia, true);
-      } else if (out.error === 'blacklisted') {
-        toast.error('Cliente na lista negra — fiado suspenso. Só à vista.');
-      } else if (out.error === 'fiado_requires_customer') {
-        toast.error('O fiado precisa do nome e telefone do cliente.');
-      } else {
-        toast.error('Não consegui fechar o pedido.');
+
+      // Fast-path online: tenta rede direto.
+      if (online) {
+        try {
+          const res = await apiFetch(`/api/comigo/orders/${orderId}/pay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const out = await res.json();
+          if (out.ok) { toast.success(out.receivable ? 'Anotado no fiado.' : 'Recebido!'); reset(); return; }
+          if (out.needsOverride) {
+            if (window.confirm(`${out.message}\n\nLiberar mesmo assim?`)) await pay(paidVia, true);
+            return;
+          }
+          if (out.error === 'blacklisted') { toast.error('Cliente na lista negra — fiado suspenso. Só à vista.'); return; }
+          if (out.error === 'fiado_requires_customer') { toast.error('O fiado precisa do nome e telefone do cliente.'); return; }
+          toast.error('Não consegui fechar o pedido.');
+          return;
+        } catch (e) {
+          if (!isNetworkError(e)) { toast.error('Falha ao cobrar.'); return; }
+          // Rede caiu — cai pro caminho offline.
+        }
       }
-    } catch { toast.error('Falha ao cobrar.'); }
-    finally { setBusy(false); }
+
+      // Caminho offline: enfileira o pagamento no outbox. Fecha o pedido local
+      // e libera o Balcão pra próxima venda; a decisão real (dedupe + limite
+      // do fiado) sai quando o outbox sincronizar. Aviso o usuário sem susto.
+      await enqueuePay(body.commandId, {
+        orderId, paidVia,
+        customer: paidVia === 'fiado' ? (fiado || undefined) : undefined,
+        override,
+      });
+      toast.success(
+        paidVia === 'fiado'
+          ? 'Anotado no fiado (vai sincronizar quando a internet voltar).'
+          : 'Recebido (vai sincronizar quando a internet voltar).'
+      );
+      pendingComigoCount().then(setPendingSync).catch(() => {});
+      reset();
+    } finally { setBusy(false); }
   };
 
   return (
@@ -1041,7 +1133,32 @@ function Balcao({ onChange }: { onChange: () => void }) {
 
       {/* Pedido da vez — no mobile fica ANTES da grade pra os botões de pagamento não escaparem do polegar. */}
       <div className="order-1 md:order-2 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 flex flex-col min-w-0">
-        <div className="text-xs text-zinc-500 mb-2">Pedido da vez</div>
+        {/* Sinais de offline / pendências de sync (Gap D) */}
+        {(!online || pendingSync > 0 || productsFromCache) && (
+          <div className="mb-2 flex flex-wrap gap-1.5 text-[11px]">
+            {!online && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-200 px-2 py-0.5">
+                <WifiOff className="w-3 h-3" /> Sem internet — venda continua, sincroniza quando voltar
+              </span>
+            )}
+            {online && pendingSync > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 text-sky-200 px-2 py-0.5">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando {pendingSync} {pendingSync === 1 ? 'pedido' : 'pedidos'}
+              </span>
+            )}
+            {productsFromCache && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 text-zinc-300 px-2 py-0.5" title="Catálogo do último acesso online">
+                catálogo em cache
+              </span>
+            )}
+          </div>
+        )}
+        <div className="flex items-center gap-1.5 mb-2">
+          <div className="text-xs text-zinc-500">Pedido da vez</div>
+          {orderPendingSync && (
+            <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-200 px-1.5 py-0.5">pendente de sincronizar</span>
+          )}
+        </div>
         {items.length === 0 ? (
           <div className="text-sm text-zinc-500 flex-1">Nenhum item ainda.</div>
         ) : (
@@ -1089,8 +1206,9 @@ function Balcao({ onChange }: { onChange: () => void }) {
             <BookUser className="w-4 h-4" /> {fiado === null ? 'Fiado' : 'Confirmar'}
           </button>
         </div>
-        {/* Pix dinâmico (ADR-118): QR com confirmação automática */}
-        {orderId && (
+        {/* Pix dinâmico (ADR-118): QR com confirmação automática — requer PSP,
+            portanto só faz sentido ONLINE. Fica escondido quando offline. */}
+        {orderId && online && (
           pix ? (
             <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
               <div className="text-xs text-sky-300 flex items-center gap-1"><QrCode className="w-3.5 h-3.5" /> Pix dinâmico — aguardando pagamento…</div>

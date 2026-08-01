@@ -126,6 +126,7 @@ jobs:
           - { name: 'clinic-guide-pdf-send', script: 'test:clinic-guide-pdf-send' }
           - { name: 'clinic-guide-cycle-integration', script: 'test:clinic-guide-cycle-integration' }
           - { name: 'clinic-ai-renewal-hints', script: 'test:clinic-ai-renewal-hints' }
+          - { name: 'clinic-ai-guide-draft', script: 'test:clinic-ai-guide-draft' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

@@ -588,6 +588,206 @@ export class ClinicGuideService {
       } catch (e) { reject(e); }
     });
   }
+
+  // ── Rascunho pré-preenchido (ADR-145 Fase 5 §F48) ──────────────────────
+
+  /**
+   * Devolve um "rascunho" de guia — objeto EM MEMÓRIA, NÃO persiste — com
+   * campos preenchidos a partir de fontes existentes (patient_profiles,
+   * plano corrente, guia anterior do mesmo episódio, ciclo). Campos sem
+   * fonte viram `{value:null, missing:true, reason:"..."}` — a UI mostra
+   * o que falta e a recepção decide se preenche à mão antes de chamar
+   * `create()` (Fatia 44).
+   *
+   * GUARDRAILS (RN-014 §Fase 5) — IA NUNCA fabrica:
+   *   - TUSS: só puxa de `procedure_authorization_requests.tuss_code` ou
+   *     de guia anterior do mesmo episódio. Sem fonte → missing.
+   *   - Carteirinha: só de `patient_profiles.insurance_card_number`.
+   *   - Número de autorização: só de authorization existente. Sem →
+   *     missing (o convênio precisa emitir; IA não gera).
+   *   - Data de validade: nunca chuta. Sem fonte → missing.
+   *   - Operadora: só se paciente tem plano; sem plano → missing.
+   *
+   * O objeto retornado NÃO é uma guia — é uma "sugestão" que a UI usa
+   * pra pré-popular o formulário. `create()` continua exigindo os campos
+   * obrigatórios; se algum vier missing, a UI bloqueia o submit.
+   */
+  static draft(orgId: string, input: {
+    guideType: GuideType;
+    contactId: string;
+    professionalId?: string | null;
+    episodeId?: string | null;
+    cycleId?: string | null;
+  }): {
+    guideType: GuideType;
+    contactId: string;
+    contactName: string | null;
+    professionalId: string | null;
+    episodeId: string | null;
+    cycleId: string | null;
+    fields: Record<string, { value: any; missing: boolean; source?: string; reason?: string }>;
+    warnings: string[];
+  } {
+    if (!GUIDE_TYPES.includes(input.guideType)) {
+      throw new Error(`guideType inválido. Aceitos: ${GUIDE_TYPES.join(", ")}.`);
+    }
+    const contact = loadContactOrThrow(orgId, input.contactId);
+    const episode = loadOptionalEpisode(orgId, input.episodeId);
+    const cycle = loadOptionalCycle(orgId, input.cycleId);
+    if (cycle && episode && cycle.episode_id !== episode.id) {
+      throw new Error("Ciclo pertence a outro episódio.");
+    }
+    // Se cycleId vier sem episodeId, deriva episodeId do ciclo pra consultar histórico.
+    const episodeIdEff = episode?.id || cycle?.episode_id || null;
+
+    // Valida professionalId cross-tenant (se veio)
+    let professionalId: string | null = input.professionalId || null;
+    if (professionalId) {
+      const prof = db.prepare(
+        `SELECT id FROM clinic_professionals WHERE organization_id = ? AND id = ?`
+      ).get(orgId, professionalId) as any;
+      if (!prof) throw new Error("Profissional não encontrado.");
+    }
+
+    // Perfil do paciente (pode ser null se paciente novo sem convênio)
+    const profile = db.prepare(
+      `SELECT cpf, insurance_card_number, insurance_name, current_plan_name
+         FROM patient_profiles WHERE organization_id = ? AND contact_id = ?`
+    ).get(orgId, input.contactId) as any;
+
+    // Última guia emitida do MESMO tipo pra este paciente/episódio — molde da vez anterior.
+    // Só puxa TUSS/procedureId/operatorId; nunca copia número, validade ou autorização.
+    let lastSameType: any = null;
+    if (episodeIdEff) {
+      lastSameType = db.prepare(
+        `SELECT id, operator_id, procedure_id, total_sessions, snapshot_json
+           FROM clinical_guides
+          WHERE organization_id = ? AND contact_id = ? AND guide_type = ?
+            AND episode_id = ? AND status IN ('issued','submitted','approved')
+          ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId, input.contactId, input.guideType, episodeIdEff) as any;
+    }
+    if (!lastSameType) {
+      lastSameType = db.prepare(
+        `SELECT id, operator_id, procedure_id, total_sessions, snapshot_json
+           FROM clinical_guides
+          WHERE organization_id = ? AND contact_id = ? AND guide_type = ?
+            AND status IN ('issued','submitted','approved')
+          ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId, input.contactId, input.guideType) as any;
+    }
+    let lastSnapshot: any = null;
+    if (lastSameType?.snapshot_json) {
+      try { lastSnapshot = JSON.parse(lastSameType.snapshot_json); } catch {}
+    }
+
+    // Autorização anterior (procedure_authorization_requests) só se aprovada.
+    // Sem autorização aprovada → authorizationNumber missing (IA não inventa).
+    const authRow = db.prepare(
+      `SELECT id, operator_id, procedure_id, tuss_code, authorization_number,
+              status, approved_at, expires_at
+         FROM procedure_authorization_requests
+        WHERE organization_id = ? AND contact_id = ? AND status = 'approved'
+        ORDER BY approved_at DESC LIMIT 1`
+    ).get(orgId, input.contactId) as any;
+
+    const warnings: string[] = [];
+    const fields: Record<string, { value: any; missing: boolean; source?: string; reason?: string }> = {};
+
+    const set = (k: string, value: any, source?: string, reason?: string) => {
+      if (value == null || value === "") {
+        fields[k] = { value: null, missing: true, reason: reason || "sem fonte disponível" };
+      } else {
+        fields[k] = { value, missing: false, source };
+      }
+    };
+
+    // Campos comuns a todos os tipos
+    set("patientName", contact.name, contact.name ? "contacts" : undefined,
+      contact.name ? undefined : "contato sem nome cadastrado");
+    set("cpf", profile?.cpf, profile?.cpf ? "patient_profiles" : undefined,
+      profile?.cpf ? undefined : "paciente sem CPF cadastrado");
+
+    // ── Campos específicos por tipo ───────────────────────────────────
+    if (input.guideType === "tiss_authorization") {
+      // Operadora + carteirinha vêm do plano; TUSS/procedure vêm de authorization aprovada
+      // OU da guia anterior do mesmo episódio. Se ambos ausentes → missing.
+      const operatorId = authRow?.operator_id || lastSameType?.operator_id || null;
+      set("operatorId", operatorId,
+        authRow ? "procedure_authorization_requests" : (lastSameType ? "clinical_guides (guia anterior)" : undefined),
+        operatorId ? undefined : "paciente sem autorização aprovada nem guia anterior");
+      set("insuranceName", profile?.insurance_name,
+        profile?.insurance_name ? "patient_profiles" : undefined,
+        profile?.insurance_name ? undefined : "paciente sem plano cadastrado");
+      set("insuranceCardNumber", profile?.insurance_card_number,
+        profile?.insurance_card_number ? "patient_profiles" : undefined,
+        profile?.insurance_card_number ? undefined : "carteirinha não cadastrada — recepção precisa preencher");
+      const procedureId = authRow?.procedure_id || lastSameType?.procedure_id || null;
+      set("procedureId", procedureId,
+        authRow ? "procedure_authorization_requests" : (lastSameType ? "clinical_guides (guia anterior)" : undefined),
+        procedureId ? undefined : "procedimento não informado — recepção precisa selecionar");
+      set("tussCode", authRow?.tuss_code,
+        authRow?.tuss_code ? "procedure_authorization_requests" : undefined,
+        authRow?.tuss_code ? undefined : "TUSS sem fonte — IA não inventa código; recepção precisa consultar tabela TUSS");
+      set("totalSessions", lastSameType?.total_sessions,
+        lastSameType?.total_sessions ? "clinical_guides (guia anterior)" : undefined,
+        lastSameType?.total_sessions ? undefined : "sem guia anterior — recepção define quantidade a solicitar");
+      // authorizationNumber: só vem de autorização APROVADA (não de guia anterior).
+      // Se paciente vai submeter guia nova, autorização vem depois — jamais copiar.
+      set("authorizationNumber", authRow?.authorization_number,
+        authRow?.authorization_number ? "procedure_authorization_requests" : undefined,
+        authRow?.authorization_number ? undefined : "autorização precisa ser obtida do convênio — IA não gera número");
+      // Validade: nunca chutar; o convênio define.
+      set("validUntil", authRow?.expires_at,
+        authRow?.expires_at ? "procedure_authorization_requests" : undefined,
+        authRow?.expires_at ? undefined : "validade é definida pelo convênio; deixe em branco até receber autorização");
+
+      if (fields.tussCode.missing || fields.operatorId.missing) {
+        warnings.push("Dados de convênio incompletos — TUSS/operadora precisam ser preenchidos antes de emitir.");
+      }
+    }
+
+    if (input.guideType === "referral") {
+      // Especialidade destino e motivo vêm da UI (recepção/médico digita).
+      // Puxamos só o que faz sentido: do último referral do paciente, sugerimos
+      // a especialidade destino (se houver) — mas jamais copiamos o "motivo".
+      const lastReferralSpec = lastSnapshot?.fields?.referralSpecialty || null;
+      set("referralSpecialty", lastReferralSpec,
+        lastReferralSpec ? "clinical_guides (encaminhamento anterior)" : undefined,
+        lastReferralSpec ? undefined : "especialidade destino precisa ser selecionada pelo médico solicitante");
+      // referralReason NUNCA copia — cada encaminhamento tem motivo próprio
+      set("referralReason", null, undefined,
+        "motivo do encaminhamento não é herdado — médico solicitante precisa descrever o caso atual");
+    }
+
+    if (input.guideType === "medical_order") {
+      // Items é lista aberta — jamais fabricar. Devolvemos vazio pra UI preencher.
+      set("items", null, undefined,
+        "pedido médico exige lista de exames/procedimentos — médico solicitante preenche");
+      // CID sugerido a partir do último atestado emitido do paciente (se houver).
+      // NÃO puxa de assessment do prontuário livre — muito impreciso pra virar
+      // sugestão. Se médico ainda não emitiu atestado com CID, deixa missing.
+      const lastCid = db.prepare(
+        `SELECT cid FROM clinical_medical_certificates
+          WHERE organization_id = ? AND contact_id = ? AND cid IS NOT NULL AND cid != ''
+          ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId, input.contactId) as any;
+      set("cidCode", lastCid?.cid,
+        lastCid?.cid ? "clinical_medical_certificates (último atestado)" : undefined,
+        lastCid?.cid ? undefined : "CID sem histórico prévio — médico solicitante define");
+    }
+
+    return {
+      guideType: input.guideType,
+      contactId: input.contactId,
+      contactName: contact.name,
+      professionalId,
+      episodeId: episodeIdEff,
+      cycleId: cycle?.id || null,
+      fields,
+      warnings,
+    };
+  }
 }
 
 function writeSectionTitle(doc: any, title: string) {

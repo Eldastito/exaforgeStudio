@@ -1017,6 +1017,21 @@ router.post("/guides", (req: AuthRequest, res): any => {
   } catch (e: any) { guideError(res, e); }
 });
 
+// ADR-145 Fase 5 §F48 — Rascunho pré-preenchido (IA operacional).
+// GUARDRAIL: NÃO persiste (só sugere). Campos sem fonte vêm
+// {missing:true, reason:"..."} — IA nunca inventa TUSS/carteirinha/
+// autorização. Recepção revisa e chama POST /guides pra criar.
+router.post("/guides/draft", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const draft = ClinicGuideService.draft(orgId, req.body || {});
+    res.json({ draft });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 router.get("/guides/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

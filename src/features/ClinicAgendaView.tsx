@@ -17,6 +17,10 @@ const TreatmentCyclePanel = React.lazy(() => import('./clinic/treatment-cycles/T
 // ADR-146 F54: sessões em grupo (multi-paciente na mesma agenda) +
 // AvailabilitySuggestions (IA F47). Também lazy.
 const GroupSessionPanel = React.lazy(() => import('./clinic/group-sessions/GroupSessionPanel'));
+
+// ADR-146 F55: guias polimorfas (TISS/encaminhamento/pedido médico) +
+// GuideDraftButton (IA F48 com missing:true). Também lazy.
+const GuidesPanel = React.lazy(() => import('./clinic/guides/GuidesPanel'));
 import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell, BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
@@ -195,7 +199,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 }
 
 export function ClinicAgendaView() {
-  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'autorizacoes' | 'conexao'>('agenda');
+  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -321,7 +325,7 @@ export function ClinicAgendaView() {
 
       {/* Abas internas */}
       <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden">
-        {([['agenda', 'Agenda'], ['episodios', 'Episódios'], ['ciclos', 'Ciclos'], ['grupos', 'Grupos'], ['especialidades', 'Especialidades'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
+        {([['agenda', 'Agenda'], ['episodios', 'Episódios'], ['ciclos', 'Ciclos'], ['grupos', 'Grupos'], ['guias', 'Guias'], ['especialidades', 'Especialidades'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
             {label}
@@ -370,6 +374,16 @@ export function ClinicAgendaView() {
           </div>
         }>
           <GroupSessionPanel />
+        </Suspense>
+      )}
+
+      {tab === 'guias' && (
+        <Suspense fallback={
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-10">
+            <Loader2 className="w-4 h-4 animate-spin" /> Carregando guias…
+          </div>
+        }>
+          <GuidesPanel />
         </Suspense>
       )}
 

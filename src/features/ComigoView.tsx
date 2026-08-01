@@ -1130,7 +1130,7 @@ function Balcao({ onChange }: { onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const [fiado, setFiado] = useState<{ name: string; phone: string } | null>(null);
   const [suggest, setSuggest] = useState<{ alsoBought: SugItem[]; top: SugItem[] }>({ alsoBought: [], top: [] });
-  const [pix, setPix] = useState<{ txid: string; qrPayload: string } | null>(null);
+  const [pix, setPix] = useState<{ txid: string; qrPayload: string; qrCodeBase64?: string } | null>(null);
   // Produto por peso aguardando o vendedor informar os kg (peixaria/açougue).
   const [weighing, setWeighing] = useState<Product | null>(null);
   // Esconde produtos zerados da grade (server-side): não dá pra vender o que
@@ -1251,7 +1251,7 @@ function Balcao({ onChange }: { onChange: () => void }) {
     setBusy(true);
     try {
       const out = await apiFetch(`/api/comigo/orders/${orderId}/pix-dynamic`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json());
-      if (out.ok) setPix({ txid: out.txid, qrPayload: out.qrPayload });
+      if (out.ok) setPix({ txid: out.txid, qrPayload: out.qrPayload, qrCodeBase64: out.qrCodeBase64 });
       else toast.error('Adicione itens antes de gerar o Pix.');
     } catch { toast.error('Não consegui gerar o Pix.'); }
     finally { setBusy(false); }
@@ -1449,6 +1449,12 @@ function Balcao({ onChange }: { onChange: () => void }) {
           pix ? (
             <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
               <div className="text-xs text-sky-300 flex items-center gap-1"><QrCode className="w-3.5 h-3.5" /> Pix dinâmico — aguardando pagamento…</div>
+              {pix.qrCodeBase64 && (
+                <div className="mt-2 flex justify-center">
+                  {/* QR imagem vinda do PSP real (Gap G, ADR-149) — MP devolve base64 pronto */}
+                  <img src={`data:image/png;base64,${pix.qrCodeBase64}`} alt="QR Pix" className="w-40 h-40 rounded bg-white p-1" />
+                </div>
+              )}
               <div className="mt-2 text-[11px] text-zinc-400 break-all bg-zinc-900 rounded p-2 font-mono">{pix.qrPayload}</div>
               <button onClick={() => { navigator.clipboard?.writeText(pix.qrPayload); toast.success('Código Pix copiado.'); }}
                 className="text-xs text-sky-300 hover:text-sky-200 mt-1">copiar código</button>

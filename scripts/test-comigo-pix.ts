@@ -35,7 +35,7 @@ async function main() {
   B.addItem(orgId, o1, { name: "Refri", qty: 2, unitPrice: 5 });
 
   // ===== 1. createCharge gera txid + payload =====
-  const c1 = Pix.createCharge(orgId, o1) as any;
+  const c1 = await Pix.createCharge(orgId,o1) as any;
   check("cobrança criada", c1.ok === true && !!c1.txid);
   check("valor da cobrança = 55", near(c1.amount, 55));
   check("txid tem ≤ 35 chars (regra Pix)", c1.txid.length <= 35);
@@ -43,7 +43,7 @@ async function main() {
   check("pedido segue aberto até pagar", (db.prepare("SELECT status FROM comigo_orders WHERE id=?").get(o1) as any).status === "open");
 
   // ===== 2. Idempotente por pedido (reusa a cobrança pendente) =====
-  const c2 = Pix.createCharge(orgId, o1) as any;
+  const c2 = await Pix.createCharge(orgId,o1) as any;
   check("createCharge reusa cobrança pendente", c2.txid === c1.txid && c2.reused === true);
 
   // ===== 3. confirmByTxid fecha o pedido como pix_dyn =====
@@ -63,7 +63,7 @@ async function main() {
   // Novo pedido + cobrança, confirmada via webhook.
   const o2 = B.openOrder(orgId, {});
   B.addItem(orgId, o2, { name: "Bolo", unitPrice: 30 });
-  const c3 = Pix.createCharge(orgId, o2) as any;
+  const c3 = await Pix.createCharge(orgId,o2) as any;
   const wh = Pix.handleWebhook(secret, { txid: c3.txid, status: "paid", e2eId: "E2EABC" });
   check("webhook válido concilia por txid", wh.status === "ok" && wh.orgId === orgId);
   check("webhook fechou o pedido via pix_dyn", (db.prepare("SELECT paid_via FROM comigo_orders WHERE id=?").get(o2) as any).paid_via === "pix_dyn");

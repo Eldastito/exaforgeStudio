@@ -25,6 +25,7 @@ import { ClinicReminderService } from "./ClinicReminderService.js";
 import { ClinicRetentionService } from "./ClinicRetentionService.js";
 import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
+import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
@@ -263,6 +264,33 @@ export class Scheduler {
     } catch (e) { console.error("[Clínica] passe relatório mensal falhou", e); }
   }
 
+  /**
+   * Módulo Clínica (ADR-145 Fase 5 / Fatia 49) — sweep de renovação de ciclo.
+   * Publica sinais operacionais em `business_signals` (ADR-136) pra recepção
+   * enxergar `renewal_due` / `pending_authorization` / `renewal_alert` sem
+   * precisar disparar o POST manual. Idempotente (ClinicRenewalTaskService.run
+   * já deduplica por `dedupe_key`), best-effort por-org. Só varre orgs que
+   * têm ciclos vivos (active/renewal_due/pending_authorization/on_hold) — não
+   * gasta tempo em tenant sem uso.
+   */
+  static clinicRenewalTaskPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM clinic_treatment_cycles
+           WHERE status IN ('active','renewal_due','pending_authorization','on_hold')`
+      ).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        if (!ModuleService.isEnabled(orgId, "clinica")) continue;
+        ClinicRenewalTaskService.run(orgId);
+      } catch (e) { console.error("[Clínica] sweep de renovação falhou", orgId, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -338,6 +366,7 @@ export class Scheduler {
     await this.clinicReminderPass().catch(e => console.error('[Scheduler] lembrete de consulta clínica falhou', e));
     await this.clinicFollowUpNoticePass().catch(e => console.error('[Scheduler] aviso de retorno clínica falhou', e));
     await this.clinicMonthlyReportPass().catch(e => console.error('[Scheduler] relatório mensal clínica falhou', e));
+    try { this.clinicRenewalTaskPass(); } catch (e: any) { console.error('[Scheduler] sweep de renovação clínica falhou', e?.message); }
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

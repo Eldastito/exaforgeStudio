@@ -313,6 +313,7 @@ jobs:
           - { name: 'comigo-agenda', script: 'test:comigo-agenda' }
           - { name: 'comigo-monthly-report', script: 'test:comigo-monthly-report' }
           - { name: 'comigo-balcao-offline', script: 'test:comigo-balcao-offline' }
+          - { name: 'comigo-impact', script: 'test:comigo-impact' }
           - { name: 'loss-margin', script: 'test:loss-margin' }
           - { name: 'loss-hooks', script: 'test:loss-hooks' }
           - { name: 'legal-advisor', script: 'test:legal-advisor' }

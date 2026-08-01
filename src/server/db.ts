@@ -6520,6 +6520,14 @@ const initDb = () => {
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comigo_order_items_command ON comigo_order_items (command_id) WHERE command_id IS NOT NULL`); } catch(e){}
   try { db.exec(`ALTER TABLE comigo_fiado_ledger ADD COLUMN command_id TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comigo_fiado_ledger_command ON comigo_fiado_ledger (organization_id, command_id) WHERE command_id IS NOT NULL`); } catch(e){}
+
+  // Impact/Paywall do Comigo (Gap E do levantamento autônomos, ADR-088 D8): o
+  // paywall não é banner — é o VALOR PROVADO. Guarda o dia-0 do módulo pra
+  // computar "quanto o Comigo já entregou desde que você começou a usar" via
+  // agregação (sem tabela de eventos própria — reusa comigo_orders + fiado
+  // ledger, mesmo padrão do ComigoHealthService). Nullable; capturado na
+  // primeira leitura do endpoint /impact.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_impact_baseline_at DATETIME`); } catch(e){}
 };
 
 initDb();

@@ -121,6 +121,7 @@
     "test:clinic-ai-renewal-hints": "tsx scripts/test-clinic-ai-renewal-hints.ts",
     "test:clinic-ai-guide-draft": "tsx scripts/test-clinic-ai-guide-draft.ts",
     "test:clinic-journey-e2e": "tsx scripts/test-clinic-journey-e2e.ts",
+    "test:clinic-journey-tenant-setup": "tsx scripts/test-clinic-journey-tenant-setup.ts",
     "test:clinic-renewal-scheduler": "tsx scripts/test-clinic-renewal-scheduler.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",

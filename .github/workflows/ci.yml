@@ -128,6 +128,7 @@ jobs:
           - { name: 'clinic-ai-renewal-hints', script: 'test:clinic-ai-renewal-hints' }
           - { name: 'clinic-ai-guide-draft', script: 'test:clinic-ai-guide-draft' }
           - { name: 'clinic-journey-e2e', script: 'test:clinic-journey-e2e' }
+          - { name: 'clinic-journey-tenant-setup', script: 'test:clinic-journey-tenant-setup' }
           - { name: 'clinic-renewal-scheduler', script: 'test:clinic-renewal-scheduler' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }

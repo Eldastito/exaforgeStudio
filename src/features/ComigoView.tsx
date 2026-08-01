@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { LegalTip } from '@/src/features/LegalAdvisorView';
@@ -129,10 +129,7 @@ export function ComigoView() {
         {activeTab === 'balcao' && <Balcao onChange={loadOverview} />}
         {activeTab === 'mesa' && <Mesa onChange={loadOverview} />}
         {activeTab === 'saude' && <Saude />}
-        {activeTab === 'precificacao' && (
-          <Placeholder icon={Calculator} title="Precificação"
-            desc="O motor já calcula custo, preço sugerido e recalibra pelo real (API pronta no PR #2). O formulário da ficha entra no próximo incremento." />
-        )}
+        {activeTab === 'precificacao' && <Precificacao />}
         {activeTab === 'caderneta' && <Caderneta onChange={loadOverview} />}
         {activeTab === 'divulgar' && <Divulgar />}
       </div>
@@ -180,13 +177,359 @@ function Divulgar() {
   );
 }
 
-function Placeholder({ icon: Icon, title, desc }: { icon: any; title: string; desc: string }) {
+// ── Precificação: fichas técnicas, custos, preço sugerido (ADR-111 D3) ──────
+type RecipeRow = { id: string; name: string; kind: string; yield_qty: number | null; labor_minutes: number | null; updated_at: string };
+type CostRow = { id?: string; label: string; kind: string; amount: number; is_estimate: number | boolean };
+type Breakdown = { insumos: number; indiretos: number; tempo: number; yield: number; unitCost: number; hasEstimate: boolean };
+type Suggestion = { price: number; margin: number; markup: number };
+type MissingHint = { key: string; label: string };
+type RecipeDetail = { recipe: RecipeRow; costs: CostRow[]; breakdown: Breakdown; suggestion: Suggestion; missing: MissingHint[]; kind: string };
+
+const KIND_LABELS: Record<string, string> = { revenda: 'Revenda', fabricacao: 'Fabricacao', servico: 'Servico' };
+
+function Precificacao() {
+  const [recipes, setRecipes] = useState<RecipeRow[]>([]);
+  const [selected, setSelected] = useState<RecipeDetail | null>(null);
+  const [margin, setMargin] = useState(30);
+  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [hourValue, setHourValue] = useState(0);
+  // Formulario nova ficha
+  const [newName, setNewName] = useState('');
+  const [newKind, setNewKind] = useState<string>('revenda');
+  const [newYield, setNewYield] = useState('');
+  const [newMinutes, setNewMinutes] = useState('');
+  // Novo custo inline
+  const [costLabel, setCostLabel] = useState('');
+  const [costKind, setCostKind] = useState<string>('insumo');
+  const [costAmount, setCostAmount] = useState('');
+  const [costEstimate, setCostEstimate] = useState(true);
+  // Calibracao
+  const [calYield, setCalYield] = useState('');
+  const [calWaste, setCalWaste] = useState('');
+
+  const loadList = useCallback(() => {
+    apiFetch('/api/comigo/recipes').then(r => r.json()).then((r: any) => setRecipes(r?.recipes || [])).catch(() => {});
+    apiFetch('/api/comigo/settings').then(r => r.json()).then((r: any) => setHourValue(Number(r?.hourValue) || 0)).catch(() => {});
+  }, []);
+  useEffect(() => { loadList(); }, [loadList]);
+
+  const loadDetail = useCallback((id: string, m?: number) => {
+    const mg = ((m ?? margin) / 100).toFixed(2);
+    apiFetch(`/api/comigo/recipes/${id}?margin=${mg}`).then(r => r.json()).then((r: any) => {
+      if (r?.recipe) setSelected(r as RecipeDetail);
+    }).catch(() => {});
+  }, [margin]);
+
+  const createRecipe = async () => {
+    if (!newName.trim() || busy) return;
+    setBusy(true);
+    try {
+      const body: any = { name: newName.trim(), kind: newKind };
+      if (newKind === 'fabricacao' && newYield) body.yield_qty = Number(newYield.replace(',', '.')) || null;
+      if (newKind === 'servico' && newMinutes) body.labor_minutes = Number(newMinutes.replace(',', '.')) || null;
+      const r = await apiFetch('/api/comigo/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(x => x.json());
+      if (r?.id) { loadList(); loadDetail(r.id); setCreating(false); setNewName(''); setNewYield(''); setNewMinutes(''); toast.success('Ficha criada!'); }
+    } catch { toast.error('Erro ao criar ficha.'); }
+    finally { setBusy(false); }
+  };
+
+  const deleteRecipe = async (id: string) => {
+    if (!window.confirm('Apagar esta ficha de preco? Nao tem volta.')) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/comigo/recipes/${id}`, { method: 'DELETE' });
+      setSelected(null); loadList(); toast.success('Ficha apagada.');
+    } catch { toast.error('Erro ao apagar.'); }
+    finally { setBusy(false); }
+  };
+
+  const addCost = async () => {
+    if (!selected || !costLabel.trim() || busy) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/comigo/recipes/${selected.recipe.id}/costs`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: costLabel.trim(), kind: costKind, amount: Number(costAmount.replace(',', '.')) || 0, is_estimate: costEstimate }),
+      });
+      setCostLabel(''); setCostAmount('');
+      loadDetail(selected.recipe.id);
+    } catch { toast.error('Erro ao adicionar custo.'); }
+    finally { setBusy(false); }
+  };
+
+  const removeCost = async (costId: string) => {
+    if (!selected || busy) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/comigo/recipes/${selected.recipe.id}/costs/${costId}`, { method: 'DELETE' });
+      loadDetail(selected.recipe.id);
+    } catch { toast.error('Erro ao remover custo.'); }
+    finally { setBusy(false); }
+  };
+
+  const calibrate = async () => {
+    if (!selected || busy) return;
+    const y = Number(calYield.replace(',', '.'));
+    if (!y || y <= 0) { toast.error('Informe o rendimento real.'); return; }
+    setBusy(true);
+    try {
+      await apiFetch(`/api/comigo/recipes/${selected.recipe.id}/calibrate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actualYield: y, wasteQty: Number(calWaste.replace(',', '.')) || 0 }),
+      });
+      setCalYield(''); setCalWaste('');
+      loadDetail(selected.recipe.id);
+      loadList();
+      toast.success('Rendimento recalibrado!');
+    } catch { toast.error('Erro na calibracao.'); }
+    finally { setBusy(false); }
+  };
+
+  const updateHourValue = async () => {
+    const v = window.prompt('Quanto vale sua hora de trabalho (R$)?', String(hourValue));
+    if (v == null) return;
+    const n = Number(v.replace(',', '.')) || 0;
+    await apiFetch('/api/comigo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hourValue: n }) }).catch(() => {});
+    setHourValue(n);
+    if (selected) loadDetail(selected.recipe.id);
+  };
+
+  const updateRecipeField = async (field: string, value: any) => {
+    if (!selected || busy) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/comigo/recipes/${selected.recipe.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+      loadDetail(selected.recipe.id);
+    } catch { toast.error('Erro ao atualizar.'); }
+    finally { setBusy(false); }
+  };
+
+  // ── Vista de detalhe ────────────────────────────────────────────────────────
+  if (selected) {
+    const { recipe, costs, breakdown, suggestion, missing, kind } = selected;
+    return (
+      <div className="space-y-4">
+        <button onClick={() => { setSelected(null); loadList(); }} className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1">
+          <ChevronLeft className="w-3.5 h-3.5" /> Voltar
+        </button>
+
+        {/* Header da ficha */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-zinc-100">{recipe.name}</h3>
+              <span className="text-xs text-zinc-500">{KIND_LABELS[kind] || kind}</span>
+              {kind === 'fabricacao' && (
+                <span className="text-xs text-zinc-500 ml-2">
+                  Rendimento: {recipe.yield_qty || 1} un
+                  <button onClick={() => { const v = window.prompt('Rendimento por lote:', String(recipe.yield_qty || 1)); if (v) updateRecipeField('yield_qty', Number(v.replace(',', '.')) || 1); }} className="ml-1 text-sky-400 hover:text-sky-300">(editar)</button>
+                </span>
+              )}
+              {kind === 'servico' && (
+                <span className="text-xs text-zinc-500 ml-2">
+                  Tempo: {recipe.labor_minutes || 0} min
+                  <button onClick={() => { const v = window.prompt('Tempo do atendimento (min):', String(recipe.labor_minutes || 0)); if (v) updateRecipeField('labor_minutes', Number(v.replace(',', '.')) || 0); }} className="ml-1 text-sky-400 hover:text-sky-300">(editar)</button>
+                  {' · '}Hora: {brl(hourValue)}
+                  <button onClick={updateHourValue} className="ml-1 text-sky-400 hover:text-sky-300">(editar)</button>
+                </span>
+              )}
+            </div>
+            <button onClick={() => deleteRecipe(recipe.id)} className="text-xs text-red-400 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
+          </div>
+        </div>
+
+        {/* Custos */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="text-sm font-medium text-zinc-200 mb-3">Custos da ficha</div>
+          {costs.length === 0 && <p className="text-xs text-zinc-500">Nenhum custo ainda. Adicione abaixo.</p>}
+          <div className="space-y-1.5">
+            {costs.map((c, i) => (
+              <div key={c.id || i} className="flex items-center justify-between text-xs bg-zinc-900 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.kind === 'insumo' ? 'bg-emerald-500/15 text-emerald-300' : c.kind === 'indireto' ? 'bg-sky-500/15 text-sky-300' : 'bg-purple-500/15 text-purple-300'}`}>
+                    {c.kind}
+                  </span>
+                  <span className="text-zinc-200">{c.label}</span>
+                  {(c.is_estimate === true || c.is_estimate === 1) && <span className="text-[10px] text-amber-400">(chute)</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-300">{brl(c.amount)}</span>
+                  <button onClick={() => c.id && removeCost(c.id)} className="text-zinc-600 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Adicionar custo */}
+          <div className="mt-3 flex flex-wrap gap-2 items-end">
+            <input value={costLabel} onChange={e => setCostLabel(e.target.value)} placeholder="Ex.: Farinha" className="flex-1 min-w-[120px] rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200" />
+            <select value={costKind} onChange={e => setCostKind(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200">
+              <option value="insumo">Insumo</option>
+              <option value="indireto">Indireto</option>
+              <option value="tempo">Tempo</option>
+            </select>
+            <input value={costAmount} onChange={e => setCostAmount(e.target.value)} placeholder="R$" className="w-20 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200" />
+            <label className="flex items-center gap-1 text-[10px] text-zinc-400">
+              <input type="checkbox" checked={costEstimate} onChange={e => setCostEstimate(e.target.checked)} className="rounded" />
+              Chute
+            </label>
+            <button disabled={busy || !costLabel.trim()} onClick={addCost} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 disabled:opacity-40">
+              <Plus className="w-3 h-3 inline mr-1" />Adicionar
+            </button>
+          </div>
+        </div>
+
+        {/* Resultado: custo unitario + preco sugerido */}
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+          <div className="text-sm font-medium text-emerald-200 flex items-center gap-1.5"><Gauge className="w-4 h-4" /> Resultado</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500">Custo unitario</div>
+              <div className="text-lg font-semibold text-zinc-100">{brl(breakdown.unitCost)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500">Preco sugerido</div>
+              <div className="text-lg font-semibold text-emerald-300">{brl(suggestion.price)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500">Margem</div>
+              <div className="text-lg font-semibold text-zinc-100">{Math.round(suggestion.margin * 100)}%</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500">Markup</div>
+              <div className="text-lg font-semibold text-zinc-100">{Math.round(suggestion.markup * 100)}%</div>
+            </div>
+          </div>
+
+          {/* Slider de margem */}
+          <div className="mt-3">
+            <label className="text-[10px] text-zinc-400">Margem-alvo: {margin}%</label>
+            <input type="range" min={5} max={90} value={margin}
+              onChange={e => { const m = Number(e.target.value); setMargin(m); loadDetail(selected.recipe.id, m); }}
+              className="w-full h-1.5 rounded-full appearance-none bg-zinc-700 accent-emerald-500 mt-1" />
+          </div>
+
+          {breakdown.hasEstimate && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-400">
+              <AlertTriangle className="w-3.5 h-3.5" /> Ainda tem custos como chute. Conforme souber o valor real, edite.
+            </div>
+          )}
+          {!breakdown.hasEstimate && costs.length > 0 && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-400">
+              <CheckCircle className="w-3.5 h-3.5" /> Todos os custos sao reais — preco confiavel.
+            </div>
+          )}
+
+          {/* Detalhamento */}
+          <div className="mt-3 text-[11px] text-zinc-500 flex flex-wrap gap-x-4">
+            <span>Insumos: {brl(breakdown.insumos)}</span>
+            <span>Indiretos: {brl(breakdown.indiretos)}</span>
+            {breakdown.tempo > 0 && <span>Tempo: {brl(breakdown.tempo)}</span>}
+            {kind === 'fabricacao' && <span>Rendimento: {breakdown.yield} un</span>}
+          </div>
+        </div>
+
+        {/* Custos esquecidos */}
+        {missing.length > 0 && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+            <div className="text-xs font-medium text-amber-200 mb-1.5">Custos que muita gente esquece:</div>
+            <div className="flex flex-wrap gap-1.5">
+              {missing.map(m => (
+                <button key={m.key} onClick={() => { setCostLabel(m.label); setCostKind('indireto'); setCostEstimate(true); }}
+                  className="text-[11px] rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-200 px-2.5 py-0.5 hover:bg-amber-500/20">
+                  + {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Calibracao (so fabricacao) */}
+        {kind === 'fabricacao' && (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <div className="text-sm font-medium text-zinc-200 mb-2">Calibrar pelo real</div>
+            <p className="text-xs text-zinc-400 mb-3">Fez um lote? Informe quanto rendeu e quanto perdeu — o motor recalcula automaticamente.</p>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div>
+                <label className="text-[10px] text-zinc-500">Rendimento real</label>
+                <input value={calYield} onChange={e => setCalYield(e.target.value)} placeholder="Ex.: 25" className="block w-24 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200" />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500">Perda/merma</label>
+                <input value={calWaste} onChange={e => setCalWaste(e.target.value)} placeholder="0" className="block w-24 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200" />
+              </div>
+              <button disabled={busy} onClick={calibrate} className="rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 disabled:opacity-40">Recalibrar</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Vista de lista ──────────────────────────────────────────────────────────
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
-      <Sparkles className="w-6 h-6 text-emerald-300 mx-auto mb-2" />
-      <div className="text-sm font-medium text-zinc-200">{title} — em construção</div>
-      <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1.5">{desc}</p>
-      <div className="text-[11px] text-zinc-600 mt-2 inline-flex"><Icon className="w-3.5 h-3.5" /></div>
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-400">Monte a ficha de cada produto/servico: custos, rendimento e margem. O motor calcula o preco sugerido e avisa o que voce esqueceu.</p>
+
+      {/* Botao criar */}
+      {!creating ? (
+        <button onClick={() => setCreating(true)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5">
+          <Plus className="w-3 h-3 inline mr-1" />Nova ficha de preco
+        </button>
+      ) : (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+          <div className="text-sm font-medium text-zinc-200">Nova ficha</div>
+          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nome do produto/servico" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200" autoFocus />
+          <div className="flex gap-2">
+            {(['revenda', 'fabricacao', 'servico'] as const).map(k => (
+              <button key={k} onClick={() => setNewKind(k)}
+                className={`text-xs rounded-lg px-3 py-1.5 border ${newKind === k ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'}`}>
+                {KIND_LABELS[k]}
+              </button>
+            ))}
+          </div>
+          {newKind === 'fabricacao' && (
+            <input value={newYield} onChange={e => setNewYield(e.target.value)} placeholder="Rendimento por lote (ex.: 30)" className="w-40 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200" />
+          )}
+          {newKind === 'servico' && (
+            <input value={newMinutes} onChange={e => setNewMinutes(e.target.value)} placeholder="Tempo do atendimento (min)" className="w-48 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200" />
+          )}
+          <div className="flex gap-2">
+            <button disabled={busy || !newName.trim()} onClick={createRecipe} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 disabled:opacity-40">Criar</button>
+            <button onClick={() => setCreating(false)} className="rounded-lg border border-zinc-700 text-zinc-400 text-xs px-3 py-1.5 hover:text-zinc-200">Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Valor da hora (servicos) */}
+      <div className="text-xs text-zinc-500 flex items-center gap-1">
+        Valor da sua hora: <span className="text-zinc-300">{brl(hourValue)}</span>
+        <button onClick={updateHourValue} className="text-sky-400 hover:text-sky-300 ml-1">(editar)</button>
+      </div>
+
+      {/* Lista de fichas */}
+      {recipes.length === 0 && !creating && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
+          <Calculator className="w-6 h-6 text-emerald-300 mx-auto mb-2" />
+          <div className="text-sm font-medium text-zinc-200">Nenhuma ficha de preco</div>
+          <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1.5">Crie sua primeira ficha pra descobrir quanto custa de verdade e quanto cobrar.</p>
+        </div>
+      )}
+      <div className="space-y-2">
+        {recipes.map(r => (
+          <button key={r.id} onClick={() => loadDetail(r.id)} className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800/60 p-3 flex items-center justify-between transition-colors">
+            <div>
+              <div className="text-sm font-medium text-zinc-100">{r.name}</div>
+              <div className="text-xs text-zinc-500">{KIND_LABELS[r.kind] || r.kind}{r.kind === 'fabricacao' && r.yield_qty ? ` · ${r.yield_qty} un/lote` : ''}{r.kind === 'servico' && r.labor_minutes ? ` · ${r.labor_minutes} min` : ''}</div>
+            </div>
+            <ChevronLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

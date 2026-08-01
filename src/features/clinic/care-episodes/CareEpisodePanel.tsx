@@ -241,6 +241,7 @@ export default function CareEpisodePanel() {
                         professional={professionalById.get(ep.primaryProfessionalId) || null}
                         professionals={professionals}
                         onChanged={() => { loadEpisodes(); loadBase(); }}
+                        onSwitchToNewEpisode={() => setShowNew(true)}
                       />
                     </React.Fragment>
                   ))}
@@ -290,12 +291,13 @@ function JourneyCountsBar({ counts }: { counts: JourneyCounts }) {
 }
 
 // ── Card individual de episódio + ações ───────────────────────────────
-function EpisodeCard({ episode, specialty, professional, professionals, onChanged }: {
+function EpisodeCard({ episode, specialty, professional, professionals, onChanged, onSwitchToNewEpisode }: {
   episode: CareEpisode;
   specialty: Specialty | null;
   professional: ProfessionalLite | null;
   professionals: ProfessionalLite[];
   onChanged: () => void;
+  onSwitchToNewEpisode?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [showTransfer, setShowTransfer] = useState(false);
@@ -423,6 +425,10 @@ function EpisodeCard({ episode, specialty, professional, professionals, onChange
           professionals={professionals}
           onClose={() => setShowTransfer(false)}
           onDone={() => { setShowTransfer(false); onChanged(); }}
+          onSwitchToNewEpisode={onSwitchToNewEpisode ? () => {
+            setShowTransfer(false);
+            onSwitchToNewEpisode();
+          } : undefined}
         />
       )}
 
@@ -536,11 +542,14 @@ function NewEpisodeModal({ contactId, patientName, specialties, professionals, o
 }
 
 // ── Modal: transferir profissional (owner|admin) ──────────────────────
-function TransferEpisodeModal({ episode, professionals, onClose, onDone }: {
+function TransferEpisodeModal({ episode, professionals, onClose, onDone, onSwitchToNewEpisode }: {
   episode: CareEpisode;
   professionals: ProfessionalLite[];
   onClose: () => void;
   onDone: () => void;
+  /** Ponte pro NewEpisodeModal — evita a confusão "trocar de
+   *  especialidade" (que é abrir episódio novo, não transferir). */
+  onSwitchToNewEpisode?: () => void;
 }) {
   const [toProfessionalId, setTo] = useState('');
   const [reason, setReason] = useState('');
@@ -571,8 +580,30 @@ function TransferEpisodeModal({ episode, professionals, onClose, onDone }: {
 
   return (
     <ModalShell title="Transferir episódio" onClose={onClose}
-      subtitle="Somente owner/admin pode transferir.">
+      subtitle="Troca o profissional responsável DENTRO da mesma especialidade.">
       <div className="space-y-3">
+        {/* Hint UX: separação clara entre "trocar de profissional" (esta ação)
+            e "adicionar/mudar especialidade" (que é abrir episódio novo — o
+            paciente permanece; ADR-145 D1). Sem isso, a recepção fica confusa
+            porque "transferir" no vocabulário comum é polissêmico. */}
+        {onSwitchToNewEpisode && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-100">
+            <div className="flex items-start gap-2">
+              <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="leading-relaxed">
+                  Precisa <b>trocar de especialidade</b> (ex.: paciente vai passar
+                  a fazer Psicologia)? Isso é <b>abrir episódio novo</b> — o
+                  paciente permanece, os dados cadastrais não são perdidos.
+                </p>
+                <button onClick={onSwitchToNewEpisode}
+                  className="mt-1 h-6 px-2 text-[11px] rounded border border-amber-500/40 text-amber-100 hover:bg-amber-500/10 inline-flex items-center gap-1">
+                  Abrir episódio em outra especialidade →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-zinc-400">Novo profissional responsável</span>
           <select value={toProfessionalId} onChange={e => setTo(e.target.value)}
@@ -583,7 +614,7 @@ function TransferEpisodeModal({ episode, professionals, onClose, onDone }: {
               .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <span className="text-[10px] text-zinc-600 mt-0.5">
-            Precisa estar vinculado à mesma especialidade.
+            Precisa estar vinculado à mesma especialidade. Somente owner/admin.
           </span>
         </label>
         <label className="flex flex-col gap-1">

@@ -10,6 +10,9 @@ const SpecialtiesPanel = React.lazy(() => import('./clinic/specialties/Specialti
 // lazy — o painel puxa modais e o PinConfirmModal shared. Fica em
 // chunk separado do agenda inicial.
 const CareEpisodePanel = React.lazy(() => import('./clinic/care-episodes/CareEpisodePanel'));
+
+// ADR-146 F53: ciclos + fila de renovação + sinais F47. Também lazy.
+const TreatmentCyclePanel = React.lazy(() => import('./clinic/treatment-cycles/TreatmentCyclePanel'));
 import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell, BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
@@ -188,7 +191,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 }
 
 export function ClinicAgendaView() {
-  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'autorizacoes' | 'conexao'>('agenda');
+  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -314,7 +317,7 @@ export function ClinicAgendaView() {
 
       {/* Abas internas */}
       <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden">
-        {([['agenda', 'Agenda'], ['episodios', 'Episódios'], ['especialidades', 'Especialidades'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
+        {([['agenda', 'Agenda'], ['episodios', 'Episódios'], ['ciclos', 'Ciclos'], ['especialidades', 'Especialidades'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
             {label}
@@ -343,6 +346,16 @@ export function ClinicAgendaView() {
           </div>
         }>
           <CareEpisodePanel />
+        </Suspense>
+      )}
+
+      {tab === 'ciclos' && (
+        <Suspense fallback={
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-10">
+            <Loader2 className="w-4 h-4 animate-spin" /> Carregando ciclos de tratamento…
+          </div>
+        }>
+          <TreatmentCyclePanel />
         </Suspense>
       )}
 

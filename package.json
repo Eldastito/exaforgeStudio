@@ -275,6 +275,7 @@
     "test:comigo-boosts": "tsx scripts/test-comigo-boosts.ts",
     "test:comigo-agenda": "tsx scripts/test-comigo-agenda.ts",
     "test:comigo-monthly-report": "tsx scripts/test-comigo-monthly-report.ts",
+    "test:comigo-balcao-offline": "tsx scripts/test-comigo-balcao-offline.ts",
     "test:loss-margin": "tsx scripts/test-loss-margin.ts",
     "test:loss-hooks": "tsx scripts/test-loss-hooks.ts",
     "test:legal-advisor": "tsx scripts/test-legal-advisor.ts",

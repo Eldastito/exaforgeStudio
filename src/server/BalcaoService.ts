@@ -75,10 +75,20 @@ export class BalcaoService {
   }
 
   // ── Ciclo do pedido ─────────────────────────────────────────────────────────
-  static openOrder(orgId: string, opts: { sessionAlias?: string; contactId?: string; consumo?: string } = {}): string {
-    const id = randomUUID();
-    db.prepare(`INSERT INTO comigo_orders (id, organization_id, contact_id, session_alias, status, consumo, total) VALUES (?, ?, ?, ?, 'open', ?, 0)`)
-      .run(id, orgId, opts.contactId || null, opts.sessionAlias || null, opts.consumo === "viagem" ? "viagem" : "local");
+  /**
+   * Abre um pedido. Aceita `id` gerado no cliente (usado quando o Balcão está
+   * offline e enfileira comandos ANTES de o servidor conhecer o pedido) e
+   * `commandId` (idempotência ponta-a-ponta com o outbox — Gap D). Se o mesmo
+   * `commandId` já foi processado, devolve o id gravado sem duplicar.
+   */
+  static openOrder(orgId: string, opts: { id?: string; sessionAlias?: string; contactId?: string; consumo?: string; commandId?: string } = {}): string {
+    if (opts.commandId) {
+      const dup = db.prepare("SELECT id FROM comigo_orders WHERE organization_id = ? AND command_id = ?").get(orgId, opts.commandId) as any;
+      if (dup) return dup.id;
+    }
+    const id = opts.id || randomUUID();
+    db.prepare(`INSERT INTO comigo_orders (id, organization_id, contact_id, session_alias, status, consumo, total, command_id) VALUES (?, ?, ?, ?, 'open', ?, 0, ?)`)
+      .run(id, orgId, opts.contactId || null, opts.sessionAlias || null, opts.consumo === "viagem" ? "viagem" : "local", opts.commandId || null);
     return id;
   }
 
@@ -93,7 +103,16 @@ export class BalcaoService {
     return round2(fallback);
   }
 
-  static addItem(orgId: string, orderId: string, item: { productId?: string; name: string; qty?: number; unitPrice: number; unitCostSnapshot?: number }) {
+  /**
+   * Adiciona um item ao pedido. `commandId` deduplica reenvios do outbox
+   * (Balcão offline). Se o comando já rodou, devolve o mesmo itemId (não
+   * duplica linha nem infla o total).
+   */
+  static addItem(orgId: string, orderId: string, item: { productId?: string; name: string; qty?: number; unitPrice: number; unitCostSnapshot?: number; commandId?: string }) {
+    if (item.commandId) {
+      const dup = db.prepare("SELECT id FROM comigo_order_items WHERE command_id = ?").get(item.commandId) as any;
+      if (dup) return dup.id;
+    }
     const order = db.prepare("SELECT id, status FROM comigo_orders WHERE organization_id = ? AND id = ?").get(orgId, orderId) as any;
     if (!order) throw new Error("order_not_found");
     if (order.status !== "open") throw new Error("order_not_open");
@@ -101,8 +120,8 @@ export class BalcaoService {
     const unitPrice = round2(item.unitPrice);
     const unitCost = this.costFor(orgId, item.productId, item.unitCostSnapshot || 0);
     const itemId = randomUUID();
-    db.prepare(`INSERT INTO comigo_order_items (id, order_id, product_id, name, qty, unit_price, unit_cost_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(itemId, orderId, item.productId || null, String(item.name).trim(), qty, unitPrice, unitCost);
+    db.prepare(`INSERT INTO comigo_order_items (id, order_id, product_id, name, qty, unit_price, unit_cost_snapshot, command_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(itemId, orderId, item.productId || null, String(item.name).trim(), qty, unitPrice, unitCost, item.commandId || null);
     this.recomputeTotal(orderId);
     return itemId;
   }
@@ -118,7 +137,32 @@ export class BalcaoService {
    * dados do cliente). Retorna a decisão; quando precisa de aviso, devolve
    * `{ needsOverride, reason, ... }` sem fechar — o Balcão confirma e repete.
    */
-  static pay(orgId: string, orderId: string, opts: { paidVia: PayVia; customer?: { name: string; phone: string }; override?: boolean; actorId?: string }) {
+  static pay(orgId: string, orderId: string, opts: { paidVia: PayVia; customer?: { name: string; phone: string }; override?: boolean; actorId?: string; commandId?: string }) {
+    // Idempotência do PAY (Balcão offline): se o mesmo commandId já pagou o
+    // pedido, devolve a mesma resposta em vez de tentar pagar de novo (o que
+    // falharia com order_not_open, ou pior — duplicaria a dívida do fiado).
+    if (opts.commandId) {
+      const dup = db.prepare(
+        `SELECT o.id, o.paid_via, o.status, o.over_limit, o.contact_id
+           FROM comigo_orders o
+          WHERE o.organization_id = ? AND o.id = ? AND o.status IN ('paid','done')`
+      ).get(orgId, orderId) as any;
+      // Se o pedido já foi fechado E o ledger tem esse commandId, é replay.
+      if (dup) {
+        const ledger = db.prepare(
+          `SELECT id FROM comigo_fiado_ledger WHERE organization_id = ? AND command_id = ?`
+        ).get(orgId, opts.commandId) as any;
+        if (dup.paid_via === "fiado" && ledger) {
+          return { ok: true, paidVia: "fiado" as const, receivable: true, overLimit: !!dup.over_limit, contactId: dup.contact_id };
+        }
+        if (dup.paid_via !== "fiado") {
+          // Cash / pix_manual: idempotência é pelo status já fechado + paid_via.
+          // (Não temos ledger pra ancorar o commandId; conferimos que o status
+          //  bate e devolvemos a mesma decisão.)
+          return { ok: true, paidVia: dup.paid_via, receivable: false };
+        }
+      }
+    }
     const order = db.prepare("SELECT * FROM comigo_orders WHERE organization_id = ? AND id = ?").get(orgId, orderId) as any;
     if (!order) throw new Error("order_not_found");
     if (order.status !== "open") throw new Error("order_not_open");
@@ -147,8 +191,8 @@ export class BalcaoService {
         return { ok: false, needsOverride: true, reason: "over_limit", message: `Já deve R$ ${chk.balance.toFixed(2)} (limite R$ ${chk.limit.toFixed(2)}). Essa venda leva a R$ ${chk.projected.toFixed(2)}.`, ...chk };
       }
       const over = chk.overLimit ? 1 : 0;
-      db.prepare(`INSERT INTO comigo_fiado_ledger (id, organization_id, contact_id, order_id, kind, amount, over_limit, created_by) VALUES (?, ?, ?, ?, 'debt', ?, ?, ?)`)
-        .run(randomUUID(), orgId, contactId, orderId, amount, over, opts.actorId || null);
+      db.prepare(`INSERT INTO comigo_fiado_ledger (id, organization_id, contact_id, order_id, kind, amount, over_limit, created_by, command_id) VALUES (?, ?, ?, ?, 'debt', ?, ?, ?, ?)`)
+        .run(randomUUID(), orgId, contactId, orderId, amount, over, opts.actorId || null, opts.commandId || null);
       // Fiado = pedido entregue mas a RECEBER: fecha o pedido, não é caixa.
       db.prepare("UPDATE comigo_orders SET status = 'done', paid_via = 'fiado', over_limit = ? WHERE id = ?").run(over, orderId);
       return { ok: true, paidVia: "fiado", receivable: true, overLimit: !!over, contactId };

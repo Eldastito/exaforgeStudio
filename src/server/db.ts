@@ -6505,6 +6505,21 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_retail_store_var_costs ON retail_store_variable_costs (organization_id, store_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_store_variable_costs', e); }
+
+  // Balcão OFFLINE (Gap D do levantamento autônomos): idempotência ponta-a-ponta.
+  // O cliente gera commandId (UUID) por operação (abrir pedido, adicionar item,
+  // pagar); quando volta online e o outbox reenviar, o servidor DEDUPLICA por
+  // (organization_id, command_id) em vez de duplicar venda/dívida. Mesmo padrão
+  // do SEND_MESSAGE (ADR-082 / linha 557). Índice único parcial: NULL não
+  // participa (pedidos criados online sem passar pelo outbox seguem sem chave).
+  try { db.exec(`ALTER TABLE comigo_orders ADD COLUMN command_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comigo_orders_command ON comigo_orders (organization_id, command_id) WHERE command_id IS NOT NULL`); } catch(e){}
+  try { db.exec(`ALTER TABLE comigo_order_items ADD COLUMN command_id TEXT`); } catch(e){}
+  // Itens não têm organization_id direta — o commandId por si só é o suficiente
+  // como identidade global (UUID). Índice único simples.
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comigo_order_items_command ON comigo_order_items (command_id) WHERE command_id IS NOT NULL`); } catch(e){}
+  try { db.exec(`ALTER TABLE comigo_fiado_ledger ADD COLUMN command_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_comigo_fiado_ledger_command ON comigo_fiado_ledger (organization_id, command_id) WHERE command_id IS NOT NULL`); } catch(e){}
 };
 
 initDb();

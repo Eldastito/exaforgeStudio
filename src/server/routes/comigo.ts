@@ -194,12 +194,15 @@ router.put("/settings", (req: AuthRequest, res): any => {
 // ── Balcão PDV + fiado (ADR-111 D4 / ADR-112 / ADR-113, PR #3) ───────────────
 
 // POST /api/comigo/orders — abre um pedido na fila do Balcão.
+// Aceita `id` e `commandId` opcionais (Balcão offline): o cliente gera o
+// UUID do pedido pra poder empilhar addItem/pay ANTES do server ver o open,
+// e o commandId deduplica reenvios do outbox.
 router.post("/orders", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { sessionAlias, contactId, consumo } = req.body || {};
-  const id = BalcaoService.openOrder(orgId, { sessionAlias, contactId, consumo });
-  res.status(201).json({ id });
+  const { id, sessionAlias, contactId, consumo, commandId } = req.body || {};
+  const orderId = BalcaoService.openOrder(orgId, { id, sessionAlias, contactId, consumo, commandId });
+  res.status(201).json({ id: orderId });
 });
 
 // GET /api/comigo/orders?status=open — fila do Balcão.
@@ -225,10 +228,10 @@ router.get("/orders/:id", (req: AuthRequest, res): any => {
 router.post("/orders/:id/items", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { productId, name, qty, unitPrice, unitCostSnapshot } = req.body || {};
+  const { productId, name, qty, unitPrice, unitCostSnapshot, commandId } = req.body || {};
   if (!name || unitPrice == null) return res.status(400).json({ error: "name_and_price_required" });
   try {
-    const itemId = BalcaoService.addItem(orgId, req.params.id, { productId, name, qty, unitPrice, unitCostSnapshot });
+    const itemId = BalcaoService.addItem(orgId, req.params.id, { productId, name, qty, unitPrice, unitCostSnapshot, commandId });
     res.status(201).json({ id: itemId });
   } catch (e: any) {
     res.status(e?.message === "order_not_found" ? 404 : 409).json({ error: e?.message || "add_item_failed" });
@@ -240,10 +243,10 @@ router.post("/orders/:id/items", (req: AuthRequest, res): any => {
 router.post("/orders/:id/pay", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { paidVia, customer, override } = req.body || {};
+  const { paidVia, customer, override, commandId } = req.body || {};
   if (!["cash", "pix_manual", "fiado"].includes(paidVia)) return res.status(400).json({ error: "invalid_paid_via" });
   try {
-    const out = BalcaoService.pay(orgId, req.params.id, { paidVia, customer, override: !!override, actorId: req.user?.userId });
+    const out = BalcaoService.pay(orgId, req.params.id, { paidVia, customer, override: !!override, actorId: req.user?.userId, commandId });
     if (!out.ok) return res.status(out.needsOverride ? 409 : 422).json(out);
     audit(orgId, req.user?.userId, req.params.id, "comigo_order_pay", { paidVia, override: !!override });
     res.json(out);

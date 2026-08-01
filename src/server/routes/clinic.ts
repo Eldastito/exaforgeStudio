@@ -30,6 +30,7 @@ import { ClinicTreatmentCycleService } from "../ClinicTreatmentCycleService.js";
 import { ClinicCareJourneyMetricsService, QueueFilter } from "../ClinicCareJourneyMetricsService.js";
 import { ClinicScheduleSessionService } from "../ClinicScheduleSessionService.js";
 import { ClinicGuideService, GuideType, GuideStatus } from "../ClinicGuideService.js";
+import { ClinicGuideDeliveryService } from "../ClinicGuideDeliveryService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -1045,6 +1046,49 @@ router.post("/guides/:id/cancel", requireRole("owner", "admin"), (req: AuthReque
     const guide = ClinicGuideService.cancel(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json({ guide });
   } catch (e: any) { guideError(res, e); }
+});
+
+// PDF autenticado — recepção baixa direto (materializa se ainda não).
+router.get("/guides/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { bytes } = await ClinicGuideDeliveryService.materializePdf(orgId, req.params.id);
+    const guide = ClinicGuideService.get(orgId, req.params.id);
+    const label = guide?.guideType === "referral" ? "encaminhamento"
+                : guide?.guideType === "medical_order" ? "pedido-medico"
+                : "guia";
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `inline; filename="${label}-${guide?.internalNumber || req.params.id.slice(0,8)}.pdf"`);
+    res.send(bytes);
+  } catch (e: any) { guideError(res, e); }
+});
+
+// Envio pelo canal do paciente (recepção clica "Enviar por WhatsApp").
+router.post("/guides/:id/send", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const delivery = await ClinicGuideDeliveryService.send(orgId, req.params.id, actor(req) ?? null, {
+      caption: req.body?.caption,
+    });
+    res.json({ delivery });
+  } catch (e: any) {
+    const code = e?.code;
+    const status = code === "LGPD_CONSENT_REQUIRED" ? 403
+                : code === "LGPD_COMMS_CONSENT_REQUIRED" ? 403
+                : code === "GUIDE_NOT_SENDABLE" ? 409
+                : 400;
+    res.status(status).json({ error: e.message, code: code || null });
+  }
+});
+
+// Histórico de envios pra guia
+router.get("/guides/:id/deliveries", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ deliveries: ClinicGuideDeliveryService.list(orgId, req.params.id) });
 });
 
 // Sessões de agenda compartilhadas (ADR-145 D6, Fatia 41). Habilita

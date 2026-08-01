@@ -259,13 +259,17 @@ router.post("/orders/:id/pay", (req: AuthRequest, res): any => {
   }
 });
 
-// POST /api/comigo/orders/:id/pix-dynamic — gera a cobrança Pix dinâmica (ADR-118).
-router.post("/orders/:id/pix-dynamic", (req: AuthRequest, res): any => {
+// POST /api/comigo/orders/:id/pix-dynamic — gera a cobrança Pix dinâmica (ADR-118/149).
+// Async porque o provider MP (Gap G) chama a API externa. Mock continua rápido.
+router.post("/orders/:id/pix-dynamic", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const out = ComigoPixService.createCharge(orgId, req.params.id);
-  if (!out.ok) return res.status(out.error === "order_not_found" ? 404 : 409).json(out);
-  audit(orgId, req.user?.userId, req.params.id, "comigo_pix_create", { txid: out.txid });
+  const out = await ComigoPixService.createCharge(orgId, req.params.id);
+  if (!out.ok) {
+    const code = out.error === "order_not_found" ? 404 : out.error === "provider_failed" ? 502 : 409;
+    return res.status(code).json(out);
+  }
+  audit(orgId, req.user?.userId, req.params.id, "comigo_pix_create", { txid: out.txid, provider: out.provider });
   res.json(out);
 });
 

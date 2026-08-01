@@ -24,11 +24,11 @@ router.post("/:token/fiado-check", (req, res): any => {
 });
 
 // POST /api/public/comigo/:token/order — Pix dinâmico (pay-first) ou fiado autorizado.
-router.post("/:token/order", (req, res): any => {
+router.post("/:token/order", async (req, res): Promise<any> => {
   const orgId = ComigoMesaService.orgByToken(req.params.token);
   if (!orgId) return res.status(404).json({ error: "not_found" });
   const { items, sessionAlias, consumo, payment, customer } = req.body || {};
-  const out = ComigoMesaService.placeOrder(orgId, { items, sessionAlias, consumo, payment, customer });
+  const out = await ComigoMesaService.placeOrder(orgId, { items, sessionAlias, consumo, payment, customer });
   if (!out.ok) return res.status(400).json(out);
   res.status(201).json(out);
 });

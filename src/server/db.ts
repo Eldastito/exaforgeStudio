@@ -6538,6 +6538,14 @@ const initDb = () => {
   // Whisper é ~10x mais caro que chat (por minuto), então default menor (30/dia).
   // Ao estourar, a rota responde 429 — cadastro por áudio pausa até amanhã.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_audio_catalog_daily_cap INTEGER DEFAULT 30`); } catch(e){}
+
+  // Gap G (ADR-088 D3 nível 2 real): Pix dinâmico com PSP real (Mercado Pago).
+  // Colunas aditivas em comigo_pix_charges — o QR imagem base64 (pra UI mostrar
+  // sem precisar de lib de QR) e o id externo do PSP (payment id do MP), pra
+  // conciliação e auditoria. O mock (provider=mock) segue funcionando: ambas
+  // as colunas ficam NULL.
+  try { db.exec(`ALTER TABLE comigo_pix_charges ADD COLUMN qr_code_base64 TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE comigo_pix_charges ADD COLUMN external_id TEXT`); } catch(e){}
 };
 
 initDb();

@@ -311,6 +311,13 @@ export class PaymentService {
         } else if (ref.startsWith("sub:")) {
           // Fatura de assinatura: marca a mensalidade paga.
           try { SubscriptionService.markInvoicePaid(orgId, ref.slice(4)); } catch (e) { /* noop */ }
+        } else if (ref.startsWith("cmg:")) {
+          // Pedido do Comigo Balcão/Mesa (Gap G, ADR-149). O webhook geral cobre
+          // esse fluxo — sem endpoint separado. Import dinâmico p/ evitar ciclo.
+          try {
+            const mod = await import("./ComigoPixService.js");
+            mod.ComigoPixService.confirmByReference(orgId, ref.slice(4), String(data.id));
+          } catch (e) { /* noop */ }
         } else {
           this.markPaid(orgId, ref, { method: "mercadopago", externalId: String(data.id) });
         }

@@ -118,7 +118,7 @@ export class ComigoMesaService {
    * Cria o pedido do cliente. `payment='pix'` (pay-first, Pix dinâmico) ou
    * `payment='fiado'` (só p/ cliente cadastrado e liberado, dentro do limite).
    */
-  static placeOrder(orgId: string, params: { items: { productId: string; qty?: number }[]; sessionAlias?: string; consumo?: string; payment?: string; customer?: { phone?: string } }) {
+  static async placeOrder(orgId: string, params: { items: { productId: string; qty?: number }[]; sessionAlias?: string; consumo?: string; payment?: string; customer?: { phone?: string } }) {
     if (!Array.isArray(params.items) || !params.items.length) return { ok: false, error: "empty_cart" };
 
     // FIADO autorizado (ADR-124): valida ANTES de criar o pedido.
@@ -140,9 +140,9 @@ export class ComigoMesaService {
     // PIX dinâmico (pay-first).
     const draft = this.createMesaOrder(orgId, params);
     if (!draft.orderId) return { ok: false, error: "no_valid_items" };
-    const charge = ComigoPixService.createCharge(orgId, draft.orderId) as any;
+    const charge = await ComigoPixService.createCharge(orgId, draft.orderId) as any;
     if (!charge.ok) return { ok: false, error: charge.error || "charge_failed" };
-    return { ok: true, orderId: draft.orderId, total: draft.total, txid: charge.txid, qrPayload: charge.qrPayload };
+    return { ok: true, orderId: draft.orderId, total: draft.total, txid: charge.txid, qrPayload: charge.qrPayload, qrCodeBase64: charge.qrCodeBase64 };
   }
 
   /** Status do pedido para o cliente (polling). */

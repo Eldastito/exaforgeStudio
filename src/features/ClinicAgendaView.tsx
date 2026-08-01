@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, Suspense } from 'react';
+
+// ADR-146 F51: aba de especialidades entra como shell lazy. Mantém o
+// bundle inicial da Agenda enxuto — o painel novo só baixa quando o
+// usuário clica na aba. Padrão da ADR-146 D1 (extração incremental, sem
+// reescrever este arquivo).
+const SpecialtiesPanel = React.lazy(() => import('./clinic/specialties/SpecialtiesPanel'));
 import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell, BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
@@ -177,7 +183,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 }
 
 export function ClinicAgendaView() {
-  const [tab, setTab] = useState<'agenda' | 'autorizacoes' | 'conexao'>('agenda');
+  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -303,7 +309,7 @@ export function ClinicAgendaView() {
 
       {/* Abas internas */}
       <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden">
-        {([['agenda', 'Agenda'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
+        {([['agenda', 'Agenda'], ['especialidades', 'Especialidades'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
             {label}
@@ -314,6 +320,16 @@ export function ClinicAgendaView() {
       {tab === 'autorizacoes' && <AuthorizationsTab contacts={contacts} />}
 
       {tab === 'conexao' && <ConnectionTab />}
+
+      {tab === 'especialidades' && (
+        <Suspense fallback={
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-10">
+            <Loader2 className="w-4 h-4 animate-spin" /> Carregando especialidades…
+          </div>
+        }>
+          <SpecialtiesPanel />
+        </Suspense>
+      )}
 
       {tab === 'agenda' && (<>
       {/* Filtros */}

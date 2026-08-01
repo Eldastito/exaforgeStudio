@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown, WifiOff, RefreshCw } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown, WifiOff, RefreshCw, Trophy } from 'lucide-react';
 import { apiFetch, currentOrgId } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { LegalTip } from '@/src/features/LegalAdvisorView';
@@ -1436,8 +1436,96 @@ function Saude() {
         </div>
       )}
 
+      <ValorGerado />
       <MonthlyReport />
       <Graduacao />
+    </div>
+  );
+}
+
+// ── Valor Gerado (Paywall via Impact Ledger — Gap E, ADR-088 D8) ──────────
+// O paywall não é banner. É a métrica que a pessoa já olha ("meu ganho") + um
+// CTA CONDICIONAL: só aparece quando o Comigo já provou valor real.
+type ImpactSummary = {
+  baselineAt: string; now: string; sinceDays: number;
+  provenBRL: number; revenueBRL: number; ordersCount: number;
+  fiadoBalanceBRL: number;
+  billingStatus: string; planId: string | null;
+  cta: { show: boolean; planId: string; planName: string; monthlyPrice: number; annualMonthPrice: number | null; reason: string };
+};
+
+function ValorGerado() {
+  const [s, setS] = useState<ImpactSummary | null>(null);
+  useEffect(() => {
+    apiFetch('/api/comigo/impact').then(r => r.json()).then((r: any) => {
+      if (r && typeof r.provenBRL === 'number') setS(r);
+    }).catch(() => {});
+  }, []);
+
+  if (!s) return null;
+
+  const goToPlans = () => { window.location.hash = '#/settings/plans'; };
+
+  return (
+    <div className={`rounded-xl border p-4 ${s.cta.show ? 'border-amber-500/40 bg-amber-500/5' : 'border-emerald-500/25 bg-emerald-500/5'}`}>
+      <div className={`flex items-center gap-1.5 text-sm font-medium mb-1 ${s.cta.show ? 'text-amber-200' : 'text-emerald-200'}`}>
+        <Trophy className="w-4 h-4" /> Valor gerado pelo Comigo
+      </div>
+      <p className="text-xs text-zinc-400">
+        Desde {new Date(s.baselineAt).toLocaleDateString('pt-BR')}
+        {s.sinceDays > 0 && ` (${s.sinceDays} ${s.sinceDays === 1 ? 'dia' : 'dias'})`}
+        {' — '}
+        {s.provenBRL > 0
+          ? <>o Comigo já provou <span className="text-emerald-300 font-semibold">{brl(s.provenBRL)}</span> de lucro pra você.</>
+          : <>ainda estamos provando o valor — continue vendendo pra ver o número crescer.</>}
+      </p>
+
+      {/* Breakdown honesto — sem dupla contagem */}
+      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+        <div className="rounded-lg bg-zinc-900/60 p-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Lucro provado</div>
+          <div className="text-emerald-300 font-semibold">{brl(s.provenBRL)}</div>
+        </div>
+        <div className="rounded-lg bg-zinc-900/60 p-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Faturamento</div>
+          <div className="text-zinc-100 font-medium">{brl(s.revenueBRL)}</div>
+        </div>
+        <div className="rounded-lg bg-zinc-900/60 p-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Pedidos</div>
+          <div className="text-zinc-100 font-medium">{s.ordersCount}</div>
+        </div>
+        <div className="rounded-lg bg-zinc-900/60 p-2" title="Grana ainda no ar, não conta no lucro provado — mas o Comigo te ajuda a receber">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Fiado a receber</div>
+          <div className="text-amber-300 font-medium">{brl(s.fiadoBalanceBRL)}</div>
+        </div>
+      </div>
+
+      {/* CTA condicional — só quando o Comigo já se pagou */}
+      {s.cta.show && (
+        <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+          <div className="text-sm font-medium text-amber-100">
+            Continue com o Comigo — plano {s.cta.planName}
+          </div>
+          <p className="text-xs text-amber-200/90 mt-1">{s.cta.reason}</p>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-zinc-300">
+              <span className="text-lg font-semibold text-zinc-100">{brl(s.cta.monthlyPrice)}</span>/mês
+              {s.cta.annualMonthPrice != null && s.cta.annualMonthPrice < s.cta.monthlyPrice && (
+                <span className="ml-2 text-emerald-300">ou {brl(s.cta.annualMonthPrice)}/mês no anual</span>
+              )}
+            </span>
+            <div className="flex-1" />
+            <button onClick={goToPlans} className="rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1.5">
+              Ativar o plano
+            </button>
+          </div>
+        </div>
+      )}
+      {!s.cta.show && s.billingStatus === 'active' && s.provenBRL > 0 && (
+        <div className="mt-3 text-[11px] text-emerald-300/80">
+          ✓ Você já é assinante — o Comigo continua trabalhando por você.
+        </div>
+      )}
     </div>
   );
 }

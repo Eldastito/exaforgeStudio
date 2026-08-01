@@ -16,6 +16,7 @@ import { ComigoGraduationService } from "../ComigoGraduationService.js";
 import { ComigoBoostService } from "../ComigoBoostService.js";
 import { ComigoAgendaService } from "../ComigoAgendaService.js";
 import { ComigoMonthlyReportService } from "../ComigoMonthlyReportService.js";
+import { ComigoImpactService } from "../ComigoImpactService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -626,6 +627,21 @@ router.get("/reports/monthly.pdf", requireRole("owner", "admin"), async (req: Au
     res.status(200).send(pdf);
   } catch (e: any) {
     res.status(400).json({ error: String(e?.message || e) });
+  }
+});
+
+// ── Impact/Paywall (Gap E) ──────────────────────────────────────────────────
+// Retorna o "valor provado" acumulado (lucro desde o baseline) + estado de
+// billing + CTA condicional. Todo autenticado pode ler — a decisão de quem vê
+// o CTA já vem calculada no payload.
+router.get("/impact", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const summary = ComigoImpactService.summary(orgId);
+    res.json(summary);
+  } catch (e: any) {
+    res.status(500).json({ error: "impact_failed", detail: String(e?.message || e) });
   }
 });
 

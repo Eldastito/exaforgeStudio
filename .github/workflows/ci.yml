@@ -310,6 +310,7 @@ jobs:
           - { name: 'comigo-progress', script: 'test:comigo-progress' }
           - { name: 'comigo-graduation', script: 'test:comigo-graduation' }
           - { name: 'comigo-boosts', script: 'test:comigo-boosts' }
+          - { name: 'comigo-agenda', script: 'test:comigo-agenda' }
           - { name: 'loss-margin', script: 'test:loss-margin' }
           - { name: 'loss-hooks', script: 'test:loss-hooks' }
           - { name: 'legal-advisor', script: 'test:legal-advisor' }

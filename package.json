@@ -273,6 +273,7 @@
     "test:comigo-progress": "tsx scripts/test-comigo-progress.ts",
     "test:comigo-graduation": "tsx scripts/test-comigo-graduation.ts",
     "test:comigo-boosts": "tsx scripts/test-comigo-boosts.ts",
+    "test:comigo-agenda": "tsx scripts/test-comigo-agenda.ts",
     "test:loss-margin": "tsx scripts/test-loss-margin.ts",
     "test:loss-hooks": "tsx scripts/test-loss-hooks.ts",
     "test:legal-advisor": "tsx scripts/test-legal-advisor.ts",

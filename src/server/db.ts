@@ -6533,6 +6533,11 @@ const initDb = () => {
   // Frugalidade dura — ao estourar, o service cai pra busca literal (nunca 500).
   // Default 50/dia por org é folgado pra Balcão de bairro e ainda evita abuso.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_menu_suggest_daily_cap INTEGER DEFAULT 50`); } catch(e){}
+
+  // Gap A (ADR-088 D2): teto de chamadas /catalog/parse-audio por org/dia.
+  // Whisper é ~10x mais caro que chat (por minuto), então default menor (30/dia).
+  // Ao estourar, a rota responde 429 — cadastro por áudio pausa até amanhã.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_audio_catalog_daily_cap INTEGER DEFAULT 30`); } catch(e){}
 };
 
 initDb();

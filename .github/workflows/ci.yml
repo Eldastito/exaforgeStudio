@@ -315,6 +315,7 @@ jobs:
           - { name: 'comigo-balcao-offline', script: 'test:comigo-balcao-offline' }
           - { name: 'comigo-impact', script: 'test:comigo-impact' }
           - { name: 'comigo-menu-suggest', script: 'test:comigo-menu-suggest' }
+          - { name: 'comigo-audio-catalog', script: 'test:comigo-audio-catalog' }
           - { name: 'loss-margin', script: 'test:loss-margin' }
           - { name: 'loss-hooks', script: 'test:loss-hooks' }
           - { name: 'legal-advisor', script: 'test:legal-advisor' }

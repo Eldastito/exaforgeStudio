@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import db from "../db.js";
 import { randomUUID } from "crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
@@ -9,6 +10,7 @@ import { AiGovernanceService } from "../AiGovernanceService.js";
 import { ComigoHealthService, Period } from "../ComigoHealthService.js";
 import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
 import { ComigoMenuSuggestService } from "../ComigoMenuSuggestService.js";
+import { ComigoAudioCatalogService } from "../ComigoAudioCatalogService.js";
 import { ComigoPixService } from "../ComigoPixService.js";
 import { ComigoMesaService } from "../ComigoMesaService.js";
 import { ComigoArchetypeService } from "../ComigoArchetypeService.js";
@@ -417,6 +419,48 @@ router.get("/suggest", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const productId = req.query.productId ? String(req.query.productId) : undefined;
   res.json(ComigoSuggestionService.forBalcao(orgId, productId));
+});
+
+// ── Cadastro de catálogo por ÁUDIO (Gap A, ADR-088 D2) ─────────────────────
+// 5MB é folgado pra 60s de OGG/Opus a 96kbps. Mimetypes de áudio de gravação
+// via MediaRecorder do browser: webm/opus, ogg/opus; upload de WhatsApp: ogg.
+const AUDIO_ACCEPT = new Set(["audio/ogg", "audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/m4a"]);
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    // Aceita a família toda de audio/*; o service valida tamanho e devolve
+    // no_transcript se o Whisper não conseguir ler.
+    if (AUDIO_ACCEPT.has(file.mimetype) || file.mimetype.startsWith("audio/")) cb(null, true);
+    else cb(new Error("Envie um áudio (webm/ogg/mp3/wav)."));
+  },
+});
+// POST /api/comigo/catalog/parse-audio — dita "bolo 8; galeto 45; água 3",
+// devolve preview com N itens pra dono revisar. NÃO CRIA nada (o front chama
+// POST /api/products depois pra cada linha aprovada).
+router.post("/catalog/parse-audio", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  audioUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhum áudio enviado." });
+    try {
+      const result = await ComigoAudioCatalogService.parseAudio(orgId, file.buffer, file.mimetype);
+      if (result.source === "cap_reached") return res.status(429).json(result);
+      return res.json(result);
+    } catch (e: any) {
+      // Defesa final — service já degrada internamente. Nunca deve chegar aqui.
+      return res.status(500).json({ error: String(e?.message || e).slice(0, 200), items: [], transcript: "", source: "empty" });
+    }
+  });
+});
+
+// GET /api/comigo/catalog/audio-status — teto/uso do dia (debug/UI).
+router.get("/catalog/audio-status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ComigoAudioCatalogService.status(orgId));
 });
 
 // POST /api/comigo/menu-suggest — sugestão POR DESEJO (Gap B, ADR-088 D5 nível 2).

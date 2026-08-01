@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown, WifiOff, RefreshCw, Trophy } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User, FileDown, WifiOff, RefreshCw, Trophy, Mic, Square } from 'lucide-react';
 import { apiFetch, currentOrgId } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { LegalTip } from '@/src/features/LegalAdvisorView';
@@ -469,6 +469,172 @@ function Divulgar() {
   );
 }
 
+// ── Cadastro de catálogo por ÁUDIO (Gap A, ADR-088 D2) ─────────────────────
+// Dita "bolo de pote 8; galeto 45; água 3" → Whisper transcreve → LLM extrai
+// lista → dono revisa cada linha → "Salvar todos" cria em products_services.
+// Nada é salvo sem clique de confirmação (mesmo padrão do Smart Inventory).
+type AudioCatalogItem = { name: string; price: number | null; type: 'product' | 'service'; description: string | null; confidence: number };
+type AudioParseResult = { transcript: string; items: AudioCatalogItem[]; source: string; capReached?: boolean };
+function AudioCatalogPanel({ onSaved }: { onSaved: () => void }) {
+  const [state, setState] = useState<'idle' | 'recording' | 'processing' | 'preview' | 'saving'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState('');
+  const [items, setItems] = useState<AudioCatalogItem[]>([]);
+  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
+  const [chunks, setChunks] = useState<Blob[]>([]);
+  const [capMsg, setCapMsg] = useState<string | null>(null);
+
+  const start = async () => {
+    setError(null); setCapMsg(null);
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setError('Seu navegador não suporta gravação de áudio.'); return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // webm/opus é o formato mais universal do MediaRecorder no Chrome/Edge.
+      // Firefox devolve ogg/opus; Safari 15+ suporta mp4. O Whisper come todos.
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : '';
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const local: Blob[] = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) local.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setChunks(local);
+        const blob = new Blob(local, { type: rec.mimeType || 'audio/webm' });
+        await upload(blob);
+      };
+      rec.start();
+      setRecorder(rec); setChunks([]); setState('recording');
+    } catch (e: any) {
+      setError('Não consegui acessar o microfone. Verifique a permissão do navegador.');
+    }
+  };
+
+  const stop = () => {
+    if (recorder && recorder.state !== 'inactive') { setState('processing'); recorder.stop(); }
+  };
+
+  const upload = async (blob: Blob) => {
+    try {
+      const form = new FormData();
+      // Nome do arquivo é irrelevante pro backend; ele usa o mimetype pra escolher
+      // extensão do Whisper. Precisa terminar com .webm/.ogg/.mp3 pra o multer aceitar.
+      const ext = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogg' : 'mp3';
+      form.append('file', blob, `catalog.${ext}`);
+      const res = await apiFetch('/api/comigo/catalog/parse-audio', { method: 'POST', body: form });
+      if (res.status === 429) {
+        const j = await res.json().catch(() => ({}));
+        setCapMsg('Limite diário de cadastro por áudio atingido. Volte amanhã ou digite à mão.');
+        setState('idle');
+        return;
+      }
+      const j = (await res.json()) as AudioParseResult;
+      setTranscript(j?.transcript || '');
+      setItems(j?.items || []);
+      if ((j?.items?.length || 0) === 0) {
+        if (j?.transcript) setError(`Ouvi "${j.transcript}", mas não achei itens pra cadastrar. Grave de novo dizendo "nome tal preço tal".`);
+        else setError('Não consegui transcrever o áudio. Tente falar mais alto e devagar.');
+        setState('idle');
+      } else {
+        setState('preview');
+      }
+    } catch { setError('Falha ao enviar o áudio.'); setState('idle'); }
+  };
+
+  const updateItem = (i: number, patch: Partial<AudioCatalogItem>) => {
+    setItems((prev) => prev.map((it, ix) => ix === i ? { ...it, ...patch } : it));
+  };
+  const removeItem = (i: number) => setItems((prev) => prev.filter((_, ix) => ix !== i));
+
+  const saveAll = async () => {
+    if (items.length === 0) return;
+    // Regra: só grava itens com nome não-vazio E preço numérico > 0. O dono
+    // teve chance de editar; o que sobrou incompleto é descartado.
+    const valid = items.filter((it) => it.name.trim().length > 0 && it.price != null && it.price > 0);
+    if (valid.length === 0) { toast.error('Preencha nome e preço em pelo menos um item.'); return; }
+    setState('saving');
+    let ok = 0, fail = 0;
+    for (const it of valid) {
+      try {
+        const body = { type: it.type, name: it.name.trim(), price: it.price, description: it.description || '' };
+        const r = await apiFetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (r.ok) ok++; else fail++;
+      } catch { fail++; }
+    }
+    if (ok > 0) toast.success(`${ok} item${ok > 1 ? 's' : ''} cadastrado${ok > 1 ? 's' : ''}.`);
+    if (fail > 0) toast.error(`${fail} falhou${fail > 1 ? 'ram' : ''} ao salvar.`);
+    setState('idle'); setItems([]); setTranscript(''); setChunks([]);
+    onSaved();
+  };
+
+  const cancel = () => { setState('idle'); setItems([]); setTranscript(''); setError(null); };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (state === 'preview') {
+    return (
+      <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-emerald-200 flex items-center gap-1.5"><Mic className="w-4 h-4" /> Confira e edite antes de salvar</div>
+          <button onClick={cancel} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+        </div>
+        {transcript && <div className="text-[11px] text-zinc-500 italic">Você disse: "{transcript}"</div>}
+        <div className="space-y-1.5">
+          {items.map((it, i) => (
+            <div key={i} className="flex flex-wrap gap-1.5 items-center bg-zinc-900/60 rounded-lg p-2">
+              <input value={it.name} onChange={(e) => updateItem(i, { name: e.target.value })}
+                className="flex-1 min-w-[140px] rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100"
+                placeholder="Nome" />
+              <input type="number" step="0.01" value={it.price ?? ''}
+                onChange={(e) => updateItem(i, { price: e.target.value === '' ? null : Number(e.target.value) })}
+                className="w-20 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100"
+                placeholder="R$" />
+              <select value={it.type} onChange={(e) => updateItem(i, { type: e.target.value as 'product' | 'service' })}
+                className="rounded-md border border-zinc-700 bg-zinc-900 px-1.5 py-1 text-xs text-zinc-100">
+                <option value="product">Produto</option>
+                <option value="service">Serviço</option>
+              </select>
+              {it.confidence < 70 && <span className="text-[10px] text-amber-400" title="A IA teve dúvida — confira com atenção.">⚠</span>}
+              <button onClick={() => removeItem(i)} className="text-zinc-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button disabled={state === 'saving' || items.length === 0} onClick={saveAll}
+            className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 disabled:opacity-40">
+            {state === 'saving' ? 'Salvando...' : `Salvar ${items.length}`}
+          </button>
+          <button onClick={cancel} className="rounded-lg border border-zinc-700 text-zinc-400 text-xs px-3 py-1.5 hover:text-zinc-200">Cancelar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="flex items-center gap-3">
+        {state === 'recording' ? (
+          <button onClick={stop} className="rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1.5 flex items-center gap-1.5">
+            <Square className="w-3.5 h-3.5" fill="currentColor" /> Parar
+          </button>
+        ) : (
+          <button onClick={start} disabled={state === 'processing'}
+            className="rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-40">
+            <Mic className="w-3.5 h-3.5" />
+            {state === 'processing' ? 'Transcrevendo...' : 'Cadastrar por áudio'}
+          </button>
+        )}
+        <div className="text-[11px] text-zinc-500 flex-1">
+          {state === 'recording' && <span className="text-red-400 animate-pulse">● Gravando... dite "nome tal, preço tal; próximo..."</span>}
+          {state === 'idle' && !error && !capMsg && <span>Ex.: "bolo de pote P, 8 reais; galeto inteiro, 45; água mineral, 3"</span>}
+          {error && <span className="text-amber-400">{error}</span>}
+          {capMsg && <span className="text-amber-400">{capMsg}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Precificação: fichas técnicas, custos, preço sugerido (ADR-111 D3) ──────
 type RecipeRow = { id: string; name: string; kind: string; yield_qty: number | null; labor_minutes: number | null; updated_at: string };
 type CostRow = { id?: string; label: string; kind: string; amount: number; is_estimate: number | boolean };
@@ -766,6 +932,9 @@ function Precificacao() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-zinc-400">Monte a ficha de cada produto/servico: custos, rendimento e margem. O motor calcula o preco sugerido e avisa o que voce esqueceu.</p>
+
+      {/* Cadastro por áudio (Gap A, ADR-088 D2): dita a lista, a IA transcreve, o dono confirma */}
+      <AudioCatalogPanel onSaved={loadList} />
 
       {/* Botao criar */}
       {!creating ? (

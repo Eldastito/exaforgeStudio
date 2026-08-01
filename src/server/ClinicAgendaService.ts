@@ -245,7 +245,7 @@ export class ClinicAgendaService {
    * `{code:"ROOM_CAPACITY_EXCEEDED", current, capacity}` se excede.
    * Chamado pelo createAppointment sempre que roomId presente.
    */
-  private static checkRoomCapacity(orgId: string, roomId: string, startMs: number, endMs: number, ignoreAppointmentId?: string): { code: string; current: number; capacity: number } | null {
+  static checkRoomCapacity(orgId: string, roomId: string, startMs: number, endMs: number, ignoreAppointmentId?: string): { code: string; current: number; capacity: number } | null {
     const room = db.prepare(
       `SELECT id, capacity FROM clinic_rooms WHERE organization_id = ? AND id = ?`
     ).get(orgId, roomId) as any;

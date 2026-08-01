@@ -29,6 +29,7 @@ import { ClinicCareEpisodeService } from "../ClinicCareEpisodeService.js";
 import { ClinicTreatmentCycleService } from "../ClinicTreatmentCycleService.js";
 import { ClinicCareJourneyMetricsService, QueueFilter } from "../ClinicCareJourneyMetricsService.js";
 import { ClinicScheduleSessionService } from "../ClinicScheduleSessionService.js";
+import { ClinicRenewalTaskService } from "../ClinicRenewalTaskService.js";
 import { ClinicGuideService, GuideType, GuideStatus } from "../ClinicGuideService.js";
 import { ClinicGuideDeliveryService } from "../ClinicGuideDeliveryService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
@@ -1121,6 +1122,30 @@ router.get("/schedule-sessions", (req: AuthRequest, res): any => {
   res.json({ sessions: ClinicScheduleSessionService.listByProfessionalDay(orgId, professionalId, date) });
 });
 
+// ADR-145 Fase 5 §F47 — IA operacional (sugestão de horários).
+// GUARDRAIL: só devolve horário livre do PRÓPRIO profissional (não sugere
+// outro; não inventa dado clínico). Determinístico — mesmos inputs, mesmo
+// resultado. Vem ANTES de /:id senão o param captura "availability".
+router.get("/schedule-sessions/availability", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const professionalId = String(req.query.professionalId || "");
+    const durationMinutes = Number(req.query.durationMinutes) || 0;
+    const from = String(req.query.from || "");
+    const to = String(req.query.to || "");
+    const roomId = req.query.roomId ? String(req.query.roomId) : null;
+    const maxSuggestions = req.query.maxSuggestions ? Number(req.query.maxSuggestions) : undefined;
+    const stepMinutes = req.query.stepMinutes ? Number(req.query.stepMinutes) : undefined;
+    const suggestions = ClinicScheduleSessionService.availability(orgId, {
+      professionalId, durationMinutes, from, to, roomId, maxSuggestions, stepMinutes,
+    });
+    res.json({ suggestions });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 router.post("/schedule-sessions", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -1240,6 +1265,28 @@ router.post("/treatment-cycles/:id/cancel", requireRole("owner", "admin"), (req:
     const cycle = ClinicTreatmentCycleService.cancel(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json({ cycle });
   } catch (e: any) { cycleError(res, e); }
+});
+
+// ADR-145 Fase 5 §F47 — Detector IA operacional de renovação de ciclos.
+// GUARDRAIL: sinaliza no dashboard; NÃO renova, NÃO troca profissional,
+// NÃO dá alta, NÃO emite guia. Publica em business_signals (idempotente).
+router.post("/renewal-tasks/run", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const threshold = req.body?.threshold != null ? Number(req.body.threshold) : undefined;
+    const result = ClinicRenewalTaskService.run(orgId, { threshold });
+    res.json({ result });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.get("/renewal-tasks", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const includeResolved = String(req.query.includeResolved || "") === "1";
+  res.json({ signals: ClinicRenewalTaskService.list(orgId, { includeResolved }) });
 });
 
 // Catálogo CID-10 (ADR-080 Fase 23). Busca por prefixo de código ou

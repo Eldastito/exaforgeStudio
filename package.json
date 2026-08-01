@@ -118,6 +118,7 @@
     "test:clinic-guides": "tsx scripts/test-clinic-guides.ts",
     "test:clinic-guide-pdf-send": "tsx scripts/test-clinic-guide-pdf-send.ts",
     "test:clinic-guide-cycle-integration": "tsx scripts/test-clinic-guide-cycle-integration.ts",
+    "test:clinic-ai-renewal-hints": "tsx scripts/test-clinic-ai-renewal-hints.ts",
     "test:continuity-fase0": "tsx scripts/test-continuity-fase0.ts",
     "test:continuity-fase1": "tsx scripts/test-continuity-fase1.ts",
     "test:continuity-outbox": "tsx scripts/test-continuity-outbox.ts",

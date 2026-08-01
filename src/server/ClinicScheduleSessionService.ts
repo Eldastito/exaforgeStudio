@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicAgendaService } from "./ClinicAgendaService.js";
+import { ClinicProfessionalAbsenceService } from "./ClinicProfessionalAbsenceService.js";
 
 export type SessionType = "individual" | "group";
 export type SessionStatus = "scheduled" | "in_care" | "completed" | "cancelled";
@@ -540,6 +541,110 @@ export class ClinicScheduleSessionService {
     });
 
     return { session: this.get(orgId, sessionId)!, cancelledAppointments: cancelledCount };
+  }
+
+  // ── Availability (ADR-145 Fase 5 §F47) ─────────────────────────────────
+
+  /**
+   * Sugere horários livres pro profissional dentro de uma janela — usado pela
+   * IA operacional pra propor 3 opções à recepção na renovação do ciclo.
+   *
+   * GUARDRAILS (RN-014 §Fase 5): IA NUNCA inventa dado clínico.
+   *   - Só devolve horários que existem no calendário do próprio profissional.
+   *   - Filtra conflito (findConflicts, ignora mesma sessão), ausência
+   *     (ClinicProfessionalAbsenceService.overlaps) e capacidade de sala
+   *     (checkRoomCapacity — só se roomId informado).
+   *   - NÃO propõe outro profissional ("cabe amanhã com o Dr. X" quebra
+   *     RN-003/professional-fixo do episódio).
+   *   - NÃO inventa TUSS/carteirinha/autorização — esses viram outro fatia (F48).
+   *
+   * Determinístico: mesmos inputs → mesmos outputs (sem randomness). Passo
+   * de busca é `stepMinutes` (default 30min — padrão de agenda clínica).
+   * Alinha o slot ao passo dentro da janela pra evitar propor "10:07".
+   *
+   * Limite: janela máxima 14 dias (evita varredura desnecessária).
+   */
+  static availability(
+    orgId: string,
+    input: {
+      professionalId: string;
+      durationMinutes: number;
+      from: string;
+      to: string;
+      roomId?: string | null;
+      maxSuggestions?: number;
+      stepMinutes?: number;
+    }
+  ): Array<{ startISO: string; endISO: string; durationMinutes: number }> {
+    const professionalId = String(input?.professionalId || "").trim();
+    if (!professionalId) throw new Error("professionalId é obrigatório.");
+    const duration = Math.floor(Number(input?.durationMinutes) || 0);
+    if (!Number.isFinite(duration) || duration < 5 || duration > 480) {
+      throw new Error("durationMinutes deve estar entre 5 e 480.");
+    }
+    const fromMs = Date.parse(String(input?.from || ""));
+    const toMs = Date.parse(String(input?.to || ""));
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+      throw new Error("Janela [from, to) inválida.");
+    }
+    const MAX_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+    if (toMs - fromMs > MAX_WINDOW_MS) {
+      throw new Error("Janela de busca não pode exceder 14 dias.");
+    }
+    const maxSuggestions = Math.max(1, Math.min(10, Math.floor(Number(input?.maxSuggestions) || 3)));
+    const stepMinutes = Math.max(5, Math.min(60, Math.floor(Number(input?.stepMinutes) || 30)));
+    const stepMs = stepMinutes * 60000;
+    const roomId = input?.roomId ? String(input.roomId).trim() || null : null;
+
+    // Confirma que o profissional pertence à org (evita vazamento cross-tenant).
+    const prof = db.prepare(
+      `SELECT id FROM clinic_professionals WHERE organization_id = ? AND id = ? AND active = 1`
+    ).get(orgId, professionalId) as any;
+    if (!prof) throw new Error("Profissional não encontrado ou inativo.");
+
+    if (roomId) {
+      const room = db.prepare(
+        `SELECT id FROM clinic_rooms WHERE organization_id = ? AND id = ?`
+      ).get(orgId, roomId) as any;
+      if (!room) throw new Error("Sala não encontrada.");
+    }
+
+    // Alinha o cursor ao próximo múltiplo de stepMinutes dentro da janela.
+    // Padrão: se from=10:07 e step=30, começa em 10:30 (não 10:07).
+    let cursorMs = Math.ceil(fromMs / stepMs) * stepMs;
+    const suggestions: Array<{ startISO: string; endISO: string; durationMinutes: number }> = [];
+
+    while (cursorMs + duration * 60000 <= toMs && suggestions.length < maxSuggestions) {
+      const startMs = cursorMs;
+      const endMs = startMs + duration * 60000;
+
+      // 1) conflito de agenda (profissional/sala 1:1)
+      const conflicts = ClinicAgendaService.findConflicts(orgId, {
+        professionalId, roomId,
+        startMs, endMs,
+      });
+      if (conflicts.length > 0) { cursorMs += stepMs; continue; }
+
+      // 2) ausência (férias/atestado/etc.)
+      const absence = ClinicProfessionalAbsenceService.overlaps(orgId, professionalId, startMs, endMs);
+      if (absence) { cursorMs += stepMs; continue; }
+
+      // 3) capacidade de sala (só se roomId informado e sala capacity>1;
+      // pra sala 1:1 o findConflicts acima já bloqueou).
+      if (roomId) {
+        const overflow = ClinicAgendaService.checkRoomCapacity(orgId, roomId, startMs, endMs);
+        if (overflow) { cursorMs += stepMs; continue; }
+      }
+
+      suggestions.push({
+        startISO: new Date(startMs).toISOString(),
+        endISO: new Date(endMs).toISOString(),
+        durationMinutes: duration,
+      });
+      cursorMs += stepMs;
+    }
+
+    return suggestions;
   }
 }
 

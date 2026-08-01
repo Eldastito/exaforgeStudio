@@ -8,6 +8,7 @@ import { ComigoCollectionService } from "../ComigoCollectionService.js";
 import { AiGovernanceService } from "../AiGovernanceService.js";
 import { ComigoHealthService, Period } from "../ComigoHealthService.js";
 import { ComigoSuggestionService } from "../ComigoSuggestionService.js";
+import { ComigoMenuSuggestService } from "../ComigoMenuSuggestService.js";
 import { ComigoPixService } from "../ComigoPixService.js";
 import { ComigoMesaService } from "../ComigoMesaService.js";
 import { ComigoArchetypeService } from "../ComigoArchetypeService.js";
@@ -416,6 +417,31 @@ router.get("/suggest", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const productId = req.query.productId ? String(req.query.productId) : undefined;
   res.json(ComigoSuggestionService.forBalcao(orgId, productId));
+});
+
+// POST /api/comigo/menu-suggest — sugestão POR DESEJO (Gap B, ADR-088 D5 nível 2).
+// Corpo: { desire: "algo leve" }. LLM+RAG do cardápio real da loja; NUNCA inventa
+// item (valida ids contra o snapshot). Degrada pra busca literal se não houver
+// OPENAI_API_KEY ou se o teto diário estourou — nunca 500 no atendimento.
+router.post("/menu-suggest", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const desire = String(req.body?.desire || "").trim();
+  try {
+    const result = await ComigoMenuSuggestService.interpret(orgId, desire);
+    return res.json(result);
+  } catch (e: any) {
+    // Defesa final — interpret() já degrada internamente, mas se algo escapar
+    // ainda respondemos [] em vez de 500 (Balcão em atendimento não pode quebrar).
+    return res.json({ items: [], source: "empty", error: String(e?.message || e).slice(0, 200) });
+  }
+});
+
+// GET /api/comigo/menu-suggest/status — quanto do teto diário sobrou (pro debug/UI).
+router.get("/menu-suggest/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ComigoMenuSuggestService.status(orgId));
 });
 
 // GET /api/comigo/health?period=dia|semana|mes — termômetro de saúde (ADR-116).

@@ -886,6 +886,71 @@ function ArchetypeOnboarding({ onDone }: { onDone: () => void }) {
   );
 }
 
+// ── DesireBox: sugestão POR DESEJO (Gap B, ADR-088 D5 nível 2) ──────────────
+// "diga o que o cliente quer" → LLM+RAG do cardápio real. Só sugere ids que
+// existem no catálogo carregado (o backend já valida contra o snapshot; o front
+// filtra de novo em `products.find(...)` pra nunca clicar num id fantasma).
+type DesireItem = { id: string; name: string; price: number; reason: string };
+type DesireResult = { items: DesireItem[]; source: 'llm' | 'literal' | 'empty'; capReached?: boolean };
+function DesireBox({ products, busy, onPick }: { products: Product[]; busy: boolean; onPick: (pid: string) => void }) {
+  const [desire, setDesire] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<DesireResult | null>(null);
+  const submit = async () => {
+    const d = desire.trim();
+    if (d.length < 3) { setResult(null); return; }
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/comigo/menu-suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ desire: d }),
+      }).then((r) => r.json());
+      setResult(r as DesireResult);
+    } catch {
+      // Rede caiu — não polui o Balcão com toast: só limpa o resultado.
+      setResult({ items: [], source: 'empty' });
+    } finally { setLoading(false); }
+  };
+  const items = (result?.items || []).filter((it) => products.some((p) => p.id === it.id));
+  return (
+    <div className="mb-3">
+      <div className="text-[11px] text-zinc-500 mb-1 flex items-center gap-1">
+        <Sparkles className="w-3 h-3" /> Diga o que o cliente quer
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          type="text" value={desire} onChange={(e) => setDesire(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+          placeholder="ex.: algo leve, sem lactose, pra 2 pessoas..."
+          className="flex-1 min-w-0 rounded-lg bg-zinc-900/70 border border-zinc-800 focus:border-emerald-500/40 text-sm px-3 py-1.5 text-zinc-100 placeholder-zinc-600"
+          disabled={busy || loading}
+        />
+        <button
+          onClick={submit} disabled={busy || loading || desire.trim().length < 3}
+          className="text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 disabled:opacity-40"
+        >{loading ? '...' : 'Sugerir'}</button>
+      </div>
+      {result && items.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {items.map((it) => (
+            <button key={it.id} disabled={busy} onClick={() => onPick(it.id)}
+              className="text-xs rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-200 px-2.5 py-1 hover:bg-amber-500/20 disabled:opacity-40"
+              title={it.reason || undefined}>
+              + {it.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {result && items.length === 0 && desire.trim().length >= 3 && !loading && (
+        <div className="mt-1 text-[11px] text-zinc-500">Nada no cardápio casa com isso.</div>
+      )}
+      {result?.capReached && (
+        <div className="mt-1 text-[11px] text-amber-400/80">Limite de sugestões IA do dia atingido — mostrando busca simples.</div>
+      )}
+    </div>
+  );
+}
+
 // ── Balcão PDV por toque ─────────────────────────────────────────────────────
 function Balcao({ onChange }: { onChange: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -1107,6 +1172,9 @@ function Balcao({ onChange }: { onChange: () => void }) {
             </div>
           );
         })()}
+        {/* Sugestão por desejo (Gap B, ADR-088 D5 nível 2): LLM+RAG do cardápio */}
+        <DesireBox products={products} busy={busy} onPick={(pid) => addByProductId(pid)} />
+
         <div className="flex items-center justify-between mb-2 gap-2">
           <div className="text-xs text-zinc-500">Toque para adicionar</div>
           <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer shrink-0" title="Esconde produtos com estoque zerado. Serviços e itens sem controle de estoque continuam aparecendo.">

@@ -4,12 +4,66 @@
 
 **Pré-requisitos:** módulo Clínica (ADR-080) já configurado — a org tem `organization_settings` populada, ao menos 1 `clinic_professionals` cadastrado.
 
+---
+
+## Onde rodar o script (LEIA PRIMEIRO)
+
+O script precisa ler o **mesmo SQLite** que o app usa em produção, então **roda DENTRO do container do app na Coolify** — não na VPS host, não no seu desktop, não no CI.
+
+### Opção 1 — Coolify UI (recomendado)
+
+1. Dashboard Coolify → aplicação `exaforgestudio` → aba lateral **"Terminal"** (ou "Command").
+2. Isso abre um shell dentro do container, já em `/app`.
+3. Cola o comando:
+
+```
+npx npx tsx scripts/clinic-journey-tenant-setup.ts <orgId> --dry-run
+```
+
+### Opção 2 — SSH na VPS + docker exec
+
+```
+ssh usuario@sua-vps
+docker ps | grep exaforge                        # pega o container ID/nome
+docker exec -it <container-id> sh
+# agora tá em /app dentro do container:
+npx npx tsx scripts/clinic-journey-tenant-setup.ts <orgId> --dry-run
+```
+
+### Opção 3 — Uma linha
+
+```
+ssh usuario@sua-vps "docker exec <container-id> npx npx tsx scripts/clinic-journey-tenant-setup.ts <orgId> --dry-run"
+```
+
+### Como pegar o `<orgId>`
+
+No próprio Coolify UI (Terminal), dentro do container:
+
+```
+sqlite3 $DATA_DIR/*.db "SELECT organization_id, business_name FROM organization_settings"
+```
+
+(Ou olha no admin do app se você tiver uma tela que lista orgs.)
+
+### Por que dentro do container e não fora
+
+- Volume persistente do SQLite está montado dentro do container em `DATA_DIR` (env configurada no Coolify).
+- Rodar de fora abriria banco vazio ou inexistente.
+- `npx tsx` funciona no container porque o Dockerfile faz `npm ci --include=dev` — `tsx` fica em `/app/node_modules/.bin/`.
+
+### Se der `SQLITE_BUSY`
+
+Raro (better-sqlite3 usa WAL mode e tolera leitura concorrente). Se acontecer: para o app 1 min no Coolify → roda o script → sobe o app de novo.
+
+---
+
 ## Passo a passo
 
 ### 1. Dry-run (sempre primeiro)
 
 ```
-tsx scripts/clinic-journey-tenant-setup.ts <orgId> --dry-run
+npx tsx scripts/clinic-journey-tenant-setup.ts <orgId> --dry-run
 ```
 
 Imprime o que faria sem mutar. Confere org, conta profissionais legados, verifica PIN, mostra estado atual de `clinic_cycle_requires_guide`.
@@ -17,7 +71,7 @@ Imprime o que faria sem mutar. Confere org, conta profissionais legados, verific
 ### 2. Rodar de verdade
 
 ```
-tsx scripts/clinic-journey-tenant-setup.ts <orgId>
+npx tsx scripts/clinic-journey-tenant-setup.ts <orgId>
 ```
 
 Faz 3 coisas, idempotente:
@@ -45,7 +99,7 @@ Rodar o script de novo até `Status: PRONTO`.
 Se o cliente opera SÓ com plano/convênio (ciclo tem que ter guia antes de agendar):
 
 ```
-tsx scripts/clinic-journey-tenant-setup.ts <orgId> --cycle-requires-guide
+npx tsx scripts/clinic-journey-tenant-setup.ts <orgId> --cycle-requires-guide
 ```
 
 Ciclos passam a nascer `pending_authorization` até uma guia `issued` ser amarrada. Padrão comportamental da RN-005 §8.

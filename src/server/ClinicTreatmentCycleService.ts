@@ -202,7 +202,19 @@ export class ClinicTreatmentCycleService {
   static create(
     orgId: string,
     episodeId: string,
-    input: { plannedSessions?: number | null; noShowConsumesSession?: boolean; startsAt?: string | null } = {},
+    input: {
+      plannedSessions?: number | null;
+      noShowConsumesSession?: boolean;
+      startsAt?: string | null;
+      /**
+       * ADR-145 D7 / RN-005 §8 (Fatia 46): quando true (ou config org
+       * clinic_cycle_requires_guide=1), o ciclo nasce 'pending_authorization'
+       * até uma guia emitida ser amarrada — bloqueia agendamento novo até
+       * lá. Se `guideId` já vier (guia issued), transita direto pra 'active'.
+       */
+      requiresGuide?: boolean;
+      guideId?: string | null;
+    } = {},
     actorId: string | null = null
   ): TreatmentCycle {
     const ep = loadEpisodeOrThrow(orgId, episodeId);
@@ -225,6 +237,42 @@ export class ClinicTreatmentCycleService {
     const defaultN = specialtyDefaultCycleSessions(orgId, ep.specialty_id);
     const plannedSessions = validPlannedSessions(input.plannedSessions, defaultN);
 
+    // Config org: se opt-in, força pending_authorization mesmo sem requiresGuide=true
+    let requiresGuide = !!input.requiresGuide;
+    if (!requiresGuide) {
+      const cfg = db.prepare(
+        `SELECT clinic_cycle_requires_guide AS req FROM organization_settings WHERE organization_id = ?`
+      ).get(orgId) as any;
+      if (cfg && Number(cfg.req) === 1) requiresGuide = true;
+    }
+
+    // Valida guideId (se passado): existe, issued, pertence à mesma org+contact.
+    let guide: any = null;
+    if (input.guideId) {
+      guide = db.prepare(
+        `SELECT id, contact_id, status, cycle_id FROM clinical_guides
+          WHERE organization_id = ? AND id = ?`
+      ).get(orgId, input.guideId) as any;
+      if (!guide) throw new Error("Guia não encontrada.");
+      if (guide.contact_id !== ep.contact_id) {
+        throw new Error("Guia pertence a outro paciente.");
+      }
+      if (guide.status !== "issued" && guide.status !== "submitted" && guide.status !== "approved") {
+        const e: any = new Error(`Guia com status ${guide.status} não pode habilitar ciclo.`);
+        e.code = "GUIDE_NOT_ACTIVE"; throw e;
+      }
+      if (guide.cycle_id && guide.cycle_id !== null) {
+        const e: any = new Error("Guia já está vinculada a outro ciclo.");
+        e.code = "GUIDE_ALREADY_LINKED"; throw e;
+      }
+    }
+
+    // Status inicial: guia emitida presente → active; requiresGuide sem guia
+    // → pending_authorization; nenhum dos dois → active (legado).
+    const initialStatus: CycleStatus = guide
+      ? "active"
+      : (requiresGuide ? "pending_authorization" : "active");
+
     // cycle_number: max + 1 (inclui fechados — sequência global do episódio)
     const maxRow = db.prepare(
       `SELECT COALESCE(MAX(cycle_number), 0) AS mx FROM clinic_treatment_cycles
@@ -233,28 +281,132 @@ export class ClinicTreatmentCycleService {
     const cycleNumber = Number(maxRow?.mx || 0) + 1;
 
     const id = randomUUID();
-    try {
-      db.prepare(
-        `INSERT INTO clinic_treatment_cycles
-           (id, organization_id, episode_id, cycle_number, planned_sessions,
-            no_show_consumes_session, status, starts_at, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`
-      ).run(id, orgId, episodeId, cycleNumber, plannedSessions,
-            input.noShowConsumesSession ? 1 : 0, input.startsAt || null, actorId);
-    } catch (e: any) {
-      if (String(e?.message || "").includes("UNIQUE") || e?.code === "SQLITE_CONSTRAINT_UNIQUE") {
-        const err: any = new Error("Episódio já tem ciclo em uso.");
-        err.code = "CYCLE_ALREADY_ACTIVE"; throw err;
+    const tx = db.transaction(() => {
+      try {
+        db.prepare(
+          `INSERT INTO clinic_treatment_cycles
+             (id, organization_id, episode_id, cycle_number, planned_sessions,
+              no_show_consumes_session, status, starts_at, guide_id, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(id, orgId, episodeId, cycleNumber, plannedSessions,
+              input.noShowConsumesSession ? 1 : 0, initialStatus,
+              input.startsAt || null, guide?.id || null, actorId);
+      } catch (e: any) {
+        if (String(e?.message || "").includes("UNIQUE") || e?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+          const err: any = new Error("Episódio já tem ciclo em uso.");
+          err.code = "CYCLE_ALREADY_ACTIVE"; throw err;
+        }
+        throw e;
       }
-      throw e;
-    }
+      // Se guia veio, amarra bidirecional (guide.cycle_id)
+      if (guide) {
+        db.prepare(
+          `UPDATE clinical_guides SET cycle_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND organization_id = ?`
+        ).run(id, guide.id, orgId);
+      }
+    });
+    tx();
 
     logAuthEvent(orgId, actorId, ep.contact_id, "CLINIC_TREATMENT_CYCLE_CREATED", {
       cycleId: id, episodeId, cycleNumber, plannedSessions,
       noShowConsumesSession: !!input.noShowConsumesSession,
+      initialStatus, guideId: guide?.id || null, requiresGuide,
     });
 
     return this.get(orgId, id)!;
+  }
+
+  /**
+   * Amarra uma guia issued a um ciclo `pending_authorization` — libera o
+   * ciclo pra 'active'. Chamado pela UI (recepção emitiu guia e liga ao
+   * ciclo pendente) OU pelo hook transitionOnGuideIssued quando a guia
+   * já tem cycle_id preenchido na hora do issue.
+   *
+   * Regras:
+   *   - Ciclo precisa ser 'pending_authorization'.
+   *   - Guia precisa estar issued|submitted|approved.
+   *   - Guia e ciclo precisam ser do mesmo paciente.
+   *   - Guia não pode estar já vinculada a outro ciclo.
+   */
+  static linkGuide(
+    orgId: string,
+    cycleId: string,
+    guideId: string,
+    actorId: string | null = null
+  ): TreatmentCycle {
+    const cycle = this.get(orgId, cycleId);
+    if (!cycle) throw new Error("Ciclo não encontrado.");
+    if (cycle.status !== "pending_authorization") {
+      const e: any = new Error(`Ciclo com status ${cycle.status} não aguarda autorização.`);
+      e.code = "CYCLE_NOT_PENDING_AUTH"; throw e;
+    }
+    const guide = db.prepare(
+      `SELECT id, contact_id, status, cycle_id FROM clinical_guides
+        WHERE organization_id = ? AND id = ?`
+    ).get(orgId, guideId) as any;
+    if (!guide) throw new Error("Guia não encontrada.");
+    if (guide.status !== "issued" && guide.status !== "submitted" && guide.status !== "approved") {
+      const e: any = new Error(`Guia com status ${guide.status} não pode habilitar ciclo.`);
+      e.code = "GUIDE_NOT_ACTIVE"; throw e;
+    }
+    const ep = loadEpisodeOrThrow(orgId, cycle.episodeId);
+    if (guide.contact_id !== ep.contact_id) {
+      throw new Error("Guia pertence a outro paciente.");
+    }
+    if (guide.cycle_id && guide.cycle_id !== cycleId) {
+      const e: any = new Error("Guia já está vinculada a outro ciclo.");
+      e.code = "GUIDE_ALREADY_LINKED"; throw e;
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare(
+        `UPDATE clinic_treatment_cycles
+            SET status='active', guide_id=?, updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND organization_id=?`
+      ).run(guideId, cycleId, orgId);
+      db.prepare(
+        `UPDATE clinical_guides SET cycle_id=?, updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND organization_id=?`
+      ).run(cycleId, guideId, orgId);
+    });
+    tx();
+
+    logAuthEvent(orgId, actorId, ep.contact_id, "CLINIC_TREATMENT_CYCLE_GUIDE_LINKED", {
+      cycleId, guideId, episodeId: cycle.episodeId,
+    });
+    return this.get(orgId, cycleId)!;
+  }
+
+  /**
+   * Hook chamado por ClinicGuideService.issue (via import dinâmico pra
+   * evitar ciclo). Se a guia sendo emitida tem cycle_id preenchido e o
+   * ciclo está pending_authorization, ativa o ciclo automaticamente.
+   * Best-effort: erro loga e retorna null sem quebrar o issue da guia.
+   */
+  static transitionOnGuideIssued(orgId: string, guideId: string): TreatmentCycle | null {
+    try {
+      const g = db.prepare(
+        `SELECT id, cycle_id, status FROM clinical_guides
+          WHERE organization_id = ? AND id = ?`
+      ).get(orgId, guideId) as any;
+      if (!g || !g.cycle_id) return null;
+      if (g.status !== "issued" && g.status !== "submitted" && g.status !== "approved") return null;
+      const cycle = this.get(orgId, g.cycle_id);
+      if (!cycle || cycle.status !== "pending_authorization") return cycle;
+      db.prepare(
+        `UPDATE clinic_treatment_cycles
+            SET status='active', updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND organization_id=?`
+      ).run(cycle.id, orgId);
+      logAuthEvent(orgId, null, null, "CLINIC_TREATMENT_CYCLE_ACTIVATED_BY_GUIDE", {
+        cycleId: cycle.id, guideId, episodeId: cycle.episodeId,
+      });
+      return this.get(orgId, cycle.id);
+    } catch (e) {
+      console.error("[Clínica] transitionOnGuideIssued falhou", guideId, e);
+      return null;
+    }
   }
 
   // ── Renovar ciclo ──────────────────────────────────────────────────────

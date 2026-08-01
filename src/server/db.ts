@@ -2996,6 +2996,12 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_guides', e); }
 
+  // Config: ciclo exige guia pra ativar (ADR-145 D7 / RN-005 §8, Fatia 46).
+  // Opt-in (default 0). Quando ligada, todo novo ciclo nasce pending_
+  // authorization até uma guia emitida ser amarrada. Passar `requiresGuide=
+  // true` na criação também força independente da config.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN clinic_cycle_requires_guide INTEGER DEFAULT 0`); } catch(e){}
+
   // Envios da guia por canal (ADR-145 Fatia 45). Cada tentativa vira row
   // — histórico completo. Mesmo padrão de clinical_document_deliveries
   // (Fase K). Sem retry automático nesta fatia (KISS); Scheduler futuro

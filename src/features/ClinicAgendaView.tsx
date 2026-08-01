@@ -21,6 +21,12 @@ const GroupSessionPanel = React.lazy(() => import('./clinic/group-sessions/Group
 // ADR-146 F55: guias polimorfas (TISS/encaminhamento/pedido médico) +
 // GuideDraftButton (IA F48 com missing:true). Também lazy.
 const GuidesPanel = React.lazy(() => import('./clinic/guides/GuidesPanel'));
+
+// ADR-146 F56: header de métricas F40 + badges nas abas. NÃO lazy —
+// aparece imediatamente ao abrir a Clínica e alimenta os badges das
+// tabs (que precisam do count antes de qualquer aba ser clicada).
+// Bundle pequeno (~2KB gzip) sem dependências pesadas.
+import JourneyMetricsHeader, { useJourneyCounts, TabBadge } from './clinic/journey/JourneyMetricsHeader';
 import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Loader2, MoreHorizontal, Printer, Download, Link2, Copy, Check, Ban, FileCheck2, Send, Building2, Info, ListChecks, KeyRound, Plug, Gauge, Award, ClipboardList, Lock, FileText, Trash2, CalendarPlus, RotateCcw, Paperclip, Image as ImageIcon, Upload, Bell, BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
@@ -198,6 +204,48 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
   return 'on_time';
 }
 
+// ADR-146 F56: barra de tabs com badges numéricos.
+// Extraída pra poder chamar useJourneyCounts sem carregá-lo no
+// componente principal (isola o re-render por refresh a 60s).
+// Badges âmbar sinalizam trabalho pendente (RN-014: sinalizar, não
+// decidir por conta própria — a decisão é do humano na aba).
+type ClinicTab = 'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
+function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab) => void }) {
+  const { counts } = useJourneyCounts();
+  const badgeFor = (id: ClinicTab): { n: number; hi: boolean } | null => {
+    if (!counts) return null;
+    if (id === 'episodios') return { n: counts.withoutSchedule, hi: true };
+    if (id === 'ciclos')    return { n: counts.renewalDue,      hi: true };
+    return null;
+  };
+  const items: Array<[ClinicTab, string]> = [
+    ['agenda', 'Agenda'],
+    ['episodios', 'Episódios'],
+    ['ciclos', 'Ciclos'],
+    ['grupos', 'Grupos'],
+    ['guias', 'Guias'],
+    ['especialidades', 'Especialidades'],
+    ['autorizacoes', 'Autorizações'],
+    ['conexao', 'Conexão'],
+  ];
+  return (
+    <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden overflow-x-auto">
+      {items.map(([id, label]) => {
+        const b = badgeFor(id);
+        return (
+          <button key={id} onClick={() => setTab(id)}
+            className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors whitespace-nowrap inline-flex items-center ${
+              tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}>
+            {label}
+            {b && <TabBadge n={b.n} highlight={b.hi} />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ClinicAgendaView() {
   const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
@@ -323,15 +371,12 @@ export function ClinicAgendaView() {
         )}
       </div>
 
-      {/* Abas internas */}
-      <div className="mb-5 flex items-center gap-1 border-b border-zinc-800 print:hidden">
-        {([['agenda', 'Agenda'], ['episodios', 'Episódios'], ['ciclos', 'Ciclos'], ['grupos', 'Grupos'], ['guias', 'Guias'], ['especialidades', 'Especialidades'], ['autorizacoes', 'Autorizações'], ['conexao', 'Conexão']] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${tab === id ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* ADR-146 F56: header operacional + badges nas abas.
+          Aparece pra org com Jornada ativa; se não tem episódio, se auto-esconde. */}
+      <JourneyMetricsHeader onNavigate={(t) => setTab(t)} />
+
+      {/* Abas internas — badge numérico por aba vem do useJourneyCounts (F40 /counts) */}
+      <ClinicTabsBar tab={tab} setTab={setTab} />
 
       {tab === 'autorizacoes' && <AuthorizationsTab contacts={contacts} />}
 

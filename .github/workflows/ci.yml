@@ -122,6 +122,7 @@ jobs:
           - { name: 'clinic-group-sessions', script: 'test:clinic-group-sessions' }
           - { name: 'clinic-conflict-by-session', script: 'test:clinic-conflict-by-session' }
           - { name: 'clinic-group-metrics-portal', script: 'test:clinic-group-metrics-portal' }
+          - { name: 'clinic-guides', script: 'test:clinic-guides' }
           - { name: 'escola-digest', script: 'test:escola-digest' }
           - { name: 'escola-teacher', script: 'test:escola-teacher' }
           - { name: 'escola-extracurricular', script: 'test:escola-extracurricular' }

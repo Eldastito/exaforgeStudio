@@ -2934,6 +2934,68 @@ const initDb = () => {
   // (refactor conflict) usa isso pra bloquear grupo maior que a sala.
   try { db.exec(`ALTER TABLE clinic_rooms ADD COLUMN capacity INTEGER DEFAULT 1`); } catch(e){}
 
+  // Guia da recepção (ADR-145 D7, Fatia 44). Documento administrativo
+  // polimorfo emitido pela recepção — cliente confirmou 2026-07: 3 tipos
+  // suportados na mesma tabela:
+  //   - tiss_authorization: guia TISS de autorização de procedimento
+  //     (operadora, TUSS, total_sessions, autorização, validade).
+  //   - referral: encaminhamento pra outro especialista (specialty destino,
+  //     CRM médico solicitante, motivo).
+  //   - medical_order: pedido médico de exames/procedimentos (items,
+  //     justificativa clínica, CID via Fatia 23, validade).
+  //
+  // Campos específicos por tipo vão em snapshot_json (hidratados/validados
+  // pelo service). Estados: draft→issued→(submitted→approved|denied)|
+  // expired|cancelled. Emitida vira imutável (snapshot congelado +
+  // document_hash canônico da Fase 29).
+  //
+  // Numeração: internal_number UNIQUE(org, guide_type) — cada tipo tem
+  // sua própria série sequencial (ex.: TISS-000123, REF-000045, PM-000078).
+  // Fatia 45 adiciona PDF (pdf_storage_key) + envio HMAC. Fatia 46
+  // liga com procedure_authorization_requests + treatment_cycles.
+  //
+  // connector_type reservado pra ADR-081 (evolução XML TISS por conector
+  // sem breaking change nesta tabela).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_guides (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        internal_number TEXT NOT NULL,
+        guide_type TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        episode_id TEXT,
+        cycle_id TEXT,
+        authorization_id TEXT,
+        operator_id TEXT,
+        procedure_id TEXT,
+        professional_id TEXT,
+        total_sessions INTEGER,
+        valid_from DATETIME,
+        valid_until DATETIME,
+        status TEXT NOT NULL DEFAULT 'draft',
+        snapshot_json TEXT,
+        pdf_storage_key TEXT,
+        document_hash TEXT,
+        connector_type TEXT,
+        cancelled_reason TEXT,
+        cancelled_at DATETIME,
+        issued_by TEXT,
+        issued_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, internal_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_guides_patient
+        ON clinical_guides (organization_id, contact_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_clinical_guides_cycle
+        ON clinical_guides (organization_id, cycle_id, status);
+      CREATE INDEX IF NOT EXISTS idx_clinical_guides_type_status
+        ON clinical_guides (organization_id, guide_type, status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_guides', e); }
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

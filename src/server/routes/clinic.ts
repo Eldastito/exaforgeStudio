@@ -29,6 +29,7 @@ import { ClinicCareEpisodeService } from "../ClinicCareEpisodeService.js";
 import { ClinicTreatmentCycleService } from "../ClinicTreatmentCycleService.js";
 import { ClinicCareJourneyMetricsService, QueueFilter } from "../ClinicCareJourneyMetricsService.js";
 import { ClinicScheduleSessionService } from "../ClinicScheduleSessionService.js";
+import { ClinicGuideService, GuideType, GuideStatus } from "../ClinicGuideService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -978,6 +979,72 @@ router.post("/treatment-cycles/:id/renew", requireRole("owner", "admin"), (req: 
     const result = ClinicTreatmentCycleService.renew(orgId, req.params.id, req.body || {}, actor(req) ?? null);
     res.json(result);
   } catch (e: any) { cycleError(res, e); }
+});
+
+// Guia da recepção (ADR-145 D7, Fatia 44). CRUD + issue com snapshot
+// canônico + cancel. Escrita autenticada (recepção prepara), cancel
+// restrito a owner|admin (guia emitida cancelada afeta faturamento).
+function guideError(res: any, e: any) {
+  const code = e?.code;
+  const status = code === "GUIDE_NOT_EDITABLE" ? 409
+              : code === "GUIDE_NOT_ISSUABLE" ? 409
+              : code === "GUIDE_NOT_CANCELLABLE" ? 409
+              : 400;
+  res.status(status).json({ error: e.message, code: code || null, status: e.status });
+}
+
+router.get("/guides", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const contactId = (req.query.contactId as string) || undefined;
+  const status = (req.query.status as GuideStatus) || undefined;
+  const guideType = (req.query.type as GuideType) || undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json({ guides: ClinicGuideService.list(orgId, { contactId, status, guideType, limit }) });
+});
+
+router.post("/guides", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const guide = ClinicGuideService.create(orgId, req.body || {}, actor(req) ?? null);
+    res.json({ guide });
+  } catch (e: any) { guideError(res, e); }
+});
+
+router.get("/guides/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const g = ClinicGuideService.get(orgId, req.params.id);
+  if (!g) return res.status(404).json({ error: "Guia não encontrada." });
+  res.json({ guide: g });
+});
+
+router.patch("/guides/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const guide = ClinicGuideService.update(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ guide });
+  } catch (e: any) { guideError(res, e); }
+});
+
+router.post("/guides/:id/issue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const guide = ClinicGuideService.issue(orgId, req.params.id, actor(req) ?? null);
+    res.json({ guide });
+  } catch (e: any) { guideError(res, e); }
+});
+
+router.post("/guides/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const guide = ClinicGuideService.cancel(orgId, req.params.id, req.body || {}, actor(req) ?? null);
+    res.json({ guide });
+  } catch (e: any) { guideError(res, e); }
 });
 
 // Sessões de agenda compartilhadas (ADR-145 D6, Fatia 41). Habilita

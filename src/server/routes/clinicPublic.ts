@@ -103,6 +103,16 @@ router.get("/patient/:token/certificates/:id/pdf", async (req, res): Promise<any
   } catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
+// ADR-145 Fatia 43 / RN-013 §3: se o appointment do paciente pertence
+// a uma sessão em grupo, retorna contexto agregado (contador +
+// capacidade) SEM VAZAR nomes/dados de outros participantes.
+router.get("/patient/:token/appointments/:id/group-info", (req, res): any => {
+  const ctx = resolveOr404(res, req.params.token); if (!ctx) return;
+  const info = ClinicPatientPortalService.groupInfoForOwnAppointment(ctx.orgId, ctx.contactId, req.params.id);
+  if (!info) return res.status(404).json({ error: "not_found" });
+  res.json(info);
+});
+
 router.get("/patient/:token/attachments/:id/download", (req, res): any => {
   const ctx = resolveOr404(res, req.params.token); if (!ctx) return;
   if (!ClinicPatientPortalService.assertOwnsSharedAttachment(ctx.orgId, ctx.contactId, req.params.id)) return res.status(404).json({ error: "not_found" });

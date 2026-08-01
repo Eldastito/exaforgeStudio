@@ -221,6 +221,59 @@ export class ClinicPatientPortalService {
   }
 
   /**
+   * ADR-145 D6 / RN-013 §3 (Fatia 43). Quando o appointment do paciente
+   * pertence a uma sessão em grupo, o portal pode mostrar contexto
+   * ("Grupo — 5 participantes") SEM VAZAR NOMES/DADOS dos outros
+   * participantes. Este método retorna apenas contadores agregados +
+   * capacidade + status da sessão — nunca a lista de contatos.
+   *
+   * Blindagem: valida que o appointment pertence ao contactId; se não,
+   * retorna null (evita enumeração de sessões via IDs alheios).
+   */
+  static groupInfoForOwnAppointment(orgId: string, contactId: string, appointmentId: string): {
+    sessionId: string;
+    title: string | null;
+    sessionType: string;
+    capacity: number;
+    participantsCount: number;
+    scheduledStart: string;
+    scheduledEnd: string;
+    status: string;
+  } | null {
+    const appt = db.prepare(
+      `SELECT id, contact_id, schedule_session_id FROM appointments
+        WHERE organization_id = ? AND id = ?`
+    ).get(orgId, appointmentId) as any;
+    if (!appt) return null;
+    if (appt.contact_id !== contactId) return null; // não é seu appointment
+    if (!appt.schedule_session_id) return null; // não é grupo
+
+    const session = db.prepare(
+      `SELECT id, title, session_type, capacity, scheduled_start, scheduled_end, status
+         FROM clinic_schedule_sessions
+        WHERE organization_id = ? AND id = ?`
+    ).get(orgId, appt.schedule_session_id) as any;
+    if (!session) return null;
+
+    const cnt = db.prepare(
+      `SELECT COUNT(*) AS c FROM appointments
+        WHERE organization_id = ? AND schedule_session_id = ?
+          AND status NOT IN ('cancelled')`
+    ).get(orgId, appt.schedule_session_id) as any;
+
+    return {
+      sessionId: session.id,
+      title: session.title ?? null,
+      sessionType: session.session_type,
+      capacity: Number(session.capacity),
+      participantsCount: Number(cnt?.c) || 0,
+      scheduledStart: session.scheduled_start,
+      scheduledEnd: session.scheduled_end,
+      status: session.status,
+    };
+  }
+
+  /**
    * Guardas de acesso público a arquivo do paciente (chamadas nas rotas
    * públicas). Devolve `{orgId, contactId}` verificados OU null.
    */

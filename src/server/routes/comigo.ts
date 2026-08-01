@@ -14,6 +14,7 @@ import { ComigoArchetypeService } from "../ComigoArchetypeService.js";
 import { ComigoProgressService } from "../ComigoProgressService.js";
 import { ComigoGraduationService } from "../ComigoGraduationService.js";
 import { ComigoBoostService } from "../ComigoBoostService.js";
+import { ComigoAgendaService } from "../ComigoAgendaService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -530,6 +531,71 @@ router.post("/fiado/:contactId/block-all", (req: AuthRequest, res): any => {
   }
   BalcaoService.setBlockAllSales(orgId, req.params.contactId, on);
   audit(orgId, req.user?.userId, req.params.contactId, on ? "comigo_block_all" : "comigo_block_all_off", { on });
+  res.json({ ok: true });
+});
+
+// ── Agenda (arquétipo agenda: unhas, cabelo, chaveiro-em-agenda) ────────────
+// Reusa a tabela genérica `appointments`. Único profissional (o autônomo);
+// se um dia tiver "sócio" que atende junto, vira segunda fatia.
+router.get("/agenda", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "invalid_date" });
+  const items = ComigoAgendaService.listForDay(orgId, date);
+  const counts = ComigoAgendaService.counts(orgId, date);
+  res.json({ date, items, counts });
+});
+
+router.post("/agenda", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const r = ComigoAgendaService.create(orgId, {
+    contact_name: b.contact_name,
+    contact_phone: b.contact_phone,
+    contact_id: b.contact_id,
+    product_service_id: b.product_service_id,
+    title: b.title,
+    description: b.description,
+    scheduled_start: b.scheduled_start,
+    duration_minutes: b.duration_minutes,
+    force: !!b.force,
+  }, req.user?.userId);
+  if (!('ok' in r) || !r.ok) {
+    const err = r as any;
+    // Conflito com corpo estruturado pra UI oferecer "manter mesmo assim"
+    if (err.error === "CONFLICT") return res.status(409).json(err);
+    return res.status(400).json(err);
+  }
+  audit(orgId, req.user?.userId, r.id, "comigo_agenda_create", { contactId: b.contact_id, product: b.product_service_id });
+  res.status(201).json({ id: r.id });
+});
+
+router.post("/agenda/:id/cancel", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ComigoAgendaService.cancel(orgId, req.params.id, req.body?.reason, req.user?.userId);
+  if (!ok) return res.status(404).json({ error: "not_found" });
+  audit(orgId, req.user?.userId, req.params.id, "comigo_agenda_cancel", { reason: req.body?.reason });
+  res.json({ ok: true });
+});
+
+router.post("/agenda/:id/complete", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ComigoAgendaService.complete(orgId, req.params.id);
+  if (!ok) return res.status(409).json({ error: "cannot_complete" });
+  audit(orgId, req.user?.userId, req.params.id, "comigo_agenda_complete", {});
+  res.json({ ok: true });
+});
+
+router.post("/agenda/:id/no-show", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = ComigoAgendaService.markNoShow(orgId, req.params.id);
+  if (!ok) return res.status(409).json({ error: "cannot_mark_no_show" });
+  audit(orgId, req.user?.userId, req.params.id, "comigo_agenda_no_show", {});
   res.json({ ok: true });
 });
 

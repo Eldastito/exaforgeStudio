@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge } from 'lucide-react';
+import { HandCoins, Calculator, Store, NotebookText, Sparkles, Trash2, Banknote, QrCode, BookUser, MessageCircle, Activity, TrendingUp, TrendingDown, Minus, Megaphone, Plus, ChevronLeft, AlertTriangle, CheckCircle, Gauge, CalendarDays, X, Clock, User } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { LegalTip } from '@/src/features/LegalAdvisorView';
@@ -20,6 +20,7 @@ type SugItem = { product_id: string; name: string; count: number };
 type Overview = { recipes: number; openOrders: number; fiadoReceivable: number; blacklisted: number };
 
 const TABS = [
+  { key: 'agenda', label: 'Agenda', icon: CalendarDays },
   { key: 'balcao', label: 'Balcão', icon: Store },
   { key: 'mesa', label: 'Mesa/QR', icon: QrCode },
   { key: 'saude', label: 'Saúde', icon: Activity },
@@ -29,6 +30,7 @@ const TABS = [
 ] as const;
 
 export function ComigoView() {
+  // Default = 'balcao'; ajustado pra 'agenda' abaixo quando o arquétipo é hora-marcada.
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('balcao');
   const [ov, setOv] = useState<Overview | null>(null);
   const [arch, setArch] = useState<any | null>(null);
@@ -58,8 +60,25 @@ export function ComigoView() {
 
   // A aba Mesa/QR só aparece quando o arquétipo usa (ADR-120 D2).
   const mesaHidden = arch ? arch.mesaEnabled === false : false;
-  const visibleTabs = TABS.filter((t) => t.key !== 'mesa' || !mesaHidden);
-  const activeTab = tab === 'mesa' && mesaHidden ? 'balcao' : tab;
+  // A aba Agenda só aparece quando o arquétipo é hora-marcada (unhas, cabelo, ou
+  // arquétipo qualquer que respondeu "agenda" na 2ª pergunta do onboarding).
+  const agendaVisible = arch?.mode === 'agenda';
+  const visibleTabs = TABS.filter((t) => {
+    if (t.key === 'mesa' && mesaHidden) return false;
+    if (t.key === 'agenda' && !agendaVisible) return false;
+    return true;
+  });
+  // Fallback quando a aba selecionada some do menu.
+  const activeTab = (
+    (tab === 'mesa' && mesaHidden) ||
+    (tab === 'agenda' && !agendaVisible)
+  ) ? (agendaVisible ? 'agenda' : 'balcao') : tab;
+
+  // Primeira carga em modo agenda: entra direto na Agenda em vez do Balcão.
+  useEffect(() => {
+    if (agendaVisible && tab === 'balcao') setTab('agenda');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agendaVisible]);
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto p-3 md:p-6">
@@ -126,6 +145,7 @@ export function ComigoView() {
       </div>
 
       <div className="mt-4">
+        {activeTab === 'agenda' && <Agenda />}
         {activeTab === 'balcao' && <Balcao onChange={loadOverview} />}
         {activeTab === 'mesa' && <Mesa onChange={loadOverview} />}
         {activeTab === 'saude' && <Saude />}
@@ -133,6 +153,261 @@ export function ComigoView() {
         {activeTab === 'caderneta' && <Caderneta onChange={loadOverview} />}
         {activeTab === 'divulgar' && <Divulgar />}
       </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Agenda: hora marcada (arquétipo agenda — unhas, cabelo, etc) ────────────
+type AgendaItem = {
+  id: string; contact_id: string; contact_name: string; contact_phone: string | null;
+  product_service_id: string | null; product_name: string | null;
+  title: string; description: string | null;
+  scheduled_start: string; scheduled_end: string | null; duration_minutes: number;
+  status: string; cancellation_reason: string | null; created_at: string;
+};
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const timeOf = (iso: string) => {
+  const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+const isoOfLocal = (date: string, time: string) => {
+  // date = YYYY-MM-DD, time = HH:MM → ISO no horário local
+  const d = new Date(`${date}T${time}:00`);
+  return d.toISOString();
+};
+
+function Agenda() {
+  const [date, setDate] = useState<string>(todayISO());
+  const [items, setItems] = useState<AgendaItem[]>([]);
+  const [services, setServices] = useState<Product[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [conflictPreview, setConflictPreview] = useState<{ ids: string[]; message: string } | null>(null);
+  // Form
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [time, setTime] = useState('09:00');
+  const [duration, setDuration] = useState('30');
+  const [serviceId, setServiceId] = useState<string>('');
+  const [note, setNote] = useState('');
+
+  const load = useCallback((d: string) => {
+    apiFetch(`/api/comigo/agenda?date=${encodeURIComponent(d)}`).then(r => r.json()).then((r: any) => {
+      setItems(r?.items || []);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { load(date); }, [load, date]);
+  useEffect(() => {
+    // Puxa serviços (products_services do tipo service) pra preencher o combo.
+    apiFetch('/api/products?type=service').then(r => r.json()).then((r: any) => {
+      const rows = Array.isArray(r) ? r : (r?.products || r?.items || []);
+      setServices((rows as any[]).filter(p => p.active !== 0));
+    }).catch(() => {});
+  }, []);
+
+  const resetForm = () => { setName(''); setPhone(''); setTime('09:00'); setDuration('30'); setServiceId(''); setNote(''); setConflictPreview(null); };
+
+  const onServiceChange = (id: string) => {
+    setServiceId(id);
+    // Se o produto tem uma ficha de preço com labor_minutes, dá um empurrão na duração.
+    // Como o /api/products não devolve labor_minutes, mantemos o default 30 e o usuário ajusta.
+  };
+
+  const submit = async (force = false) => {
+    if (busy) return;
+    if (!name.trim() && !phone.trim()) { toast.error('Informe nome ou telefone do cliente.'); return; }
+    setBusy(true);
+    try {
+      const startISO = isoOfLocal(date, time);
+      const body: any = {
+        contact_name: name.trim() || undefined,
+        contact_phone: phone.trim() || undefined,
+        product_service_id: serviceId || undefined,
+        scheduled_start: startISO,
+        duration_minutes: Number(duration) || undefined,
+        description: note.trim() || undefined,
+        force: force || undefined,
+      };
+      const res = await apiFetch('/api/comigo/agenda', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const r = await res.json();
+      if (res.status === 409 && r?.error === 'CONFLICT') {
+        setConflictPreview({ ids: (r.conflicts || []).map((c: any) => c.id), message: r.message || 'Conflito de horário.' });
+        return;
+      }
+      if (!res.ok || !r?.id) { toast.error('Erro ao agendar.'); return; }
+      toast.success('Agendado!');
+      resetForm(); setCreating(false); load(date);
+    } catch { toast.error('Erro ao agendar.'); }
+    finally { setBusy(false); }
+  };
+
+  const cancel = async (a: AgendaItem) => {
+    const reason = window.prompt(`Cancelar agendamento de ${a.contact_name}?\nMotivo (opcional):`);
+    if (reason == null) return;
+    await apiFetch(`/api/comigo/agenda/${a.id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }).catch(() => {});
+    load(date); toast.success('Cancelado.');
+  };
+  const complete = async (a: AgendaItem) => {
+    await apiFetch(`/api/comigo/agenda/${a.id}/complete`, { method: 'POST' }).catch(() => {});
+    load(date); toast.success('Atendimento concluído.');
+  };
+  const noShow = async (a: AgendaItem) => {
+    if (!window.confirm(`Marcar ${a.contact_name} como faltou?`)) return;
+    await apiFetch(`/api/comigo/agenda/${a.id}/no-show`, { method: 'POST' }).catch(() => {});
+    load(date); toast.success('Marcado como faltou.');
+  };
+
+  const waLink = (a: AgendaItem) => {
+    if (!a.contact_phone) return null;
+    const digits = a.contact_phone.replace(/\D/g, '');
+    if (!digits) return null;
+    const time = timeOf(a.scheduled_start);
+    const text = encodeURIComponent(`Oi ${a.contact_name}! Confirmando seu horário às ${time} — ${a.title}.`);
+    return `https://wa.me/${digits}?text=${text}`;
+  };
+
+  const statusPill = (s: string) => {
+    const map: Record<string, string> = {
+      pending: 'bg-zinc-500/15 text-zinc-300',
+      confirmed: 'bg-sky-500/15 text-sky-300',
+      in_progress: 'bg-emerald-500/15 text-emerald-300',
+      completed: 'bg-emerald-600/25 text-emerald-200',
+      cancelled: 'bg-red-500/15 text-red-300',
+      no_show: 'bg-amber-500/15 text-amber-300',
+    };
+    const label: Record<string, string> = { pending: 'Aguardando', confirmed: 'Agendado', in_progress: 'Em atendimento', completed: 'Concluído', cancelled: 'Cancelado', no_show: 'Faltou' };
+    return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${map[s] || 'bg-zinc-500/15 text-zinc-300'}`}>{label[s] || s}</span>;
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-400">Sua agenda de hora marcada. Cliente confirma, você atende, o horário fica seu.</p>
+
+      {/* Seletor de dia + novo */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <input type="date" value={date} onChange={e => setDate(e.target.value)}
+          className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200" />
+        <button onClick={() => setDate(todayISO())} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1.5">Hoje</button>
+        <div className="flex-1" />
+        {!creating && (
+          <button onClick={() => { resetForm(); setCreating(true); }} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5">
+            <Plus className="w-3 h-3 inline mr-1" />Novo agendamento
+          </button>
+        )}
+      </div>
+
+      {/* Formulário de criação */}
+      {creating && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-zinc-200">Novo agendamento — {date}</div>
+            <button onClick={() => { setCreating(false); resetForm(); }} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome do cliente" className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200" autoFocus />
+            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Telefone (WhatsApp)" className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-zinc-500">Horário</label>
+              <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200" />
+            </div>
+            <div>
+              <label className="text-[10px] text-zinc-500">Duração (min)</label>
+              <input type="number" min={5} max={480} value={duration} onChange={e => setDuration(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] text-zinc-500">Serviço (opcional)</label>
+            <select value={serviceId} onChange={e => onServiceChange(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200">
+              <option value="">— Selecione —</option>
+              {services.map(s => <option key={s.id} value={s.id}>{s.name} · {brl(s.price)}</option>)}
+            </select>
+          </div>
+
+          <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Observação (opcional)" rows={2}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200" />
+
+          {conflictPreview && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs">
+              <div className="flex items-center gap-1.5 text-amber-300 font-medium"><AlertTriangle className="w-3.5 h-3.5" /> {conflictPreview.message}</div>
+              <p className="text-zinc-400 mt-1">Já tem cliente marcado nesse horário. Marcar mesmo assim?</p>
+              <div className="flex gap-2 mt-2">
+                <button disabled={busy} onClick={() => submit(true)} className="rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1.5 disabled:opacity-40">Marcar mesmo assim</button>
+                <button onClick={() => setConflictPreview(null)} className="rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs px-3 py-1.5">Voltar</button>
+              </div>
+            </div>
+          )}
+
+          {!conflictPreview && (
+            <div className="flex gap-2">
+              <button disabled={busy} onClick={() => submit(false)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 disabled:opacity-40">Marcar</button>
+              <button onClick={() => { setCreating(false); resetForm(); }} className="rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs px-3 py-1.5">Cancelar</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lista do dia */}
+      {items.length === 0 && !creating && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
+          <CalendarDays className="w-6 h-6 text-emerald-300 mx-auto mb-2" />
+          <div className="text-sm font-medium text-zinc-200">Nenhum agendamento nesse dia</div>
+          <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1.5">Clique em "Novo agendamento" pra reservar o horário do seu cliente.</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {items.map(a => {
+          const wa = waLink(a);
+          const canAct = !['cancelled', 'completed', 'no_show'].includes(a.status);
+          return (
+            <div key={a.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-emerald-300" />
+                    {timeOf(a.scheduled_start)}
+                  </div>
+                  <span className="text-xs text-zinc-500">· {a.duration_minutes} min</span>
+                  {statusPill(a.status)}
+                </div>
+                <div className="flex gap-1">
+                  {wa && canAct && (
+                    <a href={wa} target="_blank" rel="noreferrer" title="Confirmar no WhatsApp"
+                      className="text-xs rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 px-2 py-1">
+                      <MessageCircle className="w-3.5 h-3.5 inline" />
+                    </a>
+                  )}
+                  {canAct && (
+                    <>
+                      <button onClick={() => complete(a)} title="Concluir" className="text-xs rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 px-2 py-1">
+                        <CheckCircle className="w-3.5 h-3.5 inline" />
+                      </button>
+                      <button onClick={() => noShow(a)} title="Faltou" className="text-xs rounded-lg border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 px-2 py-1">Faltou</button>
+                      <button onClick={() => cancel(a)} title="Cancelar" className="text-xs rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 px-2 py-1">
+                        <X className="w-3.5 h-3.5 inline" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="mt-1.5 text-sm text-zinc-200 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-zinc-500" />
+                {a.contact_name}
+                {a.contact_phone && <span className="text-xs text-zinc-500">· {a.contact_phone}</span>}
+              </div>
+              <div className="text-xs text-zinc-400">{a.title}{a.product_name && a.product_name !== a.title ? ` · ${a.product_name}` : ''}</div>
+              {a.description && <div className="text-xs text-zinc-500 mt-1">"{a.description}"</div>}
+              {a.status === 'cancelled' && a.cancellation_reason && <div className="text-xs text-red-400 mt-1">Motivo: {a.cancellation_reason}</div>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 # ADR-146 — Módulo Clínica: UI da Jornada de Tratamento (Fase 1 do go-live)
 
-**Status:** Proposto — Fatia 1 (esta ADR + inventário do frontend + fatiamento). Aguardando início da Fatia 2.
+**Status:** FECHADO — 8 fatias (50–57) em produção. Encerrado 2026-08-01.
 
 **Data:** 2026-08-01
 
@@ -93,14 +93,14 @@ Numeração continua a série do ADR-145 (F49 já foi Scheduler pass). **Este AD
 
 | Fatia | Escopo                                                                                                | Consome                          | Status  |
 |-------|-------------------------------------------------------------------------------------------------------|----------------------------------|---------|
-| 50    | ADR-146 aceita + inventário do frontend + shell de navegação (aba stub por superfície)                | —                                | Esta PR |
-| 51    | `<SpecialtiesPanel/>` — CRUD especialidades + vínculos N:N com profissional + botão "backfill legado" | F35 (`/clinic/specialties/*`)   | Pending |
-| 52    | `<CareEpisodePanel/>` — abrir episódio + lista + transfer/hold/resume; alta/reopen via `PinConfirmModal` | F36 + F39 + F40 (`/clinic/care-episodes/*`) | Pending |
-| 53    | `<TreatmentCyclePanel/>` — ciclo atual + usage derivada + fila de renovação + badge no sidebar         | F38 + F47 (`/clinic/care-episodes/:id/cycles`, `/clinic/renewal-tasks`) | Pending |
-| 54    | `<ScheduleSessionModal/>` — sessão em grupo + participantes + `AvailabilitySuggestions` (F47)          | F41–F43 + F47 (`/clinic/schedule-sessions/*`) | Pending |
-| 55    | `<GuideForm/>` polimorfo (3 tipos) + `<GuideDraftButton/>` + emissão com PIN + PDF preview + envio HMAC | F44–F46 + F48 (`/clinic/guides/*`) | Pending |
-| 56    | `<JourneyMetricsHeader/>` + badge no sidebar dos sinais do `business_signals` (domain=clinic)           | F40 + F47                        | Pending |
-| 57    | Smoke test Playwright E2E do happy path (criar episódio → agendar → completar → renovar → emitir guia) | todas                            | Pending |
+| 50    | ADR-146 aceita + inventário do frontend + shell de navegação (aba stub por superfície)                | —                                | MERGED |
+| 51    | `<SpecialtiesPanel/>` — CRUD especialidades + vínculos N:N com profissional + botão "backfill legado" | F35 (`/clinic/specialties/*`)   | MERGED |
+| 52    | `<CareEpisodePanel/>` — abrir episódio + lista + transfer/hold/resume; alta/reopen via `PinConfirmModal` | F36 + F39 + F40 (`/clinic/care-episodes/*`) | MERGED |
+| 53    | `<TreatmentCyclePanel/>` — ciclo atual + usage derivada + fila de renovação + badge no sidebar         | F38 + F47 (`/clinic/care-episodes/:id/cycles`, `/clinic/renewal-tasks`) | MERGED |
+| 54    | `<ScheduleSessionModal/>` — sessão em grupo + participantes + `AvailabilitySuggestions` (F47)          | F41–F43 + F47 (`/clinic/schedule-sessions/*`) | MERGED |
+| 55    | `<GuideForm/>` polimorfo (3 tipos) + `<GuideDraftButton/>` + emissão com PIN + PDF preview + envio HMAC | F44–F46 + F48 (`/clinic/guides/*`) | MERGED |
+| 56    | `<JourneyMetricsHeader/>` + badge no sidebar dos sinais do `business_signals` (domain=clinic)           | F40 + F47                        | MERGED |
+| 57    | Smoke E2E cross-service do happy path (episódio → ciclo → grupo → availability F47 → draft F48 → guia → alta → cross-tenant → RN-014). Não usa Playwright — mantém o padrão `scripts/test-*.ts` do repo, que exerce os mesmos services que a UI consome via /api/clinic/*. | todas | MERGED |
 
 Depois da Fatia 57, o **item #1 do meu ranking de "pra produção"** (ver conversa 2026-08-01) fica riscado. Sobra só o setup por-tenant (backfill + módulo on + config) e o runbook operacional (itens 3–7 daquele ranking).
 

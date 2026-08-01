@@ -273,7 +273,8 @@ async function main() {
     cicloAntes?.plannedSessions === cicloDepois?.plannedSessions,
     `antes=${cicloAntes?.status}/${cicloAntes?.plannedSessions} depois=${cicloDepois?.status}/${cicloDepois?.plannedSessions}`);
   check("10. RN-014: renewalTask.run apenas publicou sinais",
-    Array.isArray(run?.signals) || typeof run === "object");
+    typeof run?.published === "number" && typeof run?.seen === "number",
+    `run=${JSON.stringify(run)}`);
 
   // ══ 11. CROSS-TENANT ══════════════════════════════════════════════
   // Org B tenta ler episódio/ciclo/guia/sessão da org A → tudo null

@@ -6528,6 +6528,11 @@ const initDb = () => {
   // ledger, mesmo padrão do ComigoHealthService). Nullable; capturado na
   // primeira leitura do endpoint /impact.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_impact_baseline_at DATETIME`); } catch(e){}
+
+  // Gap B (ADR-088 D5 nível 2): teto de chamadas LLM/dia pro /menu-suggest.
+  // Frugalidade dura — ao estourar, o service cai pra busca literal (nunca 500).
+  // Default 50/dia por org é folgado pra Balcão de bairro e ainda evita abuso.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN comigo_menu_suggest_daily_cap INTEGER DEFAULT 50`); } catch(e){}
 };
 
 initDb();

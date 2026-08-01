@@ -277,6 +277,7 @@
     "test:comigo-monthly-report": "tsx scripts/test-comigo-monthly-report.ts",
     "test:comigo-balcao-offline": "tsx scripts/test-comigo-balcao-offline.ts",
     "test:comigo-impact": "tsx scripts/test-comigo-impact.ts",
+    "test:comigo-menu-suggest": "tsx scripts/test-comigo-menu-suggest.ts",
     "test:loss-margin": "tsx scripts/test-loss-margin.ts",
     "test:loss-hooks": "tsx scripts/test-loss-hooks.ts",
     "test:legal-advisor": "tsx scripts/test-legal-advisor.ts",

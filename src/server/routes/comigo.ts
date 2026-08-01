@@ -1,7 +1,7 @@
 import { Router } from "express";
 import db from "../db.js";
 import { randomUUID } from "crypto";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ComigoPricingService } from "../ComigoPricingService.js";
 import { BalcaoService } from "../BalcaoService.js";
 import { ComigoCollectionService } from "../ComigoCollectionService.js";
@@ -15,6 +15,7 @@ import { ComigoProgressService } from "../ComigoProgressService.js";
 import { ComigoGraduationService } from "../ComigoGraduationService.js";
 import { ComigoBoostService } from "../ComigoBoostService.js";
 import { ComigoAgendaService } from "../ComigoAgendaService.js";
+import { ComigoMonthlyReportService } from "../ComigoMonthlyReportService.js";
 
 // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
 // PR #1: registro do módulo + schema. Este router expõe só o /overview
@@ -597,6 +598,46 @@ router.post("/agenda/:id/no-show", (req: AuthRequest, res): any => {
   if (!ok) return res.status(409).json({ error: "cannot_mark_no_show" });
   audit(orgId, req.user?.userId, req.params.id, "comigo_agenda_no_show", {});
   res.json({ ok: true });
+});
+
+// ── Relatório mensal em PDF (Gap C do levantamento autônomos) ───────────────
+// Expõe agregados sensíveis (receita, lucro, fiado) — restrito a owner/admin.
+// Fatia enxuta: gera on-the-fly, sem persistir. Envio automático via WhatsApp
+// (ComigoMonthlyReportDeliveryService) fica pra fatia seguinte.
+router.get("/reports/monthly.pdf", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const month = typeof req.query.month === "string" ? req.query.month : undefined;
+    const payload = ComigoMonthlyReportService.buildPayload(orgId, month || null);
+    const pdf = await ComigoMonthlyReportService.renderPdfFromPayload(payload);
+    audit(orgId, req.user?.userId, undefined, "COMIGO_MONTHLY_REPORT_GENERATED", {
+      month: payload.month,
+      revenue: payload.sales.revenue,
+      orders: payload.sales.orders,
+      fiadoBalance: payload.fiado.balanceEndOfMonth,
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `inline; filename="comigo-relatorio-mensal-${payload.month}.pdf"`);
+    res.status(200).send(pdf);
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
+});
+
+// GET agregado só do payload (sem PDF) — útil pra UI mostrar "prévia do mês"
+// e escolher o mês antes de baixar. Mesma restrição de role.
+router.get("/reports/monthly.json", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const month = typeof req.query.month === "string" ? req.query.month : undefined;
+    const payload = ComigoMonthlyReportService.buildPayload(orgId, month || null);
+    res.json(payload);
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
 });
 
 export default router;

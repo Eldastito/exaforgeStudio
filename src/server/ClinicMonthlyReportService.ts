@@ -17,6 +17,10 @@
 import PDFDocument from "pdfkit";
 import db from "./db.js";
 import { ClinicMetricsService, type MetricsOverview } from "./ClinicMetricsService.js";
+// normalizeMonth/monthWindow moradores em util/monthWindow.ts (compartilhado
+// com ComigoMonthlyReportService). Re-exportados aqui p/ manter a API pública.
+import { normalizeMonth, monthWindow } from "./util/monthWindow.js";
+export { normalizeMonth, monthWindow };
 
 export interface MonthlyReportPayload {
   month: string;               // YYYY-MM
@@ -25,36 +29,6 @@ export interface MonthlyReportPayload {
   windowToISO: string;
   businessName: string;
   metrics: MetricsOverview;
-}
-
-const PT_MONTHS = [
-  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
-  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
-];
-
-/** Aceita "YYYY-MM" ou undefined (default: mês anterior ao atual, hoje). */
-export function normalizeMonth(input: string | undefined | null, nowMs: number = Date.now()): string {
-  if (input && /^\d{4}-\d{2}$/.test(input)) {
-    const [y, m] = input.split("-").map(Number);
-    if (m >= 1 && m <= 12 && y >= 1970 && y <= 2999) return input;
-  }
-  const d = new Date(nowMs);
-  // Mês anterior (fechado) — relatório é retrospectivo por natureza.
-  const prev = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
-  return `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-/** Devolve [fromISO, toISO] cobrindo o mês inteiro em UTC (primeiro ao último dia). */
-export function monthWindow(month: string): { fromISO: string; toISO: string; label: string } {
-  const [y, m] = month.split("-").map(Number);
-  const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
-  // Último instante do último dia do mês = primeiro do próximo - 1ms.
-  const to = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0) - 1);
-  return {
-    fromISO: from.toISOString(),
-    toISO: to.toISOString(),
-    label: `${PT_MONTHS[m - 1]} de ${y}`,
-  };
 }
 
 function businessName(orgId: string): string {

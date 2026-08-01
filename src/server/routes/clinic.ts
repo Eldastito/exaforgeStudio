@@ -1047,6 +1047,21 @@ router.delete("/schedule-sessions/:id/participants/:appointmentId", (req: AuthRe
   } catch (e: any) { sessionError(res, e); }
 });
 
+// Ocupação real do profissional (ADR-145 D6 / Fatia 43 / RN-006):
+// grupo de 5 = 1 ocupação, não 5. Dashboard usa isso pra não inflar.
+router.get("/schedule-sessions/professionals/:id/occupation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const from = String(req.query.from || "");
+  const to = String(req.query.to || "");
+  if (!from || !to) {
+    return res.status(400).json({ error: "from e to (ISO) são obrigatórios." });
+  }
+  res.json({
+    occupation: ClinicScheduleSessionService.occupationForProfessional(orgId, req.params.id, { from, to }),
+  });
+});
+
 router.post("/schedule-sessions/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

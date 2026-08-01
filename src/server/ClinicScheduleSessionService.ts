@@ -426,6 +426,68 @@ export class ClinicScheduleSessionService {
     return { session: this.get(orgId, sessionId)!, removedAppointmentId: appointmentId };
   }
 
+  /**
+   * Métrica de ocupação (ADR-145 D6 / Fatia 43 / RN-006). Conta OCUPAÇÕES
+   * DE AGENDA — grupo de 5 pacientes = 1 ocupação, não 5. Serve pra:
+   *   - Dashboard "ocupação real do profissional" (não inflado por grupos).
+   *   - Base pra `ClinicMetricsService` calcular utilização vs. capacidade.
+   *
+   * Regra:
+   *   - Cada `schedule_session_id` distinto no período = 1 ocupação.
+   *   - Appointments SEM schedule_session_id (individuais legado) contam
+   *     cada um como 1 ocupação.
+   *   - Cancelled/no_show excluídos.
+   *   - Retorna somatório de minutos + contador de blocos.
+   */
+  static occupationForProfessional(orgId: string, professionalId: string, opts: { from: string; to: string }): {
+    groupSessions: number;
+    individualAppointments: number;
+    totalOccupations: number;
+    totalMinutes: number;
+    windowFromISO: string;
+    windowToISO: string;
+  } {
+    const fromISO = String(opts.from);
+    const toISO = String(opts.to);
+
+    // Grupos: um bloco por schedule_session_id distinto no período
+    const groups = db.prepare(
+      `SELECT COUNT(DISTINCT s.id) AS c,
+              COALESCE(SUM(s.duration_minutes), 0) AS min_sum
+         FROM clinic_schedule_sessions s
+        WHERE s.organization_id = ?
+          AND s.professional_id = ?
+          AND s.status NOT IN ('cancelled')
+          AND s.scheduled_start >= ? AND s.scheduled_start <= ?`
+    ).get(orgId, professionalId, fromISO, toISO) as any;
+
+    // Individuais: appts sem schedule_session_id no período (legado)
+    const individuals = db.prepare(
+      `SELECT COUNT(*) AS c,
+              COALESCE(SUM(expected_duration_minutes), 0) AS min_sum
+         FROM appointments
+        WHERE organization_id = ?
+          AND professional_id = ?
+          AND schedule_session_id IS NULL
+          AND status NOT IN ('cancelled','no_show')
+          AND scheduled_start >= ? AND scheduled_start <= ?`
+    ).get(orgId, professionalId, fromISO, toISO) as any;
+
+    const groupSessions = Number(groups?.c) || 0;
+    const individualAppointments = Number(individuals?.c) || 0;
+    const groupMin = Number(groups?.min_sum) || 0;
+    const indMin = Number(individuals?.min_sum) || 0;
+
+    return {
+      groupSessions,
+      individualAppointments,
+      totalOccupations: groupSessions + individualAppointments,
+      totalMinutes: groupMin + indMin,
+      windowFromISO: fromISO,
+      windowToISO: toISO,
+    };
+  }
+
   // ── Cancelar sessão inteira ────────────────────────────────────────────
 
   /**

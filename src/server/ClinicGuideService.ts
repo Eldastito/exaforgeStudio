@@ -413,6 +413,18 @@ export class ClinicGuideService {
       guideId: id, guideType: cur.guideType, internalNumber: cur.internalNumber,
       documentHashPrefix: documentHash.slice(0, 12),
     });
+
+    // Fatia 46 hook (ADR-145 RN-005 §8): se a guia sendo emitida tem
+    // cycle_id preenchido e o ciclo está pending_authorization, ativa o
+    // ciclo automaticamente. Import dinâmico evita ciclo de import
+    // (TreatmentCycleService → GuideService pra linkGuide).
+    if (cur.cycleId) {
+      import("./ClinicTreatmentCycleService.js").then((m) => {
+        try { m.ClinicTreatmentCycleService.transitionOnGuideIssued(orgId, id); }
+        catch (err) { console.error("[Clínica] transition on guide issued falhou", id, err); }
+      });
+    }
+
     return this.get(orgId, id)!;
   }
 

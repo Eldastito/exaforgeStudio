@@ -929,6 +929,9 @@ function cycleError(res: any, e: any) {
   const status = code === "CYCLE_ALREADY_ACTIVE" ? 409
               : code === "CYCLE_NOT_RENEWABLE" ? 409
               : code === "CYCLE_NOT_CANCELLABLE" ? 409
+              : code === "CYCLE_NOT_PENDING_AUTH" ? 409
+              : code === "GUIDE_NOT_ACTIVE" ? 409
+              : code === "GUIDE_ALREADY_LINKED" ? 409
               : code === "EPISODE_NOT_ACTIVE" ? 409
               : 400;
   res.status(status).json({ error: e.message, code: code || null,
@@ -1216,6 +1219,18 @@ router.get("/care-journey/counts", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ counts: ClinicCareJourneyMetricsService.counts(orgId) });
+});
+
+// Fatia 46: amarra guia issued a ciclo pending_authorization → ativa ciclo
+router.post("/treatment-cycles/:id/link-guide", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const guideId = String(req.body?.guideId || "");
+  if (!guideId) return res.status(400).json({ error: "guideId é obrigatório." });
+  try {
+    const cycle = ClinicTreatmentCycleService.linkGuide(orgId, req.params.id, guideId, actor(req) ?? null);
+    res.json({ cycle });
+  } catch (e: any) { cycleError(res, e); }
 });
 
 router.post("/treatment-cycles/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

@@ -2996,6 +2996,30 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar clinical_guides', e); }
 
+  // Envios da guia por canal (ADR-145 Fatia 45). Cada tentativa vira row
+  // — histórico completo. Mesmo padrão de clinical_document_deliveries
+  // (Fase K). Sem retry automático nesta fatia (KISS); Scheduler futuro
+  // pode reprocessar 'failed' se surgir necessidade operacional.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinical_guide_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        guide_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        channel_id TEXT,
+        to_identifier TEXT,
+        status TEXT NOT NULL,
+        provider_message_id TEXT,
+        error TEXT,
+        sent_by TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinical_guide_deliveries_guide
+        ON clinical_guide_deliveries (organization_id, guide_id, sent_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar clinical_guide_deliveries', e); }
+
   // Alergias do paciente (ADR-080 Fase 25). Registro clínico de alergia a
   // droga/substância/alimento/latex/outros — insumo direto pra travar receita
   // que contenha item cruzado com alergia grave. Dado sensível (LGPD Art.11):

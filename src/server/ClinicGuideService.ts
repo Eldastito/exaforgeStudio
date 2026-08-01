@@ -31,6 +31,7 @@
  * das Fases 26/27/33 (`logAuthEvent`).
  */
 import { randomUUID } from "node:crypto";
+import PDFDocument from "pdfkit";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { canonicalize, computeDocumentHash } from "./ClinicDocumentsService.js";
@@ -442,6 +443,154 @@ export class ClinicGuideService {
       guideId: id, guideType: cur.guideType, previousStatus: cur.status,
     });
     return this.get(orgId, id)!;
+  }
+
+  // ── PDF polimorfo (ADR-145 Fatia 45) ───────────────────────────────────
+
+  /**
+   * Renderiza o PDF da guia. Só emite quando issued (rascunho falha).
+   * O PDF sempre é IGUAL após emissão (usa snapshot congelado — Fase 29).
+   * Layout diferente por guide_type:
+   *   - tiss_authorization: cabeçalho operadora + carteirinha + TUSS +
+   *     total_sessions + validade + CRM prof.
+   *   - referral: especialidade destino + motivo + CRM médico solicitante.
+   *   - medical_order: lista items[] + CID (via snapshot.fields) +
+   *     justificativa clínica + validade.
+   * Todos: cabeçalho comum (business_name + internal_number + data
+   * emissão) + rodapé (document_hash truncado 12 chars pra auditoria).
+   */
+  static renderPdf(orgId: string, guideId: string): Promise<Buffer> {
+    const guide = this.get(orgId, guideId);
+    if (!guide) throw new Error("Guia não encontrada.");
+    if (guide.status !== "issued" && guide.status !== "submitted" &&
+        guide.status !== "approved" && guide.status !== "denied" &&
+        guide.status !== "expired") {
+      const e: any = new Error(`Guia com status ${guide.status} não tem PDF disponível.`);
+      e.code = "GUIDE_NOT_ISSUED"; throw e;
+    }
+    const snap = guide.snapshotJson || {};
+    const fields = snap.fields || {};
+    const patient = snap.patient || {};
+    const business = snap.business || { name: "Clínica" };
+    const professional = snap.professional || null;
+
+    return new Promise<Buffer>((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ size: "A4", margin: 48 });
+        const chunks: Buffer[] = [];
+        doc.on("data", (b: Buffer) => chunks.push(b));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+
+        // ── Cabeçalho comum ─────────────────────────────────────────────
+        doc.font("Helvetica-Bold").fontSize(16).fillColor("#0f766e").text(business.name || "Clínica", { align: "left" });
+        doc.moveDown(0.1);
+        const titleByType = {
+          tiss_authorization: "Guia de Autorização (Convênio)",
+          referral: "Encaminhamento Médico",
+          medical_order: "Pedido Médico",
+        } as const;
+        doc.font("Helvetica-Bold").fontSize(13).fillColor("#111827")
+          .text(titleByType[guide.guideType] || "Guia");
+        doc.moveDown(0.1);
+        doc.font("Helvetica").fontSize(9).fillColor("#6b7280")
+          .text(`Nº ${guide.internalNumber} · Emitida em ${(guide.issuedAt || "").slice(0, 10)}`);
+        doc.moveDown(0.8);
+
+        // ── Bloco Paciente (comum) ──────────────────────────────────────
+        writeSectionTitle(doc, "Paciente");
+        writeKV(doc, [
+          ["Nome", patient.name || "—"],
+          ...(patient.cpf ? [["CPF", patient.cpf] as [string, string]] : []),
+          ...(patient.insuranceCardNumber ? [["Carteirinha", patient.insuranceCardNumber] as [string, string]] : []),
+        ]);
+
+        // ── Bloco Profissional (comum, se veio) ─────────────────────────
+        if (professional) {
+          writeSectionTitle(doc, "Profissional solicitante");
+          const profReg = [professional.council, professional.registrationNumber].filter(Boolean).join(" ");
+          writeKV(doc, [
+            ["Nome", professional.name || "—"],
+            ...(profReg ? [["Registro", profReg] as [string, string]] : []),
+          ]);
+        }
+
+        // ── Bloco específico por tipo ───────────────────────────────────
+        if (guide.guideType === "tiss_authorization") {
+          writeSectionTitle(doc, "Autorização de convênio");
+          writeKV(doc, [
+            ...(snap.operatorId ? [["Operadora (ID)", snap.operatorId] as [string, string]] : []),
+            ...(snap.procedureId ? [["Procedimento (ID)", snap.procedureId] as [string, string]] : []),
+            ...(snap.totalSessions ? [["Sessões autorizadas", String(snap.totalSessions)] as [string, string]] : []),
+            ...(snap.validFrom ? [["Válida de", snap.validFrom.slice(0, 10)] as [string, string]] : []),
+            ...(snap.validUntil ? [["Válida até", snap.validUntil.slice(0, 10)] as [string, string]] : []),
+            ...(fields.authorizationNumber ? [["Nº autorização", String(fields.authorizationNumber)] as [string, string]] : []),
+          ]);
+        } else if (guide.guideType === "referral") {
+          writeSectionTitle(doc, "Encaminhamento");
+          writeKV(doc, [
+            ["Especialidade destino", String(fields.referralSpecialty || "—")],
+            ...(fields.urgency ? [["Urgência", String(fields.urgency)] as [string, string]] : []),
+          ]);
+          if (fields.referralReason) {
+            doc.moveDown(0.4);
+            doc.font("Helvetica-Bold").fontSize(10).fillColor("#374151").text("Motivo do encaminhamento:");
+            doc.font("Helvetica").fontSize(10).fillColor("#111827").text(String(fields.referralReason), { align: "justify" });
+          }
+        } else if (guide.guideType === "medical_order") {
+          writeSectionTitle(doc, "Pedido médico");
+          const items = Array.isArray(fields.items) ? fields.items : [];
+          for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            const y = doc.y;
+            doc.font("Helvetica-Bold").fontSize(10).fillColor("#374151").text(`${i + 1}.`, 48, y, { width: 20 });
+            doc.font("Helvetica").fontSize(10).fillColor("#111827")
+              .text(String(it?.description || "—"), 72, y, { width: 470 });
+            if (it?.quantity || it?.notes) {
+              const extra: string[] = [];
+              if (it.quantity) extra.push(`Qtd: ${it.quantity}`);
+              if (it.notes) extra.push(String(it.notes));
+              doc.font("Helvetica-Oblique").fontSize(9).fillColor("#6b7280")
+                .text(extra.join(" · "), 72, doc.y, { width: 470 });
+            }
+            doc.moveDown(0.3);
+          }
+          if (fields.cid || fields.clinicalJustification) {
+            doc.moveDown(0.4);
+            if (fields.cid) writeKV(doc, [["CID", String(fields.cid)]]);
+            if (fields.clinicalJustification) {
+              doc.font("Helvetica-Bold").fontSize(10).fillColor("#374151").text("Justificativa clínica:");
+              doc.font("Helvetica").fontSize(10).fillColor("#111827")
+                .text(String(fields.clinicalJustification), { align: "justify" });
+            }
+          }
+          if (snap.validUntil) writeKV(doc, [["Válida até", snap.validUntil.slice(0, 10)]]);
+        }
+
+        // ── Rodapé (document_hash truncado) ─────────────────────────────
+        doc.moveDown(1.5);
+        doc.font("Helvetica-Oblique").fontSize(8).fillColor("#6b7280")
+          .text(`Documento emitido por ${business.name} · Verificação: ${(guide.documentHash || "").slice(0, 12)}`, { align: "center" });
+
+        doc.end();
+      } catch (e) { reject(e); }
+    });
+  }
+}
+
+function writeSectionTitle(doc: any, title: string) {
+  doc.moveDown(0.6);
+  doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f766e").text(title);
+  doc.moveTo(48, doc.y + 1).lineTo(547, doc.y + 1).strokeColor("#0f766e").lineWidth(0.5).stroke();
+  doc.moveDown(0.35);
+}
+
+function writeKV(doc: any, rows: [string, string][]) {
+  for (const [k, v] of rows) {
+    const y = doc.y;
+    doc.font("Helvetica").fontSize(10).fillColor("#374151").text(k, 48, y, { width: 160 });
+    doc.font("Helvetica").fontSize(10).fillColor("#111827").text(v, 208, y, { width: 340 });
+    doc.moveDown(0.2);
   }
 }
 

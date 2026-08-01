@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicDocumentDeliveryService } from "../ClinicDocumentDeliveryService.js";
 import { ClinicMonthlyReportDeliveryService } from "../ClinicMonthlyReportDeliveryService.js";
+import { ClinicGuideDeliveryService } from "../ClinicGuideDeliveryService.js";
 import { ClinicPatientPortalService } from "../ClinicPatientPortalService.js";
 import { ClinicDocumentsService } from "../ClinicDocumentsService.js";
 import { ClinicAttachmentService } from "../ClinicAttachmentService.js";
@@ -39,6 +40,25 @@ router.get("/documents/:orgId/:file", (req, res): any => {
   // Fase 18: `filename` do `Content-Disposition` sanitiza `\r\n` (CRLF
   // injection) e aspas — o `req.params.file` já bate o whitelist do service,
   // mas defesa em profundidade custa uma linha.
+  const safeName = req.params.file.replace(/[^\w.\- ]/g, "_");
+  res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
+  return fs.createReadStream(filePath).pipe(res);
+});
+
+// GET /api/public/clinic/guides/:orgId/:file?exp=&sig=  → PDF de guia
+// (ADR-145 Fatia 45). Provider (Meta/BSP) baixa o PDF que vai anexo à
+// mensagem; ninguém sem `sig` válido acessa. Mesmo padrão HMAC + nosniff +
+// Content-Disposition sanitizado do envio de documento clínico (Fase K/18).
+router.get("/guides/:orgId/:file", (req, res): any => {
+  const key = `${req.params.orgId}/${req.params.file}`;
+  const filePath = ClinicGuideDeliveryService.resolveSignedFile(
+    key,
+    String(req.query.exp || ""),
+    String(req.query.sig || "")
+  );
+  if (!filePath) return res.status(404).json({ error: "not_found" });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   const safeName = req.params.file.replace(/[^\w.\- ]/g, "_");
   res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
   return fs.createReadStream(filePath).pipe(res);

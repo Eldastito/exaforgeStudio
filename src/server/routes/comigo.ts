@@ -265,7 +265,7 @@ router.post("/orders/:id/pix-dynamic", async (req: AuthRequest, res): Promise<an
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const out = await ComigoPixService.createCharge(orgId, req.params.id);
-  if (!out.ok) {
+  if (out.ok === false) {
     const code = out.error === "order_not_found" ? 404 : out.error === "provider_failed" ? 502 : 409;
     return res.status(code).json(out);
   }

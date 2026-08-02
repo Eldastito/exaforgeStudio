@@ -9,6 +9,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailFloorService, RetailFloorSettingsService } from "../RetailFloorService.js";
 import { RetailFloorShiftService, RetailFloorQueueService } from "../RetailFloorShiftService.js";
+import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -89,6 +90,38 @@ router.post("/queue/:sellerId/status", (req: AuthRequest, res) => {
     const storeId = String(req.body?.storeId || "");
     if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
     res.json(RetailFloorQueueService.setStatus(req.organizationId!, { storeId, sellerId: req.params.sellerId, status: String(req.body?.status || "") }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 3: atendimento (cronômetro server-side) ----
+
+// Inicia atendimento (self quando é o próximo; gestor pode override — auditado).
+router.post("/attendances/start", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.body?.storeId || "");
+    if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+    res.json(RetailFloorAttendanceService.start(req.organizationId!, { storeId, sellerId: req.body?.sellerId || null }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Encerra com desfecho (converted → conciliação pendente, RN-150-004).
+router.post("/attendances/:id/finish", (req: AuthRequest, res) => {
+  try {
+    res.json(RetailFloorAttendanceService.finish(req.organizationId!, req.params.id, {
+      outcome: String(req.body?.outcome || ""),
+      declaredValue: req.body?.declaredValue ?? null,
+      declaredPieces: req.body?.declaredPieces ?? null,
+      notes: req.body?.notes || null,
+    }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Atendimentos ativos da loja com tempo decorrido derivado (Kanban).
+router.get("/attendances/active", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.query.storeId || "");
+    if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+    res.json({ attendances: RetailFloorAttendanceService.active(req.organizationId!, storeId) });
   } catch (e: any) { fail(res, e); }
 });
 

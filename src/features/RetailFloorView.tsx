@@ -38,6 +38,12 @@ const NOT_CONVERTED_NOTE_HINT: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   break: 'Pausa', unavailable: 'Indisponível', skipped: 'Pulado',
 };
+// Códigos do servidor → mensagem amigável no toast.
+const ERR_LABEL: Record<string, string> = {
+  not_your_turn: 'Ainda não é a sua vez na fila.',
+  not_next: 'Esse vendedor não é o próximo da fila — libere com o PIN da gerência para atender fora da ordem.',
+  attendance_already_active: 'Esse vendedor já está em atendimento.',
+};
 const RECON: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Pendente PDV', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
   confirmed: { label: 'Confirmada', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
@@ -173,7 +179,7 @@ export function RetailFloorView() {
   const act = async (fn: () => Promise<any>, okMsg?: string) => {
     setBusy(true);
     try { await fn(); if (okMsg) toast.success(okMsg); await loadSnap(storeId); }
-    catch (e: any) { toast.error(e.message); }
+    catch (e: any) { toast.error(ERR_LABEL[e.message] || e.message); }
     finally { setBusy(false); }
   };
 
@@ -236,7 +242,13 @@ export function RetailFloorView() {
     const sellerId = draggableId;
 
     if (source.droppableId === 'waiting' && destination.droppableId === 'serving') {
-      act(() => api('/attendances/start', { storeId, sellerId }), 'Atendimento iniciado.');
+      // Ordem dura (RN-150-012): só o da vez entra livre; furar a fila exige PIN.
+      const dragged = waiting.find((w) => w.sellerId === sellerId);
+      if (dragged?.next) {
+        act(() => api('/attendances/start', { storeId, sellerId }), 'Atendimento iniciado.');
+      } else {
+        withManagerAuth(() => act(() => api('/attendances/start', { storeId, sellerId, allowSkip: true }), 'Atendimento iniciado (fora da vez).'));
+      }
     } else if (source.droppableId === 'waiting' && destination.droppableId === 'out') {
       // Sair da fila = pular a vez → só com o PIN da gerência (pedido do cliente).
       withManagerAuth(() => act(() => api(`/queue/${sellerId}/status`, { storeId, status: 'break' })));
@@ -376,7 +388,9 @@ export function RetailFloorView() {
                 {waiting.map((q, i) => (
                   <SellerCard key={q.sellerId} q={q} index={i} isMine={q.sellerId === mySellerId} isManager={isManager} busy={busy} variant="waiting"
                     locked={!unlocked}
-                    onStart={() => act(() => api('/attendances/start', { storeId, sellerId: q.sellerId }), 'Atendimento iniciado.')}
+                    onStart={() => q.next
+                      ? act(() => api('/attendances/start', { storeId, sellerId: q.sellerId }), 'Atendimento iniciado.')
+                      : withManagerAuth(() => act(() => api('/attendances/start', { storeId, sellerId: q.sellerId, allowSkip: true }), 'Atendimento iniciado (fora da vez).'))}
                     onBreak={() => withManagerAuth(() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'break' })))}
                     onUnavailable={() => withManagerAuth(() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'unavailable' })))} />
                 ))}
@@ -569,9 +583,15 @@ function SellerCard({ q, index, att, elapsed, isMine, isManager, busy, variant, 
           {/* Actions */}
           {canAct && (
             <div className="flex shrink-0 items-center gap-1.5">
+              {/* Só o da vez inicia livre. Gestor pode furar a fila, mas com o
+                  cadeado (PIN) — o vendedor comum nem vê o botão fora da vez. */}
               {variant === 'waiting' && (isNext || isManager) && onStart && (
-                <ActionBtn busy={busy} title="Iniciar atendimento" accent="teal" onClick={onStart}>
-                  <Play className="h-4 w-4" />
+                <ActionBtn busy={busy} accent="teal" onClick={onStart}
+                  title={isNext ? 'Iniciar atendimento' : (locked ? 'Atender fora da vez — exige PIN da gerência' : 'Atender fora da vez')}>
+                  <span className="relative inline-flex">
+                    <Play className="h-4 w-4" />
+                    {!isNext && locked && <Lock className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5" />}
+                  </span>
                 </ActionBtn>
               )}
               {variant === 'serving' && onScan && (

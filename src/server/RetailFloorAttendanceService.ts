@@ -11,9 +11,10 @@
  * defesa se dois processos disputarem.
  *
  * Vez de quem: o vendedor SÓ inicia quando é o "próximo" derivado da lista
- * (RN-150-003). Fora da vez (cliente pediu vendedor específico, correria) é
- * OVERRIDE de gestor da loja — auditado (RN-150-005). Encerrar atendimento de
- * terceiro idem.
+ * (RN-150-003). Furar a fila (cliente pediu vendedor específico, correria) é
+ * OVERRIDE de gestor — e a ordem é DURA (RN-150-012): exige `allowSkip`
+ * explícito, não basta a conta ser gestora (o quiosque loga como gestor).
+ * Auditado (RN-150-005). Encerrar atendimento de terceiro idem.
  *
  * Conversão em 2 tempos (RN-150-004): outcome=converted grava
  * reconciliation_state='pending' + valor/peças DECLARADOS (insumo do matching
@@ -50,10 +51,19 @@ const uid = (u: UserRef) => u?.userId || u?.id || null;
 export class RetailFloorAttendanceService {
   /**
    * Inicia atendimento pro vendedor `waiting` do turno aberto da loja.
-   * Self-service só quando ele é o próximo derivado; caso contrário é override
-   * de gestor (auditado). Atômico: 1 atendimento ativo por vendedor.
+   *
+   * RN-150-012 (ordem dura da fila): SÓ o próximo derivado entra em
+   * atendimento livremente. Iniciar QUALQUER outro (furar a fila) exige
+   * liberação EXPLÍCITA do gestor via `allowSkip` — a conta gestora sozinha
+   * NÃO basta, porque no quiosque (Fatia 12) o tablet loga sempre como gestor.
+   * A liberação do gestor no quiosque é o PIN, que a UI traduz em `allowSkip`.
+   * Sem o flag, o start fora da vez é rejeitado mesmo para conta gestora — foi
+   * o vazamento que deixava o vendedor pular o da vez selecionando o 2º da fila.
+   *
+   * Atômico: 1 atendimento ativo por vendedor. Pode haver N atendimentos
+   * simultâneos na loja (cada start avança a fila; o próximo derivado muda).
    */
-  static start(orgId: string, opts: { storeId: string; sellerId?: string | null }, user: UserRef): any {
+  static start(orgId: string, opts: { storeId: string; sellerId?: string | null; allowSkip?: boolean }, user: UserRef): any {
     const shift = db.prepare(`SELECT * FROM retail_floor_shifts WHERE organization_id = ? AND store_id = ? AND status = 'open'`).get(orgId, opts.storeId) as any;
     if (!shift) throw new Error("Nenhum turno aberto nesta loja.");
 
@@ -69,10 +79,17 @@ export class RetailFloorAttendanceService {
     const ordered = RetailFloorQueueService.ordered(orgId, shift.id);
     const isNext = ordered.queue.find((r: any) => r.next)?.sellerId === sellerId;
     let override = false;
-    if (!isSelf || !isNext) {
-      try { RetailFloorService.assertStoreManager(orgId, user, opts.storeId); }
-      catch (e) { throw isSelf && !isNext ? new Error("not_your_turn") : e; }
-      override = !isNext;
+    if (!isNext) {
+      // Furar a fila (RN-150-012): exige liberação explícita do gestor. Sem o
+      // flag, rejeita — inclusive pra gestor (o quiosque é sempre gestor). O
+      // vendedor tentando a própria vez fora de hora vê `not_your_turn`.
+      if (!opts.allowSkip) throw new Error(isSelf ? "not_your_turn" : "not_next");
+      RetailFloorService.assertStoreManager(orgId, user, opts.storeId);
+      override = true;
+    } else if (!isSelf) {
+      // É o próximo, mas quem dispara é o gestor iniciando por ele — ok, não é
+      // furar a fila (a ordem é respeitada), só não é self-service.
+      RetailFloorService.assertStoreManager(orgId, user, opts.storeId);
     }
 
     const id = randomUUID();

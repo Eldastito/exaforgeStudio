@@ -161,7 +161,30 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | 9 | Analytics da loja + modo calibração + piloto TOULON | **MERGED (PR #719)** |
 | 10 | Pós-piloto: comparativo de rede (owner/admin) + resumo diário da loja por WhatsApp (opt-in, ADR-108 como destinatários) | **MERGED (PR #720)** |
 | Ops | CLI de ativação do piloto (`pilot-retail-floor`): find/plan/apply idempotente + checklist de prontidão | **ENTREGUE (PR #721)** |
-| 11 | UI/UX: redesign ZappFlow (Kanban DnD + KPIs, PR #723) + onboarding guiado (loja → equipe → turno) + cadastro de equipe com FOTO (`retail_sellers.photo_url` + `POST/PUT /sellers`) + escala do dia ao abrir turno | **PR desta fatia** |
+| 11 | UI/UX: redesign ZappFlow (Kanban DnD + KPIs, PR #723) + onboarding guiado (loja → equipe → turno) + cadastro de equipe com FOTO (`retail_sellers.photo_url` + `POST/PUT /sellers`) + escala do dia ao abrir turno | **MERGED (PRs #724–#726)** |
+| 12 | Modo quiosque: vendedor vê SÓ a Lista da Vez; funções de gestão (conciliação, indicadores, rede, fechar turno, equipe, troca de loja) atrás do PIN da gerência por loja (molde Clínica Fase 28: sha256(salt+pin) + timingSafeEqual + lockout 5×/15min); loja FIXA na 1ª escolha do aparelho | **PR desta fatia** |
+
+## Fatia 12 — Modo quiosque + PIN da gerência (feedback TOULON)
+
+O app roda num tablet/PC compartilhado da loja, logado numa conta com
+poderes de gestão. Sem trava, qualquer vendedor no balcão acessaria
+conciliação, indicadores e fechamento de turno. Entregue:
+
+1. **PIN da gerência por loja** — aditivos `retail_stores.manager_pin_*`;
+   `setManagerPin` (4-8 dígitos; trocar/remover exige o PIN atual — quem
+   está com o tablet na mão não troca a fechadura) + `verifyManagerPin`
+   (códigos estáveis PIN_NOT_SET/REQUIRED/INVALID/LOCKED; lockout 5×/15min;
+   tudo auditado) + reset de lockout owner/admin. Rotas em
+   `/api/retail-floor/stores/:id/manager-pin[/verify|/reset-lockout]`.
+2. **UI em dois modos** — travado (padrão): só a Lista da Vez, nome da loja
+   fixo, botões Fechar turno/Equipe pedem PIN ao toque; destravado (PIN):
+   abas de gestão aparecem por 5 min (auto-trava) com botão "Gerência" pra
+   travar antes. A verificação é NO SERVIDOR; a conta do quiosque já tem os
+   direitos — o PIN é a trava de balcão auditada, não substitui RBAC.
+3. **Loja fixa do aparelho** — 1ª escolha persiste (localStorage); trocar
+   exige PIN. Sem PIN configurado, o 1º destravo guia a criação.
+4. **Operação continua livre** — abrir turno com escala, fila, atendimento,
+   bipe e "Entrar na vez" não pedem PIN (é o trabalho do salão).
 
 ## Fatia 11 — UI/UX (feedback do cliente TOULON)
 

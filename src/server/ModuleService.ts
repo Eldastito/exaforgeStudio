@@ -37,6 +37,7 @@ export class ModuleService {
     vision: "vms",
     radar: "radar",
     retailops: "retail",
+    "retail-floor": "retail_floor",
     comigo: "copiloto",
     escola: "escola",
   };
@@ -66,6 +67,7 @@ export class ModuleService {
     radar: { label: "Radar de Execução IA", desc: "Diagnóstico de maturidade em IA (7 pilares) + Índice de Velocidade de Conversão." },
     clinica: { label: "Clínica", desc: "Fluxo de saúde: prontuário, agenda clínica, portal do paciente." },
     retail: { label: "Retail Ops", desc: "Operação de rede de lojas: fechamento, cotas, malote, premiação." },
+    retail_floor: { label: "Atendimento de Loja", desc: "Lista da vez, cronômetro de atendimento, desfechos, consulta de estoque no atendimento e conciliação com o PDV." },
     copiloto: { label: "Comigo (Copiloto)", desc: "Balcão de vendas por toque + precificação (quanto custa, quanto cobrar, quanto sobra) + fiado com limite e caderneta. Exclusivo do plano Autônomo." },
     escola: { label: "Escola", desc: "Conecta a escola à família: resumo diário do aluno ao responsável no WhatsApp + sinais de coordenação." },
   };

@@ -6546,6 +6546,160 @@ const initDb = () => {
   // as colunas ficam NULL.
   try { db.exec(`ALTER TABLE comigo_pix_charges ADD COLUMN qr_code_base64 TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE comigo_pix_charges ADD COLUMN external_id TEXT`); } catch(e){}
+
+  // ============================================================
+  // ADR-150 — Retail Floor: Atendimento de Loja / Lista da Vez (Fatia 1)
+  // ============================================================
+  // Config por org do módulo retail_floor. Uma linha por organização, criada
+  // lazy no primeiro acesso. `queue_policy` round_robin por padrão (FIFO puro
+  // pune quem pegou atendimento longo); `calibration_until` marca o período do
+  // piloto em que indicadores NÃO alimentam cobrança/comissão (RN-150-011).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_settings (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL UNIQUE,
+        queue_policy TEXT NOT NULL DEFAULT 'round_robin',  -- round_robin|fifo
+        auto_close_minutes INTEGER NOT NULL DEFAULT 90,    -- auto-encerra atendimento esquecido (outcome=unknown)
+        anonymous_default INTEGER NOT NULL DEFAULT 1,      -- RN-150-008: atendimento anônimo por padrão
+        calibration_until TEXT,                            -- YYYY-MM-DD; NULL = fora de calibração
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_settings', e); }
+
+  // Turno da loja. O roster do turno É o vínculo vendedor↔loja do dia
+  // (retail_sellers não tem store_id de propósito — vendedor pode cobrir outra
+  // loja). Unique parcial: 1 turno aberto por loja — abrir de novo é erro, não
+  // duplicata. Fechamento é UPDATE (retenção, RN-150-010).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_shifts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',               -- open|closed
+        opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        opened_by TEXT,
+        closed_at DATETIME,
+        closed_by TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_floor_shift_open
+        ON retail_floor_shifts (organization_id, store_id) WHERE status = 'open';
+      CREATE INDEX IF NOT EXISTS idx_retail_floor_shifts
+        ON retail_floor_shifts (organization_id, store_id, opened_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_shifts', e); }
+
+  // Estado do vendedor NA FILA de um turno. A POSIÇÃO na lista da vez é
+  // DERIVADA por query (política + joined_at + atendimentos do turno) — nunca
+  // coluna mutável de posição (RN-150-003, mesma lição do RN-004/ADR-145).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_queue_state (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        shift_id TEXT NOT NULL,
+        seller_id TEXT NOT NULL,                           -- retail_sellers.id
+        status TEXT NOT NULL DEFAULT 'waiting',            -- waiting|next|serving|closing|break|unavailable|skipped|offline
+        joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status_changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (shift_id, seller_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_floor_queue
+        ON retail_floor_queue_state (organization_id, shift_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_queue_state', e); }
+
+  // Atendimento. Cronômetro é SEMPRE server-side (started_at/ended_at,
+  // RN-150-002). Unique parcial: 1 atendimento ATIVO por vendedor (a transação
+  // atômica da Fatia 3 conta antes de inserir; o índice é a última linha de
+  // defesa contra race). `reconciliation_state` implementa a conversão em 2
+  // tempos (RN-150-004): declarar convertido NUNCA é venda confirmada — só a
+  // conciliação com o PDV (Fatia 6) promove pending→confirmed|unmatched.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_attendances (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        shift_id TEXT NOT NULL,
+        seller_id TEXT NOT NULL,                           -- retail_sellers.id
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        ended_at DATETIME,
+        outcome TEXT,                                      -- converted|not_converted|walkout|unknown
+        outcome_reason_json TEXT,                          -- taxonomia hierárquica (Fatia 4)
+        reconciliation_state TEXT,                         -- pending|confirmed|unmatched (só converted)
+        customer_contact_id TEXT,                          -- opt-in LGPD (RN-150-008); NULL = anônimo
+        declared_value REAL,                               -- valor declarado na conversão (input do matching)
+        declared_pieces INTEGER,                           -- peças declaradas (input do matching)
+        created_by TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_floor_attendance_active
+        ON retail_floor_attendances (organization_id, seller_id) WHERE ended_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_retail_floor_attendances
+        ON retail_floor_attendances (organization_id, store_id, started_at);
+      CREATE INDEX IF NOT EXISTS idx_retail_floor_attendances_recon
+        ON retail_floor_attendances (organization_id, reconciliation_state)
+        WHERE reconciliation_state IS NOT NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_attendances', e); }
+
+  // Leituras de EAN/consultas DURANTE o atendimento — a timeline do que o
+  // cliente procurou. Congela o estoque local/rede e o last_sync_at do cursor
+  // Alterdata no momento da leitura (RN-150-007) — o dado histórico não muda
+  // quando o estoque muda depois.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_attendance_scans (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        attendance_id TEXT NOT NULL,
+        ean TEXT,
+        product_id TEXT,                                   -- products_services.id quando resolvido
+        product_name TEXT,
+        local_stock REAL,
+        network_stock REAL,
+        stock_synced_at DATETIME,                          -- last_sync_at do cursor no momento da leitura
+        action TEXT,                                       -- viewed|reserved|transfer_requested|sold
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_floor_scans
+        ON retail_floor_attendance_scans (organization_id, attendance_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_attendance_scans', e); }
+
+  // Demanda não atendida EVIDENCIADA: nasce de um scan/consulta registrado no
+  // atendimento (RN-150-009) — nunca digitada solta. É o input do Comprador IA
+  // (ADR-137) e dos sinais de ruptura (Fatia 8).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_unmet_demand (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        attendance_id TEXT NOT NULL,
+        scan_id TEXT,                                      -- retail_floor_attendance_scans.id (evidência)
+        product_id TEXT,
+        ean TEXT,
+        reason TEXT NOT NULL,                              -- no_assortment|no_local_stock|no_network_stock|missing_size|missing_color|missing_category
+        detail_json TEXT,                                  -- tamanho/cor/categoria pedidos
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_floor_unmet
+        ON retail_floor_unmet_demand (organization_id, store_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_unmet_demand', e); }
+
+  // ADR-150 Fatia 6 (preparado já na fundação): link venda-do-PDV ↔ atendimento
+  // após a conciliação. Aditivo, NULL para todo o histórico existente.
+  try { db.exec(`ALTER TABLE retail_erp_seller_sales ADD COLUMN attendance_id TEXT`); } catch(e){}
 };
 
 initDb();

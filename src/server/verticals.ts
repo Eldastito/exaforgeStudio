@@ -36,7 +36,7 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-  "vms", "radar", "clinica", "retail", "copiloto", "escola",
+  "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor",
 ] as const;
 
 // "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de
@@ -72,7 +72,10 @@ export const OPTIONAL_MODULES = [
 // papel que "clinica" tem para "saude": preset dessa vertical, mas nunca ligado
 // por "outro" nem pelas demais (só educação ou ativação explícita), e preservado
 // (grandfather) ao (re)aplicar uma vertical.
-export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail", "escola"] as const;
+// "retail_floor" (Atendimento de Loja / Lista da Vez, ADR-150) segue o mesmo
+// racional do "retail": operação de loja física supervisionada é opt-in
+// explícito do dono — nenhuma vertical liga sozinha.
+export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail", "escola", "retail_floor"] as const;
 
 // PLAN_FREE_ADDONS: subconjunto dos add-ons que o DONO pode ligar em
 // Configurações › Módulos independentemente do teto do plano (billing mockado).
@@ -80,7 +83,7 @@ export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail", "
 // como ligável. Os demais add-ons (radar/prospect/clinica/vms) continuam presos
 // ao plano (ADR-091): habilitá-los em enabled_modules NÃO fura o teto; para valer
 // exigem que o plano os inclua ou uma assinatura de add-on (org_addons).
-export const PLAN_FREE_ADDONS = ["retail"] as const;
+export const PLAN_FREE_ADDONS = ["retail", "retail_floor"] as const;
 const OUTRO_MODULES = OPTIONAL_MODULES.filter((m) => !(ADDON_MODULES as readonly string[]).includes(m));
 
 export const VERTICALS: Vertical[] = [

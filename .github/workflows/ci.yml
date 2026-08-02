@@ -167,6 +167,7 @@ jobs:
           - { name: 'executive-retail-commission-block', script: 'test:executive-retail-commission-block' }
           - { name: 'retail-seller-sales-manual', script: 'test:retail-seller-sales-manual' }
           - { name: 'retail-erp-seller-sales', script: 'test:retail-erp-seller-sales' }
+          - { name: 'retail-floor-foundation', script: 'test:retail-floor-foundation' }
           - { name: 'retail-transfer', script: 'test:retail-transfer' }
           - { name: 'retail-transfer-signal', script: 'test:retail-transfer-signal' }
           - { name: 'retail-transfer-geo', script: 'test:retail-transfer-geo' }

@@ -66,6 +66,32 @@ async function main() {
   const cmp = RetailCommissionService.compare(A, run.id, [{ storeId: s1.id, amount: 500 }, { storeId: s2.id, amount: 200 }], "u1");
   check("Detecta divergência (Loja 2: 250 calc vs 200 informado)", cmp.divergence_count === 1 && cmp.items.find((i: any) => i.store_id === s2.id).status === "divergent");
 
+  // ---- 3.5. Ajuste manual do gerente (updateItem / deleteItem) ----
+  // Antes de aprovar: sobrescrever o valor de uma linha e excluir outra;
+  // o total_commission tem que refletir a mudança na hora.
+  const runEdit = RetailCommissionService.createRun(A, START, END, "u1");
+  const itA1 = runEdit.items.find((i: any) => i.store_id === s1.id);
+  const itA2 = runEdit.items.find((i: any) => i.store_id === s2.id);
+  const overwritten = RetailCommissionService.updateItem(A, runEdit.id, itA1.id, { commissionAmount: 620.5 }, "gestor");
+  const itA1u = overwritten.items.find((i: any) => i.id === itA1.id);
+  check("updateItem: comissão sobrescrita (500 → 620,50)", itA1u.commission_amount === 620.5);
+  check("updateItem: total_commission recalculou (620,50 + 250 = 870,50)", overwritten.total_commission === 870.5, `total=${overwritten.total_commission}`);
+  const afterDelete = RetailCommissionService.deleteItem(A, runEdit.id, itA2.id, "gestor");
+  check("deleteItem: loja 2 fora da apuração", !afterDelete.items.some((i: any) => i.id === itA2.id));
+  check("deleteItem: total_commission = só a loja 1 sobrescrita (620,50)", afterDelete.total_commission === 620.5, `total=${afterDelete.total_commission}`);
+  let editBlocked = false;
+  try { RetailCommissionService.updateItem(A, runEdit.id, itA1.id, { commissionAmount: -1 }, "gestor"); } catch (e: any) { editBlocked = e.message === "negative_commission"; }
+  check("updateItem bloqueia comissão negativa", editBlocked);
+  RetailCommissionService.setStatus(A, runEdit.id, "approved", "gestor");
+  let approvedBlocked = false;
+  try { RetailCommissionService.updateItem(A, runEdit.id, itA1.id, { commissionAmount: 999 }, "gestor"); } catch (e: any) { approvedBlocked = e.message === "run_not_editable"; }
+  check("updateItem bloqueia edição em run APROVADO (congelado)", approvedBlocked);
+  let approvedDeleteBlocked = false;
+  try { RetailCommissionService.deleteItem(A, runEdit.id, itA1.id, "gestor"); } catch (e: any) { approvedDeleteBlocked = e.message === "run_not_editable"; }
+  check("deleteItem bloqueia remoção em run APROVADO (congelado)", approvedDeleteBlocked);
+  const editAudit = db.prepare(`SELECT event_type FROM auth_audit_logs WHERE organization_id = ? AND event_type IN ('RETAIL_COMMISSION_ITEM_ADJUSTED', 'RETAIL_COMMISSION_ITEM_REMOVED')`).all(A) as any[];
+  check("Audit: ajuste e remoção registrados", editAudit.some((e) => e.event_type === "RETAIL_COMMISSION_ITEM_ADJUSTED") && editAudit.some((e) => e.event_type === "RETAIL_COMMISSION_ITEM_REMOVED"));
+
   // ---- 4. Aprovação humana ----
   const appr = RetailCommissionService.setStatus(A, run.id, "approved", "gestor");
   check("Aprovação humana → 'approved' com aprovador", appr.status === "approved" && appr.approved_by === "gestor");

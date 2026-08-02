@@ -3522,38 +3522,122 @@ function CommissionTab() {
         </div>
       )}
 
-      {detail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setDetail(null)}>
-          <div className="w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-zinc-100">Apuração {detail.period_start} → {detail.period_end}</h3>
-              <button onClick={() => setDetail(null)} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="mt-1 flex items-center gap-2"><Badge map={RUN_STATUS} s={detail.status} /><span className="text-xs text-zinc-500">Total: {brl(detail.total_commission)}</span></div>
-            <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-zinc-800">
-              <table className="w-full text-sm">
-                <thead className="bg-zinc-900/60 text-zinc-400"><tr><th className="px-3 py-2 text-left font-medium">Loja / Escopo</th><th className="px-3 py-2 text-right font-medium">Base</th><th className="px-3 py-2 text-right font-medium">Comissão</th></tr></thead>
-                <tbody>
-                  {(detail.items || []).map((it: any) => (
-                    <tr key={it.id} className="border-t border-zinc-800/70">
-                      <td className="px-3 py-2 text-zinc-200">{it.seller_name}</td>
-                      <td className="px-3 py-2 text-right text-zinc-400">{brl(it.base_amount)}</td>
-                      <td className="px-3 py-2 text-right text-zinc-100">{brl(it.commission_amount)}</td>
-                    </tr>
-                  ))}
-                  {(!detail.items || detail.items.length === 0) && <tr><td colSpan={3} className="px-3 py-4 text-center text-xs text-zinc-500">Sem itens (cadastre regras de comissão).</td></tr>}
-                </tbody>
-              </table>
-            </div>
-            {detail.status === 'draft' && (
-              <div className="mt-4 flex justify-end gap-2">
-                <button onClick={() => setStatus(detail, 'reject')} className="rounded-lg border border-red-500/40 px-3 py-1.5 text-sm text-red-300 hover:bg-red-500/10">Rejeitar</button>
-                <button onClick={() => setStatus(detail, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500">Aprovar comissão</button>
-              </div>
-            )}
-          </div>
+      {detail && <RunDetailModal run={detail} onClose={() => setDetail(null)} onSaved={(r) => { setDetail(r); load(); }} onStatus={(action) => setStatus(detail, action)} />}
+    </div>
+  );
+}
+
+// ---- Modal "Ver apuração" — ajuste manual + excluir loja (draft) ------------
+// O gerente/dono pode SOBRESCREVER a comissão de uma linha (input decimal,
+// grava on-blur) e REMOVER uma loja/vendedor da apuração inteira. Só em
+// status draft — approved/rejected ficam congelados. O total do run
+// recalcula na hora a cada operação (SUM(items), derivado).
+function RunDetailModal({ run: initial, onClose, onSaved, onStatus }: { run: any; onClose: () => void; onSaved: (r: any) => void; onStatus: (a: 'approve' | 'reject') => void }) {
+  const [run, setRun] = useState<any>(initial);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingItem, setSavingItem] = useState<string | null>(null);
+  const editable = run.status === 'draft';
+
+  const displayValue = (it: any) => drafts[it.id] ?? String(it.commission_amount ?? 0);
+  const liveTotal = useMemo(() => {
+    return (run.items || []).reduce((a: number, it: any) => {
+      const raw = drafts[it.id];
+      const v = raw != null ? Number(String(raw).replace(',', '.')) : Number(it.commission_amount || 0);
+      return a + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [drafts, run.items]);
+  const dirty = Object.keys(drafts).length > 0;
+
+  const commit = async (it: any) => {
+    const raw = drafts[it.id];
+    if (raw == null) return;
+    const v = Number(String(raw).replace(',', '.'));
+    if (!Number.isFinite(v) || v < 0) { toast.error('Comissão inválida.'); return; }
+    if (Math.abs(v - Number(it.commission_amount || 0)) < 0.005) {
+      setDrafts(p => { const { [it.id]: _, ...rest } = p; return rest; });
+      return;
+    }
+    setSavingItem(it.id);
+    try {
+      const res = await apiFetch(`/api/retailops/commission/runs/${run.id}/items/${it.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commissionAmount: v }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { setRun(d); setDrafts(p => { const { [it.id]: _, ...rest } = p; return rest; }); onSaved(d); }
+      else toast.error(d.error || 'Falha ao ajustar a comissão.');
+    } finally { setSavingItem(null); }
+  };
+  const remove = async (it: any) => {
+    if (!window.confirm(`Excluir ${it.seller_name} da apuração? A comissão de ${brl(it.commission_amount)} sai do total.`)) return;
+    setSavingItem(it.id);
+    try {
+      const res = await apiFetch(`/api/retailops/commission/runs/${run.id}/items/${it.id}`, { method: 'DELETE' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { setRun(d); toast.success('Loja/vendedor removido da apuração.'); onSaved(d); }
+      else toast.error(d.error || 'Falha ao excluir.');
+    } finally { setSavingItem(null); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100">Apuração {run.period_start} → {run.period_end}</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
         </div>
-      )}
+        <div className="mt-1 flex items-center gap-2">
+          <Badge map={RUN_STATUS} s={run.status} />
+          <span className="text-xs text-zinc-500">Total: <strong className={dirty ? 'text-amber-300' : 'text-zinc-200'}>{brl(liveTotal)}</strong>{dirty && <span className="ml-1 text-amber-300">(prévia — salve saindo do campo)</span>}</span>
+        </div>
+        {editable && <p className="mt-2 text-[11px] text-zinc-500">Toque no campo <em>Comissão</em> pra sobrescrever o valor calculado, ou no <span className="text-red-300">×</span> pra tirar a loja/vendedor da apuração. O total recalcula na hora.</p>}
+        <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Loja / Escopo</th>
+                <th className="px-3 py-2 text-right font-medium">Base</th>
+                <th className="px-3 py-2 text-right font-medium">Comissão</th>
+                {editable && <th className="w-8 px-1 py-2"></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {(run.items || []).map((it: any) => (
+                <tr key={it.id} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-2 text-zinc-200">{it.seller_name}</td>
+                  <td className="px-3 py-2 text-right text-zinc-400">{brl(it.base_amount)}</td>
+                  <td className="px-3 py-2 text-right">
+                    {editable ? (
+                      <input
+                        inputMode="decimal"
+                        value={displayValue(it)}
+                        disabled={savingItem === it.id}
+                        onChange={e => setDrafts(p => ({ ...p, [it.id]: e.target.value }))}
+                        onBlur={() => commit(it)}
+                        onKeyDown={e => { if (e.key === 'Enter') { (e.currentTarget as HTMLInputElement).blur(); } }}
+                        className={`w-24 rounded border px-2 py-0.5 text-right text-sm ${drafts[it.id] != null ? 'border-amber-500/40 bg-amber-500/5 text-amber-200' : 'border-zinc-700 bg-zinc-950 text-zinc-100'}`}
+                      />
+                    ) : (
+                      <span className="text-zinc-100">{brl(it.commission_amount)}</span>
+                    )}
+                  </td>
+                  {editable && (
+                    <td className="px-1 py-2 text-right">
+                      <button onClick={() => remove(it)} disabled={savingItem === it.id} title="Excluir loja/vendedor da apuração" className="text-zinc-500 hover:text-red-300 disabled:opacity-40">
+                        {savingItem === it.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {(!run.items || run.items.length === 0) && <tr><td colSpan={editable ? 4 : 3} className="px-3 py-4 text-center text-xs text-zinc-500">Sem itens (cadastre regras de comissão).</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {editable && (
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={() => onStatus('reject')} className="rounded-lg border border-red-500/40 px-3 py-1.5 text-sm text-red-300 hover:bg-red-500/10">Rejeitar</button>
+            <button onClick={() => onStatus('approve')} disabled={dirty} title={dirty ? 'Salve o valor no campo antes de aprovar (saia do campo)' : ''} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Aprovar comissão</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

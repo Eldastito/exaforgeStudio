@@ -121,4 +121,36 @@ export class RetailFloorAnalyticsService {
   }
 }
 
+export class RetailFloorNetworkAnalytics {
+  /**
+   * Comparativo da REDE no período (Fatia 10, pós-piloto): uma linha por loja
+   * ativa com os mesmos números honestos do painel da loja (declarada ×
+   * confirmada, TMA, rupturas). Escopo: owner/admin (visão regional) — o
+   * gerente de loja vê só a dele no /analytics/store. Ordem alfabética; a
+   * comparação é do humano, não ranking do sistema (RN-150-006).
+   */
+  static network(orgId: string, start: string, end: string): any {
+    for (const d of [start, end]) if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ""))) throw new Error("start/end devem ser YYYY-MM-DD.");
+    const stores = db.prepare(`SELECT id, name, code FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    const rows = stores.map((s) => {
+      const r = RetailFloorAnalyticsService.store(orgId, s.id, start, end);
+      return {
+        storeId: s.id, storeName: s.name, code: s.code || null,
+        attendances: r.totals.attendances, decided: r.totals.decided,
+        conversionDeclaredPct: r.totals.conversionDeclaredPct,
+        conversionConfirmedPct: r.totals.conversionConfirmedPct,
+        pendingCount: r.totals.pendingCount, unmatchedCount: r.totals.unmatchedCount,
+        avgServiceMinutes: r.totals.avgServiceMinutes,
+        confirmedValue: r.totals.confirmedValue,
+        unmetCount: r.topUnmet.reduce((acc: number, u: any) => acc + u.count, 0),
+      };
+    });
+    return {
+      start, end,
+      inCalibration: RetailFloorSettingsService.inCalibration(orgId),
+      stores: rows,
+    };
+  }
+}
+
 export default RetailFloorAnalyticsService;

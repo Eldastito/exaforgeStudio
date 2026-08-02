@@ -1,6 +1,6 @@
 # ADR-150 — Retail Floor: Atendimento de Loja, Lista da Vez e Consulta de Estoque
 
-- **Status:** Implementação completa — 9 fatias entregues (piloto TOULON em 1 loja com `calibration_until` é o próximo passo operacional)
+- **Status:** Implementação completa — 10 fatias entregues (9 do MVP + Fatia 10 pós-piloto). Próximo passo operacional: piloto TOULON em 1 loja com `calibration_until`; `daily_digest_enabled` liga o resumo por WhatsApp quando quiserem.
 - **Data:** 2026-08-02
 - **Origem:** PRD "Módulo Atendimento de Loja, Lista da Vez e Consulta de Estoque" v2.0 (piloto TOULON).
 - **Relacionadas:** ADR-083 (Retail Ops — lojas/fechamento), ADR-084 (modo de estoque D4), ADR-087 (multiloja), ADR-095 (RBAC granular), ADR-105 (conector Alterdata/ModaUp), ADR-136 (Decision-Action Ledger / `business_signals`), ADR-137 (Comprador IA — consome demanda não atendida), ADR-142 (memória de padrões do varejo).
@@ -153,11 +153,30 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | **MERGED (PR #716)** |
 | 7 | UI (Kanban + encerramento + consulta de peça + conciliação; polling 8s) | **MERGED (PR #717)** |
 | 8 | Sinais para o Orquestrador (7 tipos) | **MERGED (PR #718)** |
-| 9 | Analytics da loja + modo calibração + piloto TOULON | **ENTREGUE (PR desta fatia)** |
+| 9 | Analytics da loja + modo calibração + piloto TOULON | **MERGED (PR #719)** |
+| 10 | Pós-piloto: comparativo de rede (owner/admin) + resumo diário da loja por WhatsApp (opt-in, ADR-108 como destinatários) | **ENTREGUE (PR desta fatia)** |
+
+## Fatia 10 — pós-piloto (entregue)
+
+1. **Comparativo de rede** (`RetailFloorNetworkAnalytics.network` +
+   `GET /analytics/network`, owner/admin; aba "Rede" na UI): uma linha por
+   loja ativa com os mesmos números honestos do painel — ordem alfabética,
+   a comparação é do humano, não ranking do sistema (RN-150-006).
+2. **Resumo diário da loja por WhatsApp** (`RetailFloorDigestService`,
+   opt-in `daily_digest_enabled` + `digest_hour` BRT): a mensagem-exemplo do
+   PRD com fatos do próprio módulo (conversão confirmada × média 28d,
+   principal perda com %, peça mais pedida, pico + minutos de fila cheia do
+   sinal da Fatia 8, unmatched/pendentes). Destinatários:
+   `retail_store_responsibles` (ADR-108) + número da loja; dedupe por
+   (org, loja, dia) em `retail_floor_digest_log`; best-effort no passe
+   horário do Scheduler; `GET /digest/preview` pro gestor conferir o texto.
+3. **Upgrade do realtime pra socket.io segue FORA** — só se o piloto mostrar
+   que o polling de 8s não basta.
 
 ## O que ficou explicitamente de fora
 
 - Comissão baseada em conversão confirmada (proibida no piloto — RN-150-011).
-- Dashboard regional comparativo (pós-piloto).
 - PWA mobile dedicado do vendedor (a UI da Fatia 7 é responsiva web).
-- Mensagem pós-atendimento ao cliente via WhatsApp (ADR próprio se puxarem).
+- Mensagem pós-atendimento ao CLIENTE via WhatsApp (ADR próprio se puxarem —
+  o resumo da Fatia 10 é interno, pro gestor).
+- Upgrade do realtime pra socket.io (documentado na Fatia 7/10).

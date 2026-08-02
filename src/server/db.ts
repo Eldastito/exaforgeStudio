@@ -6700,6 +6700,30 @@ const initDb = () => {
   // ADR-150 Fatia 6 (preparado já na fundação): link venda-do-PDV ↔ atendimento
   // após a conciliação. Aditivo, NULL para todo o histórico existente.
   try { db.exec(`ALTER TABLE retail_erp_seller_sales ADD COLUMN attendance_id TEXT`); } catch(e){}
+
+  // ============================================================
+  // ADR-150 — Retail Floor Fatia 10 (pós-piloto): resumo diário WhatsApp
+  // ============================================================
+  // Opt-in por org (convenção #10): o resumo do dia da loja vai por WhatsApp
+  // aos responsáveis (retail_store_responsibles/ADR-108, fallback no número da
+  // loja) quando chega a hora configurada. Desligado por padrão.
+  try { db.exec(`ALTER TABLE retail_floor_settings ADD COLUMN daily_digest_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_floor_settings ADD COLUMN digest_hour INTEGER DEFAULT 20`); } catch(e){}
+  // Dedupe do envio (convenção #7: best-effort + unique index): 1 resumo por
+  // (org, loja, dia) — o passe horário do Scheduler pode rodar N vezes.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_floor_digest_log (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        digest_date TEXT NOT NULL,               -- YYYY-MM-DD
+        sent_to TEXT,                            -- CSV dos destinos (auditoria leve)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, store_id, digest_date)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_floor_digest_log', e); }
 };
 
 initDb();

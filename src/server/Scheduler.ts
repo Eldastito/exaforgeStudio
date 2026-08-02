@@ -31,6 +31,7 @@ import { ModuleService } from "./ModuleService.js";
 import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
 import { RetailFloorReconciliationService } from "./RetailFloorReconciliationService.js";
 import { RetailFloorSignalPublisher } from "./RetailFloorSignalPublisher.js";
+import { RetailFloorDigestService } from "./RetailFloorDigestService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
@@ -119,6 +120,31 @@ export class Scheduler {
         RetailFloorReconciliationService.runAll(o.organization_id, yesterday);
         RetailFloorReconciliationService.runAll(o.organization_id, today);
       } catch (e) { console.error("[RetailFloor] conciliação falhou", o.organization_id, e); }
+    }
+  }
+
+  /**
+   * Retail Floor (ADR-150, Fatia 10) — resumo diário da loja por WhatsApp,
+   * opt-in via retail_floor_settings.daily_digest_enabled. O service decide
+   * hora/dedupe/destinatários; aqui só resolvemos o canal (mesmo padrão do
+   * schoolDigestPass). Best-effort por org.
+   */
+  static async retailFloorDigestPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT organization_id FROM retail_floor_settings WHERE daily_digest_enabled = 1`).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        if (!ModuleService.isEnabled(orgId, "retail_floor")) continue;
+        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        if (!channel) continue; // sem canal conectado não há como enviar
+        const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+        await RetailFloorDigestService.runDigestPass(orgId, { now, send });
+      } catch (e) { console.error("[RetailFloor] passe de resumo falhou", orgId, e); }
     }
   }
 
@@ -436,6 +462,9 @@ export class Scheduler {
     // E, com a conciliação fresca, publica os sinais do Atendimento de Loja
     // (ADR-150 Fatia 8) — fatos com dedupe por loja/dia no business_signals.
     try { this.retailFloorSignalsPass(); } catch (e: any) { console.error('[Scheduler] sinais Retail Floor falharam', e?.message); }
+    // Resumo diário da loja por WhatsApp (ADR-150 Fatia 10, opt-in) — depois
+    // dos sinais pro texto citar a evidência do dia (ex.: minutos de fila cheia).
+    await this.retailFloorDigestPass().catch(e => console.error('[Scheduler] resumo Retail Floor falhou', e));
     this.trialPass();
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));

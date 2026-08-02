@@ -55,10 +55,13 @@ export class RetailFloorSettingsService {
       if (v != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(v))) throw new Error("calibration_until deve ser YYYY-MM-DD ou null.");
       calibrationUntil = v == null ? null : String(v);
     }
+    const digestEnabled = patch.dailyDigestEnabled != null ? (patch.dailyDigestEnabled ? 1 : 0) : (current.dailyDigestEnabled ? 1 : 0);
+    const digestHour = patch.digestHour != null ? Math.trunc(Number(patch.digestHour)) : current.digestHour;
+    if (!Number.isFinite(digestHour) || digestHour < 0 || digestHour > 23) throw new Error("digest_hour deve estar entre 0 e 23.");
     db.prepare(
-      `UPDATE retail_floor_settings SET queue_policy = ?, auto_close_minutes = ?, anonymous_default = ?, calibration_until = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?`
-    ).run(queuePolicy, autoClose, anonymous, calibrationUntil, orgId);
-    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_SETTINGS_UPDATE", { queuePolicy, autoClose, anonymous, calibrationUntil }); } catch { /* noop */ }
+      `UPDATE retail_floor_settings SET queue_policy = ?, auto_close_minutes = ?, anonymous_default = ?, calibration_until = ?, daily_digest_enabled = ?, digest_hour = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?`
+    ).run(queuePolicy, autoClose, anonymous, calibrationUntil, digestEnabled, digestHour, orgId);
+    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_SETTINGS_UPDATE", { queuePolicy, autoClose, anonymous, calibrationUntil, digestEnabled, digestHour }); } catch { /* noop */ }
     return this.get(orgId);
   }
 
@@ -76,6 +79,8 @@ export class RetailFloorSettingsService {
       autoCloseMinutes: Number(row.auto_close_minutes),
       anonymousDefault: Number(row.anonymous_default) === 1,
       calibrationUntil: row.calibration_until || null,
+      dailyDigestEnabled: Number(row.daily_digest_enabled) === 1,
+      digestHour: Number(row.digest_hour ?? 20),
     };
   }
 }

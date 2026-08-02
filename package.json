@@ -162,6 +162,7 @@
     "test:retail-floor-reconciliation": "tsx scripts/test-retail-floor-reconciliation.ts",
     "test:retail-floor-signals": "tsx scripts/test-retail-floor-signals.ts",
     "test:retail-floor-analytics": "tsx scripts/test-retail-floor-analytics.ts",
+    "test:retail-floor-digest": "tsx scripts/test-retail-floor-digest.ts",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
     "test:product-instock": "tsx scripts/test-product-instock.ts",
     "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",

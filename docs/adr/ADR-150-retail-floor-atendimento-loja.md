@@ -1,6 +1,11 @@
 # ADR-150 — Retail Floor: Atendimento de Loja, Lista da Vez e Consulta de Estoque
 
-- **Status:** Implementação completa — 10 fatias entregues (9 do MVP + Fatia 10 pós-piloto). Próximo passo operacional: piloto TOULON em 1 loja com `calibration_until`; `daily_digest_enabled` liga o resumo por WhatsApp quando quiserem.
+- **Status:** Implementação completa — 10 fatias + CLI de ativação do piloto.
+  Ativar a TOULON = rodar NO SERVIDOR: `node dist/pilot-retail-floor.cjs
+  --find toulon` → `--org <id>` (diagnóstico) → `--org <id> --apply
+  --calibration-days 30 [--store 1005 --manager-email <email>] [--digest]`.
+  O `plan` imprime o checklist de prontidão (gerente, vínculos de vendedor,
+  canal, sync Alterdata) — nada é cobrado do time até a calibração vencer.
 - **Data:** 2026-08-02
 - **Origem:** PRD "Módulo Atendimento de Loja, Lista da Vez e Consulta de Estoque" v2.0 (piloto TOULON).
 - **Relacionadas:** ADR-083 (Retail Ops — lojas/fechamento), ADR-084 (modo de estoque D4), ADR-087 (multiloja), ADR-095 (RBAC granular), ADR-105 (conector Alterdata/ModaUp), ADR-136 (Decision-Action Ledger / `business_signals`), ADR-137 (Comprador IA — consome demanda não atendida), ADR-142 (memória de padrões do varejo).
@@ -154,7 +159,8 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | 7 | UI (Kanban + encerramento + consulta de peça + conciliação; polling 8s) | **MERGED (PR #717)** |
 | 8 | Sinais para o Orquestrador (7 tipos) | **MERGED (PR #718)** |
 | 9 | Analytics da loja + modo calibração + piloto TOULON | **MERGED (PR #719)** |
-| 10 | Pós-piloto: comparativo de rede (owner/admin) + resumo diário da loja por WhatsApp (opt-in, ADR-108 como destinatários) | **ENTREGUE (PR desta fatia)** |
+| 10 | Pós-piloto: comparativo de rede (owner/admin) + resumo diário da loja por WhatsApp (opt-in, ADR-108 como destinatários) | **MERGED (PR #720)** |
+| Ops | CLI de ativação do piloto (`pilot-retail-floor`): find/plan/apply idempotente + checklist de prontidão | **ENTREGUE (PR desta fatia)** |
 
 ## Fatia 10 — pós-piloto (entregue)
 

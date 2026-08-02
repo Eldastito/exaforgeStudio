@@ -354,6 +354,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@vitejs/plugin-react": "^5.0.4",
     "@xmldom/xmldom": "^0.9.10",
+    "@zxing/browser": "^0.2.1",
+    "@zxing/library": "^0.23.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.10.0",
     "class-variance-authority": "^0.7.1",

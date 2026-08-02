@@ -5,8 +5,9 @@ import { cn } from '@/src/lib/utils';
 import {
   Loader2, RefreshCw, Play, Square, Coffee, UserX, LogIn, Barcode,
   Scale, Clock, Users, DoorOpen, DoorClosed, AlertTriangle, Check, X,
-  ChevronDown, Timer, UserPlus, ArrowLeft, ScanLine, ShoppingBag,
+  ChevronDown, Timer, UserPlus, ArrowLeft, ScanLine, ShoppingBag, Camera,
 } from 'lucide-react';
+import { BarcodeCameraScanner } from '@/src/components/BarcodeCameraScanner';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -878,10 +879,11 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
   const [ean, setEan] = useState('');
   const [sold, setSold] = useState<any[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [camOpen, setCamOpen] = useState(false);
   const eanRef = useRef<HTMLInputElement>(null);
 
-  const scanSold = async () => {
-    const code = ean.trim();
+  const scanSold = async (fromCamera?: string) => {
+    const code = (fromCamera ?? ean).trim();
     if (!code || scanning) return;
     setScanning(true);
     try {
@@ -957,11 +959,20 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); scanSold(); } }}
                 placeholder="Código de barras (EAN)" inputMode="numeric" autoFocus
                 className="min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
-              <button type="button" disabled={scanning || !ean.trim()} onClick={scanSold}
-                className="shrink-0 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">
+              <button type="button" title="Ler com a câmera" onClick={() => setCamOpen(true)}
+                className="shrink-0 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110">
+                <Camera className="h-4 w-4" />
+              </button>
+              <button type="button" disabled={scanning || !ean.trim()} onClick={() => scanSold()}
+                className="shrink-0 rounded-xl border border-[var(--color-flow)]/40 bg-[var(--color-flow)]/10 px-4 py-3 text-sm font-semibold text-[var(--color-flow)] transition-all hover:bg-[var(--color-flow)]/20 disabled:opacity-50">
                 {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
               </button>
             </div>
+            {camOpen && (
+              <BarcodeCameraScanner hint="Aponte para a etiqueta da peça vendida"
+                onClose={() => setCamOpen(false)}
+                onDetected={(code) => { setCamOpen(false); scanSold(code); }} />
+            )}
             {sold.length > 0 && (
               <div className="mt-2 space-y-1.5">
                 {sold.map((s, i) => (
@@ -1049,13 +1060,15 @@ function ScanPanel({ attendance, onClose }: any) {
   const [ean, setEan] = useState('');
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [camOpen, setCamOpen] = useState(false);
   const [unmetReason, setUnmetReason] = useState('');
   const [unmetDetail, setUnmetDetail] = useState('');
 
-  const doScan = async () => {
-    if (!ean) return;
+  const doScan = async (code?: string) => {
+    const c = (code ?? ean).trim();
+    if (!c) return;
     setBusy(true);
-    try { setResult(await api(`/attendances/${attendance.id}/scan`, { ean })); }
+    try { setResult(await api(`/attendances/${attendance.id}/scan`, { ean: c })); }
     catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
@@ -1079,11 +1092,21 @@ function ScanPanel({ attendance, onClose }: any) {
             placeholder="Bipe ou digite o código de barras"
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-3 pl-10 pr-4 text-sm text-[var(--color-text-strong)] focus:border-[var(--color-flow)] focus:outline-none focus:ring-1 focus:ring-[var(--color-flow)]/30" />
         </div>
-        <button disabled={busy} onClick={doScan}
+        <button title="Ler com a câmera" onClick={() => setCamOpen(true)}
           className="rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95">
+          <Camera className="h-4 w-4" />
+        </button>
+        <button disabled={busy} onClick={() => doScan()} title="Consultar código digitado"
+          className="rounded-xl border border-[var(--color-flow)]/40 bg-[var(--color-flow)]/10 px-4 py-3 text-sm font-semibold text-[var(--color-flow)] transition-all hover:bg-[var(--color-flow)]/20 active:scale-95">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Barcode className="h-4 w-4" />}
         </button>
       </div>
+
+      {camOpen && (
+        <BarcodeCameraScanner hint="Aponte para a etiqueta da peça"
+          onClose={() => setCamOpen(false)}
+          onDetected={(code) => { setCamOpen(false); setEan(code); doScan(code); }} />
+      )}
 
       {result && (
         <div className="mt-4 space-y-3">

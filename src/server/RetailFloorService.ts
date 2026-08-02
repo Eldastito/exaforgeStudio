@@ -18,7 +18,7 @@
  *    flag para a UI avisar.
  */
 import db from "./db.js";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash, timingSafeEqual } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
 
 const QUEUE_POLICIES = ["round_robin", "fifo"];
@@ -98,11 +98,11 @@ export class RetailFloorService {
     const isOrgAdmin = role === "owner" || role === "admin";
 
     const allStores = db.prepare(
-      `SELECT id, name, code, manager_user_id FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`
+      `SELECT id, name, code, manager_user_id, manager_pin_hash FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`
     ).all(orgId) as any[];
 
     const manageableStores = (isOrgAdmin ? allStores : allStores.filter((s) => s.manager_user_id && s.manager_user_id === userId))
-      .map((s) => ({ id: s.id, name: s.name, code: s.code || null }));
+      .map((s) => ({ id: s.id, name: s.name, code: s.code || null, hasManagerPin: !!s.manager_pin_hash }));
 
     const sellerRow = userId ? db.prepare(
       `SELECT id, matricula, name, photo_url FROM retail_sellers WHERE organization_id = ? AND user_id = ? AND active = 1 LIMIT 1`
@@ -111,7 +111,9 @@ export class RetailFloorService {
     // Fatia 7 (UI): todo mundo vê a lista mínima de lojas (o vendedor precisa
     // achar o turno aberto pra entrar na vez); o roster de vendedores só vai
     // pra quem gerencia alguma loja (adicionar terceiro à fila é de gestor).
-    const stores = allStores.map((s) => ({ id: s.id, name: s.name, code: s.code || null }));
+    // hasManagerPin é só um booleano (nunca o hash): o quiosque precisa saber
+    // se pede o PIN existente ou guia a criação do primeiro (Fatia 12).
+    const stores = allStores.map((s) => ({ id: s.id, name: s.name, code: s.code || null, hasManagerPin: !!s.manager_pin_hash }));
     const sellers = manageableStores.length
       ? (db.prepare(`SELECT id, matricula, name, photo_url FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
           .map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null, photoUrl: s.photo_url || null }))
@@ -211,6 +213,111 @@ export class RetailFloorService {
 
   private static shapeSeller(r: any) {
     return { id: r.id, matricula: r.matricula, name: r.name || null, photoUrl: r.photo_url || null, active: Number(r.active) === 1 };
+  }
+
+  // ── Fatia 12: PIN da gerência (modo quiosque) ─────────────────────────
+  // O tablet da loja fica logado numa conta com poderes de gestão; o PIN é a
+  // trava de UI verificada NO SERVIDOR (auditada + lockout) pra equipe de
+  // salão não usar as funções de gerência. Mesmo molde da Clínica Fase 28:
+  // sha256(salt+pin), timingSafeEqual, 5 tentativas → 15 min de bloqueio.
+
+  /**
+   * Define/troca o PIN da loja. Exige direitos reais de gestão na loja
+   * (assertStoreManager na rota) E — quando já existe PIN — o PIN atual,
+   * pra ninguém trocar a fechadura por estar com o tablet na mão.
+   * `pin=null` remove (com PIN atual). 4-8 dígitos; salt novo a cada set.
+   */
+  static setManagerPin(orgId: string, storeId: string, rawPin: string | null, currentPin: string | undefined, actorId?: string): { hasManagerPin: boolean } {
+    const store = db.prepare(
+      `SELECT id, manager_pin_hash FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`
+    ).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    if (store.manager_pin_hash) this.verifyManagerPin(orgId, storeId, currentPin);
+
+    if (!rawPin) {
+      db.prepare(
+        `UPDATE retail_stores SET manager_pin_salt = NULL, manager_pin_hash = NULL, manager_pin_failed_count = 0, manager_pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+      ).run(orgId, storeId);
+      try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_MANAGER_PIN_CLEARED", { storeId }); } catch { /* noop */ }
+      return { hasManagerPin: false };
+    }
+    const pin = String(rawPin).trim();
+    if (!/^\d{4,8}$/.test(pin)) {
+      const e: any = new Error("PIN inválido: use 4 a 8 dígitos numéricos.");
+      e.code = "PIN_INVALID_FORMAT"; throw e;
+    }
+    const salt = randomUUID();
+    const hash = createHash("sha256").update(salt + pin).digest("hex");
+    db.prepare(
+      `UPDATE retail_stores SET manager_pin_salt = ?, manager_pin_hash = ?, manager_pin_failed_count = 0, manager_pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(salt, hash, orgId, storeId);
+    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_MANAGER_PIN_SET", { storeId }); } catch { /* noop */ }
+    return { hasManagerPin: true };
+  }
+
+  /**
+   * Verifica o PIN da gerência da loja. Lança PIN_REQUIRED / PIN_INVALID /
+   * PIN_LOCKED (códigos estáveis pra UI). Sem PIN configurado lança
+   * PIN_NOT_SET — o quiosque guia a criação em vez de tentar verificar.
+   */
+  static verifyManagerPin(orgId: string, storeId: string, providedPin: string | undefined): true {
+    const store = db.prepare(
+      `SELECT manager_pin_salt, manager_pin_hash, manager_pin_failed_count, manager_pin_locked_until
+         FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`
+    ).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    if (!store.manager_pin_hash || !store.manager_pin_salt) {
+      const e: any = new Error("Esta loja ainda não tem PIN da gerência configurado.");
+      e.code = "PIN_NOT_SET"; throw e;
+    }
+
+    if (store.manager_pin_locked_until) {
+      const untilMs = Date.parse(store.manager_pin_locked_until);
+      if (Number.isFinite(untilMs) && untilMs > Date.now()) {
+        const e: any = new Error("PIN bloqueado por excesso de tentativas erradas. Aguarde 15 minutos ou peça ao administrador desbloquear.");
+        e.code = "PIN_LOCKED"; e.until = store.manager_pin_locked_until; throw e;
+      }
+      db.prepare(`UPDATE retail_stores SET manager_pin_locked_until = NULL, manager_pin_failed_count = 0 WHERE organization_id = ? AND id = ?`).run(orgId, storeId);
+    }
+
+    const pin = String(providedPin || "").trim();
+    if (!pin) {
+      const e: any = new Error("Informe o PIN da gerência.");
+      e.code = "PIN_REQUIRED"; throw e;
+    }
+
+    const attemptHash = createHash("sha256").update(store.manager_pin_salt + pin).digest();
+    const storedHash = Buffer.from(String(store.manager_pin_hash), "hex");
+    let match = false;
+    try { match = storedHash.length === attemptHash.length && timingSafeEqual(storedHash, attemptHash); } catch { match = false; }
+
+    if (!match) {
+      const nextCount = Number(store.manager_pin_failed_count || 0) + 1;
+      if (nextCount >= 5) {
+        const untilIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        db.prepare(`UPDATE retail_stores SET manager_pin_failed_count = ?, manager_pin_locked_until = ? WHERE organization_id = ? AND id = ?`).run(nextCount, untilIso, orgId, storeId);
+        try { logAuthEvent(orgId, null, null, "RETAIL_FLOOR_MANAGER_PIN_LOCKED", { storeId, attempts: nextCount, lockedUntil: untilIso }); } catch { /* noop */ }
+        const e: any = new Error("PIN bloqueado por excesso de tentativas erradas. Aguarde 15 minutos ou peça ao administrador desbloquear.");
+        e.code = "PIN_LOCKED"; e.until = untilIso; throw e;
+      }
+      db.prepare(`UPDATE retail_stores SET manager_pin_failed_count = ? WHERE organization_id = ? AND id = ?`).run(nextCount, orgId, storeId);
+      try { logAuthEvent(orgId, null, null, "RETAIL_FLOOR_MANAGER_PIN_FAILED", { storeId, attempts: nextCount }); } catch { /* noop */ }
+      const e: any = new Error("PIN incorreto.");
+      e.code = "PIN_INVALID"; throw e;
+    }
+
+    if (Number(store.manager_pin_failed_count || 0) > 0) {
+      db.prepare(`UPDATE retail_stores SET manager_pin_failed_count = 0, manager_pin_locked_until = NULL WHERE organization_id = ? AND id = ?`).run(orgId, storeId);
+    }
+    return true;
+  }
+
+  /** Destrava o lockout antes dos 15 min (owner/admin — mesmo racional da Clínica Fase 28). */
+  static resetManagerPinLockout(orgId: string, storeId: string, actorId: string | null): void {
+    const store = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    db.prepare(`UPDATE retail_stores SET manager_pin_failed_count = 0, manager_pin_locked_until = NULL WHERE organization_id = ? AND id = ?`).run(orgId, storeId);
+    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_MANAGER_PIN_LOCKOUT_RESET", { storeId }); } catch { /* noop */ }
   }
 }
 

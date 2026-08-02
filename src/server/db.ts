@@ -6731,6 +6731,18 @@ const initDb = () => {
   // O card do vendedor no Kanban mostra a foto (pedido do cliente TOULON).
   // Aditivo em retail_sellers — NULL cai no Avatar de iniciais da UI.
   try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN photo_url TEXT`); } catch(e){}
+
+  // ============================================================
+  // ADR-150 — Retail Floor Fatia 12: PIN da gerência (modo quiosque)
+  // ============================================================
+  // O tablet da loja fica logado numa conta com poderes de gestão; o PIN
+  // trava as funções de gerência (fechar turno, equipe, conciliação,
+  // indicadores, troca de loja) pra equipe de salão não acessar. Mesmo
+  // molde do PIN da Clínica (Fase 28): sha256(salt+pin) + lockout 5×/15min.
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_salt TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_failed_count INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_locked_until TEXT`); } catch(e){}
 };
 
 initDb();

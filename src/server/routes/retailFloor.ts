@@ -74,6 +74,43 @@ router.put("/sellers/:id", (req: AuthRequest, res) => {
   } catch (e: any) { fail(res, e); }
 });
 
+// ---- Fatia 12: PIN da gerência (modo quiosque) ----
+// O tablet da loja fica logado numa conta com poderes de gestão; o PIN trava
+// as funções de gerência na UI, com verificação/lockout/auditoria no servidor.
+
+// Define/troca/remove o PIN. Exige direitos reais na loja; com PIN já
+// configurado, o PIN atual também (verificado dentro do service).
+router.put("/stores/:storeId/manager-pin", (req: AuthRequest, res) => {
+  try {
+    RetailFloorService.assertStoreManager(req.organizationId!, req.user, req.params.storeId);
+    res.json(RetailFloorService.setManagerPin(
+      req.organizationId!, req.params.storeId, req.body?.pin ?? null, req.body?.currentPin, actor(req)
+    ));
+  } catch (e: any) {
+    res.status(e?.code === "PIN_LOCKED" ? 423 : 400).json({ error: e?.message || "Erro", code: e?.code });
+  }
+});
+
+// Verifica o PIN (destrava o modo gerência no quiosque). Qualquer usuário
+// autenticado da org pode TENTAR — o lockout 5×/15min segura brute-force e
+// cada falha é auditada.
+router.post("/stores/:storeId/manager-pin/verify", (req: AuthRequest, res) => {
+  try {
+    RetailFloorService.verifyManagerPin(req.organizationId!, req.params.storeId, req.body?.pin);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(e?.code === "PIN_LOCKED" ? 423 : 400).json({ error: e?.message || "Erro", code: e?.code });
+  }
+});
+
+// Destrava o lockout antes dos 15 min naturais — só owner/admin.
+router.post("/stores/:storeId/manager-pin/reset-lockout", requireRole("owner", "admin"), (req: AuthRequest, res) => {
+  try {
+    RetailFloorService.resetManagerPinLockout(req.organizationId!, req.params.storeId, actor(req));
+    res.json({ reset: true });
+  } catch (e: any) { fail(res, e); }
+});
+
 // ---- Fatia 2: turno + lista da vez ----
 
 // Abre o turno da loja (gestor da loja — RN-150-005).

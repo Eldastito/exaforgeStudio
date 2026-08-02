@@ -6,6 +6,7 @@ import {
   Loader2, RefreshCw, Play, Square, Coffee, UserX, LogIn, Barcode,
   Scale, Clock, Users, DoorOpen, DoorClosed, AlertTriangle, Check, X,
   ChevronDown, Timer, UserPlus, ArrowLeft, ScanLine, ShoppingBag, Camera,
+  Lock, LockOpen, Pencil, Store,
 } from 'lucide-react';
 import { BarcodeCameraScanner } from '@/src/components/BarcodeCameraScanner';
 import { apiFetch } from '@/src/lib/api';
@@ -14,6 +15,11 @@ import { toast } from '@/src/lib/toast';
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const POLL_MS = 8000;
+// Loja fixa do aparelho (modo quiosque): a 1ª escolha persiste; trocar exige
+// PIN da gerência. Chave local do navegador — cada tablet guarda a sua.
+const STORE_KEY = 'zf_retail_floor_store';
+// Modo gerência destravado por PIN expira sozinho (tablet compartilhado).
+const UNLOCK_TTL_MS = 5 * 60 * 1000;
 
 const CATEGORY_LABEL: Record<string, string> = {
   product: 'Produto', price: 'Preço/condição', size_fit: 'Tamanho/modelagem',
@@ -96,20 +102,47 @@ export function RetailFloorView() {
   const [scanFor, setScanFor] = useState<any>(null);
   const [teamOpen, setTeamOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
+  // Fatia 12 — modo quiosque: funções de gerência começam TRAVADAS; o PIN da
+  // loja (verificado no servidor) destrava por UNLOCK_TTL_MS.
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinPrompt, setPinPrompt] = useState<null | { run: () => void }>(null);
   const pollRef = useRef<any>(null);
 
   const isManager = (ctx?.manageableStores || []).some((s: any) => s.id === storeId) || ctx?.canConfigure;
   const mySellerId = ctx?.sellerProfile?.sellerId || null;
+  // O que a UI mostra de gestão = direitos da CONTA + PIN destravado.
+  const managerUI = isManager && unlocked;
 
   const loadCtx = useCallback(async () => {
     try {
       const c = await api('/context');
       setCtx(c);
-      const first = c.manageableStores?.[0]?.id || c.stores?.[0]?.id || '';
-      setStoreId((prev) => prev || first);
+      setStoreId((prev) => {
+        if (prev) return prev;
+        const stores: any[] = c.stores || [];
+        // Loja fixa do aparelho: 1ª escolha salva vale enquanto existir.
+        const saved = localStorage.getItem(STORE_KEY);
+        if (saved && stores.some((s) => s.id === saved)) return saved;
+        if (stores.length === 1) return stores[0].id;
+        return ''; // múltiplas lojas sem escolha salva → StorePicker
+      });
     } catch (e: any) { toast.error(e.message); }
     finally { setLoading(false); }
   }, []);
+
+  // Destravo expira sozinho; ao travar, volta pra Lista da Vez.
+  useEffect(() => {
+    if (!unlocked) return;
+    const t = setTimeout(() => setUnlocked(false), UNLOCK_TTL_MS);
+    return () => clearTimeout(t);
+  }, [unlocked]);
+  useEffect(() => { if (!unlocked) setTab('fila'); }, [unlocked]);
+
+  /** Roda `fn` já destravado; senão abre o prompt de PIN e roda depois. */
+  const withManagerAuth = (fn: () => void) => {
+    if (unlocked) return fn();
+    setPinPrompt({ run: fn });
+  };
 
   const loadSnap = useCallback(async (sid: string) => {
     if (!sid) return;
@@ -165,6 +198,12 @@ export function RetailFloorView() {
     return <OnboardingStore canConfigure={!!ctx.canConfigure} onCreated={loadCtx} />;
   }
 
+  // Loja fixa do aparelho: múltiplas lojas e nenhuma escolhida ainda →
+  // pergunta UMA vez qual é esta loja; depois o nome fica fixo no topo.
+  if (!storeId) {
+    return <StorePicker stores={ctx.stores} onPick={(id: string) => { localStorage.setItem(STORE_KEY, id); setStoreId(id); }} />;
+  }
+
   const shift = snap?.shift;
   const queue: any[] = snap?.queue?.queue || [];
   const waiting = queue.filter((q) => q.status === 'waiting');
@@ -173,11 +212,15 @@ export function RetailFloorView() {
   const totalServedToday = queue.reduce((s, q) => s + (q.served || 0), 0);
   const storeName = (ctx.stores || []).find((s: any) => s.id === storeId)?.name || '';
 
+  // Vendedor vê SÓ a Lista da Vez. Conciliação/Indicadores/Rede são funções
+  // de gestão — aparecem apenas com o modo gerência destravado (PIN).
   const tabs = [
     { key: 'fila' as const, label: 'Lista da Vez' },
-    { key: 'conciliacao' as const, label: 'Conciliação PDV' },
-    ...(isManager ? [{ key: 'indicadores' as const, label: 'Indicadores' }] : []),
-    ...(ctx.canConfigure ? [{ key: 'rede' as const, label: 'Rede' }] : []),
+    ...(managerUI ? [
+      { key: 'conciliacao' as const, label: 'Conciliação PDV' },
+      { key: 'indicadores' as const, label: 'Indicadores' },
+    ] : []),
+    ...(managerUI && ctx.canConfigure ? [{ key: 'rede' as const, label: 'Rede' }] : []),
   ];
 
   const handleDragEnd = (result: DropResult) => {
@@ -205,12 +248,21 @@ export function RetailFloorView() {
         </div>
       )}
 
-      {/* Header */}
+      {/* Header — nome da loja FIXO (modo quiosque); trocar exige PIN. */}
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 md:px-6">
-        <select value={storeId} onChange={(e) => setStoreId(e.target.value)}
-          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-strong)] focus:border-[var(--color-flow)] focus:outline-none focus:ring-1 focus:ring-[var(--color-flow)]/30">
-          {(ctx.stores || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ''}</option>)}
-        </select>
+        <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5">
+          <Store className="h-4 w-4 text-[var(--color-flow)]" />
+          <span className="text-sm font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>
+            {storeName}{(ctx.stores || []).find((s: any) => s.id === storeId)?.code ? ` (${(ctx.stores || []).find((s: any) => s.id === storeId).code})` : ''}
+          </span>
+          {(ctx.stores || []).length > 1 && (
+            <button title="Trocar de loja (exige PIN da gerência)"
+              onClick={() => withManagerAuth(() => { localStorage.removeItem(STORE_KEY); setStoreId(''); setSnap(null); })}
+              className="ml-1 text-zinc-600 transition-colors hover:text-[var(--color-flow)]">
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
 
         {shift ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-400">
@@ -229,16 +281,18 @@ export function RetailFloorView() {
           </button>
         )}
         {isManager && shift && (
-          <button disabled={busy} onClick={() => act(() => api(`/shifts/${shift.id}/close`, {}), 'Turno fechado.')}
+          <button disabled={busy}
+            onClick={() => withManagerAuth(() => act(() => api(`/shifts/${shift.id}/close`, {}), 'Turno fechado.'))}
             className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)]">
-            Fechar turno
+            {!unlocked && <Lock className="mr-1.5 inline h-3.5 w-3.5" />}Fechar turno
           </button>
         )}
 
         <div className="ml-auto flex items-center gap-2">
           {isManager && (
-            <button disabled={busy} onClick={() => setTeamOpen(true)}
+            <button disabled={busy} onClick={() => withManagerAuth(() => setTeamOpen(true))}
               className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-strong)]">
+              {!unlocked && <Lock className="mr-1.5 inline h-3.5 w-3.5" />}
               <Users className="mr-1.5 inline h-4 w-4" />Equipe
             </button>
           )}
@@ -251,6 +305,20 @@ export function RetailFloorView() {
               className="rounded-xl bg-[var(--color-flow)] px-4 py-2.5 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95">
               <LogIn className="mr-1.5 inline h-4 w-4" />Entrar na vez
             </button>
+          )}
+          {/* Modo gerência: destrava/trava as funções de gestão no quiosque */}
+          {isManager && (
+            unlocked ? (
+              <button title="Travar o modo gerência" onClick={() => setUnlocked(false)}
+                className="rounded-xl border border-[var(--color-flow)]/40 bg-[var(--color-flow)]/10 px-3 py-2.5 text-sm font-semibold text-[var(--color-flow)] transition-colors hover:bg-[var(--color-flow)]/20">
+                <LockOpen className="mr-1.5 inline h-4 w-4" />Gerência
+              </button>
+            ) : (
+              <button title="Destravar o modo gerência (PIN)" onClick={() => withManagerAuth(() => { /* só destrava */ })}
+                className="rounded-xl border border-[var(--color-border)] px-3 py-2.5 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)]">
+                <Lock className="mr-1.5 inline h-4 w-4" />Gerência
+              </button>
+            )
           )}
           <button disabled={busy} onClick={() => loadSnap(storeId)}
             className="rounded-xl border border-[var(--color-border)] p-2.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)]">
@@ -269,26 +337,28 @@ export function RetailFloorView() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b border-[var(--color-border)] px-4 md:px-6">
-        {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={cn(
-              'whitespace-nowrap px-4 py-2.5 text-sm font-semibold transition-colors',
-              tab === t.key
-                ? 'border-b-2 border-[var(--color-flow)] text-[var(--color-flow)]'
-                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-strong)]'
-            )}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — escondidas quando só existe a Lista da Vez (quiosque travado / vendedor) */}
+      {tabs.length > 1 && (
+        <div className="flex gap-1 overflow-x-auto border-b border-[var(--color-border)] px-4 md:px-6">
+          {tabs.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={cn(
+                'whitespace-nowrap px-4 py-2.5 text-sm font-semibold transition-colors',
+                tab === t.key
+                  ? 'border-b-2 border-[var(--color-flow)] text-[var(--color-flow)]'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-strong)]'
+              )}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         {tab === 'fila' && !shift && (
           <EmptyShift isManager={isManager} busy={busy} hasSellers={(ctx.sellers || []).length > 0}
-            onOpen={() => setRosterOpen(true)} onTeam={() => setTeamOpen(true)} />
+            onOpen={() => setRosterOpen(true)} onTeam={() => withManagerAuth(() => setTeamOpen(true))} />
         )}
 
         {tab === 'fila' && shift && (
@@ -327,9 +397,9 @@ export function RetailFloorView() {
           </DragDropContext>
         )}
 
-        {tab === 'conciliacao' && <ReconPanel storeId={storeId} isManager={isManager} />}
-        {tab === 'indicadores' && isManager && <AnalyticsPanel storeId={storeId} />}
-        {tab === 'rede' && ctx.canConfigure && <NetworkPanel />}
+        {tab === 'conciliacao' && managerUI && <ReconPanel storeId={storeId} isManager={isManager} />}
+        {tab === 'indicadores' && managerUI && <AnalyticsPanel storeId={storeId} />}
+        {tab === 'rede' && managerUI && ctx.canConfigure && <NetworkPanel />}
       </div>
 
       {finishing && (
@@ -340,6 +410,18 @@ export function RetailFloorView() {
       {scanFor && <ScanPanel attendance={scanFor} onClose={() => setScanFor(null)} />}
       {teamOpen && (
         <TeamModal sellers={ctx.sellers || []} onClose={() => setTeamOpen(false)} onChanged={loadCtx} />
+      )}
+      {pinPrompt && (
+        <ManagerPinModal storeId={storeId} storeName={storeName} isManager={isManager}
+          hasPin={!!(ctx.stores || []).find((s: any) => s.id === storeId)?.hasManagerPin}
+          onClose={() => setPinPrompt(null)}
+          onSuccess={() => {
+            setUnlocked(true);
+            const run = pinPrompt.run;
+            setPinPrompt(null);
+            loadCtx(); // refresca hasManagerPin quando o PIN acabou de ser criado
+            run();
+          }} />
       )}
       {rosterOpen && (
         <RosterModal sellers={ctx.sellers || []} storeName={storeName} busy={busy}
@@ -627,6 +709,116 @@ function OnboardingStore({ canConfigure, onCreated }: { canConfigure: boolean; o
         </p>
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// Loja fixa do aparelho: escolha única (modo quiosque)
+// ============================================================================
+
+function StorePicker({ stores, onPick }: { stores: any[]; onPick: (id: string) => void }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center px-6">
+      <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)]">
+        <Store className="h-10 w-10 text-zinc-600" />
+      </div>
+      <h3 className="mt-5 text-lg font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>
+        Qual é esta loja?
+      </h3>
+      <p className="mt-1 max-w-sm text-center text-sm text-[var(--color-text-muted)]">
+        Este aparelho fica vinculado à loja escolhida. Trocar depois exige o PIN da gerência.
+      </p>
+      <div className="mt-6 w-full max-w-sm space-y-2">
+        {stores.map((s: any) => (
+          <button key={s.id} onClick={() => onPick(s.id)}
+            className="flex w-full items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left transition-all hover:border-[var(--color-flow)]/50 hover:bg-[var(--color-flow)]/5">
+            <Store className="h-5 w-5 shrink-0 text-[var(--color-flow)]" />
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text-strong)]">{s.name}</span>
+            {s.code && <span className="shrink-0 text-xs text-[var(--color-text-muted)]">{s.code}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// PIN da gerência (modo quiosque) — verificação/criação
+// ============================================================================
+
+function ManagerPinModal({ storeId, storeName, isManager, hasPin, onSuccess, onClose }: {
+  storeId: string; storeName: string; isManager: any; hasPin: boolean;
+  onSuccess: () => void; onClose: () => void;
+}) {
+  const [pin, setPin] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const creating = !hasPin;
+
+  const submit = async () => {
+    setError(null);
+    if (creating) {
+      if (!/^\d{4,8}$/.test(pin)) return setError('Use de 4 a 8 dígitos numéricos.');
+      if (pin !== confirm) return setError('Os dois PINs não conferem.');
+    } else if (!pin.trim()) {
+      return setError('Informe o PIN.');
+    }
+    setBusy(true);
+    try {
+      if (creating) {
+        const res = await apiFetch(`/api/retail-floor/stores/${storeId}/manager-pin`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `Erro ${res.status}`);
+        toast.success('PIN da gerência configurado.');
+      } else {
+        await api(`/stores/${storeId}/manager-pin/verify`, { pin });
+      }
+      onSuccess();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (creating && !isManager) {
+    return (
+      <Modal title="PIN da gerência" subtitle={storeName} onClose={onClose}>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Esta loja ainda não tem PIN da gerência. Peça ao gerente ou dono configurar no aparelho da loja.
+        </p>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title={creating ? 'Criar PIN da gerência' : 'PIN da gerência'} subtitle={storeName} onClose={onClose}>
+      <p className="text-sm text-[var(--color-text-muted)]">
+        {creating
+          ? 'Defina o PIN que trava as funções de gestão (fechar turno, equipe, conciliação, indicadores) neste aparelho compartilhado.'
+          : 'Digite o PIN da gerência para liberar as funções de gestão.'}
+      </p>
+      <div className="mt-4 space-y-3">
+        <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+          onKeyDown={(e) => e.key === 'Enter' && !creating && submit()}
+          type="password" inputMode="numeric" autoFocus placeholder={creating ? 'Novo PIN (4-8 dígitos)' : 'PIN'}
+          className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center text-lg tracking-[0.5em] text-[var(--color-text-strong)] placeholder:text-sm placeholder:tracking-normal placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+        {creating && (
+          <input value={confirm} onChange={(e) => setConfirm(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            type="password" inputMode="numeric" placeholder="Confirme o PIN"
+            className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center text-lg tracking-[0.5em] text-[var(--color-text-strong)] placeholder:text-sm placeholder:tracking-normal placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+        )}
+        {error && (
+          <p className="flex items-center gap-1.5 text-sm text-rose-400"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</p>
+        )}
+        <button disabled={busy} onClick={submit}
+          className="w-full rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50">
+          {busy ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Lock className="mr-2 inline h-4 w-4" />}
+          {creating ? 'Salvar PIN e liberar' : 'Liberar gerência'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

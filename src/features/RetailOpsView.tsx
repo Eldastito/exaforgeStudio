@@ -1452,6 +1452,25 @@ function NewStoreButton({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+// Linha compacta pra adicionar uma nova bandeira dentro do painel de cartões.
+// Enter = adicionar. Fica embaixo do grid de cada método (crédito/débito).
+function AddBrandRow({ onAdd }: { onAdd: (name: string) => void | Promise<void> }) {
+  const [name, setName] = useState('');
+  const submit = async () => { const v = name.trim(); if (!v) return; await onAdd(v); setName(''); };
+  return (
+    <div className="mt-2 flex items-center gap-1.5">
+      <input
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+        placeholder="+ nova bandeira"
+        className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-[12px] text-zinc-100 placeholder:text-zinc-600"
+      />
+      <button type="button" onClick={submit} disabled={!name.trim()} className="rounded border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[11px] font-medium text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-40">Adicionar</button>
+    </div>
+  );
+}
+
 // Fase C2 — a FOLHA da loja em forma digital: dinheiro/PIX, crédito e débito
 // POR BANDEIRA (configuráveis por loja), despesas, ranking por vendedor
 // (valor/AT/peças — pré-preenchido pela escala do dia), cadastros, boletas,
@@ -1511,16 +1530,50 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
     // eslint-disable-next-line
   }, [storeId, date]);
 
-  const editBrands = async (kind: 'credito' | 'debito') => {
-    if (!brands) return;
-    const cur = brands[kind].join(', ');
-    const v = window.prompt(`Bandeiras de ${kind} desta loja (separadas por vírgula):`, cur);
-    if (v == null) return;
-    const next = { ...brands, [kind]: v.split(',').map(s => s.trim()).filter(Boolean) };
+  // Add/remove/rename em nível de bandeira — a folha da loja muda com a mesa
+  // comprando/derrubando maquininhas, então recepção/gerência precisa mexer
+  // sem abrir prompt do navegador nem editar CSV colado.
+  const saveBrands = async (next: { credito: string[]; debito: string[] }) => {
     const res = await apiFetch(`/api/retailops/stores/${storeId}/card-brands`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) });
     const d = await res.json().catch(() => ({}));
-    if (res.ok) { setBrands(d); toast.success('Bandeiras da loja atualizadas.'); }
-    else toast.error(d.error || 'Falha ao salvar as bandeiras.');
+    if (res.ok) { setBrands(d); return true; }
+    toast.error(d.error || 'Falha ao salvar as bandeiras.');
+    return false;
+  };
+  const addBrand = async (kind: 'credito' | 'debito', name: string) => {
+    if (!brands) return;
+    const clean = name.trim();
+    if (!clean) return;
+    if (brands[kind].some(b => b.toLowerCase() === clean.toLowerCase())) { toast.error('Essa bandeira já está na lista.'); return; }
+    const next = { ...brands, [kind]: [...brands[kind], clean] };
+    if (await saveBrands(next)) toast.success(`Bandeira "${clean}" adicionada.`);
+  };
+  const removeBrand = async (kind: 'credito' | 'debito', name: string) => {
+    if (!brands) return;
+    const setter = kind === 'credito' ? setCredito : setDebito;
+    const map = kind === 'credito' ? credito : debito;
+    if (n(String(map[name] ?? '')) > 0 && !window.confirm(`A bandeira "${name}" já tem valor lançado hoje. Remover mesmo assim?`)) return;
+    const next = { ...brands, [kind]: brands[kind].filter(b => b !== name) };
+    if (await saveBrands(next)) {
+      // Limpa o valor lançado pra bandeira removida — evita "fantasma" no total.
+      setter(p => { const { [name]: _drop, ...rest } = p; return rest; });
+      toast.success(`Bandeira "${name}" removida.`);
+    }
+  };
+  const renameBrand = async (kind: 'credito' | 'debito', oldName: string) => {
+    if (!brands) return;
+    const v = window.prompt(`Renomear "${oldName}" para:`, oldName);
+    if (v == null) return;
+    const clean = v.trim();
+    if (!clean || clean === oldName) return;
+    if (brands[kind].some(b => b.toLowerCase() === clean.toLowerCase())) { toast.error('Já existe uma bandeira com esse nome.'); return; }
+    const next = { ...brands, [kind]: brands[kind].map(b => b === oldName ? clean : b) };
+    if (await saveBrands(next)) {
+      // Move o valor lançado (se houver) pra chave nova, senão o input volta a zero.
+      const setter = kind === 'credito' ? setCredito : setDebito;
+      setter(p => { const { [oldName]: v0, ...rest } = p; return v0 != null ? { ...rest, [clean]: v0 } : rest; });
+      toast.success(`Bandeira renomeada para "${clean}".`);
+    }
   };
 
   const n = (v: string) => Number(String(v || '').replace(',', '.')) || 0;
@@ -1623,26 +1676,34 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
           <div className="rounded-lg border border-zinc-800 p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Crédito · {brl(totalCredito)}</span>
-              <button onClick={() => editBrands('credito')} className="text-[11px] text-indigo-300 hover:text-indigo-200">editar bandeiras</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {(brands?.credito || []).map(b => (
-                <label key={b} className="text-xs text-zinc-400">{b}
+                <div key={b} className="text-xs text-zinc-400">
+                  <div className="flex items-center justify-between gap-1">
+                    <button onClick={() => renameBrand('credito', b)} title="Renomear bandeira" className="truncate text-left hover:text-zinc-200">{b}</button>
+                    <button onClick={() => removeBrand('credito', b)} title="Remover bandeira" className="text-zinc-600 hover:text-red-300"><X className="w-3 h-3" /></button>
+                  </div>
                   <input inputMode="decimal" value={credito[b] || ''} onChange={e => setCredito(p => ({ ...p, [b]: e.target.value.replace(',', '.') }))} placeholder="0,00" className={inp} />
-                </label>
+                </div>
               ))}
             </div>
+            <AddBrandRow onAdd={(name) => addBrand('credito', name)} />
             <div className="flex items-center justify-between mt-3 mb-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Débito · {brl(totalDebito)}</span>
-              <button onClick={() => editBrands('debito')} className="text-[11px] text-indigo-300 hover:text-indigo-200">editar bandeiras</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {(brands?.debito || []).map(b => (
-                <label key={b} className="text-xs text-zinc-400">{b}
+                <div key={b} className="text-xs text-zinc-400">
+                  <div className="flex items-center justify-between gap-1">
+                    <button onClick={() => renameBrand('debito', b)} title="Renomear bandeira" className="truncate text-left hover:text-zinc-200">{b}</button>
+                    <button onClick={() => removeBrand('debito', b)} title="Remover bandeira" className="text-zinc-600 hover:text-red-300"><X className="w-3 h-3" /></button>
+                  </div>
                   <input inputMode="decimal" value={debito[b] || ''} onChange={e => setDebito(p => ({ ...p, [b]: e.target.value.replace(',', '.') }))} placeholder="0,00" className={inp} />
-                </label>
+                </div>
               ))}
             </div>
+            <AddBrandRow onAdd={(name) => addBrand('debito', name)} />
           </div>
         </div>
 

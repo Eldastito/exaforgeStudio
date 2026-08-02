@@ -82,8 +82,8 @@ async function main() {
 
   // ---- 4. guards ----
   let halfManager = false;
-  try { RetailFloorPilotService.apply(A, { storeCode: "1005" }); } catch (e: any) { halfManager = /storeCode E managerEmail/.test(e.message); }
-  check("guard: storeCode sem managerEmail rejeitado", halfManager);
+  try { RetailFloorPilotService.apply(A, { managerEmail: "gerente@toulon.com.br" }); } catch (e: any) { halfManager = /--store/.test(e.message); }
+  check("guard: manager-email sem store rejeitado", halfManager);
   let badDays = false;
   try { RetailFloorPilotService.apply(A, { calibrationDays: 999 }); } catch (e: any) { badDays = /0 e 365/.test(e.message); }
   check("guard: calibrationDays fora de 0..365 rejeitado", badDays);
@@ -96,14 +96,32 @@ async function main() {
   const p4 = RetailFloorPilotService.apply(A, { calibrationDays: 0 });
   check("calibrationDays=0 remove a calibração", p4.settings.calibrationUntil === null);
 
+  // ---- 4b. corretores das pendências (novos) ----
+  const pLink = RetailFloorPilotService.apply(A, { calibrationDays: 30, linkSellers: [{ matricula: "M-01", email: "gerente@toulon.com.br" }] });
+  check("link-sellers: matrícula vinculada ao login por e-mail", pLink.sellers.linkedToUser === 1);
+  let badMatricula = false;
+  try { RetailFloorPilotService.apply(A, { linkSellers: [{ matricula: "M-99", email: "gerente@toulon.com.br" }] }); } catch (e: any) { badMatricula = /matrícula M-99/.test(e.message); }
+  check("link-sellers: matrícula inexistente rejeitada", badMatricula);
+  let crossLink = false;
+  try { RetailFloorPilotService.apply(A, { linkSellers: [{ matricula: "M-01", email: "intruso@outra.com" }] }); } catch (e: any) { crossLink = /NESTA organização/.test(e.message); }
+  check("link-sellers: e-mail de outra org rejeitado", crossLink);
+
+  const pResp = RetailFloorPilotService.apply(A, { calibrationDays: 30, storeCode: "1005", responsiblePhone: "+55 (11) 88888-0001", responsibleName: "Gerente" });
+  check("responsible: cadastrado normalizado (só dígitos) na loja", pResp.stores[0].responsibles === 1);
+  const pResp2 = RetailFloorPilotService.apply(A, { calibrationDays: 30, storeCode: "1005", responsiblePhone: "5511888880001" });
+  check("responsible: mesmo número não duplica (dedupe)", pResp2.stores[0].responsibles === 1);
+  let badPhone = false;
+  try { RetailFloorPilotService.apply(A, { storeCode: "1005", responsiblePhone: "123" }); } catch (e: any) { badPhone = /número WhatsApp válido/.test(e.message); }
+  check("responsible: número curto rejeitado", badPhone);
+  const pWa = RetailFloorPilotService.apply(A, { calibrationDays: 30, storeCode: "1005", storeWhatsapp: "5511999990001" });
+  check("store-whatsapp: número da loja gravado", pWa.stores[0].whatsapp === "5511999990001");
+
   // ---- 5. checklist PRONTO ----
-  RetailFloorPilotService.apply(A, { calibrationDays: 30 });
-  db.prepare(`UPDATE retail_sellers SET user_id = ? WHERE organization_id = ?`).run(randomUUID(), A);
-  db.prepare(`INSERT INTO retail_store_responsibles (id, organization_id, store_id, name, whatsapp_identifier) VALUES (?, ?, ?, 'Gerente', '5511888880001')`).run(randomUUID(), A, store1);
   db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', 'WA', '5511', 'connected')`).run(randomUUID(), A);
   db.prepare(`INSERT INTO alterdata_sync_cursors (id, organization_id, module, resource, filial, version, last_synced_at) VALUES (?, ?, 'supply', 'Saldo', '1005', '1', CURRENT_TIMESTAMP)`).run(randomUUID(), A);
   const pReady = RetailFloorPilotService.plan(A);
-  check("checklist: tudo preenchido → PRONTO", pReady.readiness === "PRONTO" && pReady.checklist.length === 0, JSON.stringify(pReady.checklist));
+  check("checklist: tudo preenchido (via corretores) → PRONTO", pReady.readiness === "PRONTO" && pReady.checklist.length === 0, JSON.stringify(pReady.checklist));
+  check("checklist: pendências trazem o comando de correção", p0.checklist.some((c: string) => /--apply/.test(c)));
 
   // ---- 6. isolamento ----
   const pB = RetailFloorPilotService.plan(B);

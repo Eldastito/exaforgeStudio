@@ -30,6 +30,7 @@ import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
 import { RetailFloorReconciliationService } from "./RetailFloorReconciliationService.js";
+import { RetailFloorSignalPublisher } from "./RetailFloorSignalPublisher.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
@@ -118,6 +119,29 @@ export class Scheduler {
         RetailFloorReconciliationService.runAll(o.organization_id, yesterday);
         RetailFloorReconciliationService.runAll(o.organization_id, today);
       } catch (e) { console.error("[RetailFloor] conciliação falhou", o.organization_id, e); }
+    }
+  }
+
+  /**
+   * Retail Floor (ADR-150, Fatia 8) — publica os sinais do dia (hoje + ontem,
+   * o PDV/conciliação chega atrasado) no business_signals. Idempotente pelo
+   * dedupe do ledger; só orgs com turno recente e módulo habilitado.
+   */
+  static retailFloorSignalsPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM retail_floor_shifts WHERE opened_at >= datetime('now', '-2 days')`
+      ).all() as any[];
+    } catch { return; }
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    for (const o of orgs) {
+      try {
+        if (!ModuleService.isEnabled(o.organization_id, "retail_floor")) continue;
+        RetailFloorSignalPublisher.sweep(o.organization_id, yesterday);
+        RetailFloorSignalPublisher.sweep(o.organization_id, today);
+      } catch (e) { console.error("[RetailFloor] sinais falharam", o.organization_id, e); }
     }
   }
 
@@ -409,6 +433,9 @@ export class Scheduler {
     // Depois do sync Alterdata: concilia atendimento declarado × vendas do PDV
     // (ADR-150 Fatia 6). Idempotente e só-promove.
     try { this.retailFloorReconciliationPass(); } catch (e: any) { console.error('[Scheduler] conciliação Retail Floor falhou', e?.message); }
+    // E, com a conciliação fresca, publica os sinais do Atendimento de Loja
+    // (ADR-150 Fatia 8) — fatos com dedupe por loja/dia no business_signals.
+    try { this.retailFloorSignalsPass(); } catch (e: any) { console.error('[Scheduler] sinais Retail Floor falharam', e?.message); }
     this.trialPass();
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));

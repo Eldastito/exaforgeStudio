@@ -2442,6 +2442,17 @@ function TopProductsTab() {
 // na hora (nada persiste até "Gerar prévia", que cria o run draft da Fase G).
 const pct = (n: any) => (n == null ? '—' : `${Number(n).toFixed(Math.abs(Number(n)) % 1 ? 1 : 0)}%`);
 const QUOTA_SRC: Record<string, string> = { explicit: 'cadastrada', schedule: 'da escala', none: 'sem cota' };
+// Labels das dimensões do Ranking da Rede (Fase G3) — casam com as chaves do
+// service (`monthlySales`, `monthlyPa`, `monthlyPieces`, `bestWeekSales`,
+// `bestFortnightSales`). Manter em sincronia se novas dimensões surgirem.
+const CHAMP_LABELS: Record<string, string> = {
+  monthlySales: 'Vendas do mês',
+  monthlyPa: 'P.A',
+  monthlyPieces: 'Peças',
+  bestWeekSales: 'Melhor semana',
+  bestFortnightSales: 'Melhor quinzena',
+};
+const CHAMP_ICON: Record<string, string> = { monthlySales: '💰', monthlyPa: '🎯', monthlyPieces: '📦', bestWeekSales: '⚡', bestFortnightSales: '🔥' };
 
 function TierEditor({ label, tiers, onChange, minLabel }: { label: string; tiers: any[]; onChange: (t: any[]) => void; minLabel?: string }) {
   const set = (i: number, k: 'min' | 'percent', v: string) => {
@@ -2476,7 +2487,20 @@ function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void
   const [saving, setSaving] = useState(false);
   const load = async (sid: string) => {
     const d = await apiFetch(`/api/retailops/commission/plan${sid ? `?storeId=${sid}` : ''}`).then(r => r.json()).catch(() => null);
-    if (d?.plan) { setPlan(JSON.parse(JSON.stringify(d.plan))); setSource(d.source); }
+    if (d?.plan) {
+      // Plano antigo salvo antes da Fase G3 não tem `networkChampions` — normaliza
+      // aqui pra evitar leituras em objeto undefined nos inputs.
+      const p = JSON.parse(JSON.stringify(d.plan));
+      p.seller = p.seller || {};
+      p.seller.networkChampions = p.seller.networkChampions || {};
+      const nc = p.seller.networkChampions;
+      for (const k of ['monthlySales', 'monthlyPa', 'monthlyPieces', 'bestWeekSales', 'bestFortnightSales']) {
+        if (!Array.isArray(nc[k])) nc[k] = [0, 0, 0];
+        while (nc[k].length < 3) nc[k].push(0);
+      }
+      if (nc.minAttendancesForPa == null) nc.minAttendancesForPa = 20;
+      setPlan(p); setSource(d.source);
+    }
   };
   useEffect(() => { load(storeId); /* eslint-disable-next-line */ }, [storeId]);
   const save = async () => {
@@ -2527,6 +2551,25 @@ function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void
               <NumField label="% do 2º da semana (com cota)" path={['seller', 'weeklySecondPercent']} step={0.1} />
               <NumField label="Desvio da rede — 1º (R$)" path={['seller', 'networkDeviationPrizes', '0']} />
               <NumField label="Desvio da rede — 2º (R$)" path={['seller', 'networkDeviationPrizes', '1']} />
+              <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2">
+                <div className="text-[11px] font-semibold text-amber-200 mb-1">🏆 Campeões da Rede (podium 1º/2º/3º)</div>
+                <p className="text-[10px] text-zinc-500 mb-2">Prêmio extra para quem lidera cada ranking da REDE (todas as lojas). Só entra quem bateu a própria cota do mês. Deixe 0 pra desativar uma posição.</p>
+                {[
+                  { key: 'monthlySales', label: 'Vendas do mês' },
+                  { key: 'monthlyPa', label: 'P.A do mês' },
+                  { key: 'monthlyPieces', label: 'Peças do mês' },
+                  { key: 'bestWeekSales', label: 'Melhor semana' },
+                  { key: 'bestFortnightSales', label: 'Melhor quinzena' },
+                ].map(dim => (
+                  <div key={dim.key} className="mb-1 grid grid-cols-[1fr_auto_auto_auto] gap-1 items-center">
+                    <span className="text-[11px] text-zinc-400">{dim.label}</span>
+                    <NumField label="1º" path={['seller', 'networkChampions', dim.key, '0']} />
+                    <NumField label="2º" path={['seller', 'networkChampions', dim.key, '1']} />
+                    <NumField label="3º" path={['seller', 'networkChampions', dim.key, '2']} />
+                  </div>
+                ))}
+                <NumField label="P.A — mínimo de atendimentos para elegibilidade" path={['seller', 'networkChampions', 'minAttendancesForPa']} />
+              </div>
             </div>
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Gerente</div>
@@ -2617,6 +2660,7 @@ function RaceSection({ stores }: { stores: any[] }) {
                   <th className="px-2 py-1 font-medium text-right" title="Peças ÷ atendimentos">P.A</th>
                   <th className="px-2 py-1 font-medium text-right">Semanal</th>
                   <th className="px-2 py-1 font-medium text-right" title="Prêmio de desvio de cota da rede">Desvio</th>
+                  <th className="px-2 py-1 font-medium text-right" title="Prêmio de campeão da rede (podium multi-dimensional)">Ranking</th>
                   <th className="px-2 py-1 font-medium text-right">Total</th>
                   <th className="px-2 py-1 font-medium text-right" title="Dias escalados / folgas na escala do mês">Escala</th>
                 </tr>
@@ -2635,11 +2679,12 @@ function RaceSection({ stores }: { stores: any[] }) {
                     <td className="px-2 py-1 text-right text-zinc-300">{s.at > 0 ? <>{s.pa.toFixed(2)}{s.paBonus > 0 && <span className="text-emerald-300"> +{brl(s.paBonus)}</span>}</> : '—'}</td>
                     <td className="px-2 py-1 text-right text-zinc-200">{brl(s.weeklyTotal)}</td>
                     <td className="px-2 py-1 text-right">{s.deviationPrize > 0 ? <span className="text-emerald-300">{brl(s.deviationPrize)}</span> : '—'}</td>
+                    <td className="px-2 py-1 text-right">{(s.championPrize || 0) > 0 ? <span className="text-amber-300" title={(s.championWins || []).map((w: any) => `${w.rank}º ${CHAMP_LABELS[w.dimension] || w.dimension}: ${brl(w.prize)}`).join(' · ')}>{brl(s.championPrize)}</span> : '—'}</td>
                     <td className="px-2 py-1 text-right font-semibold text-emerald-300">{brl(s.total)}</td>
                     <td className="px-2 py-1 text-right text-zinc-500">{s.scheduledDays > 0 || s.offDays > 0 ? `${s.scheduledDays}d / ${s.offDays}f` : '—'}</td>
                   </tr>
                 ))}
-                {sr.monthly.length === 0 && <tr><td colSpan={11} className="px-2 py-3 text-center text-zinc-500">Sem vendas, escala nem cotas no mês pra esta loja.</td></tr>}
+                {sr.monthly.length === 0 && <tr><td colSpan={12} className="px-2 py-3 text-center text-zinc-500">Sem vendas, escala nem cotas no mês pra esta loja.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2687,6 +2732,35 @@ function RaceSection({ stores }: { stores: any[] }) {
             <span key={s.sellerKey}>{i > 0 && ' · '}{i + 1}º {s.sellerName} ({s.storeName}) +{s.attainment - 100 > 0 ? Math.round((s.attainment - 100) * 10) / 10 : 0}%{s.prize > 0 ? ` → ${brl(s.prize)}` : ''}</span>
           ))}
           {race.networkDeviation.stores.length > 0 && <span className="text-zinc-500"> | Lojas: {race.networkDeviation.stores.map((s: any, i: number) => `${i + 1}º ${s.storeName} (+${s.deviation}%)${s.prize > 0 ? ` → ${brl(s.prize)}` : ''}`).join(' · ')}</span>}
+        </div>
+      )}
+
+      {race && !storeId && race.networkChampions && Object.keys(CHAMP_LABELS).some(k => (race.networkChampions[k] || []).some((p: any) => p.prize > 0)) && (
+        <div className="mt-3 rounded-xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-amber-500/0 p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+            🏆 Campeões da Rede
+            <span className="text-[10px] font-normal text-zinc-500">só vendedor com cota do mês batida; P.A exige ≥ {race.networkChampions.minAttendancesForPa || 0} atendimentos</span>
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+            {Object.keys(CHAMP_LABELS).map((dim) => {
+              const podium = (race.networkChampions[dim] || []) as any[];
+              if (!podium.some((p) => p.prize > 0)) return null;
+              const fmt = (v: number) => dim === 'monthlyPa' ? v.toFixed(2) : dim === 'monthlyPieces' ? String(v) : brl(v);
+              return (
+                <div key={dim} className="rounded-lg border border-amber-500/20 bg-zinc-950/40 p-2">
+                  <div className="text-[11px] font-medium text-amber-200">{CHAMP_ICON[dim]} {CHAMP_LABELS[dim]}</div>
+                  {podium.filter(p => p.prize > 0).map((p) => (
+                    <div key={p.rank} className="mt-1 flex items-center gap-2 text-[11px]">
+                      <span className={`w-5 text-right ${p.rank === 1 ? 'text-amber-300 font-semibold' : p.rank === 2 ? 'text-zinc-300' : 'text-zinc-500'}`}>{p.rank}º</span>
+                      <span className="min-w-0 flex-1 truncate text-zinc-200" title={`${p.sellerName} — ${p.storeName}`}>{p.sellerName}</span>
+                      <span className="text-zinc-500 text-[10px]">{fmt(p.metric)}</span>
+                      <span className="text-emerald-300 font-medium">{brl(p.prize)}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       {race && <div className="mt-2 text-right text-sm text-zinc-300">Total da corrida: <span className="font-semibold text-emerald-300">{brl(race.totals.grand)}</span> <span className="text-zinc-500">(vendedores {brl(race.totals.sellers)} · gerentes {brl(race.totals.managers)})</span></div>}

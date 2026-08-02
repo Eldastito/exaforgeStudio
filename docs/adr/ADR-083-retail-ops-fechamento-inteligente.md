@@ -377,3 +377,68 @@ ao vivo.
 clique sem dia aberto, imutabilidade do inicial, cancelamento só do último
 com retenção, reuso do número, match PDV com normalização, conferência do
 fechamento com gap-flag, audit, isolamento multi-tenant).
+
+## Fase G3 — Ranking da Rede (campeões multi-dimensionais) (2026-08)
+
+**Origem:** pedido do dono. A planilha CARIOCA já premia desvio de cota
+individual (1º R$250, 2º R$100 — Fase G2), mas não tem "campeão do longo":
+o vendedor que se destaca na REDE INTEIRA em outras dimensões (peça por
+atendimento, peças totais, melhor semana, melhor quinzena) fica invisível.
+Este ranking coroa o "melhor do longo" em 5 pontas, cria disputa saudável
+entre lojas e paga extra em cima do que a Fase G2 já apura.
+
+**5 dimensões, cada uma com podium 1º/2º/3º** (todos os valores
+configuráveis por rede OU por loja — sem config, cai no default):
+
+| Dimensão | Métrica | Default 1º/2º/3º |
+| --- | --- | --- |
+| **Vendas do mês** | soma de vendas do mês | R$500 / R$300 / R$150 |
+| **P.A do mês** | peças ÷ atendimentos (com piso mínimo de AT) | R$200 / R$100 / R$50 |
+| **Peças do mês** | soma de peças vendidas | R$200 / R$100 / R$50 |
+| **Melhor semana** | maior venda em UMA semana isolada do mês (o pico) | R$150 / R$100 / R$50 |
+| **Melhor quinzena** | soma da primeira metade OU segunda metade — o melhor bloco | R$200 / R$100 / R$50 |
+
+**Elegibilidade dura (RN-G3-001):** só entra vendedor que **bateu a
+própria cota do mês**. Alinhada à regra da planilha ("prêmio semanal e
+desvio SÓ com cota batida") — evita coroar top de loja fraca por acaso.
+
+**Piso de atendimentos no P.A (default 20 AT):** protege o ranking contra
+"1 atendimento com 5 peças" (P.A 5.0 mentiroso). Configurável.
+
+**Prêmio soma em cima**, não substitui — o campeão da rede recebe faixas +
+P.A + semanal + desvio + Ranking. Cada vitória carrega detalhamento
+(`championWins: [{dimension, rank, prize}]`) que vai pro run draft da
+Fase G pra rastreabilidade.
+
+**Semana e quinzena isoladas** (não somadas): "melhor semana" é o pico do
+mês (a semana que explodiu, tipicamente um sábado com mostruário certo),
+não a soma; "melhor quinzena" pega a metade do mês em que o vendedor
+mais brilhou. Somar as duas cairia praticamente no "vendas do mês" e
+duplicaria o mesmo prêmio.
+
+**Ordem estável em empate:** first-in wins (mesma convenção implícita da
+planilha, que também não trata empate — a posição vale).
+
+**Entidades:** ZERO tabelas novas. O plano JSON (`retail_commission_plans`)
+ganha o campo opcional `seller.networkChampions` — retrocompatível: plano
+salvo antes desta fase continua funcionando (o loader do modal semeia
+defaults na normalização). A apuração é derivada por query (RN-G3-001,
+lição RN-004) e materializada no run junto com o resto.
+
+**UI (aba Comissão):**
+- Nova coluna "Ranking" na tabela da corrida (mostra R$ com tooltip
+  detalhando quais dimensões o vendedor venceu).
+- Painel "🏆 Campeões da Rede" abaixo dos cards de loja, um card por
+  dimensão com o podium 1º/2º/3º (ícone + nome + métrica + prêmio).
+- No **Configurar corrida**: bloco novo com os 15 campos (5 dimensões × 3
+  posições) + o piso de atendimentos do P.A.
+
+**Retrocompatibilidade 100%** — plano antigo sem `networkChampions` usa o
+default; total do vendedor continua fechando a soma das partes; itens do
+run trazem `championPrize` e `championWins` no JSON.
+
+**Teste:** `test:retail-commission-race` (13 verificações novas — bloco
+`networkChampions` presente; 1º/2º de cada dimensão com prêmio correto;
+Andressa fora por não bater cota; Thamyres soma R$1.250 no championPrize
+e `total` fecha; Rafaela entra em 3º em vendas/peças mas é filtrada do
+P.A pelo piso de 20 AT; piso exposto no retorno).

@@ -48,6 +48,19 @@ const norm = (s: any) => String(s || "").trim().toLowerCase();
 function safeParse(s: any): any { try { return JSON.parse(s ?? "null"); } catch { return null; } }
 
 export type Tier = { min: number; percent: number };
+/**
+ * Prêmios de podium (1º/2º/3º) por dimensão do "Ranking da Rede" (Fase G3).
+ * Cada array define os prêmios em R$ nas posições 1/2/3 (vazio = não paga).
+ * Só entra quem bateu a própria cota do mês (RN-G3-001).
+ */
+export type NetworkChampionPrizes = {
+  monthlySales: number[];      // "melhor vendedor da rede no mês"
+  monthlyPa: number[];         // maior P.A com min. de atendimentos
+  monthlyPieces: number[];     // quem vendeu mais peças
+  bestWeekSales: number[];     // melhor semana ISOLADA do mês
+  bestFortnightSales: number[];// melhor quinzena (1ª quinzena OU 2ª — o melhor bloco)
+  minAttendancesForPa: number; // piso pra entrar no ranking de P.A (evita "1 AT + 5 peças")
+};
 export type RacePlan = {
   name: string;
   seller: {
@@ -58,6 +71,7 @@ export type RacePlan = {
     weeklySecondPercent: number;
     networkDeviationPrizes: number[];
     requiresFullMonth: boolean;
+    networkChampions?: NetworkChampionPrizes;
   };
   manager: {
     storeMonthlyTiers: Tier[];
@@ -83,6 +97,17 @@ export const DEFAULT_RACE_PLAN: RacePlan = {
     weeklySecondPercent: 0.5,
     networkDeviationPrizes: [250, 100],
     requiresFullMonth: true,
+    // Ranking da Rede (Fase G3) — números de partida, editáveis. Só entra quem
+    // bateu a própria cota do mês (RN-G3-001). O prêmio soma no total, não
+    // substitui as outras faixas — é uma camada extra de "campeão do longo".
+    networkChampions: {
+      monthlySales: [500, 300, 150],
+      monthlyPa: [200, 100, 50],
+      monthlyPieces: [200, 100, 50],
+      bestWeekSales: [150, 100, 50],
+      bestFortnightSales: [200, 100, 50],
+      minAttendancesForPa: 20,
+    },
   },
   manager: {
     // min:0 = o 1% da loja sai COM OU SEM cota batida; as faixas maiores só
@@ -563,9 +588,91 @@ export class RetailCommissionRaceService {
       if (i < managerPrizes.length && managerPrizes[i] > 0) sr.manager.deviationPrize = managerPrizes[i];
     });
 
-    // Totais fechados só depois do desvio.
+    // ── Ranking da REDE (Fase G3) — 5 dimensões × podium 1º/2º/3º ──
+    // O "campeão do longo": o melhor vendedor da rede em cada dimensão ganha
+    // prêmio EXTRA em cima do que já ganharia pela cota/PA/semanal/desvio.
+    // Elegibilidade dura (RN-G3-001): só vendedor que bateu a própria cota do
+    // mês entra — evita coroar top de loja fraca por acaso, alinhado à regra
+    // da planilha CARIOCA ("prêmio semanal e desvio SÓ com cota batida").
+    // Prêmios (`networkChampions`) são configuráveis por loja OU rede — sem
+    // config, cai em `DEFAULT_RACE_PLAN.seller.networkChampions`.
+    const champCfg: NetworkChampionPrizes = (netPlan.seller as any)?.networkChampions
+      || DEFAULT_RACE_PLAN.seller.networkChampions!;
+    const eligibleAll = storeReports
+      .flatMap((sr) => sr.monthly.map((s: any) => ({ s, sr })))
+      .filter(({ s }) => s.quotaHit);
+
+    // Pré-cálculo por vendedor: melhor semana + melhor quinzena isolados.
+    // Semana e quinzena vêm da mesma segmentação da corrida (RN-G2-003).
+    const bestWeekOf = new Map<string, number>();
+    const bestFortnightOf = new Map<string, number>();
     for (const sr of storeReports) {
-      for (const s of sr.monthly) s.total = round2(s.tierAmount + s.paBonus + s.weeklyTotal + s.deviationPrize);
+      // Melhor SEMANA isolada — o pico do mês (a "explosão de sábado").
+      for (const s of sr.monthly) {
+        let best = 0;
+        for (const w of sr.weeks) {
+          const row = w.sellers.find((x: any) => x.sellerKey === s.sellerKey);
+          if (row && row.sales > best) best = row.sales;
+        }
+        bestWeekOf.set(`${sr.storeId}::${s.sellerKey}`, round2(best));
+      }
+      // Melhor QUINZENA — soma da 1ª metade das semanas VS soma da 2ª metade.
+      const half = Math.max(1, Math.floor(sr.weeks.length / 2));
+      for (const s of sr.monthly) {
+        let firstHalf = 0, secondHalf = 0;
+        sr.weeks.forEach((w: any, i: number) => {
+          const row = w.sellers.find((x: any) => x.sellerKey === s.sellerKey);
+          const v = row?.sales || 0;
+          if (i < half) firstHalf += v; else secondHalf += v;
+        });
+        bestFortnightOf.set(`${sr.storeId}::${s.sellerKey}`, round2(Math.max(firstHalf, secondHalf)));
+      }
+    }
+
+    // Aplica prêmios de podium numa dimensão. `metric` extrai o valor
+    // ordenado; `filter` (opcional) restringe elegibilidade adicional
+    // (ex.: min. de atendimentos pra ranking de P.A). Empate: preserva
+    // a ordem estável do sort (first-in wins) — coerente com a planilha
+    // que também não trata empate (posição vale).
+    const applyPodium = (
+      metric: (item: { s: any; sr: any }) => number,
+      prizes: number[],
+      filter?: (item: { s: any; sr: any }) => boolean,
+      key?: string,
+    ) => {
+      const pool = filter ? eligibleAll.filter(filter) : eligibleAll.slice();
+      pool.sort((a, b) => metric(b) - metric(a));
+      const podium: any[] = [];
+      pool.slice(0, Math.max(prizes.length, 3)).forEach((item, i) => {
+        const prize = i < prizes.length ? Number(prizes[i] || 0) : 0;
+        const rank = i + 1;
+        if (prize > 0) {
+          item.s.championPrize = round2((item.s.championPrize || 0) + prize);
+          item.s.championWins = item.s.championWins || [];
+          item.s.championWins.push({ dimension: key || "", rank, prize });
+        }
+        podium.push({
+          rank, sellerKey: item.s.sellerKey, sellerName: item.s.sellerName,
+          storeId: item.sr.storeId, storeName: item.sr.storeName,
+          metric: round2(metric(item)), prize,
+        });
+      });
+      return podium;
+    };
+
+    for (const { s } of eligibleAll) { s.championPrize = 0; s.championWins = []; }
+    const networkChampions = {
+      monthlySales: applyPodium(({ s }) => s.sales, champCfg.monthlySales || [], undefined, "monthlySales"),
+      monthlyPa: applyPodium(({ s }) => s.pa, champCfg.monthlyPa || [], ({ s }) => s.at >= Number(champCfg.minAttendancesForPa || 0), "monthlyPa"),
+      monthlyPieces: applyPodium(({ s }) => s.pecas, champCfg.monthlyPieces || [], undefined, "monthlyPieces"),
+      bestWeekSales: applyPodium(({ s, sr }) => bestWeekOf.get(`${sr.storeId}::${s.sellerKey}`) || 0, champCfg.bestWeekSales || [], undefined, "bestWeekSales"),
+      bestFortnightSales: applyPodium(({ s, sr }) => bestFortnightOf.get(`${sr.storeId}::${s.sellerKey}`) || 0, champCfg.bestFortnightSales || [], undefined, "bestFortnightSales"),
+      minAttendancesForPa: Number(champCfg.minAttendancesForPa || 0),
+    };
+
+    // Totais fechados só depois do desvio + campeões da rede.
+    for (const sr of storeReports) {
+      for (const s of sr.monthly) s.total = round2(s.tierAmount + s.paBonus + s.weeklyTotal + s.deviationPrize + (s.championPrize || 0));
       if (sr.manager) sr.manager.total = round2(sr.manager.storeTierAmount + sr.manager.ownTierAmount + sr.manager.paBonus + sr.manager.weeklyTotal + sr.manager.deviationPrize);
       sr.totals = {
         sellers: round2(sr.monthly.reduce((a: number, s: any) => a + s.total, 0)),
@@ -580,6 +687,7 @@ export class RetailCommissionRaceService {
         sellers: eligibleSellers.slice(0, Math.max(sellerPrizes.length, 3)).map((s: any) => ({ sellerKey: s.sellerKey, sellerName: s.sellerName, storeName: s.storeName, attainment: s.attainment, prize: s.deviationPrize })),
         stores: eligibleStores.slice(0, Math.max(managerPrizes.length, 3)).map((sr) => ({ storeId: sr.storeId, storeName: sr.storeName, deviation: sr.store.deviation, prize: sr.manager.deviationPrize })),
       },
+      networkChampions,
       totals: {
         sellers: round2(storeReports.reduce((a, sr) => a + sr.totals.sellers, 0)),
         managers: round2(storeReports.reduce((a, sr) => a + (sr.totals.manager || 0), 0)),
@@ -608,7 +716,7 @@ export class RetailCommissionRaceService {
         for (const s of sr.monthly) {
           if (s.total <= 0 && s.sales <= 0) continue;
           insertItem.run(randomUUID(), orgId, runId, sr.storeId, s.sellerUserId || null, s.sellerName, s.sales, s.total,
-            JSON.stringify({ type: "race", month, tierPercent: s.tierPercent, tierAmount: s.tierAmount, paBonus: s.paBonus, weeklyTotal: s.weeklyTotal, deviationPrize: s.deviationPrize, quota: s.quota, quotaSource: s.quotaSource, pa: s.pa, scheduledDays: s.scheduledDays, offDays: s.offDays, daysInMonth: s.daysInMonth }));
+            JSON.stringify({ type: "race", month, tierPercent: s.tierPercent, tierAmount: s.tierAmount, paBonus: s.paBonus, weeklyTotal: s.weeklyTotal, deviationPrize: s.deviationPrize, championPrize: s.championPrize || 0, championWins: s.championWins || [], quota: s.quota, quotaSource: s.quotaSource, pa: s.pa, scheduledDays: s.scheduledDays, offDays: s.offDays, daysInMonth: s.daysInMonth }));
           totalSales += s.sales; totalCommission += s.total;
         }
         if (sr.manager && sr.manager.total > 0) {

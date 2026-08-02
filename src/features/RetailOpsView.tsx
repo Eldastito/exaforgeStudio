@@ -310,11 +310,12 @@ function PatternsTab() {
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
+  { key: 'escala', label: 'Escala & cotas', icon: Users },
   { key: 'resultado', label: 'Resultado por loja', icon: DollarSign },
   { key: 'precificar', label: 'Precificar', icon: Tag },
   { key: 'maisvendidos', label: 'Mais vendidos', icon: TrendingUp },
@@ -480,6 +481,7 @@ export function RetailOpsView() {
       {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'comissao' && <CommissionTab />}
+      {tab === 'escala' && <ScheduleTab />}
       {tab === 'resultado' && <StoreResultTab />}
       {tab === 'maisvendidos' && <TopProductsTab />}
       {tab === 'cartao' && <CardReceivablesTab />}
@@ -1392,12 +1394,12 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
 // ---- Lançamento de vendas por vendedor (manual / foto+IA — Cenário B) -------
 // A loja anota as vendas de cada vendedor no papel; o gestor digita aqui OU
 // envia a foto da folha p/ a IA ler e pré-preencher, conferindo antes de salvar.
-type SellerRow = { sellerName: string; valor: string; pecas: string };
+type SellerRow = { sellerName: string; valor: string; pecas: string; atendimentos: string };
 function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: string; onClose: () => void; onSaved: () => void }) {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [date, setDate] = useState(defaultDate || todayStr());
-  const [rows, setRows] = useState<SellerRow[]>([{ sellerName: '', valor: '', pecas: '' }]);
+  const [rows, setRows] = useState<SellerRow[]>([{ sellerName: '', valor: '', pecas: '', atendimentos: '' }]);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
@@ -1409,7 +1411,7 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
   const total = useMemo(() => rows.reduce((a, r) => a + (Number(r.valor) || 0), 0), [rows]);
   const totalPecas = useMemo(() => rows.reduce((a, r) => a + (Number(r.pecas) || 0), 0), [rows]);
   const setRow = (i: number, patch: Partial<SellerRow>) => setRows(p => p.map((r, idx) => idx === i ? { ...r, ...patch } : r));
-  const addRow = () => setRows(p => [...p, { sellerName: '', valor: '', pecas: '' }]);
+  const addRow = () => setRows(p => [...p, { sellerName: '', valor: '', pecas: '', atendimentos: '' }]);
   const removeRow = (i: number) => setRows(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p);
 
   const onScan = async (file: File) => {
@@ -1421,7 +1423,7 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
       if (!res.ok) { toast.error(d.error || 'Falha ao ler a folha.'); return; }
       const entries = Array.isArray(d.entries) ? d.entries : [];
       if (!entries.length) { toast.error('A IA não encontrou vendedores legíveis. Tente uma foto mais nítida ou digite manualmente.'); return; }
-      setRows(entries.map((e: any) => ({ sellerName: String(e.sellerName || ''), valor: e.valor ? String(e.valor) : '', pecas: e.pecas ? String(e.pecas) : '' })));
+      setRows(entries.map((e: any) => ({ sellerName: String(e.sellerName || ''), valor: e.valor ? String(e.valor) : '', pecas: e.pecas ? String(e.pecas) : '', atendimentos: e.atendimentos ? String(e.atendimentos) : '' })));
       setScanSource('photo'); setImageUrl(d.imageUrl || null);
       setScanNote(d.needsReview
         ? `Leitura com baixa confiança (${d.confidence}%). CONFIRA cada linha antes de salvar.`
@@ -1432,7 +1434,7 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
 
   const save = async () => {
     const entries = rows
-      .map(r => ({ sellerName: r.sellerName.trim(), valor: Number(r.valor) || 0, pecas: Number(r.pecas) || 0 }))
+      .map(r => ({ sellerName: r.sellerName.trim(), valor: Number(r.valor) || 0, pecas: Number(r.pecas) || 0, atendimentos: Number(r.atendimentos) || 0 }))
       .filter(e => e.sellerName && (e.valor > 0 || e.pecas > 0));
     if (!entries.length) { toast.error('Informe ao menos um vendedor com nome e valor (ou peças).'); return; }
     setSaving(true);
@@ -1477,14 +1479,15 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
         </div>
 
         <div className="mt-3 space-y-2">
-          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-1 text-[11px] uppercase tracking-wider text-zinc-500">
-            <span>Vendedor</span><span className="w-24 text-right">Valor (R$)</span><span className="w-16 text-right">Peças</span><span className="w-6"></span>
+          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-1 text-[11px] uppercase tracking-wider text-zinc-500">
+            <span>Vendedor</span><span className="w-24 text-right">Valor (R$)</span><span className="w-14 text-right">Peças</span><span className="w-14 text-right" title="Atendimentos — o AT da folha, denominador do P.A">AT</span><span className="w-6"></span>
           </div>
           {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
+            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
               <input value={r.sellerName} onChange={e => setRow(i, { sellerName: e.target.value })} placeholder="Nome do vendedor" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
               <input inputMode="decimal" value={r.valor} onChange={e => setRow(i, { valor: e.target.value.replace(',', '.') })} placeholder="0,00" className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
-              <input inputMode="numeric" value={r.pecas} onChange={e => setRow(i, { pecas: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" className="w-16 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
+              <input inputMode="numeric" value={r.pecas} onChange={e => setRow(i, { pecas: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
+              <input inputMode="numeric" value={r.atendimentos} onChange={e => setRow(i, { atendimentos: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" title="Atendimentos (AT da folha)" className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
               <button onClick={() => removeRow(i)} title="Remover linha" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
             </div>
           ))}
@@ -2008,6 +2011,477 @@ function TopProductsTab() {
 }
 
 // ---- Comissão ---------------------------------------------------------------
+// ---- Corrida de comissão (Fase G2 — modelo da planilha CARIOCA) -------------
+// Faixas NÃO cumulativas sobre a cota individual, P.A, corrida semanal por
+// ranking da loja, desvio de cota da rede e o bloco do gerente. Tudo derivado
+// na hora (nada persiste até "Gerar prévia", que cria o run draft da Fase G).
+const pct = (n: any) => (n == null ? '—' : `${Number(n).toFixed(Math.abs(Number(n)) % 1 ? 1 : 0)}%`);
+const QUOTA_SRC: Record<string, string> = { explicit: 'cadastrada', schedule: 'da escala', none: 'sem cota' };
+
+function TierEditor({ label, tiers, onChange, minLabel }: { label: string; tiers: any[]; onChange: (t: any[]) => void; minLabel?: string }) {
+  const set = (i: number, k: 'min' | 'percent', v: string) => {
+    const next = tiers.map((t, j) => (j === i ? { ...t, [k]: v === '' ? '' : Number(v) } : t));
+    onChange(next);
+  };
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[11px] font-medium text-zinc-300">{label}</span>
+        <button onClick={() => onChange([...tiers, { min: 1, percent: 1 }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ faixa</button>
+      </div>
+      {tiers.map((t, i) => (
+        <div key={i} className="mb-1 flex items-center gap-1.5 text-[11px] text-zinc-400">
+          <span>{minLabel || 'atingiu'}</span>
+          <input type="number" step="0.05" value={t.min} onChange={e => set(i, 'min', e.target.value)} className="w-16 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-0.5 text-xs text-zinc-100" />
+          <span>× a cota →</span>
+          <input type="number" step="0.1" value={t.percent} onChange={e => set(i, 'percent', e.target.value)} className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-0.5 text-xs text-zinc-100" />
+          <span>%</span>
+          <button onClick={() => onChange(tiers.filter((_, j) => j !== i))} className="ml-auto text-zinc-600 hover:text-red-300"><X className="w-3 h-3" /></button>
+        </div>
+      ))}
+      <p className="text-[10px] text-zinc-600">Não cumulativo: vale a MAIOR faixa alcançada (1 = 100% da cota).</p>
+    </div>
+  );
+}
+
+function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void }) {
+  const [storeId, setStoreId] = useState('');
+  const [plan, setPlan] = useState<any | null>(null);
+  const [source, setSource] = useState('');
+  const [saving, setSaving] = useState(false);
+  const load = async (sid: string) => {
+    const d = await apiFetch(`/api/retailops/commission/plan${sid ? `?storeId=${sid}` : ''}`).then(r => r.json()).catch(() => null);
+    if (d?.plan) { setPlan(JSON.parse(JSON.stringify(d.plan))); setSource(d.source); }
+  };
+  useEffect(() => { load(storeId); /* eslint-disable-next-line */ }, [storeId]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/retailops/commission/plan', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId: storeId || null, config: plan }) });
+      if (res.ok) { toast.success(storeId ? 'Plano da loja salvo.' : 'Plano da rede salvo.'); onClose(); }
+      else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar o plano.'); }
+    } finally { setSaving(false); }
+  };
+  const num = (path: string[], v: string) => {
+    setPlan((p: any) => {
+      const next = JSON.parse(JSON.stringify(p));
+      let o = next; for (const k of path.slice(0, -1)) o = o[k];
+      o[path[path.length - 1]] = v === '' ? 0 : Number(v);
+      return next;
+    });
+  };
+  const get = (path: string[]) => path.reduce((o, k) => o?.[k], plan);
+  const NumField = ({ label, path, step = 1 }: { label: string; path: string[]; step?: number }) => (
+    <label className="flex items-center justify-between gap-2 text-[11px] text-zinc-400">{label}
+      <input type="number" step={step} value={get(path) ?? 0} onChange={e => num(path, e.target.value)} className="w-20 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-0.5 text-xs text-zinc-100" />
+    </label>
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-4" onClick={e => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-semibold text-zinc-100">Configurar a corrida</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="mb-3 flex items-center gap-2">
+          <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+            <option value="">Rede toda (padrão)</option>
+            {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <span className="text-[11px] text-zinc-500">plano em uso: {source === 'store' ? 'próprio da loja' : source === 'network' ? 'da rede' : 'padrão (planilha CARIOCA)'}</span>
+        </div>
+        {!plan ? <div className="text-sm text-zinc-500">Carregando…</div> : (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-300">Vendedor</div>
+              <TierEditor label="Faixas MENSAIS sobre a venda do vendedor" tiers={plan.seller.monthlyTiers} onChange={t => setPlan({ ...plan, seller: { ...plan.seller, monthlyTiers: t } })} />
+              <NumField label="P.A mínimo (mensal)" path={['seller', 'monthlyPa', 'min']} step={0.1} />
+              <NumField label="Bônus P.A mensal (R$)" path={['seller', 'monthlyPa', 'amount']} />
+              <TierEditor label="Faixas do 1º da SEMANA (com cota)" tiers={plan.seller.weeklyFirstTiers} onChange={t => setPlan({ ...plan, seller: { ...plan.seller, weeklyFirstTiers: t } })} />
+              <NumField label="Bônus P.A semanal (R$)" path={['seller', 'weeklyFirstPa', 'amount']} />
+              <NumField label="% do 2º da semana (com cota)" path={['seller', 'weeklySecondPercent']} step={0.1} />
+              <NumField label="Desvio da rede — 1º (R$)" path={['seller', 'networkDeviationPrizes', '0']} />
+              <NumField label="Desvio da rede — 2º (R$)" path={['seller', 'networkDeviationPrizes', '1']} />
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-emerald-300">Gerente</div>
+              <TierEditor label="Faixas MENSAIS sobre a venda da LOJA" tiers={plan.manager.storeMonthlyTiers} onChange={t => setPlan({ ...plan, manager: { ...plan.manager, storeMonthlyTiers: t } })} />
+              <p className="text-[10px] text-zinc-600 -mt-1">Uma faixa com “atingiu 0” paga com ou sem cota batida (o 1% do padrão).</p>
+              <TierEditor label="Faixas MENSAIS sobre a venda PRÓPRIA do gerente" tiers={plan.manager.ownMonthlyTiers} onChange={t => setPlan({ ...plan, manager: { ...plan.manager, ownMonthlyTiers: t } })} />
+              <NumField label="Bônus P.A mensal da loja (R$)" path={['manager', 'monthlyPa', 'amount']} />
+              <TierEditor label="Faixas SEMANAIS sobre a LOJA (com cota)" tiers={plan.manager.weeklyStoreTiers} onChange={t => setPlan({ ...plan, manager: { ...plan.manager, weeklyStoreTiers: t } })} />
+              <TierEditor label="Faixas SEMANAIS sobre a venda própria" tiers={plan.manager.weeklyOwnTiers} onChange={t => setPlan({ ...plan, manager: { ...plan.manager, weeklyOwnTiers: t } })} />
+              <NumField label="Bônus P.A semanal da loja (R$)" path={['manager', 'weeklyPa', 'amount']} />
+              <NumField label="Desvio entre lojas — 1º (R$)" path={['manager', 'networkDeviationPrizes', '0']} />
+              <NumField label="Desvio entre lojas — 2º (R$)" path={['manager', 'networkDeviationPrizes', '1']} />
+            </div>
+          </div>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={save} disabled={saving || !plan} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : (storeId ? 'Salvar plano da loja' : 'Salvar plano da rede')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RaceSection({ stores }: { stores: any[] }) {
+  const [month, setMonth] = useState(() => todayStr().slice(0, 7));
+  const [storeId, setStoreId] = useState('');
+  const [race, setRace] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [planModal, setPlanModal] = useState(false);
+  const [openWeeks, setOpenWeeks] = useState<Record<string, boolean>>({});
+  const [running, setRunning] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ month });
+      if (storeId) params.set('storeId', storeId);
+      const d = await apiFetch(`/api/retailops/commission/race?${params}`).then(r => r.json()).catch(() => null);
+      if (d && !d.error) setRace(d); else toast.error(d?.error || 'Falha ao apurar a corrida.');
+    } finally { setLoading(false); }
+  };
+  const createRun = async () => {
+    if (!window.confirm(`Gerar a PRÉVIA da corrida de ${month}? A aprovação continua manual (nada é pago automaticamente).`)) return;
+    setRunning(true);
+    try {
+      const res = await apiFetch('/api/retailops/commission/race/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) toast.success(`Prévia da corrida criada (${brl(d.total_commission)}) — aprove na lista de apurações abaixo.`);
+      else toast.error(d.error || 'Falha ao gerar a prévia.');
+    } finally { setRunning(false); }
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><TrendingUp className="w-4 h-4 text-indigo-400" /> Corrida do mês (cota + P.A + semanal + desvio)</div>
+        <input type="month" value={month} onChange={e => setMonth(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100">
+          <option value="">Todas as lojas</option>
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button onClick={load} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Apurar</button>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setPlanModal(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><Pencil className="w-3.5 h-3.5" /> Configurar corrida</button>
+          {race && <button onClick={createRun} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> Gerar prévia p/ aprovação</button>}
+        </div>
+      </div>
+      <p className="mt-1 text-[11px] text-zinc-500">O padrão da sua planilha: bateu a cota 1% · +10% 1,5% · +20% 2% · +30% 3% (vale a maior) · P.A ≥ 2,50 com cota · 1º/2º da semana · desvio de cota da rede · bloco do gerente. Cota individual vem do cadastro semanal ou da escala (cota da loja ÷ escalados). Ajuste tudo em “Configurar corrida”.</p>
+
+      {race && race.stores.map((sr: any) => (
+        <div key={sr.storeId} className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-zinc-100">{sr.storeName}</span>
+            <span className="text-[11px] text-zinc-500">loja: {brl(sr.store.sales)} / cota {brl(sr.store.quota)}{sr.store.deviation != null ? ` (${sr.store.deviation > 0 ? '+' : ''}${sr.store.deviation}%)` : ''}</span>
+            <span className="ml-auto text-[11px] text-zinc-400">vendedores <strong className="text-emerald-300">{brl(sr.totals.sellers)}</strong>{sr.manager ? <> · gerente <strong className="text-emerald-300">{brl(sr.totals.manager)}</strong></> : null}</span>
+          </div>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-zinc-500">
+                <tr className="text-left">
+                  <th className="px-2 py-1 font-medium">Vendedor</th>
+                  <th className="px-2 py-1 font-medium text-right">Cota</th>
+                  <th className="px-2 py-1 font-medium text-right">Venda</th>
+                  <th className="px-2 py-1 font-medium text-right">Ating.</th>
+                  <th className="px-2 py-1 font-medium text-right">Faixa</th>
+                  <th className="px-2 py-1 font-medium text-right">Mensal</th>
+                  <th className="px-2 py-1 font-medium text-right" title="Peças ÷ atendimentos">P.A</th>
+                  <th className="px-2 py-1 font-medium text-right">Semanal</th>
+                  <th className="px-2 py-1 font-medium text-right" title="Prêmio de desvio de cota da rede">Desvio</th>
+                  <th className="px-2 py-1 font-medium text-right">Total</th>
+                  <th className="px-2 py-1 font-medium text-right" title="Dias escalados / folgas na escala do mês">Escala</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sr.monthly.map((s: any) => (
+                  <tr key={s.sellerKey} className="border-t border-zinc-800/60">
+                    <td className="px-2 py-1 text-zinc-200">{s.sellerName}</td>
+                    <td className="px-2 py-1 text-right text-zinc-300">
+                      {s.quotaSource === 'none' ? <span className="text-amber-300" title="Sem cota cadastrada nem escala — prêmios condicionados à cota não saem">sem cota</span> : <span title={QUOTA_SRC[s.quotaSource]}>{brl(s.quota)}</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right text-zinc-200">{brl(s.sales)}</td>
+                    <td className={`px-2 py-1 text-right ${s.quotaHit ? 'text-emerald-300' : 'text-zinc-400'}`}>{s.attainment == null ? '—' : `${s.attainment}%`}</td>
+                    <td className="px-2 py-1 text-right text-zinc-300">{pct(s.tierPercent)}</td>
+                    <td className="px-2 py-1 text-right text-zinc-200">{brl(s.tierAmount)}</td>
+                    <td className="px-2 py-1 text-right text-zinc-300">{s.at > 0 ? <>{s.pa.toFixed(2)}{s.paBonus > 0 && <span className="text-emerald-300"> +{brl(s.paBonus)}</span>}</> : '—'}</td>
+                    <td className="px-2 py-1 text-right text-zinc-200">{brl(s.weeklyTotal)}</td>
+                    <td className="px-2 py-1 text-right">{s.deviationPrize > 0 ? <span className="text-emerald-300">{brl(s.deviationPrize)}</span> : '—'}</td>
+                    <td className="px-2 py-1 text-right font-semibold text-emerald-300">{brl(s.total)}</td>
+                    <td className="px-2 py-1 text-right text-zinc-500">{s.scheduledDays > 0 || s.offDays > 0 ? `${s.scheduledDays}d / ${s.offDays}f` : '—'}</td>
+                  </tr>
+                ))}
+                {sr.monthly.length === 0 && <tr><td colSpan={11} className="px-2 py-3 text-center text-zinc-500">Sem vendas, escala nem cotas no mês pra esta loja.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          {sr.manager && (
+            <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-zinc-300">
+              <span className="font-medium text-emerald-200">Gerente — {sr.manager.name}:</span>{' '}
+              loja {pct(sr.manager.storeTierPercent)} = {brl(sr.manager.storeTierAmount)}{!sr.manager.storeQuotaHit && sr.manager.storeTierPercent > 0 ? ' (sem cota — só a faixa base)' : ''}
+              {' · '}venda própria {pct(sr.manager.ownTierPercent)} = {brl(sr.manager.ownTierAmount)}
+              {' · '}P.A da loja {sr.manager.storePa ? sr.manager.storePa.toFixed(2) : '—'}{sr.manager.paBonus > 0 ? ` +${brl(sr.manager.paBonus)}` : ''}
+              {' · '}semanal {brl(sr.manager.weeklyTotal)}
+              {sr.manager.deviationPrize > 0 ? <> · desvio entre lojas <span className="text-emerald-300">{brl(sr.manager.deviationPrize)}</span></> : null}
+              {' · '}<span className="font-semibold text-emerald-300">total {brl(sr.manager.total)}</span>
+            </div>
+          )}
+
+          <button onClick={() => setOpenWeeks(p => ({ ...p, [sr.storeId]: !p[sr.storeId] }))} className="mt-2 text-[11px] text-indigo-300 hover:text-indigo-200">
+            {openWeeks[sr.storeId] ? '▾ Esconder as semanas' : '▸ Ver a corrida semana a semana'}
+          </button>
+          {openWeeks[sr.storeId] && sr.weeks.map((w: any) => (
+            <div key={w.start} className="mt-2 rounded border border-zinc-800/70 p-2">
+              <div className="text-[11px] text-zinc-400">{w.start.slice(8)}/{w.start.slice(5, 7)} → {w.end.slice(8)}/{w.end.slice(5, 7)} · loja {brl(w.storeSales)} / cota {brl(w.storeQuota)}</div>
+              <div className="mt-1 grid gap-1">
+                {w.sellers.filter((s: any) => s.sales > 0 || s.quota > 0).map((s: any) => (
+                  <div key={s.sellerKey} className="flex items-center gap-2 text-[11px]">
+                    <span className={`w-6 text-right ${s.rank <= 2 ? 'text-amber-300' : 'text-zinc-600'}`}>{s.rank}º</span>
+                    <span className="text-zinc-300 min-w-24">{s.sellerName}</span>
+                    <span className="text-zinc-400">{brl(s.sales)}</span>
+                    <span className="text-zinc-600">/ {s.quotaSource === 'none' ? 'sem cota' : brl(s.quota)}</span>
+                    {s.pa > 0 && <span className="text-zinc-600">P.A {s.pa.toFixed(2)}</span>}
+                    {s.prize.total > 0 && <span className="ml-auto text-emerald-300">{pct(s.prize.percent)} → {brl(s.prize.total)}</span>}
+                    {s.prize.total === 0 && s.rank <= 2 && s.prize.reasons.length > 0 && <span className="ml-auto text-amber-300/80">{s.prize.reasons.includes('sem_cota') ? 'sem cota cadastrada' : 'cota não batida'}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {race && !storeId && (race.networkDeviation.sellers.length > 0 || race.networkDeviation.stores.length > 0) && (
+        <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-300">
+          <span className="font-medium text-amber-200">Desvio de cota da rede:</span>{' '}
+          {race.networkDeviation.sellers.map((s: any, i: number) => (
+            <span key={s.sellerKey}>{i > 0 && ' · '}{i + 1}º {s.sellerName} ({s.storeName}) +{s.attainment - 100 > 0 ? Math.round((s.attainment - 100) * 10) / 10 : 0}%{s.prize > 0 ? ` → ${brl(s.prize)}` : ''}</span>
+          ))}
+          {race.networkDeviation.stores.length > 0 && <span className="text-zinc-500"> | Lojas: {race.networkDeviation.stores.map((s: any, i: number) => `${i + 1}º ${s.storeName} (+${s.deviation}%)${s.prize > 0 ? ` → ${brl(s.prize)}` : ''}`).join(' · ')}</span>}
+        </div>
+      )}
+      {race && <div className="mt-2 text-right text-sm text-zinc-300">Total da corrida: <span className="font-semibold text-emerald-300">{brl(race.totals.grand)}</span> <span className="text-zinc-500">(vendedores {brl(race.totals.sellers)} · gerentes {brl(race.totals.managers)})</span></div>}
+      {planModal && <RacePlanModal stores={stores} onClose={() => setPlanModal(false)} />}
+    </div>
+  );
+}
+
+// ---- Escala semanal + cotas por vendedor (Fase G2) --------------------------
+function ScheduleTab() {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState('');
+  const [sellers, setSellers] = useState<any[]>([]);
+  // Semana exibida na grade (domingo → sábado).
+  const sundayOf = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); return x.toISOString().slice(0, 10); };
+  const [weekStart, setWeekStart] = useState(() => sundayOf(new Date()));
+  const addDays = (d: string, n: number) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const DOW = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
+  // grade[date][sellerKey] = 'work' | 'off' | undefined
+  const [grid, setGrid] = useState<Record<string, Record<string, string>>>({});
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Cotas semanais do mês (semanas da CORRIDA — podem colar o começo quebrado).
+  const [month, setMonth] = useState(() => todayStr().slice(0, 7));
+  const [raceWeeks, setRaceWeeks] = useState<any[]>([]);
+  const [quotaGrid, setQuotaGrid] = useState<Record<string, Record<string, string>>>({}); // [weekStart][sellerKey] = valor
+  const [savingQuotas, setSavingQuotas] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const [st, se] = await Promise.all([
+        apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({})),
+        apiFetch('/api/retailops/sellers').then(r => r.json()).catch(() => ({})),
+      ]);
+      const ss = Array.isArray(st?.stores) ? st.stores : [];
+      setStores(ss);
+      if (ss.length && !storeId) setStoreId(ss[0].id);
+      setSellers(Array.isArray(se?.sellers) ? se.sellers.filter((x: any) => x.active !== 0) : []);
+    })();
+    // eslint-disable-next-line
+  }, []);
+
+  const keyOf = (s: any) => `mat:${s.matricula}`;
+
+  const loadWeek = async () => {
+    if (!storeId) return;
+    setLoading(true);
+    try {
+      const end = addDays(weekStart, 6);
+      const d = await apiFetch(`/api/retailops/schedule?storeId=${storeId}&start=${weekStart}&end=${end}`).then(r => r.json()).catch(() => null);
+      const g: Record<string, Record<string, string>> = {};
+      for (const e of d?.entries || []) { g[e.work_date] = g[e.work_date] || {}; g[e.work_date][e.seller_key] = e.status; }
+      setGrid(g);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { loadWeek(); /* eslint-disable-next-line */ }, [storeId, weekStart]);
+
+  const loadQuotas = async () => {
+    if (!storeId) return;
+    const d = await apiFetch(`/api/retailops/seller-quotas?storeId=${storeId}&month=${month}`).then(r => r.json()).catch(() => null);
+    setRaceWeeks(Array.isArray(d?.weeks) ? d.weeks : []);
+    const g: Record<string, Record<string, string>> = {};
+    for (const q of d?.quotas || []) { g[q.week_start] = g[q.week_start] || {}; g[q.week_start][q.seller_key] = String(q.quota_amount); }
+    setQuotaGrid(g);
+  };
+  useEffect(() => { loadQuotas(); /* eslint-disable-next-line */ }, [storeId, month]);
+
+  // Clique na célula: (vazio) → trabalha → folga → (vazio).
+  const cycle = (date: string, sk: string) => {
+    setGrid(p => {
+      const cur = p[date]?.[sk];
+      const next = { ...p, [date]: { ...(p[date] || {}) } };
+      if (!cur) next[date][sk] = 'work';
+      else if (cur === 'work') next[date][sk] = 'off';
+      else delete next[date][sk];
+      return next;
+    });
+  };
+
+  const saveWeek = async () => {
+    setSaving(true);
+    try {
+      const entries: any[] = [];
+      for (const date of days) for (const [sk, status] of Object.entries(grid[date] || {})) {
+        const s = sellers.find(x => keyOf(x) === sk);
+        entries.push({ date, sellerKey: sk, sellerName: s?.name || sk.replace(/^(mat|nom|user):/, ''), status });
+      }
+      const res = await apiFetch('/api/retailops/schedule', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, start: weekStart, end: addDays(weekStart, 6), entries }) });
+      if (res.ok) toast.success('Escala da semana salva.');
+      else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar a escala.'); }
+    } finally { setSaving(false); }
+  };
+  const copyPrevious = async () => {
+    const res = await apiFetch('/api/retailops/schedule/copy-week', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, fromStart: addDays(weekStart, -7), toStart: weekStart }) });
+    if (res.ok) { toast.success('Escala copiada da semana anterior.'); loadWeek(); }
+    else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao copiar.'); }
+  };
+
+  const saveQuotas = async () => {
+    setSavingQuotas(true);
+    try {
+      for (const w of raceWeeks) {
+        const row = quotaGrid[w.start] || {};
+        const quotas = Object.entries(row)
+          .filter(([, v]) => String(v).trim() !== '')
+          .map(([sk, v]) => ({ sellerKey: sk, sellerName: sellers.find(x => keyOf(x) === sk)?.name, amount: Number(v) || 0 }));
+        if (!quotas.length) continue;
+        const res = await apiFetch('/api/retailops/seller-quotas', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, weekStart: w.start, quotas }) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar as cotas.'); return; }
+      }
+      toast.success('Cotas semanais salvas.');
+    } finally { setSavingQuotas(false); }
+  };
+
+  // Quantos escalados 'work' por dia — o denominador do "cota ÷ escalados".
+  const workCount = (date: string) => Object.values(grid[date] || {}).filter(s => s === 'work').length;
+
+  if (!stores.length) return <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Cadastre as lojas na aba <strong>Comissão</strong> (botão “Nova loja”) pra montar a escala.</p>;
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><CalendarDays className="w-4 h-4 text-indigo-400" /> Escala semanal</div>
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">← semana</button>
+        <span className="text-xs text-zinc-400">{days[0].slice(8)}/{days[0].slice(5, 7)} → {days[6].slice(8)}/{days[6].slice(5, 7)}</span>
+        <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">semana →</button>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={copyPrevious} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Copiar semana anterior</button>
+          <button onClick={saveWeek} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar escala</button>
+        </div>
+      </div>
+      <p className="mb-3 text-[11px] text-zinc-500">Clique na célula pra alternar: <span className="text-emerald-300">trabalha</span> → <span className="text-red-300">folga</span> → vazio. A cota individual derivada usa a cota diária da loja ÷ nº de escalados do dia (o “COTA ÷ 4” da folha de fechamento) quando não há cota semanal cadastrada abaixo.</p>
+
+      {sellers.length === 0 ? (
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum vendedor cadastrado. Associe as matrículas em <strong>Comissão › Vendas por vendedor (PDV)</strong> ou cadastre a equipe no módulo Atendimento de Loja.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/60 text-zinc-400">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Vendedor</th>
+                {days.map((d, i) => <th key={d} className="px-2 py-2 text-center font-medium">{DOW[i]}<br /><span className="text-[10px] text-zinc-600">{d.slice(8)}/{d.slice(5, 7)}</span></th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {sellers.map((s: any) => {
+                const sk = keyOf(s);
+                return (
+                  <tr key={sk} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-1.5 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                    {days.map(d => {
+                      const st = grid[d]?.[sk];
+                      return (
+                        <td key={d} className="px-1 py-1 text-center">
+                          <button onClick={() => cycle(d, sk)} className={`w-full rounded px-1 py-1 text-[11px] border ${st === 'work' ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' : st === 'off' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-zinc-800 text-zinc-600 hover:bg-zinc-800/60'}`}>
+                            {st === 'work' ? 'trabalha' : st === 'off' ? 'folga' : '—'}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-zinc-700 bg-zinc-900/40 text-zinc-400">
+                <td className="px-3 py-1.5">Escalados no dia</td>
+                {days.map(d => <td key={d} className="px-2 py-1.5 text-center">{workCount(d) || '—'}</td>)}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+      {loading && <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando escala…</div>}
+
+      {/* Cotas semanais individuais (as semanas da CORRIDA do mês) */}
+      <div className="mt-5">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-emerald-400" /> Cotas semanais por vendedor</div>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+          <button onClick={saveQuotas} disabled={savingQuotas} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{savingQuotas ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar cotas</button>
+        </div>
+        <p className="mb-2 text-[11px] text-zinc-500">A cota que cada vendedor precisa bater em cada semana da corrida (a mensal é a soma). Em branco = usa a derivada da escala.</p>
+        {sellers.length > 0 && raceWeeks.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-xs">
+              <thead className="bg-zinc-900/60 text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Vendedor</th>
+                  {raceWeeks.map((w: any) => <th key={w.start} className="px-2 py-2 text-center font-medium">{w.start.slice(8)}/{w.start.slice(5, 7)} → {w.end.slice(8)}/{w.end.slice(5, 7)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {sellers.map((s: any) => {
+                  const sk = keyOf(s);
+                  return (
+                    <tr key={sk} className="border-t border-zinc-800/70">
+                      <td className="px-3 py-1.5 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                      {raceWeeks.map((w: any) => (
+                        <td key={w.start} className="px-2 py-1 text-center">
+                          <input type="number" step="50" placeholder="—" value={quotaGrid[w.start]?.[sk] ?? ''} onChange={e => setQuotaGrid(p => ({ ...p, [w.start]: { ...(p[w.start] || {}), [sk]: e.target.value } }))} className="w-24 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-xs text-zinc-100 text-right" />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CommissionTab() {
   const [runs, setRuns] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
@@ -2172,6 +2646,9 @@ function CommissionTab() {
 
   return (
     <div>
+      {/* Corrida do mês (Fase G2 — modelo da planilha do cliente) */}
+      <RaceSection stores={stores} />
+
       <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-indigo-400" /> Regras de comissão</div>

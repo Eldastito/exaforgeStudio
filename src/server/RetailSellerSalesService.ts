@@ -22,6 +22,8 @@ export type SellerSaleEntry = {
   matricula?: string | null;
   valor?: number;
   pecas?: number;
+  /** AT da folha de fechamento — denominador do P.A (ADR-083 Fase G2). */
+  atendimentos?: number;
 };
 
 /** Chave para consolidar um vendedor: matrícula (se houver) ou nome normalizado. */
@@ -66,8 +68,8 @@ export class RetailSellerSalesService {
     const rows = Array.isArray(input.entries) ? input.entries : [];
     const created: string[] = [];
     const insert = db.prepare(
-      `INSERT INTO retail_seller_sales (id, organization_id, store_id, sale_date, seller_name, matricula, valor, pecas, source, image_url, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_seller_sales (id, organization_id, store_id, sale_date, seller_name, matricula, valor, pecas, atendimentos, source, image_url, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const tx = db.transaction((entries: SellerSaleEntry[]) => {
       for (const e of entries) {
@@ -76,7 +78,7 @@ export class RetailSellerSalesService {
         const pecas = Number(e.pecas || 0) || 0;
         if (!name || (valor <= 0 && pecas <= 0)) continue;
         const id = randomUUID();
-        insert.run(id, orgId, storeId, saleDate, name, e.matricula ? String(e.matricula).trim() : null, valor, pecas, source, input.imageUrl || null, actorId || null);
+        insert.run(id, orgId, storeId, saleDate, name, e.matricula ? String(e.matricula).trim() : null, valor, pecas, Number(e.atendimentos || 0) || 0, source, input.imageUrl || null, actorId || null);
         created.push(id);
       }
     });
@@ -95,7 +97,7 @@ export class RetailSellerSalesService {
   static update(
     orgId: string,
     id: string,
-    patch: { sellerName?: string; valor?: number; pecas?: number; saleDate?: string; storeId?: string | null; matricula?: string | null },
+    patch: { sellerName?: string; valor?: number; pecas?: number; atendimentos?: number; saleDate?: string; storeId?: string | null; matricula?: string | null },
     actorId?: string
   ): any | null {
     const row = db.prepare(`SELECT * FROM retail_seller_sales WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
@@ -109,6 +111,7 @@ export class RetailSellerSalesService {
     }
     if (patch.valor !== undefined) { sets.push("valor = ?"); vals.push(round2(patch.valor)); }
     if (patch.pecas !== undefined) { sets.push("pecas = ?"); vals.push(Number(patch.pecas || 0) || 0); }
+    if (patch.atendimentos !== undefined) { sets.push("atendimentos = ?"); vals.push(Number(patch.atendimentos || 0) || 0); }
     if (patch.saleDate !== undefined) {
       const d = String(patch.saleDate || "").slice(0, 10);
       if (!d) throw new Error("Data inválida.");
@@ -171,7 +174,7 @@ export class RetailSellerSalesService {
     try { parsed = JSON.parse((await extractor(base64, mimetype)) || "{}"); } catch { parsed = {}; }
     const list = Array.isArray(parsed?.vendedores) ? parsed.vendedores : [];
     const entries: SellerSaleEntry[] = list
-      .map((v: any) => ({ sellerName: String(v?.nome || "").trim(), valor: Number(v?.valor || 0) || 0, pecas: Number(v?.pecas || 0) || 0 }))
+      .map((v: any) => ({ sellerName: String(v?.nome || "").trim(), valor: Number(v?.valor || 0) || 0, pecas: Number(v?.pecas || 0) || 0, atendimentos: Number(v?.atendimentos || 0) || 0 }))
       .filter((e: SellerSaleEntry) => e.sellerName && ((e.valor || 0) > 0 || (e.pecas || 0) > 0));
     const confidence = Number(parsed?.confidence ?? 0);
     const minConf = Number(process.env.RETAIL_SELLER_SALES_MIN_CONFIDENCE || 80);

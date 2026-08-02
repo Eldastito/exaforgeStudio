@@ -6724,6 +6724,13 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_floor_digest_log', e); }
+
+  // ============================================================
+  // ADR-150 — Retail Floor Fatia 11 (UI/UX): foto do vendedor
+  // ============================================================
+  // O card do vendedor no Kanban mostra a foto (pedido do cliente TOULON).
+  // Aditivo em retail_sellers — NULL cai no Avatar de iniciais da UI.
+  try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN photo_url TEXT`); } catch(e){}
 };
 
 initDb();

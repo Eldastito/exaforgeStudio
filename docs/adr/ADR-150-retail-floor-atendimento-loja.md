@@ -160,7 +160,30 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | 8 | Sinais para o Orquestrador (7 tipos) | **MERGED (PR #718)** |
 | 9 | Analytics da loja + modo calibração + piloto TOULON | **MERGED (PR #719)** |
 | 10 | Pós-piloto: comparativo de rede (owner/admin) + resumo diário da loja por WhatsApp (opt-in, ADR-108 como destinatários) | **MERGED (PR #720)** |
-| Ops | CLI de ativação do piloto (`pilot-retail-floor`): find/plan/apply idempotente + checklist de prontidão | **ENTREGUE (PR desta fatia)** |
+| Ops | CLI de ativação do piloto (`pilot-retail-floor`): find/plan/apply idempotente + checklist de prontidão | **ENTREGUE (PR #721)** |
+| 11 | UI/UX: redesign ZappFlow (Kanban DnD + KPIs, PR #723) + onboarding guiado (loja → equipe → turno) + cadastro de equipe com FOTO (`retail_sellers.photo_url` + `POST/PUT /sellers`) + escala do dia ao abrir turno | **PR desta fatia** |
+
+## Fatia 11 — UI/UX (feedback do cliente TOULON)
+
+O cliente pediu explicitamente: vendedores com **foto nos cards**, lojista
+**cadastra a equipe** e **associa ao turno**, e a tela abrindo **direto no
+Kanban com KPIs**. Entregue:
+
+1. **Foto do vendedor** — aditivo `retail_sellers.photo_url`; upload reusa
+   `POST /api/uploads/image` (multer → `/media/*`); `photoUrl` exposto no
+   contexto, na fila (`ordered`) e no card (Avatar cai em iniciais sem foto).
+2. **Cadastro de equipe pela UI** (`POST /sellers`, `PUT /sellers/:id`,
+   escopo `assertAnyManager` — gestor de alguma loja ou owner/admin).
+   Matrícula do PDV é opcional no cadastro: sem ela geramos placeholder
+   `LV-xxxxxx` (trocável depois SEM perder histórico — id preservado);
+   a conciliação PDV continua usando a matrícula real quando existir.
+3. **Onboarding guiado** — sem loja: cria a primeira loja inline
+   (owner/admin) em vez do erro críptico "storeId é obrigatório"; sem
+   equipe: CTA de cadastro; com equipe: abrir turno.
+4. **Escala do dia** — "Abrir turno" pergunta *quem trabalha hoje?*
+   (multi-select com fotos) e já coloca os selecionados na lista da vez —
+   o vínculo vendedor↔turno que o cliente pediu, sem prender o vendedor
+   à loja no cadastro (mantém ADR-150 §"Vínculo vendedor↔loja").
 
 ## Fatia 10 — pós-piloto (entregue)
 

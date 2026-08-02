@@ -51,6 +51,29 @@ router.put("/settings", requireRole("owner", "admin"), (req: AuthRequest, res) =
   }
 });
 
+// ---- Fatia 11 (UI/UX): cadastro de equipe pela loja (nome + foto) ----
+// Escopo: gestor de alguma loja ou owner/admin (assertAnyManager). O vendedor
+// não é preso a uma loja (ADR-150 §"Vínculo vendedor↔loja") — o vínculo do
+// dia é o roster do turno.
+
+router.post("/sellers", (req: AuthRequest, res) => {
+  try {
+    RetailFloorService.assertAnyManager(req.organizationId!, req.user);
+    res.json(RetailFloorService.createSeller(req.organizationId!, {
+      name: req.body?.name, matricula: req.body?.matricula, photoUrl: req.body?.photoUrl,
+    }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
+router.put("/sellers/:id", (req: AuthRequest, res) => {
+  try {
+    RetailFloorService.assertAnyManager(req.organizationId!, req.user);
+    res.json(RetailFloorService.updateSeller(req.organizationId!, req.params.id, {
+      name: req.body?.name, matricula: req.body?.matricula, photoUrl: req.body?.photoUrl, active: req.body?.active,
+    }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
 // ---- Fatia 2: turno + lista da vez ----
 
 // Abre o turno da loja (gestor da loja — RN-150-005).

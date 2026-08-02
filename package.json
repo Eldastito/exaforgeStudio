@@ -158,6 +158,7 @@
     "test:retail-floor-shift-queue": "tsx scripts/test-retail-floor-shift-queue.ts",
     "test:retail-floor-attendance": "tsx scripts/test-retail-floor-attendance.ts",
     "test:retail-floor-outcomes": "tsx scripts/test-retail-floor-outcomes.ts",
+    "test:retail-floor-scan": "tsx scripts/test-retail-floor-scan.ts",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
     "test:product-instock": "tsx scripts/test-product-instock.ts",
     "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",

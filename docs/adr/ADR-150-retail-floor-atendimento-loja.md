@@ -171,7 +171,28 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | Ops | CLI de ativação do piloto (`pilot-retail-floor`): find/plan/apply idempotente + checklist de prontidão | **ENTREGUE (PR #721)** |
 | 11 | UI/UX: redesign ZappFlow (Kanban DnD + KPIs, PR #723) + onboarding guiado (loja → equipe → turno) + cadastro de equipe com FOTO (`retail_sellers.photo_url` + `POST/PUT /sellers`) + escala do dia ao abrir turno | **MERGED (PRs #724–#726)** |
 | 12 | Modo quiosque: vendedor vê SÓ a Lista da Vez; funções de gestão (conciliação, indicadores, rede, fechar turno, equipe, troca de loja) atrás do PIN da gerência por loja (molde Clínica Fase 28: sha256(salt+pin) + timingSafeEqual + lockout 5×/15min); loja FIXA na 1ª escolha do aparelho | **MERGED (PR #727)** |
-| 13 | Analytics v2: ticket médio + PA (declarado × confirmado), ruptura em R$, walkout por hora, série por dia, conversão com × sem consulta de peça, taxa de auto-encerrados; ops via audit (`/analytics/ops`): fila furada autorizada, pausas por vendedor, destino pós-atendimento | **PR desta fatia** |
+| 13 | Analytics v2: ticket médio + PA (declarado × confirmado), ruptura em R$, walkout por hora, série por dia, conversão com × sem consulta de peça, taxa de auto-encerrados; ops via audit (`/analytics/ops`): fila furada autorizada, pausas por vendedor, destino pós-atendimento | **MERGED (PR #731)** |
+| 14 | Gráficos do dono: funil de venda (loja + rede consolidada), comparativo visual por loja na Rede (conversão/ticket/ruptura), mapa de escala (heatmap dia-da-semana × hora, `byWeekdayHour`), Pareto de perdas com % acumulado | **PR desta fatia** |
+
+## Fatia 14 — Gráficos do dono
+
+Quatro visuais sobre dados existentes (único aditivo de API: `byWeekdayHour`
+no `/analytics/store` e `declaredCount`/`confirmedCount` nas linhas da rede).
+Sem lib de gráfico — divs puros como os gráficos da Fatia 13 (leve pro
+tablet, sem dependência nova).
+
+1. **Funil de venda** (loja e rede): atendimentos → com desfecho → venda
+   declarada → confirmada no PDV, cada barra com % sobre o degrau ANTERIOR.
+   Degrau decidido→declarada encolhendo = problema de conversão; declarada→
+   confirmada = gap com o PDV (conciliação ou declaração sem venda).
+2. **Lojas lado a lado** (aba Rede): barras horizontais por loja — conversão
+   confirmada, ticket confirmado e ruptura em R$. Ordem alfabética; o texto
+   da aba segue explícito: a comparação é do humano (RN-150-006).
+3. **Mapa de escala**: heatmap dia-da-semana × hora de início — o "por hora"
+   agregado mistura terça com sábado e esconde o padrão de escala; o heatmap
+   mostra onde precisa de gente.
+4. **Pareto de perdas**: a lista "por que não converteu" ganhou barra
+   proporcional + % acumulado (o 80/20 visível).
 
 ## Fatia 13 — Analytics v2 (métricas sobre dados já gravados)
 

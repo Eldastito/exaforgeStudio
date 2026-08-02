@@ -21,6 +21,11 @@ transferência.
 
 1. Mesmo login/JWT/sessão/organização do ZappFlow. Rota `/api/retail-floor/*`,
    gateada por `ModuleService.MODULE_BY_ROUTE["retail-floor"] = "retail_floor"`.
+   **UI (Fatia 7):** o caminho `/loja/*` do PRD JÁ pertence à vitrine pública
+   (storefront) — a tela vive como aba `retailfloor` do app autenticado
+   (Sidebar gateada pelo módulo; `organization_settings.default_landing_view`
+   pode apontar direto pra ela). Realtime por POLLING curto (8s) — snapshot
+   barato; upgrade pra socket.io (sala `org:*` existente) se o piloto pedir.
 2. `retail_floor` entra em `ADDON_MODULES` (nenhuma vertical liga sozinha) e em
    `PLAN_FREE_ADDONS` (o dono liga em Configurações › Módulos, como o Retail
    Ops — é operacional do piloto TOULON, billing mockado).
@@ -136,8 +141,8 @@ as contagens que sustentam o sinal (RN-150-006).
 | 3 | Atendimento start/finish com transação atômica (1 ativo por vendedor) + auto-encerramento | **MERGED (PR #713)** |
 | 4 | Taxonomia de desfecho hierárquica + política de retorno à fila | **MERGED (PR #714)** |
 | 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | **MERGED (PR #715)** |
-| 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | **ENTREGUE (PR desta fatia)** |
-| 7 | UI `/loja/atendimento` (Kanban realtime via SSE + fallback polling) | pendente |
+| 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | **MERGED (PR #716)** |
+| 7 | UI (Kanban + encerramento + consulta de peça + conciliação; polling 8s) | **ENTREGUE (PR desta fatia)** |
 | 8 | Sinais para o Orquestrador (7 tipos) | pendente |
 | 9 | Analytics da loja + modo calibração + piloto TOULON | pendente |
 

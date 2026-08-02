@@ -34,6 +34,7 @@ import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
+import { RetailFloorView } from '@/src/features/RetailFloorView';
 import { LegalAdvisorView } from '@/src/features/LegalAdvisorView';
 import { CashView } from '@/src/features/CashView';
 import { HealthCenterView } from '@/src/features/HealthCenterView';
@@ -105,7 +106,7 @@ export default function App() {
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
       vision: 'vms', radar: 'radar', clinica: 'clinica', prospect: 'prospect', radar_b2b: 'prospect',
-      retailops: 'retail', comigo: 'copiloto',
+      retailops: 'retail', retailfloor: 'retail_floor', comigo: 'copiloto',
     };
     const mod = map[viewMode];
     // Só redireciona DEPOIS que a config da org carregou (enabledModules != null),
@@ -261,6 +262,7 @@ export default function App() {
              {viewMode === 'escuta' && 'Escuta Ativa'}
              {viewMode === 'admin' && 'Admin Master'}
              {viewMode === 'retailops' && 'Operação da Rede'}
+             {viewMode === 'retailfloor' && 'Atendimento de Loja'}
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'areas' && 'Áreas de Atendimento'}
              {viewMode === 'dashboard' && 'Dashboard'}
@@ -373,6 +375,7 @@ export default function App() {
           {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
           {viewMode === 'retailops' && <RetailOpsView />}
+          {viewMode === 'retailfloor' && <RetailFloorView />}
           {viewMode === 'comigo' && <ComigoView />}
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}

@@ -103,11 +103,22 @@ export class RetailFloorService {
       `SELECT id, matricula, name FROM retail_sellers WHERE organization_id = ? AND user_id = ? AND active = 1 LIMIT 1`
     ).get(orgId, userId) as any : null;
 
+    // Fatia 7 (UI): todo mundo vê a lista mínima de lojas (o vendedor precisa
+    // achar o turno aberto pra entrar na vez); o roster de vendedores só vai
+    // pra quem gerencia alguma loja (adicionar terceiro à fila é de gestor).
+    const stores = allStores.map((s) => ({ id: s.id, name: s.name, code: s.code || null }));
+    const sellers = manageableStores.length
+      ? (db.prepare(`SELECT id, matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
+          .map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null }))
+      : [];
+
     return {
       module: "retail_floor",
       role,
       canConfigure: isOrgAdmin,
       manageableStores,
+      stores,
+      sellers,
       // O vendedor entra na fila de QUALQUER loja com turno aberto (o roster do
       // turno é o vínculo do dia — ADR-150 §"Vínculo vendedor↔loja"), por isso
       // o contexto não prende o vendedor a uma loja.

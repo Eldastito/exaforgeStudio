@@ -28,6 +28,7 @@ import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliver
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
+import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
@@ -90,6 +91,27 @@ export class Scheduler {
     // Retail Ops (ADR-083, Fase D): cobrança de fechamento/malote/escala. No
     // passe rápido porque a recobrança é sensível a minutos (retry_minutes).
     await this.retailCobrancaPass().catch(e => console.error('[Scheduler] cobrança Retail Ops falhou', e));
+    // Retail Floor (ADR-150, Fatia 3): auto-encerra atendimento esquecido além
+    // de auto_close_minutes. Sensível a minutos → passe rápido.
+    try { this.retailFloorAutoClosePass(); } catch (e: any) { console.error('[Scheduler] auto-encerramento Retail Floor falhou', e?.message); }
+  }
+
+  /**
+   * Retail Floor (ADR-150, Fatia 3) — fecha com outcome='unknown' o
+   * atendimento aberto além do teto da org e devolve o vendedor pra fila.
+   * Best-effort por-org; só orgs com o módulo habilitado.
+   */
+  static retailFloorAutoClosePass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT DISTINCT organization_id FROM retail_floor_attendances WHERE ended_at IS NULL`).all() as any[];
+    } catch { return; }
+    for (const o of orgs) {
+      try {
+        if (!ModuleService.isEnabled(o.organization_id, "retail_floor")) continue;
+        RetailFloorAttendanceService.autoCloseStale(o.organization_id);
+      } catch (e) { console.error("[RetailFloor] auto-encerramento falhou", o.organization_id, e); }
+    }
   }
 
   /**

@@ -156,6 +156,7 @@
     "test:retail-erp-seller-sales": "tsx scripts/test-retail-erp-seller-sales.ts",
     "test:retail-floor-foundation": "tsx scripts/test-retail-floor-foundation.ts",
     "test:retail-floor-shift-queue": "tsx scripts/test-retail-floor-shift-queue.ts",
+    "test:retail-floor-attendance": "tsx scripts/test-retail-floor-attendance.ts",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
     "test:product-instock": "tsx scripts/test-product-instock.ts",
     "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",

@@ -1147,6 +1147,10 @@ function ClosingsTab() {
               {stores.map((s) => {
                 const c = byStore[s.id];
                 const variance = Number(c?.variance_amount || 0);
+                // Desvio como % da cota — R$ negativo grande pesa demais na loja; o % conta a mesma
+                // história sem escancarar o rombo (ex.: "-8%" no lugar de "-R$ 2.000,00").
+                const quotaAmt = Number(c?.quota_amount || 0);
+                const variancePct = quotaAmt > 0 ? (variance / quotaAmt) * 100 : null;
                 return (
                   <tr key={s.id} className={`border-t border-zinc-800/70 ${!s.active ? 'opacity-50' : ''}`}>
                     <td className="px-3 py-2 text-zinc-200">
@@ -1171,7 +1175,11 @@ function ClosingsTab() {
                     <td className="px-3 py-2">{c ? <Badge map={CLOSING_STATUS} s={c.status} /> : <span className="text-xs text-zinc-500">—</span>}</td>
                     <td className="px-3 py-2 text-right text-zinc-400">{c ? brl(c.quota_amount) : '—'}</td>
                     <td className="px-3 py-2 text-right text-zinc-200">{c?.informed_total != null ? brl(c.informed_total) : '—'}</td>
-                    <td className={`px-3 py-2 text-right ${variance < 0 ? 'text-red-300' : variance > 0 ? 'text-emerald-300' : 'text-zinc-500'}`}>{c?.informed_total != null ? brl(variance) : '—'}</td>
+                    <td className={`px-3 py-2 text-right ${variance < 0 ? 'text-red-300' : variance > 0 ? 'text-emerald-300' : 'text-zinc-500'}`}>
+                      {c?.informed_total != null && variancePct != null
+                        ? `${variancePct > 0 ? '+' : ''}${variancePct.toFixed(1)}%`
+                        : '—'}
+                    </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => openInform(s)} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-800">{c && c.informed_total != null ? 'Editar' : 'Informar'}</button>

@@ -175,6 +175,7 @@ jobs:
           - { name: 'retail-floor-reconciliation', script: 'test:retail-floor-reconciliation' }
           - { name: 'retail-floor-signals', script: 'test:retail-floor-signals' }
           - { name: 'retail-floor-analytics', script: 'test:retail-floor-analytics' }
+          - { name: 'retail-floor-analytics-v2', script: 'test:retail-floor-analytics-v2' }
           - { name: 'retail-floor-digest', script: 'test:retail-floor-digest' }
           - { name: 'retail-floor-pilot', script: 'test:retail-floor-pilot' }
           - { name: 'retail-floor-team', script: 'test:retail-floor-team' }

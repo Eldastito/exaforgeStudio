@@ -170,7 +170,39 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | 10 | Pós-piloto: comparativo de rede (owner/admin) + resumo diário da loja por WhatsApp (opt-in, ADR-108 como destinatários) | **MERGED (PR #720)** |
 | Ops | CLI de ativação do piloto (`pilot-retail-floor`): find/plan/apply idempotente + checklist de prontidão | **ENTREGUE (PR #721)** |
 | 11 | UI/UX: redesign ZappFlow (Kanban DnD + KPIs, PR #723) + onboarding guiado (loja → equipe → turno) + cadastro de equipe com FOTO (`retail_sellers.photo_url` + `POST/PUT /sellers`) + escala do dia ao abrir turno | **MERGED (PRs #724–#726)** |
-| 12 | Modo quiosque: vendedor vê SÓ a Lista da Vez; funções de gestão (conciliação, indicadores, rede, fechar turno, equipe, troca de loja) atrás do PIN da gerência por loja (molde Clínica Fase 28: sha256(salt+pin) + timingSafeEqual + lockout 5×/15min); loja FIXA na 1ª escolha do aparelho | **PR desta fatia** |
+| 12 | Modo quiosque: vendedor vê SÓ a Lista da Vez; funções de gestão (conciliação, indicadores, rede, fechar turno, equipe, troca de loja) atrás do PIN da gerência por loja (molde Clínica Fase 28: sha256(salt+pin) + timingSafeEqual + lockout 5×/15min); loja FIXA na 1ª escolha do aparelho | **MERGED (PR #727)** |
+| 13 | Analytics v2: ticket médio + PA (declarado × confirmado), ruptura em R$, walkout por hora, série por dia, conversão com × sem consulta de peça, taxa de auto-encerrados; ops via audit (`/analytics/ops`): fila furada autorizada, pausas por vendedor, destino pós-atendimento | **PR desta fatia** |
+
+## Fatia 13 — Analytics v2 (métricas sobre dados já gravados)
+
+Zero migração de schema: tudo é agregação nova sobre o que o módulo já
+grava, mantendo as regras duras da Fatia 9 (dois números rotulados
+declarado × confirmado — RN-150-004; nada ranqueia vendedor — RN-150-006).
+
+1. **Painel da loja** (`/analytics/store`) ganhou: `ticketDeclared`/
+   `ticketConfirmed` e `piecesPerSaleDeclared`/`piecesPerSaleConfirmed`
+   (média só sobre linhas com o dado preenchido); `unknownCount`/`unknownPct`
+   (higiene: auto-encerrado alto = cronômetro mal usado, números sem
+   confiança); `byHour` com `walkouts` (entrou-e-saiu no pico = loja
+   subdimensionada); `byDay` (série de tendência com contagens honestas);
+   `scanSplit` (conversão com × sem consulta de peça — mede o valor do
+   leitor); `unmetLostValue` (R$ da ruptura via preço do catálogo; peça sem
+   produto resolvido conta em `unpricedCount` — não fingimos precisão).
+2. **Rede** (Fatia 10) carrega `ticketConfirmed`, `unknownPct` e
+   `unmetLostValue` por loja.
+3. **Ops via audit** (`RetailFloorOpsMetricsService`, `GET /analytics/ops`,
+   escopo gestor): métricas de governança derivadas do `auth_audit_logs`,
+   sem tabela nova — fila furada AUTORIZADA (starts `override=true` da
+   RN-150-012: total/por dia/por vendedor beneficiado), pausas por vendedor
+   (pareamento entrada→saída do status; pausa em aberto conta na frequência
+   e NÃO nos minutos) e destino pós-atendimento (returnTo fila × pausa).
+   Escopo por loja resolvido via `shiftId` dos metadados; o audit do
+   `finish` passou a carregar `shiftId`/`storeId` (aditivo) — eventos
+   antigos ficam de fora e a métrica conta do deploy em diante (honesto).
+4. **UI**: 2ª fileira de KPIs (ticket, PA, entrou-e-saiu, auto-encerrados,
+   ruptura em R$, fila furada), split de consulta de peça, walkout empilhado
+   no gráfico por hora, série por dia e cards de pausas/furos por vendedor
+   (alfabético).
 
 ## Fatia 12 — Modo quiosque + PIN da gerência (feedback TOULON)
 

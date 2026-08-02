@@ -1506,6 +1506,7 @@ const LOSS_LABEL: Record<string, string> = {
 function AnalyticsPanel({ storeId }: { storeId: string }) {
   const [days, setDays] = useState(7);
   const [data, setData] = useState<any>(null);
+  const [ops, setOps] = useState<any>(null);
 
   useEffect(() => {
     if (!storeId) return;
@@ -1513,6 +1514,8 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
     const start = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
     api(`/analytics/store?storeId=${encodeURIComponent(storeId)}&start=${start}&end=${end}`)
       .then(setData).catch((e: any) => toast.error(e.message));
+    api(`/analytics/ops?storeId=${encodeURIComponent(storeId)}&start=${start}&end=${end}`)
+      .then(setOps).catch(() => { /* seção operacional é opcional no painel */ });
   }, [storeId, days]);
 
   if (!data) return <div className="p-6 text-[var(--color-text-muted)]"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Carregando…</div>;
@@ -1537,6 +1540,33 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
         <Stat label="TMA" v={t.avgServiceMinutes != null ? `${t.avgServiceMinutes} min` : '—'} />
         <Stat label="Valor confirmado" v={brl(t.confirmedValue)} />
       </div>
+      {/* Fatia 13 — ticket/PA (confirmado), higiene e ruptura em R$ */}
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
+        <Stat label="Ticket confirmado" v={t.ticketConfirmed != null ? brl(t.ticketConfirmed) : '—'} cls="text-emerald-400" />
+        <Stat label="Peças/venda (conf.)" v={t.piecesPerSaleConfirmed != null ? t.piecesPerSaleConfirmed : '—'} />
+        <Stat label="Entrou e saiu" v={t.byOutcome?.walkout || 0} cls="text-amber-300" />
+        <Stat label="Auto-encerrados" v={t.unknownPct != null ? `${t.unknownPct}%` : '0%'} cls={t.unknownPct > 10 ? 'text-rose-400' : undefined} />
+        <Stat label="Ruptura em R$" v={brl(data.unmetLostValue?.knownValue || 0)} cls="text-rose-400" />
+        <Stat label="Fila furada" v={ops ? ops.queueSkips.total : '—'} />
+      </div>
+      {/* Conversão com × sem consulta de peça — o valor do leitor em número */}
+      {(data.scanSplit?.withScan?.decided > 0 || data.scanSplit?.withoutScan?.decided > 0) && (
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+          <div className="mb-2 text-sm font-semibold text-[var(--color-text-strong)]">Consulta de peça × conversão</div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="rounded-xl bg-[var(--color-surface-2)]/50 px-3 py-2">
+              <span className="text-[var(--color-text-muted)]">Com consulta ({data.scanSplit.withScan.decided} atend.):</span>{' '}
+              <span className="font-semibold text-emerald-400">{data.scanSplit.withScan.conversionDeclaredPct ?? '—'}%</span>
+              <span className="text-xs text-[var(--color-text-muted)]"> declarada</span>
+            </div>
+            <div className="rounded-xl bg-[var(--color-surface-2)]/50 px-3 py-2">
+              <span className="text-[var(--color-text-muted)]">Sem consulta ({data.scanSplit.withoutScan.decided} atend.):</span>{' '}
+              <span className="font-semibold text-[var(--color-text-strong)]">{data.scanSplit.withoutScan.conversionDeclaredPct ?? '—'}%</span>
+              <span className="text-xs text-[var(--color-text-muted)]"> declarada</span>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
           <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">Por vendedor <span className="text-xs font-normal text-[var(--color-text-muted)]">(alfabético)</span></div>
@@ -1572,21 +1602,84 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
           {!data.topUnmet.length && <p className="py-2 text-sm text-zinc-600">Sem rupturas.</p>}
         </div>
       </div>
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
-        <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">Atendimentos por hora</div>
-        <div className="flex items-end gap-1" style={{ height: 80 }}>
-          {data.byHour.map((h: any) => {
-            const max = Math.max(...data.byHour.map((x: any) => x.count), 1);
-            return (
-              <div key={h.hour} className="flex flex-col items-center" title={`${h.hour}h: ${h.count}`}>
-                <div className="w-6 rounded-t bg-[var(--color-flow)]/60" style={{ height: `${(h.count / max) * 60 + 4}px` }} />
-                <span className="text-[10px] text-[var(--color-text-muted)]">{h.hour}h</span>
-              </div>
-            );
-          })}
-          {!data.byHour.length && <span className="text-sm text-zinc-600">Sem dados.</span>}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+          <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+            Atendimentos por hora <span className="text-xs font-normal text-amber-400">(âmbar = entrou e saiu)</span>
+          </div>
+          <div className="flex items-end gap-1" style={{ height: 80 }}>
+            {data.byHour.map((h: any) => {
+              const max = Math.max(...data.byHour.map((x: any) => x.count), 1);
+              const total = (h.count / max) * 60 + 4;
+              const walk = h.count > 0 ? (h.walkouts / h.count) * total : 0;
+              return (
+                <div key={h.hour} className="flex flex-col items-center" title={`${h.hour}h: ${h.count} atend. (${h.walkouts || 0} entrou e saiu)`}>
+                  <div className="flex w-6 flex-col justify-end overflow-hidden rounded-t" style={{ height: `${total}px` }}>
+                    <div className="w-full bg-amber-500/70" style={{ height: `${walk}px` }} />
+                    <div className="w-full flex-1 bg-[var(--color-flow)]/60" />
+                  </div>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">{h.hour}h</span>
+                </div>
+              );
+            })}
+            {!data.byHour.length && <span className="text-sm text-zinc-600">Sem dados.</span>}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+          <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+            Por dia <span className="text-xs font-normal text-emerald-400">(verde = confirmadas)</span>
+          </div>
+          <div className="flex items-end gap-1" style={{ height: 80 }}>
+            {(data.byDay || []).map((d: any) => {
+              const max = Math.max(...data.byDay.map((x: any) => x.attendances), 1);
+              const total = (d.attendances / max) * 60 + 4;
+              const conf = d.attendances > 0 ? (d.confirmed / d.attendances) * total : 0;
+              return (
+                <div key={d.date} className="flex flex-col items-center" title={`${d.date}: ${d.attendances} atend., ${d.confirmed} confirmadas, ${d.walkouts} entrou-e-saiu`}>
+                  <div className="flex w-6 flex-col justify-end overflow-hidden rounded-t" style={{ height: `${total}px` }}>
+                    <div className="w-full flex-1 bg-[var(--color-flow)]/40" />
+                    <div className="w-full bg-emerald-500/70" style={{ height: `${conf}px` }} />
+                  </div>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">{d.date.slice(8, 10)}</span>
+                </div>
+              );
+            })}
+            {!(data.byDay || []).length && <span className="text-sm text-zinc-600">Sem dados.</span>}
+          </div>
         </div>
       </div>
+
+      {/* Fatia 13 — operação da fila (derivado do audit): pausas e furos com PIN */}
+      {ops && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+            <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">Pausas por vendedor <span className="text-xs font-normal text-[var(--color-text-muted)]">(alfabético)</span></div>
+            <div className="space-y-2">
+              {ops.pauses.map((p: any) => (
+                <div key={p.sellerId} className="flex items-center gap-3 rounded-xl bg-[var(--color-surface-2)]/50 px-3 py-2 text-sm">
+                  <span className="flex-1 text-[var(--color-text-strong)]">{p.sellerName}</span>
+                  <span className="text-xs text-amber-300">{p.breaks} pausa{p.breaks === 1 ? '' : 's'} · {Math.round(p.breakMinutes)} min</span>
+                  {p.unavailable > 0 && <span className="text-xs text-zinc-500">{p.unavailable} indisp. · {Math.round(p.unavailableMinutes)} min</span>}
+                </div>
+              ))}
+              {!ops.pauses.length && <p className="py-2 text-sm text-zinc-600">Sem pausas no período.</p>}
+            </div>
+            <div className="mt-3 text-xs text-[var(--color-text-muted)]">
+              Depois de atender: {ops.returnTo.waiting}× voltou pra fila · {ops.returnTo.break}× foi pra pausa
+            </div>
+          </div>
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+            <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">Fila furada (liberada com PIN)</div>
+            {ops.queueSkips.bySeller.map((s: any) => (
+              <div key={s.sellerId} className="flex justify-between border-t border-[var(--color-border)] py-2 text-sm">
+                <span className="text-[var(--color-text-muted)]">{s.sellerName} <span className="text-[10px]">(atendeu fora da vez)</span></span>
+                <span className="font-semibold text-amber-400">{s.count}×</span>
+              </div>
+            ))}
+            {!ops.queueSkips.total && <p className="py-2 text-sm text-zinc-600">Nenhum furo de fila no período — a ordem foi respeitada.</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -55,7 +55,7 @@ export function RetailFloorView() {
   const [ctx, setCtx] = useState<any>(null);
   const [storeId, setStoreId] = useState<string>('');
   const [snap, setSnap] = useState<{ shift: any; queue: any; actives: any[]; fetchedAt: number } | null>(null);
-  const [tab, setTab] = useState<'fila' | 'conciliacao' | 'indicadores'>('fila');
+  const [tab, setTab] = useState<'fila' | 'conciliacao' | 'indicadores' | 'rede'>('fila');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
@@ -160,10 +160,10 @@ export function RetailFloorView() {
       </div>
 
       <div className="flex gap-2 border-b border-zinc-800 text-sm">
-        {(['fila', 'conciliacao', ...(isManager ? ['indicadores'] as const : [])] as const).map((t) => (
+        {(['fila', 'conciliacao', ...(isManager ? ['indicadores'] as const : []), ...(ctx.canConfigure ? ['rede'] as const : [])] as const).map((t) => (
           <button key={t} onClick={() => setTab(t as any)}
             className={`px-3 py-2 ${tab === t ? 'border-b-2 border-sky-500 text-sky-300' : 'text-zinc-400 hover:text-zinc-200'}`}>
-            {t === 'fila' ? 'Lista da Vez' : t === 'conciliacao' ? 'Conciliação PDV' : 'Indicadores'}
+            {t === 'fila' ? 'Lista da Vez' : t === 'conciliacao' ? 'Conciliação PDV' : t === 'indicadores' ? 'Indicadores' : 'Rede'}
           </button>
         ))}
       </div>
@@ -217,6 +217,7 @@ export function RetailFloorView() {
 
       {tab === 'conciliacao' && <ReconPanel storeId={storeId} isManager={isManager} />}
       {tab === 'indicadores' && isManager && <AnalyticsPanel storeId={storeId} />}
+      {tab === 'rede' && ctx.canConfigure && <NetworkPanel />}
 
       {finishing && (
         <FinishModal attendance={finishing} taxonomy={ctx.taxonomy} busy={busy}
@@ -549,6 +550,55 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
           {!data.byHour.length && <span className="text-sm text-zinc-600">Sem dados.</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- Comparativo da rede (Fatia 10 — só owner/admin) ------------------------
+function NetworkPanel() {
+  const [days, setDays] = useState(7);
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    const end = todayStr();
+    const start = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    api(`/analytics/network?start=${start}&end=${end}`).then(setData).catch((e: any) => toast.error(e.message));
+  }, [days]);
+
+  if (!data) return <div className="p-6 text-zinc-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Carregando…</div>;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        {[7, 30].map((d) => (
+          <button key={d} onClick={() => setDays(d)}
+            className={`rounded-lg border px-3 py-1.5 text-sm ${days === d ? 'border-sky-500 text-sky-300' : 'border-zinc-700 text-zinc-400'}`}>{d} dias</button>
+        ))}
+        {data.inCalibration && <span className="ml-auto text-xs text-amber-300">Calibração: números NÃO valem pra cobrança.</span>}
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-zinc-800">
+        <table className="w-full text-sm">
+          <thead className="bg-zinc-900 text-left text-xs text-zinc-500">
+            <tr><th className="p-2">Loja</th><th className="p-2">Atend.</th><th className="p-2">Conv. conf.</th><th className="p-2">Conv. decl.</th><th className="p-2">Pend. PDV</th><th className="p-2">Sem corresp.</th><th className="p-2">TMA</th><th className="p-2">Confirmado</th><th className="p-2">Rupturas</th></tr>
+          </thead>
+          <tbody>
+            {data.stores.map((s: any) => (
+              <tr key={s.storeId} className="border-t border-zinc-800 text-zinc-300">
+                <td className="p-2 text-zinc-200">{s.storeName}{s.code ? ` (${s.code})` : ''}</td>
+                <td className="p-2">{s.attendances}</td>
+                <td className="p-2 text-emerald-300">{s.conversionConfirmedPct != null ? `${s.conversionConfirmedPct}%` : '—'}</td>
+                <td className="p-2">{s.conversionDeclaredPct != null ? `${s.conversionDeclaredPct}%` : '—'}</td>
+                <td className="p-2 text-amber-300">{s.pendingCount}</td>
+                <td className="p-2 text-rose-300">{s.unmatchedCount}</td>
+                <td className="p-2">{s.avgServiceMinutes != null ? `${s.avgServiceMinutes}m` : '—'}</td>
+                <td className="p-2">{brl(s.confirmedValue)}</td>
+                <td className="p-2 text-amber-300">{s.unmetCount}</td>
+              </tr>
+            ))}
+            {!data.stores.length && <tr><td colSpan={9} className="p-4 text-center text-zinc-600">Sem lojas ativas.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-zinc-500">Comparação lado a lado (ordem alfabética) — a leitura é sua; o sistema não ranqueia loja nem vendedor.</p>
     </div>
   );
 }

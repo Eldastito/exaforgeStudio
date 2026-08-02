@@ -13,7 +13,8 @@ import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js
 import { RetailFloorScanService } from "../RetailFloorScanService.js";
 import { RetailFloorReconciliationService } from "../RetailFloorReconciliationService.js";
 import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
-import { RetailFloorAnalyticsService } from "../RetailFloorAnalyticsService.js";
+import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics } from "../RetailFloorAnalyticsService.js";
+import { RetailFloorDigestService } from "../RetailFloorDigestService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -212,6 +213,29 @@ router.get("/analytics/store", (req: AuthRequest, res) => {
     if (!storeId || !start || !end) return res.status(400).json({ error: "storeId, start e end são obrigatórios" });
     RetailFloorService.assertStoreManager(req.organizationId!, req.user, storeId);
     res.json(RetailFloorAnalyticsService.store(req.organizationId!, storeId, start, end));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 10 (pós-piloto): comparativo de rede + preview do resumo diário ----
+
+// Rede inteira lado a lado — visão regional, só owner/admin.
+router.get("/analytics/network", requireRole("owner", "admin"), (req: AuthRequest, res) => {
+  try {
+    const start = String(req.query.start || "");
+    const end = String(req.query.end || "");
+    if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios" });
+    res.json(RetailFloorNetworkAnalytics.network(req.organizationId!, start, end));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Preview do resumo diário (gestor da loja confere o texto antes de opt-in).
+router.get("/digest/preview", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.query.storeId || "");
+    const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+    if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+    RetailFloorService.assertStoreManager(req.organizationId!, req.user, storeId);
+    res.json({ message: RetailFloorDigestService.buildMessage(req.organizationId!, storeId, date) });
   } catch (e: any) { fail(res, e); }
 });
 

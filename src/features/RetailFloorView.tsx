@@ -29,6 +29,12 @@ const PRODUCT_REASON_LABEL: Record<string, string> = {
   no_assortment: 'Loja não trabalha', no_local_stock: 'Sem estoque local', no_network_stock: 'Sem estoque na rede',
   missing_size: 'Faltou tamanho', missing_color: 'Faltou cor', missing_category: 'Faltou categoria/grupo',
 };
+const NOT_CONVERTED_NOTE_HINT: Record<string, string> = {
+  price: 'Ex.: achou caro, queria mais desconto ou parcelar em mais vezes…',
+  size_fit: 'Ex.: modelagem não serviu, caimento não agradou…',
+  service_time: 'Ex.: cliente não quis esperar, loja cheia…',
+  other: 'Descreva o motivo…',
+};
 const STATUS_LABEL: Record<string, string> = {
   break: 'Pausa', unavailable: 'Indisponível', skipped: 'Pulado',
 };
@@ -1063,6 +1069,7 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
   const [category, setCategory] = useState('');
   const [prodReason, setProdReason] = useState('');
   const [size, setSize] = useState(''); const [color, setColor] = useState(''); const [catLabel, setCatLabel] = useState('');
+  const [note, setNote] = useState('');
   const [returnTo, setReturnTo] = useState<'waiting' | 'break'>('waiting');
 
   // Leitor de código de barras: bipa as peças vendidas ANTES de encerrar (o
@@ -1109,9 +1116,10 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
     if (outcome === 'not_converted') {
       if (!category) return toast.error('Informe o motivo.');
       payload.reason = { category };
+      if (note.trim()) payload.reason.note = note.trim();
       if (category === 'product') {
-        if (!prodReason) return toast.error('Informe o detalhe do produto.');
-        payload.reason.productDetail = { reason: prodReason, size: size || undefined, color: color || undefined, categoryLabel: catLabel || undefined };
+        if (!prodReason) return toast.error('Informe o que faltou.');
+        payload.reason.productDetail = { reason: prodReason, size: size.trim() || undefined, color: color.trim() || undefined, categoryLabel: catLabel.trim() || undefined };
       }
     }
     onSubmit(payload);
@@ -1207,12 +1215,23 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
               <option value="">O que faltou?</option>
               {(taxonomy?.productReasons || []).map((r: string) => <option key={r} value={r}>{PRODUCT_REASON_LABEL[r] || r}</option>)}
             </select>
-            <div className="grid grid-cols-3 gap-2">
-              <Input value={size} onChange={setSize} placeholder="Tamanho" />
-              <Input value={color} onChange={setColor} placeholder="Cor" />
-              <Input value={catLabel} onChange={setCatLabel} placeholder="Grupo" />
-            </div>
+            {/* Só os campos que fazem sentido pro motivo escolhido — "Grupo"
+                genérico confundia quem preenchia (feedback do piloto). */}
+            {['missing_size', 'no_local_stock', 'no_network_stock'].includes(prodReason) && (
+              <Input value={size} onChange={setSize} placeholder="Qual tamanho? (ex.: G, 44)" className="w-full" />
+            )}
+            {['missing_color', 'no_local_stock', 'no_network_stock'].includes(prodReason) && (
+              <Input value={color} onChange={setColor} placeholder="Qual cor?" className="w-full" />
+            )}
+            {['missing_category', 'no_assortment'].includes(prodReason) && (
+              <Input value={catLabel} onChange={setCatLabel} placeholder="Que tipo de peça? (ex.: moda praia, plus size)" className="w-full" />
+            )}
           </>)}
+          {category && category !== 'product' && (
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500}
+              placeholder={NOT_CONVERTED_NOTE_HINT[category] || 'Descreva o motivo…'}
+              className="w-full resize-none rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+          )}
         </div>
       )}
 
@@ -1626,8 +1645,8 @@ function Stat({ label, v, cls }: any) {
 
 function Modal({ title, subtitle, children, onClose }: { title: string; subtitle?: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 md:items-center md:p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-background)] p-5 md:rounded-2xl"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] p-5"
         onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <div>

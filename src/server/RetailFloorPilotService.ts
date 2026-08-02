@@ -12,6 +12,7 @@
  * RN-150-001: orgId sempre 1º arg; toda query filtra organization_id.
  */
 import db from "./db.js";
+import { randomUUID } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailFloorSettingsService } from "./RetailFloorService.js";
@@ -28,6 +29,11 @@ export interface PilotApplyOpts {
   managerEmail?: string | null;     // vira manager_user_id da loja piloto
   digest?: boolean;                 // liga o resumo diário (Fatia 10)
   digestHour?: number | null;       // hora BRT do resumo
+  // Corretores das pendências do checklist (cada item tem seu comando):
+  linkSellers?: Array<{ matricula: string; email: string }>; // vincula login ao vendedor
+  responsiblePhone?: string | null; // destinatário do resumo (retail_store_responsibles) — exige storeCode
+  responsibleName?: string | null;
+  storeWhatsapp?: string | null;    // número da própria loja (fallback do resumo) — exige storeCode
 }
 
 export class RetailFloorPilotService {
@@ -72,15 +78,15 @@ export class RetailFloorPilotService {
     const cursor = db.prepare(`SELECT MAX(last_synced_at) AS t FROM alterdata_sync_cursors WHERE organization_id = ?`).get(orgId) as any;
 
     const checklist: string[] = [];
-    if (!moduleEnabled) checklist.push("Módulo retail_floor DESLIGADO — o apply liga.");
-    if (!settings.calibrationUntil) checklist.push("Sem calibração definida — o apply grava (RN-150-011: sem ela os números valem pra cobrança desde o dia 1).");
-    if (!stores.length) checklist.push("NENHUMA loja ativa cadastrada (retail_stores) — cadastre antes do piloto.");
-    for (const s of stores) if (!s.hasManager) checklist.push(`Loja ${s.name}${s.code ? ` (${s.code})` : ""} sem manager_user_id — o gerente não terá o escopo de gestão.`);
-    if (Number(sellers?.total || 0) === 0) checklist.push("Nenhum vendedor ativo em retail_sellers — cadastre a equipe (matrícula = a do ERP).");
-    else if (Number(sellers?.linked || 0) === 0) checklist.push("Nenhum vendedor com user_id vinculado — sem vínculo, só o gerente opera a fila por eles.");
-    if (!channel) checklist.push("Sem canal WhatsApp conectado — o resumo diário (opt-in) não terá por onde sair.");
-    if (settings.dailyDigestEnabled && stores.every((s) => !s.responsibles && !s.whatsapp)) checklist.push("Resumo diário LIGADO mas nenhuma loja tem responsável (ADR-108) nem número — não haverá destinatário.");
-    if (!cursor?.t) checklist.push("Conector Alterdata sem sync registrado — conciliação e estoque-rede ficam vazios até o primeiro sync.");
+    if (!moduleEnabled) checklist.push("Módulo retail_floor DESLIGADO — corrige: --apply");
+    if (!settings.calibrationUntil) checklist.push("Sem calibração definida (RN-150-011: sem ela os números valem pra cobrança desde o dia 1) — corrige: --apply --calibration-days 30");
+    if (!stores.length) checklist.push("NENHUMA loja ativa cadastrada (retail_stores) — cadastre no app (Operação da Rede) antes do piloto.");
+    for (const s of stores) if (!s.hasManager) checklist.push(`Loja ${s.name}${s.code ? ` (${s.code})` : ""} sem manager_user_id — corrige: --apply --store ${s.code || "<code>"} --manager-email <email-do-gerente>`);
+    if (Number(sellers?.total || 0) === 0) checklist.push("Nenhum vendedor ativo em retail_sellers — cadastre a equipe no app (matrícula = a do ERP); sem CLI pra isso de propósito (cadastro é operação).");
+    else if (Number(sellers?.linked || 0) === 0) checklist.push("Nenhum vendedor com user_id vinculado (sem vínculo, só o gerente opera a fila por eles) — corrige: --apply --link-sellers \"M-01=ana@...,M-02=bia@...\"");
+    if (!channel) checklist.push("Sem canal WhatsApp conectado — conecte no app (Configurações › Canais); o resumo diário não tem por onde sair.");
+    if (settings.dailyDigestEnabled && stores.every((s) => !s.responsibles && !s.whatsapp)) checklist.push("Resumo diário LIGADO mas nenhuma loja tem destinatário — corrige: --apply --store <code> --responsible <fone> [--responsible-name \"Nome\"]");
+    if (!cursor?.t) checklist.push("Conector Alterdata sem sync registrado — configure/teste no app (Configurações › Integrações › Alterdata); conciliação e estoque-rede ficam vazios até o 1º sync.");
 
     return {
       org: { orgId: org.organization_id, name: org.business_name, vertical: org.vertical || null, status: org.status },
@@ -105,22 +111,59 @@ export class RetailFloorPilotService {
     if (opts.digestHour != null) patch.digestHour = opts.digestHour;
     RetailFloorSettingsService.update(orgId, patch, ACTOR);
 
-    let managerSet: string | null = null;
-    if (opts.storeCode && opts.managerEmail) {
-      const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND code = ? AND active = 1`).get(orgId, String(opts.storeCode)) as any;
+    // Ações por loja (gerente/responsável/número) exigem a loja-alvo.
+    const storeActions = !!(opts.managerEmail || opts.responsiblePhone || opts.storeWhatsapp);
+    if (storeActions && !opts.storeCode) throw new Error("Passe --store <code> junto de manager-email/responsible/store-whatsapp.");
+    let store: any = null;
+    if (opts.storeCode) {
+      store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND code = ? AND active = 1`).get(orgId, String(opts.storeCode)) as any;
       if (!store) throw new Error(`Loja com code=${opts.storeCode} não encontrada/ativa nesta org.`);
-      const user = db.prepare(`SELECT id, email FROM users WHERE organization_id = ? AND LOWER(email) = ? AND global_status = 'active'`).get(orgId, String(opts.managerEmail).toLowerCase()) as any;
-      if (!user) throw new Error(`Usuário ${opts.managerEmail} não encontrado/ativo NESTA organização.`);
+    }
+
+    const findUser = (email: string) => {
+      const u = db.prepare(`SELECT id, email FROM users WHERE organization_id = ? AND LOWER(email) = ? AND global_status = 'active'`).get(orgId, email.toLowerCase()) as any;
+      if (!u) throw new Error(`Usuário ${email} não encontrado/ativo NESTA organização.`);
+      return u;
+    };
+
+    let managerSet: string | null = null;
+    if (opts.managerEmail) {
+      const user = findUser(String(opts.managerEmail));
       db.prepare(`UPDATE retail_stores SET manager_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(user.id, orgId, store.id);
       managerSet = `${user.email} → ${store.name}`;
-    } else if (opts.storeCode || opts.managerEmail) {
-      throw new Error("Pra definir o gerente, passe storeCode E managerEmail juntos.");
+    }
+
+    // Pendência "vendedor sem user_id vinculado": matricula=email, idempotente.
+    const sellersLinked: string[] = [];
+    for (const link of opts.linkSellers || []) {
+      const seller = db.prepare(`SELECT id, matricula FROM retail_sellers WHERE organization_id = ? AND matricula = ? AND active = 1`).get(orgId, String(link.matricula)) as any;
+      if (!seller) throw new Error(`Vendedor com matrícula ${link.matricula} não encontrado/ativo nesta org.`);
+      const user = findUser(String(link.email));
+      db.prepare(`UPDATE retail_sellers SET user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(user.id, orgId, seller.id);
+      sellersLinked.push(`${seller.matricula}→${user.email}`);
+    }
+
+    // Pendência "resumo sem destinatário": responsável da loja (dedupe por número).
+    let responsibleSet: string | null = null;
+    if (opts.responsiblePhone) {
+      const phone = String(opts.responsiblePhone).replace(/\D/g, "");
+      if (phone.length < 10) throw new Error("responsible deve ser um número WhatsApp válido (DDI+DDD+número).");
+      const existing = db.prepare(`SELECT id FROM retail_store_responsibles WHERE organization_id = ? AND store_id = ? AND whatsapp_identifier = ?`).get(orgId, store.id, phone) as any;
+      if (existing) db.prepare(`UPDATE retail_store_responsibles SET active = 1, name = COALESCE(?, name), updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(opts.responsibleName || null, existing.id);
+      else db.prepare(`INSERT INTO retail_store_responsibles (id, organization_id, store_id, name, whatsapp_identifier) VALUES (?, ?, ?, ?, ?)`).run(randomUUID(), orgId, store.id, opts.responsibleName || null, phone);
+      responsibleSet = `${phone} → ${store.name}`;
+    }
+    if (opts.storeWhatsapp) {
+      const phone = String(opts.storeWhatsapp).replace(/\D/g, "");
+      if (phone.length < 10) throw new Error("store-whatsapp deve ser um número WhatsApp válido.");
+      db.prepare(`UPDATE retail_stores SET whatsapp_identifier = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(phone, orgId, store.id);
     }
 
     try {
       logAuthEvent(orgId, ACTOR, null, "RETAIL_FLOOR_PILOT_APPLY", {
         calibrationDays: days, digest: opts.digest ?? null, digestHour: opts.digestHour ?? null,
-        managerSet, moduleWasEnabled: before.moduleEnabled,
+        managerSet, sellersLinked, responsibleSet, storeWhatsapp: opts.storeWhatsapp || null,
+        moduleWasEnabled: before.moduleEnabled,
       });
     } catch { /* noop */ }
     return this.plan(orgId);

@@ -143,7 +143,7 @@ export class RetailFloorAttendanceService {
       ).run(returnTo, orgId, att.shift_id, att.seller_id);
     });
     tx();
-    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_ATTENDANCE_FINISH", { attendanceId, sellerId: att.seller_id, outcome, reasonCategory: reason?.category || null, returnTo, byManager: !isSelf }); } catch { /* noop */ }
+    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_ATTENDANCE_FINISH", { attendanceId, shiftId: att.shift_id, storeId: att.store_id, sellerId: att.seller_id, outcome, reasonCategory: reason?.category || null, returnTo, byManager: !isSelf }); } catch { /* noop */ }
     return this.get(orgId, attendanceId);
   }
 

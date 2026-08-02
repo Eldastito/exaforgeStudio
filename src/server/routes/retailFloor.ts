@@ -13,7 +13,7 @@ import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js
 import { RetailFloorScanService } from "../RetailFloorScanService.js";
 import { RetailFloorReconciliationService } from "../RetailFloorReconciliationService.js";
 import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
-import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics } from "../RetailFloorAnalyticsService.js";
+import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics, RetailFloorOpsMetricsService } from "../RetailFloorAnalyticsService.js";
 import { RetailFloorDigestService } from "../RetailFloorDigestService.js";
 
 const router = Router();
@@ -273,6 +273,18 @@ router.get("/analytics/store", (req: AuthRequest, res) => {
     if (!storeId || !start || !end) return res.status(400).json({ error: "storeId, start e end são obrigatórios" });
     RetailFloorService.assertStoreManager(req.organizationId!, req.user, storeId);
     res.json(RetailFloorAnalyticsService.store(req.organizationId!, storeId, start, end));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 13: métricas operacionais derivadas do audit (gestor — RN-150-005) ----
+router.get("/analytics/ops", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.query.storeId || "");
+    const start = String(req.query.start || "");
+    const end = String(req.query.end || "");
+    if (!storeId || !start || !end) return res.status(400).json({ error: "storeId, start e end são obrigatórios" });
+    RetailFloorService.assertStoreManager(req.organizationId!, req.user, storeId);
+    res.json(RetailFloorOpsMetricsService.store(req.organizationId!, storeId, start, end));
   } catch (e: any) { fail(res, e); }
 });
 

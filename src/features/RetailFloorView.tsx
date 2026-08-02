@@ -238,7 +238,8 @@ export function RetailFloorView() {
     if (source.droppableId === 'waiting' && destination.droppableId === 'serving') {
       act(() => api('/attendances/start', { storeId, sellerId }), 'Atendimento iniciado.');
     } else if (source.droppableId === 'waiting' && destination.droppableId === 'out') {
-      act(() => api(`/queue/${sellerId}/status`, { storeId, status: 'break' }));
+      // Sair da fila = pular a vez → só com o PIN da gerência (pedido do cliente).
+      withManagerAuth(() => act(() => api(`/queue/${sellerId}/status`, { storeId, status: 'break' })));
     } else if (source.droppableId === 'out' && destination.droppableId === 'waiting') {
       act(() => api('/queue/join', { storeId, sellerId }));
     } else if (source.droppableId === 'serving') {
@@ -374,9 +375,10 @@ export function RetailFloorView() {
                 emptyText="Nenhum vendedor na fila">
                 {waiting.map((q, i) => (
                   <SellerCard key={q.sellerId} q={q} index={i} isMine={q.sellerId === mySellerId} isManager={isManager} busy={busy} variant="waiting"
+                    locked={!unlocked}
                     onStart={() => act(() => api('/attendances/start', { storeId, sellerId: q.sellerId }), 'Atendimento iniciado.')}
-                    onBreak={() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'break' }))}
-                    onUnavailable={() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'unavailable' }))} />
+                    onBreak={() => withManagerAuth(() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'break' })))}
+                    onUnavailable={() => withManagerAuth(() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'unavailable' })))} />
                 ))}
               </QueueSection>
 
@@ -498,9 +500,9 @@ function QueueSection({ id, title, count, accent, icon, emptyText, collapsible, 
 // Seller Card (Draggable)
 // ============================================================================
 
-function SellerCard({ q, index, att, elapsed, isMine, isManager, busy, variant, onStart, onFinish, onScan, onBreak, onUnavailable, onRejoin }: {
+function SellerCard({ q, index, att, elapsed, isMine, isManager, busy, variant, locked, onStart, onFinish, onScan, onBreak, onUnavailable, onRejoin }: {
   key?: React.Key; q: any; index: number; att?: any; elapsed?: number; isMine: any; isManager: any; busy: any;
-  variant: 'waiting' | 'serving' | 'out';
+  variant: 'waiting' | 'serving' | 'out'; locked?: boolean;
   onStart?: () => void; onFinish?: () => void; onScan?: () => void;
   onBreak?: () => void; onUnavailable?: () => void; onRejoin?: () => void;
 }) {
@@ -582,14 +584,21 @@ function SellerCard({ q, index, att, elapsed, isMine, isManager, busy, variant, 
                   <Check className="h-4 w-4" />
                 </ActionBtn>
               )}
+              {/* Sair da fila = pular a vez → exige PIN da gerência quando travado */}
               {variant === 'waiting' && onBreak && (
-                <ActionBtn busy={busy} title="Pausa" onClick={onBreak} className="hidden group-hover:flex md:flex">
-                  <Coffee className="h-3.5 w-3.5" />
+                <ActionBtn busy={busy} title={locked ? 'Pausa — exige PIN da gerência' : 'Pausa'} onClick={onBreak} className="hidden group-hover:flex md:flex">
+                  <span className="relative inline-flex">
+                    <Coffee className="h-3.5 w-3.5" />
+                    {locked && <Lock className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5" />}
+                  </span>
                 </ActionBtn>
               )}
               {variant === 'waiting' && isManager && !isMine && onUnavailable && (
-                <ActionBtn busy={busy} title="Indisponível" onClick={onUnavailable} className="hidden group-hover:flex md:flex">
-                  <UserX className="h-3.5 w-3.5" />
+                <ActionBtn busy={busy} title={locked ? 'Indisponível — exige PIN da gerência' : 'Indisponível'} onClick={onUnavailable} className="hidden group-hover:flex md:flex">
+                  <span className="relative inline-flex">
+                    <UserX className="h-3.5 w-3.5" />
+                    {locked && <Lock className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5" />}
+                  </span>
                 </ActionBtn>
               )}
               {variant === 'out' && onRejoin && (
@@ -1071,6 +1080,14 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
   const [size, setSize] = useState(''); const [color, setColor] = useState(''); const [catLabel, setCatLabel] = useState('');
   const [note, setNote] = useState('');
   const [returnTo, setReturnTo] = useState<'waiting' | 'break'>('waiting');
+
+  // Trocar de desfecho com o teclado virtual aberto (autoFocus do EAN) deixava
+  // a viewport encolhida e o modal deslocado pro fundo da tela no tablet —
+  // fechar o teclado re-centraliza. Em 'converted' não: o autoFocus do EAN
+  // (leitor de código) precisa permanecer.
+  useEffect(() => {
+    if (outcome !== 'converted') (document.activeElement as HTMLElement | null)?.blur?.();
+  }, [outcome]);
 
   // Leitor de código de barras: bipa as peças vendidas ANTES de encerrar (o
   // atendimento ainda está ativo) — cada bipe vira scan action='sold' na
@@ -1644,18 +1661,24 @@ function Stat({ label, v, cls }: any) {
 }
 
 function Modal({ title, subtitle, children, onClose }: { title: string; subtitle?: string; children: React.ReactNode; onClose: () => void }) {
+  // Overlay rolável (não flex-center direto no fixed): com o teclado virtual
+  // aberto a viewport encolhe e um card maior que ela ficava com o topo
+  // inalcançável, parecendo "grudado embaixo" no tablet. Com min-h-full o
+  // card centraliza quando cabe e rola a partir do TOPO quando não cabe.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] p-5"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>{title}</h3>
-            {subtitle && <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{subtitle}</p>}
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/60" onClick={onClose}>
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="my-4 w-full max-w-lg rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] p-5"
+          onClick={(e) => e.stopPropagation()}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>{title}</h3>
+              {subtitle && <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{subtitle}</p>}
+            </div>
+            <button onClick={onClose} className="rounded-xl p-2 text-zinc-500 hover:bg-[var(--color-surface-2)]"><X className="h-5 w-5" /></button>
           </div>
-          <button onClick={onClose} className="rounded-xl p-2 text-zinc-500 hover:bg-[var(--color-surface-2)]"><X className="h-5 w-5" /></button>
+          {children}
         </div>
-        {children}
       </div>
     </div>
   );

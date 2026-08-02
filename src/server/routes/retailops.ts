@@ -18,6 +18,7 @@ import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { haversineKm } from "../geo.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
+import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -740,6 +741,7 @@ router.patch("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthReque
     if (b.sellerName !== undefined) patch.sellerName = b.sellerName;
     if (b.valor !== undefined) patch.valor = Number(b.valor) || 0;
     if (b.pecas !== undefined) patch.pecas = Number(b.pecas) || 0;
+    if (b.atendimentos !== undefined) patch.atendimentos = Number(b.atendimentos) || 0;
     if (b.saleDate !== undefined) patch.saleDate = b.saleDate;
     if (b.storeId !== undefined) patch.storeId = b.storeId || null;
     if (b.matricula !== undefined) patch.matricula = b.matricula || null;
@@ -1218,6 +1220,98 @@ router.post("/commission/runs/:id/reject", requireRole("owner", "admin"), (req: 
   const run = RetailCommissionService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
   if (!run) return res.status(404).json({ error: "run_not_found" });
   res.json(run);
+});
+
+// --- Corrida de comissão (Fase G2 — modelo CARIOCA) + escala semanal ---------
+// Plano efetivo (loja específica > rede '*' > default da planilha CARIOCA).
+router.get("/commission/plan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  res.json(RetailCommissionRaceService.getPlan(orgId, storeId));
+});
+
+router.put("/commission/plan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, config } = req.body || {};
+  if (storeId && !RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  try {
+    res.json(RetailCommissionRaceService.savePlan(orgId, storeId ? String(storeId) : null, config, req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Apuração da corrida do mês — SÓ LEITURA, nada persiste (RN-G2-001).
+router.get("/commission/race", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "month (YYYY-MM) é obrigatório" });
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  try { res.json(RetailCommissionRaceService.raceMonth(orgId, month, { storeId })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Materializa a corrida num RUN draft (aprovação segue humana — D7).
+router.post("/commission/race/run", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.body?.month || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "month (YYYY-MM) é obrigatório" });
+  try { res.status(201).json(RetailCommissionRaceService.createRaceRun(orgId, month, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Escala semanal da loja (quadro dia × vendedor).
+router.get("/schedule", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  const start = String(req.query.start || ""), end = String(req.query.end || "");
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "storeId, start e end (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  res.json({ storeId, start, end, entries: RetailCommissionRaceService.getSchedule(orgId, storeId, start, end) });
+});
+
+router.put("/schedule", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, start, end, entries } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(start)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(end))) return res.status(400).json({ error: "storeId, start e end (YYYY-MM-DD) obrigatórios" });
+  if (!Array.isArray(entries)) return res.status(400).json({ error: "entries deve ser uma lista" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  res.json({ entries: RetailCommissionRaceService.saveSchedule(orgId, String(storeId), String(start), String(end), entries, req.user?.userId) });
+});
+
+router.post("/schedule/copy-week", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, fromStart, toStart, days } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(fromStart)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(toStart))) return res.status(400).json({ error: "storeId, fromStart e toStart (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  res.json({ entries: RetailCommissionRaceService.copyScheduleWeek(orgId, String(storeId), String(fromStart), String(toStart), Number(days) || 7, req.user?.userId) });
+});
+
+// Cota individual do vendedor por semana da corrida.
+router.get("/seller-quotas", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  const month = String(req.query.month || "");
+  if (!storeId || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "storeId e month (YYYY-MM) obrigatórios" });
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  const weeks = RetailCommissionRaceService.weeksOfMonth(month);
+  res.json({ storeId, month, weeks, quotas: RetailCommissionRaceService.listSellerQuotas(orgId, storeId, weeks.map((w) => w.start)) });
+});
+
+router.put("/seller-quotas", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, weekStart, quotas } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart))) return res.status(400).json({ error: "storeId e weekStart (YYYY-MM-DD) obrigatórios" });
+  if (!Array.isArray(quotas)) return res.status(400).json({ error: "quotas deve ser uma lista" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  res.json({ quotas: RetailCommissionRaceService.setSellerQuotas(orgId, String(storeId), String(weekStart), quotas, req.user?.userId) });
 });
 
 // --- Dashboard + acumulado mensal + export (Fase H) ---

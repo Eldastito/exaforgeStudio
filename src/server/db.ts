@@ -6743,6 +6743,74 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_hash TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_failed_count INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN manager_pin_locked_until TEXT`); } catch(e){}
+
+  // ============================================================
+  // ADR-083 — Fase G2: Corrida de comissão (modelo CARIOCA) + escala semanal
+  // ============================================================
+  // A "corrida" da planilha do cliente: faixas NÃO cumulativas sobre o
+  // atingimento da cota (bateu → 1%, +10% → 1,5%, +20% → 2%, +30% → 3%),
+  // prêmio de P.A (peças/atendimento ≥ 2,50 com cota batida), corrida semanal
+  // por ranking da loja (1º/2º com cota) e prêmio de desvio de cota da REDE.
+  // O plano fica em config_json (store_id '*' = rede toda; loja específica tem
+  // precedência). Nada aqui paga sozinho: a apuração vira RUN draft (Fase G) e
+  // a aprovação continua humana (D7).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_commission_plans (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL DEFAULT '*',      -- '*' = rede; senão retail_stores.id
+        config_json TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE (organization_id, store_id)
+      );
+
+      -- Cota individual do vendedor POR SEMANA da corrida (a planilha cadastra
+      -- cota semanal por vendedor; a mensal é a soma das semanas). Sem linha
+      -- aqui, a cota do vendedor é DERIVADA: cota diária da loja ÷ nº de
+      -- escalados no dia (exatamente o "COTA ÷ 4" da folha de fechamento).
+      CREATE TABLE IF NOT EXISTS retail_seller_quotas (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        seller_key TEXT NOT NULL,                -- mat:<matricula> | nom:<nome normalizado> | user:<id>
+        seller_name TEXT,
+        week_start TEXT NOT NULL,                -- YYYY-MM-DD (1º dia da semana da corrida)
+        quota_amount REAL NOT NULL DEFAULT 0,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE (organization_id, store_id, seller_key, week_start)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_seller_quotas
+        ON retail_seller_quotas (organization_id, store_id, week_start);
+
+      -- Escala semanal da loja (o quadro dia × vendedor do cliente): 'work'
+      -- trabalha, 'off' folga. É planejamento operacional — a linha pode ser
+      -- regravada ao editar a semana (não é documento com retenção).
+      CREATE TABLE IF NOT EXISTS retail_schedule_entries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        work_date TEXT NOT NULL,                 -- YYYY-MM-DD
+        seller_key TEXT NOT NULL,
+        seller_name TEXT,
+        status TEXT NOT NULL DEFAULT 'work',     -- work | off
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE (organization_id, store_id, work_date, seller_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_schedule_entries
+        ON retail_schedule_entries (organization_id, store_id, work_date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas ADR-083 Fase G2 (corrida/escala)', e); }
+  // A folha de fechamento traz AT (atendimentos) por vendedor — é o denominador
+  // do P.A (peças ÷ atendimentos). Aditivo no lançamento manual/foto.
+  try { db.exec(`ALTER TABLE retail_seller_sales ADD COLUMN atendimentos REAL DEFAULT 0`); } catch(e){}
 };
 
 initDb();

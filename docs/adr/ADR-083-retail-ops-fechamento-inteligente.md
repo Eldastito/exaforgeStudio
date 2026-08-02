@@ -188,3 +188,79 @@ Ponto equilíb.  = custos fixos ÷ MC% efetiva
 1. Custos variáveis (E5) — o que a venda perde além do CMV.
 2. CMV real (E6) — quanto de fato custou a mercadoria (via `avg_cost` das notas).
 3. Precificar (E7) — a tela que fecha: revisar preços com base no custo real, semáforo pra "vazamentos" e aplicação em lote com histórico.
+
+## Fase G2 — Corrida de comissão (modelo CARIOCA) + escala semanal (2026-08)
+
+**Origem:** o dono da rede mandou a planilha "CARIOCA AGOSTO 26" (corrida do
+mês) + as fotos da folha de fechamento diária e do quadro de escala. Pedido:
+implementar o padrão de comissão dos vendedores E o padrão de escala por loja,
+na aba Comissão da Operação da Rede. A Fase G já tinha o motor genérico
+(percent/fixed/quota_bonus/tiered) — o que faltava era o modelo da CORRIDA:
+prêmios condicionados ao atingimento da cota INDIVIDUAL, corrida semanal por
+ranking, P.A e desvio de cota da rede.
+
+**Regras implementadas (default = números da planilha, tudo editável na UI):**
+
+- **Vendedor mensal:** faixas NÃO cumulativas sobre a própria venda — bateu a
+  cota 1%, +10% 1,5%, +20% 2%, +30% 3% (vale a MAIOR); P.A (peças ÷
+  atendimentos) ≥ 2,50 com cota batida → R$ 50.
+- **Vendedor semanal:** 1º do ranking da loja COM cota batida → faixa sobre a
+  venda da semana (1% / +20% 2% / +30% 3%) + P.A R$ 30; 2º com cota → 0,5%.
+- **Desvio de cota da REDE (mensal):** 1º/2º maiores desvios entre vendedores
+  com cota batida → R$ 250 / R$ 100. O ranking SEMPRE considera todas as
+  lojas, mesmo filtrando a visualização por uma.
+- **Gerente:** 1% sobre a venda da loja COM OU SEM cota (faixa `min:0`);
+  faixas maiores (+10% 1,5% etc.) e P.A da loja só com cota; faixas sobre a
+  venda própria (+15% 1,5%...); corrida semanal da loja (1% / +30% 2%);
+  desvio entre lojas → R$ 300 / R$ 150.
+- **"Só recebe quem trabalhou o mês inteiro"** NÃO é automático (RN-G2-004):
+  a apuração expõe dias escalados/folgas da escala e o gestor decide na
+  aprovação — o sistema não mede ausência real.
+
+**Decisões (RN-G2-00x no header do service):**
+
+1. **Derivado por query, nunca contador** (RN-G2-001) — `raceMonth` é só
+   leitura; persistir = `createRaceRun` gera RUN **draft** da Fase G
+   (`retail_commission_runs/items`, `rule_id NULL`, detalhamento no JSON) e a
+   aprovação segue humana (D7).
+2. **Cota individual por semana** (RN-G2-002): `retail_seller_quotas`
+   (org, loja, seller_key, week_start). SEM cadastro, deriva da ESCALA: cota
+   diária da loja ÷ nº de escalados 'work' no dia — exatamente o "COTA ÷ 4 =
+   575" da folha de fechamento. Sem nenhuma das duas → `quotaSource:'none'` e
+   nenhum prêmio condicionado à cota (a UI marca em âmbar pro gestor corrigir).
+3. **Semana fecha no sábado** (RN-G2-003): começo de mês quebrado < 4 dias
+   cola na semana seguinte (o "01/08 até 08/08" da planilha); ≥ 4 dias vira
+   semana própria.
+4. **P.A** (RN-G2-005): atendimentos = aditivo `retail_seller_sales.atendimentos`
+   (o AT da folha, lançado à mão ou lido por foto — prompt da IA atualizado) +
+   atendimentos ENCERRADOS do Retail Floor (ADR-150) quando a loja usa a
+   lista da vez. Merge por aliases (user:/mat:/nom:) tomando o MÁXIMO entre
+   aliases (nunca soma, que contaria em dobro).
+5. **Plano por loja:** `retail_commission_plans` (config_json; `store_id='*'`
+   = rede) — loja específica > rede > default CARIOCA hardcoded
+   (`DEFAULT_RACE_PLAN`). Editor na UI com as faixas e valores.
+6. **Escala é planejamento, não documento:** `retail_schedule_entries`
+   (org, loja, data, seller_key, work|off) pode ser regravada ao editar a
+   semana — sem retenção de documento (diferente de fechamento/prontuário).
+
+**Entidades novas:** `retail_commission_plans`, `retail_seller_quotas`,
+`retail_schedule_entries` + aditivo `retail_seller_sales.atendimentos`.
+
+**Rotas** (em `/api/retailops`): `GET/PUT /commission/plan`,
+`GET /commission/race?month=`, `POST /commission/race/run`,
+`GET/PUT /schedule` + `POST /schedule/copy-week`, `GET/PUT /seller-quotas`;
+`POST/PATCH /seller-sales` aceitam `atendimentos`. Escritas owner/admin.
+
+**UI:** aba **Comissão** ganhou a seção "Corrida do mês" (apuração por loja:
+tabela mensal por vendedor com cota/fonte, atingimento, faixa, P.A, semanal,
+desvio e total; bloco do gerente; corrida semana a semana; ranking de desvio
+da rede; botão "Gerar prévia p/ aprovação"; modal "Configurar corrida" com
+editor de faixas). Nova aba **"Escala & cotas"**: grade semanal dia ×
+vendedor (trabalha/folga/vazio, contagem de escalados por dia, copiar semana
+anterior) + grade de cotas semanais por vendedor nas semanas da corrida.
+
+**Teste:** `test:retail-commission-race` (46 verificações — semanas/colagem,
+faixas não cumulativas, P.A com/sem cota, ranking semanal 1º/2º e razões de
+não-prêmio, desvio da rede com filtro por loja, gerente com/sem cota da loja,
+cota derivada da escala, precedência do plano por loja, run draft com
+detalhamento, audit, isolamento multi-tenant).

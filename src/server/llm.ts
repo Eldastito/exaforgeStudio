@@ -449,8 +449,8 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente 
  * antes de salvar (nunca salva sozinha). Devolve SOMENTE um JSON com a lista.
  */
 export async function extractSellerSalesFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
-  const system = `Você é um assistente de leitura de FOLHAS DE VENDAS POR VENDEDOR de loja no varejo brasileiro. Na folha, cada linha traz o NOME de um vendedor e o total vendido por ele (em reais) e/ou a quantidade de peças. Extraia todas as linhas legíveis e devolva SOMENTE um JSON:
-{"vendedores": [{"nome": <string, nome do vendedor>, "valor": <número em reais ou null>, "pecas": <número inteiro de peças ou null>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
+  const system = `Você é um assistente de leitura de FOLHAS DE VENDAS POR VENDEDOR de loja no varejo brasileiro. Na folha, cada linha traz o NOME de um vendedor e o total vendido por ele (em reais), a quantidade de peças e, às vezes, o número de ATENDIMENTOS (coluna "AT" ou "A/P"). Extraia todas as linhas legíveis e devolva SOMENTE um JSON:
+{"vendedores": [{"nome": <string, nome do vendedor>, "valor": <número em reais ou null>, "pecas": <número inteiro de peças ou null>, "atendimentos": <número inteiro de atendimentos ou null>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
 Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente um nome ou valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. Ignore linhas de total geral, cabeçalhos e anotações que não sejam de um vendedor. Não some nem calcule nada por conta própria. Responda SOMENTE o JSON, sem texto ao redor.`;
   const res = await getClient().chat.completions.create({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,

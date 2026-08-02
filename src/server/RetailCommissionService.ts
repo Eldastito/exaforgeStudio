@@ -673,4 +673,45 @@ export class RetailCommissionService {
     try { logAuthEvent(orgId, actorId || "system", runId, `RETAIL_COMMISSION_${status.toUpperCase()}`, {}); } catch { /* noop */ }
     return this.getRun(orgId, runId);
   }
+
+  /**
+   * Ajuste manual do gerente/dono numa apuração DRAFT: sobrescreve o valor de
+   * comissão calculado ou remove um item por completo (loja/vendedor fora da
+   * apuração). Só draft — approved/rejected são congelados (retenção contábil).
+   *
+   * O `total_commission` do run é sempre recalculado como SUM(items) — tudo
+   * derivado, nunca somatório mutável (RN-004). Cada operação vira audit
+   * event com a diferença pra rastrear "quem tirou/mudou o quê".
+   */
+  private static assertDraft(orgId: string, runId: string): any {
+    const run = db.prepare(`SELECT id, status FROM retail_commission_runs WHERE organization_id = ? AND id = ?`).get(orgId, runId) as any;
+    if (!run) throw new Error("run_not_found");
+    if (run.status !== "draft") throw new Error("run_not_editable");
+    return run;
+  }
+
+  static updateItem(orgId: string, runId: string, itemId: string, patch: { commissionAmount: number }, actorId?: string): any | null {
+    this.assertDraft(orgId, runId);
+    const item = db.prepare(`SELECT id, commission_amount FROM retail_commission_items WHERE id = ? AND run_id = ? AND organization_id = ?`).get(itemId, runId, orgId) as any;
+    if (!item) throw new Error("item_not_found");
+    const next = Math.round((Number(patch.commissionAmount) || 0) * 100) / 100;
+    if (next < 0) throw new Error("negative_commission");
+    const previous = Number(item.commission_amount) || 0;
+    db.prepare(`UPDATE retail_commission_items SET commission_amount = ? WHERE id = ?`).run(next, itemId);
+    const total = (db.prepare(`SELECT COALESCE(SUM(commission_amount), 0) AS s FROM retail_commission_items WHERE run_id = ?`).get(runId) as any).s;
+    db.prepare(`UPDATE retail_commission_runs SET total_commission = ? WHERE organization_id = ? AND id = ?`).run(Math.round(total * 100) / 100, orgId, runId);
+    try { logAuthEvent(orgId, actorId || "system", runId, "RETAIL_COMMISSION_ITEM_ADJUSTED", { itemId, previous, next, delta: Math.round((next - previous) * 100) / 100 }); } catch { /* noop */ }
+    return this.getRun(orgId, runId);
+  }
+
+  static deleteItem(orgId: string, runId: string, itemId: string, actorId?: string): any | null {
+    this.assertDraft(orgId, runId);
+    const item = db.prepare(`SELECT id, seller_name, commission_amount FROM retail_commission_items WHERE id = ? AND run_id = ? AND organization_id = ?`).get(itemId, runId, orgId) as any;
+    if (!item) throw new Error("item_not_found");
+    db.prepare(`DELETE FROM retail_commission_items WHERE id = ?`).run(itemId);
+    const total = (db.prepare(`SELECT COALESCE(SUM(commission_amount), 0) AS s FROM retail_commission_items WHERE run_id = ?`).get(runId) as any).s;
+    db.prepare(`UPDATE retail_commission_runs SET total_commission = ? WHERE organization_id = ? AND id = ?`).run(Math.round(total * 100) / 100, orgId, runId);
+    try { logAuthEvent(orgId, actorId || "system", runId, "RETAIL_COMMISSION_ITEM_REMOVED", { itemId, sellerName: item.seller_name, removedAmount: Number(item.commission_amount) || 0 }); } catch { /* noop */ }
+    return this.getRun(orgId, runId);
+  }
 }

@@ -1300,6 +1300,35 @@ router.post("/commission/runs/:id/reject", requireRole("owner", "admin"), (req: 
   res.json(run);
 });
 
+// Ajuste manual do gerente/dono em item DRAFT: sobrescreve o valor calculado
+// (ex.: acordo com o vendedor, correção pontual) — recalcula o total do run.
+router.patch("/commission/runs/:runId/items/:itemId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const amount = Number(req.body?.commissionAmount);
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: "commissionAmount inválido (não pode ser negativo)" });
+  try {
+    const run = RetailCommissionService.updateItem(orgId, req.params.runId, req.params.itemId, { commissionAmount: amount }, req.user?.userId);
+    res.json(run);
+  } catch (e: any) {
+    const map: Record<string, number> = { run_not_found: 404, run_not_editable: 409, item_not_found: 404, negative_commission: 400 };
+    res.status(map[e?.message] || 400).json({ error: e?.message || "falha" });
+  }
+});
+
+// Remove um item DRAFT (vendedor/loja fora da apuração) — recalcula o total.
+router.delete("/commission/runs/:runId/items/:itemId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const run = RetailCommissionService.deleteItem(orgId, req.params.runId, req.params.itemId, req.user?.userId);
+    res.json(run);
+  } catch (e: any) {
+    const map: Record<string, number> = { run_not_found: 404, run_not_editable: 409, item_not_found: 404 };
+    res.status(map[e?.message] || 400).json({ error: e?.message || "falha" });
+  }
+});
+
 // --- Corrida de comissão (Fase G2 — modelo CARIOCA) + escala semanal ---------
 // Plano efetivo (loja específica > rede '*' > default da planilha CARIOCA).
 router.get("/commission/plan", (req: AuthRequest, res): any => {

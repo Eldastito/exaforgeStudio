@@ -105,7 +105,7 @@ export class RetailFloorService {
       .map((s) => ({ id: s.id, name: s.name, code: s.code || null }));
 
     const sellerRow = userId ? db.prepare(
-      `SELECT id, matricula, name FROM retail_sellers WHERE organization_id = ? AND user_id = ? AND active = 1 LIMIT 1`
+      `SELECT id, matricula, name, photo_url FROM retail_sellers WHERE organization_id = ? AND user_id = ? AND active = 1 LIMIT 1`
     ).get(orgId, userId) as any : null;
 
     // Fatia 7 (UI): todo mundo vê a lista mínima de lojas (o vendedor precisa
@@ -113,8 +113,8 @@ export class RetailFloorService {
     // pra quem gerencia alguma loja (adicionar terceiro à fila é de gestor).
     const stores = allStores.map((s) => ({ id: s.id, name: s.name, code: s.code || null }));
     const sellers = manageableStores.length
-      ? (db.prepare(`SELECT id, matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
-          .map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null }))
+      ? (db.prepare(`SELECT id, matricula, name, photo_url FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
+          .map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null, photoUrl: s.photo_url || null }))
       : [];
 
     return {
@@ -127,7 +127,7 @@ export class RetailFloorService {
       // O vendedor entra na fila de QUALQUER loja com turno aberto (o roster do
       // turno é o vínculo do dia — ADR-150 §"Vínculo vendedor↔loja"), por isso
       // o contexto não prende o vendedor a uma loja.
-      sellerProfile: sellerRow ? { sellerId: sellerRow.id, matricula: sellerRow.matricula, name: sellerRow.name || null } : null,
+      sellerProfile: sellerRow ? { sellerId: sellerRow.id, matricula: sellerRow.matricula, name: sellerRow.name || null, photoUrl: sellerRow.photo_url || null } : null,
       settings: RetailFloorSettingsService.get(orgId),
       inCalibration: RetailFloorSettingsService.inCalibration(orgId),
       // Taxonomia de desfecho pros dropdowns da UI (Fatia 4) — fonte única.
@@ -148,6 +148,69 @@ export class RetailFloorService {
       `SELECT id FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1 AND manager_user_id = ?`
     ).get(orgId, storeId, userId || "") as any;
     if (!row) throw new Error("store_scope_denied");
+  }
+
+  /**
+   * Gestor de QUALQUER loja (ou owner/admin). Escopo do cadastro de equipe
+   * (Fatia 11): o vendedor não é preso a uma loja (ADR-150 §"Vínculo
+   * vendedor↔loja"), então quem gerencia alguma loja pode manter o roster.
+   */
+  static assertAnyManager(orgId: string, user: { userId?: string; id?: string; role?: string }): void {
+    const role = user?.role || "";
+    if (role === "owner" || role === "admin") return;
+    const userId = user?.userId || user?.id || null;
+    const row = db.prepare(
+      `SELECT id FROM retail_stores WHERE organization_id = ? AND active = 1 AND manager_user_id = ? LIMIT 1`
+    ).get(orgId, userId || "") as any;
+    if (!row) throw new Error("store_scope_denied");
+  }
+
+  /**
+   * Cadastro de vendedor pela UI da loja (Fatia 11 — pedido TOULON: lojista
+   * adiciona vendedor com nome + foto). A matrícula continua sendo a chave de
+   * conciliação com o ERP; quando o lojista não informa (vendedor sem código
+   * no PDV ainda), geramos placeholder `LV-xxxxxx` — trocável depois via
+   * updateSeller sem perder histórico (o id não muda).
+   */
+  static createSeller(orgId: string, input: { name?: string; matricula?: string; photoUrl?: string }, actorId?: string): any {
+    const name = String(input?.name || "").trim();
+    if (!name) throw new Error("Nome do vendedor é obrigatório.");
+    const matricula = String(input?.matricula || "").trim() || `LV-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const photoUrl = input?.photoUrl ? String(input.photoUrl).trim() : null;
+    const dup = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;
+    if (dup) throw new Error(`Já existe vendedor com a matrícula "${matricula}".`);
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO retail_sellers (id, organization_id, matricula, name, photo_url, active) VALUES (?, ?, ?, ?, ?, 1)`
+    ).run(id, orgId, matricula, name, photoUrl);
+    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_SELLER_CREATE", { sellerId: id, matricula, name }); } catch { /* noop */ }
+    return this.shapeSeller(db.prepare(`SELECT * FROM retail_sellers WHERE id = ?`).get(id));
+  }
+
+  /** Edita nome/foto/ativo do vendedor. Desativar tira dos rosters futuros; histórico fica (retenção). */
+  static updateSeller(orgId: string, sellerId: string, patch: { name?: string; matricula?: string; photoUrl?: string | null; active?: boolean }, actorId?: string): any {
+    const row = db.prepare(`SELECT * FROM retail_sellers WHERE organization_id = ? AND id = ?`).get(orgId, sellerId) as any;
+    if (!row) throw new Error("Vendedor não encontrado.");
+    const name = patch.name != null ? String(patch.name).trim() : row.name;
+    if (patch.name != null && !name) throw new Error("Nome do vendedor é obrigatório.");
+    let matricula = row.matricula;
+    if (patch.matricula != null) {
+      matricula = String(patch.matricula).trim();
+      if (!matricula) throw new Error("Matrícula não pode ficar vazia.");
+      const dup = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND matricula = ? AND id != ?`).get(orgId, matricula, sellerId) as any;
+      if (dup) throw new Error(`Já existe vendedor com a matrícula "${matricula}".`);
+    }
+    const photoUrl = patch.photoUrl !== undefined ? (patch.photoUrl ? String(patch.photoUrl).trim() : null) : row.photo_url;
+    const active = patch.active != null ? (patch.active ? 1 : 0) : row.active;
+    db.prepare(
+      `UPDATE retail_sellers SET name = ?, matricula = ?, photo_url = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(name, matricula, photoUrl, active, orgId, sellerId);
+    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_SELLER_UPDATE", { sellerId, name, matricula, active }); } catch { /* noop */ }
+    return this.shapeSeller(db.prepare(`SELECT * FROM retail_sellers WHERE id = ?`).get(sellerId));
+  }
+
+  private static shapeSeller(r: any) {
+    return { id: r.id, matricula: r.matricula, name: r.name || null, photoUrl: r.photo_url || null, active: Number(r.active) === 1 };
   }
 }
 

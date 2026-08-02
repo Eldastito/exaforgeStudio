@@ -159,7 +159,7 @@ export class RetailFloorQueueService {
     const policy = RetailFloorSettingsService.get(orgId).queuePolicy;
     const rows = db.prepare(
       `SELECT q.id, q.seller_id, q.status, q.joined_at, q.status_changed_at,
-              s.name AS seller_name, s.matricula,
+              s.name AS seller_name, s.matricula, s.photo_url,
               (SELECT COUNT(*) FROM retail_floor_attendances a
                 WHERE a.organization_id = q.organization_id AND a.shift_id = q.shift_id AND a.seller_id = q.seller_id) AS served,
               (SELECT MAX(a.ended_at) FROM retail_floor_attendances a
@@ -185,6 +185,7 @@ export class RetailFloorQueueService {
           sellerId: r.seller_id,
           sellerName: r.seller_name || null,
           matricula: r.matricula,
+          photoUrl: r.photo_url || null,
           status: r.status,
           position: positions.get(r.id) || null,
           next: positions.get(r.id) === 1,

@@ -57,6 +57,8 @@ export function RetailFloorView() {
   const [tick, setTick] = useState(0);
   const [finishing, setFinishing] = useState<any>(null);
   const [scanFor, setScanFor] = useState<any>(null);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
   const pollRef = useRef<any>(null);
 
   const isManager = (ctx?.manageableStores || []).some((s: any) => s.id === storeId) || ctx?.canConfigure;
@@ -120,6 +122,12 @@ export function RetailFloorView() {
   );
   if (!ctx) return <div className="p-6 text-[var(--color-text-muted)]">Módulo indisponível.</div>;
 
+  // Onboarding: sem loja cadastrada não há o que operar — guia o usuário em
+  // vez de deixar a tela disparar chamadas sem storeId (erro críptico).
+  if (!(ctx.stores || []).length) {
+    return <OnboardingStore canConfigure={!!ctx.canConfigure} onCreated={loadCtx} />;
+  }
+
   const shift = snap?.shift;
   const queue: any[] = snap?.queue?.queue || [];
   const waiting = queue.filter((q) => q.status === 'waiting');
@@ -178,8 +186,8 @@ export function RetailFloorView() {
         )}
 
         {isManager && !shift && (
-          <button disabled={busy} onClick={() => act(() => api('/shifts', { storeId }), 'Turno aberto.')}
-            className="rounded-xl bg-[var(--color-flow)] px-4 py-2.5 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95">
+          <button disabled={busy || !storeId} onClick={() => setRosterOpen(true)}
+            className="rounded-xl bg-[var(--color-flow)] px-4 py-2.5 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50">
             <DoorOpen className="mr-1.5 inline h-4 w-4" />Abrir turno
           </button>
         )}
@@ -191,6 +199,12 @@ export function RetailFloorView() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {isManager && (
+            <button disabled={busy} onClick={() => setTeamOpen(true)}
+              className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-strong)]">
+              <Users className="mr-1.5 inline h-4 w-4" />Equipe
+            </button>
+          )}
           {shift && isManager && (ctx.sellers || []).length > 0 && (
             <AddSeller sellers={ctx.sellers} inQueue={new Set(queue.map((q) => q.sellerId))} busy={busy}
               onAdd={(sid: string) => act(() => api('/queue/join', { storeId, sellerId: sid }), 'Vendedor adicionado.')} />
@@ -235,7 +249,10 @@ export function RetailFloorView() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        {tab === 'fila' && !shift && <EmptyShift isManager={isManager} busy={busy} onOpen={() => act(() => api('/shifts', { storeId }), 'Turno aberto.')} />}
+        {tab === 'fila' && !shift && (
+          <EmptyShift isManager={isManager} busy={busy} hasSellers={(ctx.sellers || []).length > 0}
+            onOpen={() => setRosterOpen(true)} onTeam={() => setTeamOpen(true)} />
+        )}
 
         {tab === 'fila' && shift && (
           <DragDropContext onDragEnd={handleDragEnd}>
@@ -284,6 +301,21 @@ export function RetailFloorView() {
           onSubmit={(payload: any) => act(async () => { await api(`/attendances/${finishing.id}/finish`, payload); setFinishing(null); }, 'Atendimento encerrado.')} />
       )}
       {scanFor && <ScanPanel attendance={scanFor} onClose={() => setScanFor(null)} />}
+      {teamOpen && (
+        <TeamModal sellers={ctx.sellers || []} onClose={() => setTeamOpen(false)} onChanged={loadCtx} />
+      )}
+      {rosterOpen && (
+        <RosterModal sellers={ctx.sellers || []} storeName={storeName} busy={busy}
+          onClose={() => setRosterOpen(false)}
+          onTeam={() => { setRosterOpen(false); setTeamOpen(true); }}
+          onConfirm={(ids: string[]) => act(async () => {
+            await api('/shifts', { storeId });
+            for (const sid of ids) {
+              try { await api('/queue/join', { storeId, sellerId: sid }); } catch { /* segue os demais */ }
+            }
+            setRosterOpen(false);
+          }, 'Turno aberto.')} />
+      )}
     </div>
   );
 }
@@ -366,7 +398,7 @@ function SellerCard({ q, index, att, elapsed, isMine, isManager, busy, variant, 
 
           {/* Avatar */}
           <div className="relative shrink-0">
-            <Avatar name={q.sellerName || q.matricula} size={44} className="border-2 border-[var(--color-border)]" />
+            <Avatar name={q.sellerName || q.matricula} src={q.photoUrl} size={44} className="border-2 border-[var(--color-border)]" />
             {variant === 'serving' && (
               <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--color-surface-1)] bg-[var(--color-intelligence)]" />
             )}
@@ -470,23 +502,309 @@ function ActionBtn({ children, title, onClick, busy, accent, className }: {
 // Empty shift state
 // ============================================================================
 
-function EmptyShift({ isManager, busy, onOpen }: { isManager: boolean; busy: boolean; onOpen: () => void }) {
+function EmptyShift({ isManager, busy, hasSellers, onOpen, onTeam }: {
+  isManager: any; busy: any; hasSellers: boolean; onOpen: () => void; onTeam: () => void;
+}) {
+  const needsTeam = isManager && !hasSellers;
   return (
     <div className="flex flex-col items-center justify-center py-20">
       <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)]">
-        <DoorClosed className="h-10 w-10 text-zinc-600" />
+        {needsTeam ? <UserPlus className="h-10 w-10 text-zinc-600" /> : <DoorClosed className="h-10 w-10 text-zinc-600" />}
       </div>
       <h3 className="mt-5 text-lg font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>
-        Nenhum turno aberto
+        {needsTeam ? 'Cadastre sua equipe' : 'Nenhum turno aberto'}
       </h3>
-      <p className="mt-1 text-sm text-[var(--color-text-muted)]">Abra o turno para iniciar a lista da vez.</p>
-      {isManager && (
+      <p className="mt-1 max-w-sm text-center text-sm text-[var(--color-text-muted)]">
+        {needsTeam
+          ? 'Adicione os vendedores da loja — com nome e foto — para montar a lista da vez.'
+          : 'Abra o turno e escolha quem trabalha hoje para iniciar a lista da vez.'}
+      </p>
+      {needsTeam ? (
+        <button disabled={busy} onClick={onTeam}
+          className="mt-5 rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95">
+          <UserPlus className="mr-2 inline h-4 w-4" />Cadastrar equipe
+        </button>
+      ) : isManager && (
         <button disabled={busy} onClick={onOpen}
           className="mt-5 rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95">
           <DoorOpen className="mr-2 inline h-4 w-4" />Abrir turno
         </button>
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// Onboarding: sem loja cadastrada (primeiro acesso ao módulo)
+// ============================================================================
+
+function OnboardingStore({ canConfigure, onCreated }: { canConfigure: boolean; onCreated: () => void }) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const create = async () => {
+    if (!name.trim()) return toast.error('Informe o nome da loja.');
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/retailops/stores', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), code: code.trim() || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Erro ${res.status}`);
+      toast.success('Loja cadastrada!');
+      onCreated();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center px-6">
+      <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)]">
+        <ShoppingBag className="h-10 w-10 text-zinc-600" />
+      </div>
+      <h3 className="mt-5 text-lg font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>
+        Bem-vindo ao Atendimento de Loja
+      </h3>
+      {canConfigure ? (
+        <>
+          <p className="mt-1 max-w-md text-center text-sm text-[var(--color-text-muted)]">
+            Para começar, cadastre sua primeira loja. Depois você adiciona a equipe (com foto) e abre o turno do dia.
+          </p>
+          <div className="mt-6 w-full max-w-sm space-y-3">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome da loja (ex.: Loja Centro)"
+              className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none focus:ring-1 focus:ring-[var(--color-flow)]/30" />
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código (opcional — igual ao do PDV)"
+              className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none focus:ring-1 focus:ring-[var(--color-flow)]/30" />
+            <button disabled={saving} onClick={create}
+              className="w-full rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50">
+              {saving ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <ShoppingBag className="mr-2 inline h-4 w-4" />}
+              Cadastrar loja
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="mt-1 max-w-md text-center text-sm text-[var(--color-text-muted)]">
+          Nenhuma loja cadastrada ainda. Peça ao administrador da conta para cadastrar a loja — depois disso a lista da vez aparece aqui.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Equipe: cadastro de vendedores com foto (gestor)
+// ============================================================================
+
+function PhotoInput({ value, onChange, name }: { value: string | null; onChange: (url: string | null) => void; name?: string }) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Falha no upload.');
+      onChange(data.url);
+    } catch (e: any) { toast.error(e.message); }
+    finally { setUploading(false); }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
+        className="relative shrink-0 rounded-full transition-all hover:ring-2 hover:ring-[var(--color-flow)]/50">
+        <Avatar name={name || '?'} src={value} size={56} className="border-2 border-[var(--color-border)]" />
+        <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--color-surface-1)] bg-[var(--color-flow)] text-zinc-950">
+          {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserPlus className="h-3 w-3" />}
+        </span>
+      </button>
+      <div className="text-xs text-[var(--color-text-muted)]">
+        {value ? (
+          <button type="button" onClick={() => onChange(null)} className="text-rose-400 hover:underline">Remover foto</button>
+        ) : (
+          <span>Toque para adicionar a foto<br />do vendedor (aparece no card)</span>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} />
+    </div>
+  );
+}
+
+function TeamModal({ sellers, onClose, onChanged }: { sellers: any[]; onClose: () => void; onChanged: () => void }) {
+  const [adding, setAdding] = useState(sellers.length === 0);
+  const [name, setName] = useState('');
+  const [matricula, setMatricula] = useState('');
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) return toast.error('Informe o nome do vendedor.');
+    setSaving(true);
+    try {
+      await api('/sellers', { name: name.trim(), matricula: matricula.trim() || undefined, photoUrl: photoUrl || undefined });
+      toast.success(`${name.trim()} adicionado à equipe.`);
+      setName(''); setMatricula(''); setPhotoUrl(null); setAdding(false);
+      onChanged();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const setPhoto = async (sellerId: string, url: string | null) => {
+    try { await api(`/sellers/${sellerId}`, { photoUrl: url }); onChanged(); }
+    catch (e: any) { toast.error(e.message); }
+  };
+
+  const deactivate = async (s: any) => {
+    try { await api(`/sellers/${s.id}`, { active: false }); toast.success(`${s.name || s.matricula} removido da equipe.`); onChanged(); }
+    catch (e: any) { toast.error(e.message); }
+  };
+
+  return (
+    <Modal title="Equipe da loja" subtitle="Vendedores que entram na lista da vez" onClose={onClose}>
+      {sellers.length > 0 && (
+        <div className="max-h-[40vh] space-y-2 overflow-y-auto">
+          {sellers.map((s) => (
+            <div key={s.id} className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
+              <TeamPhotoCell seller={s} onPhoto={(url) => setPhoto(s.id, url)} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-[var(--color-text-strong)]">{s.name || s.matricula}</p>
+                <p className="text-xs text-[var(--color-text-muted)]">{String(s.matricula).startsWith('LV-') ? 'Sem código do PDV' : `Matrícula ${s.matricula}`}</p>
+              </div>
+              <button title="Remover da equipe" onClick={() => deactivate(s)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400">
+                <UserX className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding ? (
+        <div className="mt-4 space-y-3 rounded-xl border border-[var(--color-flow)]/30 bg-[var(--color-flow)]/5 p-4">
+          <PhotoInput value={photoUrl} onChange={setPhotoUrl} name={name} />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome do vendedor" autoFocus
+            className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+          <input value={matricula} onChange={(e) => setMatricula(e.target.value)} placeholder="Matrícula no PDV (opcional)"
+            className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+          <div className="flex gap-2">
+            <button disabled={saving} onClick={save}
+              className="flex-1 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">
+              {saving ? <Loader2 className="mr-1.5 inline h-4 w-4 animate-spin" /> : <Check className="mr-1.5 inline h-4 w-4" />}Salvar
+            </button>
+            {sellers.length > 0 && (
+              <button onClick={() => setAdding(false)}
+                className="rounded-xl border border-[var(--color-border)] px-4 py-3 text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]">
+                Cancelar
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="mt-4 w-full rounded-xl border border-dashed border-[var(--color-border)] px-4 py-3 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-flow)]/50 hover:text-[var(--color-flow)]">
+          <UserPlus className="mr-1.5 inline h-4 w-4" />Adicionar vendedor
+        </button>
+      )}
+    </Modal>
+  );
+}
+
+function TeamPhotoCell({ seller, onPhoto }: { seller: any; onPhoto: (url: string | null) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Falha no upload.');
+      onPhoto(data.url);
+    } catch (e: any) { toast.error(e.message); }
+    finally { setUploading(false); }
+  };
+  return (
+    <>
+      <button type="button" title="Trocar foto" onClick={() => inputRef.current?.click()} disabled={uploading}
+        className="relative shrink-0 rounded-full transition-all hover:ring-2 hover:ring-[var(--color-flow)]/50">
+        <Avatar name={seller.name || seller.matricula} src={seller.photoUrl} size={44} className="border-2 border-[var(--color-border)]" />
+        {uploading && (
+          <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50">
+            <Loader2 className="h-4 w-4 animate-spin text-white" />
+          </span>
+        )}
+      </button>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} />
+    </>
+  );
+}
+
+// ============================================================================
+// Abrir turno: escala do dia ("quem trabalha hoje?")
+// ============================================================================
+
+function RosterModal({ sellers, storeName, busy, onClose, onTeam, onConfirm }: {
+  sellers: any[]; storeName: string; busy: any;
+  onClose: () => void; onTeam: () => void; onConfirm: (ids: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(sellers.map((s: any) => s.id)));
+  const toggle = (id: string) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  return (
+    <Modal title="Abrir turno" subtitle={storeName ? `${storeName} — quem trabalha hoje?` : 'Quem trabalha hoje?'} onClose={onClose}>
+      {sellers.length === 0 ? (
+        <div className="py-6 text-center">
+          <p className="text-sm text-[var(--color-text-muted)]">Nenhum vendedor cadastrado ainda.</p>
+          <button onClick={onTeam}
+            className="mt-4 rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110">
+            <UserPlus className="mr-1.5 inline h-4 w-4" />Cadastrar equipe
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="max-h-[45vh] space-y-2 overflow-y-auto">
+            {sellers.map((s: any) => {
+              const on = selected.has(s.id);
+              return (
+                <button key={s.id} type="button" onClick={() => toggle(s.id)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all',
+                    on ? 'border-[var(--color-flow)]/50 bg-[var(--color-flow)]/5' : 'border-[var(--color-border)] bg-[var(--color-surface-1)] opacity-60 hover:opacity-100',
+                  )}>
+                  <Avatar name={s.name || s.matricula} src={s.photoUrl} size={40} className="border-2 border-[var(--color-border)]" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text-strong)]">{s.name || s.matricula}</span>
+                  <span className={cn(
+                    'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-all',
+                    on ? 'border-[var(--color-flow)] bg-[var(--color-flow)] text-zinc-950' : 'border-[var(--color-border)]',
+                  )}>
+                    {on && <Check className="h-3.5 w-3.5" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+            {selected.size} de {sellers.length} na escala — eles já entram na lista da vez. Dá pra ajustar depois.
+          </p>
+          <button disabled={busy} onClick={() => onConfirm(Array.from(selected))}
+            className="mt-3 w-full rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50">
+            <DoorOpen className="mr-2 inline h-4 w-4" />Abrir turno com {selected.size} vendedor{selected.size === 1 ? '' : 'es'}
+          </button>
+        </>
+      )}
+    </Modal>
   );
 }
 

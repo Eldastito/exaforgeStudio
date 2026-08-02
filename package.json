@@ -164,6 +164,7 @@
     "test:retail-floor-analytics": "tsx scripts/test-retail-floor-analytics.ts",
     "test:retail-floor-digest": "tsx scripts/test-retail-floor-digest.ts",
     "test:retail-floor-pilot": "tsx scripts/test-retail-floor-pilot.ts",
+    "test:retail-floor-team": "tsx scripts/test-retail-floor-team.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",

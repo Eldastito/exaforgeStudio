@@ -23,6 +23,13 @@ import { logAuthEvent } from "./auditLog.js";
 
 const QUEUE_POLICIES = ["round_robin", "fifo"];
 
+// Taxonomia hierárquica do motivo de NÃO conversão (Fatia 4). Mora aqui (na
+// fundação) pra rota/context e AttendanceService consumirem sem ciclo de
+// import. Nível 2 usa a MESMA taxonomia de retail_floor_unmet_demand — o
+// Pareto de perdas e o sinal de compra (Fatia 8) falam a mesma língua.
+export const NOT_CONVERTED_CATEGORIES = ["product", "price", "size_fit", "service_time", "other"] as const;
+export const PRODUCT_REASONS = ["no_assortment", "no_local_stock", "no_network_stock", "missing_size", "missing_color", "missing_category"] as const;
+
 export class RetailFloorSettingsService {
   /** Lê (criando lazy com defaults) as settings do módulo para a org. */
   static get(orgId: string): any {
@@ -107,6 +114,8 @@ export class RetailFloorService {
       sellerProfile: sellerRow ? { sellerId: sellerRow.id, matricula: sellerRow.matricula, name: sellerRow.name || null } : null,
       settings: RetailFloorSettingsService.get(orgId),
       inCalibration: RetailFloorSettingsService.inCalibration(orgId),
+      // Taxonomia de desfecho pros dropdowns da UI (Fatia 4) — fonte única.
+      taxonomy: { notConvertedCategories: NOT_CONVERTED_CATEGORIES, productReasons: PRODUCT_REASONS },
     };
   }
 

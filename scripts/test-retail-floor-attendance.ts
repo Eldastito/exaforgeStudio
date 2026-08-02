@@ -150,7 +150,8 @@ async function main() {
 
   // Gestor encerra de terceiro (auditado byManager). Bia (próxima) atende de novo.
   const att4 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2 }, manager);
-  const done4 = RetailFloorAttendanceService.finish(A, att4.id, { outcome: "not_converted" }, manager);
+  // Fatia 4: not_converted passou a EXIGIR o motivo hierárquico.
+  const done4 = RetailFloorAttendanceService.finish(A, att4.id, { outcome: "not_converted", reason: { category: "price" } }, manager);
   check("finish: not_converted sem estado de conciliação", done4.reconciliationState === null);
   const auditFin = db.prepare(`SELECT metadata_json FROM auth_audit_logs WHERE organization_id = ? AND event_type = 'RETAIL_FLOOR_ATTENDANCE_FINISH' ORDER BY rowid DESC LIMIT 1`).get(A) as any;
   check("finish: gestor encerrando terceiro audita byManager", JSON.parse(auditFin.metadata_json).byManager === true);

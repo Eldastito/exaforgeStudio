@@ -1341,47 +1341,285 @@ function NewStoreButton({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-const PAYMENT_METHODS = ['dinheiro', 'pix', 'credito', 'debito', 'voucher', 'troca', 'outros'];
+// Fase C2 — a FOLHA da loja em forma digital: dinheiro/PIX, crédito e débito
+// POR BANDEIRA (configuráveis por loja), despesas, ranking por vendedor
+// (valor/AT/peças — pré-preenchido pela escala do dia), cadastros, boletas,
+// malote e conferência com o resumo do POS. Foto da folha pré-preenche (IA).
+type RankRow = { sellerName: string; valor: string; at: string; pecas: string };
+type DespesaRow = { descricao: string; valor: string };
 function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () => void; onSaved: () => void }) {
-  const initial: Record<string, string> = {};
-  for (const it of closing.items || []) initial[it.payment_method] = String(it.informed_amount || '');
-  const [methods, setMethods] = useState<Record<string, string>>(initial);
+  const date = closing.closing_date;
+  const storeId = closing.store_id;
+  const existing = useMemo(() => { try { return JSON.parse(closing.details_json || 'null') || {}; } catch { return {}; } }, [closing.details_json]);
+
+  const [brands, setBrands] = useState<{ credito: string[]; debito: string[] } | null>(null);
+  const [dinheiro, setDinheiro] = useState(existing.dinheiro ? String(existing.dinheiro) : '');
+  const [pix, setPix] = useState(existing.pix ? String(existing.pix) : '');
+  const [voucher, setVoucher] = useState(existing.voucher ? String(existing.voucher) : '');
+  const [troca, setTroca] = useState(existing.troca ? String(existing.troca) : '');
+  const [outros, setOutros] = useState(existing.outros ? String(existing.outros) : '');
+  const [credito, setCredito] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing.credito || {}).map(([k, v]) => [k, String(v)])));
+  const [debito, setDebito] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing.debito || {}).map(([k, v]) => [k, String(v)])));
+  const [despesas, setDespesas] = useState<DespesaRow[]>(() => (existing.despesas || []).map((d: any) => ({ descricao: d.descricao, valor: String(d.valor) })));
+  const [ranking, setRanking] = useState<RankRow[]>(() => (existing.ranking || []).map((r: any) => ({ sellerName: r.sellerName, valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '' })));
+  const [cadastros, setCadastros] = useState(existing.cadastros ? String(existing.cadastros) : '');
+  const [boletaInicial, setBoletaInicial] = useState(existing.boletaInicial || '');
+  const [boletaFinal, setBoletaFinal] = useState(existing.boletaFinal || '');
+  const [malote, setMalote] = useState(existing.malote || '');
+  const [premioDia, setPremioDia] = useState(existing.premioDia || '');
+  const [obs, setObs] = useState(existing.obs || '');
+  const [posCred, setPosCred] = useState(existing.pos?.creditoValor ? String(existing.pos.creditoValor) : '');
+  const [posCredQtd, setPosCredQtd] = useState(existing.pos?.creditoQtd ? String(existing.pos.creditoQtd) : '');
+  const [posDeb, setPosDeb] = useState(existing.pos?.debitoValor ? String(existing.pos.debitoValor) : '');
+  const [posDebQtd, setPosDebQtd] = useState(existing.pos?.debitoQtd ? String(existing.pos.debitoQtd) : '');
+  const [escalados, setEscalados] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const total = useMemo(() => PAYMENT_METHODS.reduce((a, m) => a + (Number(methods[m]) || 0), 0), [methods]);
+  const [scanning, setScanning] = useState(false);
+  const [scanNote, setScanNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch(`/api/retailops/stores/${storeId}/card-brands`).then(r => r.json()).then(d => {
+      if (d?.credito) setBrands(d);
+    }).catch(() => setBrands({ credito: ['Amex', 'Master', 'Visa', 'Elo'], debito: ['Redshop', 'Eletron', 'Elo'] }));
+    // Escala do dia: pré-preenche o ranking com quem trabalhou (status work).
+    apiFetch(`/api/retailops/schedule?storeId=${storeId}&start=${date}&end=${date}`).then(r => r.json()).then(d => {
+      const names = (d?.entries || []).filter((e: any) => e.status === 'work').map((e: any) => e.seller_name || e.seller_key.replace(/^(mat|nom|user):/, ''));
+      setEscalados(names);
+      setRanking(prev => prev.length ? prev : (names.length ? names.map((n: string) => ({ sellerName: n, valor: '', at: '', pecas: '' })) : [{ sellerName: '', valor: '', at: '', pecas: '' }]));
+    }).catch(() => setRanking(prev => prev.length ? prev : [{ sellerName: '', valor: '', at: '', pecas: '' }]));
+    // eslint-disable-next-line
+  }, [storeId, date]);
+
+  const editBrands = async (kind: 'credito' | 'debito') => {
+    if (!brands) return;
+    const cur = brands[kind].join(', ');
+    const v = window.prompt(`Bandeiras de ${kind} desta loja (separadas por vírgula):`, cur);
+    if (v == null) return;
+    const next = { ...brands, [kind]: v.split(',').map(s => s.trim()).filter(Boolean) };
+    const res = await apiFetch(`/api/retailops/stores/${storeId}/card-brands`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { setBrands(d); toast.success('Bandeiras da loja atualizadas.'); }
+    else toast.error(d.error || 'Falha ao salvar as bandeiras.');
+  };
+
+  const n = (v: string) => Number(String(v || '').replace(',', '.')) || 0;
+  const totalCredito = useMemo(() => Object.values(credito).reduce((a: number, v) => a + n(String(v ?? '')), 0), [credito]);
+  const totalDebito = useMemo(() => Object.values(debito).reduce((a: number, v) => a + n(String(v ?? '')), 0), [debito]);
+  const totalVendas = useMemo(() => n(dinheiro) + n(pix) + totalCredito + totalDebito + n(voucher) + n(troca) + n(outros), [dinheiro, pix, totalCredito, totalDebito, voucher, troca, outros]);
+  const totalDespesas = useMemo(() => despesas.reduce((a, d) => a + n(d.valor), 0), [despesas]);
+  const rankingTotal = useMemo(() => ranking.reduce((a, r) => a + n(r.valor), 0), [ranking]);
+  const rankingGap = ranking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
+  const posGapCred = n(posCred) > 0 ? Math.round((totalCredito - n(posCred)) * 100) / 100 : null;
+  const posGapDeb = n(posDeb) > 0 ? Math.round((totalDebito - n(posDeb)) * 100) / 100 : null;
+  const quota = Number(closing.quota_amount || 0);
+  const cotaPorVendedor = quota > 0 && escalados.length > 0 ? quota / escalados.length : null;
+
+  // Foto da folha → IA pré-preenche o formulário inteiro (Fase C2).
+  const onScan = async (file: File) => {
+    setScanning(true); setScanNote(null);
+    try {
+      const fd = new FormData(); fd.append('file', file); fd.append('storeId', storeId); fd.append('date', date);
+      const res = await apiFetch('/api/retailops/closings/scan', { method: 'POST', body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao ler a folha.'); return; }
+      const x = d.extraction || {};
+      if (x.dinheiro != null) setDinheiro(String(x.dinheiro));
+      if (x.pix != null) setPix(String(x.pix));
+      if (x.voucher != null) setVoucher(String(x.voucher));
+      if (x.troca != null) setTroca(String(x.troca));
+      if (x.creditoBandeiras) setCredito(Object.fromEntries(Object.entries(x.creditoBandeiras).map(([k, v]) => [k, String(v)])));
+      else if (x.credito != null && brands?.credito?.length) setCredito({ [brands.credito[0]]: String(x.credito) });
+      if (x.debitoBandeiras) setDebito(Object.fromEntries(Object.entries(x.debitoBandeiras).map(([k, v]) => [k, String(v)])));
+      else if (x.debito != null && brands?.debito?.length) setDebito({ [brands.debito[0]]: String(x.debito) });
+      if (Array.isArray(x.despesas) && x.despesas.length) setDespesas(x.despesas.map((dd: any) => ({ descricao: String(dd.descricao || ''), valor: dd.valor ? String(dd.valor) : '' })));
+      if (Array.isArray(x.ranking) && x.ranking.length) setRanking(x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '' })));
+      if (x.cadastros != null) setCadastros(String(x.cadastros));
+      if (x.boletaInicial) setBoletaInicial(String(x.boletaInicial));
+      if (x.boletaFinal) setBoletaFinal(String(x.boletaFinal));
+      if (x.malote) setMalote(String(x.malote));
+      if (x.pos) { setPosCred(x.pos.creditoValor ? String(x.pos.creditoValor) : ''); setPosCredQtd(x.pos.creditoQtd ? String(x.pos.creditoQtd) : ''); setPosDeb(x.pos.debitoValor ? String(x.pos.debitoValor) : ''); setPosDebQtd(x.pos.debitoQtd ? String(x.pos.debitoQtd) : ''); }
+      setScanNote(x.needsReview
+        ? `Leitura com baixa confiança (${x.confidence}%). CONFIRA cada campo antes de salvar.`
+        : `IA leu a folha (confiança ${x.confidence}%). Confira e salve.`);
+    } catch { toast.error('Falha ao enviar a imagem.'); }
+    finally { setScanning(false); }
+  };
 
   const save = async () => {
     setSaving(true);
     try {
-      const items = PAYMENT_METHODS.filter(m => Number(methods[m]) > 0).map(m => ({ paymentMethod: m, informedAmount: Number(methods[m]) }));
-      const res = await apiFetch(`/api/retailops/closings/${closing.id}/inform`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ informedTotal: total, items }) });
-      if (res.ok) { toast.success('Fechamento informado.'); onSaved(); }
+      const details = {
+        dinheiro: n(dinheiro), pix: n(pix), voucher: n(voucher), troca: n(troca), outros: n(outros),
+        credito: Object.fromEntries(Object.entries(credito).map(([k, v]) => [k, n(String(v ?? ''))])),
+        debito: Object.fromEntries(Object.entries(debito).map(([k, v]) => [k, n(String(v ?? ''))])),
+        despesas: despesas.map(d => ({ descricao: d.descricao, valor: n(d.valor) })),
+        ranking: ranking.map(r => ({ sellerName: r.sellerName.trim(), valor: n(r.valor), atendimentos: n(r.at), pecas: n(r.pecas) })).filter(r => r.sellerName),
+        cadastros: n(cadastros), boletaInicial, boletaFinal, malote, premioDia, obs,
+        pos: n(posCred) > 0 || n(posDeb) > 0 ? { creditoValor: n(posCred), creditoQtd: n(posCredQtd), debitoValor: n(posDeb), debitoQtd: n(posDebQtd) } : null,
+      };
+      const res = await apiFetch(`/api/retailops/closings/${closing.id}/detailed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ details }) });
+      if (res.ok) { toast.success('Fechamento do dia registrado — aguardando aprovação.'); onSaved(); }
       else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar.'); }
     } finally { setSaving(false); }
   };
 
+  const inp = 'w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100';
+  const money = (v: string, set: (s: string) => void, ph = '0,00') => (
+    <input inputMode="decimal" value={v} onChange={e => set(e.target.value.replace(',', '.'))} placeholder={ph} className={inp} />
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-900 p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-zinc-100">Fechamento — {closing.store_name}</h3>
+          <h3 className="font-semibold text-zinc-100">Fechamento do dia — {closing.store_name} · {date?.slice(8)}/{date?.slice(5, 7)}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
         </div>
-        <p className="mt-0.5 text-xs text-zinc-500">Informe o total por forma de pagamento. Cota do dia: {brl(closing.quota_amount)}.</p>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          {PAYMENT_METHODS.map(m => (
-            <label key={m} className="text-xs text-zinc-400 capitalize">{m}
-              <input inputMode="decimal" value={methods[m] || ''} onChange={e => setMethods(p => ({ ...p, [m]: e.target.value.replace(',', '.') }))}
-                placeholder="0,00" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+        <p className="mt-0.5 text-xs text-zinc-500">
+          Cota do dia: <strong className="text-zinc-300">{brl(quota)}</strong>
+          {cotaPorVendedor != null && <> ÷ {escalados.length} escalado(s) = <strong className="text-zinc-300">{brl(cotaPorVendedor)}</strong> por vendedor</>}
+        </p>
+
+        <div className="mt-3">
+          <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">
+            {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Enviar foto da folha (IA pré-preenche)
+            <input type="file" accept="image/*" className="hidden" disabled={scanning} onChange={e => { const f = e.target.files?.[0]; if (f) onScan(f); e.currentTarget.value = ''; }} />
+          </label>
+          {scanNote && <p className="mt-2 flex items-start gap-1.5 text-[12px] text-amber-300/90"><Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {scanNote}</p>}
+        </div>
+
+        {/* Dinheiro / PIX + cartões por bandeira */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Dinheiro & PIX</div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-zinc-400">R$ (dinheiro){money(dinheiro, setDinheiro)}</label>
+              <label className="text-xs text-zinc-400">PIX{money(pix, setPix)}</label>
+              <label className="text-xs text-zinc-400">Voucher{money(voucher, setVoucher)}</label>
+              <label className="text-xs text-zinc-400">Troca{money(troca, setTroca)}</label>
+            </div>
+          </div>
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Crédito · {brl(totalCredito)}</span>
+              <button onClick={() => editBrands('credito')} className="text-[11px] text-indigo-300 hover:text-indigo-200">editar bandeiras</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(brands?.credito || []).map(b => (
+                <label key={b} className="text-xs text-zinc-400">{b}
+                  <input inputMode="decimal" value={credito[b] || ''} onChange={e => setCredito(p => ({ ...p, [b]: e.target.value.replace(',', '.') }))} placeholder="0,00" className={inp} />
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center justify-between mt-3 mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Débito · {brl(totalDebito)}</span>
+              <button onClick={() => editBrands('debito')} className="text-[11px] text-indigo-300 hover:text-indigo-200">editar bandeiras</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(brands?.debito || []).map(b => (
+                <label key={b} className="text-xs text-zinc-400">{b}
+                  <input inputMode="decimal" value={debito[b] || ''} onChange={e => setDebito(p => ({ ...p, [b]: e.target.value.replace(',', '.') }))} placeholder="0,00" className={inp} />
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Conferência com o POS */}
+        <div className="mt-3 rounded-lg border border-zinc-800 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Resumo do POS (comprovante da maquininha — opcional)</div>
+          <div className="grid grid-cols-4 gap-2">
+            <label className="text-xs text-zinc-400">Crédito (R$){money(posCred, setPosCred)}</label>
+            <label className="text-xs text-zinc-400">Qtd
+              <input inputMode="numeric" value={posCredQtd} onChange={e => setPosCredQtd(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
             </label>
+            <label className="text-xs text-zinc-400">Débito (R$){money(posDeb, setPosDeb)}</label>
+            <label className="text-xs text-zinc-400">Qtd
+              <input inputMode="numeric" value={posDebQtd} onChange={e => setPosDebQtd(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
+            </label>
+          </div>
+          {(posGapCred != null || posGapDeb != null) && (
+            <p className={`mt-2 text-[11px] ${Math.abs(posGapCred || 0) > 0.01 || Math.abs(posGapDeb || 0) > 0.01 ? 'text-amber-300' : 'text-emerald-300'}`}>
+              {Math.abs(posGapCred || 0) <= 0.01 && Math.abs(posGapDeb || 0) <= 0.01
+                ? 'Cartões batem com o POS.'
+                : `Diferença vs POS — crédito ${brl(posGapCred || 0)} · débito ${brl(posGapDeb || 0)}. Confira antes de salvar.`}
+            </p>
+          )}
+        </div>
+
+        {/* Ranking por vendedor (alimenta a comissão na aprovação) */}
+        <div className="mt-3 rounded-lg border border-zinc-800 p-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Ranking por vendedor · {brl(rankingTotal)}</span>
+            <button onClick={() => setRanking(p => [...p, { sellerName: '', valor: '', at: '', pecas: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ vendedor</button>
+          </div>
+          <p className="mb-2 text-[10px] text-zinc-600">Na aprovação, essas linhas viram as vendas por vendedor da comissão/corrida (AT = atendimentos, o denominador do P.A).{escalados.length ? ' Pré-preenchido pela escala do dia.' : ''}</p>
+          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-zinc-500">
+            <span>Vendedor</span><span className="w-24 text-right">Valor</span><span className="w-12 text-right">AT</span><span className="w-12 text-right">Peças</span><span className="w-5"></span>
+          </div>
+          {ranking.map((r, i) => (
+            <div key={i} className="mt-1 grid grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 items-center">
+              <input value={r.sellerName} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, sellerName: e.target.value } : x))} placeholder="Nome" className={inp} />
+              <input inputMode="decimal" value={r.valor} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value.replace(',', '.') } : x))} placeholder="0,00" className={`${inp} w-24 text-right`} />
+              <input inputMode="numeric" value={r.at} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, at: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-12 text-right`} />
+              <input inputMode="numeric" value={r.pecas} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, pecas: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-12 text-right`} />
+              <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
           ))}
+          {rankingGap != null && Math.abs(rankingGap) > 0.01 && (
+            <p className="mt-2 text-[11px] text-amber-300">A soma do ranking difere do total do dia em {brl(rankingGap)} — a linha LOJA da folha deveria bater. Confira.</p>
+          )}
         </div>
+
+        {/* Despesas + rodapé da folha */}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Despesas do dia · {brl(totalDespesas)}</span>
+              <button onClick={() => setDespesas(p => [...p, { descricao: '', valor: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ despesa</button>
+            </div>
+            {despesas.length === 0 && <p className="text-[11px] text-zinc-600">Sem despesas lançadas.</p>}
+            {despesas.map((d, i) => (
+              <div key={i} className="mt-1 grid grid-cols-[1fr_auto_auto] gap-1.5 items-center">
+                <input value={d.descricao} onChange={e => setDespesas(p => p.map((x, j) => j === i ? { ...x, descricao: e.target.value } : x))} placeholder="Descrição" className={inp} />
+                <input inputMode="decimal" value={d.valor} onChange={e => setDespesas(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value.replace(',', '.') } : x))} placeholder="0,00" className={`${inp} w-24 text-right`} />
+                <button onClick={() => setDespesas(p => p.filter((_, j) => j !== i))} className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Boletas, cadastros & malote</div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-zinc-400">Boleta inicial
+                <input value={boletaInicial} onChange={e => setBoletaInicial(e.target.value)} placeholder="017752" className={inp} />
+              </label>
+              <label className="text-xs text-zinc-400">Boleta final
+                <input value={boletaFinal} onChange={e => setBoletaFinal(e.target.value)} placeholder="017757" className={inp} />
+              </label>
+              <label className="text-xs text-zinc-400">Cadastros
+                <input inputMode="numeric" value={cadastros} onChange={e => setCadastros(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
+              </label>
+              <label className="text-xs text-zinc-400">Malote
+                <input value={malote} onChange={e => setMalote(e.target.value)} placeholder="—" className={inp} />
+              </label>
+              <label className="col-span-2 text-xs text-zinc-400">Prêmio do dia
+                <input value={premioDia} onChange={e => setPremioDia(e.target.value)} placeholder="—" className={inp} />
+              </label>
+              <label className="col-span-2 text-xs text-zinc-400">OBS
+                <input value={obs} onChange={e => setObs(e.target.value)} placeholder="—" className={inp} />
+              </label>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-950/60 px-3 py-2">
-          <span className="text-sm text-zinc-400">Total informado</span>
-          <span className="text-sm font-semibold text-zinc-100">{brl(total)}</span>
+          <span className="text-sm text-zinc-400">Total do dia {quota > 0 && <span className="text-zinc-600">· cota {brl(quota)} ({totalVendas >= quota ? '+' : ''}{quota > 0 ? Math.round(((totalVendas / quota) - 1) * 1000) / 10 : 0}%)</span>}</span>
+          <span className={`text-sm font-semibold ${quota > 0 && totalVendas >= quota ? 'text-emerald-300' : 'text-zinc-100'}`}>{brl(totalVendas)}</span>
         </div>
+
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
-          <button onClick={save} disabled={saving || total <= 0} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          <button onClick={save} disabled={saving || totalVendas <= 0} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar fechamento
           </button>
         </div>

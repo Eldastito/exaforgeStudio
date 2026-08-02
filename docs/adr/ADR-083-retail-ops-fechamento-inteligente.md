@@ -264,3 +264,67 @@ faixas não cumulativas, P.A com/sem cota, ranking semanal 1º/2º e razões de
 não-prêmio, desvio da rede com filtro por loja, gerente com/sem cota da loja,
 cota derivada da escala, precedência do plano por loja, run draft com
 detalhamento, audit, isolamento multi-tenant).
+
+## Fase C2 — Fechamento noturno completo (padrão da folha da loja) (2026-08)
+
+**Origem:** fotos da rotina real do cliente — a folha de fechamento preenchida
+à noite (loja NOVA IGUAÇU 31/07/26), uma boleta de venda e a tela de
+vendedores do Alterdata. A folha real tem MUITO mais do que os totais por
+forma de pagamento que a Fase C capturava: **crédito e débito POR BANDEIRA**
+(Amex/Master/Visa/Elo; Redshop/Eletron/Elo), **despesas do dia**, **ranking
+por vendedor** (valor, A/P = atendimentos, P/A = peças), **cadastros de
+clientes**, **boleta inicial/final**, **malote**, **prêmio do dia**, e o
+**resumo do POS (Clover) grampeado** — que confere com os cartões (a linha
+"Crédito (4) R$ 1.379,30 / Débito (2) R$ 469,80" bate com o "6/9" da linha
+LOJA: 6 atendimentos, 9 peças).
+
+**Decisões:**
+
+1. **`details_json` aditivo em `retail_daily_closings`** — a folha inteira
+   estruturada (shape no header de `submitDetailed`). Fechamentos antigos
+   (NULL) seguem operando só com `informed_total`/items.
+2. **Total DERIVADO** — dinheiro + pix + bandeiras + voucher/troca/outros.
+   Despesas NÃO abatem venda (são caixa, não faturamento). Desvio vs cota
+   continua no mesmo caminho da Fase B.
+3. **Conferências viram FLAGS, não bloqueio (D4)** — `derived.rankingGap`
+   (a linha LOJA da folha: soma do ranking × total do dia) e
+   `derived.posGapCredito/Debito` (cartões informados × comprovante do POS).
+   A UI avisa; quem decide é o humano na aprovação.
+4. **Bandeiras por loja** — `retail_stores.card_brands_json` (aditivo);
+   default = as da folha do cliente. `GET/PUT /stores/:id/card-brands`.
+5. **Ranking → comissão sem digitar duas vezes** — na APROVAÇÃO do
+   fechamento, `syncRankingToSellerSales` grava o ranking em
+   `retail_seller_sales` com `source='closing'` (valor/peças/AT — a mesma
+   base da Fase G/G2). Idempotente: substitui só as linhas `closing` daquela
+   (loja, dia); lançamentos manuais/foto não são tocados. Matrícula
+   resolvida pelo nome quando bate com UM único vendedor cadastrado (sem
+   chute em ambiguidade — o Alterdata tem o cadastro por loja; o sync via
+   ADR-105 continua sendo o caminho canônico da matrícula).
+6. **OCR v2** — `extractClosingFromImage` agora lê a folha completa
+   (bandeiras, despesas, ranking com A/P=atendimentos e P/A=peças, cadastros,
+   boletas, malote, POS); `submitFromImage` mapeia a extração rica pro
+   `details_json` (pré-preenche o formulário na conferência) e folha antiga
+   sem os campos segue o fluxo de sempre.
+
+**UI (aba Fechamento diário):** o modal "Informar" virou a **folha digital**:
+cota do dia ÷ escalados (integra a escala da Fase G2), dinheiro/PIX/voucher/
+troca, crédito e débito por bandeira (com editor de bandeiras da loja),
+resumo do POS com conferência ao vivo, ranking por vendedor pré-preenchido
+pelos ESCALADOS do dia (valor/AT/peças), despesas, boletas/cadastros/malote/
+prêmio do dia/OBS, totais automáticos com % da cota e o botão "Enviar foto da
+folha" (IA pré-preenche tudo; conferência humana antes de salvar).
+
+**Rotas:** `POST /closings/:id/detailed`, `GET/PUT /stores/:id/card-brands`;
+`POST /closings/:id/approve` passou a disparar o sync do ranking
+(best-effort, não falha a aprovação).
+
+**Fora desta fase (documentado de propósito):** boleta a boleta no app (a
+folha de venda individual com S/E e troca continua no papel/PDV — o
+fechamento registra o range de boletas e o agregado; lançar venda a venda
+mudaria a rotina do salão e é projeto próprio, se o cliente pedir).
+
+**Teste:** `test:retail-closing-detailed` (28 verificações — bandeiras
+default/config/validação, total derivado + desvio, conferências ranking/POS
+com divergência-flag, sync na aprovação idempotente sem tocar lançamento
+manual + matrícula por nome único, scan rico × folha simples, audit,
+isolamento multi-tenant).

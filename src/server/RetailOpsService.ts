@@ -154,6 +154,25 @@ export class RetailClosingService {
       imageUrl: opts.imageUrl, submittedByContactId: opts.submittedByContactId, submittedByIdentifier: opts.submittedByIdentifier,
     }, actorId);
 
+    // Fase C2: a extração rica (bandeiras/despesas/ranking/boletas/POS) vira o
+    // details_json — pré-preenche o formulário da folha completa na conferência.
+    // Best-effort: folha antiga sem esses campos continua só com os totais.
+    try {
+      const hasRich = parsed?.creditoBandeiras || parsed?.debitoBandeiras || (Array.isArray(parsed?.ranking) && parsed.ranking.length) || (Array.isArray(parsed?.despesas) && parsed.despesas.length) || parsed?.pos;
+      if (hasRich) {
+        this.submitDetailed(orgId, storeId, date, {
+          dinheiro: parsed?.dinheiro, pix: parsed?.pix,
+          credito: parsed?.creditoBandeiras || (Number(parsed?.credito) > 0 ? { "Cartão": Number(parsed.credito) } : {}),
+          debito: parsed?.debitoBandeiras || (Number(parsed?.debito) > 0 ? { "Cartão": Number(parsed.debito) } : {}),
+          voucher: parsed?.voucher, troca: parsed?.troca, outros: parsed?.outros,
+          despesas: parsed?.despesas,
+          ranking: (Array.isArray(parsed?.ranking) ? parsed.ranking : []).map((r: any) => ({ sellerName: r?.nome, valor: r?.valor, atendimentos: r?.atendimentos, pecas: r?.pecas })),
+          cadastros: parsed?.cadastros, boletaInicial: parsed?.boletaInicial, boletaFinal: parsed?.boletaFinal, malote: parsed?.malote,
+          pos: parsed?.pos,
+        }, { source: opts.source || "image_ocr", imageUrl: opts.imageUrl }, actorId);
+      }
+    } catch { /* extração rica é opcional — os totais acima já foram gravados */ }
+
     // Baixa confiança OU total ausente → precisa de conferência humana.
     const minConf = Number(process.env.RETAIL_CLOSING_MIN_CONFIDENCE || 80);
     const status = (confidence >= minConf && informedTotal > 0) ? "extracted" : "needs_review";
@@ -161,6 +180,150 @@ export class RetailClosingService {
     try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_SCANNED", { informedTotal, confidence, status }); } catch { /* noop */ }
 
     return { closing: this.get(orgId, closing.id), extraction: { ...parsed, informedTotal, confidence, needsReview: status === "needs_review" } };
+  }
+
+  // ── Fase C2 — fechamento noturno completo (padrão da folha da loja) ────────
+
+  /** Bandeiras default = as da folha do cliente (TOULON). */
+  static readonly DEFAULT_CARD_BRANDS = { credito: ["Amex", "Master", "Visa", "Elo"], debito: ["Redshop", "Eletron", "Elo"] };
+
+  static getCardBrands(orgId: string, storeId: string): { credito: string[]; debito: string[] } {
+    const s = db.prepare(`SELECT card_brands_json FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    try {
+      const cfg = JSON.parse(s?.card_brands_json || "null");
+      if (cfg && Array.isArray(cfg.credito) && Array.isArray(cfg.debito)) return { credito: cfg.credito.map(String), debito: cfg.debito.map(String) };
+    } catch { /* cai no default */ }
+    return { credito: [...this.DEFAULT_CARD_BRANDS.credito], debito: [...this.DEFAULT_CARD_BRANDS.debito] };
+  }
+
+  static setCardBrands(orgId: string, storeId: string, brands: { credito?: string[]; debito?: string[] }, actorId?: string): { credito: string[]; debito: string[] } {
+    const clean = (arr: any) => (Array.isArray(arr) ? arr.map((b) => String(b || "").trim()).filter(Boolean).slice(0, 12) : []);
+    const cfg = { credito: clean(brands?.credito), debito: clean(brands?.debito) };
+    if (!cfg.credito.length && !cfg.debito.length) throw new Error("Informe ao menos uma bandeira de crédito ou débito.");
+    db.prepare(`UPDATE retail_stores SET card_brands_json = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(JSON.stringify(cfg), orgId, storeId);
+    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CARD_BRANDS_SET", cfg); } catch { /* noop */ }
+    return cfg;
+  }
+
+  /**
+   * Fechamento noturno COMPLETO — a folha da loja em forma estruturada:
+   * {
+   *   dinheiro, pix,
+   *   credito: { [bandeira]: valor }, debito: { [bandeira]: valor },
+   *   voucher?, troca?, outros?,
+   *   despesas: [{ descricao, valor }],
+   *   ranking: [{ sellerName, valor, atendimentos, pecas }],
+   *   cadastros?, boletaInicial?, boletaFinal?, malote?, premioDia?, obs?,
+   *   pos?: { creditoValor, creditoQtd, debitoValor, debitoQtd }   // resumo do POS (Clover etc.)
+   * }
+   * O total informado é DERIVADO (dinheiro + pix + bandeiras + voucher/troca/
+   * outros) — despesas NÃO abatem venda (são caixa, não faturamento). Grava
+   * `derived` com as conferências: ranking × total (a linha LOJA da folha) e
+   * POS × cartões (o comprovante grampeado). Divergência NÃO bloqueia o
+   * registro — vira flag pra conferência humana na aprovação (D4).
+   */
+  static submitDetailed(orgId: string, storeId: string, date: string, details: any, opts: { source?: string; imageUrl?: string | null } = {}, actorId?: string): any | null {
+    const closing = this.getOrCreate(orgId, storeId, date);
+    const num = (v: any) => Math.round((Number(v) || 0) * 100) / 100;
+    const sumMap = (m: any) => Object.values(m || {}).reduce((a: number, v: any) => a + num(v), 0);
+
+    const credito: Record<string, number> = {};
+    for (const [k, v] of Object.entries(details?.credito || {})) { const n = num(v); if (n > 0) credito[String(k)] = n; }
+    const debito: Record<string, number> = {};
+    for (const [k, v] of Object.entries(details?.debito || {})) { const n = num(v); if (n > 0) debito[String(k)] = n; }
+    const despesas = (Array.isArray(details?.despesas) ? details.despesas : [])
+      .map((d: any) => ({ descricao: String(d?.descricao || "").trim(), valor: num(d?.valor) }))
+      .filter((d: any) => d.descricao && d.valor > 0);
+    const ranking = (Array.isArray(details?.ranking) ? details.ranking : [])
+      .map((r: any) => ({ sellerName: String(r?.sellerName || "").trim(), valor: num(r?.valor), atendimentos: Number(r?.atendimentos || 0) || 0, pecas: Number(r?.pecas || 0) || 0 }))
+      .filter((r: any) => r.sellerName && (r.valor > 0 || r.pecas > 0 || r.atendimentos > 0));
+
+    const totalCredito = num(sumMap(credito));
+    const totalDebito = num(sumMap(debito));
+    const dinheiro = num(details?.dinheiro), pix = num(details?.pix);
+    const voucher = num(details?.voucher), troca = num(details?.troca), outros = num(details?.outros);
+    const informedTotal = num(dinheiro + pix + totalCredito + totalDebito + voucher + troca + outros);
+    const totalDespesas = num(despesas.reduce((a: number, d: any) => a + d.valor, 0));
+    const rankingTotal = num(ranking.reduce((a: number, r: any) => a + r.valor, 0));
+
+    const pos = details?.pos && (num(details.pos.creditoValor) > 0 || num(details.pos.debitoValor) > 0)
+      ? { creditoValor: num(details.pos.creditoValor), creditoQtd: Number(details.pos.creditoQtd || 0) || 0, debitoValor: num(details.pos.debitoValor), debitoQtd: Number(details.pos.debitoQtd || 0) || 0 }
+      : null;
+
+    const normalized = {
+      dinheiro, pix, credito, debito, voucher, troca, outros,
+      despesas, ranking,
+      cadastros: Number(details?.cadastros || 0) || 0,
+      boletaInicial: String(details?.boletaInicial || "").trim() || null,
+      boletaFinal: String(details?.boletaFinal || "").trim() || null,
+      malote: String(details?.malote || "").trim() || null,
+      premioDia: String(details?.premioDia || "").trim() || null,
+      obs: String(details?.obs || "").trim() || null,
+      pos,
+      derived: {
+        totalCredito, totalDebito, totalDespesas, informedTotal, rankingTotal,
+        // A linha LOJA da folha: soma do ranking deve bater com o total do dia.
+        rankingGap: ranking.length ? num(informedTotal - rankingTotal) : null,
+        // Comprovante do POS grampeado: cartões informados × cartões do POS.
+        posGapCredito: pos ? num(totalCredito - pos.creditoValor) : null,
+        posGapDebito: pos ? num(totalDebito - pos.debitoValor) : null,
+      },
+    };
+
+    const items = [
+      { paymentMethod: "dinheiro", informedAmount: dinheiro },
+      { paymentMethod: "pix", informedAmount: pix },
+      { paymentMethod: "credito", informedAmount: totalCredito },
+      { paymentMethod: "debito", informedAmount: totalDebito },
+      { paymentMethod: "voucher", informedAmount: voucher },
+      { paymentMethod: "troca", informedAmount: troca },
+      { paymentMethod: "outros", informedAmount: outros },
+    ].filter((i) => i.informedAmount > 0);
+
+    this.setInformed(orgId, closing.id, { informedTotal, items, source: opts.source || "manual", imageUrl: opts.imageUrl }, actorId);
+    db.prepare(`UPDATE retail_daily_closings SET details_json = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`)
+      .run(JSON.stringify(normalized), orgId, closing.id);
+    try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_DETAILED", { storeId, date, informedTotal, sellers: ranking.length, rankingGap: normalized.derived.rankingGap }); } catch { /* noop */ }
+    return this.get(orgId, closing.id);
+  }
+
+  /**
+   * Na APROVAÇÃO do fechamento, o ranking da folha vira lançamento de vendas
+   * por vendedor (retail_seller_sales, source='closing') — a MESMA base da
+   * comissão/corrida (Fase G/G2), sem digitar duas vezes. Idempotente:
+   * substitui só as linhas source='closing' daquela (loja, dia); lançamentos
+   * manuais/foto do gestor não são tocados. Matrícula resolvida pelo nome
+   * quando bate com UM único vendedor cadastrado (sem chute em ambiguidade).
+   */
+  static syncRankingToSellerSales(orgId: string, closingId: string, actorId?: string): number {
+    const c = this.get(orgId, closingId);
+    if (!c) return 0;
+    let details: any = null;
+    try { details = JSON.parse(c.details_json || "null"); } catch { details = null; }
+    const ranking: any[] = Array.isArray(details?.ranking) ? details.ranking : [];
+    if (!ranking.length) return 0;
+    const sellers = db.prepare(`SELECT matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    const byName = new Map<string, string[]>();
+    for (const s of sellers) {
+      const k = String(s.name || "").trim().toLowerCase();
+      if (!k) continue;
+      byName.set(k, [...(byName.get(k) || []), String(s.matricula)]);
+    }
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ? AND source = 'closing'`)
+        .run(orgId, c.store_id, c.closing_date);
+      const ins = db.prepare(
+        `INSERT INTO retail_seller_sales (id, organization_id, store_id, sale_date, seller_name, matricula, valor, pecas, atendimentos, source, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'closing', ?)`
+      );
+      for (const r of ranking) {
+        const mats = byName.get(String(r.sellerName || "").trim().toLowerCase()) || [];
+        ins.run(randomUUID(), orgId, c.store_id, c.closing_date, r.sellerName, mats.length === 1 ? mats[0] : null, Number(r.valor) || 0, Number(r.pecas) || 0, Number(r.atendimentos) || 0, actorId || null);
+      }
+    });
+    tx();
+    try { logAuthEvent(orgId, actorId || "system", closingId, "RETAIL_CLOSING_RANKING_SYNCED", { count: ranking.length, date: c.closing_date }); } catch { /* noop */ }
+    return ranking.length;
   }
 }
 

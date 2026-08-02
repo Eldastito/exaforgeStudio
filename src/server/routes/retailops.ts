@@ -1022,7 +1022,11 @@ router.post("/closings/:id/approve", requireRole("owner", "admin"), (req: AuthRe
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const c = RetailClosingService.setStatus(orgId, req.params.id, "approved", req.user?.userId);
   if (!c) return res.status(404).json({ error: "closing_not_found" });
-  res.json(c);
+  // Fase C2: o ranking da folha aprovada vira vendas por vendedor (base da
+  // comissão/corrida) — best-effort, a aprovação não falha por causa disso.
+  let syncedSellers = 0;
+  try { syncedSellers = RetailClosingService.syncRankingToSellerSales(orgId, req.params.id, req.user?.userId); } catch { /* noop */ }
+  res.json({ ...c, syncedSellers });
 });
 
 router.post("/closings/:id/reject", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
@@ -1031,6 +1035,36 @@ router.post("/closings/:id/reject", requireRole("owner", "admin"), (req: AuthReq
   const c = RetailClosingService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
   if (!c) return res.status(404).json({ error: "closing_not_found" });
   res.json(c);
+});
+
+// Fase C2 — fechamento noturno COMPLETO (a folha da loja em forma estruturada):
+// dinheiro/PIX, crédito e débito POR BANDEIRA, despesas, ranking por vendedor
+// (valor/AT/peças), cadastros, boletas, malote, prêmio do dia e conferência
+// com o resumo do POS. O total é derivado; divergências viram flags (D4).
+router.post("/closings/:id/detailed", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const c = RetailClosingService.get(orgId, req.params.id);
+  if (!c) return res.status(404).json({ error: "closing_not_found" });
+  try {
+    res.json(RetailClosingService.submitDetailed(orgId, c.store_id, c.closing_date, req.body?.details || {}, { source: "manual" }, req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Bandeiras de cartão da loja (o formulário da folha monta os campos por elas).
+router.get("/stores/:id/card-brands", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
+  res.json(RetailClosingService.getCardBrands(orgId, req.params.id));
+});
+
+router.put("/stores/:id/card-brands", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
+  try { res.json(RetailClosingService.setCardBrands(orgId, req.params.id, req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Fechamento por FOTO (Fase C): a IA lê a folha e preenche o fechamento do dia

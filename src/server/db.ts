@@ -6811,6 +6811,21 @@ const initDb = () => {
   // A folha de fechamento traz AT (atendimentos) por vendedor — é o denominador
   // do P.A (peças ÷ atendimentos). Aditivo no lançamento manual/foto.
   try { db.exec(`ALTER TABLE retail_seller_sales ADD COLUMN atendimentos REAL DEFAULT 0`); } catch(e){}
+
+  // ============================================================
+  // ADR-083 — Fase C2: fechamento noturno completo (padrão da folha da loja)
+  // ============================================================
+  // A folha real tem MUITO mais que totais por forma de pagamento: crédito e
+  // débito POR BANDEIRA, despesas do dia, ranking por vendedor (valor/AT/peças),
+  // cadastros, range de boletas, malote, prêmio do dia e a conferência com o
+  // resumo do POS. Tudo vive em details_json (estrutura no header do
+  // RetailClosingService.submitDetailed) — aditivo, NULL pros fechamentos
+  // antigos, que continuam operando só com informed_total/items.
+  try { db.exec(`ALTER TABLE retail_daily_closings ADD COLUMN details_json TEXT`); } catch(e){}
+  // Bandeiras de cartão da loja (maquininhas variam por loja). NULL = default
+  // da folha do cliente (Amex/Master/Visa/Elo no crédito; Redshop/Eletron/Elo
+  // no débito).
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN card_brands_json TEXT`); } catch(e){}
 };
 
 initDb();

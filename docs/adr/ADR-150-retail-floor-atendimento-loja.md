@@ -109,6 +109,17 @@ taxonomia da `unmet_demand`).
 Conciliação (`reconciliation_state`): `pending` → `confirmed` |
 `unmatched`; `not_converted`/`unknown` não entram.
 
+**Matching (Fatia 6) — decisão:** `retail_erp_seller_sales` é AGREGADO DIÁRIO
+por (filial, matrícula) — não existe venda a venda no sync (ADR-105). Então o
+matching é por COBERTURA DE VALOR no nível (loja, vendedor, dia): sem ERP →
+todos `unmatched`; com ERP → confirma na ordem de `started_at` enquanto a soma
+declarada cabe em `erpValor × 1.05`; declarado sem valor é confirmado quando o
+PDV tem venda no dia (não consome orçamento). Idempotente e SÓ-PROMOVE (o já
+confirmado consome o orçamento no re-run; ERP atrasado promove
+`unmatched→confirmed`); rebaixar `confirmed` é exclusivamente humano (override
+do gestor, auditado). Job: tick horário do Scheduler, hoje+ontem, após o sync
+Alterdata.
+
 ## Sinais publicados (`business_signals`, domain `retail_floor`)
 
 `queue_delay`, `long_service`, `unmet_demand`, `out_of_assortment`,
@@ -124,8 +135,8 @@ as contagens que sustentam o sinal (RN-150-006).
 | 2 | Turno (abrir/fechar) + fila (join/status/pausa) + posição derivada round-robin | **MERGED (PR #712)** |
 | 3 | Atendimento start/finish com transação atômica (1 ativo por vendedor) + auto-encerramento | **MERGED (PR #713)** |
 | 4 | Taxonomia de desfecho hierárquica + política de retorno à fila | **MERGED (PR #714)** |
-| 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | **ENTREGUE (PR desta fatia)** |
-| 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | pendente |
+| 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | **MERGED (PR #715)** |
+| 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | **ENTREGUE (PR desta fatia)** |
 | 7 | UI `/loja/atendimento` (Kanban realtime via SSE + fallback polling) | pendente |
 | 8 | Sinais para o Orquestrador (7 tipos) | pendente |
 | 9 | Analytics da loja + modo calibração + piloto TOULON | pendente |

@@ -11,6 +11,7 @@ import { RetailFloorService, RetailFloorSettingsService } from "../RetailFloorSe
 import { RetailFloorShiftService, RetailFloorQueueService } from "../RetailFloorShiftService.js";
 import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js";
 import { RetailFloorScanService } from "../RetailFloorScanService.js";
+import { RetailFloorReconciliationService } from "../RetailFloorReconciliationService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -157,6 +158,36 @@ router.post("/attendances/:id/unmet-demand", (req: AuthRequest, res) => {
 router.get("/attendances/:id/scans", (req: AuthRequest, res) => {
   try {
     res.json({ scans: RetailFloorScanService.scans(req.organizationId!, req.params.id) });
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 6: conciliação declarado × PDV ----
+
+// Resumo do dia (painel do gerente): estados + declarado × ERP + gap.
+router.get("/reconciliation", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.query.storeId || "");
+    const date = String(req.query.date || "");
+    if (!storeId || !date) return res.status(400).json({ error: "storeId e date são obrigatórios" });
+    res.json(RetailFloorReconciliationService.summary(req.organizationId!, storeId, date));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Roda a conciliação do dia sob demanda (gestor da loja).
+router.post("/reconciliation/run", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.body?.storeId || "");
+    const date = String(req.body?.date || "");
+    if (!storeId || !date) return res.status(400).json({ error: "storeId e date são obrigatórios" });
+    RetailFloorService.assertStoreManager(req.organizationId!, req.user, storeId);
+    res.json(RetailFloorReconciliationService.runDay(req.organizationId!, storeId, date, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Override manual (gestor): força confirmed|unmatched — auditado.
+router.post("/reconciliation/:attendanceId/state", (req: AuthRequest, res) => {
+  try {
+    res.json(RetailFloorReconciliationService.override(req.organizationId!, req.params.attendanceId, String(req.body?.state || ""), req.user));
   } catch (e: any) { fail(res, e); }
 });
 

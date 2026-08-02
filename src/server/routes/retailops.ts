@@ -14,6 +14,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailStoreCostService, FIXED_COST_CATEGORIES, VARIABLE_COST_CATEGORIES } from "../RetailStoreCostService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
+import { RetailBoletaService } from "../RetailBoletaService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { haversineKm } from "../geo.js";
@@ -1064,6 +1065,49 @@ router.put("/stores/:id/card-brands", requireRole("owner", "admin"), (req: AuthR
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
   try { res.json(RetailClosingService.setCardBrands(orgId, req.params.id, req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// --- Boletas em tempo real (Fase C3) ----------------------------------------
+// O talão manuscrito continua; o clique registra a HORA real de cada venda.
+router.get("/boletas/day", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  const day = String(req.query.day || "").slice(0, 10);
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: "storeId e day (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  res.json(RetailBoletaService.dayReport(orgId, storeId, day));
+});
+
+// Abre o dia com o nº inicial do talão (gestão).
+router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, day, initialNumber } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return res.status(400).json({ error: "storeId e day (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  try { res.json(RetailBoletaService.openDay(orgId, String(storeId), String(day), String(initialNumber || ""), req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// O CLIQUE da venda — SEM requireRole de propósito: o vendedor no balcão
+// também registra (a segurança é o gate do módulo + org). Hora é do servidor.
+router.post("/boletas/click", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, day, sellerName } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return res.status(400).json({ error: "storeId e day (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  try { res.status(201).json(RetailBoletaService.click(orgId, String(storeId), String(day), { sellerName }, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Desfaz o ÚLTIMO clique (misclick) — gestão.
+router.post("/boletas/click/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailBoletaService.cancelClick(orgId, req.params.id, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

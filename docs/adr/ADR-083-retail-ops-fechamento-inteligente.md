@@ -328,3 +328,52 @@ default/config/validação, total derivado + desvio, conferências ranking/POS
 com divergência-flag, sync na aprovação idempotente sem tocar lançamento
 manual + matrícula por nome único, scan rico × folha simples, audit,
 isolamento multi-tenant).
+
+## Fase C3 — Boletas em tempo real (hora real da venda) (2026-08)
+
+**Origem:** pedido direto do dono. As lojas vendem com boleta MANUSCRITA de
+talão sequencial (Nº 005988) e só lançam no PDV à noite — a HORA real de cada
+venda se perdia. O fluxo devolve a hora sem mudar a rotina do papel:
+
+1. O gerente **abre o dia** informando o nº inicial do talão.
+2. A cada venda, gerente/vendedor **clica no botão** (que sempre mostra o
+   próximo nº da sequência) — o servidor grava o número + o timestamp DO
+   SERVIDOR (a hora do clique É a hora da venda; nenhuma hora vem do cliente
+   — mesma regra do RN-150-002).
+3. No **fechamento**, o range informado na folha confere com os cliques
+   (`derived.boleta.gap` no submitDetailed — flag, nunca bloqueio/D4), e cada
+   boleta clicada **casa com a venda do PDV** (`retail_pdv_sales.boleta`)
+   quando o lançamento noturno sincroniza — clique (hora real) × PDV (valor,
+   peças, vendedor).
+
+**Decisões:**
+- **Sequência atômica** — transação com COUNT dentro da tx antes do INSERT
+  (padrão AC-012) + unique index parcial (org, loja, dia, nº) ativo.
+- **Desfazer = UPDATE status='cancelled'** (nunca DELETE, convenção #9) e SÓ
+  o último ativo — cancelar do meio furaria a sequência; o número liberado é
+  reusado pelo próximo clique.
+- **Nº inicial imutável após cliques** (os números gravados derivam dele);
+  reabrir com o mesmo nº é idempotente.
+- **Match com o PDV é DERIVADO por query** na leitura (nunca coluna de
+  vínculo mutável — RN-004), normalizando zeros à esquerda ("017752" ≡
+  "17752") e casando por (filial da loja, nº, data).
+- **Clique SEM requireRole** de propósito (o vendedor no balcão registra);
+  abrir o dia e desfazer são de gestão (owner/admin).
+
+**Entidades:** `retail_boleta_days` (nº inicial por loja/dia) +
+`retail_boleta_events` (nº, seq, hora, status active|cancelled).
+
+**Rotas:** `GET /boletas/day`, `POST /boletas/day/open`,
+`POST /boletas/click`, `POST /boletas/click/:id/cancel`.
+
+**UI (aba Fechamento diário):** painel "Boletas de hoje" — abrir o dia,
+botão grande "Registrar venda — Nº X" (mostra o número e a hora no toast),
+lista dos cliques com hora e o valor do PDV quando casado ("aguardando PDV"
+até lá), desfazer último. O modal do fechamento pré-preenche boleta
+inicial/final com o dia aberto + último clique e confere o range × cliques
+ao vivo.
+
+**Teste:** `test:retail-boletas` (25 verificações — sequência com zeros,
+clique sem dia aberto, imutabilidade do inicial, cancelamento só do último
+com retenção, reuso do número, match PDV com normalização, conferência do
+fechamento com gap-flag, audit, isolamento multi-tenant).

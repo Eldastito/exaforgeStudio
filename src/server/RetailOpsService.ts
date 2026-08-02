@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { RetailBoletaService } from "./RetailBoletaService.js";
 
 // ── Cotas ────────────────────────────────────────────────────────────────────
 export class RetailQuotaService {
@@ -267,6 +268,11 @@ export class RetailClosingService {
         // Comprovante do POS grampeado: cartões informados × cartões do POS.
         posGapCredito: pos ? num(totalCredito - pos.creditoValor) : null,
         posGapDebito: pos ? num(totalDebito - pos.debitoValor) : null,
+        // Fase C3: range de boletas da folha × cliques registrados no dia.
+        boleta: (() => {
+          try { return RetailBoletaService.closingCheck(orgId, storeId, date, details?.boletaInicial, details?.boletaFinal); }
+          catch { return null; }
+        })(),
       },
     };
 

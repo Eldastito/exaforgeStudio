@@ -166,6 +166,7 @@ jobs:
           - { name: 'retail-commission-store-seller-manual-override', script: 'test:retail-commission-store-seller-manual-override' }
           - { name: 'retail-commission-race', script: 'test:retail-commission-race' }
           - { name: 'retail-closing-detailed', script: 'test:retail-closing-detailed' }
+          - { name: 'retail-boletas', script: 'test:retail-boletas' }
           - { name: 'executive-retail-commission-block', script: 'test:executive-retail-commission-block' }
           - { name: 'retail-seller-sales-manual', script: 'test:retail-seller-sales-manual' }
           - { name: 'retail-erp-seller-sales', script: 'test:retail-erp-seller-sales' }

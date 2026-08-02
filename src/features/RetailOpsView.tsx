@@ -932,6 +932,107 @@ function OnlineReserveTab() {
 }
 
 // ---- Fechamento diário ------------------------------------------------------
+// Fase C3 — Boletas em tempo real: o talão manuscrito continua, mas a cada
+// venda alguém clica no botão e o servidor grava o nº sequencial + a HORA
+// real. À noite, o fechamento confere o range com os cliques, e o PDV
+// (lançado à noite) casa valor/vendedor com cada boleta pelo número.
+function BoletaPanel({ stores }: { stores: any[] }) {
+  const [storeId, setStoreId] = useState('');
+  const [day] = useState(todayStr());
+  const [report, setReport] = useState<any | null>(null);
+  const [initial, setInitial] = useState('');
+  const [clicking, setClicking] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => { if (stores.length && !storeId) setStoreId(stores.find((s: any) => s.active)?.id || stores[0].id); /* eslint-disable-next-line */ }, [stores]);
+  const load = async () => {
+    if (!storeId) return;
+    const d = await apiFetch(`/api/retailops/boletas/day?storeId=${storeId}&day=${day}`).then(r => r.json()).catch(() => null);
+    if (d && !d.error) setReport(d);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeId]);
+
+  const openDay = async () => {
+    const res = await apiFetch('/api/retailops/boletas/day/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, day, initialNumber: initial }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success(`Dia aberto — 1ª boleta Nº ${d.initial_number}.`); setInitial(''); load(); }
+    else toast.error(d.error || 'Falha ao abrir o dia.');
+  };
+  const click = async () => {
+    setClicking(true);
+    try {
+      const res = await apiFetch('/api/retailops/boletas/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, day }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`Venda registrada — boleta Nº ${d.boleta_number} · ${new Date(d.clicked_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`); load(); }
+      else toast.error(d.error || 'Falha ao registrar.');
+    } finally { setClicking(false); }
+  };
+  const undo = async () => {
+    const last = report?.clicks?.[report.clicks.length - 1];
+    if (!last) return;
+    if (!window.confirm(`Desfazer o registro da boleta Nº ${last.number}?`)) return;
+    const res = await apiFetch(`/api/retailops/boletas/click/${last.id}/cancel`, { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success('Registro desfeito — o número volta pra sequência.'); load(); }
+    else toast.error(d.error || 'Falha ao desfazer.');
+  };
+  const hora = (ts: string) => { try { return new Date(String(ts) + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch { return ts; } };
+
+  if (!stores.length) return null;
+  return (
+    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><CalendarDays className="w-4 h-4 text-amber-400" /> Boletas de hoje (hora real da venda)</div>
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100">
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        {report?.initialNumber && (
+          <span className="text-[11px] text-zinc-400">1ª boleta <strong className="text-zinc-200">{report.initialNumber}</strong> · registradas <strong className="text-zinc-200">{report.count}</strong>{report.lastNumber ? <> · última <strong className="text-zinc-200">{report.lastNumber}</strong></> : null}</span>
+        )}
+        <button onClick={() => setOpen(o => !o)} className="ml-auto text-[11px] text-indigo-300 hover:text-indigo-200">{open ? '▾ esconder' : '▸ detalhes'}</button>
+      </div>
+
+      {!report?.initialNumber ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-zinc-400">Abra o dia informando o nº da 1ª boleta do talão:</span>
+          <input inputMode="numeric" value={initial} onChange={e => setInitial(e.target.value.replace(/[^0-9]/g, ''))} placeholder="017752" className="w-28 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+          <button onClick={openDay} disabled={!initial} className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">Abrir o dia</button>
+          <span className="text-[10px] text-zinc-500">A cada venda, clique no botão — a hora do clique vira a hora da venda.</span>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button onClick={click} disabled={clicking} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-base font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
+            {clicking ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />} Registrar venda — Nº {report.nextNumber}
+          </button>
+          {report.count > 0 && <button onClick={undo} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Desfazer último</button>}
+          {report.pdvMatch?.matched > 0 && <span className="text-[11px] text-emerald-300">{report.pdvMatch.matched} boleta(s) já casada(s) com o PDV · {brl(report.pdvMatch.valorTotal)}</span>}
+        </div>
+      )}
+
+      {open && report?.clicks?.length > 0 && (
+        <div className="mt-3 overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/60 text-zinc-400">
+              <tr><th className="px-3 py-1.5 text-left font-medium">Nº</th><th className="px-3 py-1.5 text-left font-medium">Hora</th><th className="px-3 py-1.5 text-left font-medium">Vendedor</th><th className="px-3 py-1.5 text-right font-medium">PDV (valor)</th><th className="px-3 py-1.5 text-right font-medium">Peças</th></tr>
+            </thead>
+            <tbody>
+              {report.clicks.map((c: any) => (
+                <tr key={c.id} className="border-t border-zinc-800/60">
+                  <td className="px-3 py-1.5 text-zinc-200">{c.number}</td>
+                  <td className="px-3 py-1.5 text-zinc-300">{hora(c.clickedAt)}</td>
+                  <td className="px-3 py-1.5 text-zinc-400">{c.pdv?.sellerName || c.sellerName || '—'}</td>
+                  <td className="px-3 py-1.5 text-right">{c.pdv ? <span className="text-emerald-300">{brl(c.pdv.valor)}</span> : <span className="text-zinc-600" title="Casa automaticamente quando o PDV do dia for lançado/sincronizado">aguardando PDV</span>}</td>
+                  <td className="px-3 py-1.5 text-right text-zinc-400">{c.pdv ? c.pdv.pecas : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClosingsTab() {
   const [date, setDate] = useState(todayStr());
   const [stores, setStores] = useState<any[]>([]);
@@ -1020,6 +1121,8 @@ function ClosingsTab() {
         )}
         <button onClick={() => setStoreModal({ store: null })} className={`inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 ${bridge === null ? 'ml-auto' : ''}`}><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
+
+      <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 
       {stores.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center">
@@ -1373,6 +1476,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [posDeb, setPosDeb] = useState(existing.pos?.debitoValor ? String(existing.pos.debitoValor) : '');
   const [posDebQtd, setPosDebQtd] = useState(existing.pos?.debitoQtd ? String(existing.pos.debitoQtd) : '');
   const [escalados, setEscalados] = useState<string[]>([]);
+  const [boletaClicks, setBoletaClicks] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
@@ -1387,6 +1491,15 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       setEscalados(names);
       setRanking(prev => prev.length ? prev : (names.length ? names.map((n: string) => ({ sellerName: n, valor: '', at: '', pecas: '' })) : [{ sellerName: '', valor: '', at: '', pecas: '' }]));
     }).catch(() => setRanking(prev => prev.length ? prev : [{ sellerName: '', valor: '', at: '', pecas: '' }]));
+    // Boletas em tempo real (Fase C3): pré-preenche inicial/final com o dia
+    // aberto + cliques, e traz a contagem pra conferência ao vivo.
+    apiFetch(`/api/retailops/boletas/day?storeId=${storeId}&day=${date}`).then(r => r.json()).then(d => {
+      if (d?.initialNumber) {
+        setBoletaClicks(Number(d.count || 0));
+        setBoletaInicial((prev: string) => prev || d.initialNumber);
+        if (d.lastNumber) setBoletaFinal((prev: string) => prev || d.lastNumber);
+      }
+    }).catch(() => {});
     // eslint-disable-next-line
   }, [storeId, date]);
 
@@ -1596,6 +1709,11 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
               <label className="text-xs text-zinc-400">Boleta final
                 <input value={boletaFinal} onChange={e => setBoletaFinal(e.target.value)} placeholder="017757" className={inp} />
               </label>
+              {boletaClicks != null && boletaInicial && boletaFinal && (() => {
+                const range = parseInt(String(boletaFinal).replace(/\D/g, ''), 10) - parseInt(String(boletaInicial).replace(/\D/g, ''), 10) + 1;
+                const ok = range === boletaClicks;
+                return <p className={`col-span-2 text-[11px] ${ok ? 'text-emerald-300' : 'text-amber-300'}`}>{ok ? `Range de ${range} boleta(s) bate com os ${boletaClicks} clique(s) do dia.` : `Range de ${isNaN(range) ? '?' : range} boleta(s) × ${boletaClicks} clique(s) registrados — confira antes de salvar.`}</p>;
+              })()}
               <label className="text-xs text-zinc-400">Cadastros
                 <input inputMode="numeric" value={cadastros} onChange={e => setCadastros(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
               </label>

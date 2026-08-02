@@ -6826,6 +6826,54 @@ const initDb = () => {
   // da folha do cliente (Amex/Master/Visa/Elo no crédito; Redshop/Eletron/Elo
   // no débito).
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN card_brands_json TEXT`); } catch(e){}
+
+  // ============================================================
+  // ADR-083 — Fase C3: boletas em tempo real (hora real da venda)
+  // ============================================================
+  // A loja vende com boleta MANUSCRITA de talão sequencial e só lança no PDV
+  // à noite — a hora real de cada venda se perdia. Agora: o gerente abre o
+  // dia com o nº inicial do talão; a cada venda alguém CLICA no botão e o
+  // servidor grava o próximo nº da sequência + o timestamp (a hora do clique
+  // É a hora da venda). No fechamento, o range informado confere com os
+  // cliques, e o nº da boleta casa com a venda do PDV (retail_pdv_sales.boleta)
+  // quando o lançamento noturno sincroniza — clique (hora) × PDV (valor).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_boleta_days (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        day TEXT NOT NULL,                       -- YYYY-MM-DD (data local da loja)
+        initial_number TEXT NOT NULL,            -- nº da 1ª boleta do dia, com zeros ("017752")
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE (organization_id, store_id, day)
+      );
+
+      -- Um clique = uma venda realizada AGORA. Nunca DELETE (convenção #9):
+      -- desfazer é UPDATE status='cancelled' (só o último ativo, pra sequência
+      -- não furar). seq é a posição do clique; o nº exibido deriva do inicial.
+      CREATE TABLE IF NOT EXISTS retail_boleta_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        boleta_number TEXT NOT NULL,             -- nº formatado como no talão
+        seq INTEGER NOT NULL,                    -- posição na sequência do dia (1..N)
+        seller_name TEXT,                        -- opcional: quem vendeu
+        status TEXT NOT NULL DEFAULT 'active',   -- active | cancelled
+        clicked_by TEXT,
+        clicked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        cancelled_by TEXT,
+        cancelled_at DATETIME
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_boleta_events_active
+        ON retail_boleta_events (organization_id, store_id, day, boleta_number) WHERE status = 'active';
+      CREATE INDEX IF NOT EXISTS idx_retail_boleta_events_day
+        ON retail_boleta_events (organization_id, store_id, day);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas ADR-083 Fase C3 (boletas)', e); }
 };
 
 initDb();

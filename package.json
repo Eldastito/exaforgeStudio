@@ -185,6 +185,7 @@
     "test:retail-commission-store-seller-manual-override": "tsx scripts/test-retail-commission-store-seller-manual-override.ts",
     "test:retail-commission-race": "tsx scripts/test-retail-commission-race.ts",
     "test:retail-closing-detailed": "tsx scripts/test-retail-closing-detailed.ts",
+    "test:retail-boletas": "tsx scripts/test-retail-boletas.ts",
     "test:executive-retail-commission-block": "tsx scripts/test-executive-retail-commission-block.ts",
     "test:retail-ops-signals": "tsx scripts/test-retail-ops-signals.ts",
     "test:order-seller-attribution": "tsx scripts/test-order-seller-attribution.ts",

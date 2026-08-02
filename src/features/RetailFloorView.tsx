@@ -55,7 +55,7 @@ export function RetailFloorView() {
   const [ctx, setCtx] = useState<any>(null);
   const [storeId, setStoreId] = useState<string>('');
   const [snap, setSnap] = useState<{ shift: any; queue: any; actives: any[]; fetchedAt: number } | null>(null);
-  const [tab, setTab] = useState<'fila' | 'conciliacao'>('fila');
+  const [tab, setTab] = useState<'fila' | 'conciliacao' | 'indicadores'>('fila');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
@@ -160,10 +160,10 @@ export function RetailFloorView() {
       </div>
 
       <div className="flex gap-2 border-b border-zinc-800 text-sm">
-        {(['fila', 'conciliacao'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
+        {(['fila', 'conciliacao', ...(isManager ? ['indicadores'] as const : [])] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t as any)}
             className={`px-3 py-2 ${tab === t ? 'border-b-2 border-sky-500 text-sky-300' : 'text-zinc-400 hover:text-zinc-200'}`}>
-            {t === 'fila' ? 'Lista da Vez' : 'Conciliação PDV'}
+            {t === 'fila' ? 'Lista da Vez' : t === 'conciliacao' ? 'Conciliação PDV' : 'Indicadores'}
           </button>
         ))}
       </div>
@@ -216,6 +216,7 @@ export function RetailFloorView() {
       )}
 
       {tab === 'conciliacao' && <ReconPanel storeId={storeId} isManager={isManager} />}
+      {tab === 'indicadores' && isManager && <AnalyticsPanel storeId={storeId} />}
 
       {finishing && (
         <FinishModal attendance={finishing} taxonomy={ctx.taxonomy} busy={busy}
@@ -455,6 +456,98 @@ function ReconPanel({ storeId, isManager }: { storeId: string; isManager: boolea
             {!data?.attendances?.length && <tr><td colSpan={5} className="p-4 text-center text-zinc-600">Nenhuma conversão declarada no dia.</td></tr>}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ---- Indicadores da loja (Fatia 9) ------------------------------------------
+const LOSS_LABEL: Record<string, string> = {
+  price: 'Preço/condição', size_fit: 'Tamanho/modelagem', service_time: 'Atendimento/tempo', other: 'Outro',
+  'product:no_assortment': 'Produto: fora do mix', 'product:no_local_stock': 'Produto: sem estoque local',
+  'product:no_network_stock': 'Produto: sem estoque na rede', 'product:missing_size': 'Produto: faltou tamanho',
+  'product:missing_color': 'Produto: faltou cor', 'product:missing_category': 'Produto: faltou categoria',
+};
+
+function AnalyticsPanel({ storeId }: { storeId: string }) {
+  const [days, setDays] = useState(7);
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    if (!storeId) return;
+    const end = todayStr();
+    const start = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    api(`/analytics/store?storeId=${encodeURIComponent(storeId)}&start=${start}&end=${end}`)
+      .then(setData).catch((e: any) => toast.error(e.message));
+  }, [storeId, days]);
+
+  if (!data) return <div className="p-6 text-zinc-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Carregando…</div>;
+  const t = data.totals;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        {[1, 7, 30].map((d) => (
+          <button key={d} onClick={() => setDays(d)}
+            className={`rounded-lg border px-3 py-1.5 text-sm ${days === d ? 'border-sky-500 text-sky-300' : 'border-zinc-700 text-zinc-400'}`}>
+            {d === 1 ? 'Hoje' : `${d} dias`}
+          </button>
+        ))}
+        {data.inCalibration && <span className="ml-auto text-xs text-amber-300">Calibração até {data.calibrationUntil}: números NÃO valem pra cobrança.</span>}
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
+        <Stat label="Atendimentos" v={t.attendances} />
+        <Stat label="Conv. confirmada" v={t.conversionConfirmedPct != null ? `${t.conversionConfirmedPct}%` : '—'} cls="text-emerald-300" />
+        <Stat label="Conv. declarada" v={t.conversionDeclaredPct != null ? `${t.conversionDeclaredPct}%` : '—'} />
+        <Stat label="Pend. PDV" v={t.pendingCount} cls="text-amber-300" />
+        <Stat label="TMA" v={t.avgServiceMinutes != null ? `${t.avgServiceMinutes} min` : '—'} />
+        <Stat label="Valor confirmado" v={brl(t.confirmedValue)} />
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-zinc-800 p-3">
+          <div className="mb-2 text-sm font-medium text-zinc-300">Por vendedor <span className="text-xs text-zinc-500">(ordem alfabética — não é ranking)</span></div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-zinc-500"><tr><th>Vendedor</th><th>Atend.</th><th>Decl.</th><th>Conf.</th><th>TMA</th></tr></thead>
+            <tbody>
+              {data.bySeller.map((s: any) => (
+                <tr key={s.sellerId} className="border-t border-zinc-800 text-zinc-300">
+                  <td className="py-1">{s.sellerName}</td><td>{s.attendances}</td><td>{s.declared}</td><td className="text-emerald-300">{s.confirmed}</td><td>{s.avgMinutes != null ? `${s.avgMinutes}m` : '—'}</td>
+                </tr>
+              ))}
+              {!data.bySeller.length && <tr><td colSpan={5} className="py-2 text-zinc-600">Sem dados no período.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="rounded-xl border border-zinc-800 p-3">
+          <div className="mb-2 text-sm font-medium text-zinc-300">Por que não converteu (Pareto)</div>
+          {data.lossPareto.map((l: any) => (
+            <div key={l.reason} className="flex justify-between border-t border-zinc-800 py-1 text-sm text-zinc-300">
+              <span>{LOSS_LABEL[l.reason] || l.reason}</span><span className="text-rose-300">{l.count}</span>
+            </div>
+          ))}
+          {!data.lossPareto.length && <div className="py-2 text-sm text-zinc-600">Sem perdas registradas.</div>}
+          <div className="mb-2 mt-4 text-sm font-medium text-zinc-300">Top rupturas (peça pedida e faltou)</div>
+          {data.topUnmet.map((u: any, i: number) => (
+            <div key={i} className="flex justify-between border-t border-zinc-800 py-1 text-sm text-zinc-300">
+              <span>{u.item} <span className="text-xs text-zinc-500">({PRODUCT_REASON_LABEL[u.reason] || u.reason})</span></span><span className="text-amber-300">{u.count}</span>
+            </div>
+          ))}
+          {!data.topUnmet.length && <div className="py-2 text-sm text-zinc-600">Sem rupturas evidenciadas.</div>}
+        </div>
+      </div>
+      <div className="rounded-xl border border-zinc-800 p-3">
+        <div className="mb-2 text-sm font-medium text-zinc-300">Atendimentos por hora de início</div>
+        <div className="flex items-end gap-1" style={{ height: 80 }}>
+          {data.byHour.map((h: any) => {
+            const max = Math.max(...data.byHour.map((x: any) => x.count), 1);
+            return (
+              <div key={h.hour} className="flex flex-col items-center" title={`${h.hour}h: ${h.count}`}>
+                <div className="w-6 rounded-t bg-sky-600/70" style={{ height: `${(h.count / max) * 60 + 4}px` }} />
+                <span className="text-[10px] text-zinc-500">{h.hour}h</span>
+              </div>
+            );
+          })}
+          {!data.byHour.length && <span className="text-sm text-zinc-600">Sem dados.</span>}
+        </div>
       </div>
     </div>
   );

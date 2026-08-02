@@ -13,6 +13,7 @@ import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js
 import { RetailFloorScanService } from "../RetailFloorScanService.js";
 import { RetailFloorReconciliationService } from "../RetailFloorReconciliationService.js";
 import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
+import { RetailFloorAnalyticsService } from "../RetailFloorAnalyticsService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -199,6 +200,18 @@ router.post("/signals/scan", (req: AuthRequest, res) => {
   try {
     const date = req.body?.date ? String(req.body.date) : undefined;
     res.json(RetailFloorSignalPublisher.sweep(req.organizationId!, date));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 9: indicadores da loja (gestor — RN-150-005) ----
+router.get("/analytics/store", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.query.storeId || "");
+    const start = String(req.query.start || "");
+    const end = String(req.query.end || "");
+    if (!storeId || !start || !end) return res.status(400).json({ error: "storeId, start e end são obrigatórios" });
+    RetailFloorService.assertStoreManager(req.organizationId!, req.user, storeId);
+    res.json(RetailFloorAnalyticsService.store(req.organizationId!, storeId, start, end));
   } catch (e: any) { fail(res, e); }
 });
 

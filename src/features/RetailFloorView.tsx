@@ -43,6 +43,42 @@ async function api(path: string, body?: any) {
   return data;
 }
 
+const MAX_PHOTO_MB = 15;
+
+// Avatar não precisa de mais que ~512px: foto de celular (5–30 MB) estoura o
+// limite do upload e o erro do servidor é críptico — encolher no cliente
+// resolve 99% dos casos e ainda acelera o envio.
+async function downscaleImage(file: File, maxDim: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  if (scale >= 1 && file.size < 1024 * 1024) return file;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas_to_blob'))), 'image/jpeg', 0.85));
+}
+
+async function uploadSellerPhoto(file: File): Promise<string> {
+  let blob: Blob = file;
+  try { blob = await downscaleImage(file, 512); } catch { /* formato não decodável no browser — tenta o original */ }
+  if (blob.size > MAX_PHOTO_MB * 1024 * 1024) {
+    throw new Error(`A foto tem ${(blob.size / 1024 / 1024).toFixed(1)} MB — o máximo aceito é ${MAX_PHOTO_MB} MB. Escolha uma imagem menor.`);
+  }
+  const fd = new FormData();
+  fd.append('file', blob instanceof File ? blob : new File([blob], 'foto.jpg', { type: 'image/jpeg' }));
+  const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 413 || /too large/i.test(String(data?.error || ''))) {
+      throw new Error(`Foto grande demais para o servidor — o máximo aceito é ${MAX_PHOTO_MB} MB.`);
+    }
+    throw new Error(data?.error || 'Falha no upload da foto. Tente novamente ou use outra imagem (PNG, JPG ou WEBP).');
+  }
+  return data.url;
+}
+
 // ============================================================================
 // Main View
 // ============================================================================
@@ -257,6 +293,16 @@ export function RetailFloorView() {
         {tab === 'fila' && shift && (
           <DragDropContext onDragEnd={handleDragEnd}>
             <div className="grid gap-4 md:grid-cols-3">
+              <QueueSection id="waiting" title="Esperando a Vez" count={waiting.length} accent="teal" icon={<Users className="h-4 w-4" />}
+                emptyText="Nenhum vendedor na fila">
+                {waiting.map((q, i) => (
+                  <SellerCard key={q.sellerId} q={q} index={i} isMine={q.sellerId === mySellerId} isManager={isManager} busy={busy} variant="waiting"
+                    onStart={() => act(() => api('/attendances/start', { storeId, sellerId: q.sellerId }), 'Atendimento iniciado.')}
+                    onBreak={() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'break' }))}
+                    onUnavailable={() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'unavailable' }))} />
+                ))}
+              </QueueSection>
+
               <QueueSection id="serving" title="Em Atendimento" count={serving.length} accent="blue" icon={<Timer className="h-4 w-4" />}
                 emptyText="Nenhum vendedor atendendo">
                 {serving.map((q, i) => {
@@ -267,16 +313,6 @@ export function RetailFloorView() {
                       onScan={() => att && setScanFor(att)} onFinish={() => att && setFinishing(att)} />
                   );
                 })}
-              </QueueSection>
-
-              <QueueSection id="waiting" title="Esperando a Vez" count={waiting.length} accent="teal" icon={<Users className="h-4 w-4" />}
-                emptyText="Nenhum vendedor na fila">
-                {waiting.map((q, i) => (
-                  <SellerCard key={q.sellerId} q={q} index={i} isMine={q.sellerId === mySellerId} isManager={isManager} busy={busy} variant="waiting"
-                    onStart={() => act(() => api('/attendances/start', { storeId, sellerId: q.sellerId }), 'Atendimento iniciado.')}
-                    onBreak={() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'break' }))}
-                    onUnavailable={() => act(() => api(`/queue/${q.sellerId}/status`, { storeId, status: 'unavailable' }))} />
-                ))}
               </QueueSection>
 
               <QueueSection id="out" title="Fora da Fila" count={out.length} accent="muted" icon={<Coffee className="h-4 w-4" />}
@@ -603,14 +639,8 @@ function PhotoInput({ value, onChange, name }: { value: string | null; onChange:
 
   const upload = async (file: File) => {
     setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || 'Falha no upload.');
-      onChange(data.url);
-    } catch (e: any) { toast.error(e.message); }
+    try { onChange(await uploadSellerPhoto(file)); }
+    catch (e: any) { toast.error(e.message); }
     finally { setUploading(false); }
   };
 
@@ -720,14 +750,8 @@ function TeamPhotoCell({ seller, onPhoto }: { seller: any; onPhoto: (url: string
   const inputRef = useRef<HTMLInputElement>(null);
   const upload = async (file: File) => {
     setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await apiFetch('/api/uploads/image', { method: 'POST', body: fd });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || 'Falha no upload.');
-      onPhoto(data.url);
-    } catch (e: any) { toast.error(e.message); }
+    try { onPhoto(await uploadSellerPhoto(file)); }
+    catch (e: any) { toast.error(e.message); }
     finally { setUploading(false); }
   };
   return (
@@ -848,6 +872,40 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
   const [size, setSize] = useState(''); const [color, setColor] = useState(''); const [catLabel, setCatLabel] = useState('');
   const [returnTo, setReturnTo] = useState<'waiting' | 'break'>('waiting');
 
+  // Leitor de código de barras: bipa as peças vendidas ANTES de encerrar (o
+  // atendimento ainda está ativo) — cada bipe vira scan action='sold' na
+  // timeline e pré-preenche valor/peças. O vendedor pode ajustar depois.
+  const [ean, setEan] = useState('');
+  const [sold, setSold] = useState<any[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const eanRef = useRef<HTMLInputElement>(null);
+
+  const scanSold = async () => {
+    const code = ean.trim();
+    if (!code || scanning) return;
+    setScanning(true);
+    try {
+      const r = await api(`/attendances/${attendance.id}/scan`, { ean: code, action: 'sold' });
+      const next = [...sold, r];
+      setSold(next);
+      setPieces(String(next.length));
+      const total = next.reduce((acc, s) => acc + Number(s.product?.price || 0), 0);
+      if (total > 0) setValue(total.toFixed(2).replace('.', ','));
+      if (!r.found) toast.error('Peça fora do catálogo — registrada só pelo código.');
+      setEan('');
+      eanRef.current?.focus();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setScanning(false); }
+  };
+
+  const removeSold = (idx: number) => {
+    const next = sold.filter((_, i) => i !== idx);
+    setSold(next);
+    setPieces(next.length ? String(next.length) : '');
+    const total = next.reduce((acc, s) => acc + Number(s.product?.price || 0), 0);
+    setValue(total > 0 ? total.toFixed(2).replace('.', ',') : '');
+  };
+
   const submit = () => {
     const payload: any = { outcome, returnTo };
     if (outcome === 'converted') {
@@ -888,10 +946,48 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
       </div>
 
       {outcome === 'converted' && (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <Input value={value} onChange={setValue} placeholder="Valor (R$)" />
-          <Input value={pieces} onChange={setPieces} placeholder="Peças" />
-          <p className="col-span-2 text-xs text-[var(--color-text-muted)]">Fica "Pendente PDV" até a conciliação com o caixa confirmar.</p>
+        <div className="mt-4 space-y-3">
+          {/* Leitor de código de barras — associa as peças vendidas ao atendimento */}
+          <div className="rounded-xl border border-[var(--color-flow)]/30 bg-[var(--color-flow)]/5 p-3">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-[var(--color-flow)]">
+              <Barcode className="h-4 w-4" />Bipe as peças vendidas
+            </p>
+            <div className="flex gap-2">
+              <input ref={eanRef} value={ean} onChange={(e) => setEan(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); scanSold(); } }}
+                placeholder="Código de barras (EAN)" inputMode="numeric" autoFocus
+                className="min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+              <button type="button" disabled={scanning || !ean.trim()} onClick={scanSold}
+                className="shrink-0 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">
+                {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
+              </button>
+            </div>
+            {sold.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {sold.map((s, i) => (
+                  <div key={`${s.scanId}-${i}`} className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-1)] px-3 py-2 text-xs">
+                    <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-[var(--color-flow)]" />
+                    <span className="min-w-0 flex-1 truncate text-[var(--color-text-strong)]">
+                      {s.product?.name || `EAN ${s.ean}`}
+                      {s.variant?.size || s.variant?.color ? ` (${[s.variant?.size, s.variant?.color].filter(Boolean).join(' · ')})` : ''}
+                    </span>
+                    {Number(s.product?.price || 0) > 0 && <span className="shrink-0 text-[var(--color-text-muted)]">{brl(s.product.price)}</span>}
+                    <button type="button" title="Tirar da lista" onClick={() => removeSold(i)}
+                      className="shrink-0 text-zinc-600 transition-colors hover:text-rose-400"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+              Use o leitor da loja ou digite o código. Valor e peças preenchem sozinhos — dá pra ajustar abaixo.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input value={value} onChange={setValue} placeholder="Valor (R$)" />
+            <Input value={pieces} onChange={setPieces} placeholder="Peças" />
+          </div>
+          <p className="text-xs text-[var(--color-text-muted)]">Fica "Pendente PDV" até a conciliação com o caixa confirmar.</p>
         </div>
       )}
 

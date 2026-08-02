@@ -168,6 +168,7 @@ jobs:
           - { name: 'retail-seller-sales-manual', script: 'test:retail-seller-sales-manual' }
           - { name: 'retail-erp-seller-sales', script: 'test:retail-erp-seller-sales' }
           - { name: 'retail-floor-foundation', script: 'test:retail-floor-foundation' }
+          - { name: 'retail-floor-shift-queue', script: 'test:retail-floor-shift-queue' }
           - { name: 'retail-transfer', script: 'test:retail-transfer' }
           - { name: 'retail-transfer-signal', script: 'test:retail-transfer-signal' }
           - { name: 'retail-transfer-geo', script: 'test:retail-transfer-geo' }

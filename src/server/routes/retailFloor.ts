@@ -10,6 +10,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RetailFloorService, RetailFloorSettingsService } from "../RetailFloorService.js";
 import { RetailFloorShiftService, RetailFloorQueueService } from "../RetailFloorShiftService.js";
 import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js";
+import { RetailFloorScanService } from "../RetailFloorScanService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -125,6 +126,37 @@ router.get("/attendances/active", (req: AuthRequest, res) => {
     const storeId = String(req.query.storeId || "");
     if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
     res.json({ attendances: RetailFloorAttendanceService.active(req.organizationId!, storeId) });
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 5: scan no atendimento + demanda não atendida ----
+
+// Bipa um EAN dentro do atendimento ativo (congela estoque + carimbo de sync).
+router.post("/attendances/:id/scan", (req: AuthRequest, res) => {
+  try {
+    const ean = String(req.body?.ean || "");
+    if (!ean) return res.status(400).json({ error: "ean é obrigatório" });
+    res.json(RetailFloorScanService.scan(req.organizationId!, req.params.id, ean, { action: req.body?.action ?? null }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Demanda por input do vendedor (faltou tamanho/cor/categoria) — exige scanId.
+router.post("/attendances/:id/unmet-demand", (req: AuthRequest, res) => {
+  try {
+    res.json(RetailFloorScanService.registerUnmet(req.organizationId!, req.params.id, {
+      scanId: String(req.body?.scanId || ""),
+      reason: String(req.body?.reason || ""),
+      size: req.body?.size ?? null,
+      color: req.body?.color ?? null,
+      categoryLabel: req.body?.categoryLabel ?? null,
+    }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Timeline de consultas do atendimento.
+router.get("/attendances/:id/scans", (req: AuthRequest, res) => {
+  try {
+    res.json({ scans: RetailFloorScanService.scans(req.organizationId!, req.params.id) });
   } catch (e: any) { fail(res, e); }
 });
 

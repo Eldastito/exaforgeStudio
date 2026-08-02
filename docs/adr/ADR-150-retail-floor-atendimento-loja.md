@@ -123,8 +123,8 @@ as contagens que sustentam o sinal (RN-150-006).
 | 1 | ADR + módulo/gate + migração DB (6 tabelas + aditivo) + settings + contexto por escopo (owner/gerente/vendedor) + teste | **MERGED (PR #711)** |
 | 2 | Turno (abrir/fechar) + fila (join/status/pausa) + posição derivada round-robin | **MERGED (PR #712)** |
 | 3 | Atendimento start/finish com transação atômica (1 ativo por vendedor) + auto-encerramento | **MERGED (PR #713)** |
-| 4 | Taxonomia de desfecho hierárquica + política de retorno à fila | **ENTREGUE (PR desta fatia)** |
-| 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | pendente |
+| 4 | Taxonomia de desfecho hierárquica + política de retorno à fila | **MERGED (PR #714)** |
+| 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | **ENTREGUE (PR desta fatia)** |
 | 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | pendente |
 | 7 | UI `/loja/atendimento` (Kanban realtime via SSE + fallback polling) | pendente |
 | 8 | Sinais para o Orquestrador (7 tipos) | pendente |

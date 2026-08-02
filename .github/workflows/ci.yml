@@ -171,6 +171,7 @@ jobs:
           - { name: 'retail-floor-shift-queue', script: 'test:retail-floor-shift-queue' }
           - { name: 'retail-floor-attendance', script: 'test:retail-floor-attendance' }
           - { name: 'retail-floor-outcomes', script: 'test:retail-floor-outcomes' }
+          - { name: 'retail-floor-scan', script: 'test:retail-floor-scan' }
           - { name: 'retail-transfer', script: 'test:retail-transfer' }
           - { name: 'retail-transfer-signal', script: 'test:retail-transfer-signal' }
           - { name: 'retail-transfer-geo', script: 'test:retail-transfer-geo' }

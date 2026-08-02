@@ -145,6 +145,30 @@ async function main() {
   check("Desvio da rede: Gabriel 2º (+15%) → R$100", gabriel?.deviationPrize === 100, `prize=${gabriel?.deviationPrize}`);
   check("Desvio da rede: Andressa sem cota → sem prêmio de desvio", andressa?.deviationPrize === 0);
 
+  // ── Ranking da REDE (Fase G3) — podium 1º/2º/3º por dimensão ─────────────
+  // Estado nesse ponto: só loja 1 tem dados. Elegíveis (cota batida) = Thamyres
+  // (6.600 / P.A 3.0 / 120 peças) e Gabriel (5.750 / P.A 2.5 / 80 peças).
+  // Andressa NÃO entra (9.000 < 10.000). Prêmios padrão:
+  //   monthlySales [500,300,150] · monthlyPa [200,100,50] ·
+  //   monthlyPieces [200,100,50] · bestWeekSales [150,100,50] ·
+  //   bestFortnightSales [200,100,50]  (todos configuráveis).
+  const nc = race.networkChampions;
+  check("Ranking da Rede: bloco networkChampions no retorno", !!nc && Array.isArray(nc.monthlySales));
+  check("Vendas do mês — 1º Thamyres R$500", nc.monthlySales[0]?.sellerName === "Thamyres" && nc.monthlySales[0]?.prize === 500, JSON.stringify(nc.monthlySales[0]));
+  check("Vendas do mês — 2º Gabriel R$300", nc.monthlySales[1]?.sellerName === "Gabriel Gerente" && nc.monthlySales[1]?.prize === 300);
+  check("Vendas do mês — Andressa (sem cota) fora do podium", !nc.monthlySales.some((p: any) => p.sellerName === "Andressa"));
+  check("P.A do mês — 1º Thamyres (P.A 3.0) R$200", nc.monthlyPa[0]?.sellerName === "Thamyres" && nc.monthlyPa[0]?.metric === 3 && nc.monthlyPa[0]?.prize === 200);
+  check("Peças do mês — 1º Thamyres (120) R$200", nc.monthlyPieces[0]?.sellerName === "Thamyres" && nc.monthlyPieces[0]?.metric === 120 && nc.monthlyPieces[0]?.prize === 200);
+  check("Melhor semana — 1º Thamyres (1.650) R$150", nc.bestWeekSales[0]?.sellerName === "Thamyres" && nc.bestWeekSales[0]?.metric === 1650 && nc.bestWeekSales[0]?.prize === 150);
+  check("Melhor quinzena — 1º Thamyres (3.300) R$200", nc.bestFortnightSales[0]?.sellerName === "Thamyres" && nc.bestFortnightSales[0]?.metric === 3300 && nc.bestFortnightSales[0]?.prize === 200);
+  const champTotalTham = 500 + 200 + 200 + 150 + 200;
+  check("Thamyres: championPrize soma os 5 primeiros lugares = R$1.250", tham?.championPrize === champTotalTham, `champ=${tham?.championPrize}`);
+  check("Thamyres.total inclui os R$1.250 do Ranking da Rede", tham?.total === round2(tham.tierAmount + tham.paBonus + tham.weeklyTotal + tham.deviationPrize + tham.championPrize), `total=${tham?.total}`);
+  const champTotalGab = 300 + 100 + 100 + 100 + 100;
+  check("Gabriel: championPrize soma os 5 segundos lugares = R$700", gabriel?.championPrize === champTotalGab, `champ=${gabriel?.championPrize}`);
+  check("Andressa: championPrize = 0 (não bateu cota)", (andressa?.championPrize || 0) === 0);
+  check("Detalhamento de vitórias (championWins) presente e coerente", Array.isArray(tham?.championWins) && tham.championWins.length === 5 && tham.championWins.every((w: any) => w.rank === 1));
+
   // ── Gerente ───────────────────────────────────────────────────────────────
   const mgr = sr.manager;
   check("Gerente identificado pelo manager_user_id da loja", mgr?.name === "Gabriel Gerente");
@@ -184,6 +208,14 @@ async function main() {
   check("Estefânio não bateu (449,80 < 1.150) → zero", estefanio?.tierPercent === 0);
   check("Escala expõe dias escalados e folgas", rafaela?.scheduledDays === 1 && rafaela?.offDays === 1, `work=${rafaela?.scheduledDays} off=${rafaela?.offDays}`);
   check("Filtro por loja NÃO esconde o ranking de desvio da rede", race2.networkDeviation.sellers.some((s: any) => s.sellerName === "Thamyres"));
+  // Rafaela entrou na rede (loja 2) — ela bateu a cota derivada, então participa
+  // do Ranking da Rede. Como só tem 2 atendimentos, é filtrada do podium de P.A
+  // (piso padrão 20 AT) — o piso protege o ranking contra "1 AT + 5 peças".
+  const nc2 = race2.networkChampions;
+  check("Ranking recalcula com Rafaela → 3º em vendas do mês", nc2.monthlySales[2]?.sellerName === "Rafaela" && nc2.monthlySales[2]?.prize === 150, JSON.stringify(nc2.monthlySales));
+  check("Rafaela fora do podium de P.A (2 AT < piso 20)", !nc2.monthlyPa.some((p: any) => p.sellerName === "Rafaela"));
+  check("Rafaela 3ª em peças (3 unid.) → R$50", nc2.monthlyPieces[2]?.sellerName === "Rafaela" && nc2.monthlyPieces[2]?.prize === 50);
+  check("Piso minAttendancesForPa exposto no retorno", nc2.minAttendancesForPa === 20);
 
   // Escala: leitura e cópia de semana.
   const sched = RetailCommissionRaceService.getSchedule(A, loja2.id, "2026-08-09", "2026-08-15");

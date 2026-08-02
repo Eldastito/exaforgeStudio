@@ -94,6 +94,14 @@ PDV usa `matricula` + `filial` (que já resolvem para `store_id` no sync).
 - **RN-150-011 (calibração):** durante o piloto, `calibration_until` (settings)
   marca o período em que os indicadores NÃO alimentam cobrança/comissão. A API
   de analytics expõe o flag para a UI avisar.
+- **RN-150-012 (ordem dura da fila):** só o "próximo" derivado (RN-150-003)
+  entra em atendimento livremente. Iniciar qualquer outro (furar a fila) exige
+  liberação EXPLÍCITA do gestor via `allowSkip` no `start` — a conta gestora
+  sozinha NÃO basta, porque no modo quiosque (Fatia 12) o tablet loga sempre
+  como gestor; a liberação é o PIN, que a UI traduz em `allowSkip`. Sem o flag,
+  o start fora da vez é rejeitado (`not_your_turn` para o próprio vendedor,
+  `not_next` para terceiro) mesmo para conta gestora. Furar continua sendo
+  override auditado (RN-150-005).
 
 ## Entidades (6 novas + 1 aditivo)
 

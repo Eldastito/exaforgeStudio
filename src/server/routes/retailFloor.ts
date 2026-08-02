@@ -165,7 +165,7 @@ router.post("/attendances/start", (req: AuthRequest, res) => {
   try {
     const storeId = String(req.body?.storeId || "");
     if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
-    res.json(RetailFloorAttendanceService.start(req.organizationId!, { storeId, sellerId: req.body?.sellerId || null }, req.user));
+    res.json(RetailFloorAttendanceService.start(req.organizationId!, { storeId, sellerId: req.body?.sellerId || null, allowSkip: !!req.body?.allowSkip }, req.user));
   } catch (e: any) { fail(res, e); }
 });
 

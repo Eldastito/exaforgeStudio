@@ -3,7 +3,9 @@
  * ---------------------------------------------------------------------
  * Prova, offline:
  *   - start: o PRÓXIMO derivado inicia sozinho; fora da vez é not_your_turn;
- *     gestor faz override auditado; fora da fila / não-waiting rejeitados;
+ *     furar a fila (não-próximo) EXIGE allowSkip — gestor SEM o flag é barrado
+ *     (RN-150-012, ordem dura); com allowSkip é override auditado; fora da fila
+ *     / não-waiting rejeitados;
  *   - atomicidade: 2º start do mesmo vendedor → attendance_already_active
  *     (SELECT COUNT dentro da tx + unique parcial como backstop);
  *   - fila integrada: iniciar vira `serving` (sem posição); encerrar devolve
@@ -86,9 +88,11 @@ async function main() {
 
   // Raça direta: força a linha da fila de volta pra waiting e tenta de novo —
   // o COUNT dentro da tx segura (o guard de status foi contornado de propósito).
+  // allowSkip=true pra passar pela ordem (Ana não é a próxima aqui) e provar que
+  // a atomicidade — não a ordem — é quem barra a 2ª entrada.
   db.prepare(`UPDATE retail_floor_queue_state SET status = 'waiting' WHERE organization_id = ? AND shift_id = ? AND seller_id = ?`).run(A, shift.id, v1);
   let raceStart = false;
-  try { RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v1 }, manager); } catch (e: any) { raceStart = e.message === "attendance_already_active"; }
+  try { RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v1, allowSkip: true }, manager); } catch (e: any) { raceStart = e.message === "attendance_already_active"; }
   check("start: raça → attendance_already_active (COUNT na tx)", raceStart);
   db.prepare(`UPDATE retail_floor_queue_state SET status = 'serving' WHERE organization_id = ? AND shift_id = ? AND seller_id = ?`).run(A, shift.id, v1);
 
@@ -105,11 +109,16 @@ async function main() {
   const sellerU3 = { userId: uV3, role: "agent" };
   db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name, user_id) VALUES (?, ?, 'M-03', 'Caio', ?)`).run(v3, A, uV3);
   RetailFloorQueueService.join(A, { storeId: store1, sellerId: v3 }, manager);
-  // Round-robin põe Caio (0 atendimentos) como próximo — gestor iniciar a BIA
-  // (1 atendimento) na frente dele é o override real (cliente pediu a Bia).
-  const att3 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2 }, manager);
+  // Round-robin põe Caio (0 atendimentos) como próximo. Furar a fila (iniciar a
+  // Bia na frente) agora EXIGE allowSkip — a conta gestora sozinha NÃO basta
+  // (RN-150-012): o quiosque loga como gestor, então a liberação é o PIN, que a
+  // UI traduz em allowSkip. Sem o flag, rejeita mesmo pra gestor.
+  let skipDenied = false;
+  try { RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2 }, manager); } catch (e: any) { skipDenied = e.message === "not_next"; }
+  check("start: gestor SEM allowSkip não fura a fila do da vez (RN-150-012)", skipDenied);
+  const att3 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2, allowSkip: true }, manager);
   const auditStart = db.prepare(`SELECT metadata_json FROM auth_audit_logs WHERE organization_id = ? AND event_type = 'RETAIL_FLOOR_ATTENDANCE_START' ORDER BY rowid DESC LIMIT 1`).get(A) as any;
-  check("start: override do gestor (fora da vez) auditado", JSON.parse(auditStart.metadata_json).override === true);
+  check("start: gestor COM allowSkip fura a fila (override auditado)", JSON.parse(auditStart.metadata_json).override === true);
   RetailFloorAttendanceService.finish(A, att3.id, { outcome: "walkout" }, manager);
 
   let noQueue = false;
@@ -148,8 +157,9 @@ async function main() {
     rr.queue[0].sellerId === v3 && rr.queue[1].sellerId === v1 &&
     rr.queue.filter((r: any) => r.position != null).slice(-1)[0].sellerId === v2);
 
-  // Gestor encerra de terceiro (auditado byManager). Bia (próxima) atende de novo.
-  const att4 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2 }, manager);
+  // Gestor encerra de terceiro (auditado byManager). Caio é o próximo (0 atend.),
+  // então iniciar a Bia é furar a fila → allowSkip.
+  const att4 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2, allowSkip: true }, manager);
   // Fatia 4: not_converted passou a EXIGIR o motivo hierárquico.
   const done4 = RetailFloorAttendanceService.finish(A, att4.id, { outcome: "not_converted", reason: { category: "price" } }, manager);
   check("finish: not_converted sem estado de conciliação", done4.reconciliationState === null);
@@ -165,7 +175,7 @@ async function main() {
 
   // ---- 4. auto-encerramento ----
   db.prepare(`UPDATE retail_floor_attendances SET started_at = datetime('now', '-120 minutes') WHERE id = ?`).run(att5.id);
-  const att6 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2 }, manager); // fresco (override do gestor)
+  const att6 = RetailFloorAttendanceService.start(A, { storeId: store1, sellerId: v2, allowSkip: true }, manager); // fresco (furar a fila = allowSkip)
   const closedCount = RetailFloorAttendanceService.autoCloseStale(A);
   check("autoclose: fecha só o vencido (120min > teto 90)", closedCount === 1);
   const att5After = RetailFloorAttendanceService.get(A, att5.id);

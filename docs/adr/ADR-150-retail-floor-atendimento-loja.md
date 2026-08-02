@@ -1,6 +1,6 @@
 # ADR-150 — Retail Floor: Atendimento de Loja, Lista da Vez e Consulta de Estoque
 
-- **Status:** Em implementação — Fatia 1
+- **Status:** Implementação completa — 9 fatias entregues (piloto TOULON em 1 loja com `calibration_until` é o próximo passo operacional)
 - **Data:** 2026-08-02
 - **Origem:** PRD "Módulo Atendimento de Loja, Lista da Vez e Consulta de Estoque" v2.0 (piloto TOULON).
 - **Relacionadas:** ADR-083 (Retail Ops — lojas/fechamento), ADR-084 (modo de estoque D4), ADR-087 (multiloja), ADR-095 (RBAC granular), ADR-105 (conector Alterdata/ModaUp), ADR-136 (Decision-Action Ledger / `business_signals`), ADR-137 (Comprador IA — consome demanda não atendida), ADR-142 (memória de padrões do varejo).
@@ -152,8 +152,8 @@ Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda
 | 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | **MERGED (PR #715)** |
 | 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | **MERGED (PR #716)** |
 | 7 | UI (Kanban + encerramento + consulta de peça + conciliação; polling 8s) | **MERGED (PR #717)** |
-| 8 | Sinais para o Orquestrador (7 tipos) | **ENTREGUE (PR desta fatia)** |
-| 9 | Analytics da loja + modo calibração + piloto TOULON | pendente |
+| 8 | Sinais para o Orquestrador (7 tipos) | **MERGED (PR #718)** |
+| 9 | Analytics da loja + modo calibração + piloto TOULON | **ENTREGUE (PR desta fatia)** |
 
 ## O que ficou explicitamente de fora
 

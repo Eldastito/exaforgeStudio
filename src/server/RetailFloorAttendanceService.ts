@@ -22,15 +22,27 @@
  * Auto-encerramento (RN-150-010): atendimento esquecido além de
  * settings.auto_close_minutes é FECHADO com outcome='unknown' (UPDATE, nunca
  * DELETE) pelo passe rápido do Scheduler; o vendedor volta pra fila.
- * A taxonomia hierárquica do motivo de não conversão entra na Fatia 4.
+ *
+ * Taxonomia hierárquica (Fatia 4): not_converted EXIGE motivo estruturado —
+ * nível 1 (categoria) e, quando a categoria é `product`, nível 2 com a MESMA
+ * taxonomia da demanda não atendida (é o que vira sinal de compra/transferência
+ * na Fatia 8, sem tradução no meio). converted/walkout não levam motivo — o
+ * dado de "por que perdeu" só existe onde faz sentido, senão o Pareto mente.
+ * O vínculo com unmet_demand continua nascendo do SCAN (RN-150-009, Fatia 5) —
+ * aqui é só o desfecho declarado.
+ *
+ * Política de retorno (Fatia 4): ao encerrar, o vendedor volta pra fila
+ * (`waiting`, default) ou vai direto pra pausa (`break` — foi almoçar). A
+ * ordenação derivada da Fatia 2 cuida do resto.
  */
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
-import { RetailFloorService, RetailFloorSettingsService } from "./RetailFloorService.js";
+import { RetailFloorService, RetailFloorSettingsService, NOT_CONVERTED_CATEGORIES, PRODUCT_REASONS } from "./RetailFloorService.js";
 import { RetailFloorQueueService } from "./RetailFloorShiftService.js";
 
 const OUTCOMES = ["converted", "not_converted", "walkout"];
+const RETURN_TO = ["waiting", "break"];
 
 type UserRef = { userId?: string; id?: string; role?: string };
 const uid = (u: UserRef) => u?.userId || u?.id || null;
@@ -81,15 +93,19 @@ export class RetailFloorAttendanceService {
 
   /**
    * Encerra o atendimento com desfecho. `converted` entra em conciliação
-   * pendente (RN-150-004) com valor/peças declarados; o vendedor volta pra
-   * fila (`waiting` — a chave de retorno da ordenação o manda pro fim).
+   * pendente (RN-150-004) com valor/peças declarados; `not_converted` EXIGE o
+   * motivo hierárquico (Fatia 4). O vendedor volta pra fila (`waiting`,
+   * default) ou vai pra pausa (`returnTo='break'`).
    */
-  static finish(orgId: string, attendanceId: string, opts: { outcome: string; declaredValue?: number | null; declaredPieces?: number | null; notes?: string | null }, user: UserRef): any {
+  static finish(orgId: string, attendanceId: string, opts: { outcome: string; reason?: any; returnTo?: string | null; declaredValue?: number | null; declaredPieces?: number | null; notes?: string | null }, user: UserRef): any {
     const att = db.prepare(`SELECT * FROM retail_floor_attendances WHERE organization_id = ? AND id = ?`).get(orgId, attendanceId) as any;
     if (!att) throw new Error("Atendimento não encontrado.");
     if (att.ended_at) throw new Error("Atendimento já encerrado.");
     const outcome = String(opts.outcome || "");
     if (!OUTCOMES.includes(outcome)) throw new Error(`Desfecho inválido (${OUTCOMES.join("|")}).`);
+    const reason = this.validateReason(outcome, opts.reason);
+    const returnTo = opts.returnTo == null ? "waiting" : String(opts.returnTo);
+    if (!RETURN_TO.includes(returnTo)) throw new Error("returnTo inválido (waiting|break).");
 
     const self = RetailFloorQueueService.sellerForUser(orgId, uid(user));
     const isSelf = !!self && self.id === att.seller_id;
@@ -103,15 +119,54 @@ export class RetailFloorAttendanceService {
 
     const tx = db.transaction(() => {
       db.prepare(
-        `UPDATE retail_floor_attendances SET ended_at = CURRENT_TIMESTAMP, outcome = ?, reconciliation_state = ?, declared_value = ?, declared_pieces = ?, notes = ? WHERE organization_id = ? AND id = ?`
-      ).run(outcome, converted ? "pending" : null, declaredValue, declaredPieces, opts.notes || null, orgId, attendanceId);
+        `UPDATE retail_floor_attendances SET ended_at = CURRENT_TIMESTAMP, outcome = ?, outcome_reason_json = ?, reconciliation_state = ?, declared_value = ?, declared_pieces = ?, notes = ? WHERE organization_id = ? AND id = ?`
+      ).run(outcome, reason ? JSON.stringify(reason) : null, converted ? "pending" : null, declaredValue, declaredPieces, opts.notes || null, orgId, attendanceId);
       db.prepare(
-        `UPDATE retail_floor_queue_state SET status = 'waiting', status_changed_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND shift_id = ? AND seller_id = ? AND status = 'serving'`
-      ).run(orgId, att.shift_id, att.seller_id);
+        `UPDATE retail_floor_queue_state SET status = ?, status_changed_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND shift_id = ? AND seller_id = ? AND status = 'serving'`
+      ).run(returnTo, orgId, att.shift_id, att.seller_id);
     });
     tx();
-    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_ATTENDANCE_FINISH", { attendanceId, sellerId: att.seller_id, outcome, byManager: !isSelf }); } catch { /* noop */ }
+    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_ATTENDANCE_FINISH", { attendanceId, sellerId: att.seller_id, outcome, reasonCategory: reason?.category || null, returnTo, byManager: !isSelf }); } catch { /* noop */ }
     return this.get(orgId, attendanceId);
+  }
+
+  /**
+   * Valida o motivo hierárquico do desfecho (Fatia 4):
+   *  - not_converted: EXIGE { category }; quando category='product', EXIGE
+   *    productDetail.reason da taxonomia da demanda não atendida (+ campos
+   *    livres opcionais: size/color/categoryLabel do que faltou);
+   *  - converted/walkout: motivo é REJEITADO (não faz sentido e sujaria o
+   *    Pareto de perdas).
+   * Retorna o objeto canônico a persistir (ou null).
+   */
+  private static validateReason(outcome: string, raw: any): any | null {
+    if (outcome !== "not_converted") {
+      if (raw != null) throw new Error("Motivo só se aplica a desfecho not_converted.");
+      return null;
+    }
+    const category = String(raw?.category || "");
+    if (!(NOT_CONVERTED_CATEGORIES as readonly string[]).includes(category)) {
+      throw new Error(`Motivo obrigatório: category (${NOT_CONVERTED_CATEGORIES.join("|")}).`);
+    }
+    if (category !== "product") {
+      if (raw?.productDetail != null) throw new Error("productDetail só se aplica à categoria product.");
+      return { category, note: raw?.note ? String(raw.note).slice(0, 500) : undefined };
+    }
+    const productReason = String(raw?.productDetail?.reason || "");
+    if (!(PRODUCT_REASONS as readonly string[]).includes(productReason)) {
+      throw new Error(`Categoria product exige productDetail.reason (${PRODUCT_REASONS.join("|")}).`);
+    }
+    const d = raw.productDetail;
+    return {
+      category,
+      note: raw?.note ? String(raw.note).slice(0, 500) : undefined,
+      productDetail: {
+        reason: productReason,
+        size: d.size ? String(d.size).slice(0, 40) : undefined,
+        color: d.color ? String(d.color).slice(0, 40) : undefined,
+        categoryLabel: d.categoryLabel ? String(d.categoryLabel).slice(0, 80) : undefined,
+      },
+    };
   }
 
   /** Atendimentos ATIVOS da loja com tempo decorrido derivado (base do Kanban). */
@@ -161,12 +216,16 @@ export class RetailFloorAttendanceService {
     return {
       id: row.id, storeId: row.store_id, shiftId: row.shift_id, sellerId: row.seller_id,
       startedAt: row.started_at, endedAt: row.ended_at || null,
-      outcome: row.outcome || null, reconciliationState: row.reconciliation_state || null,
+      outcome: row.outcome || null,
+      outcomeReason: row.outcome_reason_json ? safeParse(row.outcome_reason_json) : null,
+      reconciliationState: row.reconciliation_state || null,
       declaredValue: row.declared_value != null ? Number(row.declared_value) : null,
       declaredPieces: row.declared_pieces != null ? Number(row.declared_pieces) : null,
       notes: row.notes || null,
     };
   }
 }
+
+function safeParse(s: string): any { try { return JSON.parse(s); } catch { return null; } }
 
 export default RetailFloorAttendanceService;

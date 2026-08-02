@@ -104,11 +104,14 @@ router.post("/attendances/start", (req: AuthRequest, res) => {
   } catch (e: any) { fail(res, e); }
 });
 
-// Encerra com desfecho (converted → conciliação pendente, RN-150-004).
+// Encerra com desfecho (converted → conciliação pendente, RN-150-004;
+// not_converted exige motivo hierárquico — Fatia 4; returnTo waiting|break).
 router.post("/attendances/:id/finish", (req: AuthRequest, res) => {
   try {
     res.json(RetailFloorAttendanceService.finish(req.organizationId!, req.params.id, {
       outcome: String(req.body?.outcome || ""),
+      reason: req.body?.reason ?? null,
+      returnTo: req.body?.returnTo ?? null,
       declaredValue: req.body?.declaredValue ?? null,
       declaredPieces: req.body?.declaredPieces ?? null,
       notes: req.body?.notes || null,

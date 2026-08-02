@@ -264,3 +264,116 @@ faixas não cumulativas, P.A com/sem cota, ranking semanal 1º/2º e razões de
 não-prêmio, desvio da rede com filtro por loja, gerente com/sem cota da loja,
 cota derivada da escala, precedência do plano por loja, run draft com
 detalhamento, audit, isolamento multi-tenant).
+
+## Fase C2 — Fechamento noturno completo (padrão da folha da loja) (2026-08)
+
+**Origem:** fotos da rotina real do cliente — a folha de fechamento preenchida
+à noite (loja NOVA IGUAÇU 31/07/26), uma boleta de venda e a tela de
+vendedores do Alterdata. A folha real tem MUITO mais do que os totais por
+forma de pagamento que a Fase C capturava: **crédito e débito POR BANDEIRA**
+(Amex/Master/Visa/Elo; Redshop/Eletron/Elo), **despesas do dia**, **ranking
+por vendedor** (valor, A/P = atendimentos, P/A = peças), **cadastros de
+clientes**, **boleta inicial/final**, **malote**, **prêmio do dia**, e o
+**resumo do POS (Clover) grampeado** — que confere com os cartões (a linha
+"Crédito (4) R$ 1.379,30 / Débito (2) R$ 469,80" bate com o "6/9" da linha
+LOJA: 6 atendimentos, 9 peças).
+
+**Decisões:**
+
+1. **`details_json` aditivo em `retail_daily_closings`** — a folha inteira
+   estruturada (shape no header de `submitDetailed`). Fechamentos antigos
+   (NULL) seguem operando só com `informed_total`/items.
+2. **Total DERIVADO** — dinheiro + pix + bandeiras + voucher/troca/outros.
+   Despesas NÃO abatem venda (são caixa, não faturamento). Desvio vs cota
+   continua no mesmo caminho da Fase B.
+3. **Conferências viram FLAGS, não bloqueio (D4)** — `derived.rankingGap`
+   (a linha LOJA da folha: soma do ranking × total do dia) e
+   `derived.posGapCredito/Debito` (cartões informados × comprovante do POS).
+   A UI avisa; quem decide é o humano na aprovação.
+4. **Bandeiras por loja** — `retail_stores.card_brands_json` (aditivo);
+   default = as da folha do cliente. `GET/PUT /stores/:id/card-brands`.
+5. **Ranking → comissão sem digitar duas vezes** — na APROVAÇÃO do
+   fechamento, `syncRankingToSellerSales` grava o ranking em
+   `retail_seller_sales` com `source='closing'` (valor/peças/AT — a mesma
+   base da Fase G/G2). Idempotente: substitui só as linhas `closing` daquela
+   (loja, dia); lançamentos manuais/foto não são tocados. Matrícula
+   resolvida pelo nome quando bate com UM único vendedor cadastrado (sem
+   chute em ambiguidade — o Alterdata tem o cadastro por loja; o sync via
+   ADR-105 continua sendo o caminho canônico da matrícula).
+6. **OCR v2** — `extractClosingFromImage` agora lê a folha completa
+   (bandeiras, despesas, ranking com A/P=atendimentos e P/A=peças, cadastros,
+   boletas, malote, POS); `submitFromImage` mapeia a extração rica pro
+   `details_json` (pré-preenche o formulário na conferência) e folha antiga
+   sem os campos segue o fluxo de sempre.
+
+**UI (aba Fechamento diário):** o modal "Informar" virou a **folha digital**:
+cota do dia ÷ escalados (integra a escala da Fase G2), dinheiro/PIX/voucher/
+troca, crédito e débito por bandeira (com editor de bandeiras da loja),
+resumo do POS com conferência ao vivo, ranking por vendedor pré-preenchido
+pelos ESCALADOS do dia (valor/AT/peças), despesas, boletas/cadastros/malote/
+prêmio do dia/OBS, totais automáticos com % da cota e o botão "Enviar foto da
+folha" (IA pré-preenche tudo; conferência humana antes de salvar).
+
+**Rotas:** `POST /closings/:id/detailed`, `GET/PUT /stores/:id/card-brands`;
+`POST /closings/:id/approve` passou a disparar o sync do ranking
+(best-effort, não falha a aprovação).
+
+**Fora desta fase (documentado de propósito):** boleta a boleta no app (a
+folha de venda individual com S/E e troca continua no papel/PDV — o
+fechamento registra o range de boletas e o agregado; lançar venda a venda
+mudaria a rotina do salão e é projeto próprio, se o cliente pedir).
+
+**Teste:** `test:retail-closing-detailed` (28 verificações — bandeiras
+default/config/validação, total derivado + desvio, conferências ranking/POS
+com divergência-flag, sync na aprovação idempotente sem tocar lançamento
+manual + matrícula por nome único, scan rico × folha simples, audit,
+isolamento multi-tenant).
+
+## Fase C3 — Boletas em tempo real (hora real da venda) (2026-08)
+
+**Origem:** pedido direto do dono. As lojas vendem com boleta MANUSCRITA de
+talão sequencial (Nº 005988) e só lançam no PDV à noite — a HORA real de cada
+venda se perdia. O fluxo devolve a hora sem mudar a rotina do papel:
+
+1. O gerente **abre o dia** informando o nº inicial do talão.
+2. A cada venda, gerente/vendedor **clica no botão** (que sempre mostra o
+   próximo nº da sequência) — o servidor grava o número + o timestamp DO
+   SERVIDOR (a hora do clique É a hora da venda; nenhuma hora vem do cliente
+   — mesma regra do RN-150-002).
+3. No **fechamento**, o range informado na folha confere com os cliques
+   (`derived.boleta.gap` no submitDetailed — flag, nunca bloqueio/D4), e cada
+   boleta clicada **casa com a venda do PDV** (`retail_pdv_sales.boleta`)
+   quando o lançamento noturno sincroniza — clique (hora real) × PDV (valor,
+   peças, vendedor).
+
+**Decisões:**
+- **Sequência atômica** — transação com COUNT dentro da tx antes do INSERT
+  (padrão AC-012) + unique index parcial (org, loja, dia, nº) ativo.
+- **Desfazer = UPDATE status='cancelled'** (nunca DELETE, convenção #9) e SÓ
+  o último ativo — cancelar do meio furaria a sequência; o número liberado é
+  reusado pelo próximo clique.
+- **Nº inicial imutável após cliques** (os números gravados derivam dele);
+  reabrir com o mesmo nº é idempotente.
+- **Match com o PDV é DERIVADO por query** na leitura (nunca coluna de
+  vínculo mutável — RN-004), normalizando zeros à esquerda ("017752" ≡
+  "17752") e casando por (filial da loja, nº, data).
+- **Clique SEM requireRole** de propósito (o vendedor no balcão registra);
+  abrir o dia e desfazer são de gestão (owner/admin).
+
+**Entidades:** `retail_boleta_days` (nº inicial por loja/dia) +
+`retail_boleta_events` (nº, seq, hora, status active|cancelled).
+
+**Rotas:** `GET /boletas/day`, `POST /boletas/day/open`,
+`POST /boletas/click`, `POST /boletas/click/:id/cancel`.
+
+**UI (aba Fechamento diário):** painel "Boletas de hoje" — abrir o dia,
+botão grande "Registrar venda — Nº X" (mostra o número e a hora no toast),
+lista dos cliques com hora e o valor do PDV quando casado ("aguardando PDV"
+até lá), desfazer último. O modal do fechamento pré-preenche boleta
+inicial/final com o dia aberto + último clique e confere o range × cliques
+ao vivo.
+
+**Teste:** `test:retail-boletas` (25 verificações — sequência com zeros,
+clique sem dia aberto, imutabilidade do inicial, cancelamento só do último
+com retenção, reuso do número, match PDV com normalização, conferência do
+fechamento com gap-flag, audit, isolamento multi-tenant).

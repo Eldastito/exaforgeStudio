@@ -12,6 +12,7 @@ import { RetailFloorShiftService, RetailFloorQueueService } from "../RetailFloor
 import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js";
 import { RetailFloorScanService } from "../RetailFloorScanService.js";
 import { RetailFloorReconciliationService } from "../RetailFloorReconciliationService.js";
+import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -188,6 +189,16 @@ router.post("/reconciliation/run", (req: AuthRequest, res) => {
 router.post("/reconciliation/:attendanceId/state", (req: AuthRequest, res) => {
   try {
     res.json(RetailFloorReconciliationService.override(req.organizationId!, req.params.attendanceId, String(req.body?.state || ""), req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ---- Fatia 8: sinais pro Orquestrador (sob demanda; o Scheduler roda por hora) ----
+// Sem requireRole de propósito: é um recompute idempotente de fatos (dedupe no
+// ledger) e a resposta só traz a contagem — não expõe dado além do gate do módulo.
+router.post("/signals/scan", (req: AuthRequest, res) => {
+  try {
+    const date = req.body?.date ? String(req.body.date) : undefined;
+    res.json(RetailFloorSignalPublisher.sweep(req.organizationId!, date));
   } catch (e: any) { fail(res, e); }
 });
 

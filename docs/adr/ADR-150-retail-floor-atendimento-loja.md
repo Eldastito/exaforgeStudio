@@ -132,6 +132,15 @@ Alterdata.
 `dedupe_key = {tipo}|{store}|{dia}[|{chave}]`, `basis='fact'` e evidência com
 as contagens que sustentam o sinal (RN-150-006).
 
+**Definições (Fatia 8):** `queue_delay` = minutos do dia com o roster INTEIRO
+em atendimento simultâneo (proxy honesto — não rastreamos fila de clientes),
+≥15min. `long_service` = atendimentos ≥45min. `declared_vs_pdv_gap` = valor
+dos `unmatched` (não o total do dia, que incluiria pendentes).
+`conversion_drop` = conversão CONFIRMADA 7d×7d, amostra mínima 20+20, queda
+relativa ≥20%, dedupe pela semana. `network_recovery` = scan com
+reserva/transferência em peça sem estoque local. Sweep no tick horário do
+Scheduler (hoje+ontem, após a conciliação) + `POST /signals/scan` sob demanda.
+
 ## Fatias
 
 | Fatia | Entrega | Status |
@@ -142,8 +151,8 @@ as contagens que sustentam o sinal (RN-150-006).
 | 4 | Taxonomia de desfecho hierárquica + política de retorno à fila | **MERGED (PR #714)** |
 | 5 | Scan no atendimento: estoque local + rede agregada + `last_sync_at` + `unmet_demand` | **MERGED (PR #715)** |
 | 6 | Conciliação declarado × PDV (matching multi-critério + job diário + override manual) | **MERGED (PR #716)** |
-| 7 | UI (Kanban + encerramento + consulta de peça + conciliação; polling 8s) | **ENTREGUE (PR desta fatia)** |
-| 8 | Sinais para o Orquestrador (7 tipos) | pendente |
+| 7 | UI (Kanban + encerramento + consulta de peça + conciliação; polling 8s) | **MERGED (PR #717)** |
+| 8 | Sinais para o Orquestrador (7 tipos) | **ENTREGUE (PR desta fatia)** |
 | 9 | Analytics da loja + modo calibração + piloto TOULON | pendente |
 
 ## O que ficou explicitamente de fora

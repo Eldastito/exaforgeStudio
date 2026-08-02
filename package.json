@@ -160,6 +160,7 @@
     "test:retail-floor-outcomes": "tsx scripts/test-retail-floor-outcomes.ts",
     "test:retail-floor-scan": "tsx scripts/test-retail-floor-scan.ts",
     "test:retail-floor-reconciliation": "tsx scripts/test-retail-floor-reconciliation.ts",
+    "test:retail-floor-signals": "tsx scripts/test-retail-floor-signals.ts",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
     "test:product-instock": "tsx scripts/test-product-instock.ts",
     "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",

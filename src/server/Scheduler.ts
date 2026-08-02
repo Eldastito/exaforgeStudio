@@ -29,6 +29,7 @@ import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
+import { RetailFloorReconciliationService } from "./RetailFloorReconciliationService.js";
 import { ProspectDiscoveryService } from "./ProspectDiscoveryService.js";
 import { MaestroService } from "./MaestroService.js";
 import { JobQueueService } from "./JobQueueService.js";
@@ -94,6 +95,30 @@ export class Scheduler {
     // Retail Floor (ADR-150, Fatia 3): auto-encerra atendimento esquecido além
     // de auto_close_minutes. Sensível a minutos → passe rápido.
     try { this.retailFloorAutoClosePass(); } catch (e: any) { console.error('[Scheduler] auto-encerramento Retail Floor falhou', e?.message); }
+  }
+
+  /**
+   * Retail Floor (ADR-150, Fatia 6) — conciliação declarado × PDV de HOJE e
+   * ONTEM (o PDV lança no fim do dia; o sync Alterdata chega no tick horário
+   * anterior a este passe). Idempotente e só-promove — re-rodar por hora é
+   * barato e pega ERP atrasado. Só orgs com atendimentos conciliáveis.
+   */
+  static retailFloorReconciliationPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM retail_floor_attendances WHERE reconciliation_state IN ('pending','unmatched')`
+      ).all() as any[];
+    } catch { return; }
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    for (const o of orgs) {
+      try {
+        if (!ModuleService.isEnabled(o.organization_id, "retail_floor")) continue;
+        RetailFloorReconciliationService.runAll(o.organization_id, yesterday);
+        RetailFloorReconciliationService.runAll(o.organization_id, today);
+      } catch (e) { console.error("[RetailFloor] conciliação falhou", o.organization_id, e); }
+    }
   }
 
   /**
@@ -381,6 +406,9 @@ export class Scheduler {
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     try { this.retailOpsSignalsPass(); } catch (e: any) { console.error('[Scheduler] retailOpsSignalsPass error', e.message); }
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
+    // Depois do sync Alterdata: concilia atendimento declarado × vendas do PDV
+    // (ADR-150 Fatia 6). Idempotente e só-promove.
+    try { this.retailFloorReconciliationPass(); } catch (e: any) { console.error('[Scheduler] conciliação Retail Floor falhou', e?.message); }
     this.trialPass();
     await this.tutorPass().catch(e => console.error('[Scheduler] tutor falhou', e));
     await this.schoolDigestPass().catch(e => console.error('[Scheduler] resumo escolar falhou', e));

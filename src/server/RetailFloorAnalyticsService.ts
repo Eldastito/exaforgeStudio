@@ -34,6 +34,7 @@ export class RetailFloorAnalyticsService {
               a.started_at, date(a.started_at) AS day,
               CASE WHEN a.ended_at IS NOT NULL THEN (strftime('%s', a.ended_at) - strftime('%s', a.started_at)) / 60.0 END AS minutes,
               CAST(strftime('%H', a.started_at) AS INTEGER) AS hour,
+              CAST(strftime('%w', a.started_at) AS INTEGER) AS weekday,
               EXISTS (SELECT 1 FROM retail_floor_attendance_scans sc
                        WHERE sc.organization_id = a.organization_id AND sc.attendance_id = a.id) AS has_scan
          FROM retail_floor_attendances a
@@ -120,6 +121,14 @@ export class RetailFloorAnalyticsService {
     }
     const byDay = [...dayMap.entries()].map(([date, v]) => ({ date, ...v })).sort((a, b) => a.date.localeCompare(b.date));
 
+    // Heatmap dia-da-semana × hora (Fatia 14): o "por hora" agregado mistura
+    // terça com sábado e esconde o padrão de escala. weekday: 0=domingo (%w).
+    const wdMap = new Map<string, number>();
+    for (const a of atts) wdMap.set(`${a.weekday}:${a.hour}`, (wdMap.get(`${a.weekday}:${a.hour}`) || 0) + 1);
+    const byWeekdayHour = [...wdMap.entries()]
+      .map(([k, count]) => { const [weekday, hour] = k.split(":").map(Number); return { weekday, hour, count }; })
+      .sort((a, b) => a.weekday - b.weekday || a.hour - b.hour);
+
     // Ticket médio e PA (peças por atendimento convertido) — sempre os DOIS
     // números rotulados (RN-150-004): declarado × confirmado. Média só sobre
     // linhas com o dado preenchido (valor/peças são opcionais no finish).
@@ -189,7 +198,7 @@ export class RetailFloorAnalyticsService {
         unknownPct: pct1(byOutcome["unknown"] || 0, atts.length),
       },
       bySeller, lossPareto, topUnmet: topUnmet.map((r) => ({ item: r.item, reason: r.reason, count: Number(r.n) })), byHour,
-      byDay, scanSplit, unmetLostValue,
+      byDay, scanSplit, unmetLostValue, byWeekdayHour,
     };
   }
 }
@@ -220,6 +229,9 @@ export class RetailFloorNetworkAnalytics {
         ticketConfirmed: r.totals.ticketConfirmed,
         unknownPct: r.totals.unknownPct,
         unmetLostValue: r.unmetLostValue.knownValue,
+        // Fatia 14: contagens pro funil consolidado da rede.
+        declaredCount: r.totals.declaredCount,
+        confirmedCount: r.totals.confirmedCount,
       };
     });
     return {

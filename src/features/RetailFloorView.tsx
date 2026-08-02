@@ -38,6 +38,7 @@ const NOT_CONVERTED_NOTE_HINT: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   break: 'Pausa', unavailable: 'Indisponível', skipped: 'Pulado',
 };
+const WEEKDAY_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 // Códigos do servidor → mensagem amigável no toast.
 const ERR_LABEL: Record<string, string> = {
   not_your_turn: 'Ainda não é a sua vez na fila.',
@@ -1503,6 +1504,70 @@ const LOSS_LABEL: Record<string, string> = {
   'product:missing_color': 'Produto: faltou cor', 'product:missing_category': 'Produto: faltou categoria',
 };
 
+/**
+ * Funil de venda (Fatia 14): cada barra mostra o valor e o % em relação ao
+ * degrau ANTERIOR — é onde o degrau encolhe que o dinheiro vaza (decidido→
+ * declarada = conversão; declarada→confirmada = gap com o PDV).
+ */
+function Funnel({ steps }: { steps: { label: string; value: number; cls: string }[] }) {
+  const max = Math.max(...steps.map((s) => s.value), 1);
+  return (
+    <div className="space-y-1.5">
+      {steps.map((s, i) => {
+        const prev = i > 0 ? steps[i - 1].value : null;
+        const stepPct = prev != null && prev > 0 ? Math.round((s.value / prev) * 100) : null;
+        return (
+          <div key={s.label} className="flex items-center gap-2">
+            <span className="w-32 shrink-0 text-xs text-[var(--color-text-muted)]">{s.label}</span>
+            <div className="h-6 flex-1 overflow-hidden rounded-md bg-[var(--color-surface-2)]/50">
+              <div className={cn('flex h-full items-center rounded-md px-2 text-xs font-semibold text-zinc-950 transition-all', s.cls)}
+                style={{ width: `${Math.max((s.value / max) * 100, s.value > 0 ? 8 : 0)}%` }}>
+                {s.value > 0 ? s.value : ''}
+              </div>
+            </div>
+            <span className="w-14 shrink-0 text-right text-xs text-[var(--color-text-muted)]">
+              {s.value === 0 ? '0' : stepPct != null ? `${stepPct}%` : ''}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const funnelSteps = (attendances: number, decided: number, declared: number, confirmed: number) => ([
+  { label: 'Atendimentos', value: attendances, cls: 'bg-[var(--color-flow)]/40' },
+  { label: 'Com desfecho', value: decided, cls: 'bg-[var(--color-flow)]/60' },
+  { label: 'Venda declarada', value: declared, cls: 'bg-[var(--color-flow)]' },
+  { label: 'Confirmada no PDV', value: confirmed, cls: 'bg-emerald-500' },
+]);
+
+/** Barras comparativas por loja (Fatia 14) — ordem alfabética, sem ranking. */
+function NetBars({ title, rows, val, fmt, cls }: {
+  title: string; rows: any[]; val: (s: any) => number | null; fmt: (n: number) => string; cls: string;
+}) {
+  const max = Math.max(...rows.map((s) => val(s) ?? 0), 0.001);
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase text-[var(--color-text-muted)]">{title}</div>
+      <div className="space-y-1.5">
+        {rows.map((s) => {
+          const v = val(s);
+          return (
+            <div key={s.storeId} className="flex items-center gap-2" title={`${s.storeName}: ${v != null ? fmt(v) : '—'}`}>
+              <span className="w-24 shrink-0 truncate text-xs text-[var(--color-text-muted)]">{s.storeName}</span>
+              <div className="h-4 flex-1 overflow-hidden rounded bg-[var(--color-surface-2)]/50">
+                <div className={cn('h-full rounded', cls)} style={{ width: `${((v ?? 0) / max) * 100}%` }} />
+              </div>
+              <span className="w-20 shrink-0 text-right text-xs text-[var(--color-text-strong)]">{v != null ? fmt(v) : '—'}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsPanel({ storeId }: { storeId: string }) {
   const [days, setDays] = useState(7);
   const [data, setData] = useState<any>(null);
@@ -1549,6 +1614,13 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
         <Stat label="Ruptura em R$" v={brl(data.unmetLostValue?.knownValue || 0)} cls="text-rose-400" />
         <Stat label="Fila furada" v={ops ? ops.queueSkips.total : '—'} />
       </div>
+      {/* Fatia 14 — funil: onde o dinheiro vaza (conversão × gap com o PDV) */}
+      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+        <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+          Funil de venda <span className="text-xs font-normal text-[var(--color-text-muted)]">(% sobre o degrau anterior)</span>
+        </div>
+        <Funnel steps={funnelSteps(t.attendances, t.decided, t.declaredCount, t.confirmedCount)} />
+      </div>
       {/* Conversão com × sem consulta de peça — o valor do leitor em número */}
       {(data.scanSplit?.withScan?.decided > 0 || data.scanSplit?.withoutScan?.decided > 0) && (
         <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
@@ -1584,13 +1656,30 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
           </div>
         </div>
         <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
-          <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">Por que não converteu</div>
-          {data.lossPareto.map((l: any) => (
-            <div key={l.reason} className="flex justify-between border-t border-[var(--color-border)] py-2 text-sm">
-              <span className="text-[var(--color-text-muted)]">{LOSS_LABEL[l.reason] || l.reason}</span>
-              <span className="font-semibold text-rose-400">{l.count}</span>
-            </div>
-          ))}
+          <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+            Por que não converteu <span className="text-xs font-normal text-[var(--color-text-muted)]">(% acumulado)</span>
+          </div>
+          {/* Pareto visual (Fatia 14): barra + acumulado — o 80/20 salta aos olhos */}
+          {(() => {
+            const totalLoss = data.lossPareto.reduce((acc: number, l: any) => acc + l.count, 0);
+            const maxLoss = Math.max(...data.lossPareto.map((l: any) => l.count), 1);
+            let cum = 0;
+            return data.lossPareto.map((l: any) => {
+              cum += l.count;
+              const cumPct = totalLoss > 0 ? Math.round((cum / totalLoss) * 100) : 0;
+              return (
+                <div key={l.reason} className="border-t border-[var(--color-border)] py-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-[var(--color-text-muted)]">{LOSS_LABEL[l.reason] || l.reason}</span>
+                    <span><span className="font-semibold text-rose-400">{l.count}</span> <span className="text-xs text-[var(--color-text-muted)]">· {cumPct}%</span></span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded bg-[var(--color-surface-2)]/50">
+                    <div className="h-full rounded bg-rose-500/70" style={{ width: `${(l.count / maxLoss) * 100}%` }} />
+                  </div>
+                </div>
+              );
+            });
+          })()}
           {!data.lossPareto.length && <p className="py-2 text-sm text-zinc-600">Sem perdas registradas.</p>}
           <div className="mb-3 mt-5 text-sm font-semibold text-[var(--color-text-strong)]">Rupturas (peça pedida e faltou)</div>
           {data.topUnmet.map((u: any, i: number) => (
@@ -1648,6 +1737,47 @@ function AnalyticsPanel({ storeId }: { storeId: string }) {
           </div>
         </div>
       </div>
+
+      {/* Fatia 14 — heatmap escala: qual dia×hora concentra atendimento */}
+      {(data.byWeekdayHour || []).length > 0 && (() => {
+        const cells: any[] = data.byWeekdayHour;
+        const hours = [...new Set(cells.map((c) => c.hour))].sort((a, b) => a - b);
+        const weekdays = [...new Set(cells.map((c) => c.weekday))].sort((a, b) => a - b);
+        const maxC = Math.max(...cells.map((c) => c.count), 1);
+        const cellOf = (w: number, h: number) => cells.find((c) => c.weekday === w && c.hour === h)?.count || 0;
+        return (
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+            <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+              Mapa de escala <span className="text-xs font-normal text-[var(--color-text-muted)]">(atendimentos por dia da semana × hora — quanto mais forte, mais gente precisa)</span>
+            </div>
+            <div className="overflow-x-auto">
+              <div className="inline-grid gap-0.5" style={{ gridTemplateColumns: `36px repeat(${hours.length}, 28px)` }}>
+                <span />
+                {hours.map((h) => <span key={h} className="text-center text-[10px] text-[var(--color-text-muted)]">{h}h</span>)}
+                {weekdays.map((w) => (
+                  <React.Fragment key={w}>
+                    <span className="pr-1 text-right text-[10px] leading-6 text-[var(--color-text-muted)]">{WEEKDAY_LABEL[w]}</span>
+                    {hours.map((h) => {
+                      const c = cellOf(w, h);
+                      return (
+                        <div key={h} title={`${WEEKDAY_LABEL[w]} ${h}h: ${c} atendimento${c === 1 ? '' : 's'}`}
+                          className="flex h-6 items-center justify-center rounded text-[10px] font-semibold"
+                          style={{
+                            backgroundColor: c > 0 ? `color-mix(in srgb, var(--color-flow) ${15 + (c / maxC) * 75}%, transparent)` : 'transparent',
+                            border: '1px solid var(--color-border)',
+                            color: c / maxC > 0.55 ? '#09090b' : 'var(--color-text-muted)',
+                          }}>
+                          {c > 0 ? c : ''}
+                        </div>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Fatia 13 — operação da fila (derivado do audit): pausas e furos com PIN */}
       {ops && (
@@ -1711,6 +1841,34 @@ function NetworkPanel() {
         ))}
         {data.inCalibration && <span className="ml-auto text-xs text-amber-300">Calibração: números NÃO valem pra cobrança.</span>}
       </div>
+
+      {/* Fatia 14 — funil consolidado da rede + comparativo visual por loja */}
+      {data.stores.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+            <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+              Funil da rede <span className="text-xs font-normal text-[var(--color-text-muted)]">(% sobre o degrau anterior)</span>
+            </div>
+            <Funnel steps={funnelSteps(
+              data.stores.reduce((acc: number, s: any) => acc + s.attendances, 0),
+              data.stores.reduce((acc: number, s: any) => acc + s.decided, 0),
+              data.stores.reduce((acc: number, s: any) => acc + (s.declaredCount || 0), 0),
+              data.stores.reduce((acc: number, s: any) => acc + (s.confirmedCount || 0), 0),
+            )} />
+          </div>
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]/50 p-4">
+            <div className="mb-3 text-sm font-semibold text-[var(--color-text-strong)]">
+              Lojas lado a lado <span className="text-xs font-normal text-[var(--color-text-muted)]">(alfabético — a comparação é sua)</span>
+            </div>
+            <div className="space-y-4">
+              <NetBars title="Conversão confirmada" rows={data.stores} val={(s) => s.conversionConfirmedPct} fmt={(n) => `${n}%`} cls="bg-emerald-500/70" />
+              <NetBars title="Ticket confirmado" rows={data.stores} val={(s) => s.ticketConfirmed} fmt={brl} cls="bg-[var(--color-flow)]/70" />
+              <NetBars title="Ruptura em R$" rows={data.stores} val={(s) => s.unmetLostValue} fmt={brl} cls="bg-rose-500/70" />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-2xl border border-[var(--color-border)]">
         <table className="w-full text-sm">
           <thead className="bg-[var(--color-surface-2)] text-left text-xs text-[var(--color-text-muted)]">

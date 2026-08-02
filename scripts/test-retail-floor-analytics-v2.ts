@@ -12,6 +12,9 @@
  *   - unmetLostValue: R$ da ruptura via preço do catálogo; peça sem produto
  *     resolvido conta em unpricedCount (não finge precisão);
  *   - rede (Fatia 10) carrega ticketConfirmed/unknownPct/unmetLostValue.
+ *  Fatia 14 (gráficos do dono — a parte de dados):
+ *   - byWeekdayHour: heatmap dia-da-semana × hora (base do mapa de escala);
+ *   - rede carrega declaredCount/confirmedCount (funil consolidado).
  *  Grupo 2 (ops derivadas do audit — RetailFloorOpsMetricsService):
  *   - queueSkips: furos de fila autorizados (override=true da RN-150-012),
  *     total/byDay/bySeller (alfabético — fato, não ranking RN-150-006);
@@ -147,10 +150,17 @@ async function main() {
   check("scanSplit: unknown fora dos denominadores (5 atend., 4 decided)", r.scanSplit.withScan.decided + r.scanSplit.withoutScan.decided === 4);
   check("ruptura em R$: 2×150 precificados + 1 sem preço", r.unmetLostValue.knownValue === 300 && r.unmetLostValue.pricedCount === 2 && r.unmetLostValue.unpricedCount === 1);
 
+  // ---- Fatia 14: heatmap dia-da-semana × hora ----
+  const todayWeekday = new Date(`${today}T12:00:00Z`).getUTCDay();
+  const wd10 = (r.byWeekdayHour || []).find((c: any) => c.weekday === todayWeekday && c.hour === 10);
+  check("byWeekdayHour: célula do dia×hora com contagem certa (10h: 1)", wd10?.count === 1);
+  check("byWeekdayHour: soma das células = total de atendimentos", (r.byWeekdayHour || []).reduce((acc: number, c: any) => acc + c.count, 0) === 5);
+
   // ---- Rede carrega os novos números ----
   const net = RetailFloorNetworkAnalytics.network(A, today, today);
   const netRow = net.stores.find((s: any) => s.storeId === store1);
   check("rede: ticketConfirmed/unknownPct/unmetLostValue na linha da loja", netRow.ticketConfirmed === 200 && netRow.unknownPct === 20 && netRow.unmetLostValue === 300);
+  check("rede: contagens do funil (Fatia 14) na linha da loja", netRow.declaredCount === 2 && netRow.confirmedCount === 1 && netRow.decided === 4);
 
   // ---- Grupo 2 (ops via audit) ----
   const ops = RetailFloorOpsMetricsService.store(A, store1, today, today);

@@ -2450,7 +2450,12 @@ function TopProductsTab() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
   const maxPecas = rows.reduce((m, r) => Math.max(m, Number(r.pecas || 0)), 0) || 1;
   const shown = rows.map((r, i) => ({ ...r, _rank: i + 1 }))
-    .filter(r => !q.trim() || String(r.nome || r.produto || '').toLowerCase().includes(q.trim().toLowerCase()));
+    .filter(r => {
+      if (!q.trim()) return true;
+      const s = q.trim().toLowerCase();
+      return [r.nome, r.produto, r.sku, r.ean].some(v => String(v || '').toLowerCase().includes(s));
+    });
+  const unmatched = rows.filter(r => !r.catalogHit).length;
   return (
     <div>
       <div className="mb-3 flex items-center gap-2 flex-wrap">
@@ -2459,9 +2464,10 @@ function TopProductsTab() {
         <span className="text-xs text-zinc-500">até</span>
         <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><RefreshCw className="w-4 h-4" /> Gerar</button>
-        {rows.length > 0 && <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar produto…" className="flex-1 min-w-[140px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />}
+        {rows.length > 0 && <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar por nome, SKU, EAN ou código ERP…" className="flex-1 min-w-[180px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />}
       </div>
       {rows.length >= 100 && <p className="mb-2 text-[11px] text-amber-300/80">Mostrando os 100 produtos mais vendidos do período. Use o filtro para encontrar um item específico.</p>}
+      {unmatched > 0 && <p className="mb-2 text-[11px] text-amber-300/80">{unmatched} item(ns) sem match no catálogo — aparecem em âmbar com só o código do ERP; cadastre a variante em Estoque pra o nome/SKU/barras baterem.</p>}
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
       ) : rows.length === 0 ? (
@@ -2472,15 +2478,24 @@ function TopProductsTab() {
             <thead className="bg-zinc-900/60 text-zinc-400"><tr>
               <th className="px-3 py-2 text-left font-medium">#</th>
               <th className="px-3 py-2 text-left font-medium">Produto</th>
+              <th className="px-3 py-2 text-left font-medium" title="SKU do cadastro da variante">SKU</th>
+              <th className="px-3 py-2 text-left font-medium" title="EAN/GTIN — o código de barras impresso na etiqueta">Barras</th>
+              <th className="px-3 py-2 text-left font-medium" title="Código de 13 dígitos que sai no cupom do PDV (Alterdata)">ERP</th>
               <th className="px-3 py-2 text-right font-medium">Peças</th>
               <th className="px-3 py-2 text-right font-medium">Faturamento</th>
               <th className="px-3 py-2 text-left font-medium w-40">Volume</th>
             </tr></thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.produto} className="border-t border-zinc-800/70">
+                <tr key={r.produto} className={`border-t border-zinc-800/70 ${!r.catalogHit ? 'bg-amber-500/5' : ''}`}>
                   <td className="px-3 py-2 text-zinc-500">{r._rank}</td>
-                  <td className="px-3 py-2 text-zinc-200">{r.nome || <span className="font-mono text-zinc-400">{r.produto}</span>}</td>
+                  <td className={`px-3 py-2 ${r.catalogHit ? 'text-zinc-200' : 'text-amber-300'}`} title={!r.catalogHit ? 'Sem cadastro no catálogo — mostra só o código do ERP' : ''}>
+                    {r.nome || <span className="font-mono">{r.produto}</span>}
+                    {r.variante && r.nome && r.variante !== r.nome && <span className="ml-1 text-[10px] text-zinc-500">· {r.variante}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-400 text-[11px] font-mono">{r.sku || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-400 text-[11px] font-mono">{r.ean || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-500 text-[11px] font-mono">{r.produto}</td>
                   <td className="px-3 py-2 text-right text-zinc-100">{r.pecas}</td>
                   <td className="px-3 py-2 text-right text-emerald-300">{brl(r.valor)}</td>
                   <td className="px-3 py-2"><div className="h-2 rounded-full bg-indigo-500/70" style={{ width: `${Math.max(4, Math.round(Number(r.pecas) / maxPecas * 100))}%` }} /></td>

@@ -73,7 +73,7 @@ async function main() {
   db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, category) VALUES (?, ?, 'product', 'Camiseta', 40, 1, 'Vestuário')`).run(prod, A);
   const units = [50, 40, 30, 20, 10];
   units.forEach((u, idx) => {
-    const n = units.length - 1 - idx; // idx0 = mais antigo
+    const n = units.length - idx; // idx0 = mais antigo; série termina no mês PASSADO (dia 15 do corrente pode ser futuro e sair do asOf)
     const oid = randomUUID();
     db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount, created_at) VALUES (?, ?, 'concluido', ?, ?)`).run(oid, A, u * 40, `${monthsAgo(n, 15)} 12:00:00`);
     db.prepare(`INSERT INTO order_items (id, order_id, organization_id, product_service_id, name_snapshot, unit_price, quantity, line_total) VALUES (?, ?, ?, ?, 'Camiseta', 40, ?, ?)`).run(randomUUID(), oid, A, prod, u, u * 40);

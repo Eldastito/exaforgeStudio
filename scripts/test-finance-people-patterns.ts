@@ -52,13 +52,18 @@ async function main() {
     db.prepare(`INSERT INTO receivables (id, organization_id, contact_id, description, amount, due_date, status, received_at) VALUES (?, ?, ?, 'Fiado', 500, ?, 'received', ?)`)
       .run(randomUUID(), A, contactId, monthsAgo(i, 10), `${monthsAgo(i, 25)} 12:00:00`); // recebido dia 25 > vencimento dia 10
   }
+  // No prazo no mês MAIS ANTIGO da série — nunca no mês corrente: dia fixo do
+  // mês atual pode cair no FUTURO (ex.: dia 5 rodando dia 3) e sair do asOf,
+  // mudando a evidência conforme o dia em que a suíte roda.
   db.prepare(`INSERT INTO receivables (id, organization_id, contact_id, description, amount, due_date, status, received_at) VALUES (?, ?, ?, 'Fiado', 500, ?, 'received', ?)`)
-    .run(randomUUID(), A, contactId, monthsAgo(0, 10), `${monthsAgo(0, 5)} 12:00:00`); // no prazo (dia 5 < 10)
+    .run(randomUUID(), A, contactId, monthsAgo(5, 10), `${monthsAgo(5, 5)} 12:00:00`); // no prazo (dia 5 < 10)
 
-  // (b) Categoria de despesa que estoura: 4 meses altos + 2 baixos → 4 de 6 acima do normal.
+  // (b) Categoria de despesa que estoura: 4 meses altos + 2 baixos → 4 de 6 acima
+  // do normal. i+1: série termina no mês PASSADO (dia 15 do mês corrente seria
+  // futuro no começo do mês e derrubaria 1 mês de evidência).
   const catAmounts = [300, 300, 300, 300, 100, 100];
   catAmounts.forEach((amt, i) => db.prepare(`INSERT INTO payables (id, organization_id, description, category, amount, due_date, status) VALUES (?, ?, 'Anúncios', 'Marketing', ?, ?, 'open')`)
-    .run(randomUUID(), A, amt, monthsAgo(i, 15)));
+    .run(randomUUID(), A, amt, monthsAgo(i + 1, 15)));
 
   const rf = await FinancePatternMemory.learnPass(A, { asOf: today, windowWeeks: 40, hypothesizer: noLLM });
   check("finanças aprende 2 padrões (validados)", rf.enabled === true && rf.detected === 2 && rf.validated === 2 && rf.published === 2, JSON.stringify(rf));
@@ -74,7 +79,7 @@ async function main() {
   db.prepare(`INSERT INTO users (id, organization_id, name, email) VALUES (?, ?, 'Carla', ?)`).run(sellerId, A, `c_${sellerId.slice(0, 6)}@x.com`);
   const totals = [1000, 800, 600, 400, 200];
   totals.forEach((amt, idx) => {
-    const n = totals.length - 1 - idx; // idx0 = mais antigo
+    const n = totals.length - idx; // idx0 = mais antigo; série termina no mês PASSADO (dia 15 do corrente pode ser futuro)
     db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount, seller_user_id, created_at) VALUES (?, ?, 'concluido', ?, ?, ?)`)
       .run(randomUUID(), A, amt, sellerId, `${monthsAgo(n, 15)} 12:00:00`);
   });

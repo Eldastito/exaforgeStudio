@@ -43,20 +43,20 @@ async function main() {
   check("cardápio NÃO traz produto inativo", !menu.some((m) => m.id === inativo));
 
   // ===== 3. placeOrder: preço do SERVIDOR, cria pedido mesa + cobrança =====
-  const placed = M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }, { productId: refri, qty: 2 }], sessionAlias: "Mesa 3", consumo: "local" }) as any;
+  const placed = await M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }, { productId: refri, qty: 2 }], sessionAlias: "Mesa 3", consumo: "local" }) as any;
   check("pedido criado", placed.ok === true && !!placed.orderId);
   check("total usa preço do servidor (45 + 2×5 = 55)", near(placed.total, 55));
   check("gerou cobrança Pix (txid)", !!placed.txid && !!placed.qrPayload);
   check("pedido é source='mesa'", (db.prepare("SELECT source FROM comigo_orders WHERE id=?").get(placed.orderId) as any).source === "mesa");
 
   // ===== 3b. Cliente não consegue forjar preço (só manda productId+qty) =====
-  const placed2 = M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 } as any] }) as any;
+  const placed2 = await M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 } as any] }) as any;
   check("2º pedido também precifica pelo servidor (45)", near(placed2.total, 45));
 
   // ===== 3c. Item inválido/inativo é ignorado; carrinho vazio falha =====
-  const onlyInvalid = M.placeOrder(orgId, { items: [{ productId: inativo, qty: 1 }, { productId: "nao_existe", qty: 1 }] }) as any;
+  const onlyInvalid = await M.placeOrder(orgId, { items: [{ productId: inativo, qty: 1 }, { productId: "nao_existe", qty: 1 }] }) as any;
   check("pedido só com itens inválidos falha", onlyInvalid.ok === false);
-  check("carrinho vazio falha", (M.placeOrder(orgId, { items: [] }) as any).ok === false);
+  check("carrinho vazio falha", ((await M.placeOrder(orgId, { items: [] })) as any).ok === false);
 
   // ===== 4. PAY-FIRST: não entra na fila de preparo até pagar =====
   check("antes de pagar: fora da fila de preparo", M.prepQueue(orgId).length === 0);
@@ -105,14 +105,14 @@ async function main() {
   B.setBlacklist(orgId, cid, false);
 
   // placeOrder no fiado: grava dívida e entra na fila de preparo.
-  const fiadoOrder = M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }], payment: "fiado", customer: { phone: "5511977776666" } }) as any;
+  const fiadoOrder = await M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }], payment: "fiado", customer: { phone: "5511977776666" } }) as any;
   check("pedido no fiado criado", fiadoOrder.ok === true && fiadoOrder.fiado === true);
   check("fiado registrou dívida (saldo 45)", (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE contact_id=? AND kind='debt'").get(cid) as any).s === 45);
   check("pedido fiado entra na fila de preparo", M.prepQueue(orgId).some((o: any) => o.id === fiadoOrder.orderId));
   // Cliente não cadastrado não fecha no fiado.
-  check("telefone desconhecido: fiado negado", (M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }], payment: "fiado", customer: { phone: "5511900000000" } }) as any).error === "fiado_not_authorized");
+  check("telefone desconhecido: fiado negado", ((await M.placeOrder(orgId, { items: [{ productId: galeto, qty: 1 }], payment: "fiado", customer: { phone: "5511900000000" } })) as any).error === "fiado_not_authorized");
   // Estourar o limite é negado.
-  check("fiado acima do limite negado", (M.placeOrder(orgId, { items: [{ productId: galeto, qty: 3 }, { productId: galeto, qty: 3 }], payment: "fiado", customer: { phone: "5511977776666" } }) as any).error !== undefined);
+  check("fiado acima do limite negado", ((await M.placeOrder(orgId, { items: [{ productId: galeto, qty: 3 }, { productId: galeto, qty: 3 }], payment: "fiado", customer: { phone: "5511977776666" } })) as any).error !== undefined);
 
   // ===== 9. Isolamento =====
   const other = `org_${randomUUID().slice(0, 8)}`;

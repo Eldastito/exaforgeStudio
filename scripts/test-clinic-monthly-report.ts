@@ -117,6 +117,11 @@ async function main() {
   const cx1 = jul(10, 10); const cx2 = jul(11, 14);
   ClinicAgendaService.cancel(A.orgId, cx1.id, { cancelledBy: "patient", reason: "patient_reply" }, A.actorId);
   ClinicAgendaService.cancel(A.orgId, cx2.id, { cancelledBy: "staff", reason: "reagendou" }, A.actorId);
+  // cancel() grava cancelled_at = AGORA, mas o relatório é de julho/2026 e o
+  // byOrigin filtra por cancelled_at dentro do mês — fixa a data no período
+  // do seed (mesmo padrão do checkout_at acima) pra rodar em qualquer mês.
+  db.prepare(`UPDATE appointments SET cancelled_at=? WHERE id=?`).run("2026-07-10T11:00:00Z", cx1.id);
+  db.prepare(`UPDATE appointments SET cancelled_at=? WHERE id=?`).run("2026-07-11T15:00:00Z", cx2.id);
 
   const c6 = jul(20, 10); const c7 = jul(21, 10); const c8 = jul(22, 14); const c9 = jul(23, 14);
   ClinicAgendaService.confirmByPatient(A.orgId, c6.id, A.actorId);

@@ -38,14 +38,17 @@ function close(a: number, b: number, tol = 0.05) {
   return Math.abs(a - b) <= tol;
 }
 
-// Acha o dia (1-28) de um determinado mês/ano cujo getUTCDay() bate com targetDow
-// (0=dom..6=sáb, convenção nativa do JS) — evita depender de qual dia da semana
-// a data "hoje" do ambiente realmente cai.
-function findWeekday(year: number, month0: number, targetDow: number): number {
-  for (let day = 1; day <= 28; day++) {
-    if (new Date(Date.UTC(year, month0, day)).getUTCDay() === targetDow) return day;
-  }
-  throw new Error("dia da semana não encontrado no mês");
+// Acha o dia-da-semana alvo (0=dom..6=sáb) mais recente com pelo menos 2 dias
+// de idade. Datas FIXAS (jun/2026, versão anterior) envelheceram pra fora da
+// janela móvel de `periodDays` do calculate() e a suíte quebrou na virada de
+// agosto — relativo a hoje, os tickets ficam sempre entre 2 e 9 dias atrás
+// (dentro de qualquer janela ≥ 10 dias). A folga de 2 dias garante que até o
+// horário mais tardio do seed (23h locais = 02h UTC do dia seguinte) já
+// esteja no passado — mensagem com timestamp futuro cai fora do periodEnd.
+function lastWeekday(targetDow: number): { year: number; month0: number; day: number } {
+  const d = new Date(Date.now() - 2 * 86400000);
+  while (d.getUTCDay() !== targetDow) d.setUTCDate(d.getUTCDate() - 1);
+  return { year: d.getUTCFullYear(), month0: d.getUTCMonth(), day: d.getUTCDate() };
 }
 
 // Converte "horário local de Brasília" (UTC-3, sem horário de verão desde
@@ -120,27 +123,28 @@ async function main() {
   const A = seedOrg("A");
   const B = seedOrg("B");
 
-  // Quarta-feira e sábado de um mês fixo (jun/2026), para não depender do dia
-  // real do ambiente. Horário comercial padrão da organização: seg-sex 08-18.
-  const WED_D = findWeekday(2026, 5, 3); // 3 = quarta (JS: dom=0..sáb=6)
-  const SAT_D = findWeekday(2026, 5, 6); // 6 = sábado
+  // Quarta-feira e sábado mais recentes (2-9 dias atrás), para não depender do
+  // dia real do ambiente NEM envelhecer pra fora da janela do calculate().
+  // Horário comercial padrão da organização: seg-sex 08-18.
+  const WED = lastWeekday(3); // 3 = quarta (JS: dom=0..sáb=6)
+  const SAT = lastWeekday(6); // 6 = sábado
 
   // T1: rápido, dentro do horário, dentro do SLA (300s) — resposta em 180s.
-  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(2026, 5, WED_D, 10, 0), responseAtMs: localToMs(2026, 5, WED_D, 10, 3) });
+  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(WED.year, WED.month0, WED.day, 10, 0), responseAtMs: localToMs(WED.year, WED.month0, WED.day, 10, 3) });
   // T2: dentro do horário, ACIMA do SLA (1200s), sem follow-up (1 msg só).
-  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(2026, 5, WED_D, 11, 0), responseAtMs: localToMs(2026, 5, WED_D, 11, 20) });
+  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(WED.year, WED.month0, WED.day, 11, 0), responseAtMs: localToMs(WED.year, WED.month0, WED.day, 11, 20) });
   // T3: dentro do horário, NUNCA respondido, sem follow-up.
-  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(2026, 5, WED_D, 13, 0) });
+  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(WED.year, WED.month0, WED.day, 13, 0) });
   // T4: FORA do horário (20h), coberto rápido (240s).
-  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(2026, 5, WED_D, 20, 0), responseAtMs: localToMs(2026, 5, WED_D, 20, 4) });
+  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(WED.year, WED.month0, WED.day, 20, 0), responseAtMs: localToMs(WED.year, WED.month0, WED.day, 20, 4) });
   // T5: FORA do horário (22h), resposta tardia (3600s) MAS com cadência ativa (follow-up conforme).
-  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(2026, 5, WED_D, 22, 0), responseAtMs: localToMs(2026, 5, WED_D, 23, 0), withCadence: true });
+  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(WED.year, WED.month0, WED.day, 22, 0), responseAtMs: localToMs(WED.year, WED.month0, WED.day, 23, 0), withCadence: true });
   // T6: sábado (fora do horário por dia da semana), nunca respondido, sem follow-up.
-  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(2026, 5, SAT_D, 10, 0) });
+  makeTicket(A.orgId, A.channelId, { contactAtMs: localToMs(SAT.year, SAT.month0, SAT.day, 10, 0) });
   // T7: fechado, COM rastro de mudança de estágio (rastreável).
-  makeTicket(A.orgId, A.channelId, { closedAtMs: localToMs(2026, 5, WED_D, 15, 0), withStageLog: true });
+  makeTicket(A.orgId, A.channelId, { closedAtMs: localToMs(WED.year, WED.month0, WED.day, 15, 0), withStageLog: true });
   // T8: fechado, SEM rastro de mudança de estágio (não rastreável).
-  makeTicket(A.orgId, A.channelId, { closedAtMs: localToMs(2026, 5, WED_D, 16, 0), withStageLog: false });
+  makeTicket(A.orgId, A.channelId, { closedAtMs: localToMs(WED.year, WED.month0, WED.day, 16, 0), withStageLog: false });
 
   const snap = ConversionVelocityService.calculate(A.orgId, "user_a", { periodDays: 60 });
 

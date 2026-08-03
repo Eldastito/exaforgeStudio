@@ -111,6 +111,18 @@ router.post("/:id/prepare", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// POST /api/actions/:id/execute — ADR-152 F2.2: executor governado no modo
+// EXECUTE. 3 guardas obrigatórias (autonomy=execute + execution_mode≥approved
+// + policy=approved). Nesta fatia, handlers são NO-OP; a 2.3 pluga efeitos
+// reais. Falha nas guardas retorna 400 auditado.
+router.post("/:id/execute", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem executar." });
+  try { res.json(await CommandExecutorService.execute(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // GET /api/actions/:id/executions — trilha de execução (auditoria).
 router.get("/:id/executions", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

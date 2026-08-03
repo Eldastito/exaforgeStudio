@@ -79,9 +79,28 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 
 **Rollback:** `execution_runtime_enabled=0` desliga `/api/runtime/*` (nenhuma peça da 2.1 é chamada de fora do runtime); revert do commit reverte schema. Nada em produção usa Confirmation Engine ainda (subscribers plugam na 2.3).
 
-### Fatia 2.2 — Modo `execute` no CommandExecutorService (com guardas triplas)
-- [ ] Subir teto do `CommandExecutorService` de `prepare` pra `execute` governado (guardas: autonomy=execute + execution_mode≥approved_execution + policy=approved). Fatia sem handlers externos novos — todos os 5 existentes ganham `execute` no-op só pra validar guardas.
-- [ ] Teste `test-runtime-executor-execute.ts`.
+### Fatia 2.2 — Modo `execute` no CommandExecutorService (guardas triplas) — **ENTREGUE**
+- [x] `CommandExecutorService.ts` — método `execute(orgId, actionId)` async. Interface `CommandHandler.execute` (opcional) + `defaultExecute` fallback que retorna `{effect:'noop-2.2'}`. `registerHandler` público pra 2.3 plugar handlers concretos (WhatsApp/Asaas/Alterdata) sem tocar aqui.
+- [x] 3 guardas em série, cada rejeição AUDITADA com `error_code` explícito em `action_execution_log`:
+  - **G3 (primária)** — `action.status='approved'`; terminal (`done|rejected|cancelled`) → `action_terminal`; awaiting → `action_not_approved`
+  - **G1** — `agent_policies.autonomy_level='execute'` (ativa) → falta = `policy_missing`; abaixo = `autonomy_below_execute`
+  - **G2** — `execution_mode ∈ {approved_execution, autonomous}` (`shadow`/`assisted` = `execution_mode_blocked`)
+- [x] `no_handler` auditado antes das guardas (falha estrutural precede decisão de política)
+- [x] `routes/actions.ts` — `POST /api/actions/:id/execute` (só owner/admin) chama `CommandExecutorService.execute`
+- [x] `scripts/test-runtime-executor-execute.ts` — **22/22 checks PASS**: cada `error_code` testado com `errorCodeOfLast()`; ordem correta de recusa (`action_not_approved` precede `policy_missing`); ambos `approved_execution` e `autonomous` executam; NO-OP com `effect='noop-2.2'`; `executed_at` populado; log separa `mode='prepare'` de `mode='execute'`; regressão do `prepare` intacta; `registerHandler` custom plugável; isolamento cross-tenant
+- [x] Regressão zero: 5 suítes ADR-136 (76/76) + `runtime-process-fabric` (42/42) + `runtime-confirmation` (32/32); `tsc --noEmit` limpo
+- [x] `package.json` — script `test:runtime-executor-execute`
+
+**Contrato de confiança preservado.** Mesmo com `execute` no ar, nenhum handler nesta fatia dispara efeito externo — `defaultExecute` só retorna o mesmo `artifact` do `prepare` + `effect:'noop-2.2'`. A 2.3 sobe cada handler concreto individualmente, com `ConfirmationEngine.expect` amarrado. A mudança de "IA nunca escreve na base de negócio" fica auditável passo a passo.
+
+### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine
+- [ ] `WhatsAppSendCommandHandler` (usa `MessageProviderService.sendMessage`)
+- [ ] `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` (chama `AsaasService`, registra `expect(asaas_payment_webhook)`)
+- [ ] `AlterdataFetchCommandHandler` (leitura via `AlterdataConnectorService`)
+- [ ] `SchedulerActionCommandHandler` (agenda próxima ação por `next_attempt_at`)
+- [ ] `webhookProcessor.ts` — hook Asaas passa a chamar `ConfirmationEngine.confirm(actionId, evidence)`
+- [ ] `Scheduler.confirmationTimeoutPass` — chama `sweepTimeouts` em cada tick
+- [ ] Teste E2E `test-runtime-execute-e2e.ts`
 
 ### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine
 - [ ] `WhatsAppSendCommandHandler` (usa `MessageProviderService.sendMessage`)
@@ -167,6 +186,26 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Resultado:** Fatia 2.1 concluída — fundação da Fase 2 no ar. Nenhum efeito externo novo. Feature flag `execution_runtime_enabled=0` continua sendo o gate; nada muda em produção.
 - **Pendências criadas:** nenhuma nova. As 10 decisões pendentes do dono (§F) continuam bloqueando F4a/F4c.
 - **Próximo passo:** Fatia 2.2 (subir teto do CommandExecutorService pra `execute` governado, sem handlers externos novos — só guardas triplas), aguardando aprovação. Alternativa: passar direto pra Fatia 2.3 (handlers concretos) se o dono julgar que 2.2 é overhead — mas separar torna a mudança de contrato de confiança do produto explicitamente auditável.
+
+### Sessão 2026-08-03 (Fatia 2.2 do ADR-152 — execute governado no CommandExecutorService)
+- **Fase:** 2
+- **Itens executados:** todos os 6 da Fatia 2.2 (método execute + 3 guardas + auditoria com error_code + rota /api/actions/:id/execute + handler custom via registerHandler + teste)
+- **Arquivos criados:**
+  - `scripts/test-runtime-executor-execute.ts` (22/22 checks)
+- **Arquivos alterados:**
+  - `src/server/CommandExecutorService.ts` (adicionou execute + defaultExecute + registerHandler; prepare intacto)
+  - `src/server/routes/actions.ts` (POST /:id/execute)
+  - `package.json` (test:runtime-executor-execute)
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md` (esta atualização)
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` (§11.5 executor completo + §11.7 nível 4)
+- **Testes executados:**
+  - `npm run test:runtime-executor-execute` → **22/22 OK**
+  - Regressão ADR-136: 76/76 (decision-actions 16, outcome 17, command-executor 17, signals 12, priority 14) — o `command-executor` original passou intacto, confirmando que o `prepare` não regride
+  - `runtime-process-fabric` 42/42, `runtime-confirmation` 32/32
+  - `npx tsc --noEmit` → limpo
+- **Resultado:** Fatia 2.2 concluída — teto do executor subido pra `execute`. **Nenhum efeito externo real ainda** — handlers rodam NO-OP (`effect:'noop-2.2'`). O contrato "IA não escreve na base de negócio" continua valendo até a 2.3.
+- **Pendências criadas:** nenhuma nova. As 10 decisões pendentes do dono (§F) seguem bloqueando F4a/F4c mas não afetam a 2.3.
+- **Próximo passo:** **Fatia 2.3** — handlers concretos (WhatsAppSend/AsaasPix/AsaasCharge/AlterdataFetch/SchedulerAction) + `webhookProcessor` chamando `ConfirmationEngine.confirm` + `Scheduler.confirmationTimeoutPass`. Aguardando aprovação.
 
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …

@@ -121,10 +121,10 @@ Campos:
 `[x] DONE` (F1.1). FSM unificada de PROCESSO em `ProcessRuntimeService.transition` com 13 estados e 27 transições válidas. Transições inválidas 400. Cada transição auditada em `process_transitions` (ator, motivo, evidência). Estados atuais mapeiam para: `detected` (novo do PRD) / `planned` (novo) / `awaiting_approval` (=existe) / `authorized` (=`approved`) / `queued` (novo — `background_jobs.pending`) / `executing` (`background_jobs.processing`) / `waiting_external_response` (novo — `action_confirmations.pending`) / `retry_scheduled` (novo) / `escalated` (novo) / `completed` (=`done`) / `failed` (=existe) / `cancelled` (=existe) / `measured` (novo — outcome recorded).
 
 ### §11.5 Executor Registry
-`[~] PARCIAL` — Registry existe. Falta:
+`[~] PARCIAL` — Registry + modo `execute` (F2.2) prontos; handlers concretos vêm na F2.3. `CommandExecutorService.execute(orgId, actionId)` corre com 3 guardas em série (`policy_missing → autonomy_below_execute → execution_mode_blocked → action_not_approved/action_terminal → no_handler`) — cada rejeição AUDITADA com `error_code` explícito em `action_execution_log`. Handlers desta fatia (2.2) são NO-OP (`effect:'noop-2.2'`); a 2.3 pluga efeito real.
 | Executor do PRD | Status | Onde |
 |---|---|---|
-| WhatsApp Agent | [ ] F2 | `WhatsAppSendCommandHandler` |
+| WhatsApp Agent | [ ] F2.3 | `WhatsAppSendCommandHandler` |
 | CRM Agent | [~] parcial via handlers | Reusa services existentes |
 | Financial Agent | [ ] F2 | `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` |
 | Retail Agent | [~] existe como service | Formalizado como handler em F2 |

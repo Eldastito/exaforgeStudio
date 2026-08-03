@@ -97,12 +97,63 @@ router.post("/signals/refresh", requireRole("owner", "admin"), (req: AuthRequest
 router.get("/insights", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const priorities = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 8 })?.global || [];
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  // Filtro por loja: sinais retail carregam source_entity_type='retail_store' +
+  // source_entity_id=<storeId>. IDs desses sinais entram numa `signalWhitelist`
+  // pra prioritize considerar só eles quando o dono foca uma loja.
+  let signalWhitelist: Set<string> | null = null;
+  if (storeId) {
+    const rows = db.prepare(
+      `SELECT id FROM business_signals
+        WHERE organization_id = ? AND status = 'open'
+          AND source_entity_type = 'retail_store' AND source_entity_id = ?`
+    ).all(orgId, storeId) as any[];
+    signalWhitelist = new Set(rows.map((r) => r.id));
+  }
+  const allPriorities = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 32 })?.global || [];
+  const priorities = signalWhitelist ? allPriorities.filter((p: any) => signalWhitelist!.has(p.signalId)) : allPriorities.slice(0, 8);
   const patterns = RetailPatternMemoryService.list(orgId, { status: "validated" });
   const open = BusinessSignalService.list(orgId, { status: "open" });
+  const openFiltered = signalWhitelist ? open.filter((s: any) => signalWhitelist!.has(s.id)) : open;
   const bySeverity: Record<string, number> = { critical: 0, risk: 0, attention: 0, info: 0 };
-  for (const s of open) bySeverity[s.severity] = (bySeverity[s.severity] || 0) + 1;
-  res.json({ priorities, patterns, openCount: open.length, bySeverity });
+  for (const s of openFiltered) bySeverity[s.severity] = (bySeverity[s.severity] || 0) + 1;
+  res.json({ priorities, patterns, openCount: openFiltered.length, bySeverity, storeId });
+});
+
+/**
+ * Header do "Insights" — grandes números da REDE do dia + top/bottom 3 lojas.
+ * Reusa `RetailDashboardService.daily` pros números macro e calcula o ranking
+ * de lojas por desvio de cota no dia (top ganhando, bottom mais atrás).
+ * Zero storeId = rede toda; com storeId, devolve só os números daquela loja.
+ */
+router.get("/insights/header", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || today(req)).slice(0, 10);
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  const daily = RetailDashboardService.daily(orgId, date);
+  // Ranking de lojas do dia (só loja com fechamento não-rejeitado e com cota).
+  const rows = db.prepare(
+    `SELECT c.store_id, s.name AS store_name, c.informed_total AS realized,
+            COALESCE(q.quota_amount, 0) AS quota
+       FROM retail_daily_closings c
+       JOIN retail_stores s ON s.id = c.store_id AND s.organization_id = c.organization_id
+  LEFT JOIN retail_store_quotas q ON q.organization_id = c.organization_id AND q.store_id = c.store_id AND q.quota_date = c.closing_date
+      WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'`
+  ).all(orgId, date) as any[];
+  const scored = rows
+    .filter((r) => Number(r.quota) > 0)
+    .map((r) => ({
+      storeId: r.store_id, storeName: r.store_name,
+      realized: Number(r.realized) || 0, quota: Number(r.quota) || 0,
+      variancePercent: Math.round(((Number(r.realized) / Number(r.quota)) - 1) * 1000) / 10, // 1 casa
+    }))
+    .sort((a, b) => b.variancePercent - a.variancePercent);
+  const top3 = scored.slice(0, 3);
+  const bottom3 = scored.slice(-3).reverse();
+  res.json({
+    date, storeId, daily, ranking: { top3, bottom3, ranked: scored.length, total: daily.activeStores },
+  });
 });
 
 // Age a partir de um insight: propõe a AÇÃO recomendada do sinal (kernel C2).

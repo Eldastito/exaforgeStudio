@@ -44,16 +44,120 @@ const ACTION_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'cancelada', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
   rejected: { label: 'rejeitada', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
 };
+// Header dos "Insights": grandes números do dia da REDE (ou loja filtrada)
+// + top/bottom 3 lojas pra o dono saber onde tá a mão.
+function InsightsHeader({ header, storeFilter }: { header: any; storeFilter: string }) {
+  const d = header.daily || {};
+  const rk = header.ranking || {};
+  const varOk = Number(d.variance) >= 0;
+  return (
+    <div className="mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">{storeFilter ? 'Vendido hoje' : 'Vendido hoje (rede)'}</p>
+          <p className="text-lg font-semibold text-zinc-100">{brl(d.realized || 0)}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Cota do dia</p>
+          <p className="text-lg font-semibold text-zinc-200">{brl(d.quotaTotal || 0)}</p>
+        </div>
+        <div className={`rounded-xl border p-3 ${varOk ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <p className={`text-[10px] uppercase tracking-wider ${varOk ? 'text-emerald-400/80' : 'text-red-400/80'}`}>Desvio</p>
+          <p className={`text-lg font-semibold ${varOk ? 'text-emerald-300' : 'text-red-300'}`}>
+            {d.variance > 0 ? '+' : ''}{brl(d.variance || 0)}
+            {d.variancePercent != null && <span className="ml-1 text-xs opacity-80">({d.variancePercent > 0 ? '+' : ''}{Math.round((d.variancePercent || 0) * 10) / 10}%)</span>}
+          </p>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Lojas na cota</p>
+          <p className="text-lg font-semibold text-zinc-100">{d.storesAbove || 0}<span className="ml-1 text-xs text-zinc-500">/{(d.storesAbove || 0) + (d.storesBelow || 0)} fech.</span></p>
+          <p className="text-[10px] text-zinc-600">{d.pendingClosings || 0} sem fechar · {d.divergences || 0} divergente(s)</p>
+        </div>
+      </div>
+      {!storeFilter && (rk.top3?.length > 0 || rk.bottom3?.length > 0) && (
+        <div className="mt-2 grid gap-2 md:grid-cols-2">
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2">
+            <p className="text-[10px] uppercase tracking-wider text-emerald-300/80 mb-1">🏆 Top 3 lojas do dia</p>
+            {(rk.top3 || []).map((s: any, i: number) => (
+              <div key={s.storeId} className="flex items-center gap-2 text-[12px]">
+                <span className="w-4 text-right text-zinc-500">{i + 1}º</span>
+                <span className="flex-1 truncate text-zinc-200">{s.storeName}</span>
+                <span className="text-zinc-500 text-[10px]">{brl(s.realized)}</span>
+                <span className={`w-16 text-right font-medium ${s.variancePercent >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{s.variancePercent >= 0 ? '+' : ''}{s.variancePercent}%</span>
+              </div>
+            ))}
+            {(rk.top3 || []).length === 0 && <p className="text-[11px] text-zinc-600">Ainda não tem loja com cota + fechamento aprovado hoje.</p>}
+          </div>
+          <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-2">
+            <p className="text-[10px] uppercase tracking-wider text-red-300/80 mb-1">📉 Bottom 3 do dia (foco)</p>
+            {(rk.bottom3 || []).map((s: any, i: number) => (
+              <div key={s.storeId} className="flex items-center gap-2 text-[12px]">
+                <span className="w-4 text-right text-zinc-500">{i + 1}º</span>
+                <span className="flex-1 truncate text-zinc-200">{s.storeName}</span>
+                <span className="text-zinc-500 text-[10px]">{brl(s.realized)}</span>
+                <span className={`w-16 text-right font-medium ${s.variancePercent >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{s.variancePercent >= 0 ? '+' : ''}{s.variancePercent}%</span>
+              </div>
+            ))}
+            {(rk.bottom3 || []).length === 0 && <p className="text-[11px] text-zinc-600">Sem dados suficientes ainda.</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Empty-state do "O que atacar primeiro": explica o que a IA olha, por que
+// pode estar vazio agora e que ela roda sozinha. Melhor que "Nenhuma
+// prioridade" seco.
+function EmptyPrioritiesState({ storeFilter, header }: { storeFilter: string; header: any }) {
+  const d = header?.daily || {};
+  const noClosings = (d.storesAbove || 0) + (d.storesBelow || 0) === 0;
+  const reason = noClosings
+    ? 'Nenhuma loja fechou o caixa ainda hoje — sem fechamento, a IA não tem base pra comparar com a cota.'
+    : (storeFilter ? 'Nada acima do limite pra essa loja hoje. Bom sinal.' : 'Nada acima do limite hoje na rede toda. Bom sinal — significa que fechamento, divergência e estoque estão dentro do que o dono definiu como normal.');
+  return (
+    <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/30 p-4 text-sm">
+      <p className="text-zinc-300 font-medium">Nenhuma prioridade agora {storeFilter ? '(nessa loja)' : ''}.</p>
+      <p className="mt-1 text-[12px] text-zinc-500">{reason}</p>
+      <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2 text-[11px] text-zinc-400">
+        <p className="text-zinc-300 mb-1">O que a IA olha nessa varredura:</p>
+        <ul className="list-disc list-inside space-y-0.5 text-zinc-500">
+          <li>Fechamento diário <strong>abaixo da cota</strong> por loja (Fase C).</li>
+          <li><strong>Divergência</strong> entre o informado e o total do PDV/sistema (Fase E).</li>
+          <li><strong>Estoque negativo</strong> por loja/produto (Fase F).</li>
+          <li>Loja virtual: <strong>sem-venda</strong>, <strong>estoque baixo</strong> ou <strong>ruptura</strong> (ADR-143).</li>
+          <li><strong>Transferência entre lojas</strong> disponível pra cobrir necessidade (RetailOps).</li>
+          <li><strong>Padrões recorrentes</strong> aprendidos pela IA (ADR-142) — divergência de caixa que se repete, ruptura toda sexta, etc.</li>
+        </ul>
+      </div>
+      <p className="mt-2 text-[11px] text-zinc-600">A IA roda a análise sozinha em background; use "Analisar agora" quando quiser um retrato imediato.</p>
+    </div>
+  );
+}
+
 function InsightsTab() {
   const [data, setData] = useState<any | null>(null);
+  const [header, setHeader] = useState<any | null>(null);
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeFilter, setStoreFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [acted, setActed] = useState<Record<string, string>>({});
   const [actions, setActions] = useState<any[]>([]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const loadActions = async () => {
     const d = await apiFetch('/api/retailops/insights/actions').then(r => r.json()).catch(() => ({}));
     setActions(Array.isArray(d?.actions) ? d.actions : []);
+  };
+  const loadHeader = async () => {
+    const qs = storeFilter ? `?storeId=${storeFilter}` : '';
+    const d = await apiFetch(`/api/retailops/insights/header${qs}`).then(r => r.json()).catch(() => null);
+    setHeader(d);
+  };
+  const loadStores = async () => {
+    const d = await apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({}));
+    setStores((Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active));
   };
   const act = async (p: any) => {
     if (!p?.signalId) return;
@@ -82,10 +186,15 @@ function InsightsTab() {
 
   const load = async () => {
     setLoading(true);
-    try { setData(await apiFetch('/api/retailops/insights').then(r => r.json()).catch(() => null)); await loadActions(); }
-    finally { setLoading(false); }
+    try {
+      const qs = storeFilter ? `?storeId=${storeFilter}` : '';
+      setData(await apiFetch(`/api/retailops/insights${qs}`).then(r => r.json()).catch(() => null));
+      await loadActions();
+      await loadHeader();
+    } finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { loadStores(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeFilter]);
   const analyze = async () => {
     setAnalyzing(true);
     try {
@@ -103,39 +212,73 @@ function InsightsTab() {
 
   return (
     <div>
+      {/* Header: grandes números do dia da REDE (ou loja filtrada) — o que
+          o dono precisa ver PRIMEIRO ao entrar na aba. */}
+      {header?.daily && <InsightsHeader header={header} storeFilter={storeFilter} />}
+
       <div className="mb-4 flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Lightbulb className="w-4 h-4 text-amber-400" /> O que a IA observou na sua loja</div>
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Lightbulb className="w-4 h-4 text-amber-400" /> O que a IA observou{storeFilter ? ' nessa loja' : ' na rede'}</div>
         <div className="flex items-center gap-1.5">
           {(['critical', 'risk', 'attention', 'info'] as const).filter(k => (sev[k] || 0) > 0).map(k => (
             <span key={k} className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${SEV[k].cls}`}>{sev[k]} {SEV[k].label}</span>
           ))}
         </div>
+        {stores.length > 1 && (
+          <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" title="Filtra prioridades por loja">
+            <option value="">Rede toda ({stores.length} lojas)</option>
+            {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` · ${s.code}` : ''}</option>)}
+          </select>
+        )}
         <button onClick={analyze} disabled={analyzing} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{analyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Analisar agora</button>
       </div>
 
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">O que atacar primeiro</h3>
       {priorities.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">Nenhuma prioridade agora. Clique em <strong>“Analisar agora”</strong> — a IA varre a operação e traz o que importa.</div>
+        <EmptyPrioritiesState storeFilter={storeFilter} header={header} />
       ) : (
         <div className="space-y-2">
-          {priorities.map((p, i) => (
-            <div key={p.signalId || i} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-mono text-zinc-500">#{i + 1}</span>
-                <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{p.domain}</span>
-                {p.impact && <span className="text-[11px] text-emerald-300">impacto {fmtImpact(p.impact)}</span>}
-                <span className="text-[11px] text-zinc-500">· {p.dueHint}</span>
+          {priorities.map((p, i) => {
+            const isOpen = expanded[p.signalId] || false;
+            return (
+              <div key={p.signalId || i} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-mono text-zinc-500">#{i + 1}</span>
+                  <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{p.domain}</span>
+                  {p.impact && <span className="text-[11px] text-emerald-300">impacto {fmtImpact(p.impact)}</span>}
+                  <span className="text-[11px] text-zinc-500">· {p.dueHint}</span>
+                  {p.basis && <span className={`text-[10px] rounded px-1.5 py-0.5 border ${p.basis === 'fact' ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/5' : 'border-amber-500/30 text-amber-300 bg-amber-500/5'}`} title={p.basis === 'fact' ? 'Base em fato observado (sem inferência)' : 'Estimativa — inferido a partir de padrão'}>{p.basis === 'fact' ? 'fato' : 'estimativa'}</span>}
+                </div>
+                <p className="mt-1 text-sm text-zinc-200">{p.interpretation || p.fact}</p>
+                <div className="mt-1.5 flex items-center gap-2 text-[12px] flex-wrap">
+                  <span className="text-zinc-500">Sugestão:</span>
+                  <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-indigo-200">{p.recommendedAction}</span>
+                  {p.signalId && (
+                    <button onClick={() => setExpanded(p2 => ({ ...p2, [p.signalId]: !isOpen }))} className="text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2" title="Ver como a IA chegou nesse número">
+                      {isOpen ? 'esconder detalhe' : 'como cheguei aqui'}
+                    </button>
+                  )}
+                  {p.signalId && (acted[p.signalId]
+                    ? <span className="ml-auto inline-flex items-center gap-1 text-emerald-300"><Check className="w-3.5 h-3.5" /> {acted[p.signalId] === 'approved' ? 'ação criada' : 'ação criada (aguarda aprovação)'}</span>
+                    : <button onClick={() => act(p)} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">Agir</button>)}
+                </div>
+                {isOpen && (
+                  <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-[11px] text-zinc-400">
+                    <div className="grid gap-1 sm:grid-cols-2">
+                      <div><span className="text-zinc-500">Tipo do sinal:</span> <span className="font-mono text-zinc-300">{p.signalType || '—'}</span></div>
+                      <div><span className="text-zinc-500">Confiança:</span> <span className="text-zinc-300">{p.confidence != null ? `${Math.round(Number(p.confidence) * 100)}%` : '—'}</span></div>
+                      <div className="sm:col-span-2"><span className="text-zinc-500">Fonte:</span> <span className="font-mono text-zinc-300">{p.source || '—'}</span></div>
+                    </div>
+                    {p.evidence && Object.keys(p.evidence).length > 0 ? (
+                      <div className="mt-2">
+                        <span className="text-zinc-500">O que a IA observou:</span>
+                        <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-zinc-950 border border-zinc-800/70 p-1.5 font-mono text-[10px] text-zinc-300">{JSON.stringify(p.evidence, null, 2)}</pre>
+                      </div>
+                    ) : <p className="mt-2 text-zinc-600">Sem detalhamento adicional pra esse sinal.</p>}
+                  </div>
+                )}
               </div>
-              <p className="mt-1 text-sm text-zinc-200">{p.interpretation || p.fact}</p>
-              <div className="mt-1.5 flex items-center gap-2 text-[12px] flex-wrap">
-                <span className="text-zinc-500">Sugestão:</span>
-                <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-indigo-200">{p.recommendedAction}</span>
-                {p.signalId && (acted[p.signalId]
-                  ? <span className="inline-flex items-center gap-1 text-emerald-300"><Check className="w-3.5 h-3.5" /> {acted[p.signalId] === 'approved' ? 'ação criada' : 'ação criada (aguarda aprovação)'}</span>
-                  : <button onClick={() => act(p)} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">Agir</button>)}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -7101,6 +7101,27 @@ const initDb = () => {
   // fica pendente até o humano escolher ("qual Carlos?") — sem escolha, a
   // confirmação segue sem vincular nem criar a entidade daquela menção.
   try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN memory_json TEXT`); } catch(e){}
+
+  // ADR-151 Fatia 6 — entrega do briefing diário por WhatsApp (consome os
+  // sinais falatu_daily_briefing publicados na Fatia 5). Opt-in por org do
+  // CANAL de saída (convenção nº 10): mandar mensagem proativa é outbound, então
+  // é uma porta separada da flag falatu_enabled (que só liga o módulo). Default
+  // 0. A entrega é deduplicada por (org, usuário, dia) numa tabela best-effort
+  // (convenção nº 7/8: unique index + insert que ignora conflito) — mesmo papel
+  // do teacher_profiles.last_agenda_date, mas o FalaTu não tem tabela de perfil.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_briefing_wa_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS falatu_briefing_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        briefing_date TEXT NOT NULL,             -- YYYY-MM-DD no fuso de São Paulo
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, user_id, briefing_date)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar falatu_briefing_deliveries (ADR-151 F6)', e); }
 };
 
 initDb();

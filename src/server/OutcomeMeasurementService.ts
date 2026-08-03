@@ -23,6 +23,13 @@ export interface RecordOutcomeInput {
   measurementMethod?: string;           // self_reported | manual | attributed | derived
   attributionWindowDays?: number | null;
   evidence?: any;
+  // ADR-152 F3.1 — categorias explícitas (PRD §11.11). Todos opcionais;
+  // NUNCA são somadas entre si num número único (agrupamos por categoria
+  // no ledger — a separação é o que garante credibilidade, ADR-085 D4).
+  timeSavedMinutes?: number | null;
+  costAvoided?: number | null;
+  revenueRecovered?: number | null;
+  lossPrevented?: number | null;
 }
 
 export class OutcomeMeasurementService {
@@ -38,14 +45,19 @@ export class OutcomeMeasurementService {
     const method: Method = (METHODS as readonly string[]).includes(input.measurementMethod as any) ? (input.measurementMethod as Method) : "manual";
     const id = randomUUID();
     db.prepare(`INSERT INTO action_outcomes
-      (id, organization_id, action_id, expected_value, realized_value, basis, measurement_method, attribution_window_days, evidence_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (id, organization_id, action_id, expected_value, realized_value, basis, measurement_method, attribution_window_days, evidence_json,
+       time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, orgId, actionId,
         input.expectedValue != null ? round2(input.expectedValue) : null,
         input.realizedValue != null ? round2(input.realizedValue) : null,
         basis, method,
         input.attributionWindowDays != null ? Math.trunc(Number(input.attributionWindowDays)) : null,
-        input.evidence != null ? JSON.stringify(input.evidence) : null);
+        input.evidence != null ? JSON.stringify(input.evidence) : null,
+        input.timeSavedMinutes != null ? Math.trunc(Number(input.timeSavedMinutes)) : null,
+        input.costAvoided != null ? round2(input.costAvoided) : null,
+        input.revenueRecovered != null ? round2(input.revenueRecovered) : null,
+        input.lossPrevented != null ? round2(input.lossPrevented) : null);
     return this.get(orgId, id);
   }
 
@@ -83,6 +95,10 @@ export class OutcomeMeasurementService {
 
     const expected = round2(items.reduce((s, i) => s + (Number(i.expected_value) || 0), 0));
     const realized = round2(items.reduce((s, i) => s + (Number(i.realized_value) || 0), 0));
+    // ADR-152 F3.1 — categorias do PRD §11.11. NUNCA somadas entre si (cada
+    // uma tem unidade/interpretação diferente); só agregadas dentro da MESMA
+    // categoria. Nulls ignorados. Alimentam o painel "Concluído hoje" (F3.2).
+    const sumField = (field: string) => round2(items.reduce((s, i) => s + (Number((i as any)[field]) || 0), 0));
     return {
       items,
       totals: {
@@ -92,6 +108,13 @@ export class OutcomeMeasurementService {
         // Separação inegociável (ADR-085 D4): comprovado ≠ estimado.
         fact: { expected: sumExpected("fact"), realized: sumRealized("fact") },
         estimate: { expected: sumExpected("estimate"), realized: sumRealized("estimate") },
+        // Categorias explícitas (ADR-152 F3.1) — cada uma na sua unidade.
+        categories: {
+          timeSavedMinutes: Math.trunc(sumField("time_saved_minutes")),
+          costAvoided: sumField("cost_avoided"),
+          revenueRecovered: sumField("revenue_recovered"),
+          lossPrevented: sumField("loss_prevented"),
+        },
         count: items.length,
       },
     };

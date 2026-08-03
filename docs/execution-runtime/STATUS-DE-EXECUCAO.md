@@ -130,7 +130,21 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 **Fase 2 CONCLUÍDA.** Execute + Confirmation Engine no ar, ponta a ponta. Handlers concretos disparam efeito externo real (WhatsApp, PIX) atrás das 3 guardas + `execution_runtime_enabled` da org. Nada muda em produção com defaults: `execution_runtime_enabled=0` + `execution_mode='assisted'`.
 
 ## Fase 3 — Outcomes estendidos + UI Operações
-- [ ] Ver `PLANO §Fase 3`
+
+### Fatia 3.1 — Backend (outcomes estendidos + RuntimeExceptionsService + rotas) — **ENTREGUE**
+- [x] `db.ts` — ALTER `action_outcomes` ADD `time_saved_minutes`, `cost_avoided`, `revenue_recovered`, `loss_prevented` (aditivos nullable, ADR-085 D4 preservado — categorias NÃO somadas entre si)
+- [x] `OutcomeMeasurementService.record` aceita as 4 categorias; `ledger()` agrega em `totals.categories.{timeSavedMinutes, costAvoided, revenueRecovered, lossPrevented}` — fact × estimate ainda separados (regressão do ADR-136 D6 intacta)
+- [x] `RuntimeExceptionsService.ts` — DERIVA exceções de 4 fontes: (a) `process_instances.status IN (escalated, failed)`; (b) `decision_actions.status='approved' AND deadline_at < now` (SLA); (c) `background_jobs.status='failed'` classificado por `error_class` (permission → credential_missing; external_unavailable → integration_failed; non_retryable → conflict); (d) `action_confirmations.status='timed_out'`. Categorias PRD §11.12; ordem por severidade (credential_missing → sla_at_risk → integration_failed → ...). NUNCA cria tabela — só lê.
+- [x] `RuntimeExceptionsService.overview` — running/completedToday/exceptionsCount/slaBreached. Escalated NÃO conta em running (já aparece como exceção `decision_needed`).
+- [x] `RuntimeExceptionsService.indicators` — contadores por status pra cards do painel.
+- [x] `routes/runtime.ts` — 4 GETs novos: `/operations/overview`, `/operations/exceptions`, `/operations/indicators`, `/operations/ledger` (com categorias). Atrás do `runtimeGate` (flag opt-in da org) + RBAC granular do módulo `runtime`.
+- [x] `scripts/test-runtime-operations.ts` — **31/31 checks PASS**: campos aditivos gravados/lidos; record antigo (sem categorias) grava null; ledger agrega por CATEGORIA sem somar entre si; fact × estimate separados (regressão); 4 fontes de exceção (process escalated, deadline vencido, job dead-letter com error_class, confirmation timed_out); ordem por severidade; count agrega por categoria; overview (running exclui escalated, completedToday agrega categorias, slaBreached); indicators; isolamento cross-tenant em todos os métodos.
+- [x] Regressão zero: 5 suítes ADR-136 (76/76) + runtime-process-fabric (42/42) + runtime-confirmation (32/32) + runtime-executor-execute (22/22) + runtime-execute-e2e (27/27) + asaas-billing (16/16) + billing-dunning (10/10); `tsc --noEmit` limpo
+- [x] `package.json` — script `test:runtime-operations`
+
+### Fatia 3.2 — Aba "Operações" no ExecutiveView
+- [ ] `src/features/ExecutiveView.tsx` — aba `Operações` paralela à "Plano de Ação". Blocos: Em execução (`runtime/operations/overview.running`), Concluído hoje (categorias explícitas do outcomes), Exceções categorizadas com "consequência de não decidir", Indicadores. RBAC: só usuário com permissão do módulo `runtime` vê a aba.
+- [ ] Teste `test-runtime-ui-operations.ts` (opcional — a UI é consumo direto das rotas testadas em 3.1).
 
 ## Fase 4a — Piloto Retail Closing
 - [!] BLOQUEADO em decisões 1, 2, 5 e 8 do `DECISOES-E-PENDENCIAS.md §F`
@@ -247,6 +261,27 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Resultado:** Fase 2 CONCLUÍDA. Runtime dispara efeito externo real ponta-a-ponta atrás de 4 gates (execution_runtime_enabled + policy + autonomy=execute + execution_mode≥approved_execution). Nenhuma org existente afetada (todos os defaults bloqueiam).
 - **Pendências criadas:** nenhuma nova.
 - **Próximo passo:** **Fase 3 — Outcomes estendidos + UI Operações** (aba no ExecutiveView + Exception Center categorizado + campos aditivos em action_outcomes). É lógica read-mostly + UI; não sobe efeito externo novo. As 10 decisões pendentes do dono (§F) seguem bloqueando F4a/F4c mas não afetam F3.
+
+### Sessão 2026-08-03 (Fatia 3.1 do ADR-152 — outcomes estendidos + RuntimeExceptionsService)
+- **Fase:** 3
+- **Itens executados:** todos os 7 da Fatia 3.1 (aditivos action_outcomes, OutcomeMeasurementService estendido, RuntimeExceptionsService com 4 fontes categorizadas, 4 GETs em /operations, teste, package.json)
+- **Arquivos criados:**
+  - `src/server/RuntimeExceptionsService.ts` (list + count + overview + indicators)
+  - `scripts/test-runtime-operations.ts` (31/31 checks)
+- **Arquivos alterados:**
+  - `src/server/db.ts` (4 aditivos em action_outcomes)
+  - `src/server/OutcomeMeasurementService.ts` (RecordOutcomeInput + record + ledger com categorias)
+  - `src/server/routes/runtime.ts` (4 GETs em /operations/*)
+  - `package.json` (test:runtime-operations)
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md`
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md`
+- **Testes executados:**
+  - `npm run test:runtime-operations` → **31/31 OK**
+  - Regressão: 5 suítes ADR-136 (76/76); runtime-process-fabric (42/42); runtime-confirmation (32/32); runtime-executor-execute (22/22); runtime-execute-e2e (27/27); asaas-billing (16/16); billing-dunning (10/10)
+  - `npx tsc --noEmit` → limpo
+- **Resultado:** Fatia 3.1 concluída — backend do Exception Center + campos categorizados no outcomes. Sem UI ainda (Fatia 3.2). Nenhum efeito externo novo — só queries de leitura sobre estado existente.
+- **Pendências criadas:** nenhuma nova.
+- **Próximo passo:** **Fatia 3.2** — aba "Operações" no ExecutiveView consumindo as 4 rotas de /operations. Cosmético + guardado por RBAC. Aguardando aprovação.
 
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …

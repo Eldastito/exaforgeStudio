@@ -7285,6 +7285,21 @@ const initDb = () => {
   // confirmações à mesma ref (idempotência forte).
   try { db.exec(`ALTER TABLE action_confirmations ADD COLUMN external_ref TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_confirmations_extref ON action_confirmations (organization_id, confirmation_method, external_ref) WHERE external_ref IS NOT NULL`); } catch(e){}
+
+  // ADR-152 Fatia 3.1 — Outcomes estendidos (PRD §11.11). O
+  // `action_outcomes` (ADR-136 D6) já registra esperado × realizado com
+  // basis fact/estimate SEPARADOS; a Fase 3 acrescenta 4 CATEGORIAS
+  // explícitas pra alimentar o painel "Concluído hoje" da aba Operações
+  // (Fatia 3.2): tempo devolvido ao gestor, custo evitado, receita
+  // recuperada, perda evitada. Todos nullable e ADITIVOS — o ledger()
+  // continua funcionando; quem já registrou outcome sem esses campos
+  // continua correto (default null). NUNCA somar categorias diferentes
+  // num número único enganoso (ADR-085 D4 — a separação é o que dá
+  // credibilidade).
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN time_saved_minutes INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN cost_avoided REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN revenue_recovered REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN loss_prevented REAL`); } catch(e){}
 };
 
 initDb();

@@ -3,6 +3,8 @@ import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import db from "../db.js";
 import { ProcessRuntimeService } from "../ProcessRuntimeService.js";
+import { RuntimeExceptionsService } from "../RuntimeExceptionsService.js";
+import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -130,6 +132,27 @@ router.post("/instances/:id/transition", (req: AuthRequest, res): any => {
       actor: actorId(req), reason: b.reason, evidence: b.evidence, stepResult: b.stepResult,
     }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Operations (Fatia 3.1) — alimentam a aba Operações da Fatia 3.2 ──
+router.get("/operations/overview", (req: AuthRequest, res): any => {
+  res.json(RuntimeExceptionsService.overview(req.organizationId!));
+});
+router.get("/operations/exceptions", (req: AuthRequest, res): any => {
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json({
+    total: RuntimeExceptionsService.count(req.organizationId!).total,
+    exceptions: RuntimeExceptionsService.list(req.organizationId!, { limit }),
+  });
+});
+router.get("/operations/indicators", (req: AuthRequest, res): any => {
+  res.json(RuntimeExceptionsService.indicators(req.organizationId!));
+});
+// Ledger unificado com categorias (F3.1). Alimenta "Concluído hoje".
+router.get("/operations/ledger", (req: AuthRequest, res): any => {
+  const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json(OutcomeMeasurementService.ledger(req.organizationId!, { domain, limit }));
 });
 
 export default router;

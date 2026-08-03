@@ -162,11 +162,11 @@ Campos:
 
 | Bloco | Status | Onde |
 |---|---|---|
-| Em execução | [ ] F3 | Aba "Operações" |
-| Concluído hoje | [~] F3 | Ledger existe; agregação por hoje é F3 |
-| Exceções | [ ] F3 | `RuntimeExceptionsService` |
-| Indicadores | [ ] F3 | `GET /api/runtime/operations/indicators` |
-| Transparência (linha do tempo por processo) | [ ] F3 | Detalhe do `process_instance` na UI |
+| Em execução | [x] F3.2 | Aba "Operações" bloco 1 — 4 cards (processos ativos, aguardando aprovação, aguardando confirmação, exceções vivas) |
+| Concluído hoje | [x] F3.2 | Aba "Operações" bloco 2 — 4 cards agregados + 4 cards SEPARADOS por categoria (tempo, receita, custo, perda) |
+| Exceções | [x] F3.2 | Aba "Operações" bloco 3 — lista categorizada com badge colorido, fonte, tempo relativo, `recommendedAction` |
+| Indicadores | [x] F3.2 | Aba "Operações" bloco 4 — 8 contadores por status (destaque amarelo em > 0) |
+| Transparência (linha do tempo por processo) | [ ] futura | Detalhe do `process_instance` na UI — fatia adicional após F4 |
 
 ## §13 — Processo prioritário 1 (Cobrança)
 

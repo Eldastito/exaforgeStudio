@@ -361,7 +361,8 @@
     "test:runtime-execute-e2e": "tsx scripts/test-runtime-execute-e2e.ts",
     "test:runtime-operations": "tsx scripts/test-runtime-operations.ts",
     "test:piloto-fechamento-retail": "tsx scripts/test-piloto-fechamento-retail.ts",
-    "test:piloto-cobranca": "tsx scripts/test-piloto-cobranca.ts"
+    "test:piloto-cobranca": "tsx scripts/test-piloto-cobranca.ts",
+    "test:cobranca-intent-classifier": "tsx scripts/test-cobranca-intent-classifier.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

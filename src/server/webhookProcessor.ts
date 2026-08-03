@@ -403,6 +403,19 @@ export async function processIncomingMessage(
     }
   } catch (e) { console.error('[Clínica] Falha no parser SIM/NÃO', e); }
 
+  // 4.5. ADR-152 F4b.2 — se o contato tem cobrança viva (action_confirmation
+  // pending de collection_send_reminder), classifica intent + publica sinal +
+  // manda reply canned. Fica ANTES da IA pra que promessa/contestação/
+  // "manda o pix" não caiam no orchestrator genérico. Best-effort.
+  try {
+    const { CollectionReplyService } = await import('./CollectionReplyService.js');
+    const result = await CollectionReplyService.tryHandle(orgId, contact.id, payload.senderId || '', payload.text || '');
+    if (result.handled && result.reply) {
+      await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: result.reply, io });
+      return;
+    }
+  } catch (e) { console.error('[Cobrança F4b.2] Falha no reply router', e); }
+
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {
       try {

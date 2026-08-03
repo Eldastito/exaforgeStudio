@@ -94,10 +94,10 @@ Cada requisito do PRD ligado a **fase, serviço/tabela, rota, UI, teste, status 
 ## §11 — Componentes obrigatórios
 
 ### §11.1 Process Definition
-`[ ] TODO` — F1. Tabela `process_definitions` nova. **Nome no codebase:** `process_definitions` (não "Process Definition") — mesma coisa.
+`[x] DONE` (F1.1 — PR desta fatia). Tabela `process_definitions` com `steps_json` validado, versionamento automático por (org, processType), `active` toggle. Service `ProcessRuntimeService.defineProcess/getDefinition/listDefinitions/setActive/latestActiveDefinition`. **Nome no codebase:** `process_definitions`.
 
 ### §11.2 Process Instance
-`[ ] TODO` — F1. Tabela `process_instances`.
+`[x] DONE` (F1.1). Tabela `process_instances` com FSM validada, `context_json` acumulando resultados por step, `subject_type/id` para dedupe conservador, `result_json` populado ao concluir. Service `startForSubject`, `startFromSignal`, `getInstance`, `listInstances`, `cancel`.
 
 ### §11.3 Action Contract
 `[~] PARCIAL` — F1 adiciona campos aditivos em `decision_actions`. **Nome no codebase:** `decision_actions` (não "Action Contract") — decisão ADR-152 D1.
@@ -118,7 +118,7 @@ Campos:
 | evidence_json | [ ] | F1 aditivo |
 
 ### §11.4 Máquina de estados
-`[~] PARCIAL` — F1 entrega FSM unificada de processo. Estados atuais mapeiam para: `detected` (novo do PRD) / `planned` (novo) / `awaiting_approval` (=existe) / `authorized` (=`approved`) / `queued` (novo — `background_jobs.pending`) / `executing` (`background_jobs.processing`) / `waiting_external_response` (novo — `action_confirmations.pending`) / `retry_scheduled` (novo) / `escalated` (novo) / `completed` (=`done`) / `failed` (=existe) / `cancelled` (=existe) / `measured` (novo — outcome recorded).
+`[x] DONE` (F1.1). FSM unificada de PROCESSO em `ProcessRuntimeService.transition` com 13 estados e 27 transições válidas. Transições inválidas 400. Cada transição auditada em `process_transitions` (ator, motivo, evidência). Estados atuais mapeiam para: `detected` (novo do PRD) / `planned` (novo) / `awaiting_approval` (=existe) / `authorized` (=`approved`) / `queued` (novo — `background_jobs.pending`) / `executing` (`background_jobs.processing`) / `waiting_external_response` (novo — `action_confirmations.pending`) / `retry_scheduled` (novo) / `escalated` (novo) / `completed` (=`done`) / `failed` (=existe) / `cancelled` (=existe) / `measured` (novo — outcome recorded).
 
 ### §11.5 Executor Registry
 `[~] PARCIAL` — Registry existe. Falta:
@@ -142,7 +142,7 @@ Campos:
 `[~] PARCIAL` — Níveis 0–3 existem (`observe|suggest|prepare` + aprovação humana). F2 adiciona nível 4 (`execute`). Nível 5 é o Runtime executando o playbook (F1+F2 juntos).
 
 ### §11.8 Playbook Engine
-`[ ] TODO` — F1. `PlaybookEngine` + `steps_json` (JSON+Zod, ADR-152 D3).
+`[x] DONE` (F1.1). `PlaybookEngine.ts` puro (zero I/O): `validateDefinition` bloqueia playbook inválido no cadastro (refs quebradas, ids duplicados, commandType ausente, onFailure=fallback sem fallbackStep); `evaluateCondition` (truthy/eq/gte/lte/and/or/not); `chooseNextStep` (string direto, array de `{when, next}` com regra default por último). Testado em isolamento (10 checks no `test-runtime-process-fabric`).
 
 ### §11.9 Retry, timeout, compensação
 `[~] PARCIAL` — Retry existe em `JobQueueService`. F2 adiciona backoff exponencial, classificação de erro, dead‑letter formal. Compensação por processo é F1 (`on_failure: fallback_step`).

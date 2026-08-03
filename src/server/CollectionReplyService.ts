@@ -2,6 +2,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { classify, type IntentLabel } from "./CollectionIntentClassifier.js";
+import { CollectionResendPixService } from "./CollectionResendPixService.js";
 
 /**
  * Reply router de cobrança (ADR-152 F4b.2).
@@ -50,6 +51,7 @@ interface LiveCollection {
   receivableId: string | null;
   phone: string | null;
   contactId: string | null;
+  channelId: string | null;   // F4b.3 — precisamos disso pra re-enviar via MessageProviderService.
   amount: number | null;
   dueDate: string | null;
   paymentId: string | null;
@@ -103,6 +105,7 @@ function findLiveForContact(orgId: string, contactId: string | null | undefined,
         receivableId: payload.receivableId || null,
         phone: payload.phone || null,
         contactId: payload.contactId || null,
+        channelId: payload.channelId || null,
         amount: payload.amount != null ? Number(payload.amount) : null,
         dueDate: payload.dueDate || null,
         paymentId: r.payment_id || null,
@@ -121,9 +124,11 @@ const INTENT_META: Record<Exclude<IntentLabel, "unknown">, IntentMeta> = {
   },
   resend_pix: {
     severity: "attention",
-    // Nota MVP: não reenvia o PIX real; o dono vê o sinal e re-dispara
-    // manualmente. F4b.3 pode automatizar reusando o paymentId.
-    reply: () => "Beleza! Vou reenviar o PIX aqui em seguida — se não chegar, me avisa. 🙏",
+    // F4b.3: reply canned genérico é um FALLBACK — quando a re-emissão
+    // automática do PIX consegue, sobrescrevemos abaixo com uma reply
+    // que confirma "reenviei". Aqui fica só o backstop pra quando o
+    // Asaas está indisponível ou a re-emissão falha.
+    reply: () => "Beleza! Vou reenviar o PIX aqui — se não chegar em 1 min, me avisa que a gente resolve. 🙏",
   },
   claims_paid: {
     severity: "attention",
@@ -242,6 +247,26 @@ export class CollectionReplyService {
         confidence: result.confidence, viaLLM: !!process.env.OPENAI_API_KEY,
       });
     } catch { /* noop */ }
+
+    // ADR-152 F4b.3 — re-emissão automática de PIX quando o cliente pediu.
+    // Só dispara se temos paymentId + channelId + phone amarrados na
+    // cobrança viva. Await inline (~1-2s Asaas + envio) — melhor UX que
+    // "beleza vou reenviar" + silêncio. Se falha, o sinal
+    // `resend_pix_failed` já é publicado pelo próprio ResendPixService e
+    // o reply canned original ("vou reenviar…") vira o fallback.
+    if (intent === "resend_pix" && live.paymentId && live.channelId && live.phone) {
+      try {
+        const resend = await CollectionResendPixService.sendNow(orgId, {
+          actionId: live.actionId, paymentId: live.paymentId,
+          channelId: live.channelId, phone: live.phone,
+          amount: live.amount, dueDate: live.dueDate,
+        });
+        if (resend.sent) {
+          // Reply mais assertivo — o cliente ACABOU de receber a msg do PIX.
+          reply = "Prontinho, reenviei o PIX aqui em cima 👆 — se não abrir, me responde que a gente ajusta. 🙏";
+        }
+      } catch (e) { console.warn("[Cobrança F4b.3] resend PIX throw", e); }
+    }
 
     return { handled: true, reply, intent, signalId: signalId || undefined, receivableId: live.receivableId };
   }

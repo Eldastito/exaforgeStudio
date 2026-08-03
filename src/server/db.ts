@@ -7122,6 +7122,107 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar falatu_briefing_deliveries (ADR-151 F6)', e); }
+
+  // ADR-152 Fatia 1.1 — ZappFlow Execution Runtime (Process Fabric). O Runtime
+  // é ADITIVO em cima do ADR-136 (decision_actions), não paralelo: `decision_
+  // actions.process_instance_id` (nullable) amarra ação↔processo — ações
+  // avulsas legadas continuam funcionando. Novo módulo RBAC "runtime" no
+  // ADR-095. Feature flag `execution_runtime_enabled` default 0 mantém o
+  // comportamento intacto em todas as orgs existentes.
+  //
+  // FSM do §11.4 (validada em ProcessRuntimeService.transition):
+  //   detected → planned → awaiting_approval → authorized → queued →
+  //   executing → waiting_external_response → completed | failed | escalated
+  //   → measured (terminal), com cancelled como saída a qualquer momento e
+  //   retry_scheduled/escalated como sub-estados de recuperação.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS process_definitions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        process_type TEXT NOT NULL,               -- ex.: 'retail_daily_closing_v1'
+        name TEXT NOT NULL,
+        description TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        trigger_type TEXT,                        -- signal | manual | schedule | webhook
+        objective TEXT,
+        autonomy_level_default TEXT NOT NULL DEFAULT 'suggest', -- observe|suggest|prepare|execute
+        sla_definition_json TEXT,
+        entry_conditions_json TEXT,
+        success_conditions_json TEXT,
+        failure_conditions_json TEXT,
+        escalation_policy_json TEXT,
+        steps_json TEXT NOT NULL,                 -- validado por PlaybookEngine no boot da definição
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, process_type, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_process_definitions_org_type
+        ON process_definitions (organization_id, process_type, active);
+
+      CREATE TABLE IF NOT EXISTS process_instances (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        process_definition_id TEXT NOT NULL,
+        process_type TEXT NOT NULL,
+        subject_type TEXT,                        -- ex.: 'invoice', 'opportunity', 'retail_store_day'
+        subject_id TEXT,
+        status TEXT NOT NULL DEFAULT 'detected',  -- FSM §11.4
+        priority INTEGER NOT NULL DEFAULT 0,
+        risk_level TEXT,                          -- low|medium|high
+        expected_value REAL,
+        current_step TEXT,                        -- id do step no steps_json
+        context_json TEXT NOT NULL DEFAULT '{}',  -- entradas + acúmulo de resultados por step
+        result_json TEXT,                         -- resultado final ao concluir
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deadline_at DATETIME,
+        completed_at DATETIME,
+        failed_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_process_instances_org_status
+        ON process_instances (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_process_instances_org_type
+        ON process_instances (organization_id, process_type, status);
+      CREATE INDEX IF NOT EXISTS idx_process_instances_subject
+        ON process_instances (organization_id, subject_type, subject_id);
+
+      -- Toda transição relevante da FSM auditada (PRD §11.4).
+      CREATE TABLE IF NOT EXISTS process_transitions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        process_instance_id TEXT NOT NULL,
+        from_state TEXT,                          -- NULL na criação
+        to_state TEXT NOT NULL,
+        actor TEXT,                               -- userId | 'runtime' | 'system'
+        reason TEXT,
+        evidence_json TEXT,
+        occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_process_transitions_instance
+        ON process_transitions (organization_id, process_instance_id, occurred_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas ADR-152 F1.1 (Execution Runtime)', e); }
+
+  // Aditivos em decision_actions (ADR-152 D2) — todos nullable, retrocompatíveis
+  // com as ~30 rotas que já consomem a tabela (ADR-136 D5). Ação sem
+  // process_instance_id continua sendo "ação avulsa" (comportamento atual).
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN process_instance_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN subject_type TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN subject_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN deadline_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN attempt_count INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN max_attempts INTEGER DEFAULT 3`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN success_condition_json TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN fallback_action_type TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN evidence_json TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_decision_actions_process ON decision_actions (organization_id, process_instance_id)`); } catch(e){}
+
+  // Gate geral do Runtime (ADR-152 D10) — sem flag, /api/runtime/* retorna 403.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN execution_runtime_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

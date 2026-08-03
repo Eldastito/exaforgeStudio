@@ -88,6 +88,7 @@ import radarPublicRoutes from "./src/server/routes/radarPublic.js";
 import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import falatuRoutes from "./src/server/routes/falatu.js";
+import runtimeRoutes from "./src/server/routes/runtime.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
@@ -498,6 +499,10 @@ async function startServer() {
   // (falatuGate: Master Admin sempre + flag opt-in falatu_enabled por org);
   // o RBAC granular (módulo "falatu") vem do enforceModulePermission acima.
   protectedApi.use("/falatu", falatuRoutes);
+  // ADR-152 F1.1 — Execution Runtime. Duas camadas de gate: runtimeGate
+  // (flag opt-in `execution_runtime_enabled` da org, Master Admin bypass) +
+  // RBAC granular do módulo `runtime` (enforceModulePermission acima).
+  protectedApi.use("/runtime", runtimeRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/permissions", permissionsRoutes);

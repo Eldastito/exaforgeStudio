@@ -41,6 +41,11 @@ export const RBAC_MODULES = [
   // ADR-151 Fatia 2 — FalaTu (captura multimodal). Perfis com default 'none'
   // (vendedor/atendente/...) começam sem acesso; o dono libera por perfil.
   "falatu",
+  // ADR-152 Fatia 1.1 — ZappFlow Execution Runtime. Módulo de operação; perfis
+  // com default 'none' (vendedor/atendente/estoquista/atendente) começam sem
+  // acesso — dono/gerente entram por default full. Aditivo, não altera perfis
+  // do parque legado até o dono editar.
+  "runtime",
 ] as const;
 export type RbacModule = (typeof RBAC_MODULES)[number];
 
@@ -86,6 +91,9 @@ export const ROUTE_MODULE: Record<string, string> = {
   // ADR-151 Fatia 2 — FalaTu: o enforcement global cobre o perfil (nível no
   // módulo); a flag opt-in da org é checada pelo gate próprio da rota.
   falatu: "falatu",
+  // ADR-152 Fatia 1.1 — Execution Runtime: enforcement global cobre o perfil;
+  // a flag opt-in `execution_runtime_enabled` é checada pelo runtimeGate.
+  runtime: "runtime",
 };
 
 // Rótulos amigáveis para a tela de editor de perfis (Bloco 3).
@@ -102,6 +110,7 @@ export const RBAC_MODULE_LABELS: Record<string, string> = {
   financeiro: "Financeiro (Caixa / DRE / Retiradas)", saude_negocio: "Saúde do Negócio",
   empresa_proprietario: "Empresa × Proprietário", people: "RH / Pessoas",
   production: "Produção", falatu: "FalaTu (Captura Multimodal)",
+  runtime: "Execution Runtime (Processos)",
 };
 
 type ProfileSpec = { key: string; name: string; default: Level; overrides: Partial<Record<string, Level>> };

@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
 import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
+import { FalaTuBriefingTaskService } from "../FalaTuBriefingTaskService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -58,10 +59,25 @@ router.get("/inbox", (req: AuthRequest, res): any => {
 });
 
 router.post("/inbox/:id/confirm", (req: AuthRequest, res): any => {
-  const { intent, title, eventDate, eventTime, listItems, listType } = req.body || {};
+  const { intent, title, eventDate, eventTime, listItems, listType, mentionResolutions } = req.body || {};
   if (listItems !== undefined && !Array.isArray(listItems)) return res.status(400).json({ error: "listItems deve ser array." });
-  try { res.json(FalaTuService.confirm(req.organizationId!, actorId(req), req.params.id, { intent, title, eventDate, eventTime, listItems, listType })); }
+  if (mentionResolutions !== undefined && (typeof mentionResolutions !== "object" || Array.isArray(mentionResolutions))) {
+    return res.status(400).json({ error: "mentionResolutions deve ser objeto {menção: entityId|'new'}." });
+  }
+  try { res.json(FalaTuService.confirm(req.organizationId!, actorId(req), req.params.id, { intent, title, eventDate, eventTime, listItems, listType, mentionResolutions })); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Fatia 5 — desambiguação ativa: o humano responde "qual Carlos?". A escolha
+// é validada no service contra os candidatos sugeridos (nunca vínculo livre).
+router.post("/inbox/:id/resolve-mention", (req: AuthRequest, res): any => {
+  const { mention, entityId } = req.body || {};
+  if (typeof mention !== "string" || !mention.trim()) return res.status(400).json({ error: "mention é obrigatória." });
+  if (entityId !== undefined && entityId !== null && typeof entityId !== "string") return res.status(400).json({ error: "entityId deve ser string, null ou 'new'." });
+  try {
+    const chosen = !entityId || entityId === "new" ? null : entityId;
+    res.json(FalaTuService.resolveMention(req.organizationId!, actorId(req), req.params.id, mention, chosen));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.post("/inbox/:id/discard", (req: AuthRequest, res): any => {
@@ -134,6 +150,20 @@ router.get("/entities", (req: AuthRequest, res): any => {
 
 router.get("/briefing", (req: AuthRequest, res): any => {
   res.json(FalaTuService.briefing(req.organizationId!, actorId(req)));
+});
+
+// ── Briefing proativo (Fatia 5): sinais no business_signals (ADR-136) ──
+
+// Só os sinais do PRÓPRIO usuário — briefing é pessoal (ver service).
+router.get("/signals", (req: AuthRequest, res): any => {
+  res.json(FalaTuBriefingTaskService.list(req.organizationId!, actorId(req)));
+});
+
+// Disparo manual do sweep da org (o Scheduler roda sozinho; isto é pro botão
+// "atualizar agora" e pra depuração — idempotente por dedupe_key).
+router.post("/signals/sweep", (req: AuthRequest, res): any => {
+  try { res.json(FalaTuBriefingTaskService.run(req.organizationId!)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

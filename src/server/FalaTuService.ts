@@ -32,6 +32,20 @@ import { logAuthEvent } from "./auditLog.js";
  * mensal + top-ups ADR-091) e conta no ai_interactions_log como as demais.
  * TODA query filtra organization_id + user_id (convenção nº 1).
  * Nunca DELETE (convenção nº 9): discard é UPDATE de status.
+ *
+ * Fatia 5 (memória com desambiguação ATIVA): a captura cruza as menções da
+ * extração (pessoas/projetos) com a memória (falatu_entities) por regra de
+ * CÓDIGO, nunca de IA:
+ * - 0 correspondências → 'new' (a confirmação cria a entidade, como antes);
+ * - 1 correspondência (exata ou por prefixo de nome: "Carlos" ↔ "Carlos
+ *   Silva") → 'known', auto-vinculada — é dedução determinística de match
+ *   único, não um chute (e a confirmação só atualiza o contexto da entidade
+ *   existente em vez de criar a duplicata "carlos");
+ * - 2+ correspondências → 'ambiguous': o sistema PERGUNTA "qual Carlos?" e
+ *   quem escolhe é o humano (resolveMention valida que a escolha está entre
+ *   os candidatos sugeridos — o cliente não injeta vínculo arbitrário).
+ *   Sem escolha, a confirmação NÃO vincula nem cria a entidade da menção —
+ *   memória não é poluída por palpite.
  */
 
 export type FalaTuIntent = "TASK" | "EVENT" | "LIST" | "NOTE" | "UNKNOWN";
@@ -60,6 +74,31 @@ export interface FalaTuCaptureInput {
 }
 
 const INTENTS: FalaTuIntent[] = ["TASK", "EVENT", "LIST", "NOTE", "UNKNOWN"];
+
+export type FalaTuMentionStatus = "new" | "known" | "ambiguous";
+
+export interface FalaTuMention {
+  mention: string;
+  type: "PERSON" | "PROJECT";
+  status: FalaTuMentionStatus;
+  candidates: { id: string; name: string; context: string | null }[];
+  resolvedEntityId: string | null; // auto (known) ou escolha humana (ambiguous)
+  resolvedNew: boolean;            // humano decidiu "outro/novo" numa ambígua
+}
+
+// Normalização de nome pro matching da memória (mesma régua da conferência de
+// compras, Fatia 4): lower + sem acento + só alfanumérico. Calculada em runtime
+// sobre `name` (não sobre name_norm, que historicamente não tira acento).
+function normName(s: string): string {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export function parseFalaTuMemory(json: string | null | undefined): { mentions: FalaTuMention[] } | null {
+  try {
+    const m = JSON.parse(json || "null");
+    return m && Array.isArray(m.mentions) ? m : null;
+  } catch { return null; }
+}
 
 // Prompt ÚNICO de extração (a origem tinha 2 cópias já divergentes). As regras
 // de "nunca invente" seguem a disciplina dos prompts de visão da plataforma
@@ -156,14 +195,16 @@ export class FalaTuService {
     const extraction = await FalaTuService.interpret(input);
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;
+    const mentions = FalaTuService.analyzeMentions(orgId, userId, extraction);
     db.prepare(`
-      INSERT INTO falatu_inbox_items (id, organization_id, user_id, source, content, media_type, transcription, summary, intent, entities_json, suggested_action, confidence, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      INSERT INTO falatu_inbox_items (id, organization_id, user_id, source, content, media_type, transcription, summary, intent, entities_json, suggested_action, confidence, status, memory_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `).run(
       id, orgId, userId, input.source === "whatsapp" ? "whatsapp" : "webapp",
       input.text?.trim() || null, mediaType,
       extraction.transcription || null, extraction.summary || null, extraction.intent,
-      JSON.stringify(extraction.entities), extraction.suggestedAction || null, extraction.confidence
+      JSON.stringify(extraction.entities), extraction.suggestedAction || null, extraction.confidence,
+      JSON.stringify({ mentions })
     );
     // Conta a captura como ação de IA do mês (mesma régua do PlanService.getUsage
     // e do aiAllowed) — sem isto o FalaTu seria IA "de graça" fora do plano.
@@ -178,6 +219,75 @@ export class FalaTuService {
 
   static getInboxItem(orgId: string, userId: string, id: string): any {
     return db.prepare(`SELECT * FROM falatu_inbox_items WHERE id = ? AND organization_id = ? AND user_id = ?`).get(id, orgId, userId);
+  }
+
+  /**
+   * Fatia 5 — cruza as menções da extração com a memória do usuário. Regra de
+   * CÓDIGO (ver header): match por nome normalizado exato ou por prefixo de
+   * palavra ("carlos" casa "carlos silva" e vice-versa). 1 candidato =
+   * auto-vínculo determinístico; 2+ = ambíguo, o humano resolve.
+   */
+  static analyzeMentions(orgId: string, userId: string, extraction: FalaTuExtraction): FalaTuMention[] {
+    let stored: any[] = [];
+    try {
+      stored = db.prepare(`SELECT id, entity_type, name, context FROM falatu_entities WHERE organization_id = ? AND user_id = ?`).all(orgId, userId) as any[];
+    } catch { stored = []; }
+    const mentions: FalaTuMention[] = [];
+    const add = (type: "PERSON" | "PROJECT", list: string[]) => {
+      for (const raw of Array.isArray(list) ? list : []) {
+        const mention = String(raw).trim();
+        const mNorm = normName(mention);
+        if (!mNorm) continue;
+        const candidates = stored
+          .filter((e) => e.entity_type === type)
+          .filter((e) => {
+            const eNorm = normName(e.name);
+            return eNorm === mNorm || eNorm.startsWith(mNorm + " ") || mNorm.startsWith(eNorm + " ");
+          })
+          .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+          .slice(0, 8)
+          .map((e) => ({ id: e.id, name: e.name, context: e.context || null }));
+        const status: FalaTuMentionStatus = candidates.length === 0 ? "new" : candidates.length === 1 ? "known" : "ambiguous";
+        mentions.push({
+          mention, type, status, candidates,
+          resolvedEntityId: status === "known" ? candidates[0].id : null,
+          resolvedNew: false,
+        });
+      }
+    };
+    add("PERSON", extraction.entities.people || []);
+    add("PROJECT", extraction.entities.projects || []);
+    return mentions;
+  }
+
+  /**
+   * Resolução HUMANA de uma menção ambígua ("qual Carlos?"). `entityId` tem
+   * que estar entre os candidatos sugeridos na captura (guardrail RN-151: o
+   * cliente escolhe entre o que o código propôs, nunca injeta vínculo);
+   * `entityId=null` = "outro/novo" (a confirmação cria a entidade da menção).
+   */
+  static resolveMention(orgId: string, userId: string, inboxItemId: string, mention: string, entityId: string | null) {
+    const item = FalaTuService.getInboxItem(orgId, userId, inboxItemId);
+    if (!item) throw new Error("Item não encontrado.");
+    if (item.status !== "pending") throw new Error("Item já resolvido.");
+    const memory = parseFalaTuMemory(item.memory_json);
+    if (!memory) throw new Error("Item sem menções para resolver.");
+    const m = memory.mentions.find((x) => x.mention === mention || normName(x.mention) === normName(mention));
+    if (!m) throw new Error("Menção não encontrada neste item.");
+    if (entityId) {
+      if (!(m.candidates || []).some((c) => c.id === entityId)) {
+        throw new Error("Escolha inválida: a opção não está entre as sugeridas.");
+      }
+      m.resolvedEntityId = entityId;
+      m.resolvedNew = false;
+    } else {
+      m.resolvedEntityId = null;
+      m.resolvedNew = true;
+    }
+    db.prepare(`UPDATE falatu_inbox_items SET memory_json = ? WHERE id = ? AND organization_id = ? AND user_id = ?`)
+      .run(JSON.stringify(memory), item.id, orgId, userId);
+    logAuthEvent(orgId, userId, null, "FALATU_RESOLVE_MENTION", { inboxItemId: item.id, mention: m.mention, entityId: entityId || null, isNew: !entityId });
+    return FalaTuService.getInboxItem(orgId, userId, inboxItemId);
   }
 
   static listInbox(orgId: string, userId: string, status?: string): any[] {
@@ -196,8 +306,17 @@ export class FalaTuService {
     orgId: string,
     userId: string,
     inboxItemId: string,
-    overrides: { intent?: string; title?: string; eventDate?: string | null; eventTime?: string | null; listItems?: string[]; listType?: string } = {}
+    overrides: { intent?: string; title?: string; eventDate?: string | null; eventTime?: string | null; listItems?: string[]; listType?: string; mentionResolutions?: Record<string, string> } = {}
   ) {
+    // Fatia 5: resoluções de menção enviadas junto da confirmação (a UI faz
+    // tudo num clique) passam pelo MESMO validador do resolveMention — a
+    // escolha tem que estar entre os candidatos sugeridos ("new" = outro/novo).
+    if (overrides.mentionResolutions && typeof overrides.mentionResolutions === "object") {
+      for (const [mention, choice] of Object.entries(overrides.mentionResolutions)) {
+        if (typeof choice !== "string" || !choice) continue;
+        FalaTuService.resolveMention(orgId, userId, inboxItemId, mention, choice === "new" ? null : choice);
+      }
+    }
     const item = FalaTuService.getInboxItem(orgId, userId, inboxItemId);
     if (!item) throw new Error("Item não encontrado.");
     if (item.status !== "pending") throw new Error("Item já resolvido.");
@@ -256,11 +375,28 @@ export class FalaTuService {
         ON CONFLICT (organization_id, user_id, entity_type, name_norm)
         DO UPDATE SET context = excluded.context, updated_at = CURRENT_TIMESTAMP
       `);
-      for (const p of (Array.isArray(entities?.people) ? entities.people : [])) {
-        upsert.run(randomUUID(), orgId, userId, "PERSON", p, p.trim().toLowerCase(), item.summary || null);
-      }
-      for (const p of (Array.isArray(entities?.projects) ? entities.projects : [])) {
-        upsert.run(randomUUID(), orgId, userId, "PROJECT", p, p.trim().toLowerCase(), item.summary || null);
+      const memory = parseFalaTuMemory(item.memory_json);
+      if (memory) {
+        // Fatia 5 — memory-aware: menção vinculada (auto 'known' ou escolha
+        // humana) só ATUALIZA o contexto da entidade existente — "Carlos" não
+        // vira duplicata de "Carlos Silva". Ambígua sem resolução NÃO vincula
+        // nem cria (nunca por palpite); 'new'/"outro" cria como antes.
+        const touch = db.prepare(`UPDATE falatu_entities SET context = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND user_id = ?`);
+        for (const m of memory.mentions) {
+          if (m.resolvedEntityId) {
+            touch.run(item.summary || null, m.resolvedEntityId, orgId, userId);
+          } else if (m.status === "new" || m.resolvedNew) {
+            upsert.run(randomUUID(), orgId, userId, m.type === "PROJECT" ? "PROJECT" : "PERSON", m.mention, m.mention.trim().toLowerCase(), item.summary || null);
+          }
+        }
+      } else {
+        // Itens capturados antes da Fatia 5 (sem memory_json): comportamento original.
+        for (const p of (Array.isArray(entities?.people) ? entities.people : [])) {
+          upsert.run(randomUUID(), orgId, userId, "PERSON", p, p.trim().toLowerCase(), item.summary || null);
+        }
+        for (const p of (Array.isArray(entities?.projects) ? entities.projects : [])) {
+          upsert.run(randomUUID(), orgId, userId, "PROJECT", p, p.trim().toLowerCase(), item.summary || null);
+        }
       }
 
       db.prepare(`UPDATE falatu_inbox_items SET status = 'confirmed', confirmed_kind = ?, confirmed_ref_id = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by = ? WHERE id = ?`)

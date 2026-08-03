@@ -25,8 +25,18 @@ const INTENT_LABEL: Record<string, string> = {
 type InboxItem = {
   id: string; status: string; intent: string; summary: string | null; transcription: string | null;
   content: string | null; entities_json: string | null; suggested_action: string | null;
-  confidence: number | null; media_type: string | null; created_at: string;
+  confidence: number | null; media_type: string | null; created_at: string; memory_json?: string | null;
 };
+
+type Mention = {
+  mention: string; type: string; status: 'new' | 'known' | 'ambiguous';
+  candidates: { id: string; name: string; context: string | null }[];
+  resolvedEntityId: string | null; resolvedNew: boolean;
+};
+
+function parseMentions(item: InboxItem): Mention[] {
+  try { return JSON.parse(item.memory_json || 'null')?.mentions || []; } catch { return []; }
+}
 
 function parseEntities(item: InboxItem) {
   try { return JSON.parse(item.entities_json || '{}'); } catch { return {}; }
@@ -44,11 +54,15 @@ function blobToBase64(blob: Blob): Promise<string> {
 // Cartão de confirmação: o humano revisa (e pode editar) ANTES de materializar.
 const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, onResolved }) => {
   const ents = parseEntities(item);
+  const mentions = parseMentions(item);
+  const ambiguous = mentions.filter((m) => m.status === 'ambiguous');
+  const known = mentions.filter((m) => m.status === 'known' && m.resolvedEntityId);
   const [intent, setIntent] = useState(item.intent || 'UNKNOWN');
   const [title, setTitle] = useState(item.summary || '');
   const [eventDate, setEventDate] = useState<string>(ents.eventDate || '');
   const [eventTime, setEventTime] = useState<string>(ents.eventTime || '');
   const [listItems, setListItems] = useState<string>((ents.listItems || []).join('\n'));
+  const [mentionRes, setMentionRes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   const resolve = async (action: 'confirm' | 'discard') => {
@@ -58,6 +72,7 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
         await api(`/inbox/${item.id}/discard`, { method: 'POST' });
         toast.success('Item descartado.');
       } else {
+        const chosen = Object.fromEntries(Object.entries(mentionRes).filter(([, v]) => v));
         await api(`/inbox/${item.id}/confirm`, {
           method: 'POST',
           body: JSON.stringify({
@@ -65,6 +80,7 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
             eventDate: intent === 'EVENT' ? (eventDate || null) : undefined,
             eventTime: intent === 'EVENT' ? (eventTime || null) : undefined,
             listItems: intent === 'LIST' ? listItems.split('\n').map((s) => s.trim()).filter(Boolean) : undefined,
+            mentionResolutions: Object.keys(chosen).length ? chosen : undefined,
           }),
         });
         toast.success('Confirmado!');
@@ -117,6 +133,30 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
           placeholder="Um item por linha"
           className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
       )}
+
+      {/* Fatia 5 — memória: auto-vínculo transparente + desambiguação ativa.
+          Ambígua sem escolha NÃO vincula nem cria (o servidor nunca chuta). */}
+      {known.map((m) => {
+        const linked = m.candidates.find((c) => c.id === m.resolvedEntityId);
+        return linked && linked.name !== m.mention ? (
+          <p key={`${m.type}:${m.mention}`} className="text-xs text-zinc-400 flex items-center gap-1.5">
+            <Brain className="h-3.5 w-3.5 text-violet-300" /> {m.mention} → <span className="text-zinc-200">{linked.name}</span> (da sua memória)
+          </p>
+        ) : null;
+      })}
+      {ambiguous.map((m) => (
+        <div key={`${m.type}:${m.mention}`} className="flex items-center gap-2">
+          <span className="text-xs text-violet-300 flex items-center gap-1.5 shrink-0">
+            <Brain className="h-3.5 w-3.5" /> Qual <strong>{m.mention}</strong>?
+          </span>
+          <select value={mentionRes[m.mention] || ''} onChange={(e) => setMentionRes((p) => ({ ...p, [m.mention]: e.target.value }))}
+            className="flex-1 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5 text-xs text-zinc-200">
+            <option value="">Não vincular agora</option>
+            {m.candidates.map((c) => <option key={c.id} value={c.id}>{c.name}{c.context ? ` — ${c.context}` : ''}</option>)}
+            <option value="new">Outro / novo</option>
+          </select>
+        </div>
+      ))}
 
       <div className="flex gap-2">
         <button disabled={busy} onClick={() => resolve('confirm')}
@@ -221,6 +261,7 @@ export function FalaTuView() {
   const [checkingListId, setCheckingListId] = useState<string | null>(null);
   const [entities, setEntities] = useState<any[]>([]);
   const [briefing, setBriefing] = useState<any | null>(null);
+  const [signals, setSignals] = useState<any[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -235,7 +276,10 @@ export function FalaTuView() {
     if (tab === 'events') api('/events').then(setEvents).catch(() => {});
     if (tab === 'lists') api('/lists').then(setLists).catch(() => {});
     if (tab === 'memory') api('/entities').then(setEntities).catch(() => {});
-    if (tab === 'briefing') api('/briefing').then(setBriefing).catch(() => {});
+    if (tab === 'briefing') {
+      api('/briefing').then(setBriefing).catch(() => {});
+      api('/signals').then((d) => setSignals(Array.isArray(d) ? d : [])).catch(() => {});
+    }
   }, [tab]);
 
   useEffect(() => { loadPending(); }, [loadPending]);
@@ -497,6 +541,14 @@ export function FalaTuView() {
 
       {tab === 'briefing' && briefing && (
         <div className="space-y-4">
+          {/* Fatia 5 — o sweep diário publicou o briefing como sinal (ADR-136):
+              o mesmo resumo aparece no painel de sinais da operação. */}
+          {signals.length > 0 && (
+            <p className="text-xs text-violet-300 bg-violet-500/10 border border-violet-500/30 rounded-xl px-4 py-2.5">
+              📣 Briefing de hoje publicado no painel de sinais da operação
+              {signals[0]?.severity === 'attention' ? ' — há pendências pedindo sua ação.' : '.'}
+            </p>
+          )}
           {briefing.pendingInbox?.c > 0 && (
             <p className="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
               {briefing.pendingInbox.c} item(ns) aguardando sua confirmação no Inbox.

@@ -1,6 +1,6 @@
 # ADR-151 — FalaTu: Captura Multimodal "Fala → Faz → Confere" (incorporação ao ZapFlow)
 
-- **Status:** Fatia 4 em implementação (compras com conferência). Fatia 1 MERGED (#747); Fatia 2 MERGED (#749); Fatia 3 MERGED (#750).
+- **Status:** FECHADO — 5 fatias entregues. Fatia 1 MERGED (#747); Fatia 2 MERGED (#749); Fatia 3 MERGED (#750); Fatia 4 MERGED (#751); Fatia 5 (este PR).
 - **Data:** 2026-08-03
 - **Origem:** repositório `Eldastito/FalaTu` (protótipo AI Studio applet) — levantamento completo na seção "Levantamento do repositório de origem".
 - **Relacionadas:** ADR-136 (Decision-Action Ledger — briefing proativo futuro), ADR-095 (RBAC — rollout multi-tenant futuro), ADR-021/ADR-030 (leitura de nota fiscal por IA — reuso direto na conferência de compras), ADR-102 (tarefa por voz do gestor — mesmo princípio de confirmação antes de criar).
@@ -150,8 +150,8 @@ A IA do FalaTu **nunca**:
 | **1** | Fundação: tabelas `falatu_*`, `FalaTuService` (capture → interpret IA → confirm/discard), rotas `/api/falatu/*` atrás de `requireMasterAdmin`, tarefas/eventos/listas/entidades/briefing, UI (aba `falatu` master-only), teste `scripts/test-falatu.ts` + CI | MERGED (#747) |
 | **2** | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | MERGED (#749) |
 | **3** | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | MERGED (#750) |
-| **4** | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | **MERGED (este PR)** |
-| 5 | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | planejada |
+| **4** | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | MERGED (#751) |
+| **5** | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | **MERGED (este PR)** |
 
 ## Fatia 1 — detalhe
 
@@ -298,3 +298,62 @@ leitura com baixa confiança → Confirmar/Descartar.
 efeito na lista, confirm por subconjunto, extra só com opt-in, re-casamento
 bloqueado, discard como UPDATE, nota ilegível, teto do plano, isolamento
 multi-tenant, auditoria (`FALATU_PURCHASE_CHECK/CONFIRM/DISCARD`).
+
+## Fatia 5 — detalhe (memória com desambiguação ativa + briefing proativo)
+
+Fecha o ADR com as duas pontas "inteligentes" do PRD original, mantendo a
+divisão de papéis do módulo: **IA extrai, código decide, humano confirma**.
+
+### Memória com desambiguação ativa ("qual Carlos?")
+
+A captura cruza as menções extraídas (pessoas/projetos) com a memória do
+usuário (`falatu_entities`) por regra de CÓDIGO — a IA nunca escolhe a quem
+o nome se refere. Matching por nome normalizado (lower/sem acento, mesma
+régua da Fatia 4), exato ou por prefixo de palavra ("Carlos" ↔ "Carlos
+Silva"):
+
+- **0 correspondências** → `new`: confirmação cria a entidade (como antes).
+- **1 correspondência** → `known`: auto-vínculo determinístico (match único
+  não é chute) — a confirmação ATUALIZA o contexto da entidade existente em
+  vez de criar a duplicata "carlos".
+- **2+ correspondências** → `ambiguous`: o sistema PERGUNTA. No painel, o
+  ConfirmCard mostra o seletor "Qual Carlos?"; no WhatsApp, o reply lista as
+  opções numeradas e o humano responde `é 1` (`é 0` = outro/novo) — a
+  resposta numérica segue a regra da Fatia 3: só é interceptada com
+  pendência derivada do banco E menção ambígua em aberto.
+
+O resultado vive em `falatu_inbox_items.memory_json` (aditivo). Guardrails
+RN-151 da fatia (testados): a escolha do humano é validada contra os
+candidatos sugeridos (`resolveMention` — cliente não injeta vínculo
+arbitrário); ambígua SEM resolução não vincula nem cria entidade na
+confirmação (memória não é poluída por palpite); itens pré-F5 (sem
+`memory_json`) seguem o comportamento original.
+
+### Briefing diário proativo (`business_signals`, ADR-136)
+
+`FalaTuBriefingTaskService.run` (sweep idempotente, rodado pelo
+`Scheduler.falatuBriefingPass` e disparável por `POST
+/api/falatu/signals/sweep`): pra cada usuário com dados FalaTu na org,
+deriva os fatos do dia POR QUERY (RN-004) e publica UM sinal por
+(usuário, dia) — `dedupe_key falatu:daily_briefing:{userId}:{date}`,
+convenção nº 12 (nunca tabela própria de alerta). Dia "acionável" = inbox
+pendente, compromisso de hoje ou compromisso SEM data (o que a RN-151 não
+inventou e o humano precisa completar); tarefas abertas são só contexto na
+evidência. Severidade: `attention` com pendência de ação humana, `info`
+quando é só agenda. Sinais que deixaram de valer (dia virou, pendências
+resolvidas) fecham por `resolveByDedupe` — mesmo desenho do
+`ClinicRenewalTaskService` (ADR-145 F47). O sweep NUNCA cria/edita/envia
+nada: só sinaliza. Gate do Scheduler: org com `falatu_enabled` (ou a org do
+operador da plataforma — mesmo bypass do `falatuGate`). `GET
+/api/falatu/signals` devolve só os sinais do PRÓPRIO usuário (briefing é
+pessoal; não vaza entre colegas da mesma org).
+
+**Teste** (`scripts/test-falatu-memoria.ts`, 26 checks): new/known/ambiguous
+por regra de código, confirm memory-aware (contexto atualizado sem
+duplicata; ambígua sem escolha não toca a memória), resolveMention com
+validação de candidato + isolamento org/user + auditoria
+(`FALATU_RESOLVE_MENTION`), `mentionResolutions` no confirm ("new" cria),
+WhatsApp ("qual Carlos?" numerado, `é N` fora do intervalo, resolução
+persistida derivada do banco, `é 1` sem pergunta pendente passa reto),
+briefing (publica/deduplica/resolve, nunca materializa, isolamento
+multi-tenant, lista pessoal, gate do Scheduler com bypass do operador).

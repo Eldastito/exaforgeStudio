@@ -155,8 +155,27 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 
 **Fase 3 CONCLUÍDA.** Backend + UI no ar. Nenhum efeito externo novo (todas as rotas são GET). Nada muda em produção sem `execution_runtime_enabled=1` na org.
 
-## Fase 4a — Piloto Retail Closing
-- [!] BLOQUEADO em decisões 1, 2, 5 e 8 do `DECISOES-E-PENDENCIAS.md §F`
+## Fase 4a — Piloto Retail Closing — **ENTREGUE**
+- [x] `RetailClosingPlaybook.ts` — 3 handlers concretos + definição do playbook + `RetailClosingPlaybookService.seed/start`:
+  - `retail_reconcile_day` — chama `RetailFloorReconciliationService.runDay` (ADR-150 F6, idempotente só-promove).
+  - `retail_post_closing` — `FinancialLedgerService.recordEvent(direction=in, sourceType=retail_closing, sourceId=storeId:date)`. Idempotência via `UNIQUE(org, source_type, source_id)` do cash_events. Registra outcome F3.1 com `time_saved_minutes=15`.
+  - `retail_closing_dispatch` — decide auto_post × escalate × skipped a partir de `context.results.reconcile`. Regra: `absGap <= tolerancePct * erpTotal + R$ 0.01` E `unmatched == 0` → auto; senão → cria DecisionAction awaiting_approval; `erpTotal=0 && declaredCount=0` → skipped_no_sales.
+- [x] `RETAIL_DAILY_CLOSING_V1` (playbook JSON tipado — ADR-152 D3): `reconcile → post_dispatch → $end`. Decisão aritmética fica no handler porque o subset JSON-Logic do PlaybookEngine ainda não faz `mul/abs` (F5 futura pode enriquecer).
+- [x] `ProcessRuntimeService.runStep` + `runToCompletion` (novo — peça faltante da F1). Amarra `advance → propose+approve → execute → completeStep` em loop. Import dinâmico pra quebrar ciclos; guard anti-loop com `maxSteps`.
+- [x] `TERMINAL` do FSM expandido pra `{cancelled, measured, completed, failed}` (bug: o runner continuava em `completed` — regressão validada pelo teste antigo passando).
+- [x] Rotas: `POST /api/runtime/retail-closing/seed` (idempotente), `POST /api/runtime/retail-closing/start` (deduplica por subject vivo), `POST /api/runtime/instances/:id/run` (runner).
+- [x] `server.ts` — side-effect import do playbook.
+- [x] `scripts/test-piloto-fechamento-retail.ts` — **26/26 checks PASS**: seed idempotente; contexto persistido; runToCompletion auto-post (cash_event lançado com valor ERP, source_id correto, outcome F3.1); idempotência (UNIQUE bloqueia 2ª run); escalate (fora da tolerância → DecisionAction awaiting_approval, ZERO cash_event); no_sales (skipped, sem cash_event); isolamento cross-tenant; execução com policy faltando (dispatch falha, nada lançado).
+- [x] Regressão zero: 5 suítes ADR-136 (76/76) + 5 suítes runtime anteriores (154/154) + asaas-billing (16/16) + billing-dunning (10/10); `tsc --noEmit` limpo.
+
+**Decisões pendentes 1, 2, 5, 8, 9, 10 do §F — RESOLVIDAS 2026-08-03** (ver DECISOES-E-PENDENCIAS.md §F atualizada). Decisões 3 (nome UI) resolvida na F3.2. Decisões 4 (LGPD), 6 (Nível 5) e 7 (Sicredi) travam etapas futuras (F4c, escopo pós-piloto).
+
+**Régua operacional (D9):** o Runtime já pode rodar em produção com `execution_runtime_enabled=1` + policies `execute` + `execution_mode=shadow` — o operador monitora pelo painel Operações e compara com decisão humana. Só promove pra `assisted → approved_execution → autonomous` conforme concordância ≥95%/2 semanas.
+
+## Fase 4a.1 — Refinamentos pós-piloto (adiado)
+- [ ] Comissão retail: reusar `PerformanceFeeService` no `retail_post_closing` (mencionado no §15.7 do PRD; fora do MVP da F4a por escopo).
+- [ ] Conector Sicredi (§15.3 PRD, decisão pendente #7 resolvida como "escopo futuro").
+- [ ] Enriquecer PlaybookEngine com `mul`/`abs` pra o `dispatch` voltar pra dentro do JSON.
 
 ## Fase 4b — Piloto Cobrança
 - [ ] Depende de F4a estável
@@ -306,6 +325,28 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Resultado:** Fatia 3.2 concluída — aba Operações no ar, guardada por 3 camadas (RBAC frontend cosmético + RBAC backend + runtimeGate flag). Nada muda em produção sem `execution_runtime_enabled=1`. Fase 3 CONCLUÍDA.
 - **Pendências criadas:** nenhuma nova.
 - **Próximo passo:** **Fase 4 — pilotos**. Retail Closing (4a) → Cobrança (4b) → Recuperação Comercial (4c). BLOQUEADAS nas 10 decisões pendentes do dono do produto (§F do DECISOES-E-PENDENCIAS.md — Sicredi, LGPD, org piloto, régua do shadow, etc). Sem essas decisões, F4 não sai.
+
+### Sessão 2026-08-03 (Fatia 4a do ADR-152 — Piloto Retail Closing)
+- **Fase:** 4a (Piloto 1 dos 3)
+- **Itens executados:** todos os 8 da Fatia 4a (3 handlers concretos, playbook JSON, runner runStep/runToCompletion, TERMINAL expandido, 3 rotas, seed helper, teste E2E, docs)
+- **Arquivos criados:**
+  - `src/server/RetailClosingPlaybook.ts` (handlers + definição + seed service)
+  - `scripts/test-piloto-fechamento-retail.ts` (26/26 checks)
+- **Arquivos alterados:**
+  - `src/server/ProcessRuntimeService.ts` (TERMINAL expandido + runStep + runToCompletion)
+  - `src/server/routes/runtime.ts` (3 rotas: seed, start, run)
+  - `server.ts` (side-effect import)
+  - `package.json` (test:piloto-fechamento-retail)
+  - `docs/execution-runtime/DECISOES-E-PENDENCIAS.md` (6 decisões marcadas RESOLVIDAS)
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md`
+- **Testes executados:**
+  - `npm run test:piloto-fechamento-retail` → **26/26 OK**
+  - Regressão: 5 suítes ADR-136 (76/76); 5 suítes runtime anteriores (154/154); asaas-billing 16/16; billing-dunning 10/10
+  - `npx tsc --noEmit` → limpo
+- **Bug encontrado e corrigido:** `TERMINAL` do FSM só tinha `cancelled` e `measured`, então o runner continuava tentando `completeStep` numa instance já `completed` (que transiciona só pra `measured`). Fix: expandir pra `{cancelled, measured, completed, failed}` — teste antigo `runtime-process-fabric` 42/42 continua verde.
+- **Resultado:** Fatia 4a concluída — piloto Retail Closing pronto. Runtime dispara efeito real (`FinancialLedgerService.recordEvent`) atrás de 4 camadas: `execution_runtime_enabled=1` + 3 policies `execute+approved_execution` (steps runtime + retail_post_closing). Sem essas camadas, nada muda. Régua operacional shadow → assisted → approved_execution → autonomous fica com o dono (não codificada; monitorada pela aba Operações F3.2 comparando decisão Runtime × humana).
+- **Pendências criadas:** F4a.1 opcional (comissão retail + Sicredi + PlaybookEngine mul/abs) — adiadas pós-piloto.
+- **Próximo passo:** **Fatia 4b** (Piloto 2 — Cobrança lojista→cliente). Reusa `AsaasPixChargeCommandHandler` + `ConfirmationEngine.expect(asaas_payment_webhook)` da F2.3 + intent classifier pra respostas do cliente (via `AIOrchestratorService`). Playbook `receivable_collection_v1` com steps: `detect_due → send_reminder → wait_reply → interpret_intent → (promise|dispute|pay|escalate|next_reminder)`. Aguardando aprovação.
 
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …

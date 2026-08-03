@@ -519,10 +519,17 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
   try {
     // Casa o produto do ERP (13 díg.) com a variante/produto do catálogo p/ o
     // nome; o dígito extra do saldo (13 vs 12) é tolerado com o prefixo.
+    // Devolve tríade de identificação: SKU (do cadastro), EAN (barras do
+    // produto pai), e o próprio código do ERP (13 díg.) — pra bater etiqueta
+    // no caixa/estoque quando o dono suspeitar que "esse mais-vendido não é
+    // o produto certo".
     const rows = db.prepare(
       `SELECT i.produto,
               COALESCE(pv.name, ps.name, p2.name) AS nome_variante,
               COALESCE(pp.name, p2.name) AS nome_produto,
+              pv.sku AS sku,
+              COALESCE(pp.ean, ps.ean, p2.ean) AS ean_produto,
+              pv.external_ref AS ean_variante,
               SUM(i.quantidade) AS pecas, SUM(i.valor) AS valor, COUNT(*) AS linhas
          FROM retail_pdv_sale_items i
          LEFT JOIN product_variants pv ON pv.organization_id = i.organization_id AND (pv.external_ref = i.produto OR pv.sku = i.produto)
@@ -534,7 +541,27 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
         ORDER BY pecas DESC, valor DESC
         LIMIT 100`
     ).all(...args) as any[];
-    res.json({ start, end, products: rows.map((r) => ({ produto: r.produto, nome: r.nome_produto || r.nome_variante || null, variante: r.nome_variante, pecas: Math.round(Number(r.pecas || 0)), valor: Math.round(Number(r.valor || 0) * 100) / 100 })) });
+    // Detecção de "sem match no catálogo": não achou variante nem produto —
+    // a UI marca essas linhas em cor de alerta pra você cadastrar/corrigir.
+    res.json({
+      start, end,
+      products: rows.map((r) => {
+        const catalogHit = !!(r.nome_produto || r.nome_variante);
+        // EAN preferencial: o do produto pai (impressa na etiqueta); se não
+        // tiver, cai no external_ref da variante (que costuma ser EAN também).
+        const ean = r.ean_produto || r.ean_variante || null;
+        return {
+          produto: r.produto,                     // código do ERP (13 díg.)
+          nome: r.nome_produto || r.nome_variante || null,
+          variante: r.nome_variante || null,
+          sku: r.sku || null,
+          ean,
+          catalogHit,
+          pecas: Math.round(Number(r.pecas || 0)),
+          valor: Math.round(Number(r.valor || 0) * 100) / 100,
+        };
+      }),
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

@@ -89,6 +89,11 @@ import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import falatuRoutes from "./src/server/routes/falatu.js";
 import runtimeRoutes from "./src/server/routes/runtime.js";
+// ADR-152 F2.3 — import pro side-effect de registerHandler (registra os 3
+// handlers concretos do Execution Runtime: WhatsAppSend, AsaasPixCharge,
+// AlterdataFetch). Sem esse import, o registry ficaria com só os 5 handlers
+// prepare-only do ADR-136 C5.
+import "./src/server/RuntimeCommandHandlers.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";

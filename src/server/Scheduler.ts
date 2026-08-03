@@ -29,6 +29,7 @@ import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { FalaTuService } from "./FalaTuService.js";
 import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
+import { ConfirmationEngine } from "./ConfirmationEngine.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
@@ -420,6 +421,20 @@ export class Scheduler {
   }
 
   /**
+   * ADR-152 F2.3 — sweep de timeouts do Execution Runtime. Fecha como
+   * `timed_out` as `action_confirmations` pendentes cujo `deadline_at`
+   * venceu (webhook Asaas nunca chegou, resposta do cliente não veio, ...).
+   * Best-effort, idempotente. A Fase 3 vai listar isso na aba Operações
+   * como exceção "SLA ameaçado / timeout esgotado".
+   */
+  static confirmationTimeoutPass() {
+    try {
+      const closed = ConfirmationEngine.sweepTimeouts();
+      if (closed > 0) console.info(`[Runtime] ConfirmationEngine.sweepTimeouts fechou ${closed} pendente(s).`);
+    } catch (e: any) { console.error("[Runtime] sweepTimeouts falhou", e?.message); }
+  }
+
+  /**
    * FalaTu (ADR-151 Fatia 6) — ENTREGA do briefing por WhatsApp. Consome os
    * sinais `falatu_daily_briefing` publicados pelo falatuBriefingPass (por
    * isso roda DEPOIS dele no tick) e manda o resumo da manhã pro WhatsApp de
@@ -532,6 +547,7 @@ export class Scheduler {
     try { this.clinicRenewalTaskPass(); } catch (e: any) { console.error('[Scheduler] sweep de renovação clínica falhou', e?.message); }
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
+    try { this.confirmationTimeoutPass(); } catch (e: any) { console.error('[Scheduler] sweep de timeouts de Confirmation falhou', e?.message); }
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

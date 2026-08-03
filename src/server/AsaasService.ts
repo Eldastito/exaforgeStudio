@@ -166,6 +166,37 @@ export class AsaasService {
       PlanService.setBillingStatus(orgId, "suspended");
       billing = "suspended";
     }
+
+    // ADR-152 F2.3 — ponte pro Execution Runtime. Se o payment.id casar com
+    // uma `action_confirmations` viva (method=asaas_payment_webhook), fecha
+    // a ação via ConfirmationEngine.confirm. Aditivo puro: nada do fluxo de
+    // billing acima muda. Idempotente por design — confirm em ação já `done`
+    // devolve dismissed sem reabrir (ADR-152 F2.1). Best-effort: erro aqui
+    // NÃO afeta a resposta do webhook.
+    try { await notifyRuntimeConfirmation(payment, confirmed); } catch (e) { console.warn("[Asaas webhook] notifyRuntimeConfirmation falhou", e); }
+
     return { status: "ok", orgId, billing: billing || "unchanged" };
   }
+}
+
+/**
+ * ADR-152 F2.3 — hook Runtime pro webhook Asaas. Fica FORA da classe pra
+ * quebrar ciclo (ConfirmationEngine importa AsaasService só via handlers, mas
+ * o handler carrega tudo no boot). Só age quando o payment está PAGO (paid
+ * statuses) — não tenta confirmar em OVERDUE/REFUNDED. Idempotência total:
+ * confirm de ação já `done` devolve dismissed (ADR-152 F2.1).
+ */
+async function notifyRuntimeConfirmation(payment: any, confirmed: string): Promise<void> {
+  const paymentId = payment?.id;
+  if (!paymentId) return;
+  const paidStatuses = ["CONFIRMED", "RECEIVED", "RECEIVED_IN_CASH"];
+  if (!paidStatuses.includes(String(confirmed))) return;
+  const { ConfirmationEngine } = await import("./ConfirmationEngine.js");
+  const match = ConfirmationEngine.findByExternalRef("asaas_payment_webhook", String(paymentId));
+  if (!match) return;
+  const paidValue = Number(payment?.value ?? payment?.netValue ?? 0);
+  ConfirmationEngine.confirm(match.orgId, match.confirmation.action_id, {
+    evidence: { source: "asaas_payment_webhook", paymentId, netValue: payment?.netValue ?? null, value: payment?.value ?? null, dueDate: payment?.dueDate ?? null, status: confirmed },
+    resultAmount: paidValue > 0 ? paidValue : null,
+  });
 }

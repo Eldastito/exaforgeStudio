@@ -50,6 +50,7 @@ export interface ExpectInput {
   actionId: string;
   method: ConfirmationMethod | string;
   deadlineAt?: string | null;
+  externalRef?: string | null;   // ADR-152 F2.3: id externo (payment_id Asaas, message_id WhatsApp, ...)
 }
 
 export interface ConfirmInput {
@@ -76,13 +77,37 @@ export class ConfirmationEngine {
     if (!action) throw new Error("Ação não encontrada.");
 
     const existing = db.prepare(`SELECT * FROM action_confirmations WHERE organization_id = ? AND action_id = ?`).get(orgId, input.actionId) as any;
-    if (existing) return { ...existing, evidence: safeParse(existing.evidence_json) };
+    if (existing) {
+      // Se o handler descobre o externalRef só na 1ª chamada (ex.: PIX
+      // criado depois do expect vazio), permite fixar retroativamente numa
+      // pending — mas nunca sobrescreve um externalRef já definido (evita
+      // race de handler chamando 2x com refs diferentes).
+      if (input.externalRef && !existing.external_ref && existing.status === "pending") {
+        db.prepare(`UPDATE action_confirmations SET external_ref = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(input.externalRef, existing.id, orgId);
+        return this.get(orgId, existing.id);
+      }
+      return { ...existing, evidence: safeParse(existing.evidence_json) };
+    }
 
     const id = randomUUID();
-    db.prepare(`INSERT INTO action_confirmations (id, organization_id, action_id, confirmation_method, status, deadline_at) VALUES (?, ?, ?, ?, 'pending', ?)`)
-      .run(id, orgId, input.actionId, input.method, input.deadlineAt || null);
-    try { logAuthEvent(orgId, null, null, "RUNTIME_CONFIRMATION_EXPECT", { actionId: input.actionId, method: input.method, deadlineAt: input.deadlineAt || null }); } catch { /* noop */ }
+    db.prepare(`INSERT INTO action_confirmations (id, organization_id, action_id, confirmation_method, status, deadline_at, external_ref) VALUES (?, ?, ?, ?, 'pending', ?, ?)`)
+      .run(id, orgId, input.actionId, input.method, input.deadlineAt || null, input.externalRef || null);
+    try { logAuthEvent(orgId, null, null, "RUNTIME_CONFIRMATION_EXPECT", { actionId: input.actionId, method: input.method, deadlineAt: input.deadlineAt || null, externalRef: input.externalRef || null }); } catch { /* noop */ }
     return this.get(orgId, id);
+  }
+
+  /**
+   * Resolve uma confirmação PENDENTE pelo id externo — chamado por
+   * subscribers que recebem só o id externo (webhook Asaas conhece
+   * payment.id, não org). Sem match: null. Cross-org: uma única confirmação
+   * pode existir por (org, method, external_ref) — o UNIQUE parcial do
+   * schema garante. Retorna `{orgId, confirmation}`.
+   */
+  static findByExternalRef(method: ConfirmationMethod | string, externalRef: string): { orgId: string; confirmation: any } | null {
+    if (!externalRef) return null;
+    const row = db.prepare(`SELECT * FROM action_confirmations WHERE confirmation_method = ? AND external_ref = ? AND status = 'pending' LIMIT 1`).get(method, externalRef) as any;
+    if (!row) return null;
+    return { orgId: row.organization_id, confirmation: { ...row, evidence: safeParse(row.evidence_json) } };
   }
 
   static get(orgId: string, id: string): any | null {

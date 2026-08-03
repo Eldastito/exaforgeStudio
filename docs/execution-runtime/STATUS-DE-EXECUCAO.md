@@ -93,23 +93,41 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 
 **Contrato de confiança preservado.** Mesmo com `execute` no ar, nenhum handler nesta fatia dispara efeito externo — `defaultExecute` só retorna o mesmo `artifact` do `prepare` + `effect:'noop-2.2'`. A 2.3 sobe cada handler concreto individualmente, com `ConfirmationEngine.expect` amarrado. A mudança de "IA nunca escreve na base de negócio" fica auditável passo a passo.
 
-### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine
-- [ ] `WhatsAppSendCommandHandler` (usa `MessageProviderService.sendMessage`)
-- [ ] `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` (chama `AsaasService`, registra `expect(asaas_payment_webhook)`)
-- [ ] `AlterdataFetchCommandHandler` (leitura via `AlterdataConnectorService`)
-- [ ] `SchedulerActionCommandHandler` (agenda próxima ação por `next_attempt_at`)
-- [ ] `webhookProcessor.ts` — hook Asaas passa a chamar `ConfirmationEngine.confirm(actionId, evidence)`
-- [ ] `Scheduler.confirmationTimeoutPass` — chama `sweepTimeouts` em cada tick
-- [ ] Teste E2E `test-runtime-execute-e2e.ts`
+### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine — **ENTREGUE**
+- [x] `RuntimeCommandHandlers.ts` — 3 handlers concretos auto-registrados via side-effect import no `server.ts`:
+  - **WhatsAppSendCommandHandler** — via `MessageProviderService.sendMessage`; fire-and-forget (SEM `expect`); valida channel pertence à org (isolamento).
+  - **AsaasPixChargeCommandHandler** — cria payment via `AsaasService._req('POST', '/payments')` e IMEDIATAMENTE chama `ConfirmationEngine.expect(action, 'asaas_payment_webhook', externalRef=paymentId, deadline=dueDate+30d)`. Guarda: se `expect` falhar após criar o payment, log WARN + devolve externalRef mesmo assim (`sweepTimeouts` fecha depois).
+  - **AlterdataFetchCommandHandler** — leitura idempotente via `AlterdataConnectorService`; sem `expect`; classifica erros como `permission | external_unavailable | retryable`.
+- [x] `throwHandler(class, msg)` + classificação por status HTTP (Asaas) / mensagem (Alterdata) → `JobQueueError`-ready
+- [x] `ConfirmationEngine.expect` aceita `externalRef` (fixa retroativamente numa pending SEM sobrescrever ref já definida)
+- [x] `ConfirmationEngine.findByExternalRef(method, ref)` — subscriber recebe só o id externo (webhook Asaas conhece `payment.id`, não org)
+- [x] `db.ts` — aditivo `action_confirmations.external_ref` + índice UNIQUE parcial `(org, method, external_ref)`
+- [x] `AsaasService.handleWebhook` — passo aditivo `notifyRuntimeConfirmation(payment, confirmed)` fecha `action_confirmations` viva quando `payment.id` casa. **Aditivo puro:** fluxo billing intacto (asaas-billing 16/16, billing-dunning 10/10). Best-effort: erro no hook Runtime NÃO afeta resposta do webhook.
+- [x] `Scheduler.confirmationTimeoutPass` chama `ConfirmationEngine.sweepTimeouts()` a cada tick
+- [x] `server.ts` — side-effect import de `RuntimeCommandHandlers` no boot
+- [x] `scripts/test-runtime-execute-e2e.ts` — **27/27 checks PASS** (E2E com mocks de MessageProvider + AsaasService._req + AsaasService.getPayment): WhatsApp end-to-end; AsaasPix cria payment + expect com externalRef; `findByExternalRef`; webhook Asaas fecha ação com evidência; webhook duplicado NO-OP; payment desconhecido NO-OP silencioso; `Scheduler.confirmationTimeoutPass` fecha vencidas; validações de payload; Alterdata sem connector → recusa OK; regressão do `prepare`; registry com 8 handlers; isolamento cross-tenant.
+- [x] Regressão zero: 5 suítes ADR-136 (76/76) + runtime-process-fabric (42/42) + runtime-confirmation (32/32) + runtime-executor-execute (22/22) + **asaas-billing (16/16) + billing-dunning (10/10)** (críticos porque tocam o webhook Asaas); `tsc --noEmit` limpo
+- [x] `package.json` — script `test:runtime-execute-e2e`
 
-### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine
-- [ ] `WhatsAppSendCommandHandler` (usa `MessageProviderService.sendMessage`)
-- [ ] `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` (chama `AsaasService`, registra `expect(asaas_payment_webhook)`)
-- [ ] `AlterdataFetchCommandHandler` (leitura via `AlterdataConnectorService`)
-- [ ] `SchedulerActionCommandHandler` (agenda próxima ação por `next_attempt_at`)
-- [ ] `webhookProcessor.ts` — hook Asaas passa a chamar `ConfirmationEngine.confirm(actionId, evidence)`
-- [ ] `Scheduler.confirmationTimeoutPass` — chama `sweepTimeouts` em cada tick
-- [ ] Teste E2E `test-runtime-execute-e2e.ts`
+**Fase 2 CONCLUÍDA.** Execute + Confirmation Engine no ar, ponta a ponta. Handlers concretos disparam efeito externo real (WhatsApp, PIX) atrás das 3 guardas + `execution_runtime_enabled` da org. Nada muda em produção com defaults: `execution_runtime_enabled=0` + `execution_mode='assisted'`.
+
+### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine — **ENTREGUE**
+- [x] `RuntimeCommandHandlers.ts` — 3 handlers concretos auto-registrados via side-effect import no `server.ts`:
+  - **WhatsAppSendCommandHandler** — via `MessageProviderService.sendMessage`; fire-and-forget (SEM `expect`); valida channel pertence à org (isolamento).
+  - **AsaasPixChargeCommandHandler** — cria payment via `AsaasService._req('POST', '/payments')` e IMEDIATAMENTE chama `ConfirmationEngine.expect(action, 'asaas_payment_webhook', externalRef=paymentId, deadline=dueDate+30d)`. Guarda: se `expect` falhar após criar o payment, log WARN + devolve externalRef mesmo assim (`sweepTimeouts` fecha depois).
+  - **AlterdataFetchCommandHandler** — leitura idempotente via `AlterdataConnectorService`; sem `expect`; classifica erros como `permission | external_unavailable | retryable`.
+- [x] `throwHandler(class, msg)` + classificação por status HTTP (Asaas) / mensagem (Alterdata) → `JobQueueError`-ready
+- [x] `ConfirmationEngine.expect` aceita `externalRef` (fixa retroativamente numa pending SEM sobrescrever ref já definida)
+- [x] `ConfirmationEngine.findByExternalRef(method, ref)` — subscriber recebe só o id externo (webhook Asaas conhece `payment.id`, não org)
+- [x] `db.ts` — aditivo `action_confirmations.external_ref` + índice UNIQUE parcial `(org, method, external_ref)`
+- [x] `AsaasService.handleWebhook` — passo aditivo `notifyRuntimeConfirmation(payment, confirmed)` fecha `action_confirmations` viva quando `payment.id` casa. **Aditivo puro:** fluxo billing intacto (asaas-billing 16/16, billing-dunning 10/10). Best-effort: erro no hook Runtime NÃO afeta resposta do webhook.
+- [x] `Scheduler.confirmationTimeoutPass` chama `ConfirmationEngine.sweepTimeouts()` a cada tick
+- [x] `server.ts` — side-effect import de `RuntimeCommandHandlers` no boot
+- [x] `scripts/test-runtime-execute-e2e.ts` — **27/27 checks PASS** (E2E com mocks de MessageProvider + AsaasService._req + AsaasService.getPayment): WhatsApp end-to-end; AsaasPix cria payment + expect com externalRef; `findByExternalRef`; webhook Asaas fecha ação com evidência; webhook duplicado NO-OP; payment desconhecido NO-OP silencioso; `Scheduler.confirmationTimeoutPass` fecha vencidas; validações de payload; Alterdata sem connector → recusa OK; regressão do `prepare`; registry com 8 handlers; isolamento cross-tenant.
+- [x] Regressão zero: 5 suítes ADR-136 (76/76) + runtime-process-fabric (42/42) + runtime-confirmation (32/32) + runtime-executor-execute (22/22) + **asaas-billing (16/16) + billing-dunning (10/10)** (críticos porque tocam o webhook Asaas); `tsc --noEmit` limpo
+- [x] `package.json` — script `test:runtime-execute-e2e`
+
+**Fase 2 CONCLUÍDA.** Execute + Confirmation Engine no ar, ponta a ponta. Handlers concretos disparam efeito externo real (WhatsApp, PIX) atrás das 3 guardas + `execution_runtime_enabled` da org. Nada muda em produção com defaults: `execution_runtime_enabled=0` + `execution_mode='assisted'`.
 
 ## Fase 3 — Outcomes estendidos + UI Operações
 - [ ] Ver `PLANO §Fase 3`
@@ -206,6 +224,29 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Resultado:** Fatia 2.2 concluída — teto do executor subido pra `execute`. **Nenhum efeito externo real ainda** — handlers rodam NO-OP (`effect:'noop-2.2'`). O contrato "IA não escreve na base de negócio" continua valendo até a 2.3.
 - **Pendências criadas:** nenhuma nova. As 10 decisões pendentes do dono (§F) seguem bloqueando F4a/F4c mas não afetam a 2.3.
 - **Próximo passo:** **Fatia 2.3** — handlers concretos (WhatsAppSend/AsaasPix/AsaasCharge/AlterdataFetch/SchedulerAction) + `webhookProcessor` chamando `ConfirmationEngine.confirm` + `Scheduler.confirmationTimeoutPass`. Aguardando aprovação.
+
+### Sessão 2026-08-03 (Fatia 2.3 do ADR-152 — handlers concretos + webhook Asaas)
+- **Fase:** 2 (última fatia — Fase 2 CONCLUÍDA)
+- **Itens executados:** todos os 10 da Fatia 2.3 (3 handlers concretos, ConfirmationEngine.externalRef + findByExternalRef, aditivo action_confirmations.external_ref + UNIQUE parcial, AsaasService.handleWebhook estendido, Scheduler.confirmationTimeoutPass, server.ts side-effect, teste E2E)
+- **Arquivos criados:**
+  - `src/server/RuntimeCommandHandlers.ts` (WhatsAppSend + AsaasPixCharge + AlterdataFetch, auto-registrados)
+  - `scripts/test-runtime-execute-e2e.ts` (27/27 checks)
+- **Arquivos alterados:**
+  - `src/server/db.ts` (ALTER action_confirmations ADD external_ref + índice UNIQUE parcial)
+  - `src/server/ConfirmationEngine.ts` (expect aceita externalRef; findByExternalRef novo)
+  - `src/server/AsaasService.ts` (notifyRuntimeConfirmation dentro do handleWebhook — aditivo puro)
+  - `src/server/Scheduler.ts` (import ConfirmationEngine + confirmationTimeoutPass no tick)
+  - `server.ts` (side-effect import de RuntimeCommandHandlers)
+  - `package.json` (test:runtime-execute-e2e)
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md`
+- **Testes executados:**
+  - `npm run test:runtime-execute-e2e` → **27/27 OK**
+  - Regressão ADR-136 (76/76); runtime-process-fabric (42/42); runtime-confirmation (32/32); runtime-executor-execute (22/22)
+  - Regressão CRÍTICA (tocamos webhook Asaas): asaas-billing 16/16; billing-dunning 10/10
+  - `npx tsc --noEmit` → limpo
+- **Resultado:** Fase 2 CONCLUÍDA. Runtime dispara efeito externo real ponta-a-ponta atrás de 4 gates (execution_runtime_enabled + policy + autonomy=execute + execution_mode≥approved_execution). Nenhuma org existente afetada (todos os defaults bloqueiam).
+- **Pendências criadas:** nenhuma nova.
+- **Próximo passo:** **Fase 3 — Outcomes estendidos + UI Operações** (aba no ExecutiveView + Exception Center categorizado + campos aditivos em action_outcomes). É lógica read-mostly + UI; não sobe efeito externo novo. As 10 decisões pendentes do dono (§F) seguem bloqueando F4a/F4c mas não afetam F3.
 
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …

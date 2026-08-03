@@ -7274,6 +7274,17 @@ const initDb = () => {
         ON action_confirmations (organization_id, confirmation_method, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar action_confirmations (ADR-152 F2.1)', e); }
+
+  // ADR-152 Fatia 2.3 — handlers concretos + webhook Asaas → Confirmation.
+  // `external_ref` amarra a confirmação a um id EXTERNO do subscriber (payment
+  // do Asaas, sync run do Alterdata, message id do WhatsApp, ...). Quando o
+  // evento externo chega, o subscriber procura a confirmação por (org?,
+  // method, external_ref) — sem `orgId` do lado do subscriber, o RESOLVE
+  // recupera a org da própria linha (padrão do webhook Asaas: só o payment.id
+  // chega, não a org). UNIQUE(org, method, external_ref) evita amarrar 2
+  // confirmações à mesma ref (idempotência forte).
+  try { db.exec(`ALTER TABLE action_confirmations ADD COLUMN external_ref TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_confirmations_extref ON action_confirmations (organization_id, confirmation_method, external_ref) WHERE external_ref IS NOT NULL`); } catch(e){}
 };
 
 initDb();

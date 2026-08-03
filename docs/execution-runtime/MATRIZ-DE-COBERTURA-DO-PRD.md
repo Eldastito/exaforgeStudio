@@ -124,7 +124,9 @@ Campos:
 `[~] PARCIAL` — Registry + modo `execute` (F2.2) prontos; handlers concretos vêm na F2.3. `CommandExecutorService.execute(orgId, actionId)` corre com 3 guardas em série (`policy_missing → autonomy_below_execute → execution_mode_blocked → action_not_approved/action_terminal → no_handler`) — cada rejeição AUDITADA com `error_code` explícito em `action_execution_log`. Handlers desta fatia (2.2) são NO-OP (`effect:'noop-2.2'`); a 2.3 pluga efeito real.
 | Executor do PRD | Status | Onde |
 |---|---|---|
-| WhatsApp Agent | [ ] F2.3 | `WhatsAppSendCommandHandler` |
+| WhatsApp Agent | [x] F2.3 | `WhatsAppSendCommandHandler` (via MessageProviderService.sendMessage) |
+| Financial Agent (Asaas PIX) | [x] F2.3 | `AsaasPixChargeCommandHandler` (cria payment + expect(asaas_payment_webhook) com externalRef) |
+| ERP Connector (Alterdata read) | [x] F2.3 | `AlterdataFetchCommandHandler` (leitura via AlterdataConnectorService) |
 | CRM Agent | [~] parcial via handlers | Reusa services existentes |
 | Financial Agent | [ ] F2 | `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` |
 | Retail Agent | [~] existe como service | Formalizado como handler em F2 |

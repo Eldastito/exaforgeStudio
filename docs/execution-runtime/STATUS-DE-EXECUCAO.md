@@ -142,9 +142,18 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - [x] Regressão zero: 5 suítes ADR-136 (76/76) + runtime-process-fabric (42/42) + runtime-confirmation (32/32) + runtime-executor-execute (22/22) + runtime-execute-e2e (27/27) + asaas-billing (16/16) + billing-dunning (10/10); `tsc --noEmit` limpo
 - [x] `package.json` — script `test:runtime-operations`
 
-### Fatia 3.2 — Aba "Operações" no ExecutiveView
-- [ ] `src/features/ExecutiveView.tsx` — aba `Operações` paralela à "Plano de Ação". Blocos: Em execução (`runtime/operations/overview.running`), Concluído hoje (categorias explícitas do outcomes), Exceções categorizadas com "consequência de não decidir", Indicadores. RBAC: só usuário com permissão do módulo `runtime` vê a aba.
-- [ ] Teste `test-runtime-ui-operations.ts` (opcional — a UI é consumo direto das rotas testadas em 3.1).
+### Fatia 3.2 — Aba "Operações" no ExecutiveView — **ENTREGUE**
+- [x] `src/features/ExecutiveView.tsx` — aba `Operações` paralela à "Plano de Ação". Gateada por `isMasterAdmin || canAccessModule('runtime')` (cosmético; segurança real é `runtimeGate + enforceModulePermission` no backend).
+- [x] `OperacoesTab` consome as 4 rotas de F3.1 em paralelo:
+  - **Bloco 1 "Em execução":** `overview.running.{processes, awaitingApproval, awaitingConfirmation}` + `exceptionsCount`.
+  - **Bloco 2 "Concluído hoje":** `overview.completedToday.{processes, actions, outcomes.count, outcomes.realized}` + 4 cards SEPARADOS pra categorias explícitas (`timeSavedMinutes | revenueRecovered | costAvoided | lossPrevented`) — com nota explicando "nunca somamos entre elas" (ADR-085 D4).
+  - **Bloco 3 "Exceções categorizadas":** lista com badge colorido por categoria (`credential_missing` vermelho, `sla_at_risk` amarelo, `integration_failed` laranja, `conflict` fúcsia), label humano-legível da fonte (`process_escalated | action_overdue | job_dead_letter | confirmation_timeout`), tempo relativo ("há 5 min"), `recommendedAction` como legenda itálica.
+  - **Bloco 4 "Indicadores":** 8 cards de contadores (processes total/failed/escalated, actions awaiting, confirmations pending/timed_out, jobs pending/failed) — destaques em amarelo quando > 0.
+- [x] 403 do backend → tela dedicada "Execution Runtime desligado" com instruções pro operador ligar a flag e configurar `agent_policies` — não deixa a UI travada com erro genérico.
+- [x] Helpers puros: `relativeTime(iso)`, `minutesLabel(m)`, `sourceLabel(source)`, `exceptionColor(category)`. Reusa `<Metric>` e `<EmptyHint>` existentes da aba Plano de Ação (regressão zero).
+- [x] `tsc --noEmit` limpo; regressão zero (nenhuma alteração de comportamento nas outras abas — só adicionou tab condicional).
+
+**Fase 3 CONCLUÍDA.** Backend + UI no ar. Nenhum efeito externo novo (todas as rotas são GET). Nada muda em produção sem `execution_runtime_enabled=1` na org.
 
 ## Fase 4a — Piloto Retail Closing
 - [!] BLOQUEADO em decisões 1, 2, 5 e 8 do `DECISOES-E-PENDENCIAS.md §F`
@@ -282,6 +291,21 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Resultado:** Fatia 3.1 concluída — backend do Exception Center + campos categorizados no outcomes. Sem UI ainda (Fatia 3.2). Nenhum efeito externo novo — só queries de leitura sobre estado existente.
 - **Pendências criadas:** nenhuma nova.
 - **Próximo passo:** **Fatia 3.2** — aba "Operações" no ExecutiveView consumindo as 4 rotas de /operations. Cosmético + guardado por RBAC. Aguardando aprovação.
+
+### Sessão 2026-08-03 (Fatia 3.2 do ADR-152 — aba "Operações" no ExecutiveView)
+- **Fase:** 3 (última fatia — Fase 3 CONCLUÍDA)
+- **Itens executados:** todos os 5 da Fatia 3.2 (aba condicional gateada por RBAC frontend, OperacoesTab com 4 blocos consumindo as 4 rotas da F3.1, tela dedicada pra 403 do runtimeGate, helpers puros, regressão via tsc)
+- **Arquivos criados:** nenhum novo
+- **Arquivos alterados:**
+  - `src/features/ExecutiveView.tsx` (+~180 linhas — imports, tab type, tab condicional, OperacoesTab, helpers)
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md`
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md`
+- **Testes executados:**
+  - Regressão runtime + ADR-136: 8 suítes (31+42+32+22+27+16+17+17 = 204/204)
+  - `npx tsc --noEmit` → limpo (exit 0)
+- **Resultado:** Fatia 3.2 concluída — aba Operações no ar, guardada por 3 camadas (RBAC frontend cosmético + RBAC backend + runtimeGate flag). Nada muda em produção sem `execution_runtime_enabled=1`. Fase 3 CONCLUÍDA.
+- **Pendências criadas:** nenhuma nova.
+- **Próximo passo:** **Fase 4 — pilotos**. Retail Closing (4a) → Cobrança (4b) → Recuperação Comercial (4c). BLOQUEADAS nas 10 decisões pendentes do dono do produto (§F do DECISOES-E-PENDENCIAS.md — Sicredi, LGPD, org piloto, régua do shadow, etc). Sem essas decisões, F4 não sai.
 
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …

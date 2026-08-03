@@ -2,10 +2,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/button';
 import { toast } from '@/src/lib/toast';
-import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target } from 'lucide-react';
+import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target, Activity, AlertTriangle, Clock, Zap } from 'lucide-react';
+import { useStore } from '@/src/store/useStore';
 
 type Msg = { role: 'user' | 'ai'; text: string };
-type Tab = 'conversar' | 'plano' | 'funciona';
+type Tab = 'conversar' | 'plano' | 'funciona' | 'operacoes';
 
 const DOMAIN_LABEL: Record<string, string> = {
   finance: 'Finanças', production: 'Produção', procurement: 'Compras', inventory: 'Estoque',
@@ -23,6 +24,12 @@ const SUGESTOES = [
 
 export function ExecutiveView() {
   const [tab, setTab] = useState<Tab>('conversar');
+  // ADR-152 F3.2 — aba Operações só pra quem tem permissão do módulo `runtime`
+  // (RBAC granular ADR-095) OU o operador da plataforma. Cosmético; segurança
+  // real é o runtimeGate + enforceModulePermission no backend (retorna 403).
+  const canAccessModule = useStore(s => s.canAccessModule);
+  const isMasterAdmin = useStore(s => s.isMasterAdmin);
+  const showOperacoes = isMasterAdmin || canAccessModule('runtime');
 
   return (
     <div className="flex-1 flex flex-col bg-zinc-950 overflow-hidden">
@@ -35,9 +42,10 @@ export function ExecutiveView() {
           <TabButton active={tab === 'conversar'} onClick={() => setTab('conversar')} icon={<MessageSquare className="h-4 w-4" />} label="Conversar" />
           <TabButton active={tab === 'plano'} onClick={() => setTab('plano')} icon={<ListChecks className="h-4 w-4" />} label="Plano de Ação" />
           <TabButton active={tab === 'funciona'} onClick={() => setTab('funciona')} icon={<TrendingUp className="h-4 w-4" />} label="O que funciona" />
+          {showOperacoes && <TabButton active={tab === 'operacoes'} onClick={() => setTab('operacoes')} icon={<Activity className="h-4 w-4" />} label="Operações" />}
         </div>
       </div>
-      {tab === 'conversar' ? <ConversarTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : <FuncionaTab />}
+      {tab === 'conversar' ? <ConversarTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : <FuncionaTab />}
     </div>
   );
 }
@@ -390,4 +398,202 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
 
 function EmptyHint({ text }: { text: string }) {
   return <p className="text-xs text-zinc-500 rounded-lg border border-dashed border-zinc-800 p-4">{text}</p>;
+}
+
+// ===== Aba: Operações (ADR-152 F3.2 — Exception Center + Impact do dia) =====
+// Consome /api/runtime/operations/{overview,exceptions,indicators,ledger}.
+// Gateado por `runtimeGate` no backend (flag `execution_runtime_enabled` da
+// org) — se desligado, mostra o card de habilitação em vez do painel.
+
+const EXCEPTION_LABEL: Record<string, string> = {
+  credential_missing: 'Credencial ausente',
+  sla_at_risk: 'SLA vencido',
+  integration_failed: 'Integração falhou',
+  conflict: 'Conflito / dado inválido',
+  decision_needed: 'Decisão humana',
+  approval_needed: 'Aprovação pendente',
+  data_missing: 'Dado faltante',
+  risk_high: 'Risco elevado',
+  irreversible_action: 'Ação irreversível',
+  sensitive_customer: 'Cliente sensível',
+};
+const exceptionColor = (cat: string): string => {
+  switch (cat) {
+    case 'credential_missing': return 'text-rose-300 bg-rose-500/10 border-rose-500/30';
+    case 'sla_at_risk': return 'text-amber-300 bg-amber-500/10 border-amber-500/30';
+    case 'integration_failed': return 'text-orange-300 bg-orange-500/10 border-orange-500/30';
+    case 'conflict': return 'text-fuchsia-300 bg-fuchsia-500/10 border-fuchsia-500/30';
+    default: return 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30';
+  }
+};
+
+const minutesLabel = (m: number): string => {
+  const n = Math.trunc(m);
+  if (n <= 0) return '—';
+  if (n < 60) return `${n} min`;
+  const h = Math.floor(n / 60);
+  const rem = n % 60;
+  return rem ? `${h}h ${rem}min` : `${h}h`;
+};
+
+function OperacoesTab() {
+  const [overview, setOverview] = useState<any | null>(null);
+  const [exceptions, setExceptions] = useState<any[]>([]);
+  const [indicators, setIndicators] = useState<Record<string, number> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [gateError, setGateError] = useState<string | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    setGateError(null);
+    Promise.all([
+      apiFetch('/api/runtime/operations/overview'),
+      apiFetch('/api/runtime/operations/exceptions?limit=50'),
+      apiFetch('/api/runtime/operations/indicators'),
+    ]).then(async ([oR, eR, iR]) => {
+      // Runtime não habilitado (flag off) → 403 uniforme
+      if (oR.status === 403) {
+        const j = await oR.json().catch(() => ({}));
+        setGateError(j?.error || 'Execution Runtime não está habilitado para esta organização.');
+        return;
+      }
+      const [o, e, i] = await Promise.all([
+        oR.json().catch(() => null),
+        eR.json().catch(() => ({ exceptions: [] })),
+        iR.json().catch(() => ({})),
+      ]);
+      setOverview(o || null);
+      setExceptions(Array.isArray(e?.exceptions) ? e.exceptions : []);
+      setIndicators(i && typeof i === 'object' ? i : {});
+    }).catch(() => setGateError('Falha ao carregar o painel de Operações.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><RefreshCw className="h-5 w-5 animate-spin mr-2" /> Carregando Operações…</div>;
+
+  if (gateError) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="max-w-md rounded-xl border border-amber-500/40 bg-amber-500/5 p-5">
+          <div className="flex items-center gap-2 text-amber-300 font-semibold"><ShieldCheck className="h-5 w-5" /> Execution Runtime desligado</div>
+          <p className="text-sm text-zinc-300 mt-2">{gateError}</p>
+          <p className="text-xs text-zinc-500 mt-3">Habilitação é feita pelo operador da plataforma (flag <code className="text-zinc-400">execution_runtime_enabled</code>). Depois de ligar, é preciso configurar políticas por processo em <em>agent_policies</em> (autonomia = <code>execute</code> + modo <code>approved_execution</code>) para o Runtime rodar ações automaticamente.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const running = overview?.running || { processes: 0, awaitingApproval: 0, awaitingConfirmation: 0 };
+  const today = overview?.completedToday || { processes: 0, actions: 0, outcomes: { count: 0, realized: 0, timeSavedMinutes: 0, revenueRecovered: 0, costAvoided: 0, lossPrevented: 0 } };
+  const cats = today.outcomes || {};
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex items-center gap-2 text-sm text-zinc-300">
+          <Activity className="h-4 w-4 text-indigo-400" />
+          Painel de <strong>Operações</strong> — processos em execução, resultado do dia, exceções e indicadores. Atualiza ao recarregar.
+          <button onClick={load} className="ml-auto inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"><RefreshCw className="h-3.5 w-3.5" /> Atualizar</button>
+        </div>
+
+        {/* Bloco 1 — Em execução */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><Zap className="h-3.5 w-3.5" /> Em execução</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Metric label="Processos ativos" value={String(running.processes || 0)} />
+            <Metric label="Aguardando aprovação" value={String(running.awaitingApproval || 0)} accent={running.awaitingApproval > 0 ? 'amber' : undefined} />
+            <Metric label="Aguardando confirmação externa" value={String(running.awaitingConfirmation || 0)} />
+            <Metric label="Exceções vivas" value={String(overview?.exceptionsCount || 0)} accent={overview?.exceptionsCount > 0 ? 'amber' : undefined} />
+          </div>
+        </div>
+
+        {/* Bloco 2 — Concluído hoje */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Concluído hoje</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Metric label="Processos concluídos" value={String(today.processes || 0)} accent={today.processes > 0 ? 'emerald' : undefined} />
+            <Metric label="Ações concluídas" value={String(today.actions || 0)} accent={today.actions > 0 ? 'emerald' : undefined} />
+            <Metric label="Outcomes registrados" value={String(cats.count || 0)} />
+            <Metric label="Realizado (soma bruta)" value={brl(cats.realized || 0)} />
+          </div>
+          {/* Categorias explícitas (ADR-152 F3.1) — NUNCA somamos entre elas
+              porque as unidades e interpretações são diferentes. Aqui a UI
+              mostra cada uma como card próprio. */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <Metric label="Tempo devolvido ao gestor" value={minutesLabel(Number(cats.timeSavedMinutes || 0))} />
+            <Metric label="Receita recuperada" value={brl(cats.revenueRecovered || 0)} accent={Number(cats.revenueRecovered || 0) > 0 ? 'emerald' : undefined} />
+            <Metric label="Custo evitado" value={brl(cats.costAvoided || 0)} accent={Number(cats.costAvoided || 0) > 0 ? 'emerald' : undefined} />
+            <Metric label="Perda evitada" value={brl(cats.lossPrevented || 0)} accent={Number(cats.lossPrevented || 0) > 0 ? 'emerald' : undefined} />
+          </div>
+          <p className="text-[11px] text-zinc-500 mt-2">Categorias separadas de propósito — cada uma na sua unidade. Nunca somamos "tempo" com "R$" pra não inflar o número.</p>
+        </div>
+
+        {/* Bloco 3 — Exceções categorizadas */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" /> Exceções ({exceptions.length})</h3>
+          {exceptions.length === 0 ? (
+            <EmptyHint text="Nada exigindo intervenção agora. ✨" />
+          ) : (
+            <div className="space-y-2">
+              {exceptions.map((e) => (
+                <div key={`${e.source}:${e.id}`} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${exceptionColor(e.category)}`}>{EXCEPTION_LABEL[e.category] || e.category}</span>
+                    <span className="text-[11px] text-zinc-500">{sourceLabel(e.source)}</span>
+                    {e.since && <span className="text-[11px] text-zinc-500 inline-flex items-center gap-1"><Clock className="h-3 w-3" /> {relativeTime(e.since)}</span>}
+                  </div>
+                  <p className="mt-1 text-sm text-zinc-200">{e.subject}</p>
+                  <p className="mt-1 text-xs text-zinc-400 italic">{e.recommendedAction}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Bloco 4 — Indicadores por status */}
+        {indicators && Object.keys(indicators).length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><Target className="h-3.5 w-3.5" /> Indicadores</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Metric label="Processos totais" value={String(indicators.processesTotal || 0)} />
+              <Metric label="Processos falhos" value={String(indicators.processesFailed || 0)} accent={indicators.processesFailed > 0 ? 'amber' : undefined} />
+              <Metric label="Processos escalados" value={String(indicators.processesEscalated || 0)} accent={indicators.processesEscalated > 0 ? 'amber' : undefined} />
+              <Metric label="Ações aguardando aprovação" value={String(indicators.actionsAwaitingApproval || 0)} />
+              <Metric label="Confirmações pendentes" value={String(indicators.confirmationsPending || 0)} />
+              <Metric label="Confirmações vencidas" value={String(indicators.confirmationsTimedOut || 0)} accent={indicators.confirmationsTimedOut > 0 ? 'amber' : undefined} />
+              <Metric label="Jobs pendentes" value={String(indicators.jobsPending || 0)} />
+              <Metric label="Jobs falhados (dead-letter)" value={String(indicators.jobsFailed || 0)} accent={indicators.jobsFailed > 0 ? 'amber' : undefined} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function sourceLabel(s: string): string {
+  switch (s) {
+    case 'process_escalated': return 'Processo escalado';
+    case 'process_failed': return 'Processo falhou';
+    case 'action_overdue': return 'Ação com deadline vencido';
+    case 'job_dead_letter': return 'Job na dead-letter';
+    case 'confirmation_timeout': return 'Confirmação vencida';
+    default: return s;
+  }
+}
+
+function relativeTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const diffMs = Date.now() - d.getTime();
+    if (diffMs < 0) return d.toLocaleString('pt-BR');
+    const min = Math.floor(diffMs / 60000);
+    if (min < 1) return 'agora mesmo';
+    if (min < 60) return `há ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `há ${h}h`;
+    const days = Math.floor(h / 24);
+    return `há ${days} dia${days > 1 ? 's' : ''}`;
+  } catch { return iso; }
 }

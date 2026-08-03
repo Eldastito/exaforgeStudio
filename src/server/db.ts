@@ -7300,6 +7300,37 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN cost_avoided REAL`); } catch(e){}
   try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN revenue_recovered REAL`); } catch(e){}
   try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN loss_prevented REAL`); } catch(e){}
+
+  // ADR-152 Fatia 4b.3 — cadência multi-tentativa de cobrança + re-emissão
+  // automática de PIX. Nova tabela `collection_followup_attempts` guarda
+  // as tentativas 2 e 3 enviadas (a 1ª é implícita — sempre existe via
+  // send_reminder do playbook). UNIQUE(org, action, attempt_number)
+  // garante idempotência forte do Scheduler.collectionCadencePass (2
+  // ticks concorrentes ou 2 workers não duplicam envio).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS collection_followup_attempts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        attempt_number INTEGER NOT NULL,       -- 2 (firme) | 3 (aviso de negativação)
+        template_key TEXT,                     -- 'firm' | 'default_notice'
+        message_id TEXT,                       -- wamid ou id do provedor
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_followup_unique
+        ON collection_followup_attempts (organization_id, action_id, attempt_number);
+      CREATE INDEX IF NOT EXISTS idx_collection_followup_action
+        ON collection_followup_attempts (organization_id, action_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar collection_followup_attempts (ADR-152 F4b.3)', e); }
+  // Aditivos opt-in em organization_settings. `collection_cadence_enabled=0`
+  // por default garante que orgs pré-existentes NÃO passam a receber
+  // cobranças automáticas T2/T3 sem o dono ativar. Dias configuráveis via
+  // CLI/API por org (padrão do PRD §13.5).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_cadence_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_reminder_2_days_after_due INTEGER DEFAULT 3`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_reminder_3_days_after_due INTEGER DEFAULT 7`); } catch(e){}
 };
 
 initDb();

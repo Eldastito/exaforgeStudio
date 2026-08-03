@@ -435,6 +435,26 @@ export class Scheduler {
   }
 
   /**
+   * ADR-152 Fatia 4b.3 — cadência multi-tentativa de cobrança. Delega ao
+   * `CollectionCadenceService.tickAll` que percorre orgs opt-in
+   * (`collection_cadence_enabled=1`) e envia T2 (firme) / T3 (aviso de
+   * negativação) via WhatsApp conforme os thresholds em dias por-org.
+   * Best-effort com múltiplas guardas (RN G-4b.3-1..10): idempotência
+   * forte via UNIQUE(org, action, attempt), pausa se cliente respondeu
+   * (audit log da F4b.2), pausa se receivable já fechou. Import dinâmico
+   * pra quebrar ciclo (CollectionCadenceService usa MessageProviderService).
+   */
+  static async collectionCadencePass() {
+    try {
+      const { CollectionCadenceService } = await import("./CollectionCadenceService.js");
+      const r = await CollectionCadenceService.tickAll();
+      if (r.sent > 0 || r.orgsScanned > 0) {
+        console.info(`[Runtime F4b.3] cadência de cobrança: ${r.orgsScanned} org(s), ${r.sent} enviada(s), ${r.skipped} skip.`);
+      }
+    } catch (e: any) { console.error("[Runtime F4b.3] cadência falhou", e?.message); }
+  }
+
+  /**
    * FalaTu (ADR-151 Fatia 6) — ENTREGA do briefing por WhatsApp. Consome os
    * sinais `falatu_daily_briefing` publicados pelo falatuBriefingPass (por
    * isso roda DEPOIS dele no tick) e manda o resumo da manhã pro WhatsApp de
@@ -548,6 +568,12 @@ export class Scheduler {
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     try { this.confirmationTimeoutPass(); } catch (e: any) { console.error('[Scheduler] sweep de timeouts de Confirmation falhou', e?.message); }
+    // ADR-152 F4b.3 — cadência multi-tentativa de cobrança (T2/T3). Opt-in
+    // por org via `collection_cadence_enabled=1`. Fica DEPOIS de
+    // confirmationTimeoutPass pra a decisão de T2/T3 usar o estado
+    // atualizado das confirmações (uma cobrança que virou timed_out no
+    // sweep sai da fila e não recebe follow-up desnecessário).
+    await this.collectionCadencePass().catch(e => console.error('[Scheduler] cadência de cobrança F4b.3 falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

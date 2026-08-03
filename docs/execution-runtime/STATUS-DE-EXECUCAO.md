@@ -398,6 +398,38 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
   - F4b.4 (nova) — agendar re-check automático quando intent=`promise` (via `SchedulerActionCommandHandler` ou `ScheduleWakeup`-equivalente). Hoje o sinal é publicado mas o dono precisa lembrar de conferir na data prometida.
 - **Próximo passo:** decidir com o dono se F4b.3 (mais automação de cobrança) ou F4c (Recuperação Comercial — que segue bloqueada em decisão #4 LGPD) vem primeiro.
 
+### Sessão 2026-08-03 (Fatia 4b.3 do ADR-152 — Cadência multi-tentativa + Resend PIX)
+- **Fase:** 4b.3 (extensão da F4b/F4b.2 — Piloto Cobrança)
+- **Itens executados:** 2 subsistemas independentes na mesma fatia:
+  - (A) **Cadência multi-tentativa** — Scheduler.collectionCadencePass roda a cada tick, envia T2 (firme) aos D+3 dias e T3 (aviso de negativação) aos D+7 dias se cliente não respondeu e cobrança segue viva.
+  - (B) **Resend PIX automático** — CollectionReplyService quando intent=`resend_pix` chama AsaasService.getPayment + envia WhatsApp com invoiceUrl (não gera PIX novo — reusa o pending).
+- **Arquivos criados:**
+  - `src/server/CollectionCadenceService.ts` — `tickAll` + `runForOrg` + guardas G-4b.3-1..10.
+  - `src/server/CollectionResendPixService.ts` — `sendNow` + fail-loud via BusinessSignal.
+  - `scripts/test-cobranca-cadencia-multitentativa.ts` — **38/38 checks** (18 cadência + 6 resend + 14 misc/isolamento).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — nova tabela `collection_followup_attempts` (UNIQUE(org, action, attempt_number)) + 3 aditivos org_settings (`collection_cadence_enabled INTEGER DEFAULT 0`, `collection_reminder_2_days_after_due INTEGER DEFAULT 3`, `collection_reminder_3_days_after_due INTEGER DEFAULT 7`). Aditivos posicionados após F3.1 (linha 7302), antes de `initDb();`.
+  - `src/server/Scheduler.ts` — nova `collectionCadencePass()` (import dinâmico) chamada no tick após `confirmationTimeoutPass` (ordem importa: T2/T3 usa o estado atualizado das confirmações).
+  - `src/server/CollectionReplyService.ts` — expõe `channelId` no LiveCollection + chama `CollectionResendPixService.sendNow` quando intent=`resend_pix` (fallback pra reply canned genérica se resend falha).
+  - `package.json` — script `test:cobranca-cadencia-multitentativa`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §13 atualiza "Cadência executada pelo Runtime" pra [x].
+- **Testes executados:**
+  - `npm run test:cobranca-cadencia-multitentativa` → **38/38 OK**
+  - Regressão sem quebras: `test:cobranca-intent-classifier` (35/35), `test:piloto-cobranca` (38/38), `test:runtime-execute-e2e` (27/27), `test:runtime-confirmation` (32/32), `test:runtime-operations` (31/31), `test:asaas-billing` (16/16), `test:business-signals` (12/12), `test:clinic-reminder-reply` (37/37), `test:runtime-process-fabric` (42/42)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:**
+  - (i) **Cadência opt-in por org** via `collection_cadence_enabled=0` default. Orgs pré-existentes NÃO ganham cadência automática sem o dono ativar (evita spam pós-deploy).
+  - (ii) **T3 apenas informativa** ("vamos precisar informar as agências de proteção ao crédito", não "vou negativar amanhã") — CDC §42/§71. Publica sinal severity=`risk` pro dono acompanhar; NÃO negativa de fato.
+  - (iii) **Idempotência por INSERT-first**: reservamos a linha de attempt ANTES de enviar; se UNIQUE colide, outro tick pegou. Se envio falha, DELETE + BusinessSignal + próximo tick retenta.
+  - (iv) **Cliente respondeu pausa cadência** — busca em `auth_audit_logs` por `RUNTIME_COLLECTION_REPLY_INTERPRETED` (F4b.2). Qualquer intent (inclusive `unknown`) pausa; o dono decide próximo passo via aba Operações.
+  - (v) **Resend PIX reusa paymentId existente** (não cria novo no Asaas) — evita confusão pro cliente e polução no dashboard Asaas.
+  - (vi) **invoiceUrl** em vez de PIX copia-cola bruto — página do Asaas dá QR + copia-cola + boleto + cartão num link único, UX melhor.
+- **Cross-service change:** hook `CollectionReplyService` → `CollectionResendPixService.sendNow` é ADITIVO — se sendNow retorna `sent:false`, o reply canned original continua sendo devolvido. Nenhum caller pré-existente muda comportamento.
+- **Resultado:** F4b.3 fecha os últimos gaps do §13.7 do PRD ("Cadência executada pelo Runtime"). Runtime agora COBRA sozinho (T1 inicial + T2 firme + T3 aviso) atrás de 4 camadas: `execution_runtime_enabled=1` + policies `execute+approved_execution` + `collection_cadence_enabled=1` + resposta do cliente pausa. E responde `resend_pix` reenviando o link real — não apenas prometendo.
+- **Pendências criadas:**
+  - F4b.4 (nova) — agendar re-check automático quando intent=`promise` via `SchedulerActionCommandHandler`. Hoje o sinal é publicado mas o dono precisa lembrar de conferir na data prometida.
+- **Próximo passo:** decidir com o dono se F4b.4 (automação restante do promise) ou F4c (Recuperação Comercial — bloqueada em decisão #4 LGPD) vem primeiro.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

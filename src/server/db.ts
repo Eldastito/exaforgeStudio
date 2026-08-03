@@ -7066,6 +7066,33 @@ const initDb = () => {
   // (convenção nº 10). O Master Admin segue com acesso independente da flag
   // (gate na rota); clientes só enxergam o módulo quando o operador liga aqui.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-151 Fatia 4 — compras com conferência: lista planejada × nota fiscal
+  // fotografada. Cada conferência congela a LEITURA da nota (invoice_json,
+  // snapshot — reler a foto depois pode dar outra leitura) e o MATCHING
+  // sugerido (matching_json). O humano resolve (confirmed/discarded); nunca
+  // DELETE (convenção nº 9). O que a confirmação marcou vive nos próprios
+  // falatu_list_items (realized) — aqui fica o registro da conferência.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS falatu_purchase_checks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        list_id TEXT NOT NULL,
+        supplier_name TEXT,
+        invoice_json TEXT NOT NULL,               -- snapshot da leitura ADR-021 {supplierName, items[], confidence}
+        matching_json TEXT NOT NULL,              -- {matched[], missing[], extras[]} sugeridos (o humano decide)
+        confidence INTEGER,                       -- 0..100 geral da leitura da nota
+        status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'confirmed' | 'discarded'
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        resolved_by TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_falatu_purchase_checks_list
+        ON falatu_purchase_checks (organization_id, list_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela ADR-151 F4 (conferência de compras)', e); }
 };
 
 initDb();

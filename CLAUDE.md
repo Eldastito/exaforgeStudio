@@ -20,7 +20,7 @@ Repositório monolítico (frontend React + backend Node/Express + SQLite via `be
 | ADR-136 | Decision-Action Ledger (`business_signals`) | em produção — usado por Retail, Escola, Clínica (F47) |
 | ADR-132 | Sinais finos | em produção |
 | ADR-081 | Conectores TISS (roadmap TISS XML/WS) | roadmap — molde documentado; aditivo à ADR-145 |
-| ADR-151 | FalaTu — captura multimodal "Fala → Faz → Confere" (porte do repo `Eldastito/FalaTu`) | Fatias 1–3 em produção — multi-tenant opt-in + captura via WhatsApp no canal interno ("anota …" → inbox; confere/descarta na conversa); compras/memória nas Fatias 4–5 |
+| ADR-151 | FalaTu — captura multimodal "Fala → Faz → Confere" (porte do repo `Eldastito/FalaTu`) | Fatias 1–4 em produção — multi-tenant opt-in + WhatsApp no canal interno + compras com conferência (lista × nota fotografada, reconciliação humana); memória/briefing proativo na Fatia 5 |
 
 ## ADR-145 — CLÍNICA JORNADA DE TRATAMENTO (fechado 2026-08-01)
 

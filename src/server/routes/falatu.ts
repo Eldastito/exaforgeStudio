@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
+import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -93,6 +94,38 @@ router.get("/lists/:id/items", (req: AuthRequest, res): any => {
 router.post("/list-items/:id/toggle", (req: AuthRequest, res): any => {
   try { res.json(FalaTuService.toggleListItem(req.organizationId!, actorId(req), req.params.id, !!req.body?.realized)); }
   catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+// ── Compras com conferência (Fatia 4): lista planejada × nota fotografada ──
+
+router.post("/lists/:id/purchase-check", async (req: AuthRequest, res): Promise<any> => {
+  const { image } = req.body || {};
+  if (typeof image?.mimeType !== "string" || typeof image?.data !== "string") {
+    return res.status(400).json({ error: "image deve ter mimeType e data (base64)." });
+  }
+  if (image.data.length > MAX_MEDIA_B64) return res.status(400).json({ error: "image muito grande (máx ~1.4MB)." });
+  try {
+    res.json(await FalaTuPurchaseService.check(req.organizationId!, actorId(req), req.params.id, image));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/lists/:id/purchase-check", async (req: AuthRequest, res): Promise<any> => {
+  res.json(FalaTuPurchaseService.latestForList(req.organizationId!, actorId(req), req.params.id));
+});
+
+router.post("/purchase-checks/:id/confirm", async (req: AuthRequest, res): Promise<any> => {
+  const { listItemIds, addExtras } = req.body || {};
+  if (listItemIds !== undefined && !Array.isArray(listItemIds)) return res.status(400).json({ error: "listItemIds deve ser array." });
+  if (addExtras !== undefined && !Array.isArray(addExtras)) return res.status(400).json({ error: "addExtras deve ser array." });
+  try {
+    res.json(FalaTuPurchaseService.confirm(req.organizationId!, actorId(req), req.params.id, { listItemIds, addExtras }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/purchase-checks/:id/discard", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    res.json(FalaTuPurchaseService.discard(req.organizationId!, actorId(req), req.params.id));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.get("/entities", (req: AuthRequest, res): any => {

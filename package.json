@@ -353,7 +353,8 @@
     "test:falatu-rollout": "tsx scripts/test-falatu-rollout.ts",
     "test:falatu-whatsapp": "tsx scripts/test-falatu-whatsapp.ts",
     "test:falatu-compras": "tsx scripts/test-falatu-compras.ts",
-    "test:falatu-memoria": "tsx scripts/test-falatu-memoria.ts"
+    "test:falatu-memoria": "tsx scripts/test-falatu-memoria.ts",
+    "test:falatu-briefing-digest": "tsx scripts/test-falatu-briefing-digest.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

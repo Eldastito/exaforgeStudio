@@ -1,9 +1,12 @@
 import { Router, Response, NextFunction } from "express";
+import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
 import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
 import { FalaTuBriefingTaskService } from "../FalaTuBriefingTaskService.js";
+import { FalaTuBriefingDigestService } from "../FalaTuBriefingDigestService.js";
+import { MessageProviderService } from "../MessageProviderService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -164,6 +167,30 @@ router.get("/signals", (req: AuthRequest, res): any => {
 router.post("/signals/sweep", (req: AuthRequest, res): any => {
   try { res.json(FalaTuBriefingTaskService.run(req.organizationId!)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Entrega do briefing por WhatsApp (Fatia 6): consome os sinais acima ──
+
+// Estado da porta de canal (opt-in de envio proativo, separado da flag do módulo).
+router.get("/briefing/whatsapp", (req: AuthRequest, res): any => {
+  res.json({ enabled: FalaTuBriefingDigestService.waEnabled(req.organizationId!) });
+});
+
+router.post("/briefing/whatsapp", (req: AuthRequest, res): any => {
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled deve ser boolean." });
+  res.json(FalaTuBriefingDigestService.setWaEnabled(req.organizationId!, req.body.enabled));
+});
+
+// "Enviar meu resumo agora" — ignora janela/dedupe, respeita a porta; só pro
+// próprio usuário. O envio real é resolvido pelo canal da org (mesmo do Scheduler).
+router.post("/briefing/whatsapp/send-now", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const orgId = req.organizationId!;
+    const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+    if (!channel) return res.status(400).json({ error: "Nenhum canal de WhatsApp ativo nesta conta." });
+    const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+    res.json(await FalaTuBriefingDigestService.sendNow(orgId, actorId(req), { send }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

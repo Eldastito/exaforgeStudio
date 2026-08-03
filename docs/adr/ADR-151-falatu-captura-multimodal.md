@@ -1,6 +1,6 @@
 # ADR-151 — FalaTu: Captura Multimodal "Fala → Faz → Confere" (incorporação ao ZapFlow)
 
-- **Status:** FECHADO — 5 fatias entregues. Fatia 1 MERGED (#747); Fatia 2 MERGED (#749); Fatia 3 MERGED (#750); Fatia 4 MERGED (#751); Fatia 5 (este PR).
+- **Status:** Núcleo FECHADO em 5 fatias. Fatia 1 MERGED (#747); Fatia 2 MERGED (#749); Fatia 3 MERGED (#750); Fatia 4 MERGED (#751); Fatia 5 MERGED (#752). **Fatia 6 (aditivo pós-fechamento — entrega do briefing por WhatsApp): este PR.**
 - **Data:** 2026-08-03
 - **Origem:** repositório `Eldastito/FalaTu` (protótipo AI Studio applet) — levantamento completo na seção "Levantamento do repositório de origem".
 - **Relacionadas:** ADR-136 (Decision-Action Ledger — briefing proativo futuro), ADR-095 (RBAC — rollout multi-tenant futuro), ADR-021/ADR-030 (leitura de nota fiscal por IA — reuso direto na conferência de compras), ADR-102 (tarefa por voz do gestor — mesmo princípio de confirmação antes de criar).
@@ -151,7 +151,8 @@ A IA do FalaTu **nunca**:
 | **2** | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | MERGED (#749) |
 | **3** | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | MERGED (#750) |
 | **4** | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | MERGED (#751) |
-| **5** | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | **MERGED (este PR)** |
+| **5** | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | MERGED (#752) |
+| **6** | Aditivo pós-fechamento: entrega do briefing diário por WhatsApp — consumidor dos sinais `falatu_daily_briefing`, molde `TeacherDigestService` (ADR-144) | **MERGED (este PR)** |
 
 ## Fatia 1 — detalhe
 
@@ -357,3 +358,46 @@ WhatsApp ("qual Carlos?" numerado, `é N` fora do intervalo, resolução
 persistida derivada do banco, `é 1` sem pergunta pendente passa reto),
 briefing (publica/deduplica/resolve, nunca materializa, isolamento
 multi-tenant, lista pessoal, gate do Scheduler com bypass do operador).
+
+## Fatia 6 — detalhe (entrega do briefing por WhatsApp) — aditivo pós-fechamento
+
+Fecha o laço da Fatia 5: o sweep publica o briefing em `business_signals`, e
+agora um CONSUMIDOR desses sinais entrega o resumo da manhã no WhatsApp do
+usuário. O ledger continua sendo a fonte da verdade — o digest só lê o sinal
+do dia e formata; não recomputa nem cria sinal (se o sweep não publicou, não
+há o que entregar). Espelha o `TeacherDigestService` (ADR-144): texto
+DETERMINÍSTICO (zero-token), janela da manhã em hora de São Paulo, dedupe por
+dia, envio `send` INJETADO (testável sem rede).
+
+**Porta de canal** (`FalaTuBriefingDigestService`): flag de org
+`falatu_briefing_wa_enabled` (aditivo, convenção nº 10) — mandar mensagem
+proativa é outbound, então é um opt-in SEPARADO da `falatu_enabled` (que só
+liga o módulo). Default 0.
+
+**Dedupe de entrega**: tabela best-effort `falatu_briefing_deliveries` com
+`UNIQUE(organization_id, user_id, briefing_date)` (convenção nº 7/8: insert
+que ignora `SQLITE_CONSTRAINT_UNIQUE`) — o FalaTu não tem tabela de perfil
+como o professor (`last_agenda_date`), então o registro de "já entreguei hoje"
+mora aqui. Marca SÓ após o envio (retenta no tick seguinte se falhar).
+
+**Scheduler** (`falatuBriefingDigestPass`, roda DEPOIS do `falatuBriefingPass`
+no tick — o sweep publica, o digest consome): só orgs com o opt-in de canal
+e canal ativo; resolve o canal como o `teacherAgendaPass`; best-effort por-org.
+
+**Rotas** (`/api/falatu`, atrás do falatuGate + RBAC): `GET|POST
+/briefing/whatsapp` (lê/liga a porta) + `POST /briefing/whatsapp/send-now`
+("enviar meu resumo agora" — ignora janela/dedupe, respeita a porta, só pro
+próprio usuário). **UI** (aba Briefing): switch "Resumo diário no WhatsApp" +
+botão "Enviar agora".
+
+**Guardrails**: o digest NUNCA cria/edita tarefa, evento, lista ou entidade
+(só lê o sinal e envia); isolado por org+user; a entrega de uma org não
+alcança usuário de outra. Refino futuro: opt-in por-usuário (hoje a porta é
+da org — todos os usuários do FalaTu com telefone e sinal do dia recebem).
+
+**Teste** (`scripts/test-falatu-briefing-digest.ts`, 14 checks): porta
+desligada não entrega; fora da janela SP não entrega; entrega só a quem tem
+sinal + telefone; texto determinístico (inbox/agenda/sem-data) a partir da
+evidência; dedupe por (org, usuário, dia); digest nunca materializa; send-now
+ignora janela/dedupe mas respeita a porta e a existência de briefing;
+isolamento multi-tenant.

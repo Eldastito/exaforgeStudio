@@ -28,6 +28,7 @@ import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliver
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { FalaTuService } from "./FalaTuService.js";
 import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
+import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
@@ -418,6 +419,32 @@ export class Scheduler {
     }
   }
 
+  /**
+   * FalaTu (ADR-151 Fatia 6) — ENTREGA do briefing por WhatsApp. Consome os
+   * sinais `falatu_daily_briefing` publicados pelo falatuBriefingPass (por
+   * isso roda DEPOIS dele no tick) e manda o resumo da manhã pro WhatsApp de
+   * quem optou. Só orgs com o opt-in de canal `falatu_briefing_wa_enabled` e
+   * com sinais abertos (não varre tenant sem uso). Canal resolvido como no
+   * teacherAgendaPass; best-effort por-org. NUNCA cria/edita nada.
+   */
+  static async falatuBriefingDigestPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE falatu_briefing_wa_enabled = 1`).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        if (!channel) continue;
+        const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+        await FalaTuBriefingDigestService.runPass(orgId, { now, send });
+      } catch (e) { console.error("[FalaTu] entrega de briefing por WhatsApp falhou", orgId, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -504,6 +531,7 @@ export class Scheduler {
     await this.clinicMonthlyReportPass().catch(e => console.error('[Scheduler] relatório mensal clínica falhou', e));
     try { this.clinicRenewalTaskPass(); } catch (e: any) { console.error('[Scheduler] sweep de renovação clínica falhou', e?.message); }
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
+    await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

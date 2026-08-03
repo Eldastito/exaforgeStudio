@@ -262,6 +262,8 @@ export function FalaTuView() {
   const [entities, setEntities] = useState<any[]>([]);
   const [briefing, setBriefing] = useState<any | null>(null);
   const [signals, setSignals] = useState<any[]>([]);
+  const [waEnabled, setWaEnabled] = useState<boolean>(false);
+  const [waBusy, setWaBusy] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -279,6 +281,7 @@ export function FalaTuView() {
     if (tab === 'briefing') {
       api('/briefing').then(setBriefing).catch(() => {});
       api('/signals').then((d) => setSignals(Array.isArray(d) ? d : [])).catch(() => {});
+      api('/briefing/whatsapp').then((d) => setWaEnabled(!!d?.enabled)).catch(() => {});
     }
   }, [tab]);
 
@@ -388,6 +391,26 @@ export function FalaTuView() {
       const items = await api(`/lists/${listId}/items`);
       setListItemsById((p) => ({ ...p, [listId]: items }));
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  const toggleWa = async () => {
+    setWaBusy(true);
+    try {
+      const r = await api('/briefing/whatsapp', { method: 'POST', body: JSON.stringify({ enabled: !waEnabled }) });
+      setWaEnabled(!!r?.enabled);
+      toast.success(r?.enabled ? 'Resumo diário por WhatsApp ligado.' : 'Resumo diário por WhatsApp desligado.');
+    } catch (e: any) { toast.error(e.message); }
+    finally { setWaBusy(false); }
+  };
+
+  const sendWaNow = async () => {
+    setWaBusy(true);
+    try {
+      const r = await api('/briefing/whatsapp/send-now', { method: 'POST' });
+      if (r?.sent) toast.success('Resumo enviado pro seu WhatsApp.');
+      else toast.error(r?.reason === 'no_phone' ? 'Cadastre seu WhatsApp em Configurações → Usuários.' : r?.reason === 'no_briefing' ? 'Nada pra resumir hoje.' : 'Não foi possível enviar agora.');
+    } catch (e: any) { toast.error(e.message); }
+    finally { setWaBusy(false); }
   };
 
   const TABS = [
@@ -549,6 +572,25 @@ export function FalaTuView() {
               {signals[0]?.severity === 'attention' ? ' — há pendências pedindo sua ação.' : '.'}
             </p>
           )}
+          {/* Fatia 6 — entrega por WhatsApp: opt-in de canal + envio manual. */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-zinc-200">Resumo diário no WhatsApp</p>
+              <p className="text-xs text-zinc-500">Recebe o briefing da manhã no seu WhatsApp cadastrado.</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {waEnabled && (
+                <button onClick={sendWaNow} disabled={waBusy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-50">
+                  {waBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Enviar agora
+                </button>
+              )}
+              <button onClick={toggleWa} disabled={waBusy} role="switch" aria-checked={waEnabled}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${waEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${waEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+          </div>
           {briefing.pendingInbox?.c > 0 && (
             <p className="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
               {briefing.pendingInbox.c} item(ns) aguardando sua confirmação no Inbox.

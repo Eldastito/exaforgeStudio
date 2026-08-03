@@ -70,7 +70,7 @@ export type Ticket = {
   slaSegment?: string | null;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'retailfloor' | 'comigo' | 'juridico' | 'caixa' | 'saude' | 'insights';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'retailfloor' | 'comigo' | 'juridico' | 'caixa' | 'saude' | 'insights' | 'falatu';
 
 export type EvolutionConfig = {
   baseUrl: string;

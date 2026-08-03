@@ -87,6 +87,7 @@ import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
 import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
+import falatuRoutes from "./src/server/routes/falatu.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";
@@ -493,6 +494,9 @@ async function startServer() {
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
   protectedApi.use("/radar-consultant", requireMasterAdmin, radarConsultantRoutes);
+  // FalaTu (ADR-151) Fase 1: exclusivo do Master Admin — rollout multi-tenant
+  // (flag + RBAC) é a Fatia 2; até lá o gate é o mesmo do /admin.
+  protectedApi.use("/falatu", requireMasterAdmin, falatuRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/permissions", permissionsRoutes);

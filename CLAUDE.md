@@ -20,6 +20,7 @@ Repositório monolítico (frontend React + backend Node/Express + SQLite via `be
 | ADR-136 | Decision-Action Ledger (`business_signals`) | em produção — usado por Retail, Escola, Clínica (F47) |
 | ADR-132 | Sinais finos | em produção |
 | ADR-081 | Conectores TISS (roadmap TISS XML/WS) | roadmap — molde documentado; aditivo à ADR-145 |
+| ADR-151 | FalaTu — captura multimodal "Fala → Faz → Confere" (porte do repo `Eldastito/FalaTu`) | Fatia 1 em produção — exclusivo Master Admin; rollout multi-tenant nas Fatias 2+ |
 
 ## ADR-145 — CLÍNICA JORNADA DE TRATAMENTO (fechado 2026-08-01)
 

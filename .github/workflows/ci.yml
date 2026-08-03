@@ -403,6 +403,7 @@ jobs:
           - { name: 'subscription-service', script: 'test:subscription-service' }
           - { name: 'quote-service', script: 'test:quote-service' }
           - { name: 'reservation-service', script: 'test:reservation-service' }
+          - { name: 'falatu', script: 'test:falatu' }
     env:
       # JWT_SECRET é injetado pra evitar warn no isAIConfigured. Não é
       # segredo de produção — só desbloqueia inicialização dos services.

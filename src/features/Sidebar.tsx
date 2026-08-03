@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -82,6 +82,9 @@ export function Sidebar() {
              )}
              {isMasterAdmin && (
                <NavItem icon={<Radar />} label="Radar — Consultor" active={viewMode === 'radar_consultant'} onClick={() => setViewMode('radar_consultant')} />
+             )}
+             {isMasterAdmin && (
+               <NavItem icon={<Mic />} label="FalaTu" active={viewMode === 'falatu'} onClick={() => setViewMode('falatu')} />
              )}
           </nav>
         </div>

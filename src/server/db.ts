@@ -6958,6 +6958,109 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela ADR-083 G2c (corte das semanas)', e); }
+
+  // ADR-151 — FalaTu (captura multimodal "Fala → Faz → Confere"). Fase 1:
+  // exclusivo do Master Admin (gate na rota), mas TODAS as tabelas já nascem
+  // com organization_id + user_id pra convenção nº 1 valer desde o dia 1 —
+  // o rollout multi-tenant (Fatia 2) troca só o gate, não o schema.
+  // Nunca DELETE (convenção nº 9): discard/desfazer é UPDATE de status.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS falatu_inbox_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'webapp',   -- 'webapp' | (futuro: 'whatsapp' via canal interno, Fatia 3)
+        content TEXT,                            -- texto original digitado (ou legenda da mídia)
+        media_type TEXT,                         -- 'audio' | 'image' | NULL (só texto)
+        transcription TEXT,                      -- transcrição do áudio / texto extraído da imagem
+        summary TEXT,
+        intent TEXT,                             -- 'TASK' | 'EVENT' | 'LIST' | 'NOTE' | 'UNKNOWN'
+        entities_json TEXT,                      -- {people[], projects[], actions[], listItems[], eventDate, eventTime}
+        suggested_action TEXT,
+        confidence REAL,                         -- 0..1 (RN-151: obrigatório na extração)
+        status TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'confirmed' | 'discarded'
+        confirmed_kind TEXT,                     -- 'task' | 'event' | 'list' (o que a confirmação materializou)
+        confirmed_ref_id TEXT,                   -- id da entidade criada na confirmação
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        resolved_by TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_falatu_inbox_user
+        ON falatu_inbox_items (organization_id, user_id, status);
+
+      CREATE TABLE IF NOT EXISTS falatu_tasks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        completed INTEGER NOT NULL DEFAULT 0,
+        inbox_item_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_falatu_tasks_user
+        ON falatu_tasks (organization_id, user_id, completed);
+
+      CREATE TABLE IF NOT EXISTS falatu_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        event_date TEXT,                         -- YYYY-MM-DD; NULL quando a entrada não trouxe data (RN-151: nunca inventar)
+        event_time TEXT,                         -- HH:MM
+        inbox_item_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_falatu_events_user
+        ON falatu_events (organization_id, user_id, event_date);
+
+      CREATE TABLE IF NOT EXISTS falatu_lists (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        list_type TEXT NOT NULL DEFAULT 'general', -- 'general' | 'shopping' | 'meeting' | 'trip'
+        status TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'archived'
+        inbox_item_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_falatu_lists_user
+        ON falatu_lists (organization_id, user_id, status);
+
+      -- organization_id repetido aqui de propósito (denormalizado): permite o
+      -- toggle validar dono em uma query só, sem depender de JOIN correto em
+      -- cada call-site — o IDOR da origem nasceu exatamente desse esquecimento.
+      CREATE TABLE IF NOT EXISTS falatu_list_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        list_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        quantity TEXT,
+        planned INTEGER NOT NULL DEFAULT 1,
+        realized INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_falatu_list_items_list
+        ON falatu_list_items (organization_id, list_id);
+
+      -- name_norm (lower/trim) na unique: a origem duplicava "Carlos"/"carlos"
+      -- a cada confirmação. Upsert atualiza só o contexto mais recente.
+      CREATE TABLE IF NOT EXISTS falatu_entities (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,               -- 'PERSON' | 'COMPANY' | 'PROJECT'
+        name TEXT NOT NULL,
+        name_norm TEXT NOT NULL,
+        context TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE (organization_id, user_id, entity_type, name_norm)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas ADR-151 (FalaTu)', e); }
 };
 
 initDb();

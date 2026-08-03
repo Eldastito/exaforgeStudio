@@ -5,7 +5,7 @@ import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled } = useStore();
   const { user, logout } = useAuth();
   // Item visível quando o módulo está habilitado na org (plano/vertical) E o
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
@@ -83,7 +83,9 @@ export function Sidebar() {
              {isMasterAdmin && (
                <NavItem icon={<Radar />} label="Radar — Consultor" active={viewMode === 'radar_consultant'} onClick={() => setViewMode('radar_consultant')} />
              )}
-             {isMasterAdmin && (
+             {/* FalaTu (ADR-151 F2): master sempre; org só com a flag ligada E
+                 nível RBAC no módulo (cosmético — o servidor reforça no gate). */}
+             {(isMasterAdmin || (falatuEnabled && canAccessModule('falatu'))) && (
                <NavItem icon={<Mic />} label="FalaTu" active={viewMode === 'falatu'} onClick={() => setViewMode('falatu')} />
              )}
           </nav>

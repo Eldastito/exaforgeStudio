@@ -112,6 +112,7 @@ type AppState = {
   permissions: Record<string, string> | null; // null = ainda não carregado
   hasProfile: boolean;                         // usuário tem perfil atribuído?
   isMasterAdmin: boolean;                      // operador da plataforma (ADR-106) — controla o menu só-plataforma
+  falatuEnabled: boolean;                      // org ligou o FalaTu? (flag opt-in ADR-151 Fatia 2)
   loadPermissions: () => Promise<void>;
   canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
@@ -294,12 +295,13 @@ export const useStore = create<AppState>((set, get) => ({
   permissions: null,
   hasProfile: false,
   isMasterAdmin: false,
+  falatuEnabled: false,
   loadPermissions: async () => {
     try {
       const res = await apiFetch('/api/permissions/me');
       if (!res.ok) return;
       const data = await res.json().catch(() => ({}));
-      set({ permissions: data?.permissions || null, hasProfile: !!data?.hasProfile, isMasterAdmin: !!data?.isMasterAdmin });
+      set({ permissions: data?.permissions || null, hasProfile: !!data?.hasProfile, isMasterAdmin: !!data?.isMasterAdmin, falatuEnabled: !!data?.falatuEnabled });
     } catch (e) { /* mantém null = sem restrição visual */ }
   },
   // O usuário pode ver/entrar num módulo? Opt-in: só restringe quem tem perfil

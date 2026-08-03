@@ -7061,6 +7061,11 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas ADR-151 (FalaTu)', e); }
+
+  // ADR-151 Fatia 2 — rollout multi-tenant do FalaTu: flag opt-in por org
+  // (convenção nº 10). O Master Admin segue com acesso independente da flag
+  // (gate na rota); clientes só enxergam o módulo quando o operador liga aqui.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

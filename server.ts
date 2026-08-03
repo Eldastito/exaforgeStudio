@@ -494,9 +494,10 @@ async function startServer() {
   protectedApi.use("/admin", requireMasterAdmin, adminRoutes);
   protectedApi.use("/audit", requireMasterAdmin, auditRoutes);
   protectedApi.use("/radar-consultant", requireMasterAdmin, radarConsultantRoutes);
-  // FalaTu (ADR-151) Fase 1: exclusivo do Master Admin — rollout multi-tenant
-  // (flag + RBAC) é a Fatia 2; até lá o gate é o mesmo do /admin.
-  protectedApi.use("/falatu", requireMasterAdmin, falatuRoutes);
+  // FalaTu (ADR-151) Fatia 2: multi-tenant. O gate mora no próprio router
+  // (falatuGate: Master Admin sempre + flag opt-in falatu_enabled por org);
+  // o RBAC granular (módulo "falatu") vem do enforceModulePermission acima.
+  protectedApi.use("/falatu", falatuRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/permissions", permissionsRoutes);

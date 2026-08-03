@@ -1,6 +1,6 @@
 # ADR-151 — FalaTu: Captura Multimodal "Fala → Faz → Confere" (incorporação ao ZapFlow)
 
-- **Status:** Fatia 1 em implementação (fundação + inbox + confirmação + UI, exclusivo Master Admin).
+- **Status:** Fatia 2 em implementação (rollout multi-tenant: flag opt-in + RBAC + limites por plano). Fatia 1 MERGED (#747).
 - **Data:** 2026-08-03
 - **Origem:** repositório `Eldastito/FalaTu` (protótipo AI Studio applet) — levantamento completo na seção "Levantamento do repositório de origem".
 - **Relacionadas:** ADR-136 (Decision-Action Ledger — briefing proativo futuro), ADR-095 (RBAC — rollout multi-tenant futuro), ADR-021/ADR-030 (leitura de nota fiscal por IA — reuso direto na conferência de compras), ADR-102 (tarefa por voz do gestor — mesmo princípio de confirmação antes de criar).
@@ -147,8 +147,8 @@ A IA do FalaTu **nunca**:
 
 | Fatia | Escopo | Status |
 | --- | --- | --- |
-| **1** | Fundação: tabelas `falatu_*`, `FalaTuService` (capture → interpret IA → confirm/discard), rotas `/api/falatu/*` atrás de `requireMasterAdmin`, tarefas/eventos/listas/entidades/briefing, UI (aba `falatu` master-only), teste `scripts/test-falatu.ts` + CI | **MERGED (este PR)** |
-| 2 | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | planejada |
+| **1** | Fundação: tabelas `falatu_*`, `FalaTuService` (capture → interpret IA → confirm/discard), rotas `/api/falatu/*` atrás de `requireMasterAdmin`, tarefas/eventos/listas/entidades/briefing, UI (aba `falatu` master-only), teste `scripts/test-falatu.ts` + CI | MERGED (#747) |
+| **2** | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | **MERGED (este PR)** |
 | 3 | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | planejada |
 | 4 | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | planejada |
 | 5 | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | planejada |
@@ -176,3 +176,40 @@ mockada (sem chave OpenAI), cobre: captura texto/áudio/imagem, nada criado
 antes do confirm, confirm de TASK/EVENT/LIST, RN de data não inventada,
 override do humano na confirmação, discard, dedup de entidades, toggle com
 dono errado falha, briefing, isolamento multi-tenant e auditoria.
+
+## Fatia 2 — detalhe (rollout multi-tenant)
+
+O gate `requireMasterAdmin` da Fase 1 vira **três camadas**, cada uma reusando
+uma fundação existente (nenhum mecanismo novo):
+
+1. **Flag opt-in por org** — `organization_settings.falatu_enabled INTEGER
+   DEFAULT 0` (convenção nº 10, aditivo no fim do `db.ts`). Quem liga é o
+   operador no Admin Master (`POST /api/admin/organizations/:id/falatu`,
+   auditado com `ADMIN_FALATU_TOGGLE`; coluna "FalaTu" na tabela de orgs). O
+   enforcement mora no `falatuGate` (router-level em `routes/falatu.ts`,
+   exportado pra teste): Master Admin sempre entra (mesmo racional do bypass
+   do `requirePermission`); org sem flag recebe 403.
+2. **RBAC granular (ADR-095)** — módulo `falatu` registrado em
+   `RBAC_MODULES` + `ROUTE_MODULE` (segmento `/falatu`), então o
+   `enforceModulePermission` global do `protectedApi` já gateia por perfil sem
+   nada na rota. Perfis com default `none` (vendedor/atendente/estoquista/
+   financeiro) começam SEM acesso; dono/gerente (default `full`) começam com;
+   o parque legado sem perfil atribuído passa intacto (opt-in do RBAC, como
+   nos demais módulos). O top-up idempotente do `seedSystemProfiles` leva o
+   módulo aos perfis já semeados.
+3. **Limite de uso por plano** — captura é ação de IA: `capture()` checa
+   `PlanService.aiAllowed` (billing bloqueado + teto `ai_monthly_limit` do
+   plano + top-ups/recompra automática, ADR-091 §4) ANTES da chamada de IA e,
+   ao aceitar, registra no `ai_interactions_log` (`agent_used='falatu'`) —
+   mesma régua do atendimento, sem contador novo (RN-004: consumo derivado
+   por query). Org sem plano segue sem teto (padrão da plataforma).
+
+**Frontend:** `/api/permissions/me` passa a devolver `falatuEnabled`; a
+Sidebar mostra o FalaTu pra `isMasterAdmin || (falatuEnabled &&
+canAccessModule('falatu'))` — cosmético, o servidor reforça nas 3 camadas.
+
+**Teste** (`scripts/test-falatu-rollout.ts`): flag default off + isolamento;
+gate (master bypass / 403 sem flag / passa com flag); RBAC (níveis por perfil,
+legado não gateado, `checkRouteAccess`, `permissionMap`); teto do plano trava
+a 3ª captura (limite 2) sem gravar inbox; org sem plano sem teto; billing
+bloqueado trava; consumo não vaza entre orgs; auditoria.

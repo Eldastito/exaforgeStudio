@@ -114,6 +114,22 @@ router.post("/organizations/:id/billing-status", (req: AuthRequest, res) => {
   }
 });
 
+// Master Admin - Liga/desliga o FalaTu de uma organização (rollout opt-in da
+// Fatia 2, ADR-151). O gate real é o falatuGate da rota /api/falatu; aqui é só
+// a porta de administração da flag.
+router.post("/organizations/:id/falatu", async (req: AuthRequest, res): Promise<any> => {
+  const enabled = !!req.body?.enabled;
+  const orgId = req.params.id;
+  try {
+    const { FalaTuService } = await import("../FalaTuService.js");
+    FalaTuService.setOrgEnabled(orgId, enabled);
+    logAuthEvent(req.organizationId, req.user?.userId, orgId, 'ADMIN_FALATU_TOGGLE', { enabled });
+    res.json({ success: true, enabled });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Master Admin - Atribui/troca o plano de uma organização (libera o teto de
 // módulos do plano). Preenche o gap de "liberar a conta": até aqui o admin
 // mudava status/billing, mas não conseguia dar um plano a uma org existente.

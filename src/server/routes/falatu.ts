@@ -1,15 +1,30 @@
-import { Router } from "express";
+import { Router, Response, NextFunction } from "express";
 import { AuthRequest } from "../middleware/auth.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
 
-// FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Router
-// INTEIRO montado atrás de `requireMasterAdmin` em server.ts (mesmo padrão de
-// /api/admin e /api/radar-consultant): Fase 1 é exclusiva do operador da
-// plataforma, então nenhuma checagem de papel acontece aqui dentro. Os dados
-// continuam chaveados por (organization_id, user_id) do JWT — ver o porquê no
-// header do FalaTuService. A rota valida FORMA; invariantes ficam no service.
+// FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
+// gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
+// (`falatu_enabled`, ligada pelo operador no Admin Master) via o middleware
+// abaixo + (b) RBAC granular ADR-095 (módulo "falatu"), aplicado pelo
+// enforceModulePermission global do protectedApi — não repetimos a checagem
+// aqui (mesma razão de não validar em service + rota ao mesmo tempo). Os
+// dados seguem chaveados por (organization_id, user_id) do JWT — ver o porquê
+// no header do FalaTuService. A rota valida FORMA; invariantes ficam no service.
+
+// Exportado pra ser testável sem subir o Express (scripts/test-falatu-rollout.ts).
+// Master Admin entra sempre (operador da plataforma, mesmo racional do bypass
+// no requirePermission); as demais orgs precisam da flag.
+export const falatuGate = (req: AuthRequest, res: Response, next: NextFunction): any => {
+  if (req.user?.email && req.user.email === MASTER_ADMIN_EMAIL) return next();
+  if (!FalaTuService.orgEnabled(req.organizationId!)) {
+    return res.status(403).json({ error: "FalaTu não está habilitado para esta organização." });
+  }
+  next();
+};
 
 const router = Router();
+router.use(falatuGate);
 
 const actorId = (req: any) => req.user?.userId || req.user?.id;
 

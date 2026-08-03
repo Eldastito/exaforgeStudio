@@ -20,6 +20,7 @@ import { ClinicAgendaView } from '@/src/features/ClinicAgendaView';
 import { VisionVmsView } from '@/src/features/VisionVmsView';
 import { RadarView } from '@/src/features/RadarView';
 import { RadarConsultantView } from '@/src/features/RadarConsultantView';
+import { FalaTuView } from '@/src/features/FalaTuView';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -286,6 +287,7 @@ export default function App() {
              {viewMode === 'vision' && 'Vision VMS'}
              {viewMode === 'radar' && 'Radar de Execução IA'}
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
+             {viewMode === 'falatu' && 'FalaTu'}
              {viewMode === 'comigo' && 'Comigo'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
@@ -400,6 +402,7 @@ export default function App() {
           {viewMode === 'vision' && <VisionVmsView />}
           {viewMode === 'radar' && <RadarView />}
           {viewMode === 'radar_consultant' && <RadarConsultantView />}
+          {viewMode === 'falatu' && <FalaTuView />}
           </ErrorBoundary>
         </main>
       </div>

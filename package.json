@@ -348,7 +348,8 @@
     "test:controler-locations": "tsx scripts/test-controler-locations.ts",
     "test:controler-items": "tsx scripts/test-controler-items.ts",
     "test:controler-consumption": "tsx scripts/test-controler-consumption.ts",
-    "test:consumption-signals": "tsx scripts/test-consumption-signals.ts"
+    "test:consumption-signals": "tsx scripts/test-consumption-signals.ts",
+    "test:falatu": "tsx scripts/test-falatu.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

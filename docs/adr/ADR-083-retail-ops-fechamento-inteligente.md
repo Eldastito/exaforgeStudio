@@ -442,3 +442,111 @@ run trazem `championPrize` e `championWins` no JSON.
 Andressa fora por não bater cota; Thamyres soma R$1.250 no championPrize
 e `total` fecha; Rafaela entra em 3º em vendas/peças mas é filtrada do
 P.A pelo piso de 20 AT; piso exposto no retorno).
+
+## Fase G2b — Templates de folga + "quem folga hoje/amanhã" (2026-08)
+
+**Origem:** dono pediu "quem folga na segunda, quem folga na terça". Hoje
+a escala era clique célula-a-célula pra 7 dias — trocar de semana obrigava
+a remarcar tudo. E o dia-a-dia da operação não sabia rápido "quem tá de
+folga hoje na rede".
+
+**Duas peças conectadas em cima da escala existente (`retail_schedule_entries`):**
+
+1. **TEMPLATE de folga por vendedor** (nova tabela `retail_seller_off_pattern`,
+   por loja × vendedor × dia da semana 0-6). Cadastra Rafaela=segunda,
+   Estefânio=terça, Gabriel=quinta uma vez; botão **"Aplicar no mês"** gera
+   as linhas 'off' na grade.
+2. **Card "🌙 Quem folga hoje/amanhã"** — reusado em Escala & Cotas (por
+   loja) e Fechamento diário (rede toda, com o nome da loja de cada um).
+
+**Decisões (RN-G2b-00x no header do service):**
+
+1. **Template NÃO sobrescreve grade lançada** (RN-G2b-001): `applyToRange`
+   só INSERE 'off' pros pares (data, seller) que ainda não têm entrada em
+   `retail_schedule_entries`. Preserva ajustes manuais (troca pontual de
+   folga, cobertura de férias). Idempotente — rodar de novo pula tudo.
+2. **Isolamento multi-tenant** (RN-G2b-002): toda query filtra `organization_id`
+   E `store_id` (o padrão é por loja — cada uma tem seu quadro).
+3. **day_of_week 0-6** (RN-G2b-003): alinhado com `Date#getUTCDay()`
+   (domingo=0 … sábado=6).
+4. **whoIsOff é derivado por query**: junta grade lançada 'off' + template
+   dos vendedores que ainda não têm linha na grade daquele dia. Nunca
+   duplica; devolve `source: 'grid' | 'template'` pra transparência.
+5. **Guard de intervalo** — `applyToRange` recusa intervalo > 100 dias.
+6. **Empty-state visível** — o card e o painel aparecem MESMO sem folgas
+   / sem vendedores (respectivamente): "hoje: ninguém" é informação;
+   "sem vendedores cadastrados" traz CTA pra onde cadastrar. Ficar
+   invisível quando vazio esconde o próprio recurso — bug reportado pelo
+   dono no primeiro deploy.
+
+**Retrocompat 100%** — nenhuma mudança em `weeksOfMonth`, `raceMonth` ou
+qualquer parte da CARIOCA. Template só POPULA a grade; a corrida usa as
+mesmas linhas de `retail_schedule_entries` como antes.
+
+**Entidades:** 1 tabela nova (`retail_seller_off_pattern`) + 1 service
+novo (`RetailScheduleTemplateService`) + 4 rotas (`GET/PUT
+/schedule/off-pattern`, `POST /schedule/apply-template`,
+`GET /schedule/who-off?date&storeId`).
+
+**UI:**
+- `WhoIsOffCard` reusado nas 2 telas.
+- `OffPatternPanel` colapsável em ScheduleTab — matriz vendedor × dia da
+  semana com checkboxes; botões "Salvar template" (grava o padrão) e
+  "Aplicar no mês" (preenche a grade).
+
+**Teste:** `test:retail-schedule-template` (19 verificações — CRUD com
+regravação; `applyToRange` NÃO sobrescreve; idempotência; guard de
+intervalo > 100 dias; whoIsOff via grid vs template sem duplicar;
+`storeId` opcional agrega rede toda; isolamento multi-tenant; audit
+registrado; `weeksOfMonth` continua com 5 semanas em agosto/26 — CARIOCA
+intocada).
+
+## Fase G2c — Corte variável das semanas do mês (2026-08)
+
+**Origem:** dono pediu semanas com mais/menos de 7 dias pra fechar o mês
+alinhado com a operação real (ex.: `sem1 01→10, sem2 11→18, sem3 19→25,
+sem4 26→31`). O padrão CARIOCA sempre fecha no domingo e cola início de
+mês < 4 dias na semana seguinte (RN-G2-003) — nem sempre é o que a rede
+usa.
+
+**Decisões (RN-G2c-00x no header do service):**
+
+1. **Override é REDE-WIDE** (RN-G2c-001): a corrida cruza lojas (ranking
+   de desvio, semanal, campeões da rede), então cortes diferentes por
+   loja quebrariam a apuração. UMA definição por mês vale pra rede toda.
+2. **Fallback silencioso** (RN-G2c-002): sem override cadastrado, tudo
+   se comporta como estava. `weeksOfMonth` clássico permanece disponível
+   pra usos sem `orgId`; novo `weeksOfMonthFor(orgId, month)` consulta
+   override antes.
+3. **Cobertura total obrigatória** (RN-G2c-003): as semanas cadastradas
+   precisam cobrir do dia 01 até o último dia do mês, sem lacunas e sem
+   sobreposição. Validação estrita no `save` (start ≤ end, contiguidade,
+   primeira começa em dia 01, última termina no último dia).
+4. **`save([])` LIMPA o override** — volta ao padrão CARIOCA
+   silenciosamente. Modelo mental: "o que digitei é o que vale; apagar
+   volta ao default".
+5. **Não é aditivo em cima do padrão** — quando existe override, a lista
+   cadastrada É a lista definitiva do mês. Simplicidade > flexibilidade
+   parcial.
+
+**Retrocompat 100%** — regressão CARIOCA 63/63 PASS. Apenas
+`weeksOfMonthFor` foi introduzido; `weeksOfMonth` clássico continua
+disponível. `raceMonth` e `/seller-quotas` foram trocados pra usar o
+override transparentemente.
+
+**Entidades:** 1 tabela nova (`retail_month_weeks` — org, year_month,
+weeks_json; UNIQUE por org+mês) + 1 service novo
+(`RetailMonthWeeksService`) + 2 rotas (`GET/PUT /month-weeks?month`).
+
+**UI (aba Escala & Cotas):** `MonthWeeksPanel` colapsável — seletor de
+mês + badge "personalizado" (âmbar) ou "padrão CARIOCA" (cinza) + grid
+editável de intervalos com **+ semana / × / Voltar ao padrão / Salvar
+corte**. Se o draft ficar idêntico ao padrão, o salvar limpa o override
+em vez de gravar duplicado.
+
+**Teste:** +7 verificações em `test:retail-commission-race` (70/70 PASS):
+`weeksOfMonthFor` sem override = padrão CARIOCA; com override = exato o
+cadastrado; `raceMonth` respeita o override (3 semanas no exemplo);
+`save` rejeita lacuna; `save` rejeita última semana curta; `save([])`
+limpa e volta a 5 semanas; isolamento (org B não é afetada pelo override
+da A).

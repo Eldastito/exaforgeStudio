@@ -3025,6 +3025,82 @@ function RaceSection({ stores }: { stores: any[] }) {
   );
 }
 
+// Painel "Corte das semanas do mês" (Fase G2c) — override rede-wide do
+// weeksOfMonth. Sem override, cai no padrão CARIOCA (semana no domingo,
+// fusão < 4 dias). O grid mostra as semanas efetivas com edição inline.
+function MonthWeeksPanel() {
+  const [month, setMonth] = useState(() => todayStr().slice(0, 7));
+  const [defaultWeeks, setDefaultWeeks] = useState<any[]>([]);
+  const [override, setOverride] = useState<any[] | null>(null);
+  const [source, setSource] = useState<string>('default');
+  const [draft, setDraft] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const load = () => {
+    apiFetch(`/api/retailops/month-weeks?month=${month}`).then(r => r.json()).then(d => {
+      setDefaultWeeks(Array.isArray(d?.defaultWeeks) ? d.defaultWeeks : []);
+      setOverride(Array.isArray(d?.override) ? d.override : null);
+      setSource(d?.source || 'default');
+      setDraft(Array.isArray(d?.effective) ? d.effective : []);
+    }).catch(() => {});
+  };
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open, month]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      // Se o draft está idêntico ao default, envia vazio = limpa o override.
+      const same = draft.length === defaultWeeks.length && draft.every((w, i) => w.start === defaultWeeks[i]?.start && w.end === defaultWeeks[i]?.end);
+      const payload = same ? [] : draft;
+      const res = await apiFetch('/api/retailops/month-weeks', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month, weeks: payload }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(payload.length > 0 ? `Corte gravado — ${payload.length} semana(s).` : 'Override removido — voltou ao padrão CARIOCA.'); load(); }
+      else toast.error(d.error || 'Falha ao salvar o corte das semanas.');
+    } finally { setSaving(false); }
+  };
+  const resetToDefault = () => setDraft(defaultWeeks.map(w => ({ ...w })));
+  const setField = (i: number, k: 'start' | 'end', v: string) => setDraft(p => p.map((w, j) => j === i ? { ...w, [k]: v } : w));
+  const addWeek = () => setDraft(p => [...p, { start: '', end: '' }]);
+  const removeWeek = (i: number) => setDraft(p => p.filter((_, j) => j !== i));
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+        <ChevronRight className="w-3.5 h-3.5" /> Corte das semanas do mês (padrão CARIOCA ou personalizado)
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300"><ChevronDown className="w-4 h-4" /></button>
+        <span className="text-sm font-medium text-zinc-200">Corte das semanas do mês</span>
+        <input type="month" value={month} onChange={e => setMonth(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+        <span className={`text-[10px] px-1.5 py-0.5 rounded ${source === 'override' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'}`}>
+          {source === 'override' ? 'personalizado' : 'padrão CARIOCA'}
+        </span>
+        <button onClick={resetToDefault} className="ml-auto rounded-lg border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800">Voltar ao padrão</button>
+        <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar corte
+        </button>
+      </div>
+      <p className="mb-2 text-[10px] text-zinc-500">
+        Padrão CARIOCA: semana fecha no domingo, começo de mês curto (&lt; 4 dias) cola na semana seguinte. Se sua rede corta diferente ("sem1 01→10, sem2 11→18…"), edite aqui. As semanas precisam cobrir 01 até o último dia do mês, sem lacunas nem sobreposição. Vale pra rede toda (corridas, cotas semanais e ranking usam esses cortes).
+      </p>
+      <div className="space-y-1">
+        {draft.map((w, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-xs">
+            <span className="w-16 text-zinc-500">Sem. {i + 1}</span>
+            <input type="date" value={w.start || ''} onChange={e => setField(i, 'start', e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-xs text-zinc-100" />
+            <span className="text-zinc-600">→</span>
+            <input type="date" value={w.end || ''} onChange={e => setField(i, 'end', e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-xs text-zinc-100" />
+            <button onClick={() => removeWeek(i)} className="ml-1 text-zinc-600 hover:text-red-300"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        ))}
+        <button onClick={addWeek} className="mt-1 text-[11px] text-indigo-300 hover:text-indigo-200">+ semana</button>
+      </div>
+    </div>
+  );
+}
+
 // Painel "Templates de folga" (Fase G2b) — cadastra os dias fixos de folga
 // por vendedor + botão "Aplicar no mês" que preenche a grade sem sobrescrever
 // datas já lançadas (RN-G2b-001).
@@ -3106,6 +3182,11 @@ function OffPatternPanel({ storeId, sellers, keyOf, onApplied }: { storeId: stri
       <p className="mb-2 text-[10px] text-zinc-600">"Aplicar no mês" preenche a grade com as folgas do template — NUNCA sobrescreve datas já lançadas. Salvar o template não mexe na grade (só grava o padrão pra usar).</p>
       {loading ? (
         <div className="py-4 text-center text-xs text-zinc-500"><Loader2 className="inline w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : sellers.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">
+          Sem vendedores cadastrados nessa loja ainda — o template precisa saber quem folga.<br />
+          Cadastre a equipe em <strong>Comissão › Vendas por vendedor (PDV)</strong> ou no módulo <strong>Atendimento de Loja</strong>, depois volte aqui.
+        </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-800/70">
           <table className="w-full text-xs">
@@ -3159,7 +3240,8 @@ function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; cl
     // eslint-disable-next-line
   }, [storeId, todayIso]);
   if (loading) return null;
-  if (today.length === 0 && tomorrow.length === 0) return null;
+  // Sempre exibe o card — mesmo com ninguém de folga; ver "ninguém" também é
+  // informação (confirma que não tem gap na equipe hoje).
   const renderList = (list: any[]) => {
     if (list.length === 0) return <span className="text-zinc-500">ninguém</span>;
     return list.map((s, i) => (
@@ -3358,12 +3440,19 @@ function ScheduleTab() {
 
       {/* Template de folga (Fase G2b) — cadastra por vendedor os dias fixos
           de folga; botão "Aplicar no mês" preenche a grade sem sobrescrever
-          o que já foi lançado. */}
-      {storeId && sellers.length > 0 && (
+          o que já foi lançado. Sempre visível pra loja escolhida — quando
+          faltam vendedores, mostra CTA pra cadastrar em vez de sumir. */}
+      {storeId && (
         <div className="mt-4">
           <OffPatternPanel storeId={storeId} sellers={sellers} keyOf={keyOf} onApplied={loadWeek} />
         </div>
       )}
+
+      {/* Corte das semanas do mês (Fase G2c) — override rede-wide do padrão
+          CARIOCA (fechamento no domingo + fusão de início curto). */}
+      <div className="mt-3">
+        <MonthWeeksPanel />
+      </div>
 
       {/* Cotas semanais individuais (as semanas da CORRIDA do mês) */}
       <div className="mt-5">

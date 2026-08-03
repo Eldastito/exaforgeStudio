@@ -6897,6 +6897,26 @@ const initDb = () => {
         ON retail_seller_off_pattern (organization_id, store_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela ADR-083 G2b (template de folga)', e); }
+
+  // ADR-083 Fase G2c — CORTE variável das semanas do mês. Nem sempre a semana
+  // fecha no domingo (padrão da planilha CARIOCA): o cliente pode querer sem1
+  // 01→10, sem2 11→18, sem3 19→25, sem4 26→31 pra encaixar melhor com a
+  // realidade da loja. Override é REDE-WIDE (mesma corrida cruza lojas —
+  // cortes por loja quebrariam o ranking); sem override, o cálculo cai no
+  // `weeksOfMonth` original (semana no domingo + fusão < 4 dias).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_month_weeks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        year_month TEXT NOT NULL,                -- 'YYYY-MM'
+        weeks_json TEXT NOT NULL,                -- '[{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"},…]'
+        created_by TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, year_month)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela ADR-083 G2c (corte das semanas)', e); }
 };
 
 initDb();

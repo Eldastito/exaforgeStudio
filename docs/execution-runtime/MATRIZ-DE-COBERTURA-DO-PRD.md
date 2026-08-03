@@ -153,10 +153,10 @@ Campos:
 `[x] DONE` (F2.1). `ConfirmationEngine` centralizado com 5 métodos (`asaas_payment_webhook | retail_reconciliation | channel_reply | alterdata_sync | manual`). `expect` idempotente por (org, action). `confirm` fecha a ação via `DecisionActionService.complete` (loop ADR-136 D6). Idempotência crítica: webhook 2x devolve a linha; ação já `done/rejected/cancelled` → `dismissed` sem reabrir; cross-tenant recusado. `sweepTimeouts` fecha as pendentes vencidas. **Subscribers ficam plugados na F2.3** (webhook Asaas → `confirm`; reconciliação Alterdata → `confirm`).
 
 ### §11.11 Outcome Ledger
-`[x] DONE` — `OutcomeMeasurementService` + `action_outcomes` (ADR-136 D6). F3 adiciona campos aditivos (`time_saved_minutes`, `cost_avoided`, `revenue_recovered`, `loss_prevented`).
+`[x] DONE` — `OutcomeMeasurementService` + `action_outcomes` (ADR-136 D6). **F3.1 completa:** aditivos `time_saved_minutes`, `cost_avoided`, `revenue_recovered`, `loss_prevented` em `record()`; `ledger.totals.categories` agrega por categoria SEM somar entre si (ADR-085 D4 preservado); fact × estimate ainda separados.
 
 ### §11.12 Exception Center
-`[~] PARCIAL` — Aba "Plano de Ação" existe (ADR-136 D8). F3 entrega categorização.
+`[x] DONE` (backend F3.1; UI F3.2 pendente). `RuntimeExceptionsService.list()` categoriza (`credential_missing | sla_at_risk | integration_failed | conflict | decision_needed | ...`) a partir de 4 fontes derivadas por SQL (nunca tabela própria): `process_instances` escalated/failed; `decision_actions` com deadline vencido; `background_jobs` failed com error_class; `action_confirmations` timed_out. Ordena por severidade + antiguidade. Cada exceção carrega `evidence` + `recommendedAction`. `overview()`, `count()` e `indicators()` alimentam o painel Operações da F3.2.
 
 ## §12 — Interface Operações Autônomas
 
@@ -245,22 +245,22 @@ Campos:
 
 | Métrica | Status | Onde |
 |---|---|---|
-| Qtd de processos | [ ] F3 | `runtime/operations/indicators` |
-| Processos por estado | [ ] F3 | idem |
-| Duração | [ ] F3 | idem |
-| SLA cumprido | [ ] F3 | idem |
-| Taxa de falha | [ ] F3 | idem |
-| Retries | [x] parcial | `background_jobs.attempts` |
-| Tempo em espera | [ ] F3 | idem |
-| Integrações indisponíveis | [~] F3 | `background_jobs.error_class='external_unavailable'` |
-| Executor com erro | [~] F3 | `action_execution_log.status='failed'` |
-| Intervenção humana | [ ] F3 | Contagem de aprovações |
-| Conclusão automática | [ ] F3 | idem |
+| Qtd de processos | [x] F3.1 | `GET /api/runtime/operations/indicators.processesTotal` |
+| Processos por estado | [x] F3.1 | `indicators.processesRunning/Completed/Failed/Escalated` |
+| Duração | [ ] F3.2 | (derivar de started_at / completed_at na UI) |
+| SLA cumprido | [x] F3.1 | `overview.slaBreached` (contagem de deadline vencido) |
+| Taxa de falha | [ ] F3.2 | (derivar de indicators.processesFailed / processesTotal) |
+| Retries | [x] | `background_jobs.attempts` |
+| Tempo em espera | [ ] F3.2 | (derivar de indicators.confirmationsPending) |
+| Integrações indisponíveis | [x] F3.1 | `RuntimeExceptionsService` categoria `integration_failed` |
+| Executor com erro | [x] F3.1 | `RuntimeExceptionsService` categoria `credential_missing` / `conflict` |
+| Intervenção humana | [x] F3.1 | `indicators.actionsAwaitingApproval` |
+| Conclusão automática | [x] F3.1 | `indicators.actionsDone` |
 | Valor esperado/realizado | [x] | `OutcomeMeasurementService.ledger` |
 | Discrepâncias | [x] parcial | `RetailFloorReconciliationService` |
-| Processos presos | [ ] F3 | Exception Center |
-| Dead letters | [~] F2 | `background_jobs.status='failed'` — F3 expõe |
-| Alertas §17 | [~] F3 | Publica sinal em `business_signals` |
+| Processos presos | [x] F3.1 | Exception Center (`process_escalated`, `confirmation_timeout`) |
+| Dead letters | [x] F3.1 | `RuntimeExceptionsService.list` derivado de `background_jobs.status='failed'` |
+| Alertas §17 | [~] F3.2 | UI apresenta; publisher em `business_signals` pode vir em fatia futura |
 
 ## §18 — Testes
 

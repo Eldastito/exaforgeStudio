@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC } from 'react';
-import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox } from 'lucide-react';
+import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 
@@ -132,6 +132,81 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
   );
 }
 
+// Reconciliação da conferência de compras (Fatia 4): a IA leu a nota e o
+// matching é só SUGESTÃO — o humano escolhe o que marcar como comprado e quais
+// extras (fora da lista) puxar. Nada acontece sem o "Confirmar" (RN-151).
+const PurchaseCheckCard: FC<{ check: any; onResolved: () => void }> = ({ check, onResolved }) => {
+  const matching = (() => { try { return JSON.parse(check.matching_json || '{}'); } catch { return {}; } })();
+  const matched: any[] = matching.matched || [];
+  const missing: any[] = matching.missing || [];
+  const extras: any[] = matching.extras || [];
+  const [selected, setSelected] = useState<Set<string>>(new Set(matched.map((m) => m.listItemId)));
+  const [selExtras, setSelExtras] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const flip = <T,>(set: Set<T>, v: T, apply: (s: Set<T>) => void) => {
+    const n = new Set(set); n.has(v) ? n.delete(v) : n.add(v); apply(n);
+  };
+  const act = async (path: string, body?: any) => {
+    setBusy(true);
+    try { await api(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }); onResolved(); }
+    catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+  const cost = (m: any) => (m.unitCost != null ? ` · R$ ${Number(m.unitCost).toFixed(2)}` : '');
+
+  return (
+    <div className="mx-3 mb-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 space-y-2">
+      <p className="text-xs text-violet-300 font-semibold flex items-center gap-1.5">
+        <Receipt className="h-3.5 w-3.5" /> Conferência da nota{check.supplier_name ? ` — ${check.supplier_name}` : ''}
+        {Number(check.confidence) < 60 && <span className="text-amber-300">(leitura com baixa confiança — revise)</span>}
+      </p>
+      {matched.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Na nota (marcar como comprado)</p>
+          {matched.map((m) => (
+            <button key={m.listItemId} onClick={() => flip(selected, m.listItemId, setSelected)} className="w-full flex items-center gap-2 py-0.5 text-left">
+              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${selected.has(m.listItemId) ? 'bg-emerald-600 border-emerald-600' : 'border-slate-600'}`}>
+                {selected.has(m.listItemId) && <Check className="h-3 w-3 text-white" />}
+              </span>
+              <span className="text-sm text-zinc-300">{m.listItemName} <span className="text-zinc-500">→ {m.invoiceName}{m.quantity != null ? ` (${m.quantity}${m.unit ? ` ${m.unit}` : ''})` : ''}{cost(m)}</span></span>
+            </button>
+          ))}
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Não veio na nota</p>
+          {missing.map((m) => <p key={m.listItemId} className="text-sm text-amber-300/80 py-0.5">• {m.name}</p>)}
+        </div>
+      )}
+      {extras.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Na nota, fora da lista (opcional: puxar pra lista)</p>
+          {extras.map((x) => (
+            <button key={x.invoiceIndex} onClick={() => flip(selExtras, x.invoiceIndex, setSelExtras)} className="w-full flex items-center gap-2 py-0.5 text-left">
+              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${selExtras.has(x.invoiceIndex) ? 'bg-violet-600 border-violet-600' : 'border-slate-600'}`}>
+                {selExtras.has(x.invoiceIndex) && <Check className="h-3 w-3 text-white" />}
+              </span>
+              <span className="text-sm text-zinc-400">{x.name}{x.quantity != null ? ` (${x.quantity}${x.unit ? ` ${x.unit}` : ''})` : ''}{cost(x)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        <button disabled={busy} onClick={() => act(`/purchase-checks/${check.id}/confirm`, { listItemIds: [...selected], addExtras: [...selExtras] })}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 disabled:opacity-50">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirmar conferência
+        </button>
+        <button disabled={busy} onClick={() => act(`/purchase-checks/${check.id}/discard`)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 text-zinc-300 hover:text-white text-sm px-3 py-1.5 disabled:opacity-50">
+          <X className="h-4 w-4" /> Descartar
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export function FalaTuView() {
   const [tab, setTab] = useState<'inbox' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing'>('inbox');
   const [text, setText] = useState('');
@@ -142,11 +217,15 @@ export function FalaTuView() {
   const [events, setEvents] = useState<any[]>([]);
   const [lists, setLists] = useState<any[]>([]);
   const [listItemsById, setListItemsById] = useState<Record<string, any[]>>({});
+  const [checkByListId, setCheckByListId] = useState<Record<string, any>>({});
+  const [checkingListId, setCheckingListId] = useState<string | null>(null);
   const [entities, setEntities] = useState<any[]>([]);
   const [briefing, setBriefing] = useState<any | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const checkFileRef = useRef<HTMLInputElement | null>(null);
+  const checkListIdRef = useRef<string | null>(null);
 
   const loadPending = useCallback(() => {
     api('/inbox?status=pending').then((d) => setPending(Array.isArray(d) ? d : [])).catch(() => {});
@@ -221,7 +300,42 @@ export function FalaTuView() {
     try {
       const items = await api(`/lists/${l.id}/items`);
       setListItemsById((p) => ({ ...p, [l.id]: items }));
+      // Restaura conferência pendente (a foto pode ter sido enviada em outra sessão).
+      const check = await api(`/lists/${l.id}/purchase-check`).catch(() => null);
+      setCheckByListId((p) => ({ ...p, [l.id]: check || null }));
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  const startPurchaseCheck = (listId: string) => {
+    checkListIdRef.current = listId;
+    checkFileRef.current?.click();
+  };
+
+  const onCheckImage = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const listId = checkListIdRef.current;
+    if (!file || !listId) return;
+    if (file.size > 1_300_000) { toast.error('Imagem muito grande (máx ~1MB). Comprima antes.'); return; }
+    setCheckingListId(listId);
+    try {
+      const data = await blobToBase64(file);
+      const check = await api(`/lists/${listId}/purchase-check`, {
+        method: 'POST',
+        body: JSON.stringify({ image: { mimeType: file.type || 'image/jpeg', data } }),
+      });
+      setCheckByListId((p) => ({ ...p, [listId]: check }));
+    } catch (e: any) { toast.error(e.message); }
+    finally { setCheckingListId(null); }
+  };
+
+  const onCheckResolved = async (listId: string) => {
+    setCheckByListId((p) => ({ ...p, [listId]: null }));
+    try {
+      const items = await api(`/lists/${listId}/items`);
+      setListItemsById((p) => ({ ...p, [listId]: items }));
+      api('/lists').then(setLists).catch(() => {});
+    } catch { /* noop */ }
   };
 
   const toggleListItem = async (listId: string, item: any) => {
@@ -243,6 +357,9 @@ export function FalaTuView() {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-4">
+      {/* Input da foto da nota (Fatia 4) fica fora das abas: o clique vem de
+          qualquer lista aberta via checkListIdRef. */}
+      <input ref={checkFileRef} type="file" accept="image/*" className="hidden" onChange={onCheckImage} />
       <div className="flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1">
         {TABS.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -333,16 +450,28 @@ export function FalaTuView() {
                 <span className="text-xs text-zinc-500">{l.realized_count}/{l.item_count}</span>
               </button>
               {listItemsById[l.id] && (
-                <div className="border-t border-slate-800 px-4 py-2 space-y-1">
-                  {listItemsById[l.id].map((i) => (
-                    <button key={i.id} onClick={() => toggleListItem(l.id, i)} className="w-full flex items-center gap-2 py-1 text-left">
-                      <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${i.realized ? 'bg-emerald-600 border-emerald-600' : 'border-slate-600'}`}>
-                        {!!i.realized && <Check className="h-3 w-3 text-white" />}
-                      </span>
-                      <span className={`text-sm ${i.realized ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>{i.name}{i.quantity ? ` (${i.quantity})` : ''}</span>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="border-t border-slate-800 px-4 py-2 space-y-1">
+                    {listItemsById[l.id].map((i) => (
+                      <button key={i.id} onClick={() => toggleListItem(l.id, i)} className="w-full flex items-center gap-2 py-1 text-left">
+                        <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${i.realized ? 'bg-emerald-600 border-emerald-600' : 'border-slate-600'}`}>
+                          {!!i.realized && <Check className="h-3 w-3 text-white" />}
+                        </span>
+                        <span className={`text-sm ${i.realized ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>{i.name}{i.quantity ? ` (${i.quantity})` : ''}</span>
+                      </button>
+                    ))}
+                    {!checkByListId[l.id] && (
+                      <button onClick={() => startPurchaseCheck(l.id)} disabled={checkingListId === l.id}
+                        className="inline-flex items-center gap-1.5 text-xs text-violet-300 hover:text-violet-200 py-1.5 disabled:opacity-50">
+                        {checkingListId === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+                        {checkingListId === l.id ? 'Lendo a nota…' : 'Conferir compra (foto da nota)'}
+                      </button>
+                    )}
+                  </div>
+                  {checkByListId[l.id] && (
+                    <PurchaseCheckCard check={checkByListId[l.id]} onResolved={() => onCheckResolved(l.id)} />
+                  )}
+                </>
               )}
             </div>
           ))}

@@ -1,6 +1,6 @@
 # ADR-151 — FalaTu: Captura Multimodal "Fala → Faz → Confere" (incorporação ao ZapFlow)
 
-- **Status:** Fatia 3 em implementação (captura via WhatsApp pelo canal interno). Fatia 1 MERGED (#747); Fatia 2 MERGED (#749).
+- **Status:** Fatia 4 em implementação (compras com conferência). Fatia 1 MERGED (#747); Fatia 2 MERGED (#749); Fatia 3 MERGED (#750).
 - **Data:** 2026-08-03
 - **Origem:** repositório `Eldastito/FalaTu` (protótipo AI Studio applet) — levantamento completo na seção "Levantamento do repositório de origem".
 - **Relacionadas:** ADR-136 (Decision-Action Ledger — briefing proativo futuro), ADR-095 (RBAC — rollout multi-tenant futuro), ADR-021/ADR-030 (leitura de nota fiscal por IA — reuso direto na conferência de compras), ADR-102 (tarefa por voz do gestor — mesmo princípio de confirmação antes de criar).
@@ -149,8 +149,8 @@ A IA do FalaTu **nunca**:
 | --- | --- | --- |
 | **1** | Fundação: tabelas `falatu_*`, `FalaTuService` (capture → interpret IA → confirm/discard), rotas `/api/falatu/*` atrás de `requireMasterAdmin`, tarefas/eventos/listas/entidades/briefing, UI (aba `falatu` master-only), teste `scripts/test-falatu.ts` + CI | MERGED (#747) |
 | **2** | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | MERGED (#749) |
-| **3** | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | **MERGED (este PR)** |
-| 4 | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | planejada |
+| **3** | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | MERGED (#750) |
+| **4** | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | **MERGED (este PR)** |
 | 5 | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | planejada |
 
 ## Fatia 1 — detalhe
@@ -252,3 +252,49 @@ materializar; confere materializa / descarta descarta (UPDATE, nunca
 DELETE); sem pendência caem no fluxo normal; EVENT sem data avisa; gatilho
 vazio não gasta IA; teto do plano com motivo no reply; isolamento
 multi-tenant do pendente.
+
+## Fatia 4 — detalhe (compras com conferência)
+
+Fecha o ciclo da lista de compras: planeja no FalaTu → compra → fotografa a
+NOTA FISCAL → a reconciliação cruza planejado × comprado. Divisão de papéis
+rígida: a **IA lê a nota** (`extractInvoiceItems`, ADR-021/030 — disciplina
+"não invente item" e confiança por item já testadas), o **código pareia**
+(matching determinístico: normalização lower/sem-acento + overlap de tokens
+com prefixo, guloso 1:1 por melhor score ≥ 0.5, empate resolvido por mais
+tokens casados — "leite condensado" pareia antes de "leite" roubar a linha) e
+o **humano confirma** na tela.
+
+**Tabela** `falatu_purchase_checks` (aditiva): congela `invoice_json`
+(snapshot da leitura — reler a foto pode dar outra leitura) + `matching_json`
+(sugestão) + status `pending|confirmed|discarded` (nunca DELETE). O efeito da
+confirmação vive nos próprios `falatu_list_items` (`realized`).
+
+**Guardrails RN-151 da fatia** (testados):
+
+- A conferência NUNCA marca item sozinha: `check()` só registra a sugestão;
+  `realized` é exclusivo do `confirm()` humano (que pode escolher um
+  SUBCONJUNTO dos pareados).
+- Extra da nota (fora da lista) NUNCA entra sem opt-in explícito
+  (`addExtras` por índice); entrando, vira item `planned=0, realized=1` com
+  quantidade da nota.
+- `confirm()` relê DO BANCO; o cliente só escolhe ids/índices do que foi
+  sugerido — nunca injeta item.
+- Item já comprado (`realized=1`) não re-casa em conferência nova.
+- Nota ilegível (0 itens) é recusada com mensagem clara, sem registro.
+
+**Rotas** (`/api/falatu`, atrás do falatuGate + RBAC): `POST
+/lists/:id/purchase-check` (foto base64, mesmo limite de mídia), `GET
+/lists/:id/purchase-check` (pendente mais recente, pra UI restaurar), `POST
+/purchase-checks/:id/confirm|discard`. Leitura de nota é ação de IA: mesmo
+gate de plano da captura + contagem no `ai_interactions_log`.
+
+**UI** (FalaTuView, aba Listas): botão "Conferir compra (foto da nota)" na
+lista aberta → painel de reconciliação com 3 blocos (na nota = checkbox
+ligado; não veio na nota; fora da lista = checkbox desligado) + alerta de
+leitura com baixa confiança → Confirmar/Descartar.
+
+**Teste** (`scripts/test-falatu-compras.ts`, 24 checks): matching puro
+(acento, prefixo, guloso 1:1 com desempate por especificidade), check sem
+efeito na lista, confirm por subconjunto, extra só com opt-in, re-casamento
+bloqueado, discard como UPDATE, nota ilegível, teto do plano, isolamento
+multi-tenant, auditoria (`FALATU_PURCHASE_CHECK/CONFIRM/DISCARD`).

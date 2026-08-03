@@ -26,6 +26,7 @@ import { EventInquiryService } from "./EventInquiryService.js";
 import { ReferralService } from "./ReferralService.js";
 import { CoordenadorService } from "./CoordenadorService.js";
 import { GestorCommandService } from "./GestorCommandService.js";
+import { FalaTuWhatsAppService } from "./FalaTuWhatsAppService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
 import { MaestroService } from "./MaestroService.js";
@@ -167,6 +168,20 @@ export async function processIncomingMessage(
   // COLABORADOR — não de um cliente. Roteamos para o Coordenador IA e saímos:
   // NÃO cria contato/ticket nem aciona o fluxo de atendimento ao cliente.
   if (channel.kind === 'internal') {
+    // FalaTu (ADR-151 Fatia 3): gatilho explícito "anota …" (ou confere/
+    // descarta de um item pendente) vira captura no inbox do FalaTu. Vem ANTES
+    // do Controller de propósito: o fallback dele manda mensagem livre de
+    // gestor pro Diretor IA, o que engoliria o "anota". Áudio já chega
+    // transcrito em payload.text (transcrição roda no webhook, ADR-102).
+    try {
+      const f = await FalaTuWhatsAppService.handle(orgId, payload.senderId, payload.text || '');
+      if (f.handled) {
+        if (f.reply) await MessageProviderService.sendMessage(channel.id, payload.senderId, f.reply);
+        return;
+      }
+    } catch (e) {
+      console.error('[FalaTu] Falha na captura via canal interno:', e);
+    }
     // Controller Financeiro IA (ADR-139): quando a org habilitou o gestor por
     // WhatsApp e o número é de um gestor, comandos CLAROS de gestão (saldo, a
     // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.

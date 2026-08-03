@@ -1,6 +1,6 @@
 # ADR-151 — FalaTu: Captura Multimodal "Fala → Faz → Confere" (incorporação ao ZapFlow)
 
-- **Status:** Fatia 2 em implementação (rollout multi-tenant: flag opt-in + RBAC + limites por plano). Fatia 1 MERGED (#747).
+- **Status:** Fatia 3 em implementação (captura via WhatsApp pelo canal interno). Fatia 1 MERGED (#747); Fatia 2 MERGED (#749).
 - **Data:** 2026-08-03
 - **Origem:** repositório `Eldastito/FalaTu` (protótipo AI Studio applet) — levantamento completo na seção "Levantamento do repositório de origem".
 - **Relacionadas:** ADR-136 (Decision-Action Ledger — briefing proativo futuro), ADR-095 (RBAC — rollout multi-tenant futuro), ADR-021/ADR-030 (leitura de nota fiscal por IA — reuso direto na conferência de compras), ADR-102 (tarefa por voz do gestor — mesmo princípio de confirmação antes de criar).
@@ -135,7 +135,7 @@ A IA do FalaTu **nunca**:
 | Achado na origem | Aqui |
 | --- | --- |
 | IDOR tarefa/lista/inbox | toda query filtra `organization_id` + `user_id`; itens de lista validam dono via JOIN |
-| Webhook aberto | **não existe** nesta fase (WhatsApp real virá pela infra de canais própria, Fatia 3) |
+| Webhook aberto | **não existe**: a Fatia 3 entrou pelo canal interno já autenticado por número (`phoneMatches`), sem webhook próprio |
 | Confirm confia no cliente | confirm relê o item do banco (ver RN-151) |
 | body 50mb global | payload de mídia limitado e validado na rota (`audio`/`image` base64 ≤ ~1.3MB dentro do limite global de 2mb já existente) |
 | Entidades duplicadas | `UNIQUE(organization_id, user_id, entity_type, name_norm)` + upsert |
@@ -148,8 +148,8 @@ A IA do FalaTu **nunca**:
 | Fatia | Escopo | Status |
 | --- | --- | --- |
 | **1** | Fundação: tabelas `falatu_*`, `FalaTuService` (capture → interpret IA → confirm/discard), rotas `/api/falatu/*` atrás de `requireMasterAdmin`, tarefas/eventos/listas/entidades/briefing, UI (aba `falatu` master-only), teste `scripts/test-falatu.ts` + CI | MERGED (#747) |
-| **2** | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | **MERGED (este PR)** |
-| 3 | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | planejada |
+| **2** | Rollout multi-tenant: flag opt-in `organization_settings.falatu_enabled`, troca do gate pra RBAC (ADR-095), limites de uso por plano | MERGED (#749) |
+| **3** | WhatsApp real: captura via canal interno existente (AIOrchestrator/Coordenador), sem webhook próprio — mensagem do gestor vira item de inbox | **MERGED (este PR)** |
 | 4 | Compras com conferência: lista planejada × nota fiscal fotografada — reusa `extractInvoiceItems` (ADR-021) e o matching vira tela de reconciliação | planejada |
 | 5 | Memória/desambiguação ativa ("qual Carlos?") + briefing diário proativo publicando em `business_signals` (ADR-136) | planejada |
 
@@ -213,3 +213,42 @@ gate (master bypass / 403 sem flag / passa com flag); RBAC (níveis por perfil,
 legado não gateado, `checkRouteAccess`, `permissionMap`); teto do plano trava
 a 3ª captura (limite 2) sem gravar inbox; org sem plano sem teto; billing
 bloqueado trava; consumo não vaza entre orgs; auditoria.
+
+## Fatia 3 — detalhe (captura via WhatsApp, canal interno)
+
+**Sem webhook próprio** (o webhook aberto era o achado nº 4 do levantamento):
+a captura entra pelo desvio do canal interno (`channel.kind='internal'`) do
+`webhookProcessor`, que já autentica o colaborador pelo NÚMERO (`users.phone`
+via `phoneMatches`) e já transcreve áudio antes do orquestrador (ADR-102) —
+voz chega como texto de graça.
+
+**`FalaTuWhatsAppService.handle`** roda ANTES do Controller (ADR-139) no
+desvio interno, com gatilho **explícito e determinístico**:
+
+- `anota …` / `anotar …` / `falatu …` → `FalaTuService.capture(source:
+  'whatsapp')` e responde a interpretação (intenção, resumo, aviso de EVENT
+  sem data — RN-151 "não invento", alerta de confiança < 0.5) + instruções.
+- `confere` / `descarta` → resolvem o pendente; o pendente é **derivado do
+  banco** (último `falatu_inbox_items` `source='whatsapp'` pendente do
+  usuário, desempate por rowid) — nunca estado em memória: sobrevive a
+  restart e não diverge do painel. Sem pendência ⇒ `handled=false` (a
+  palavra pode ser de outro fluxo).
+- Qualquer outra mensagem ⇒ `handled=false`: Controller (saldo/aprovações) e
+  Coordenador (tarefas) seguem intactos. O gatilho explícito existe porque o
+  fallback do Controller manda mensagem livre de gestor pro Diretor IA — sem
+  prefixo, "anota comprar arroz" seria engolido.
+
+**Gates** (mesmas 3 camadas da Fatia 2): org sem `falatu_enabled` ⇒ nada é
+interceptado (módulo invisível); RBAC `write` no módulo `falatu` via
+`PermissionService.can` sobre o usuário resolvido por número (mesmo desenho
+do Controller com `financeiro`); teto de IA do plano enforçado pelo próprio
+`capture()` — o reply devolve o motivo quando trava. Número desconhecido só
+ganha o aviso de cadastro no gatilho explícito.
+
+**Teste** (`scripts/test-falatu-whatsapp.ts`, 21 checks): org sem flag passa
+reto; comandos do Controller/Coordenador não são interceptados; número
+desconhecido; RBAC nega atendente; captura registra pendente sem
+materializar; confere materializa / descarta descarta (UPDATE, nunca
+DELETE); sem pendência caem no fluxo normal; EVENT sem data avisa; gatilho
+vazio não gasta IA; teto do plano com motivo no reply; isolamento
+multi-tenant do pendente.

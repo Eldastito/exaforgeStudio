@@ -350,7 +350,8 @@
     "test:controler-consumption": "tsx scripts/test-controler-consumption.ts",
     "test:consumption-signals": "tsx scripts/test-consumption-signals.ts",
     "test:falatu": "tsx scripts/test-falatu.ts",
-    "test:falatu-rollout": "tsx scripts/test-falatu-rollout.ts"
+    "test:falatu-rollout": "tsx scripts/test-falatu-rollout.ts",
+    "test:falatu-whatsapp": "tsx scripts/test-falatu-whatsapp.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

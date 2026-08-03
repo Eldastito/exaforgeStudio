@@ -67,8 +67,18 @@ async function main() {
   const dra = ClinicAgendaService.createProfessional(A.orgId, { name: "Dra. Ana" }, A.actorId);
 
   const now = Date.now();
-  // Consulta 24h à frente, hora "10:00 local (~13:00 UTC BR)"
-  const originalStartMs = now + 24 * 3600_000;
+  // Ancoragem determinística: `D dias à frente às 13:00 UTC` (~10:00 BR-3).
+  // 13:00 UTC cai dentro de WORKDAY_START_HOUR=8/WORKDAY_END_HOUR=18 do
+  // RescheduleService.findSlots. Fix pré-F4b.2 (2026-08-03): antes usávamos
+  // `now + Xh` que drifta pela wall-clock; se a CI rodava após ~14:00 UTC,
+  // o slot caía fora do workday em UTC e findSlots devolvia [] (regressão
+  // de tempo real — a suíte falhava intermitentemente após 14 UTC).
+  const dayAt13UTC = (daysAhead: number): number => {
+    const d = new Date(now + daysAhead * 86400_000);
+    d.setUTCHours(13, 0, 0, 0);
+    return d.getTime();
+  };
+  const originalStartMs = dayAt13UTC(1);
   const original = ClinicAgendaService.createAppointment(A.orgId, {
     contactId: A.patient, title: "Consulta original",
     scheduledStart: new Date(originalStartMs).toISOString(),
@@ -101,7 +111,7 @@ async function main() {
 
   // ── 3. Consulta cancelada → reply amigável sem offer ─────────────────
   const canceled = ClinicAgendaService.createAppointment(A.orgId, {
-    contactId: A.patient, title: "Cancelada", scheduledStart: new Date(now + 48 * 3600_000).toISOString(),
+    contactId: A.patient, title: "Cancelada", scheduledStart: new Date(dayAt13UTC(2)).toISOString(),
     professionalId: dra.id, durationMinutes: 30, force: true,
   }, A.actorId);
   // Envia lembrete ANTES de cancelar (Fatia 7 rejeita cancelled)
@@ -167,7 +177,7 @@ async function main() {
   // ── 9. Abandono explícito com "X" ────────────────────────────────────
   // Nova consulta + nova offer pra testar
   const apt9 = ClinicAgendaService.createAppointment(A.orgId, {
-    contactId: A.patient, title: "9", scheduledStart: new Date(now + 72 * 3600_000).toISOString(),
+    contactId: A.patient, title: "9", scheduledStart: new Date(dayAt13UTC(3)).toISOString(),
     professionalId: dra.id, durationMinutes: 30, force: true,
   }, A.actorId);
   await ClinicReminderService.sendForAppointment(A.orgId, apt9.id, { sender: senderOk });

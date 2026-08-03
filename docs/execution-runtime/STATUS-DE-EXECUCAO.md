@@ -375,6 +375,29 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
   - F4b.3 — cadência multi-tentativa: se não pagou em N dias, envia 2ª lembrança (mais firme) e 3ª (com aviso de negativação). Cada tentativa é um novo step / nova instância.
 - **Próximo passo:** **Fatia 4c** (Piloto 3 — Recuperação Comercial). BLOQUEADA na decisão #4 (§F/§L do DECISOES-E-PENDENCIAS.md) — jurídico precisa validar contato proativo em massa a leads sob LGPD (mesmo em base de cadastro próprio). Cobrança (F4b) é diferente: cliente já é dono do crédito no ZappFlow, LGPD é sobre relacionamento comercial pré-existente.
 
+### Sessão 2026-08-03 (Fatia 4b.2 do ADR-152 — Intent Classifier + Reply Router de Cobrança)
+- **Fase:** 4b.2 (extensão do Piloto 2)
+- **Itens executados:** classifier via `AIOrchestratorService`-adjacent (`chat` do `llm.ts`) + reply router hookado no `webhookProcessor` antes da IA + sinais publicados via `BusinessSignalService` (padrão ADR-136 C1) + reply canned por intent + teste E2E com mock.
+- **Arquivos criados:**
+  - `src/server/CollectionIntentClassifier.ts` — 10 intents PT-BR (§13.4 PRD) + `unknown` fallback. JSON mode + whitelist estrita. Setter `__setClassifierChatForTests` isolado ao módulo pra mock (ESM modules frozen).
+  - `src/server/CollectionReplyService.ts` — `tryHandle` correlaciona reply→cobrança viva (join `action_confirmations` pending × `decision_actions` command_type=`collection_send_reminder` approved), classifica, publica sinal, retorna reply canned. Guardas G-4b.2-1..5.
+  - `scripts/test-cobranca-intent-classifier.ts` — **35/35 checks** (10 intents, 4 fallbacks unknown, isolamento cross-tenant, correlação por contactId+phone, dedupe, audit log).
+- **Arquivos alterados:**
+  - `src/server/webhookProcessor.ts` — insere hook após `ClinicReminderReplyService.tryHandle` (linha 405) e antes do `AIOrchestratorService.processMessage` (linha 407). Best-effort com try/catch.
+  - `package.json` — script `test:cobranca-intent-classifier`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §13 atualiza 4 critérios que estavam BLOQUEADOS na F4b.2.
+- **Testes executados:**
+  - `npm run test:cobranca-intent-classifier` → **35/35 OK**
+  - Regressão: `test:piloto-cobranca` (38/38), `test:runtime-execute-e2e` (27/27), `test:runtime-confirmation` (32/32), `test:runtime-operations` (31/31), `test:business-snapshot` (18/18), `test:clinic-reminder-reply` (37/37), `test:business-signals` (12/12), `test:decision-actions` (16/16)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:** (i) intents `resend_pix|promise|dispute|claims_paid|installment|partial|hardship|callback_later|escalate_human|churn` viram sinal + reply canned; classifier NUNCA age direto (G-4b.2-1) — o dono decide na aba Operações / painel de sinais. (ii) correlação prioriza cobrança MAIS RECENTE quando contato tem 2+ abertas (tiebreaker `created_at DESC, rowid DESC` pra sobreviver ao SQLite `CURRENT_TIMESTAMP` de precisão-segundo). (iii) `resend_pix` MVP só sinaliza; a re-emissão automática do PIX fica pra F4b.3 (precisa integrar `AsaasService.getPayment` pra recuperar QR/link). (iv) dedupe unknown inclui hash da mensagem — sinais consecutivos "unclassified" do mesmo contato não somem num único.
+- **Cross-service change auditada:** hook no `webhookProcessor` é ADITIVO PURO — se import falhar ou `tryHandle` retornar `{handled:false}`, o fluxo AI segue inalterado. Nenhum caller pré-existente muda comportamento.
+- **Resultado:** Fatia 4b.2 fecha as 4 lacunas do §13.7 do PRD que a F4b (MVP) tinha deixado abertas: "Respostas alteram fluxo", "Promessa agenda nova verificação" (via sinal → dono decide), "Cadência executada" (parcial — MVP + reply router), "Testes cobrem positivo e negativo" agora com 10 intents cobertas. Sem OPENAI_API_KEY, tudo cai pra `unknown` — nenhuma resposta é mal-interpretada.
+- **Pendências criadas:**
+  - F4b.3 — cadência multi-tentativa (2ª/3ª lembrança) + re-emissão automática de PIX no intent `resend_pix` (integração `AsaasService.getPayment` pra recuperar QR/link).
+  - F4b.4 (nova) — agendar re-check automático quando intent=`promise` (via `SchedulerActionCommandHandler` ou `ScheduleWakeup`-equivalente). Hoje o sinal é publicado mas o dono precisa lembrar de conferir na data prometida.
+- **Próximo passo:** decidir com o dono se F4b.3 (mais automação de cobrança) ou F4c (Recuperação Comercial — que segue bloqueada em decisão #4 LGPD) vem primeiro.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

@@ -561,8 +561,38 @@ router.get("/pdv-customers", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * Códigos padrão da tabela de cartão do Alterdata (`ADQ_CODIGO`) mapeados
+ * pras bandeiras que a recepção reconhece. Varia por instalação — quando o
+ * código não bater, o retorno mostra o CRU (nunca esconde). O gestor pode
+ * ver todos os códigos que estão chegando em `unknownBrands` no response.
+ * Override futuro por organização em `organization_settings` (fase própria).
+ */
+const CARD_BRAND_MAP: Record<string, string> = {
+  "01": "Visa", "02": "Visa",
+  "03": "Master", "04": "Master",
+  "05": "Amex",
+  "06": "Diners",
+  "07": "Elo", "08": "Elo",
+  "09": "Hipercard",
+  "10": "Aura",
+  "11": "Sorocred",
+  "99": "Outros",
+};
+function normalizeCardBrand(cod: any): { raw: string; label: string; matched: boolean } {
+  const raw = String(cod ?? "").trim();
+  if (!raw) return { raw: "", label: "Sem bandeira", matched: false };
+  // Alterdata costuma vir só com dígitos (2 chars) OU já com o nome — cobre os dois.
+  const twoDigits = /^\d+$/.test(raw) ? raw.padStart(2, "0").slice(-2) : raw.toUpperCase();
+  const mapped = CARD_BRAND_MAP[twoDigits];
+  if (mapped) return { raw, label: mapped, matched: true };
+  return { raw, label: raw, matched: false };
+}
+
 // RECEBÍVEIS DE CARTÃO (parcelasCartao do PDV): por dia de VENCIMENTO — bruto,
-// líquido (o que entra), taxa retida — + totais do período. ?store filtra filial.
+// líquido (o que entra), taxa retida — + totais do período. ?store filtra
+// filial; ?detailed=1 devolve a linha-a-linha com bandeira normalizada +
+// parcela + valor + vencimento pra conferência com o extrato do banco.
 router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -570,23 +600,64 @@ router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
   const end = String(req.query.end || "").slice(0, 10);
   if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
   const filial = String(req.query.store || "").trim();
+  const detailed = String(req.query.detailed || "") === "1";
   const args: any[] = [orgId, start, end];
   let filialClause = "";
   if (filial) { filialClause = "AND filial = ?"; args.push(filial); }
   try {
-    const rows = db.prepare(
+    // Bloco AGREGADO — sempre devolve (topo da tela, tiles + tabela por dia).
+    const byDayRows = db.prepare(
       `SELECT vencimento, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
          FROM retail_pdv_card_installments
         WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
         GROUP BY vencimento ORDER BY vencimento`
     ).all(...args) as any[];
-    const totals = rows.reduce((a, r) => ({
+    // Breakdown por BANDEIRA no período — pra mostrar "quanto Visa vs Master".
+    const byBrandRows = db.prepare(
+      `SELECT codigo_cartao, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
+         FROM retail_pdv_card_installments
+        WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
+        GROUP BY codigo_cartao ORDER BY SUM(valor) DESC`
+    ).all(...args) as any[];
+    const totals = byDayRows.reduce((a, r) => ({
       parcelas: a.parcelas + Number(r.parcelas || 0),
       bruto: a.bruto + Number(r.bruto || 0),
       liquido: a.liquido + Number(r.liquido || 0),
     }), { parcelas: 0, bruto: 0, liquido: 0 });
-    totals.taxa = Math.round((totals.bruto - totals.liquido) * 100) / 100;
-    res.json({ start, end, byDay: rows.map((r) => ({ vencimento: r.vencimento, parcelas: Number(r.parcelas), bruto: Math.round(Number(r.bruto) * 100) / 100, liquido: Math.round(Number(r.liquido) * 100) / 100 })), totals });
+    (totals as any).taxa = Math.round((totals.bruto - totals.liquido) * 100) / 100;
+    const byBrand = byBrandRows.map((r) => {
+      const n = normalizeCardBrand(r.codigo_cartao);
+      return { raw: n.raw, brand: n.label, matched: n.matched, parcelas: Number(r.parcelas), bruto: Math.round(Number(r.bruto) * 100) / 100, liquido: Math.round(Number(r.liquido) * 100) / 100 };
+    });
+    const unknownBrands = byBrand.filter((b) => !b.matched && b.raw).map((b) => b.raw);
+    // Bloco DETALHADO — só se pedido; até 1000 linhas pra não travar a tela.
+    let items: any[] | undefined;
+    if (detailed) {
+      const rowsD = db.prepare(
+        `SELECT filial, vencimento, parcela, seq, numero, boleta, codigo_cartao, valor, liquido, taxa, sale_date
+           FROM retail_pdv_card_installments
+          WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
+          ORDER BY vencimento, filial, numero, seq
+          LIMIT 1000`
+      ).all(...args) as any[];
+      items = rowsD.map((r) => {
+        const n = normalizeCardBrand(r.codigo_cartao);
+        return {
+          filial: r.filial, vencimento: r.vencimento, parcela: r.parcela, seq: r.seq,
+          numero: r.numero, boleta: r.boleta, brand: n.label, brandRaw: n.raw, brandMatched: n.matched,
+          valor: Math.round(Number(r.valor) * 100) / 100,
+          liquido: Math.round(Number(r.liquido) * 100) / 100,
+          taxa: Math.round(Number(r.taxa) * 100) / 100,
+          saleDate: r.sale_date,
+        };
+      });
+    }
+    res.json({
+      start, end,
+      byDay: byDayRows.map((r) => ({ vencimento: r.vencimento, parcelas: Number(r.parcelas), bruto: Math.round(Number(r.bruto) * 100) / 100, liquido: Math.round(Number(r.liquido) * 100) / 100 })),
+      byBrand, unknownBrands, totals,
+      items, itemsTruncated: detailed && (items?.length || 0) === 1000,
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

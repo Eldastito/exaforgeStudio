@@ -355,7 +355,9 @@
     "test:falatu-compras": "tsx scripts/test-falatu-compras.ts",
     "test:falatu-memoria": "tsx scripts/test-falatu-memoria.ts",
     "test:falatu-briefing-digest": "tsx scripts/test-falatu-briefing-digest.ts",
-    "test:runtime-process-fabric": "tsx scripts/test-runtime-process-fabric.ts"
+    "test:runtime-process-fabric": "tsx scripts/test-runtime-process-fabric.ts",
+    "test:runtime-confirmation": "tsx scripts/test-runtime-confirmation.ts",
+    "test:runtime-executor-execute": "tsx scripts/test-runtime-executor-execute.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

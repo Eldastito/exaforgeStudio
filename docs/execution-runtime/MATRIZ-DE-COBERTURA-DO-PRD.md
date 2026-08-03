@@ -121,10 +121,10 @@ Campos:
 `[x] DONE` (F1.1). FSM unificada de PROCESSO em `ProcessRuntimeService.transition` com 13 estados e 27 transições válidas. Transições inválidas 400. Cada transição auditada em `process_transitions` (ator, motivo, evidência). Estados atuais mapeiam para: `detected` (novo do PRD) / `planned` (novo) / `awaiting_approval` (=existe) / `authorized` (=`approved`) / `queued` (novo — `background_jobs.pending`) / `executing` (`background_jobs.processing`) / `waiting_external_response` (novo — `action_confirmations.pending`) / `retry_scheduled` (novo) / `escalated` (novo) / `completed` (=`done`) / `failed` (=existe) / `cancelled` (=existe) / `measured` (novo — outcome recorded).
 
 ### §11.5 Executor Registry
-`[~] PARCIAL` — Registry existe. Falta:
+`[~] PARCIAL` — Registry + modo `execute` (F2.2) prontos; handlers concretos vêm na F2.3. `CommandExecutorService.execute(orgId, actionId)` corre com 3 guardas em série (`policy_missing → autonomy_below_execute → execution_mode_blocked → action_not_approved/action_terminal → no_handler`) — cada rejeição AUDITADA com `error_code` explícito em `action_execution_log`. Handlers desta fatia (2.2) são NO-OP (`effect:'noop-2.2'`); a 2.3 pluga efeito real.
 | Executor do PRD | Status | Onde |
 |---|---|---|
-| WhatsApp Agent | [ ] F2 | `WhatsAppSendCommandHandler` |
+| WhatsApp Agent | [ ] F2.3 | `WhatsAppSendCommandHandler` |
 | CRM Agent | [~] parcial via handlers | Reusa services existentes |
 | Financial Agent | [ ] F2 | `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` |
 | Retail Agent | [~] existe como service | Formalizado como handler em F2 |
@@ -145,10 +145,10 @@ Campos:
 `[x] DONE` (F1.1). `PlaybookEngine.ts` puro (zero I/O): `validateDefinition` bloqueia playbook inválido no cadastro (refs quebradas, ids duplicados, commandType ausente, onFailure=fallback sem fallbackStep); `evaluateCondition` (truthy/eq/gte/lte/and/or/not); `chooseNextStep` (string direto, array de `{when, next}` com regra default por último). Testado em isolamento (10 checks no `test-runtime-process-fabric`).
 
 ### §11.9 Retry, timeout, compensação
-`[~] PARCIAL` — Retry existe em `JobQueueService`. F2 adiciona backoff exponencial, classificação de erro, dead‑letter formal. Compensação por processo é F1 (`on_failure: fallback_step`).
+`[x] DONE` (F1.1 + F2.1). Retry em `JobQueueService` (ADR-073) + backoff exponencial (30s base retryable, 60s external_unavailable, teto 30min); classificação de erro (`retryable | external_unavailable | permission | non_retryable` via `JobQueueError`); dead-letter formal (`status='failed'` + `deadLetters(orgId)`); `sweepStale` respeita `next_attempt_at`. Compensação por processo em F1.1 (`on_failure: fallback_step` do playbook).
 
 ### §11.10 Confirmation Engine
-`[~] PARCIAL` — F2. Confirmações existem distribuídas; F2 centraliza em `ConfirmationEngine`.
+`[x] DONE` (F2.1). `ConfirmationEngine` centralizado com 5 métodos (`asaas_payment_webhook | retail_reconciliation | channel_reply | alterdata_sync | manual`). `expect` idempotente por (org, action). `confirm` fecha a ação via `DecisionActionService.complete` (loop ADR-136 D6). Idempotência crítica: webhook 2x devolve a linha; ação já `done/rejected/cancelled` → `dismissed` sem reabrir; cross-tenant recusado. `sweepTimeouts` fecha as pendentes vencidas. **Subscribers ficam plugados na F2.3** (webhook Asaas → `confirm`; reconciliação Alterdata → `confirm`).
 
 ### §11.11 Outcome Ledger
 `[x] DONE` — `OutcomeMeasurementService` + `action_outcomes` (ADR-136 D6). F3 adiciona campos aditivos (`time_saved_minutes`, `cost_avoided`, `revenue_recovered`, `loss_prevented`).

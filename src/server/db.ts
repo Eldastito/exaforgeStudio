@@ -7223,6 +7223,57 @@ const initDb = () => {
 
   // Gate geral do Runtime (ADR-152 D10) — sem flag, /api/runtime/* retorna 403.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN execution_runtime_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-152 Fatia 2.1 — fundação do modo `execute` governado e da confirmação
+  // externa. Nenhum handler ainda executa efeito externo nesta fatia; isto
+  // aqui é o schema/infra que a Fatia 2.2 (executor) e 2.3 (handlers reais)
+  // vão usar. Todos os aditivos são retrocompatíveis (nullable/defaults).
+  //
+  // execution_mode (ADR-152 D7) na policy da org:
+  //   shadow — playbook roda mas nenhum efeito externo (só grava o plano)
+  //   assisted — comportamento atual, materializa em decision_actions
+  //   approved_execution — executa após aprovação humana
+  //   autonomous — executa dentro da política sem parar em aprovações
+  try { db.exec(`ALTER TABLE agent_policies ADD COLUMN execution_mode TEXT DEFAULT 'assisted'`); } catch(e){}
+
+  // Aditivos no JobQueue: backoff exponencial + classificação de erro. O
+  // JobQueueService (ADR-073) já retenta até max_attempts; o que faltava era
+  // (a) esperar backoff antes de re-executar; (b) classificar o erro pra
+  // saber se retenta (retryable), escala (permission), aguarda serviço
+  // (external_unavailable) ou desiste (non_retryable). Dead-letter formal já
+  // existe como `status='failed'` — a UI da Fase 3 vai exibir.
+  try { db.exec(`ALTER TABLE background_jobs ADD COLUMN backoff_seconds INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE background_jobs ADD COLUMN next_attempt_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE background_jobs ADD COLUMN error_class TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_background_jobs_next_attempt ON background_jobs(status, next_attempt_at)`); } catch(e){}
+
+  // Confirmation Engine (PRD §11.10) — action → confirmação externa esperada.
+  // UMA confirmação viva por ação (UNIQUE): se o executor manda 2 vezes, é
+  // dedupado. `status pending → confirmed | timed_out | dismissed`. Terminal
+  // por evento externo (webhook Asaas, reconciliação, resposta em canal); a
+  // Fase 2.3 pluga os subscribers. `evidence_json` é a prova auditável.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS action_confirmations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        confirmation_method TEXT NOT NULL,        -- asaas_payment_webhook | retail_reconciliation | channel_reply | alterdata_sync | manual
+        status TEXT NOT NULL DEFAULT 'pending',   -- pending | confirmed | timed_out | dismissed
+        expected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deadline_at DATETIME,
+        confirmed_at DATETIME,
+        evidence_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, action_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_action_confirmations_pending
+        ON action_confirmations (organization_id, status, deadline_at);
+      CREATE INDEX IF NOT EXISTS idx_action_confirmations_method
+        ON action_confirmations (organization_id, confirmation_method, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar action_confirmations (ADR-152 F2.1)', e); }
 };
 
 initDb();

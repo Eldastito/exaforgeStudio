@@ -251,11 +251,13 @@ async function main() {
 
   // ── 7. Timeline ──────────────────────────────────────────────────────────
   const tl = ClinicPatientTimelineService.getTimeline(A.orgId, A.contactId);
-  const recItem = tl.items.find((it: any) => it.kind === "receipt_issued");
-  check("timeline traz kind='receipt_issued'", !!recItem);
+  // Busca pelo refId, não pelo "primeiro receipt_issued": r1 e rPin são do
+  // mesmo kind e, quando os issued_at caem em segundos distintos, a ordem
+  // DESC muda qual vem primeiro — o teste não pode depender desse empate.
+  const recItem = tl.items.find((it: any) => it.kind === "receipt_issued" && it.refId === r1.id);
+  check("timeline traz kind='receipt_issued' do r1 (refId)", !!recItem);
   check("timeline summary contém valor em BRL", recItem?.summary?.includes("R$") === true);
   check("timeline summary contém '300,00'", recItem?.summary?.includes("300,00") === true);
-  check("timeline refId = receipt id", recItem?.refId === r1.id);
 
   // ── 8. Métricas ──────────────────────────────────────────────────────────
   // Janela ampla que cobre issue de r1 e rPin (hoje).

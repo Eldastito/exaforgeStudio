@@ -93,8 +93,12 @@ async function main() {
   const cert1 = ClinicDocumentsService.createCertificate(A.orgId, enc1.id, { days: 2 }, A.actorId);
   ClinicDocumentsService.issueCertificate(A.orgId, cert1.id, A.actorId);
 
+  // PNG 1×1 real: o sniffing binário da Fase 30 valida magic bytes do
+  // CONTEÚDO (nunca o mime declarado) — texto solto é rejeitado.
+  const PNG_1x1 = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c62000100000005000101" +
+    "0d0a2db40000000049454e44ae426082", "hex");
   const att1 = ClinicAttachmentService.add(A.orgId, enc1.id, {
-    buffer: Buffer.from("fake png bytes"),
+    buffer: PNG_1x1,
     mime: "image/png",
     originalFilename: "raio-x.png",
     label: "Raio-X",

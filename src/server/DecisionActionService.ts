@@ -122,7 +122,19 @@ export class DecisionActionService {
    * informado — sempre com a mesma `basis` (fato/estimativa) da ação, para o
    * Impact Ledger unificado nunca somar comprovado com estimado.
    */
-  static complete(orgId: string, id: string, opts: { resultAmount?: number | null } = {}): any {
+  static complete(orgId: string, id: string, opts: {
+    resultAmount?: number | null;
+    // ADR-152 F3.1 — categorias explícitas propagadas ao ledger unificado.
+    // Aditivo puro: quando o caller (ex.: ConfirmationEngine ao fechar
+    // cobrança) sabe atribuir "revenue_recovered" / "cost_avoided" etc.,
+    // passa aqui; senão, ficam null (comportamento pré-existente).
+    categoryOutcomes?: {
+      timeSavedMinutes?: number | null;
+      costAvoided?: number | null;
+      revenueRecovered?: number | null;
+      lossPrevented?: number | null;
+    };
+  } = {}): any {
     const a = db.prepare("SELECT status, expected_impact, basis FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) throw new Error("Ação não encontrada.");
     if (a.status !== "approved") throw new Error(`Só conclui ação aprovada (atual: ${a.status}).`);
@@ -138,6 +150,7 @@ export class DecisionActionService {
         basis: a.basis || "estimate",
         measurementMethod: "self_reported",
         evidence: { source: "decision_action.complete" },
+        ...(opts.categoryOutcomes || {}),
       });
     } catch (e) { /* medição é aditiva — nunca bloqueia a conclusão */ }
     return this.get(orgId, id);

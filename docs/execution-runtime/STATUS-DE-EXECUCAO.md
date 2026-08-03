@@ -348,6 +348,33 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Pendências criadas:** F4a.1 opcional (comissão retail + Sicredi + PlaybookEngine mul/abs) — adiadas pós-piloto.
 - **Próximo passo:** **Fatia 4b** (Piloto 2 — Cobrança lojista→cliente). Reusa `AsaasPixChargeCommandHandler` + `ConfirmationEngine.expect(asaas_payment_webhook)` da F2.3 + intent classifier pra respostas do cliente (via `AIOrchestratorService`). Playbook `receivable_collection_v1` com steps: `detect_due → send_reminder → wait_reply → interpret_intent → (promise|dispute|pay|escalate|next_reminder)`. Aguardando aprovação.
 
+### Sessão 2026-08-03 (Fatia 4b do ADR-152 — Piloto Cobrança MVP)
+- **Fase:** 4b (Piloto 2 dos 3)
+- **Itens executados:** MVP conservador da Cobrança — playbook `receivable_collection_v1` de 1 step composto (`collection_send_reminder`) que faz PIX+expect+WhatsApp num handler só; F4b.2 (intent classifier via AIOrchestrator) e F4b.3 (cadência multi-tentativa) ficaram para fatias subsequentes por não bloquearem o loop de ponta-a-ponta do piloto.
+- **Arquivos criados:**
+  - `src/server/CollectionPlaybook.ts` (CollectionSendReminderHandler async + RECEIVABLE_COLLECTION_V1 + CollectionPlaybookService.seed/start + guardas G-4b-1..5)
+  - `scripts/test-piloto-cobranca.ts` (38/38 checks E2E)
+- **Arquivos alterados:**
+  - `src/server/DecisionActionService.ts` — `complete` aceita opcional `categoryOutcomes` (F3.1) e propaga a `OutcomeMeasurementService.record`. Aditivo puro (opcional; comportamento anterior preservado quando `undefined`).
+  - `src/server/ConfirmationEngine.ts` — `ConfirmInput.categoryOutcomes` opcional; `confirm` propaga a `DecisionActionService.complete`.
+  - `src/server/AsaasService.ts` — `notifyRuntimeConfirmation` categoriza como `revenueRecovered = paidValue` quando a ação amarrada é `collection_send_reminder` ou `asaas_pix_charge` (heurística conservadora — futuras integrações Asaas passam sem categoria até serem listadas).
+  - `src/server/routes/runtime.ts` — 2 rotas: `POST /collection/seed`, `POST /collection/start`.
+  - `server.ts` — side-effect import de `CollectionPlaybook.js`.
+  - `package.json` — script `test:piloto-cobranca`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §13 Piloto Cobrança MVP marcado.
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md` (esta seção).
+- **Testes executados:**
+  - `npm run test:piloto-cobranca` → **38/38 OK**
+  - Regressão relevante: `test:runtime-process-fabric` (42/42), `test:runtime-executor-execute` (22/22), `test:runtime-execute-e2e` (27/27), `test:runtime-operations` (31/31), `test:piloto-fechamento-retail` (26/26), `test:asaas-billing` (16/16), `test:runtime-confirmation` (32/32), `test:outcome-measurement` (17/17), `test:decision-actions` (16/16), `test:retail-insight-action` (8/8)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:** o step composto (1 handler = PIX + expect + WhatsApp) foi escolhido em vez de 2 steps (`asaas_pix_charge → whatsapp_send`) porque a mensagem de cobrança precisa do `paymentId` do PIX E de um template específico com PIX embutido — combinar deixa a intent clara e evita que o handler WhatsApp genérico "conheça" formato de cobrança. Se F4b.2 quebrar em stages `wait_reply → interpret_intent`, o `send_reminder` continua atômico.
+- **Cross-service change auditada:** a extensão de `DecisionActionService.complete` com `categoryOutcomes` opcional é usada hoje só pela Cobrança via `ConfirmationEngine`. Retail (F4a) grava categoria direto no handler (`OutcomeMeasurementService.record` in-band) — não passa por essa via — logo continua funcionando idêntico.
+- **Resultado:** Fatia 4b concluída — piloto Cobrança MVP pronto. Fluxo E2E: `POST /collection/start` → `runToCompletion` → PIX criado no Asaas → WhatsApp enviado com QR/link → `ConfirmationEngine.expect(asaas_payment_webhook, paymentId)` amarrado com deadline `dueDate+30d` → webhook Asaas casa `payment.id` → `DecisionActionService.complete(result_amount=paidValue)` + outcome F3.1 com `revenueRecovered=paidValue`. Timeout: `Scheduler.confirmationTimeoutPass` fecha como `timed_out` → aparece na aba Operações (F3.2) como exceção `integration_failed` (dono decide reenviar/escalar/dispensar). Runtime dispara efeito real (PIX + msg WhatsApp) atrás das mesmas 4 camadas: `execution_runtime_enabled=1` + policies `execute+approved_execution` (runtime_step_send_reminder + collection_send_reminder).
+- **Pendências criadas:**
+  - F4b.2 — intent classifier via `AIOrchestratorService` interpreta 10 respostas do cliente (§13.4 do PRD: "vou pagar", "manda o pix", "já paguei", "posso parcelar?", "não reconheço", etc). Adiciona steps `wait_reply → interpret_intent → (promise/dispute/escalate/pay/pause)`.
+  - F4b.3 — cadência multi-tentativa: se não pagou em N dias, envia 2ª lembrança (mais firme) e 3ª (com aviso de negativação). Cada tentativa é um novo step / nova instância.
+- **Próximo passo:** **Fatia 4c** (Piloto 3 — Recuperação Comercial). BLOQUEADA na decisão #4 (§F/§L do DECISOES-E-PENDENCIAS.md) — jurídico precisa validar contato proativo em massa a leads sob LGPD (mesmo em base de cadastro próprio). Cobrança (F4b) é diferente: cliente já é dono do crédito no ZappFlow, LGPD é sobre relacionamento comercial pré-existente.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

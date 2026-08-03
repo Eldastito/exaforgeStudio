@@ -2315,15 +2315,16 @@ function CardReceivablesTab() {
   const [end, setEnd] = useState(todayStr().slice(0, 8) + '28');
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const [detailed, setDetailed] = useState(false);
   const load = () => {
     setLoading(true);
-    apiFetch(`/api/retailops/pdv-card-receivables?start=${start}&end=${end}`)
+    apiFetch(`/api/retailops/pdv-card-receivables?start=${start}&end=${end}${detailed ? '&detailed=1' : ''}`)
       .then(r => r.json())
       .then(d => setData(d && !d.error ? d : null))
       .catch(() => toast.error('Falha ao carregar os recebíveis.'))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [detailed]);
   const t = data?.totals;
   return (
     <div>
@@ -2333,6 +2334,10 @@ function CardReceivablesTab() {
         <span className="text-xs text-zinc-500">até</span>
         <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><RefreshCw className="w-4 h-4" /> Gerar</button>
+        <div className="ml-auto inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-xs">
+          <button onClick={() => setDetailed(false)} className={`px-2.5 py-1 rounded ${!detailed ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Agregado por dia</button>
+          <button onClick={() => setDetailed(true)} className={`px-2.5 py-1 rounded ${detailed ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`} title="Linha-a-linha (bandeira + parcela + valor + vencimento)">Detalhado</button>
+        </div>
       </div>
       {t && (
         <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -2342,10 +2347,64 @@ function CardReceivablesTab() {
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3"><p className="text-[11px] uppercase tracking-wider text-emerald-400/80">Líquido a receber</p><p className="text-lg font-semibold text-emerald-300">{brl(t.liquido)}</p></div>
         </div>
       )}
+      {/* Breakdown por bandeira do período */}
+      {data && data.byBrand && data.byBrand.length > 0 && (
+        <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Por bandeira</span>
+            {data.unknownBrands?.length > 0 && (
+              <span className="text-[10px] text-amber-300" title={`Códigos do ERP que ainda não têm mapping: ${data.unknownBrands.join(', ')}`}>
+                {data.unknownBrands.length} código(s) não mapeado(s)
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            {data.byBrand.map((b: any, i: number) => (
+              <div key={`${b.raw}-${i}`} className={`rounded-lg border p-2 ${b.matched ? 'border-zinc-800 bg-zinc-900/40' : 'border-amber-500/30 bg-amber-500/5'}`}>
+                <div className={`text-xs font-medium ${b.matched ? 'text-zinc-200' : 'text-amber-300'}`} title={!b.matched ? `Código cru do Alterdata: ${b.raw}` : ''}>{b.brand || 'Sem bandeira'}</div>
+                <div className="text-[10px] text-zinc-500">{b.parcelas} parc. · bruto {brl(b.bruto)}</div>
+                <div className="text-[11px] text-emerald-300">{brl(b.liquido)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
-      ) : !data || data.byDay.length === 0 ? (
+      ) : !data || (!detailed && data.byDay.length === 0) || (detailed && (data.items || []).length === 0) ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum recebível de cartão no período. As parcelas entram pela sincronização das vendas do PDV.</div>
+      ) : detailed ? (
+        <div>
+          {data.itemsTruncated && <p className="mb-2 text-[11px] text-amber-300">Mostrando as 1.000 primeiras parcelas — reduza o período pra ver o restante.</p>}
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+                <th className="px-3 py-2 text-left font-medium">Vencimento</th>
+                <th className="px-3 py-2 text-left font-medium">Filial</th>
+                <th className="px-3 py-2 text-left font-medium">Bandeira</th>
+                <th className="px-3 py-2 text-left font-medium">Parcela</th>
+                <th className="px-3 py-2 text-left font-medium">Nº transação</th>
+                <th className="px-3 py-2 text-right font-medium">Bruto</th>
+                <th className="px-3 py-2 text-right font-medium">Taxa</th>
+                <th className="px-3 py-2 text-right font-medium">Líquido</th>
+              </tr></thead>
+              <tbody>
+                {(data.items || []).map((r: any, i: number) => (
+                  <tr key={`${r.numero || i}-${r.seq}`} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-zinc-200">{r.vencimento?.split('-').reverse().join('/')}</td>
+                    <td className="px-3 py-2 text-zinc-400 text-[11px] font-mono">{r.filial}</td>
+                    <td className={`px-3 py-2 ${r.brandMatched ? 'text-zinc-200' : 'text-amber-300'}`} title={r.brandMatched ? '' : `Código cru do Alterdata: ${r.brandRaw}`}>{r.brand}</td>
+                    <td className="px-3 py-2 text-zinc-300">{r.parcela || '—'}</td>
+                    <td className="px-3 py-2 text-zinc-500 text-[11px] font-mono">{r.numero || '—'}</td>
+                    <td className="px-3 py-2 text-right text-zinc-300">{brl(r.valor)}</td>
+                    <td className="px-3 py-2 text-right text-rose-300/80 text-[11px]">{r.taxa > 0 ? `${r.taxa}%` : '—'}</td>
+                    <td className="px-3 py-2 text-right text-emerald-300">{brl(r.liquido)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
           <table className="w-full text-sm">

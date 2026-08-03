@@ -21,6 +21,7 @@ import { haversineKm } from "../geo.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
+import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -1530,6 +1531,30 @@ router.post("/schedule/apply-template", requireRole("owner", "admin"), (req: Aut
   } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
 });
 
+// Corte VARIÁVEL das semanas do mês (Fase G2c). GET devolve o override
+// cadastrado + o padrão CARIOCA lado a lado, pra UI mostrar "usando o
+// override" ou "usando o padrão".
+router.get("/month-weeks", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = String(req.query.month || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "month (YYYY-MM) obrigatório" });
+  const override = RetailMonthWeeksService.getOverride(orgId, month);
+  const defaultWeeks = RetailCommissionRaceService.weeksOfMonth(month);
+  res.json({ month, override, defaultWeeks, effective: override || defaultWeeks, source: override ? "override" : "default" });
+});
+
+router.put("/month-weeks", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { month, weeks } = req.body || {};
+  if (!/^\d{4}-\d{2}$/.test(String(month))) return res.status(400).json({ error: "month (YYYY-MM) obrigatório" });
+  try {
+    const saved = RetailMonthWeeksService.save(orgId, String(month), Array.isArray(weeks) ? weeks : [], req.user?.userId);
+    res.json({ month, weeks: saved, source: saved.length > 0 ? "override" : "default" });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+});
+
 // "Quem folga hoje/amanhã" — junta grade lançada 'off' + template do dia.
 router.get("/schedule/who-off", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
@@ -1550,7 +1575,7 @@ router.get("/seller-quotas", (req: AuthRequest, res): any => {
   const month = String(req.query.month || "");
   if (!storeId || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "storeId e month (YYYY-MM) obrigatórios" });
   if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
-  const weeks = RetailCommissionRaceService.weeksOfMonth(month);
+  const weeks = RetailCommissionRaceService.weeksOfMonthFor(orgId, month);
   res.json({ storeId, month, weeks, quotas: RetailCommissionRaceService.listSellerQuotas(orgId, storeId, weeks.map((w) => w.start)) });
 });
 

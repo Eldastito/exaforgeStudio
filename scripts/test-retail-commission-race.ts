@@ -254,6 +254,42 @@ async function main() {
     has("RETAIL_SCHEDULE_SAVED") && has("RETAIL_SELLER_QUOTA_SAVED") && has("RETAIL_COMMISSION_PLAN_SAVED") && has("RETAIL_COMMISSION_RACE_RUN_CREATED"),
     JSON.stringify(audit.map((a) => a.event_type)));
 
+  // ── Corte VARIÁVEL das semanas do mês (Fase G2c) ─────────────────────────
+  // Sem override, `weeksOfMonthFor` cai no `weeksOfMonth` clássico (5 semanas
+  // em agosto/26). Com override, retorna EXATAMENTE o que foi cadastrado.
+  const { RetailMonthWeeksService } = await import("../src/server/RetailMonthWeeksService.js");
+  check("weeksOfMonthFor sem override = padrão CARIOCA (5 semanas)", RetailCommissionRaceService.weeksOfMonthFor(A, "2026-08").length === 5);
+  const override = [
+    { start: "2026-08-01", end: "2026-08-10" },
+    { start: "2026-08-11", end: "2026-08-20" },
+    { start: "2026-08-21", end: "2026-08-31" },
+  ];
+  RetailMonthWeeksService.save(A, "2026-08", override, "tester");
+  const wOv = RetailCommissionRaceService.weeksOfMonthFor(A, "2026-08");
+  check("weeksOfMonthFor com override = 3 semanas cadastradas", wOv.length === 3 && wOv[0].start === "2026-08-01" && wOv[2].end === "2026-08-31");
+  const raceOv = RetailCommissionRaceService.raceMonth(A, "2026-08");
+  const srOv = raceOv.stores.find((s: any) => s.storeId === loja1.id);
+  check("raceMonth respeita o override (loja 1 tem 3 semanas)", srOv?.weeks?.length === 3, `n=${srOv?.weeks?.length}`);
+  // Cobertura obrigatória — lacuna dá erro.
+  let gapErr = false;
+  try { RetailMonthWeeksService.save(A, "2026-08", [
+    { start: "2026-08-01", end: "2026-08-10" },
+    { start: "2026-08-12", end: "2026-08-31" }, // gap 11/08
+  ]); } catch (e: any) { gapErr = /lacuna|esperado/.test(e.message); }
+  check("save rejeita lacuna entre semanas", gapErr);
+  // Última precisa terminar no último dia do mês.
+  let endErr = false;
+  try { RetailMonthWeeksService.save(A, "2026-08", [
+    { start: "2026-08-01", end: "2026-08-20" },
+    { start: "2026-08-21", end: "2026-08-30" }, // não cobre 31
+  ]); } catch (e: any) { endErr = /terminar em 2026-08-31/.test(e.message); }
+  check("save rejeita quando última semana não cobre o mês inteiro", endErr);
+  // Salvar [] limpa o override — org volta ao padrão.
+  RetailMonthWeeksService.save(A, "2026-08", [], "tester");
+  check("save([]) limpa override — volta a 5 semanas do padrão", RetailCommissionRaceService.weeksOfMonthFor(A, "2026-08").length === 5);
+  // Org B ignorada pelo override da A.
+  check("org B não é afetada pelo override que a A teve", RetailCommissionRaceService.weeksOfMonthFor(B, "2026-08").length === 5);
+
   // ── Isolamento multi-tenant ───────────────────────────────────────────────
   const raceB = RetailCommissionRaceService.raceMonth(B, "2026-08");
   check("Org B não vê lojas/corrida da org A", raceB.stores.length === 0 && raceB.totals.grand === 0);

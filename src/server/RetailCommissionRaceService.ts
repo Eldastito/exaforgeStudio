@@ -42,6 +42,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
+import { RetailMonthWeeksService } from "./RetailMonthWeeksService.js";
 
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
 const norm = (s: any) => String(s || "").trim().toLowerCase();
@@ -178,6 +179,18 @@ export class RetailCommissionRaceService {
     const [y, m] = month.split("-").map(Number);
     const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
     return { start: `${month}-01`, end: `${month}-${String(days).padStart(2, "0")}` };
+  }
+
+  /**
+   * Semanas efetivas do mês pra ESTA org: override em `retail_month_weeks`
+   * (RN-G2c-001) tem precedência sobre o padrão CARIOCA. Fallback silencioso
+   * (RN-G2c-002) — org sem override continua com `weeksOfMonth(month)` clássico.
+   */
+  static weeksOfMonthFor(orgId: string, month: string): Array<{ start: string; end: string }> {
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    const override = RetailMonthWeeksService.getOverride(orgId, month);
+    if (override && override.length > 0) return override;
+    return this.weeksOfMonth(month);
   }
 
   // ── Plano ──────────────────────────────────────────────────────────────────
@@ -380,7 +393,7 @@ export class RetailCommissionRaceService {
    */
   static raceMonth(orgId: string, month: string, opts?: { storeId?: string | null }): any {
     if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
-    const weeks = this.weeksOfMonth(month);
+    const weeks = this.weeksOfMonthFor(orgId, month);
     const { start: mStart, end: mEnd } = this.monthRange(month);
     const stores = db.prepare(`SELECT id, name, manager_user_id FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
 

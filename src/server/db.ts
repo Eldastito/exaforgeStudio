@@ -7093,6 +7093,14 @@ const initDb = () => {
         ON falatu_purchase_checks (organization_id, list_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela ADR-151 F4 (conferência de compras)', e); }
+
+  // ADR-151 Fatia 5 — memória com desambiguação ativa: a captura consulta a
+  // memória (falatu_entities) e registra aqui o resultado por menção
+  // ({mentions:[{mention,type,status,candidates[],resolvedEntityId,resolvedNew}]}).
+  // 'ambiguous' (2+ candidatos) NUNCA é resolvido pela IA nem por auto-link:
+  // fica pendente até o humano escolher ("qual Carlos?") — sem escolha, a
+  // confirmação segue sem vincular nem criar a entidade daquela menção.
+  try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN memory_json TEXT`); } catch(e){}
 };
 
 initDb();

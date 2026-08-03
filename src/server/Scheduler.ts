@@ -26,6 +26,8 @@ import { ClinicRetentionService } from "./ClinicRetentionService.js";
 import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
+import { FalaTuService } from "./FalaTuService.js";
+import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
 import { SchoolCoordinationService } from "./SchoolCoordinationService.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailFloorAttendanceService } from "./RetailFloorAttendanceService.js";
@@ -388,6 +390,34 @@ export class Scheduler {
     }
   }
 
+  /**
+   * FalaTu (ADR-151 Fatia 5) — briefing diário proativo. Publica UM sinal por
+   * (usuário, dia) no `business_signals` (ADR-136) com as pendências e a
+   * agenda do dia — idempotente por dedupe_key, best-effort por-org. Só varre
+   * orgs com uso real do FalaTu (dados nas tabelas falatu_*) E habilitadas
+   * (flag `falatu_enabled` — ou a org do operador da plataforma, mesmo bypass
+   * do falatuGate). NUNCA cria/edita nada nem envia mensagem: só sinaliza.
+   */
+  static falatuBriefingPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM (
+           SELECT organization_id FROM falatu_inbox_items
+           UNION SELECT organization_id FROM falatu_events
+           UNION SELECT organization_id FROM falatu_tasks)`
+      ).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        if (!FalaTuService.orgEnabled(orgId) && !FalaTuBriefingTaskService.hasMasterAdminUser(orgId)) continue;
+        FalaTuBriefingTaskService.run(orgId);
+      } catch (e) { console.error("[FalaTu] sweep de briefing falhou", orgId, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -473,6 +503,7 @@ export class Scheduler {
     await this.clinicFollowUpNoticePass().catch(e => console.error('[Scheduler] aviso de retorno clínica falhou', e));
     await this.clinicMonthlyReportPass().catch(e => console.error('[Scheduler] relatório mensal clínica falhou', e));
     try { this.clinicRenewalTaskPass(); } catch (e: any) { console.error('[Scheduler] sweep de renovação clínica falhou', e?.message); }
+    try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

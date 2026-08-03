@@ -1,5 +1,5 @@
 import db from "./db.js";
-import { FalaTuService, FalaTuIntent } from "./FalaTuService.js";
+import { FalaTuService, FalaTuIntent, FalaTuMention, parseFalaTuMemory } from "./FalaTuService.js";
 import { GestorCommandService } from "./GestorCommandService.js";
 import { PermissionService } from "./PermissionService.js";
 
@@ -29,6 +29,13 @@ import { PermissionService } from "./PermissionService.js";
  * `falatu` (PermissionService.can sobre o usuário resolvido por número, como
  * o Controller faz com `financeiro`); teto de IA do plano (o capture() já
  * enforça e conta — o reply devolve o motivo quando trava).
+ *
+ * Fatia 5 (desambiguação ativa): quando a captura acha 2+ candidatos na
+ * memória pra uma menção ("Carlos" com Carlos Silva E Carlos Mendes), o reply
+ * PERGUNTA "qual Carlos?" com opções numeradas e o humano responde "é 1"
+ * (ou "é 0" = outro/novo). A resposta numérica segue a mesma regra do
+ * confere/descarta: só é interceptada com pendência derivada do banco — aqui,
+ * pendência COM menção ambígua em aberto.
  */
 
 // "aí" fica FORA do \b: em JS, \b é ASCII e não enxerga fronteira depois de
@@ -38,6 +45,11 @@ const CAPTURE_RE = /^(?:anota|anotar|falatu)\b[:,]?\s*/i;
 const CAPTURE_FILLER_RE = /^a[ií](?:\s+|$)[:,]?\s*/i;
 const CONFIRM_RE = /^(?:confere|confirma|confirmar)\s*$/i;
 const DISCARD_RE = /^(?:descarta|descartar|ignora|ignorar)\s*$/i;
+// Fatia 5 — resposta à desambiguação ativa ("qual Carlos?"): "é 1" / "é 0".
+// Só é interceptada quando EXISTE pendência de WhatsApp com menção ambígua
+// sem resolução (derivada do banco) — fora disso cai no fluxo normal, então
+// um "é 2" solto de outra conversa nunca é sequestrado.
+const RESOLVE_RE = /^[eé]\s*(\d{1,2})\s*$/i;
 
 const INTENT_LABEL: Record<FalaTuIntent, string> = {
   TASK: "tarefa",
@@ -59,6 +71,17 @@ export class FalaTuWhatsAppService {
     `).get(orgId, userId) || null;
   }
 
+  /** Primeira menção ambígua ainda sem resolução humana no item (Fatia 5). */
+  static firstAmbiguous(item: any): FalaTuMention | null {
+    const memory = parseFalaTuMemory(item?.memory_json);
+    return memory?.mentions.find((m) => m.status === "ambiguous" && !m.resolvedEntityId && !m.resolvedNew) || null;
+  }
+
+  private static askLine(m: FalaTuMention): string {
+    const opts = m.candidates.map((c, i) => `${i + 1}) ${c.name}`).join("  ");
+    return `🧠 Qual *${m.mention}*? ${opts}  0) outro/novo — responda *é 1* (por ex.).`;
+  }
+
   /**
    * Processa uma mensagem do canal interno. `handled=false` = não é assunto do
    * FalaTu (sem flag, sem gatilho, ou confere/descarta sem pendência) — o
@@ -72,23 +95,45 @@ export class FalaTuWhatsAppService {
     const isCapture = CAPTURE_RE.test(raw);
     const isConfirm = CONFIRM_RE.test(raw);
     const isDiscard = DISCARD_RE.test(raw);
-    if (!isCapture && !isConfirm && !isDiscard) return { handled: false, reply: "" };
+    const resolveMatch = raw.match(RESOLVE_RE);
+    if (!isCapture && !isConfirm && !isDiscard && !resolveMatch) return { handled: false, reply: "" };
 
     const user = GestorCommandService.resolveUser(orgId, fromNumber);
     if (!user) {
-      // confere/descarta de número desconhecido não é nosso: deixa o fluxo
+      // confere/descarta/é-N de número desconhecido não é nosso: deixa o fluxo
       // normal responder (só o gatilho explícito ganha o aviso de cadastro).
       if (!isCapture) return { handled: false, reply: "" };
       return { handled: true, reply: "Olá! Não reconheço este número. 🙋 Peça ao administrador para cadastrar seu WhatsApp em *Configurações → Usuários*." };
     }
 
-    // confere/descarta só são nossos quando EXISTE pendência de WhatsApp —
+    // confere/descarta/é-N só são nossos quando EXISTE pendência de WhatsApp —
     // senão seguem pro Coordenador (podem ser resposta de outro fluxo).
-    const pending = (isConfirm || isDiscard) ? this.pendingItem(orgId, user.id) : null;
+    const pending = (isConfirm || isDiscard || resolveMatch) ? this.pendingItem(orgId, user.id) : null;
     if ((isConfirm || isDiscard) && !pending) return { handled: false, reply: "" };
+    // "é N" exige, além da pendência, uma menção ambígua em aberto — um número
+    // solto sem pergunta nossa pendente segue pros outros fluxos.
+    const ambiguous = resolveMatch && pending ? this.firstAmbiguous(pending) : null;
+    if (resolveMatch && !isConfirm && !isDiscard && !ambiguous) return { handled: false, reply: "" };
 
     if (!PermissionService.can(orgId, user, "falatu", "write")) {
       return { handled: true, reply: "Você não tem acesso ao FalaTu nesta conta. Fale com o gestor pra liberar seu perfil." };
+    }
+
+    if (resolveMatch && ambiguous && pending) {
+      const n = parseInt(resolveMatch[1], 10);
+      if (n > ambiguous.candidates.length) {
+        return { handled: true, reply: `Opção inválida. ${this.askLine(ambiguous)}` };
+      }
+      try {
+        const chosen = n === 0 ? null : ambiguous.candidates[n - 1];
+        const updated = FalaTuService.resolveMention(orgId, user.id, pending.id, ambiguous.mention, chosen ? chosen.id : null);
+        const next = this.firstAmbiguous(updated);
+        const lines = [`🧠 Anotado: *${ambiguous.mention}* ${chosen ? `é *${chosen.name}*` : "é outra pessoa/projeto (vou criar na memória)"}.`];
+        lines.push(next ? this.askLine(next) : "Responda *confere* pra efetivar ou *descarta* pra ignorar.");
+        return { handled: true, reply: lines.join("\n") };
+      } catch (e: any) {
+        return { handled: true, reply: `Não consegui registrar a escolha: ${e.message}` };
+      }
     }
 
     if (isConfirm) {
@@ -129,6 +174,17 @@ export class FalaTuWhatsAppService {
         lines.push(ents?.eventDate ? `🗓️ ${ents.eventDate}${ents.eventTime ? ` às ${ents.eventTime}` : ""}` : "🗓️ Sem data explícita — não invento: complete na confirmação do painel, ou descarta e dita com a data.");
       }
       if (Number(item.confidence) < 0.5) lines.push("🤔 Não tenho muita certeza dessa interpretação — vale conferir no painel.");
+      // Fatia 5 — memória: transparência do auto-vínculo (match único) e
+      // pergunta ativa quando há 2+ candidatos ("qual Carlos?").
+      const memory = parseFalaTuMemory(item.memory_json);
+      for (const m of memory?.mentions || []) {
+        if (m.status === "known" && m.resolvedEntityId) {
+          const linked = m.candidates.find((c) => c.id === m.resolvedEntityId);
+          if (linked && linked.name !== m.mention) lines.push(`🧠 *${m.mention}* → *${linked.name}* (da sua memória).`);
+        }
+      }
+      const ask = this.firstAmbiguous(item);
+      if (ask) lines.push(this.askLine(ask));
       lines.push("Responda *confere* pra efetivar, *descarta* pra ignorar — ou resolva no painel (aba FalaTu).");
       return { handled: true, reply: lines.join("\n") };
     } catch (e: any) {

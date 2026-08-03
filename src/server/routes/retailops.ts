@@ -22,6 +22,7 @@ import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
+import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -668,6 +669,51 @@ function normalizeCardBrand(cod: any): { raw: string; label: string; matched: bo
   if (mapped) return { raw, label: mapped, matched: true };
   return { raw, label: raw, matched: false };
 }
+
+// Conferência PDV × Adquirente (Fase R1): confronta as parcelas registradas
+// pela loja (Alterdata) com o que o adquirente (Sicredi) confirma. Categoriza
+// match / diverge / só PDV / só adquirente por (NSU, parcela).
+router.get("/card-acquirer/reconciliation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || "").slice(0, 10);
+  const end = String(req.query.end || "").slice(0, 10);
+  const source = req.query.source ? String(req.query.source) : "sicredi";
+  if (!start || !end) return res.status(400).json({ error: "start e end (YYYY-MM-DD) obrigatórios" });
+  try {
+    res.json(RetailCardAcquirerService.reconcile(orgId, start, end, { source }));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+});
+
+// Carga MANUAL do lado do adquirente — enquanto a API da Sicredi não tem
+// credenciais, o financeiro sobe o JSON do extrato do internet banking. Cada
+// linha vira upsert por (source, numero_transacao, parcela).
+router.post("/card-acquirer/import", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { source, rows } = req.body || {};
+  try {
+    res.json(RetailCardAcquirerService.importManual(orgId, String(source || "manual"), Array.isArray(rows) ? rows : [], req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+});
+
+// Sync API Sicredi — STUB até a Sicredi liberar credenciais/manual.
+router.post("/card-acquirer/sync-sicredi", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.body?.start || "").slice(0, 10);
+  const end = String(req.body?.end || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "start e end (YYYY-MM-DD) obrigatórios" });
+  try {
+    await RetailCardAcquirerService.syncFromSicrediApi(orgId, { start, end });
+    res.json({ ok: true });
+  } catch (e: any) {
+    if (e?.message === "sicredi_api_not_configured") {
+      return res.status(501).json({ error: "sicredi_api_not_configured", message: "Sicredi ainda não configurada. Enquanto isso, use 'Importar do extrato' (upload manual)." });
+    }
+    res.status(500).json({ error: e?.message || "falha" });
+  }
+});
 
 // RECEBÍVEIS DE CARTÃO (parcelasCartao do PDV): por dia de VENCIMENTO — bruto,
 // líquido (o que entra), taxa retida — + totais do período. ?store filtra

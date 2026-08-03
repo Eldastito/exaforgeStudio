@@ -1649,7 +1649,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-zinc-100">{editing ? 'Editar loja' : 'Nova loja (filial)'}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
@@ -2292,7 +2292,7 @@ function EditSellerSaleModal({ sale, onClose, onSaved }: { sale: any; onClose: (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-zinc-100">Editar lançamento</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
@@ -2633,23 +2633,184 @@ function PdvCustomersTab() {
   );
 }
 
+// Painel "Conferência Sicredi" (Fase R1) — cruza PDV × adquirente por (NSU,
+// parcela). Mostra 4 buckets em cores: match / diverge / só PDV / só Sicredi.
+// Empty-state explica que precisa carregar dados da Sicredi (API stub +
+// import manual pra teste enquanto credenciais não chegam).
+function SicrediReconciliationPanel({ recon, start, end, onReload }: { recon: any; start: string; end: string; onReload: () => void }) {
+  const [importing, setImporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  if (!recon) return (
+    <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
+      Sem dados de conferência ainda. Ligue o sync Sicredi ou faça upload do extrato manualmente pra começar.
+    </div>
+  );
+  const c = recon.counts || {};
+  const t = recon.totals || {};
+  const total = c.matched + c.diverged + c.onlyPdv + c.onlyAcquirer;
+  const doImport = async () => {
+    let rows: any[] = [];
+    try { rows = JSON.parse(importText); } catch { toast.error('JSON inválido — cole um array [{numeroTransacao, dataVencimento, valorBruto, ...}, ...]'); return; }
+    if (!Array.isArray(rows) || rows.length === 0) { toast.error('Cole ao menos 1 linha no array.'); return; }
+    setImporting(true);
+    try {
+      const res = await apiFetch('/api/retailops/card-acquirer/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'sicredi', rows }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(`Importadas: ${d.inserted || 0} novas, ${d.updated || 0} atualizadas${d.skipped ? `, ${d.skipped} puladas` : ''}.`);
+        setImportText(''); setShowImport(false); onReload();
+      } else toast.error(d.error || 'Falha ao importar.');
+    } finally { setImporting(false); }
+  };
+  return (
+    <div>
+      {/* Aviso do stub da API */}
+      <div className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-[12px] text-amber-200/90">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <strong>Sicredi API — em espera.</strong> Enquanto a Sicredi não libera credenciais/manual do produto Adquirência,
+            o "Sync Sicredi" acima devolve <code>sicredi_api_not_configured</code>. Você pode testar toda a cadeia carregando manualmente
+            o extrato que baixou do internet banking:{' '}
+            <button onClick={() => setShowImport(v => !v)} className="text-amber-300 hover:text-amber-100 underline underline-offset-2">
+              {showImport ? 'esconder' : 'importar extrato'}
+            </button>.
+          </div>
+        </div>
+      </div>
+      {showImport && (
+        <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+          <p className="text-[11px] text-zinc-500 mb-1">Cole o JSON no formato: <code>{`[{ "numeroTransacao": "1234567", "parcela": "1/3", "dataVencimento": "2026-08-15", "valorBruto": 300, "valorLiquido": 288, "bandeira": "Visa" }]`}</code></p>
+          <textarea value={importText} onChange={e => setImportText(e.target.value)} rows={5} placeholder='[{"numeroTransacao":"...","dataVencimento":"YYYY-MM-DD","valorBruto":0}]' className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[11px] text-zinc-100 font-mono" />
+          <div className="mt-2 flex justify-end gap-2">
+            <button onClick={() => { setShowImport(false); setImportText(''); }} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+            <button onClick={doImport} disabled={importing} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+              {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Importar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tiles do resumo */}
+      <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-emerald-400/80">Bate certinho</p>
+          <p className="text-lg font-semibold text-emerald-300">{c.matched || 0} parc.</p>
+          <p className="text-[10px] text-zinc-600">Tolerância ≤ R$ 0,05</p>
+        </div>
+        <div className={`rounded-xl border p-3 ${(c.diverged || 0) > 0 ? 'border-amber-500/30 bg-amber-500/5' : 'border-zinc-800 bg-zinc-900/50'}`}>
+          <p className="text-[10px] uppercase tracking-wider text-amber-400/80">Valor diverge</p>
+          <p className="text-lg font-semibold text-amber-300">{c.diverged || 0} parc.</p>
+          <p className="text-[10px] text-zinc-500">gap total {brl(t.divergedGap || 0)}</p>
+        </div>
+        <div className={`rounded-xl border p-3 ${(c.onlyPdv || 0) > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-zinc-800 bg-zinc-900/50'}`}>
+          <p className="text-[10px] uppercase tracking-wider text-red-400/80">Só no PDV</p>
+          <p className="text-lg font-semibold text-red-300">{c.onlyPdv || 0} parc.</p>
+          <p className="text-[10px] text-zinc-600">Sicredi ainda não confirmou / adquirente não vai depositar</p>
+        </div>
+        <div className={`rounded-xl border p-3 ${(c.onlyAcquirer || 0) > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-zinc-800 bg-zinc-900/50'}`}>
+          <p className="text-[10px] uppercase tracking-wider text-red-400/80">Só na Sicredi</p>
+          <p className="text-lg font-semibold text-red-300">{c.onlyAcquirer || 0} parc.</p>
+          <p className="text-[10px] text-zinc-600">Venda que Sicredi vai depositar sem contrapartida no PDV</p>
+        </div>
+      </div>
+      <p className="mb-3 text-[11px] text-zinc-500">Período {start.split('-').reverse().join('/')} → {end.split('-').reverse().join('/')} · PDV bruto {brl(t.pdv || 0)} · Sicredi bruto {brl(t.acquirer || 0)} · {total} parcelas confrontadas.</p>
+
+      {total === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
+          Nenhuma parcela pra confrontar. Faça a carga do extrato da Sicredi pra começar (botão "importar extrato" no topo).
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {(recon.diverged || []).length > 0 && <SicrediBucketTable title="Valor diverge" tone="amber" rows={recon.diverged} showGap />}
+          {(recon.onlyPdv || []).length > 0 && <SicrediBucketTable title="Só no PDV (Sicredi não confirmou)" tone="red" rows={(recon.onlyPdv as any[]).map((r: any) => ({ numero: r.numero, parcela: r.parcela, vencimento: r.vencimento, pdvValor: r.valor, bandeiraPdv: r.codigo_cartao }))} />}
+          {(recon.onlyAcquirer || []).length > 0 && <SicrediBucketTable title="Só na Sicredi (sem contrapartida no PDV)" tone="red" rows={(recon.onlyAcquirer as any[]).map((r: any) => ({ numero: r.numero_transacao, parcela: r.parcela, vencimento: r.data_vencimento, acquirerValor: r.valor_bruto, bandeiraAcq: r.bandeira }))} />}
+          {(recon.matched || []).length > 0 && (
+            <details className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2">
+              <summary className="cursor-pointer text-[12px] text-emerald-300 hover:text-emerald-200">Ver os {recon.matched.length} que bateram certinho</summary>
+              <div className="mt-2"><SicrediBucketTable title="Bate certinho" tone="emerald" rows={recon.matched} /></div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SicrediBucketTable({ title, tone, rows, showGap = false }: { title: string; tone: 'emerald' | 'amber' | 'red'; rows: any[]; showGap?: boolean }) {
+  const borderCls = tone === 'emerald' ? 'border-emerald-500/20' : tone === 'amber' ? 'border-amber-500/20' : 'border-red-500/20';
+  const titleCls = tone === 'emerald' ? 'text-emerald-200' : tone === 'amber' ? 'text-amber-200' : 'text-red-200';
+  return (
+    <div className={`rounded-xl border ${borderCls} bg-zinc-950/40 p-2`}>
+      <div className={`mb-2 text-[11px] font-semibold ${titleCls}`}>{title} · {rows.length} parc.</div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead className="text-zinc-500">
+            <tr>
+              <th className="px-2 py-1 text-left font-medium">Vencimento</th>
+              <th className="px-2 py-1 text-left font-medium">NSU</th>
+              <th className="px-2 py-1 text-left font-medium">Parcela</th>
+              <th className="px-2 py-1 text-left font-medium">Bandeira</th>
+              <th className="px-2 py-1 text-right font-medium">PDV</th>
+              <th className="px-2 py-1 text-right font-medium">Sicredi</th>
+              {showGap && <th className="px-2 py-1 text-right font-medium">Gap</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 200).map((r: any, i: number) => (
+              <tr key={`${r.numero}-${r.parcela}-${i}`} className="border-t border-zinc-800/60">
+                <td className="px-2 py-1 text-zinc-200">{String(r.vencimento || '').split('-').reverse().join('/')}</td>
+                <td className="px-2 py-1 text-zinc-500 font-mono text-[10px]">{r.numero || '—'}</td>
+                <td className="px-2 py-1 text-zinc-300">{r.parcela || '—'}</td>
+                <td className="px-2 py-1 text-zinc-300">{r.bandeiraAcq || r.bandeiraPdv || '—'}</td>
+                <td className="px-2 py-1 text-right text-zinc-300">{r.pdvValor != null ? brl(r.pdvValor) : '—'}</td>
+                <td className="px-2 py-1 text-right text-zinc-300">{r.acquirerValor != null ? brl(r.acquirerValor) : '—'}</td>
+                {showGap && <td className={`px-2 py-1 text-right font-medium ${Math.abs(Number(r.gap) || 0) > 0.05 ? 'text-amber-300' : 'text-zinc-500'}`}>{r.gap != null ? `${r.gap > 0 ? '+' : ''}${brl(r.gap)}` : '—'}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 200 && <p className="mt-1 text-[10px] text-zinc-600">Mostrando 200 de {rows.length}. Reduza o período pra ver o restante.</p>}
+    </div>
+  );
+}
+
 // ---- Recebíveis de cartão (parcelasCartao do PDV) ---------------------------
+type CardMode = 'aggregated' | 'detailed' | 'sicredi';
 function CardReceivablesTab() {
   const firstOfMonth = todayStr().slice(0, 8) + '01';
   const [start, setStart] = useState(firstOfMonth);
   const [end, setEnd] = useState(todayStr().slice(0, 8) + '28');
   const [data, setData] = useState<any | null>(null);
+  const [recon, setRecon] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
-  const [detailed, setDetailed] = useState(false);
+  const [mode, setMode] = useState<CardMode>('aggregated');
+  const detailed = mode === 'detailed';
   const load = () => {
     setLoading(true);
+    if (mode === 'sicredi') {
+      apiFetch(`/api/retailops/card-acquirer/reconciliation?start=${start}&end=${end}&source=sicredi`)
+        .then(r => r.json())
+        .then(d => setRecon(d && !d.error ? d : null))
+        .catch(() => toast.error('Falha ao carregar a conferência Sicredi.'))
+        .finally(() => setLoading(false));
+      return;
+    }
     apiFetch(`/api/retailops/pdv-card-receivables?start=${start}&end=${end}${detailed ? '&detailed=1' : ''}`)
       .then(r => r.json())
       .then(d => setData(d && !d.error ? d : null))
       .catch(() => toast.error('Falha ao carregar os recebíveis.'))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [detailed]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [mode]);
+  const trySicrediSync = async () => {
+    const res = await apiFetch('/api/retailops/card-acquirer/sync-sicredi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, end }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success('Sync Sicredi rodou.'); load(); }
+    else toast.error(d.message || d.error || 'Sicredi ainda não configurada. Use "Importar extrato" enquanto isso.');
+  };
   const t = data?.totals;
   return (
     <div>
@@ -2660,11 +2821,17 @@ function CardReceivablesTab() {
         <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><RefreshCw className="w-4 h-4" /> Gerar</button>
         <div className="ml-auto inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-xs">
-          <button onClick={() => setDetailed(false)} className={`px-2.5 py-1 rounded ${!detailed ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Agregado por dia</button>
-          <button onClick={() => setDetailed(true)} className={`px-2.5 py-1 rounded ${detailed ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`} title="Linha-a-linha (bandeira + parcela + valor + vencimento)">Detalhado</button>
+          <button onClick={() => setMode('aggregated')} className={`px-2.5 py-1 rounded ${mode === 'aggregated' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Agregado</button>
+          <button onClick={() => setMode('detailed')} className={`px-2.5 py-1 rounded ${mode === 'detailed' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`} title="Linha-a-linha (bandeira + parcela + valor + vencimento)">Detalhado</button>
+          <button onClick={() => setMode('sicredi')} className={`px-2.5 py-1 rounded ${mode === 'sicredi' ? 'bg-amber-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`} title="Conferência com o adquirente (Sicredi): confronta o que o PDV registrou com o que a Sicredi vai depositar">Conferência Sicredi</button>
         </div>
+        {mode === 'sicredi' && (
+          <button onClick={trySicrediSync} title="Sync com a API Sicredi (ainda em stub — precisa das credenciais)" className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-500/20">
+            <RefreshCw className="w-3.5 h-3.5" /> Sync Sicredi
+          </button>
+        )}
       </div>
-      {t && (
+      {mode !== 'sicredi' && t && (
         <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Parcelas</p><p className="text-lg font-semibold text-zinc-100">{t.parcelas}</p></div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Bruto</p><p className="text-lg font-semibold text-zinc-100">{brl(t.bruto)}</p></div>
@@ -2672,8 +2839,8 @@ function CardReceivablesTab() {
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3"><p className="text-[11px] uppercase tracking-wider text-emerald-400/80">Líquido a receber</p><p className="text-lg font-semibold text-emerald-300">{brl(t.liquido)}</p></div>
         </div>
       )}
-      {/* Breakdown por bandeira do período */}
-      {data && data.byBrand && data.byBrand.length > 0 && (
+      {/* Breakdown por bandeira do período (só nos modos PDV) */}
+      {mode !== 'sicredi' && data && data.byBrand && data.byBrand.length > 0 && (
         <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Por bandeira</span>
@@ -2694,7 +2861,13 @@ function CardReceivablesTab() {
           </div>
         </div>
       )}
-      {loading ? (
+      {mode === 'sicredi' ? (
+        loading ? (
+          <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Cruzando PDV × Sicredi…</div>
+        ) : (
+          <SicrediReconciliationPanel recon={recon} start={start} end={end} onReload={load} />
+        )
+      ) : loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
       ) : !data || (!detailed && data.byDay.length === 0) || (detailed && (data.items || []).length === 0) ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum recebível de cartão no período. As parcelas entram pela sincronização das vendas do PDV.</div>
@@ -4066,7 +4239,7 @@ function CommissionTab() {
 
       {ruleForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setRuleForm(null)}>
-          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-zinc-100">Nova regra de comissão</h3>
               <button onClick={() => setRuleForm(null)} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>

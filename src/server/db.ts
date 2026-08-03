@@ -6898,6 +6898,47 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela ADR-083 G2b (template de folga)', e); }
 
+  // ADR-083 Fase R1 — Conferência de RECEBÍVEIS DE CARTÃO contra o adquirente
+  // (Sicredi, no começo). O PDV/Alterdata já devolve o que a LOJA VIU
+  // ('retail_pdv_card_installments'); aqui guardamos o que o ADQUIRENTE diz
+  // que vai depositar/depositou. O cruzamento vira dashboard "match | diverge
+  // | só PDV | só adquirente" — sem HTTP ainda (aguarda credenciais Sicredi);
+  // enquanto isso, POST /card-acquirer/import aceita JSON manual pra teste.
+  //
+  // Chave de match: (source, numero_transacao, parcela). Fonte 'manual' é
+  // válida (você envia o extrato exportado do internet banking).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_card_acquirer_installments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'sicredi',   -- 'sicredi' | 'manual' | (futuro: cielo, rede, stone)
+        filial TEXT,                              -- opcional: id da filial do PDV pra amarrar
+        merchant_id TEXT,                         -- código do estabelecimento (EC) no adquirente
+        numero_transacao TEXT,                    -- NSU (Número Sequencial Único) — chave de match
+        autorizacao TEXT,                         -- código de autorização
+        bandeira TEXT,                            -- 'Visa' | 'Master' | 'Elo' | ...
+        produto TEXT,                             -- 'crédito' | 'débito' | 'crédito parcelado'
+        parcela TEXT,                             -- rótulo tipo '1/3'
+        parcela_num INTEGER,
+        parcelas_total INTEGER,
+        data_venda TEXT,                          -- YYYY-MM-DD
+        data_vencimento TEXT NOT NULL,            -- YYYY-MM-DD (quando cai)
+        valor_bruto REAL DEFAULT 0,
+        valor_liquido REAL DEFAULT 0,
+        taxa REAL DEFAULT 0,                      -- % ou R$ (livre; a fonte informa)
+        status TEXT DEFAULT 'previsto',           -- 'previsto' | 'pago' | 'cancelado' | 'chargeback'
+        raw_json TEXT,                            -- payload original pra auditoria
+        imported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, source, numero_transacao, parcela)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_card_acquirer_venc
+        ON retail_card_acquirer_installments (organization_id, data_vencimento);
+      CREATE INDEX IF NOT EXISTS idx_retail_card_acquirer_nsu
+        ON retail_card_acquirer_installments (organization_id, numero_transacao);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela ADR-083 R1 (adquirente)', e); }
+
   // ADR-083 Fase G2c — CORTE variável das semanas do mês. Nem sempre a semana
   // fecha no domingo (padrão da planilha CARIOCA): o cliente pode querer sem1
   // 01→10, sem2 11→18, sem3 19→25, sem4 26→31 pra encaixar melhor com a

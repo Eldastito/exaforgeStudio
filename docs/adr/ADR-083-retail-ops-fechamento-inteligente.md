@@ -550,3 +550,59 @@ cadastrado; `raceMonth` respeita o override (3 semanas no exemplo);
 `save` rejeita lacuna; `save` rejeita última semana curta; `save([])`
 limpa e volta a 5 semanas; isolamento (org B não é afetada pelo override
 da A).
+
+## Fase R1 — Conferência de recebíveis de cartão PDV × Adquirente (2026-08)
+
+**Origem:** dono pediu confrontar o que a loja registrou (`retail_pdv_card_installments`
+via Alterdata) com o que o **adquirente Sicredi** efetivamente vai depositar
+na conta. Sem essa metade, a aba Recebíveis só via UM lado da história —
+se o Sicredi confirmar valor diferente (cancelamento não registrado,
+chargeback, erro de bandeira), o dono só descobre no extrato bancário.
+
+**Decisões (RN-R1-00x no header do service):**
+
+1. **Chave de match** (RN-R1-001): `(numero_transacao, parcela)`. O NSU é o
+   identificador universal da transação de cartão; ambos os lados carregam.
+   Sem NSU no PDV, a linha cai em `só adquirente` pra revisão manual.
+2. **Tolerância de valor** (RN-R1-002): diferenças ≤ R$ 0,05 viram
+   `match` (arredondamento entre sistemas). Acima disso vira `diverge`.
+3. **Sync HTTP = STUB até credenciais** (RN-R1-003): a Sicredi não publica
+   API aberta de recebíveis — o portal do dev cobre PIX/Cobrança/DDA/Extrato,
+   não Adquirência. `syncFromSicrediApi` fica placeholder retornando
+   `sicredi_api_not_configured` (HTTP 501). Enquanto isso, o financeiro
+   faz `POST /card-acquirer/import` colando o JSON do extrato baixado do
+   internet banking — a cadeia inteira (reconcile + UI) funciona igual.
+4. **Retrocompat 100%** — zero mudança na aba Recebíveis existente; a
+   conferência é um MODO novo (toggle "Conferência Sicredi" no topo,
+   opt-in). Modos "Agregado" e "Detalhado" permanecem iguais.
+5. **Multi-tenant** — isolamento estrito em toda query por `organization_id`;
+   `source` (`'sicredi' | 'manual' | ...`) plugável pra outras adquirentes
+   no futuro (Cielo, Rede, Stone, etc.).
+
+**Entidades:** 1 tabela nova (`retail_card_acquirer_installments`) +
+1 service novo (`RetailCardAcquirerService`) + 3 rotas
+(`GET /card-acquirer/reconciliation`, `POST /card-acquirer/import`,
+`POST /card-acquirer/sync-sicredi` — este responde 501 até credenciais).
+
+**UI (aba Recebíveis):**
+- Toggle `Agregado | Detalhado | Conferência Sicredi` no topo.
+- Modo Sicredi: aviso âmbar "API em espera" com botão "importar extrato"
+  (textarea de JSON); 4 tiles (Bate certinho · Valor diverge · Só PDV ·
+  Só Sicredi) com cores; 4 tabelas expansíveis por bucket (matched
+  colapsado por padrão porque tende a ser a maioria).
+
+**Teste:** `test:retail-card-acquirer` (14 verificações — importManual
+com upsert por NSU+parcela; regravação atualiza; linhas inválidas
+skipped; reconcile categoriza os 4 buckets; tolerância R$ 0,05;
+totais fecham; stub da API lança `sicredi_api_not_configured`;
+isolamento multi-tenant; audit registrado; wipe da fonte).
+
+**Fora desta fase (documentado de propósito):**
+- Alerta ativo por WhatsApp/e-mail quando o gap for grande (dono pediu
+  "só mostrar em cor de alerta" — vai por sinal se ele mudar de ideia).
+- Registradora de Recebíveis (Núclea/CIP/TAG/Cerc) — regulado pela
+  BACEN Circular 3.952. Requer contrato com a Registradora e onboarding
+  regulatório. Grande demais pra iteração inicial.
+- Outras adquirentes (Cielo/Rede/Stone/GetNet) — o `source` do modelo
+  já é plugável; entra por adaptador HTTP próprio quando houver
+  demanda + credenciais.

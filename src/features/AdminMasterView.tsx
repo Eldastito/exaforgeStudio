@@ -98,6 +98,23 @@ export function AdminMasterView() {
     }
   };
 
+  const handleToggleFalaTu = async (id: string, enabled: boolean) => {
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/falatu`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) { toast.success(enabled ? 'FalaTu liberado para a empresa.' : 'FalaTu desligado para a empresa.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao alterar o FalaTu.'); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
   const handleSoftDelete = async (id: string) => {
     if (!(await confirmDialog('Tem certeza que deseja remover esta empresa (Soft Delete)?', { danger: true, confirmText: 'Remover' }))) return;
     setLoadingId(id);
@@ -172,6 +189,7 @@ export function AdminMasterView() {
                 <th className="px-6 py-4 font-semibold text-zinc-300">Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Plano</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Billing Status</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">FalaTu</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
               </tr>
             </thead>
@@ -240,6 +258,20 @@ export function AdminMasterView() {
                          <option value="cancelled">Cancelado</option>
                       </select>
                   </td>
+                  <td className="px-6 py-4">
+                      {/* Rollout opt-in do FalaTu (ADR-151 F2): flag por org. */}
+                      <button
+                        onClick={() => handleToggleFalaTu(org.organization_id, !Number(org.falatu_enabled))}
+                        disabled={loadingId === org.organization_id}
+                        className={`px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${
+                          Number(org.falatu_enabled)
+                            ? 'bg-violet-500/10 text-violet-300 border-violet-500/30 hover:bg-violet-500/20'
+                            : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20 hover:text-zinc-300'
+                        }`}
+                      >
+                        {Number(org.falatu_enabled) ? 'Ligado' : 'Desligado'}
+                      </button>
+                  </td>
                   <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                      {org.status === 'blocked' ? (
                         <Button 
@@ -274,7 +306,7 @@ export function AdminMasterView() {
               ))}
               {organizations.length === 0 && (
                  <tr>
-                    <td colSpan={9} className="px-6 py-8 text-center text-zinc-500">
+                    <td colSpan={10} className="px-6 py-8 text-center text-zinc-500">
                        Nenhuma organização encontrada.
                     </td>
                  </tr>

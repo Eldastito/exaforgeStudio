@@ -23,9 +23,14 @@ import { logAuthEvent } from "./auditLog.js";
  *   origem aceitava o payload inteiro do cliente, forjável).
  * - `confidence` obrigatório na extração (a UI pede mais atenção quando baixo).
  *
- * Fase 1: rotas montadas atrás de requireMasterAdmin (operador da plataforma).
- * Mesmo assim TODA query filtra organization_id + user_id (convenção nº 1) —
- * o rollout multi-tenant (Fatia 2) troca só o gate.
+ * Fatia 2 (rollout multi-tenant): o gate deixou de ser requireMasterAdmin e
+ * virou flag opt-in da org (`organization_settings.falatu_enabled`, ligada
+ * pelo operador no Admin Master) + RBAC granular ADR-095 (módulo "falatu" no
+ * enforcement global; perfis com default none começam sem acesso). O Master
+ * Admin continua entrando independente da flag. Limite de uso por plano: cada
+ * captura é uma ação de IA — respeita PlanService.aiAllowed (billing + teto
+ * mensal + top-ups ADR-091) e conta no ai_interactions_log como as demais.
+ * TODA query filtra organization_id + user_id (convenção nº 1).
  * Nunca DELETE (convenção nº 9): discard é UPDATE de status.
  */
 
@@ -86,6 +91,19 @@ function normalizeExtraction(raw: any): FalaTuExtraction {
 }
 
 export class FalaTuService {
+  /** A org ligou o FalaTu? (flag opt-in Fatia 2; Master Admin não passa por aqui.) */
+  static orgEnabled(orgId: string): boolean {
+    try {
+      const r = db.prepare(`SELECT falatu_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      return !!Number(r?.falatu_enabled);
+    } catch { return false; }
+  }
+
+  static setOrgEnabled(orgId: string, enabled: boolean): { enabled: boolean } {
+    db.prepare(`UPDATE organization_settings SET falatu_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+    return { enabled };
+  }
+
   /**
    * Chamada de IA isolada num método estático próprio pra ser mockável em
    * teste sem chave OpenAI (mesmo padrão de TaskAudioService.extractTaskFromText).
@@ -125,6 +143,16 @@ export class FalaTuService {
     if (!input.text?.trim() && !input.audio?.data && !input.image?.data) {
       throw new Error("Envie texto, áudio ou imagem.");
     }
+    // Fatia 2 — limite de uso por plano: captura consome IA, então passa pelo
+    // mesmo enforcement do atendimento (billing bloqueado + teto mensal do
+    // plano + top-ups/recompra automática, ADR-091 §4). Invariante de negócio
+    // fica no service (a rota só valida forma).
+    const { PlanService } = await import("./PlanService.js");
+    const gate = PlanService.aiAllowed(orgId);
+    if (!gate.allowed) {
+      if (gate.reason === "monthly_limit") throw new Error("Limite mensal de ações de IA do plano atingido. Compre um pacote extra ou aguarde a virada do mês.");
+      throw new Error("Conta bloqueada ou cobrança pendente — captura por IA indisponível.");
+    }
     const extraction = await FalaTuService.interpret(input);
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;
@@ -137,6 +165,13 @@ export class FalaTuService {
       extraction.transcription || null, extraction.summary || null, extraction.intent,
       JSON.stringify(extraction.entities), extraction.suggestedAction || null, extraction.confidence
     );
+    // Conta a captura como ação de IA do mês (mesma régua do PlanService.getUsage
+    // e do aiAllowed) — sem isto o FalaTu seria IA "de graça" fora do plano.
+    // Best-effort (convenção nº 7): falha no log de consumo nunca perde a captura.
+    try {
+      db.prepare(`INSERT INTO ai_interactions_log (id, organization_id, agent_used, input_prompt, output_response, confidence) VALUES (?, ?, 'falatu', ?, ?, ?)`)
+        .run(randomUUID(), orgId, (input.text?.trim() || (mediaType ? `[${mediaType}]` : "")).slice(0, 500), extraction.summary || extraction.intent, extraction.confidence);
+    } catch { /* noop */ }
     logAuthEvent(orgId, userId, null, "FALATU_CAPTURE", { inboxItemId: id, intent: extraction.intent, mediaType, confidence: extraction.confidence });
     return FalaTuService.getInboxItem(orgId, userId, id);
   }

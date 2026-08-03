@@ -4,6 +4,7 @@ import { requirePermission, AuthRequest } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { AccountDiagnosticService } from "../AccountDiagnosticService.js";
+import { FalaTuService } from "../FalaTuService.js";
 
 // RBAC granular (ADR-095 Bloco 2) — API de gestão de perfis de acesso.
 //
@@ -24,6 +25,9 @@ router.get("/me", (req: AuthRequest, res: Response): any => {
     // em vez de comparar o e-mail hardcoded (ADR-106). O servidor SEMPRE reforça
     // via requireMasterAdmin; isto é só a coerência do menu.
     isMasterAdmin: !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL),
+    // ADR-151 Fatia 2 — o front usa pra mostrar o FalaTu no menu das orgs que
+    // ligaram a flag (cosmético; o servidor reforça via falatuGate).
+    falatuEnabled: FalaTuService.orgEnabled(orgOf(req)),
   });
 });
 

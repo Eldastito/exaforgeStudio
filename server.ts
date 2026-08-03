@@ -94,6 +94,9 @@ import runtimeRoutes from "./src/server/routes/runtime.js";
 // AlterdataFetch). Sem esse import, o registry ficaria com só os 5 handlers
 // prepare-only do ADR-136 C5.
 import "./src/server/RuntimeCommandHandlers.js";
+// ADR-152 F4a — piloto Retail Closing (registra retail_reconcile_day,
+// retail_post_closing e retail_closing_dispatch no CommandExecutorService).
+import "./src/server/RetailClosingPlaybook.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";

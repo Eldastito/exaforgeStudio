@@ -43,7 +43,11 @@ import {
 
 // ── FSM ─────────────────────────────────────────────────────────────────
 
-const TERMINAL = new Set(["cancelled", "measured"]);
+// Estados TERMINAIS pro RUNNER (advance/completeStep). `completed` e `failed`
+// ainda podem transicionar (completed → measured; failed → queued/escalated/
+// cancelled/measured) — a validação de transição usa TRANSITIONS.
+// Mas o runner não deve tentar advance/completeStep sobre eles.
+const TERMINAL = new Set(["cancelled", "measured", "completed", "failed"]);
 const VALID_STATES = new Set([
   "detected", "planned", "awaiting_approval", "authorized", "queued",
   "executing", "waiting_external_response", "retry_scheduled", "escalated",
@@ -395,6 +399,88 @@ export class ProcessRuntimeService {
   static listTransitions(orgId: string, instanceId: string): any[] {
     return (db.prepare(`SELECT * FROM process_transitions WHERE organization_id = ? AND process_instance_id = ? ORDER BY occurred_at ASC`).all(orgId, instanceId) as any[])
       .map((r) => ({ ...r, evidence: safeParse(r.evidence_json) }));
+  }
+
+  /**
+   * Runner do playbook (ADR-152 Fatia 4a — amarra advance → execute →
+   * completeStep). Uma iteração:
+   *
+   *   1. advance(instance) → nextStep (o service transiciona detected→planned).
+   *   2. Se terminal (done/failed/cancelled/measured) ou waiting → retorna sem
+   *      criar action (o playbook pausa aguardando evento externo).
+   *   3. Cria DecisionAction com commandType=nextStep.commandType +
+   *      payload={ instanceId, ...context da instância }. Approve
+   *      internamente (o dispatch roda como "runtime"; políticas da org
+   *      podem rejeitar via 3 guardas do executor F2.2).
+   *   4. CommandExecutorService.execute(action). Se falhar (guardas ou
+   *      handler), transiciona instance pra `failed` com evidência —
+   *      auditado em process_transitions + action_execution_log.
+   *   5. completeStep(instance, { stepResult: result.result }) — roteia
+   *      pro próximo step conforme o playbook.
+   *
+   * Import dinâmicos pra quebrar ciclos (CommandExecutorService importa
+   * ApprovalPolicyService que importa DecisionActionService via outros
+   * caminhos). Isolado por org (convenção nº 1). Idempotente por step
+   * (o executor já é idempotente via UNIQUE de action_confirmations e
+   * o próprio ProcessRuntimeService só transiciona uma vez).
+   */
+  static async runStep(orgId: string, instanceId: string, actorId?: string): Promise<{ instance: any; nextStep: any | null; result?: any; done?: boolean; waitingFor?: string }> {
+    const [{ DecisionActionService }, { CommandExecutorService }] = await Promise.all([
+      import("./DecisionActionService.js"),
+      import("./CommandExecutorService.js"),
+    ]);
+    const adv = this.advance(orgId, instanceId);
+    if (adv.done || !adv.nextStep) return { instance: adv.instance, nextStep: null, done: true, waitingFor: adv.waitingFor };
+    // Ao rodar o 1º step (recém-planned), transicionamos pra executing
+    // pra sinalizar no FSM. Se já está executing (2º+ step), OK.
+    const cur = adv.instance;
+    if (cur.status === "planned") {
+      try {
+        this.transition(orgId, instanceId, "authorized", { actor: actorId || "runtime", reason: "runner_authorized" });
+        this.transition(orgId, instanceId, "queued", { actor: actorId || "runtime", reason: "runner_queued" });
+        this.transition(orgId, instanceId, "executing", { actor: actorId || "runtime", reason: "runner_executing" });
+      } catch { /* transição já feita por outro caller */ }
+    }
+    const step = adv.nextStep;
+    const inst = this.getInstance(orgId, instanceId)!;
+    const payload = { ...(inst.context || {}), instanceId };
+
+    const proposed = DecisionActionService.propose(orgId, {
+      domain: "runtime", actionType: `runtime_step_${step.id}`.slice(0, 60), title: `Runtime step ${step.id} (inst ${instanceId.slice(0, 8)})`,
+      commandType: step.commandType, commandPayload: payload,
+      basis: "fact",
+    });
+    if (proposed.status !== "approved") DecisionActionService.approve(orgId, proposed.id, actorId || "runtime");
+
+    let result: any = null;
+    try {
+      result = await CommandExecutorService.execute(orgId, proposed.id);
+    } catch (e: any) {
+      this.transition(orgId, instanceId, "failed", { actor: actorId || "runtime", reason: "step_execute_failed", evidence: { stepId: step.id, error: String(e?.message || e), actionId: proposed.id }, stepResult: null });
+      return { instance: this.getInstance(orgId, instanceId), nextStep: null, done: true, result: { error: String(e?.message || e) } };
+    }
+    // O result do executor traz .result = ExecutedResult. Passa o artifact
+    // como stepResult pra completeStep — o playbook usa isso pra decidir
+    // o roteamento (`chooseNextStep` sobre `results.<stepId>.<path>`).
+    const stepResult = (result as any)?.result?.artifact ?? (result as any)?.result ?? {};
+    const after = this.completeStep(orgId, instanceId, { stepResult, actor: actorId || "runtime" });
+    return { instance: after, nextStep: step, result };
+  }
+
+  /**
+   * Loop `runStep` até terminal, waiting_external_response, ou `maxSteps`
+   * atingido (guard anti-loop, default 20). Retorna a instance final +
+   * cronologia dos passos executados.
+   */
+  static async runToCompletion(orgId: string, instanceId: string, opts: { actor?: string; maxSteps?: number } = {}): Promise<{ instance: any; steps: any[] }> {
+    const maxSteps = Math.max(1, Math.min(Number(opts.maxSteps) || 20, 100));
+    const steps: any[] = [];
+    for (let i = 0; i < maxSteps; i++) {
+      const r = await this.runStep(orgId, instanceId, opts.actor);
+      steps.push({ nextStep: r.nextStep?.id || null, done: !!r.done, waitingFor: r.waitingFor || null, resultEffect: (r.result as any)?.result?.effect || null });
+      if (r.done || r.waitingFor) break;
+    }
+    return { instance: this.getInstance(orgId, instanceId), steps };
   }
 }
 

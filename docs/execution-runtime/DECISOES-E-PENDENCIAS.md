@@ -146,18 +146,18 @@ Ver `ANALISE-ARQUITETURAL.md §5` para a matriz completa. Aceitos explicitamente
 
 ## F. Decisões que dependem do dono do produto
 
-| # | Decisão pendente | Bloqueia | Prazo sugerido |
-|---|---|---|---|
-| 1 | Retail Closing pode começar sem Sicredi? | F4a start | Antes da F4a |
-| 2 | Alterdata write‑back é escopo ou não? | F4a completude | Antes da F4a |
-| 3 | Nome final da aba "Operações" | F3 UI | Antes da F3 UI |
-| 4 | Agendar revisão LGPD para Recuperação Comercial | F4c `execute` | Antes de F4c sair de `assisted` |
-| 5 | Confirmar ordem dos pilotos (Retail → Cobrança → Recuperação) | F4a start | Antes da F4a |
-| 6 | Nível 5 de autonomia entra em roadmap ou fica fora? | Escopo futuro | Após F4a estável |
-| 7 | Sicredi entra como fatia extra? | Escopo futuro | Após F4a estável |
-| 8 | Escolha da org piloto (TOULON confirmada?) | F4a shadow start | Antes da F4a |
-| 9 | Métricas de sucesso do shadow (≥95% concordância — aceita?) | Promoção shadow→assisted | Antes de qualquer piloto |
-| 10 | Kill‑switch: quem tem autoridade pra virar `execution_runtime_enabled=0` em prod? | Operacional | Antes da F1 merge |
+| # | Decisão pendente | Bloqueia | Prazo sugerido | Status |
+|---|---|---|---|---|
+| 1 | Retail Closing pode começar sem Sicredi? | F4a start | Antes da F4a | ✓ **RESOLVIDA 2026-08-03** — Sim, começar sem Sicredi; Alterdata é a fonte principal. Sicredi vira fatia futura F4a.1 se necessário. |
+| 2 | Alterdata write‑back é escopo ou não? | F4a completude | Antes da F4a | ✓ **RESOLVIDA 2026-08-03** — Não. F4a usa `FinancialLedgerService` local (fonte da verdade do ZappFlow). Alterdata segue como leitura. |
+| 3 | Nome final da aba "Operações" | F3 UI | Antes da F3 UI | ✓ **RESOLVIDA 2026-08-03** — Nome "Operações" (implementado na F3.2 sem contestação). |
+| 4 | Agendar revisão LGPD para Recuperação Comercial | F4c `execute` | Antes de F4c sair de `assisted` | Aberta — trava F4c (não F4a/F4b) |
+| 5 | Confirmar ordem dos pilotos (Retail → Cobrança → Recuperação) | F4a start | Antes da F4a | ✓ **RESOLVIDA 2026-08-03** — Ordem confirmada: Retail Closing → Cobrança → Recuperação Comercial. |
+| 6 | Nível 5 de autonomia entra em roadmap ou fica fora? | Escopo futuro | Após F4a estável | Aberta — decisão pós-piloto |
+| 7 | Sicredi entra como fatia extra? | Escopo futuro | Após F4a estável | Aberta — depende do #1 |
+| 8 | Escolha da org piloto (TOULON confirmada?) | F4a shadow start | Antes da F4a | ✓ **RESOLVIDA 2026-08-03** — TOULON confirmada (continuidade natural do ADR-150). |
+| 9 | Métricas de sucesso do shadow (≥95% concordância — aceita?) | Promoção shadow→assisted | Antes de qualquer piloto | ✓ **RESOLVIDA 2026-08-03** — ≥95% concordância com decisão humana por 2 semanas antes de promover pra assisted. |
+| 10 | Kill‑switch: quem tem autoridade pra virar `execution_runtime_enabled=0` em prod? | Operacional | Antes da F1 merge | ✓ **RESOLVIDA 2026-08-03** — Só o Master Admin da plataforma. |
 
 ## G. Log de mudanças deste documento
 

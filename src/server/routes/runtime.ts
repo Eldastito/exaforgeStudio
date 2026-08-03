@@ -5,6 +5,7 @@ import db from "../db.js";
 import { ProcessRuntimeService } from "../ProcessRuntimeService.js";
 import { RuntimeExceptionsService } from "../RuntimeExceptionsService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
+import { RetailClosingPlaybookService } from "../RetailClosingPlaybook.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -153,6 +154,32 @@ router.get("/operations/ledger", (req: AuthRequest, res): any => {
   const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
   const limit = req.query.limit ? Number(req.query.limit) : undefined;
   res.json(OutcomeMeasurementService.ledger(req.organizationId!, { domain, limit }));
+});
+
+// ── Piloto F4a: Retail Closing ────────────────────────────────────────────
+
+// Seed idempotente do playbook `retail_daily_closing_v1` na org. Master admin
+// entra sempre (via runtimeGate); demais precisam de RBAC do módulo runtime.
+router.post("/retail-closing/seed", (req: AuthRequest, res): any => {
+  try { res.json(RetailClosingPlaybookService.seed(req.organizationId!, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Inicia um fechamento (storeId + date). Delega dedupe conservador ao
+// ProcessRuntimeService (se já existe instance viva pro par, devolve).
+router.post("/retail-closing/start", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  if (typeof b.storeId !== "string" || typeof b.date !== "string") return res.status(400).json({ error: "storeId e date (YYYY-MM-DD) são obrigatórios." });
+  try { res.json(RetailClosingPlaybookService.start(req.organizationId!, { storeId: b.storeId, date: b.date, tolerancePct: b.tolerancePct }, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Runner: roda o playbook até completar / falhar / esperar externo.
+// Idempotente (o próprio runStep respeita FSM + o executor de step é
+// governado). Útil pro Scheduler futuro e pro botão "Rodar agora".
+router.post("/instances/:id/run", async (req: AuthRequest, res): Promise<any> => {
+  try { res.json(await ProcessRuntimeService.runToCompletion(req.organizationId!, req.params.id, { actor: actorId(req) })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

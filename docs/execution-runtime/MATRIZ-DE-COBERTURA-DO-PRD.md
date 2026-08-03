@@ -204,19 +204,19 @@ Campos:
 
 ## §15 — Processo prioritário 3 (Fechamento retail)
 
-| §15.7 Critério | Status | Fase |
+| §15.7 Critério | Status | Onde |
 |---|---|---|
-| Fechamento cria processo | [ ] | F4a |
-| Múltiplas fontes suportadas | [~] | F4a | PDV+Alterdata OK (ADR-150); Sicredi bloqueado (ver Decisões) |
-| Dados comparados | [x] | — (`RetailFloorReconciliationService`) |
-| Tolerâncias configuráveis | [~] | F4a | Hoje hard-coded 5%; F4a torna config |
-| Regulares concluídos automaticamente | [ ] | F4a |
-| Risco escalado | [~] | F4a |
-| Comissão gerada | [~] | F4a | `retail_commission_items` existe; F4a amarra no processo |
-| Financeiro atualizado | [x] | — (`FinancialLedgerService`) |
-| Sicredi manual + API futura mesmo contrato | [!] | — | Bloqueado (Sicredi) |
-| Evidências auditadas | [x] | — |
-| Testes cobrem divergências e idempotência | [x] | — parcial na `test-retail-floor-*`; F4a adiciona E2E |
+| Fechamento cria processo | [x] F4a | `RetailClosingPlaybookService.start` → `process_instance` viva por (org, storeId:date) |
+| Múltiplas fontes suportadas | [~] F4a | PDV+Alterdata OK (ADR-150 F6); Sicredi adiado (decisão pendente #7 resolvida como escopo futuro) |
+| Dados comparados | [x] | `RetailFloorReconciliationService.runDay` (idempotente só-promove) |
+| Tolerâncias configuráveis | [x] F4a | `context.tolerancePct` (default 0.05) por instance — dono passa no `start` ou default |
+| Regulares concluídos automaticamente | [x] F4a | `dispatch` decide auto-post + `retail_post_closing` lança em `cash_events` (UNIQUE dedup) |
+| Risco escalado | [x] F4a | `dispatch` cria `decision_actions` awaiting_approval em `escalate` (com priorityScore por unmatched+gap) |
+| Comissão gerada | [ ] F4a.1 | Adiada pós-piloto (comment no `RetailClosingPlaybook.ts` header). Reusar `PerformanceFeeService`. |
+| Financeiro atualizado | [x] F4a | `FinancialLedgerService.recordEvent(direction=in, sourceType=retail_closing)` |
+| Sicredi manual + API futura mesmo contrato | [ ] F4a.1 | Adiada (decisão pendente #7 resolvida como escopo futuro; molde já pronto no playbook) |
+| Evidências auditadas | [x] | `action_execution_log` (F2.2) + `process_transitions` (F1.1) + `cash_events.source_id` |
+| Testes cobrem divergências e idempotência | [x] F4a | `test-piloto-fechamento-retail.ts` 26/26 (auto/escalate/no_sales, idempotência UNIQUE, cross-tenant) |
 
 ## §16 — Segurança e governança
 

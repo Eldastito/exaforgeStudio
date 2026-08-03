@@ -20,6 +20,7 @@ import { RetailTransferService } from "../RetailTransferService.js";
 import { haversineKm } from "../geo.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
+import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -1495,6 +1496,50 @@ router.post("/schedule/copy-week", requireRole("owner", "admin"), (req: AuthRequ
   if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(fromStart)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(toStart))) return res.status(400).json({ error: "storeId, fromStart e toStart (YYYY-MM-DD) obrigatórios" });
   if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
   res.json({ entries: RetailCommissionRaceService.copyScheduleWeek(orgId, String(storeId), String(fromStart), String(toStart), Number(days) || 7, req.user?.userId) });
+});
+
+// Template de folga por vendedor (Fase G2b) — "Rafaela sempre segunda".
+router.get("/schedule/off-pattern", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  res.json({ storeId, patterns: RetailScheduleTemplateService.list(orgId, storeId) });
+});
+
+router.put("/schedule/off-pattern", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, patterns } = req.body || {};
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  if (!Array.isArray(patterns)) return res.status(400).json({ error: "patterns deve ser uma lista" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  res.json({ patterns: RetailScheduleTemplateService.save(orgId, String(storeId), patterns as any[], req.user?.userId) });
+});
+
+// Aplica o template no intervalo (só insere 'off' onde a grade tá vazia).
+router.post("/schedule/apply-template", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, start, end } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(start)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(end))) return res.status(400).json({ error: "storeId, start e end (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  try {
+    res.json(RetailScheduleTemplateService.applyToRange(orgId, String(storeId), String(start), String(end), req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+});
+
+// "Quem folga hoje/amanhã" — junta grade lançada 'off' + template do dia.
+router.get("/schedule/who-off", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || "");
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date (YYYY-MM-DD) obrigatório" });
+  try {
+    res.json({ date, sellers: RetailScheduleTemplateService.whoIsOff(orgId, date, { storeId }) });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
 });
 
 // Cota individual do vendedor por semana da corrida.

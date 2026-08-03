@@ -1303,6 +1303,7 @@ function ClosingsTab() {
         <button onClick={() => setStoreModal({ store: null })} className={`inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 ${bridge === null ? 'ml-auto' : ''}`}><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
 
+      <WhoIsOffCard className="mb-3" />
       <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 
       {stores.length === 0 ? (
@@ -3024,6 +3025,164 @@ function RaceSection({ stores }: { stores: any[] }) {
   );
 }
 
+// Painel "Templates de folga" (Fase G2b) — cadastra os dias fixos de folga
+// por vendedor + botão "Aplicar no mês" que preenche a grade sem sobrescrever
+// datas já lançadas (RN-G2b-001).
+const DOW_SHORT = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
+function OffPatternPanel({ storeId, sellers, keyOf, onApplied }: { storeId: string; sellers: any[]; keyOf: (s: any) => string; onApplied: () => void }) {
+  // matrix[sellerKey][dow] = boolean
+  const [matrix, setMatrix] = useState<Record<string, boolean[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [applyMonth, setApplyMonth] = useState(() => todayStr().slice(0, 7));
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    apiFetch(`/api/retailops/schedule/off-pattern?storeId=${storeId}`).then(r => r.json()).then(d => {
+      const m: Record<string, boolean[]> = {};
+      for (const s of sellers) m[keyOf(s)] = Array(7).fill(false);
+      for (const p of (d?.patterns || [])) {
+        if (!m[p.sellerKey]) m[p.sellerKey] = Array(7).fill(false);
+        for (const dw of p.daysOfWeek || []) m[p.sellerKey][dw] = true;
+      }
+      setMatrix(m);
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line
+  }, [open, storeId, sellers.length]);
+  const toggle = (sk: string, dow: number) => setMatrix(p => {
+    const cur = p[sk] || Array(7).fill(false);
+    const nxt = [...cur]; nxt[dow] = !nxt[dow];
+    return { ...p, [sk]: nxt };
+  });
+  const save = async () => {
+    setSaving(true);
+    try {
+      const patterns = sellers.map(s => {
+        const sk = keyOf(s);
+        const row = matrix[sk] || [];
+        const dows = row.map((v, i) => v ? i : -1).filter(i => i >= 0);
+        return { sellerKey: sk, sellerName: s.name || null, daysOfWeek: dows };
+      }).filter(p => p.daysOfWeek.length > 0);
+      const res = await apiFetch('/api/retailops/schedule/off-pattern', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, patterns }) });
+      if (res.ok) toast.success('Template de folga salvo.');
+      else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar.'); }
+    } finally { setSaving(false); }
+  };
+  const apply = async () => {
+    if (!/^\d{4}-\d{2}$/.test(applyMonth)) return;
+    // Aplica no mês inteiro (dia 01 até o último). O service pula datas já lançadas.
+    const [y, mo] = applyMonth.split('-').map(Number);
+    const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const start = `${applyMonth}-01`;
+    const end = `${applyMonth}-${String(last).padStart(2, '0')}`;
+    if (!window.confirm(`Aplicar o template no mês ${applyMonth}? Dias já lançados na grade não são sobrescritos.`)) return;
+    setApplying(true);
+    try {
+      const res = await apiFetch('/api/retailops/schedule/apply-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, start, end }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`${d.inserted || 0} folga(s) inserida(s) · ${d.skipped || 0} já existiam.`); onApplied(); }
+      else toast.error(d.error || 'Falha ao aplicar o template.');
+    } finally { setApplying(false); }
+  };
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+        <ChevronRight className="w-3.5 h-3.5" /> Templates de folga (Rafaela sempre segunda, Estefânio sempre terça…)
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300"><ChevronDown className="w-4 h-4" /></button>
+        <span className="text-sm font-medium text-zinc-200">Templates de folga</span>
+        <span className="text-[11px] text-zinc-500">marca os dias fixos de folga por vendedor</span>
+        <input type="month" value={applyMonth} onChange={e => setApplyMonth(e.target.value)} className="ml-auto bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+        <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar template</button>
+        <button onClick={apply} disabled={applying} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Aplicar no mês</button>
+      </div>
+      <p className="mb-2 text-[10px] text-zinc-600">"Aplicar no mês" preenche a grade com as folgas do template — NUNCA sobrescreve datas já lançadas. Salvar o template não mexe na grade (só grava o padrão pra usar).</p>
+      {loading ? (
+        <div className="py-4 text-center text-xs text-zinc-500"><Loader2 className="inline w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-zinc-800/70">
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/60 text-zinc-500">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-medium">Vendedor</th>
+                {DOW_SHORT.map((d, i) => <th key={i} className="px-2 py-1.5 text-center font-medium">{d}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {sellers.map((s: any) => {
+                const sk = keyOf(s);
+                const row = matrix[sk] || Array(7).fill(false);
+                return (
+                  <tr key={sk} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-1 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                    {row.map((v, i) => (
+                      <td key={i} className="px-2 py-1 text-center">
+                        <input type="checkbox" checked={!!v} onChange={() => toggle(sk, i)} className="accent-red-500" />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Card "quem folga hoje/amanhã" (Fase G2b) — reusável em ScheduleTab e ClosingsTab.
+// Junta grade lançada 'off' + template pra cada dia dos próximos 2 dias.
+function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; className?: string }) {
+  const [today, setToday] = useState<any[]>([]);
+  const [tomorrow, setTomorrow] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const todayIso = todayStr();
+  const tomorrowIso = new Date(Date.parse(todayIso + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+  useEffect(() => {
+    setLoading(true);
+    const qs = (d: string) => `date=${d}${storeId ? `&storeId=${storeId}` : ''}`;
+    Promise.all([
+      apiFetch(`/api/retailops/schedule/who-off?${qs(todayIso)}`).then(r => r.json()).catch(() => ({})),
+      apiFetch(`/api/retailops/schedule/who-off?${qs(tomorrowIso)}`).then(r => r.json()).catch(() => ({})),
+    ]).then(([t, m]) => {
+      setToday(Array.isArray(t?.sellers) ? t.sellers : []);
+      setTomorrow(Array.isArray(m?.sellers) ? m.sellers : []);
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line
+  }, [storeId, todayIso]);
+  if (loading) return null;
+  if (today.length === 0 && tomorrow.length === 0) return null;
+  const renderList = (list: any[]) => {
+    if (list.length === 0) return <span className="text-zinc-500">ninguém</span>;
+    return list.map((s, i) => (
+      <span key={`${s.storeId}-${s.sellerKey}-${i}`} className="inline-flex items-center gap-1">
+        {i > 0 && <span className="text-zinc-700">·</span>}
+        <span className="text-zinc-100">{s.sellerName || s.sellerKey}</span>
+        {!storeId && s.storeName && <span className="text-[10px] text-zinc-500">({s.storeName})</span>}
+        {s.source === 'template' && <span className="text-[9px] text-zinc-600" title="Vem do template — ainda não foi lançado na grade">tmpl</span>}
+      </span>
+    ));
+  };
+  return (
+    <div className={`rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-[12px] ${className}`}>
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="font-medium text-red-200">🌙 Quem folga:</span>
+        <span className="text-zinc-400">hoje</span> {renderList(today)}
+        <span className="text-zinc-600">|</span>
+        <span className="text-zinc-400">amanhã</span> {renderList(tomorrow)}
+      </div>
+    </div>
+  );
+}
+
 // ---- Escala semanal + cotas por vendedor (Fase G2) --------------------------
 function ScheduleTab() {
   const [stores, setStores] = useState<any[]>([]);
@@ -3139,6 +3298,7 @@ function ScheduleTab() {
 
   return (
     <div>
+      {storeId && <WhoIsOffCard storeId={storeId} className="mb-3" />}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><CalendarDays className="w-4 h-4 text-indigo-400" /> Escala semanal</div>
         <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
@@ -3195,6 +3355,15 @@ function ScheduleTab() {
         </div>
       )}
       {loading && <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando escala…</div>}
+
+      {/* Template de folga (Fase G2b) — cadastra por vendedor os dias fixos
+          de folga; botão "Aplicar no mês" preenche a grade sem sobrescrever
+          o que já foi lançado. */}
+      {storeId && sellers.length > 0 && (
+        <div className="mt-4">
+          <OffPatternPanel storeId={storeId} sellers={sellers} keyOf={keyOf} onApplied={loadWeek} />
+        </div>
+      )}
 
       {/* Cotas semanais individuais (as semanas da CORRIDA do mês) */}
       <div className="mt-5">

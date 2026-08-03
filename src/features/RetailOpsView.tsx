@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -561,6 +561,181 @@ function PricingHelpModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Painel expandível — edição inline dos custos da loja (fixos, variáveis e
+// margem bruta) direto na aba Precificar, sem abrir o cadastro da loja.
+// Reusa as MESMAS categorias (`STORE_COST_CATEGORIES`, `STORE_VARIABLE_COST_CATEGORIES`)
+// e endpoints do StoreFormModal — nada duplicado no cliente nem no servidor.
+function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState<string>('');
+  const [margin, setMargin] = useState<string>('');
+  const [costs, setCosts] = useState<Record<string, string>>({});
+  const [varCosts, setVarCosts] = useState<Record<string, { percent: string; fixed: string }>>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    apiFetch('/api/retailops/stores').then(r => r.json()).then(d => {
+      const arr = Array.isArray(d?.stores) ? d.stores : (Array.isArray(d) ? d : []);
+      const active = arr.filter((s: any) => s.active);
+      setStores(active);
+      if (!storeId && active[0]) setStoreId(active[0].id);
+    }).catch(() => {});
+    // eslint-disable-next-line
+  }, [open]);
+  useEffect(() => {
+    if (!open || !storeId) return;
+    setLoading(true);
+    Promise.all([
+      apiFetch(`/api/retailops/stores/${storeId}/costs`).then(r => r.json()).catch(() => ({})),
+      apiFetch(`/api/retailops/stores/${storeId}/variable-costs`).then(r => r.json()).catch(() => ({})),
+    ]).then(([f, v]) => {
+      const byF = f?.costs?.byCategory || {};
+      const nextF: Record<string, string> = {};
+      for (const c of STORE_COST_CATEGORIES) nextF[c.key] = byF[c.key] > 0 ? String(byF[c.key]) : '';
+      setCosts(nextF);
+      const byV = v?.costs?.byCategory || {};
+      const nextV: Record<string, { percent: string; fixed: string }> = {};
+      for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+        const e = byV[c.key] || { percent: 0, fixedPerSale: 0 };
+        nextV[c.key] = {
+          percent: e.percent > 0 ? String(e.percent) : '',
+          fixed: e.fixedPerSale > 0 ? String(e.fixedPerSale) : '',
+        };
+      }
+      setVarCosts(nextV);
+      const st = stores.find(s => s.id === storeId);
+      setMargin(st?.gross_margin_percent != null ? String(st.gross_margin_percent) : '');
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line
+  }, [open, storeId]);
+  const costsTotal = useMemo(
+    () => STORE_COST_CATEGORIES.reduce((a, c) => a + (Number(String(costs[c.key] || '').replace(',', '.')) || 0), 0),
+    [costs]
+  );
+  const varTotals = useMemo(() => {
+    let pct = 0, fix = 0;
+    for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+      const e = varCosts[c.key] || { percent: '', fixed: '' };
+      pct += Number(String(e.percent || '').replace(',', '.')) || 0;
+      fix += Number(String(e.fixed || '').replace(',', '.')) || 0;
+    }
+    return { pct, fix };
+  }, [varCosts]);
+  const save = async () => {
+    if (!storeId) return;
+    setSaving(true);
+    try {
+      const marginN = margin.trim() === '' ? null : Number(margin.replace(',', '.'));
+      await apiFetch(`/api/retailops/stores/${storeId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grossMarginPercent: marginN }),
+      }).catch(() => {});
+      const costsPayload: Record<string, number> = {};
+      for (const c of STORE_COST_CATEGORIES) costsPayload[c.key] = Number(String(costs[c.key] || '').replace(',', '.')) || 0;
+      await apiFetch(`/api/retailops/stores/${storeId}/costs`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ costs: costsPayload }),
+      }).catch(() => {});
+      const varPayload: Record<string, { percent: number; fixedPerSale: number }> = {};
+      for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+        const e = varCosts[c.key] || { percent: '', fixed: '' };
+        varPayload[c.key] = {
+          percent: Number(String(e.percent || '').replace(',', '.')) || 0,
+          fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0,
+        };
+      }
+      await apiFetch(`/api/retailops/stores/${storeId}/variable-costs`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ costs: varPayload }),
+      }).catch(() => {});
+      toast.success('Custos da loja atualizados.');
+    } finally { setSaving(false); }
+  };
+  if (!open) {
+    return (
+      <div className="mb-3">
+        <button onClick={onToggle} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+          <ChevronRight className="w-3.5 h-3.5" /> Custos da loja (fixos + variáveis + margem)
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <button onClick={onToggle} className="text-zinc-500 hover:text-zinc-300"><ChevronDown className="w-4 h-4" /></button>
+        <span className="text-sm font-medium text-zinc-200">Custos da loja</span>
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="ml-auto bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100">
+          {stores.length === 0 && <option value="">Sem lojas cadastradas</option>}
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` · ${s.code}` : ''}</option>)}
+        </select>
+        <button onClick={save} disabled={saving || !storeId} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar
+        </button>
+      </div>
+      <p className="mb-3 text-[11px] text-zinc-500">Editar aqui é o mesmo que editar em "Fechamento diário → editar loja" — a apuração de Resultado por Loja, ponto de equilíbrio e a sugestão de preço passam a valer com os novos números.</p>
+      {loading ? (
+        <div className="py-4 text-center text-xs text-zinc-500"><Loader2 className="inline w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-3">
+          {/* Fixos */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Fixos (mês)</span>
+              <span className="text-[10px] text-zinc-500">total {brl(costsTotal)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {STORE_COST_CATEGORIES.map(c => (
+                <label key={c.key} className="text-[10px] text-zinc-500">{c.label}
+                  <div className="mt-0.5 flex items-center rounded bg-zinc-950 border border-zinc-800 px-2">
+                    <span className="text-[10px] text-zinc-600">R$</span>
+                    <input inputMode="decimal" value={costs[c.key] || ''} onChange={e => setCosts(p => ({ ...p, [c.key]: e.target.value }))}
+                      placeholder="0,00" className="w-full bg-transparent px-1.5 py-1 text-xs text-zinc-100 outline-none" />
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+          {/* Variáveis */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Variáveis (por venda)</span>
+              <span className="text-[10px] text-zinc-500">soma {varTotals.pct.toFixed(2)}% + R$ {varTotals.fix.toFixed(2)}</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {STORE_VARIABLE_COST_CATEGORIES.map(c => (
+                <div key={c.key} className="grid grid-cols-[1fr_auto_auto] items-center gap-1">
+                  <span className="text-[10px] text-zinc-500" title={c.hint}>{c.label}</span>
+                  <div className="flex items-center rounded bg-zinc-950 border border-zinc-800 px-1.5 w-16">
+                    <input inputMode="decimal" value={varCosts[c.key]?.percent || ''} onChange={e => setVarCosts(p => ({ ...p, [c.key]: { ...(p[c.key] || { fixed: '' }), percent: e.target.value } }))}
+                      placeholder="0" className="w-full bg-transparent px-0.5 py-1 text-xs text-right text-zinc-100 outline-none" />
+                    <span className="text-[10px] text-zinc-600">%</span>
+                  </div>
+                  <div className="flex items-center rounded bg-zinc-950 border border-zinc-800 px-1.5 w-20">
+                    <span className="text-[10px] text-zinc-600">R$</span>
+                    <input inputMode="decimal" value={varCosts[c.key]?.fixed || ''} onChange={e => setVarCosts(p => ({ ...p, [c.key]: { ...(p[c.key] || { percent: '' }), fixed: e.target.value } }))}
+                      placeholder="0,00" className="w-full bg-transparent px-0.5 py-1 text-xs text-right text-zinc-100 outline-none" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Margem + resumo */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Margem bruta</div>
+            <label className="text-[10px] text-zinc-500">Margem bruta média (%)
+              <input inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)}
+                placeholder="Ex.: 55" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" />
+            </label>
+            <p className="mt-2 text-[10px] text-zinc-600">Sobra de cada R$ 100 depois de pagar a mercadoria — não inclui os fixos/variáveis acima. Sem margem, o app não calcula o lucro por loja.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- Precificar (ADR-083 E7): revisar/simular markup e aplicar em lote -----
 function PricingTab() {
   const [data, setData] = useState<any>(null);
@@ -570,6 +745,7 @@ function PricingTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showCosts, setShowCosts] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -630,6 +806,11 @@ function PricingTab() {
       </div>
 
       {showHelp && <PricingHelpModal onClose={() => setShowHelp(false)} />}
+
+      {/* Painel expandível de custos da loja — evita sair da tela pra
+          ajustar aluguel/energia/margem/taxa de cartão etc. Sem duplicar
+          categorias: reusa STORE_COST_CATEGORIES e STORE_VARIABLE_COST_CATEGORIES. */}
+      <StoreCostsInlinePanel open={showCosts} onToggle={() => setShowCosts(v => !v)} />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">

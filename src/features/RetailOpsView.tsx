@@ -1649,12 +1649,16 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
+      {/* Layout sticky-header + scroll-body + sticky-footer: com muitos campos
+          (custos fixos + variáveis + margem), a versão anterior fazia o
+          botão Salvar rolar junto — usuário não sabia onde estava nem que
+          podia rolar. Agora header e rodapé ficam fixos e só o miolo scrolla. */}
+      <div className="w-full max-w-md max-h-[92vh] flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
           <h3 className="font-semibold text-zinc-100">{editing ? 'Editar loja' : 'Nova loja (filial)'}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
         </div>
-        <div className="mt-4 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
           <label className="block text-xs text-zinc-400">Nome da loja
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Loja Centro" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
           </label>
@@ -1757,7 +1761,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             <p className="mt-1 text-[10px] text-zinc-600">A parte por venda só entra no cálculo se a loja tem PDV ou fechamentos aprovados no mês — senão a gente ignora (não dá pra chutar quantas vendas ocorreram).</p>
           </div>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-800 bg-zinc-900">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
           <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar loja</button>
         </div>

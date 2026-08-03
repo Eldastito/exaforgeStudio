@@ -57,6 +57,16 @@ export interface ConfirmInput {
   evidence?: any;
   resultAmount?: number | null;    // quando aplicável (cobrança: valor recebido)
   actorId?: string;
+  // ADR-152 F3.1 — hint de categoria (revenue_recovered / cost_avoided /
+  // time_saved / loss_prevented). Só quando o caller (webhook Asaas,
+  // reconciliação Alterdata, ...) sabe atribuir. É propagado direto pro
+  // OutcomeMeasurementService via DecisionActionService.complete.
+  categoryOutcomes?: {
+    timeSavedMinutes?: number | null;
+    costAvoided?: number | null;
+    revenueRecovered?: number | null;
+    lossPrevented?: number | null;
+  };
 }
 
 function safeParse(s: string | null | undefined): any { if (!s) return null; try { return JSON.parse(s); } catch { return null; } }
@@ -183,7 +193,10 @@ export class ConfirmationEngine {
     (async () => {
       try {
         const { DecisionActionService } = await import("./DecisionActionService.js");
-        DecisionActionService.complete(orgId, actionId, { resultAmount: input.resultAmount ?? null });
+        DecisionActionService.complete(orgId, actionId, {
+          resultAmount: input.resultAmount ?? null,
+          categoryOutcomes: input.categoryOutcomes,
+        });
       } catch (e) {
         console.error("[ConfirmationEngine] falha ao concluir ação após confirm", actionId, e);
       }

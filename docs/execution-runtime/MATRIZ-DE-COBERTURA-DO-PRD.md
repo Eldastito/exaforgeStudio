@@ -172,17 +172,17 @@ Campos:
 
 | §13.7 Critério de aceite | Status | Fase | Evidência / plano |
 |---|---|---|---|
-| Cobrança gera instância | [ ] | F4b | `receivable_collection_v1` |
-| Cadência executada pelo Runtime | [ ] | F4b | Playbook |
-| Respostas alteram fluxo | [ ] | F4b | `next: {condition→step}` |
-| Promessa agenda nova verificação | [ ] | F4b | `SchedulerActionCommandHandler` |
-| PIX enviado corretamente | [x] | — | `AsaasService` já envia PIX (usado hoje) |
-| Pagamento encerra cobrança | [~] | F4b | Webhook Asaas + `ConfirmationEngine` |
-| Ações idempotentes | [x] | — | Padrão do repo |
-| Tentativas auditadas | [x] | — | `action_execution_log` |
-| Exceções chegam ao gestor | [~] | F3 | Exception Center |
-| Valor recuperado medido | [x] | — | `OutcomeMeasurementService` |
-| Testes cobrem positivo e negativo | [ ] | F4b | `test-piloto-cobranca.ts` (10 intenções) |
+| Cobrança gera instância | [x] MVP | F4b | `CollectionPlaybookService.start` → `process_instance` viva por receivable (dedupe conservador em `ProcessRuntimeService.startForSubject`) |
+| Cadência executada pelo Runtime | [~] MVP: 1 lembrete | F4b (F4b.3 pra cadência multi-tentativa) | Playbook `receivable_collection_v1` de 1 step composto `collection_send_reminder` — cadência de 2ª/3ª tentativa fica em F4b.3 |
+| Respostas alteram fluxo | [ ] BLOQUEADO F4b.2 | F4b.2 | Intent classifier via `AIOrchestratorService` decide `promise/dispute/pay/escalate/pause` (§13.4 do PRD, 10 intenções). Sem isso, o MVP F4b espera só webhook (sem interpretar resposta livre) |
+| Promessa agenda nova verificação | [ ] BLOQUEADO F4b.2 | F4b.2 | Depende do intent classifier — quando `promise`, agenda re-check via `SchedulerActionCommandHandler` |
+| PIX enviado corretamente | [x] | F4b + pré-existente | `CollectionSendReminderHandler` chama `createPixCharge` (mesmo padrão do `AsaasPixChargeCommandHandler` F2.3) — verificado por `test-piloto-cobranca.ts` (`_req POST /payments`, `billingType=PIX`) |
+| Pagamento encerra cobrança | [x] | F4b | Webhook Asaas → `notifyRuntimeConfirmation` → `ConfirmationEngine.confirm` → `DecisionActionService.complete(result_amount)`. Idempotente 2× — verificado |
+| Ações idempotentes | [x] | — + F4b | Padrão do repo + `ConfirmationEngine.expect` UNIQUE(org, action_id) + `findByExternalRef` por payment_id + dedupe do start por subject vivo |
+| Tentativas auditadas | [x] | — | `action_execution_log` (mode='execute') + `logAuthEvent RUNTIME_COLLECTION_SENT` |
+| Exceções chegam ao gestor | [x] | F3 + F4b | `Scheduler.confirmationTimeoutPass` fecha vencidas → aparecem na aba Operações (F3.2) categorizadas como `integration_failed` |
+| Valor recuperado medido | [x] | F4b | `notifyRuntimeConfirmation` passa `categoryOutcomes.revenueRecovered=paidValue` (via `ConfirmationEngine.confirm.categoryOutcomes` → `DecisionActionService.complete` → `OutcomeMeasurementService.record`) — verificado no ledger F3.1 |
+| Testes cobrem positivo e negativo | [x] MVP | F4b | `test-piloto-cobranca.ts` **38/38 OK**: happy path (PIX+msg+webhook), timeout, idempotência, isolamento cross-tenant, validações de payload (6 casos), receivable status != 'open', Asaas 503 (G-4b-3: não envia msg sem PIX) — as 10 intenções ficam para F4b.2 |
 
 ## §14 — Processo prioritário 2 (Recuperação comercial)
 

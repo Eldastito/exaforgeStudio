@@ -195,8 +195,22 @@ async function notifyRuntimeConfirmation(payment: any, confirmed: string): Promi
   const match = ConfirmationEngine.findByExternalRef("asaas_payment_webhook", String(paymentId));
   if (!match) return;
   const paidValue = Number(payment?.value ?? payment?.netValue ?? 0);
+  // ADR-152 F4b — se a ação amarrada é uma cobrança (command_type
+  // collection_send_reminder / asaas_pix_charge), o pagamento fecha
+  // revenue_recovered no ledger F3.1. Heurística conservadora: só
+  // categoriza esses 2 command_types conhecidos; futuras integrações
+  // Asaas passam pelo default (sem categoria) até serem listadas aqui.
+  let categoryOutcomes: any = undefined;
+  try {
+    const act = db.prepare(`SELECT command_type FROM decision_actions WHERE id = ? AND organization_id = ?`).get(match.confirmation.action_id, match.orgId) as any;
+    const cmd = String(act?.command_type || "");
+    if (["collection_send_reminder", "asaas_pix_charge"].includes(cmd) && paidValue > 0) {
+      categoryOutcomes = { revenueRecovered: paidValue };
+    }
+  } catch { /* aditivo — nunca bloqueia o confirm */ }
   ConfirmationEngine.confirm(match.orgId, match.confirmation.action_id, {
     evidence: { source: "asaas_payment_webhook", paymentId, netValue: payment?.netValue ?? null, value: payment?.value ?? null, dueDate: payment?.dueDate ?? null, status: confirmed },
     resultAmount: paidValue > 0 ? paidValue : null,
+    categoryOutcomes,
   });
 }

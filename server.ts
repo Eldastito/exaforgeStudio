@@ -97,6 +97,8 @@ import "./src/server/RuntimeCommandHandlers.js";
 // ADR-152 F4a — piloto Retail Closing (registra retail_reconcile_day,
 // retail_post_closing e retail_closing_dispatch no CommandExecutorService).
 import "./src/server/RetailClosingPlaybook.js";
+// ADR-152 F4b — piloto Cobrança MVP (registra collection_send_reminder).
+import "./src/server/CollectionPlaybook.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";

@@ -6,6 +6,7 @@ import { ProcessRuntimeService } from "../ProcessRuntimeService.js";
 import { RuntimeExceptionsService } from "../RuntimeExceptionsService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { RetailClosingPlaybookService } from "../RetailClosingPlaybook.js";
+import { CollectionPlaybookService } from "../CollectionPlaybook.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -172,6 +173,38 @@ router.post("/retail-closing/start", (req: AuthRequest, res): any => {
   if (typeof b.storeId !== "string" || typeof b.date !== "string") return res.status(400).json({ error: "storeId e date (YYYY-MM-DD) são obrigatórios." });
   try { res.json(RetailClosingPlaybookService.start(req.organizationId!, { storeId: b.storeId, date: b.date, tolerancePct: b.tolerancePct }, actorId(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Piloto F4b: Cobrança MVP ──────────────────────────────────────────────
+
+// Seed idempotente do playbook `receivable_collection_v1` na org. Mesma
+// governança do F4a (runtimeGate + RBAC do módulo runtime).
+router.post("/collection/seed", (req: AuthRequest, res): any => {
+  try { res.json(CollectionPlaybookService.seed(req.organizationId!, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Inicia uma cobrança pro receivable (payload composto: receivableId,
+// phone, channelId, customerId Asaas, amount, dueDate). Dedupe por subject
+// vivo (ProcessRuntimeService.startForSubject) impede cobrança dupla no
+// mesmo receivable.
+router.post("/collection/start", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  if (typeof b.receivableId !== "string") return res.status(400).json({ error: "receivableId (string) obrigatório." });
+  if (typeof b.phone !== "string") return res.status(400).json({ error: "phone (string) obrigatório." });
+  if (typeof b.channelId !== "string") return res.status(400).json({ error: "channelId (string) obrigatório." });
+  if (typeof b.customerId !== "string") return res.status(400).json({ error: "customerId (string, Asaas) obrigatório." });
+  if (typeof b.dueDate !== "string") return res.status(400).json({ error: "dueDate (YYYY-MM-DD) obrigatório." });
+  if (!(Number(b.amount) > 0)) return res.status(400).json({ error: "amount > 0 obrigatório." });
+  try {
+    res.json(CollectionPlaybookService.start(req.organizationId!, {
+      receivableId: b.receivableId, contactId: b.contactId, phone: b.phone,
+      channelId: b.channelId, customerId: b.customerId,
+      amount: Number(b.amount), dueDate: b.dueDate,
+      description: b.description, messageTemplate: b.messageTemplate,
+      confirmationDeadline: b.confirmationDeadline,
+    }, actorId(req)));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Runner: roda o playbook até completar / falhar / esperar externo.

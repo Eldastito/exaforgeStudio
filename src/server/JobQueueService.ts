@@ -18,6 +18,31 @@ import db from "./db.js";
 
 export type JobHandler = (payload: any, job: any) => Promise<any>;
 
+// ADR-152 F2.1 — classes de erro do Runtime. Governa retry:
+//   retryable            — falha transiente (rede, DB lock). Reprocessa com backoff.
+//   external_unavailable — API externa fora do ar. Reprocessa com backoff MAIOR.
+//   permission           — 401/403. NÃO retenta; vai pra dead-letter (falta credencial).
+//   non_retryable        — 400/422/malformado. NÃO retenta.
+// Erros não classificados assumem `retryable` (comportamento atual preservado).
+export type JobErrorClass = "retryable" | "external_unavailable" | "permission" | "non_retryable";
+
+const NON_RETRYABLE_CLASSES: Set<JobErrorClass> = new Set(["permission", "non_retryable"]);
+
+export class JobQueueError extends Error {
+  constructor(message: string, public readonly errorClass: JobErrorClass) { super(message); this.name = "JobQueueError"; }
+}
+
+/**
+ * Backoff exponencial com teto e base fixa por tentativa (ADR-152 F2.1). O
+ * teto de 30min evita que uma cadeia de falhas mande o job pra daqui a
+ * horas. `external_unavailable` dobra pra dar tempo do provedor voltar.
+ */
+export function computeBackoffSeconds(attempt: number, errorClass: JobErrorClass = "retryable"): number {
+  const base = errorClass === "external_unavailable" ? 60 : 30; // seg
+  const raw = base * Math.pow(2, Math.max(0, attempt - 1));
+  return Math.min(raw, 1800); // 30 min máx
+}
+
 const handlers = new Map<string, JobHandler>();
 
 export class JobQueueService {
@@ -59,14 +84,25 @@ export class JobQueueService {
       db.prepare(`UPDATE background_jobs SET status='completed', completed_at=CURRENT_TIMESTAMP, result_json=? WHERE id=?`)
         .run(JSON.stringify(result ?? null), id);
     } catch (e: any) {
-      const willRetry = attempts < (job.max_attempts || 3);
-      db.prepare(`UPDATE background_jobs SET status=?, last_error=?, completed_at=? WHERE id=?`).run(
+      // ADR-152 F2.1 — classifica erro pra decidir política de retry.
+      // JobQueueError.errorClass é honrado; sem classe, assume 'retryable'
+      // (compatível com o comportamento antigo). permission/non_retryable
+      // NÃO retentam — mesmo abaixo de max_attempts — vão pra dead-letter.
+      const errorClass: JobErrorClass = e instanceof JobQueueError ? e.errorClass : "retryable";
+      const belowCap = attempts < (job.max_attempts || 3);
+      const willRetry = belowCap && !NON_RETRYABLE_CLASSES.has(errorClass);
+      const backoff = willRetry ? computeBackoffSeconds(attempts, errorClass) : null;
+      const nextAt = backoff != null ? new Date(Date.now() + backoff * 1000).toISOString() : null;
+      db.prepare(`UPDATE background_jobs SET status=?, last_error=?, error_class=?, backoff_seconds=?, next_attempt_at=?, completed_at=? WHERE id=?`).run(
         willRetry ? "pending" : "failed",
         String(e?.message || e).slice(0, 500),
+        errorClass,
+        backoff,
+        nextAt,
         willRetry ? null : new Date().toISOString(),
         id
       );
-      console.error(`[JobQueue] job ${id} (${job.type}) falhou na tentativa ${attempts}${willRetry ? " — será reprocessado" : " — desistindo"}:`, e);
+      console.error(`[JobQueue] job ${id} (${job.type}) falhou na tentativa ${attempts} [${errorClass}]${willRetry ? ` — reprocessa em ${backoff}s` : " — dead-letter"}:`, e);
     }
   }
 
@@ -78,9 +114,13 @@ export class JobQueueService {
   static sweepStale(staleMinutes = 10): number {
     let rows: any[] = [];
     try {
+      // ADR-152 F2.1 — só reprocessa `pending` cujo `next_attempt_at` já
+      // venceu (ou é null, mantendo compat com jobs pré-F2.1). Sem o filtro,
+      // o sweep quebrava o backoff exponencial e reprocessava tudo a cada
+      // 5min. `processing` travado (crash no meio) segue reprocessando.
       rows = db.prepare(
         `SELECT id FROM background_jobs
-         WHERE status = 'pending'
+         WHERE (status = 'pending' AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= CURRENT_TIMESTAMP))
             OR (status = 'processing' AND started_at <= datetime('now', ?))
          LIMIT 100`
       ).all(`-${staleMinutes} minutes`) as any[];
@@ -121,14 +161,36 @@ export class JobQueueService {
   }
 
   static retry(jobId: string): boolean {
+    // Reset também backoff/error_class/next_attempt_at pra o retry manual
+    // não ficar preso no janelamento do backoff anterior (ADR-152 F2.1).
     const r = db.prepare(
-      `UPDATE background_jobs SET status = 'pending', last_error = NULL, completed_at = NULL, attempts = 0 WHERE id = ? AND status = 'failed'`
+      `UPDATE background_jobs SET status = 'pending', last_error = NULL, completed_at = NULL, attempts = 0, error_class = NULL, backoff_seconds = NULL, next_attempt_at = NULL WHERE id = ? AND status = 'failed'`
     ).run(jobId);
     if (r.changes > 0) {
       setImmediate(() => { this.runJob(jobId).catch((e) => console.error("[JobQueue] retry runJob falhou", jobId, e)); });
       return true;
     }
     return false;
+  }
+
+  /**
+   * Dead-letter formal (ADR-152 F2.1) — jobs `failed` (max_attempts esgotado
+   * OU classe non-retryable). A Fase 3 vai expor isso na aba "Operações",
+   * categorizado como exceção "integração falhou" ou "credencial ausente".
+   */
+  static deadLetters(orgId?: string, limit = 100): any[] {
+    if (orgId) {
+      return db.prepare(
+        `SELECT id, organization_id, type, attempts, max_attempts, error_class, last_error, created_at, completed_at
+         FROM background_jobs WHERE organization_id = ? AND status = 'failed'
+         ORDER BY completed_at DESC LIMIT ?`
+      ).all(orgId, limit) as any[];
+    }
+    return db.prepare(
+      `SELECT id, organization_id, type, attempts, max_attempts, error_class, last_error, created_at, completed_at
+       FROM background_jobs WHERE status = 'failed'
+       ORDER BY completed_at DESC LIMIT ?`
+    ).all(limit) as any[];
   }
 
   static listRecent(limit: number = 50): any[] {

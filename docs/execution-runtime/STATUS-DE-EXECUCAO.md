@@ -62,7 +62,35 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 **Rollback:** `execution_runtime_enabled=0` (default) bloqueia o `/api/runtime/*` via `runtimeGate` (403). Se necessário reverter o schema, revert do commit — nenhum dado de produção populou as tabelas novas ainda.
 
 ## Fase 2 — Execute + Confirmation
-- [ ] Ver `PLANO §Fase 2` (Fatias 2.1 executor.execute, 2.2 handlers concretos, 2.3 ConfirmationEngine, 2.4 backoff/dead‑letter)
+
+### Fatia 2.1 — Fundação (execution_mode + ConfirmationEngine + backoff) — **ENTREGUE**
+- [x] `db.ts` — ALTER `agent_policies` ADD `execution_mode` (default `assisted`, retrocompat); ALTER `background_jobs` ADD `backoff_seconds/next_attempt_at/error_class` + índice; CREATE `action_confirmations` com `UNIQUE(org, action_id)` + índices por status/method
+- [x] `ConfirmationEngine.ts` — 5 métodos registrados (`asaas_payment_webhook | retail_reconciliation | channel_reply | alterdata_sync | manual`); `expect` idempotente por (org, action); `confirm` fecha via `DecisionActionService.complete` (loop ADR-136 D6); idempotência webhook duplicado (já `confirmed` → devolve; ação `done/rejected/cancelled` → `dismissed` sem reabrir); `dismiss` humano; `sweepTimeouts` com `datetime()` parse (aceita ISO + formato SQLite)
+- [x] `JobQueueService.ts` — `JobQueueError` com `errorClass ∈ {retryable | external_unavailable | permission | non_retryable}`; `computeBackoffSeconds` (30s base retryable, 60s external_unavailable, teto 30min, exponencial por tentativa); `permission/non_retryable` NÃO retentam (dead-letter imediato); `sweepStale` respeita `next_attempt_at`; `retry(manual)` reseta backoff; `deadLetters(orgId, limit)` pra Fase 3
+- [x] `scripts/test-runtime-confirmation.ts` — **32/32 checks PASS**: execution_mode default; backoff correto por classe + teto; sweep respeitando backoff; permission → dead-letter imediato; dead-letter isolado por org; external_unavailable com backoff maior; confirm sem expect → 400; expect idempotente; confirm fecha ação + registra outcome; webhook duplicado NÃO reabre; race com rollback humano → `dismissed`; cross-tenant recusado; dismiss humano; sweepTimeouts fecha vencidas; listPending isolado
+- [x] Regressão zero: 5 suítes ADR-136 (76/76) + `runtime-process-fabric` (42/42); `tsc --noEmit` limpo
+- [x] `package.json` — script `test:runtime-confirmation`
+
+**Critérios de aceite Fatia 2.1 — todos cumpridos:**
+1. Nenhum executor externo dispara efeito real (Fatia 2.1 é fundação) ✓
+2. `execute` na policy ainda não é consumido — teto continua em `prepare` (Fatia 2.2) ✓
+3. Idempotência crítica (webhook 2x) testada ✓
+4. Retrocompat total: default de `execution_mode = 'assisted'` mantém comportamento atual ✓
+
+**Rollback:** `execution_runtime_enabled=0` desliga `/api/runtime/*` (nenhuma peça da 2.1 é chamada de fora do runtime); revert do commit reverte schema. Nada em produção usa Confirmation Engine ainda (subscribers plugam na 2.3).
+
+### Fatia 2.2 — Modo `execute` no CommandExecutorService (com guardas triplas)
+- [ ] Subir teto do `CommandExecutorService` de `prepare` pra `execute` governado (guardas: autonomy=execute + execution_mode≥approved_execution + policy=approved). Fatia sem handlers externos novos — todos os 5 existentes ganham `execute` no-op só pra validar guardas.
+- [ ] Teste `test-runtime-executor-execute.ts`.
+
+### Fatia 2.3 — Handlers concretos + webhook Asaas → ConfirmationEngine
+- [ ] `WhatsAppSendCommandHandler` (usa `MessageProviderService.sendMessage`)
+- [ ] `AsaasPixCommandHandler`, `AsaasChargeCommandHandler` (chama `AsaasService`, registra `expect(asaas_payment_webhook)`)
+- [ ] `AlterdataFetchCommandHandler` (leitura via `AlterdataConnectorService`)
+- [ ] `SchedulerActionCommandHandler` (agenda próxima ação por `next_attempt_at`)
+- [ ] `webhookProcessor.ts` — hook Asaas passa a chamar `ConfirmationEngine.confirm(actionId, evidence)`
+- [ ] `Scheduler.confirmationTimeoutPass` — chama `sweepTimeouts` em cada tick
+- [ ] Teste E2E `test-runtime-execute-e2e.ts`
 
 ## Fase 3 — Outcomes estendidos + UI Operações
 - [ ] Ver `PLANO §Fase 3`
@@ -120,6 +148,25 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Resultado:** Fatia 1.1 concluída — Process Fabric no ar, com feature flag desligada. Nenhuma quebra em produção.
 - **Pendências criadas:** nenhuma nova; as 10 decisões pendentes do dono (§F) continuam bloqueando F4a/F4c mas não afetam F1.2 ou F2.
 - **Próximo passo:** aguardar aprovação para iniciar **Fatia 1.2** (opcional — se dividirmos) ou pular direto pra **Fase 2 (Execute + Confirmation)**. Recomendo Fase 2 direto: F1 já entrega o Process Fabric completo em uma fatia. F1.2 se torna desnecessária.
+
+### Sessão 2026-08-03 (Fatia 2.1 do ADR-152 — Confirmation Engine + JobQueue backoff)
+- **Fase:** 2
+- **Itens executados:** todos os 5 da Fatia 2.1 (schema aditivo, ConfirmationEngine com 5 métodos, JobQueue backoff+error_class+dead-letter, teste, package.json)
+- **Arquivos criados:**
+  - `src/server/ConfirmationEngine.ts` (peça fina; subscribers vazios — Fatia 2.3 pluga)
+  - `scripts/test-runtime-confirmation.ts` (32/32 checks)
+- **Arquivos alterados:**
+  - `src/server/db.ts` (aditivos: execution_mode + 3 colunas em background_jobs + tabela action_confirmations)
+  - `src/server/JobQueueService.ts` (JobQueueError + computeBackoffSeconds + retry reseta + deadLetters)
+  - `package.json` (`test:runtime-confirmation`)
+  - `docs/execution-runtime/STATUS-DE-EXECUCAO.md` (esta atualização)
+- **Testes executados:**
+  - `npm run test:runtime-confirmation` → **32/32 OK**
+  - Regressão: `test:decision-actions` 16/16, `test:outcome-measurement` 17/17, `test:command-executor` 17/17, `test:business-signals` 12/12, `test:impact-prioritization` 14/14, `test:runtime-process-fabric` 42/42
+  - `npx tsc --noEmit` → limpo (exit 0)
+- **Resultado:** Fatia 2.1 concluída — fundação da Fase 2 no ar. Nenhum efeito externo novo. Feature flag `execution_runtime_enabled=0` continua sendo o gate; nada muda em produção.
+- **Pendências criadas:** nenhuma nova. As 10 decisões pendentes do dono (§F) continuam bloqueando F4a/F4c.
+- **Próximo passo:** Fatia 2.2 (subir teto do CommandExecutorService pra `execute` governado, sem handlers externos novos — só guardas triplas), aguardando aprovação. Alternativa: passar direto pra Fatia 2.3 (handlers concretos) se o dono julgar que 2.2 é overhead — mas separar torna a mudança de contrato de confiança do produto explicitamente auditável.
 
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …

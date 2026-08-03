@@ -6874,6 +6874,29 @@ const initDb = () => {
         ON retail_boleta_events (organization_id, store_id, day);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas ADR-083 Fase C3 (boletas)', e); }
+
+  // ADR-083 Fase G2b — Template de FOLGA por vendedor (Rafaela sempre folga
+  // segunda; Estefânio sempre terça). Uma linha por (loja, vendedor, dia da
+  // semana 0-6=dom-sáb). O "Aplicar no mês" gera as linhas 'off' em
+  // `retail_schedule_entries` pros dias-da-semana marcados, respeitando o que
+  // já tá lançado (não sobrescreve; pula datas que já têm entrada).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_seller_off_pattern (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        seller_key TEXT NOT NULL,                -- mesmo formato de retail_schedule_entries
+        seller_name TEXT,
+        day_of_week INTEGER NOT NULL,            -- 0=domingo … 6=sábado (JS getUTCDay)
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, store_id, seller_key, day_of_week)
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_seller_off_pattern
+        ON retail_seller_off_pattern (organization_id, store_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela ADR-083 G2b (template de folga)', e); }
 };
 
 initDb();

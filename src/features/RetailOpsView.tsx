@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -561,6 +561,181 @@ function PricingHelpModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Painel expandível — edição inline dos custos da loja (fixos, variáveis e
+// margem bruta) direto na aba Precificar, sem abrir o cadastro da loja.
+// Reusa as MESMAS categorias (`STORE_COST_CATEGORIES`, `STORE_VARIABLE_COST_CATEGORIES`)
+// e endpoints do StoreFormModal — nada duplicado no cliente nem no servidor.
+function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState<string>('');
+  const [margin, setMargin] = useState<string>('');
+  const [costs, setCosts] = useState<Record<string, string>>({});
+  const [varCosts, setVarCosts] = useState<Record<string, { percent: string; fixed: string }>>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    apiFetch('/api/retailops/stores').then(r => r.json()).then(d => {
+      const arr = Array.isArray(d?.stores) ? d.stores : (Array.isArray(d) ? d : []);
+      const active = arr.filter((s: any) => s.active);
+      setStores(active);
+      if (!storeId && active[0]) setStoreId(active[0].id);
+    }).catch(() => {});
+    // eslint-disable-next-line
+  }, [open]);
+  useEffect(() => {
+    if (!open || !storeId) return;
+    setLoading(true);
+    Promise.all([
+      apiFetch(`/api/retailops/stores/${storeId}/costs`).then(r => r.json()).catch(() => ({})),
+      apiFetch(`/api/retailops/stores/${storeId}/variable-costs`).then(r => r.json()).catch(() => ({})),
+    ]).then(([f, v]) => {
+      const byF = f?.costs?.byCategory || {};
+      const nextF: Record<string, string> = {};
+      for (const c of STORE_COST_CATEGORIES) nextF[c.key] = byF[c.key] > 0 ? String(byF[c.key]) : '';
+      setCosts(nextF);
+      const byV = v?.costs?.byCategory || {};
+      const nextV: Record<string, { percent: string; fixed: string }> = {};
+      for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+        const e = byV[c.key] || { percent: 0, fixedPerSale: 0 };
+        nextV[c.key] = {
+          percent: e.percent > 0 ? String(e.percent) : '',
+          fixed: e.fixedPerSale > 0 ? String(e.fixedPerSale) : '',
+        };
+      }
+      setVarCosts(nextV);
+      const st = stores.find(s => s.id === storeId);
+      setMargin(st?.gross_margin_percent != null ? String(st.gross_margin_percent) : '');
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line
+  }, [open, storeId]);
+  const costsTotal = useMemo(
+    () => STORE_COST_CATEGORIES.reduce((a, c) => a + (Number(String(costs[c.key] || '').replace(',', '.')) || 0), 0),
+    [costs]
+  );
+  const varTotals = useMemo(() => {
+    let pct = 0, fix = 0;
+    for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+      const e = varCosts[c.key] || { percent: '', fixed: '' };
+      pct += Number(String(e.percent || '').replace(',', '.')) || 0;
+      fix += Number(String(e.fixed || '').replace(',', '.')) || 0;
+    }
+    return { pct, fix };
+  }, [varCosts]);
+  const save = async () => {
+    if (!storeId) return;
+    setSaving(true);
+    try {
+      const marginN = margin.trim() === '' ? null : Number(margin.replace(',', '.'));
+      await apiFetch(`/api/retailops/stores/${storeId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grossMarginPercent: marginN }),
+      }).catch(() => {});
+      const costsPayload: Record<string, number> = {};
+      for (const c of STORE_COST_CATEGORIES) costsPayload[c.key] = Number(String(costs[c.key] || '').replace(',', '.')) || 0;
+      await apiFetch(`/api/retailops/stores/${storeId}/costs`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ costs: costsPayload }),
+      }).catch(() => {});
+      const varPayload: Record<string, { percent: number; fixedPerSale: number }> = {};
+      for (const c of STORE_VARIABLE_COST_CATEGORIES) {
+        const e = varCosts[c.key] || { percent: '', fixed: '' };
+        varPayload[c.key] = {
+          percent: Number(String(e.percent || '').replace(',', '.')) || 0,
+          fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0,
+        };
+      }
+      await apiFetch(`/api/retailops/stores/${storeId}/variable-costs`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ costs: varPayload }),
+      }).catch(() => {});
+      toast.success('Custos da loja atualizados.');
+    } finally { setSaving(false); }
+  };
+  if (!open) {
+    return (
+      <div className="mb-3">
+        <button onClick={onToggle} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+          <ChevronRight className="w-3.5 h-3.5" /> Custos da loja (fixos + variáveis + margem)
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <button onClick={onToggle} className="text-zinc-500 hover:text-zinc-300"><ChevronDown className="w-4 h-4" /></button>
+        <span className="text-sm font-medium text-zinc-200">Custos da loja</span>
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="ml-auto bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100">
+          {stores.length === 0 && <option value="">Sem lojas cadastradas</option>}
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` · ${s.code}` : ''}</option>)}
+        </select>
+        <button onClick={save} disabled={saving || !storeId} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar
+        </button>
+      </div>
+      <p className="mb-3 text-[11px] text-zinc-500">Editar aqui é o mesmo que editar em "Fechamento diário → editar loja" — a apuração de Resultado por Loja, ponto de equilíbrio e a sugestão de preço passam a valer com os novos números.</p>
+      {loading ? (
+        <div className="py-4 text-center text-xs text-zinc-500"><Loader2 className="inline w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-3">
+          {/* Fixos */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Fixos (mês)</span>
+              <span className="text-[10px] text-zinc-500">total {brl(costsTotal)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {STORE_COST_CATEGORIES.map(c => (
+                <label key={c.key} className="text-[10px] text-zinc-500">{c.label}
+                  <div className="mt-0.5 flex items-center rounded bg-zinc-950 border border-zinc-800 px-2">
+                    <span className="text-[10px] text-zinc-600">R$</span>
+                    <input inputMode="decimal" value={costs[c.key] || ''} onChange={e => setCosts(p => ({ ...p, [c.key]: e.target.value }))}
+                      placeholder="0,00" className="w-full bg-transparent px-1.5 py-1 text-xs text-zinc-100 outline-none" />
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+          {/* Variáveis */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Variáveis (por venda)</span>
+              <span className="text-[10px] text-zinc-500">soma {varTotals.pct.toFixed(2)}% + R$ {varTotals.fix.toFixed(2)}</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {STORE_VARIABLE_COST_CATEGORIES.map(c => (
+                <div key={c.key} className="grid grid-cols-[1fr_auto_auto] items-center gap-1">
+                  <span className="text-[10px] text-zinc-500" title={c.hint}>{c.label}</span>
+                  <div className="flex items-center rounded bg-zinc-950 border border-zinc-800 px-1.5 w-16">
+                    <input inputMode="decimal" value={varCosts[c.key]?.percent || ''} onChange={e => setVarCosts(p => ({ ...p, [c.key]: { ...(p[c.key] || { fixed: '' }), percent: e.target.value } }))}
+                      placeholder="0" className="w-full bg-transparent px-0.5 py-1 text-xs text-right text-zinc-100 outline-none" />
+                    <span className="text-[10px] text-zinc-600">%</span>
+                  </div>
+                  <div className="flex items-center rounded bg-zinc-950 border border-zinc-800 px-1.5 w-20">
+                    <span className="text-[10px] text-zinc-600">R$</span>
+                    <input inputMode="decimal" value={varCosts[c.key]?.fixed || ''} onChange={e => setVarCosts(p => ({ ...p, [c.key]: { ...(p[c.key] || { percent: '' }), fixed: e.target.value } }))}
+                      placeholder="0,00" className="w-full bg-transparent px-0.5 py-1 text-xs text-right text-zinc-100 outline-none" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Margem + resumo */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Margem bruta</div>
+            <label className="text-[10px] text-zinc-500">Margem bruta média (%)
+              <input inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)}
+                placeholder="Ex.: 55" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-100" />
+            </label>
+            <p className="mt-2 text-[10px] text-zinc-600">Sobra de cada R$ 100 depois de pagar a mercadoria — não inclui os fixos/variáveis acima. Sem margem, o app não calcula o lucro por loja.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- Precificar (ADR-083 E7): revisar/simular markup e aplicar em lote -----
 function PricingTab() {
   const [data, setData] = useState<any>(null);
@@ -570,6 +745,7 @@ function PricingTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showCosts, setShowCosts] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -630,6 +806,11 @@ function PricingTab() {
       </div>
 
       {showHelp && <PricingHelpModal onClose={() => setShowHelp(false)} />}
+
+      {/* Painel expandível de custos da loja — evita sair da tela pra
+          ajustar aluguel/energia/margem/taxa de cartão etc. Sem duplicar
+          categorias: reusa STORE_COST_CATEGORIES e STORE_VARIABLE_COST_CATEGORIES. */}
+      <StoreCostsInlinePanel open={showCosts} onToggle={() => setShowCosts(v => !v)} />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -1122,6 +1303,7 @@ function ClosingsTab() {
         <button onClick={() => setStoreModal({ store: null })} className={`inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 ${bridge === null ? 'ml-auto' : ''}`}><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
 
+      <WhoIsOffCard className="mb-3" />
       <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 
       {stores.length === 0 ? (
@@ -2843,6 +3025,164 @@ function RaceSection({ stores }: { stores: any[] }) {
   );
 }
 
+// Painel "Templates de folga" (Fase G2b) — cadastra os dias fixos de folga
+// por vendedor + botão "Aplicar no mês" que preenche a grade sem sobrescrever
+// datas já lançadas (RN-G2b-001).
+const DOW_SHORT = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
+function OffPatternPanel({ storeId, sellers, keyOf, onApplied }: { storeId: string; sellers: any[]; keyOf: (s: any) => string; onApplied: () => void }) {
+  // matrix[sellerKey][dow] = boolean
+  const [matrix, setMatrix] = useState<Record<string, boolean[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [applyMonth, setApplyMonth] = useState(() => todayStr().slice(0, 7));
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    apiFetch(`/api/retailops/schedule/off-pattern?storeId=${storeId}`).then(r => r.json()).then(d => {
+      const m: Record<string, boolean[]> = {};
+      for (const s of sellers) m[keyOf(s)] = Array(7).fill(false);
+      for (const p of (d?.patterns || [])) {
+        if (!m[p.sellerKey]) m[p.sellerKey] = Array(7).fill(false);
+        for (const dw of p.daysOfWeek || []) m[p.sellerKey][dw] = true;
+      }
+      setMatrix(m);
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line
+  }, [open, storeId, sellers.length]);
+  const toggle = (sk: string, dow: number) => setMatrix(p => {
+    const cur = p[sk] || Array(7).fill(false);
+    const nxt = [...cur]; nxt[dow] = !nxt[dow];
+    return { ...p, [sk]: nxt };
+  });
+  const save = async () => {
+    setSaving(true);
+    try {
+      const patterns = sellers.map(s => {
+        const sk = keyOf(s);
+        const row = matrix[sk] || [];
+        const dows = row.map((v, i) => v ? i : -1).filter(i => i >= 0);
+        return { sellerKey: sk, sellerName: s.name || null, daysOfWeek: dows };
+      }).filter(p => p.daysOfWeek.length > 0);
+      const res = await apiFetch('/api/retailops/schedule/off-pattern', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, patterns }) });
+      if (res.ok) toast.success('Template de folga salvo.');
+      else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar.'); }
+    } finally { setSaving(false); }
+  };
+  const apply = async () => {
+    if (!/^\d{4}-\d{2}$/.test(applyMonth)) return;
+    // Aplica no mês inteiro (dia 01 até o último). O service pula datas já lançadas.
+    const [y, mo] = applyMonth.split('-').map(Number);
+    const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const start = `${applyMonth}-01`;
+    const end = `${applyMonth}-${String(last).padStart(2, '0')}`;
+    if (!window.confirm(`Aplicar o template no mês ${applyMonth}? Dias já lançados na grade não são sobrescritos.`)) return;
+    setApplying(true);
+    try {
+      const res = await apiFetch('/api/retailops/schedule/apply-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, start, end }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`${d.inserted || 0} folga(s) inserida(s) · ${d.skipped || 0} já existiam.`); onApplied(); }
+      else toast.error(d.error || 'Falha ao aplicar o template.');
+    } finally { setApplying(false); }
+  };
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+        <ChevronRight className="w-3.5 h-3.5" /> Templates de folga (Rafaela sempre segunda, Estefânio sempre terça…)
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300"><ChevronDown className="w-4 h-4" /></button>
+        <span className="text-sm font-medium text-zinc-200">Templates de folga</span>
+        <span className="text-[11px] text-zinc-500">marca os dias fixos de folga por vendedor</span>
+        <input type="month" value={applyMonth} onChange={e => setApplyMonth(e.target.value)} className="ml-auto bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+        <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Salvar template</button>
+        <button onClick={apply} disabled={applying} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Aplicar no mês</button>
+      </div>
+      <p className="mb-2 text-[10px] text-zinc-600">"Aplicar no mês" preenche a grade com as folgas do template — NUNCA sobrescreve datas já lançadas. Salvar o template não mexe na grade (só grava o padrão pra usar).</p>
+      {loading ? (
+        <div className="py-4 text-center text-xs text-zinc-500"><Loader2 className="inline w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-zinc-800/70">
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/60 text-zinc-500">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-medium">Vendedor</th>
+                {DOW_SHORT.map((d, i) => <th key={i} className="px-2 py-1.5 text-center font-medium">{d}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {sellers.map((s: any) => {
+                const sk = keyOf(s);
+                const row = matrix[sk] || Array(7).fill(false);
+                return (
+                  <tr key={sk} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-1 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                    {row.map((v, i) => (
+                      <td key={i} className="px-2 py-1 text-center">
+                        <input type="checkbox" checked={!!v} onChange={() => toggle(sk, i)} className="accent-red-500" />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Card "quem folga hoje/amanhã" (Fase G2b) — reusável em ScheduleTab e ClosingsTab.
+// Junta grade lançada 'off' + template pra cada dia dos próximos 2 dias.
+function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; className?: string }) {
+  const [today, setToday] = useState<any[]>([]);
+  const [tomorrow, setTomorrow] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const todayIso = todayStr();
+  const tomorrowIso = new Date(Date.parse(todayIso + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+  useEffect(() => {
+    setLoading(true);
+    const qs = (d: string) => `date=${d}${storeId ? `&storeId=${storeId}` : ''}`;
+    Promise.all([
+      apiFetch(`/api/retailops/schedule/who-off?${qs(todayIso)}`).then(r => r.json()).catch(() => ({})),
+      apiFetch(`/api/retailops/schedule/who-off?${qs(tomorrowIso)}`).then(r => r.json()).catch(() => ({})),
+    ]).then(([t, m]) => {
+      setToday(Array.isArray(t?.sellers) ? t.sellers : []);
+      setTomorrow(Array.isArray(m?.sellers) ? m.sellers : []);
+    }).finally(() => setLoading(false));
+    // eslint-disable-next-line
+  }, [storeId, todayIso]);
+  if (loading) return null;
+  if (today.length === 0 && tomorrow.length === 0) return null;
+  const renderList = (list: any[]) => {
+    if (list.length === 0) return <span className="text-zinc-500">ninguém</span>;
+    return list.map((s, i) => (
+      <span key={`${s.storeId}-${s.sellerKey}-${i}`} className="inline-flex items-center gap-1">
+        {i > 0 && <span className="text-zinc-700">·</span>}
+        <span className="text-zinc-100">{s.sellerName || s.sellerKey}</span>
+        {!storeId && s.storeName && <span className="text-[10px] text-zinc-500">({s.storeName})</span>}
+        {s.source === 'template' && <span className="text-[9px] text-zinc-600" title="Vem do template — ainda não foi lançado na grade">tmpl</span>}
+      </span>
+    ));
+  };
+  return (
+    <div className={`rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-[12px] ${className}`}>
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="font-medium text-red-200">🌙 Quem folga:</span>
+        <span className="text-zinc-400">hoje</span> {renderList(today)}
+        <span className="text-zinc-600">|</span>
+        <span className="text-zinc-400">amanhã</span> {renderList(tomorrow)}
+      </div>
+    </div>
+  );
+}
+
 // ---- Escala semanal + cotas por vendedor (Fase G2) --------------------------
 function ScheduleTab() {
   const [stores, setStores] = useState<any[]>([]);
@@ -2958,6 +3298,7 @@ function ScheduleTab() {
 
   return (
     <div>
+      {storeId && <WhoIsOffCard storeId={storeId} className="mb-3" />}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><CalendarDays className="w-4 h-4 text-indigo-400" /> Escala semanal</div>
         <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
@@ -3014,6 +3355,15 @@ function ScheduleTab() {
         </div>
       )}
       {loading && <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando escala…</div>}
+
+      {/* Template de folga (Fase G2b) — cadastra por vendedor os dias fixos
+          de folga; botão "Aplicar no mês" preenche a grade sem sobrescrever
+          o que já foi lançado. */}
+      {storeId && sellers.length > 0 && (
+        <div className="mt-4">
+          <OffPatternPanel storeId={storeId} sellers={sellers} keyOf={keyOf} onApplied={loadWeek} />
+        </div>
+      )}
 
       {/* Cotas semanais individuais (as semanas da CORRIDA do mês) */}
       <div className="mt-5">

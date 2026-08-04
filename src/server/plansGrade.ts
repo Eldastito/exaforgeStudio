@@ -1,12 +1,20 @@
 /**
- * Grade de planos ZappFlow (ADR-091). Fonte única da verdade dos 5 tiers
- * comerciais + a migração idempotente das orgs que estavam na grade antiga
- * (Starter/Pro/Business → Autônomo/Growth/Scale).
+ * Grade de planos ZappFlow (ADR-091 + ADR-153). Fonte única da verdade dos 5
+ * tiers comerciais + a migração idempotente das orgs que estavam na grade
+ * antiga (Starter/Pro/Business → Autônomo/Growth/Scale).
  *
  * Regra de módulos (ADR-091 §2 + ADR-092): cada tier HERDA o de baixo e adiciona.
  * `features.modules` é o TETO do plano — `ModuleService.isEnabled` intersecciona
- * isso com os módulos ligados pela vertical/dono. `copiloto` é exclusivo do
- * Autônomo; `valor` (Painel de Valor Gerado) entra no Scale+.
+ * isso com os módulos ligados pela vertical/dono.
+ *
+ * ADR-153 F2.1 (Decisão #1): `copiloto` (Comigo) é AGORA persistente em TODOS os
+ * planos, não mais exclusivo do Autônomo. Motivação: upgrade Autônomo→Start
+ * removia silenciosamente o balcão de peixaria/chaveiro, violando G-153-2
+ * ("upgrade nunca remove capacidade"). O plano Autônomo continua sendo o
+ * "produto Comigo" comercial; nos superiores o Comigo fica como capability
+ * base (útil pra multi-branch: matriz + subsidiárias podem usar).
+ *
+ * `valor` (Painel de Valor Gerado) entra no Scale+.
  *
  * Limites (§3): ai_monthly_limit / contacts_limit / channels_limit / users_limit.
  * Valor 0 = sem trava (Enterprise é negociado). trial_days = 30 em toda a grade.
@@ -14,7 +22,10 @@
  */
 
 const AUTONOMO = ["catalogo", "agenda", "vendas", "pagamentos", "integracoes", "loja", "copiloto"];
-const START = ["catalogo", "agenda", "vendas", "pagamentos", "integracoes", "loja", "campanhas", "areas", "diretor"];
+// ADR-153 F2.1: START/GROWTH/SCALE/ENTERPRISE agora herdam AUTONOMO (via spread)
+// pra garantir `copiloto` presente em TODOS os planos — impede que upgrade
+// remova o balcão de negócios que dependem dele (peixaria, chaveiro, autônomos).
+const START = [...AUTONOMO, "campanhas", "areas", "diretor"];
 const GROWTH = [...START, "cadencias", "assinaturas", "orcamentos", "reservas", "estudio"];
 const SCALE = [...GROWTH, "compras", "eventos", "rie", "execucao", "radar", "retail", "valor"];
 const ENTERPRISE = [...SCALE, "vms", "clinica", "prospect"];

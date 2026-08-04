@@ -22,7 +22,7 @@ function useOnline() {
 }
 
 // ============================================================================
-// ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
+// ZappFlow Comigo — módulo `copiloto`, disponível em todos os planos (ADR-111/112/113, ADR-153 F2.1).
 // PR #3: Balcão PDV por toque + fiado (limite, aviso+override) + lista negra.
 // Precificação (motor no PR #2) e Caderneta (PR #4) seguem como placeholders.
 // ============================================================================

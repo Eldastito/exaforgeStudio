@@ -33,13 +33,17 @@ async function main() {
   check("copiloto tem MODULE_META (label)", !!ModuleService.MODULE_META["copiloto"]?.label);
   check("rota comigo -> copiloto em MODULE_BY_ROUTE", ModuleService.MODULE_BY_ROUTE["comigo"] === "copiloto");
 
-  // ===== 2. Exclusivo do plano Autônomo (teto) =====
-  const autonomo = PLAN_GRADE.find((p) => p.id === "autonomo");
-  const start = PLAN_GRADE.find((p) => p.id === "start");
-  check("plano Autônomo inclui copiloto", !!autonomo?.features.modules.includes("copiloto"));
-  check("plano Start NÃO inclui copiloto", !start?.features.modules.includes("copiloto"));
+  // ===== 2. Persistente em TODOS os planos (ADR-153 F2.1 / Decisão #1) =====
+  // Antes: `copiloto` só em Autônomo. Depois: em todos (upgrade nunca remove
+  // capacidade — G-153-2). Autonomo continua sendo o "produto Comigo" comercial,
+  // mas o balcão fica disponível em Start/Growth/Scale/Enterprise pra quem
+  // migrou de Autônomo (peixaria, chaveiro, autônomos).
+  for (const planId of ["autonomo", "start", "growth", "scale", "enterprise"]) {
+    const p = PLAN_GRADE.find((pl) => pl.id === planId);
+    check(`plano ${planId} inclui copiloto (persistente em todos os tiers)`, !!p?.features.modules.includes("copiloto"));
+  }
 
-  // ===== 3. Gating: só liga onde o plano permite =====
+  // ===== 3. Gating: liga em todos os planos =====
   applyPlanGrade(db);
   function seedOrg(planId: string) {
     const orgId = `org_${randomUUID().slice(0, 8)}`;
@@ -47,10 +51,10 @@ async function main() {
       .run(randomUUID(), orgId, planId, JSON.stringify(["copiloto"]));
     return orgId;
   }
-  const orgAuto = seedOrg("autonomo");
-  const orgStart = seedOrg("start");
-  check("copiloto habilitado p/ org Autônomo", ModuleService.isEnabled(orgAuto, "copiloto") === true);
-  check("copiloto BLOQUEADO p/ org Start (fura teto)", ModuleService.isEnabled(orgStart, "copiloto") === false);
+  for (const planId of ["autonomo", "start", "growth", "scale", "enterprise"]) {
+    const org = seedOrg(planId);
+    check(`copiloto habilitado p/ org ${planId} (não fura mais o teto)`, ModuleService.isEnabled(org, "copiloto") === true);
+  }
 
   // ===== 4. Schema do Comigo criado =====
   const tables = [

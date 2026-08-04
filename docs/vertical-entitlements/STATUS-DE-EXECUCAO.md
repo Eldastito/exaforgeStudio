@@ -120,6 +120,41 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-04 (Fatia 2.1 — Comigo persistente em todos os planos)
+
+- **Fase:** 2 (correção da grade). Fatia 2.1 fecha a Decisão #1 aprovada.
+- **Bug bloqueante resolvido:** PRD §3.2 — upgrade Autônomo→Start removia silenciosamente o `copiloto` (balcão de peixaria/chaveiro). Violação clara de G-153-2 ("upgrade nunca remove capacidade"). Depois desta fatia, `copiloto` está em todos os 5 tiers.
+- **Itens executados:** 3 mudanças de código + 3 testes atualizados/criados + docs.
+- **Arquivos alterados:**
+  - `src/server/plansGrade.ts` — `START = [...AUTONOMO, "campanhas", "areas", "diretor"]` (antes era lista literal sem `copiloto`). Comentário do header atualizado explicando a decisão e a motivação (Decisão #1 aprovada). Cascade `GROWTH`/`SCALE`/`ENTERPRISE` via spread garante propagação.
+  - `src/server/ModuleService.ts` — descrição do `copiloto` atualizada (removido "Exclusivo do plano Autônomo", agora "Disponível em todos os planos (ADR-153 F2.1)").
+  - `src/features/ComigoView.tsx` — header do arquivo atualizado (removido "do plano Autônomo").
+  - `scripts/test-comigo-module.ts` — asserção antiga "plano Start NÃO inclui copiloto" invertida; agora loop de 5 tiers valida presença em todos.
+  - `scripts/test-plans-migration.ts` — asserção "copiloto é exclusivo do Autônomo" invertida ("copiloto está em TODOS os planos").
+  - `package.json` — scripts `test:comigo-preserved-on-upgrade` e `test:upgrade-matrix`.
+- **Arquivos criados:**
+  - `scripts/test-comigo-preserved-on-upgrade.ts` — **16/16 checks** cobrindo: PLAN_GRADE inclui copiloto em todos os 5 tiers; peixaria (varejo, autonomo) mantém copiloto após upgrade pra start/growth/scale/enterprise; chaveiro (servicos, autonomo→growth) idem; org sem copiloto em enabled_modules NÃO ganha por upgrade (available_to_enable); master admin bypass.
+  - `scripts/test-upgrade-matrix.ts` — **93/93 checks** cobrindo matriz completa `origem × destino` (10 pares de upgrade) × cada módulo da origem: nenhum é removido no upgrade. Sanity checks pros módulos "topo" (vms/clinica/prospect só em enterprise; valor/retail só em scale+). Downgrade documentado como REMOÇÃO esperada (F6.2 vai fazer read_only).
+- **Testes executados:**
+  - `npm run test:upgrade-matrix` → **93/93 OK** (matriz PRD §8.3).
+  - `npm run test:comigo-preserved-on-upgrade` → **16/16 OK**.
+  - `npm run test:comigo-module` → **32/32 OK** (asserções invertidas).
+  - `npm run test:plans-migration` → **24/24 OK** (asserção invertida).
+  - Regressão zero: `test:entitlement-service` (49/49), `test:entitlement-middleware` (29/29), `test:entitlements-me` (25/25), `test:vertical-plan-intersection` (19/19), `test:addons` (13/13), `test:rbac-granular` (27/27), `test:rbac-enforcement` (15/15), `test:falatu-rollout` (24/24).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Herança via spread** — `START = [...AUTONOMO, ...]` em vez de lista literal. Motivação: se `AUTONOMO` receber outro módulo no futuro, os superiores herdam automaticamente (idem a regra do PRD §8.2 "entitlements do destino ≥ entitlements do novo plano"). Aditivo puro.
+  - (ii) **Não fizemos "grandfathering explícito"** — a Decisão #1 escolheu Opção A (persistente em todos os tiers) em vez de Opção B (add-on preservado). Isso torna a política mais simples: nenhuma tabela de "concessão comercial explícita" é necessária pra copiloto (pode surgir se algum dia cobrarmos por ele avulso, mas isso é F futuro se surgir demanda).
+  - (iii) **Frontend copy atualizado no ComigoView** — o texto de introdução mencionava "plano Autônomo" como se fosse exclusivo. Agora indica que o módulo está disponível em todos.
+  - (iv) **`test-upgrade-matrix.ts` é PURO** — não sobe banco, só compara os arrays de `PLAN_GRADE`. Roda em <100ms. Detecta regressão em qualquer alteração futura da grade.
+  - (v) **Downgrade documentado como remoção esperada** — o teste 6 de `test-upgrade-matrix.ts` confirma que downgrade enterprise→autonomo REMOVE módulos (comportamento correto do teto do plano). F6.2 vai transformar essa remoção em `state=read_only` pra preservar dados (Decisão #9 aprovada, 30d de carência).
+- **Cross-service:** aditivo puro no backend + copy no frontend. `PlanService.selectPlan`, `PlanService.setPlan`, `ModuleService.isEnabled`, `EntitlementService.check` — todos continuam funcionando idênticos, só que agora o teto do plano superior inclui `copiloto`.
+- **Resultado:** Bug crítico do PRD resolvido. Peixaria/chaveiro que hoje usam Comigo podem migrar pra Start/Growth/Scale sem perder o balcão. Fase 2 do plano avança 50% (F2.2 restante: bundle Clínica no catálogo).
+- **Pendências criadas:** nenhuma nova. Decisão #1 aprovada e implementada; grade agora coerente com política de upgrade.
+- **Próximo passo:** F2.2 — bundle Clínica no catálogo de planos. Decisão #5 já aprovada (Growth + add-on Clínica). Alternativa: iniciar F1.4 (estado hidden real via mock estático de blueprint) ou F3.1 (fundação Blueprints).
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

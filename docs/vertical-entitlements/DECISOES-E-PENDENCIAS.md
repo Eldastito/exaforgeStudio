@@ -82,7 +82,7 @@ Cada decisão abaixo BLOQUEIA uma ou mais fatias do plano (`PLANO-DE-IMPLEMENTAC
 
 ---
 
-### Decisão #5 — Blueprint da Clínica: bundle `Growth + Clínica` ou plano dedicado?
+### Decisão #5 — Blueprint da Clínica: bundle `Growth + Clínica` ou plano dedicado? ✅ **APROVADA + IMPLEMENTADA em F2.2 (bundle catálogo)**
 
 **Contexto (PRD §10.3):** módulo `clinica` só existe no plano Enterprise hoje (`plansGrade.ts:20`). Uma clínica média não paga Enterprise. PRD sugere bundle `Growth ou Scale + add-on Clínica`.
 
@@ -195,7 +195,7 @@ Cada decisão abaixo BLOQUEIA uma ou mais fatias do plano (`PLANO-DE-IMPLEMENTAC
 | 2 (ToS) | F5.1 → F5-6 | Máxima | Opção A (jurídico) |
 | 3 (HMAC) | F5.2 | Alta | Opção A (migrar) |
 | 4 (Nomes Blueprint) | F3.2, F8.2-3 | Média | Opção A + 2 primeiros |
-| 5 (Bundle Clínica) | F2.2, F3.2 | Alta | Opção A (bundle) |
+| 5 (Bundle Clínica) | F2.2, F3.2 | ✅ **APROVADA + IMPLEMENTADA (F2.2 catálogo)** | Opção A (bundle Growth+addon Clínica) — F3.2 amarra ao blueprint clinica_multi_v1 |
 | 6 (Migração v1→v2) | F3.3 | Média | Opção B (proposta + aprovação) |
 | 7 (Frequência) | F7.3 | Média | A + C combinadas |
 | 8 (IA cita?) | F7.5 | Média | Opção A (só quando perguntado) |

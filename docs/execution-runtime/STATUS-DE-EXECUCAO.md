@@ -642,6 +642,42 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Pendências criadas:** nenhuma. F4c está funcionalmente completo em `approved_execution` com medição real e UI dedicada.
 - **Próximo passo:** decidir com o dono: (a) **CLI de rollout dos pilotos** (padrão TOULON ADR-150 — script idempotente `zappflow-*-tenant-setup.ts`); (b) agendar **revisão LGPD** pra desbloquear modo `autonomous` (decisão #4).
 
+### Sessão 2026-08-04 (Fatia 4d.1 do ADR-152 — CLI de rollout dos pilotos)
+- **Fase:** 4d.1 (padrão TOULON ADR-150 aplicado ao Runtime — escalar pra Nª org sem toggle manual)
+- **Escopo:** CLI idempotente `pilot:runtime` que liga o Runtime + sub-pilotos (Cobrança + Recuperação + Follow-up + Atribuição) por org, com dry-run diagnóstico e seed opcional das `agent_policies` exigidas pelo CommandExecutor F2.2. Sem CLI, cada nova org piloto exigia 6+ toggles manuais espalhados por `organization_settings` + inserção manual de policies — passível de erro (autonomy ou execution_mode incorretos → executor recusa silenciosamente).
+- **Arquivos criados:**
+  - `src/server/RuntimePilotService.ts` (findOrgs/plan/apply idempotente + validação numérica + cascade + seed policies + audit).
+  - `scripts/pilot-runtime.ts` (lógica do CLI — parseArgs, printPlan, guarda de DATA_DIR).
+  - `scripts/pilot-runtime.cli.ts` (entry — mesmo padrão do `pilot-retail-floor.cli.ts` pra rodar `tsx` no dev e `node dist/*.cjs` em produção).
+  - `scripts/test-pilot-runtime.ts` — **55/55 checks** (findOrgs, plan defaults/prereqs/cascade/readiness, apply idempotente/cascade/validação/seed-policies, isolamento cross-tenant, audit RUNTIME_PILOT_APPLY, soft-delete, warnings acumulam).
+- **Arquivos alterados:**
+  - `package.json` — scripts `pilot:runtime`/`pilot:runtime:prod` + `test:pilot-runtime` + `pilot-runtime.cli.ts` incluído no build esbuild → `dist/pilot-runtime.cjs`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §21 (operação/rollout) marcado.
+- **Testes executados:**
+  - `npm run test:pilot-runtime` → **55/55 OK**
+  - Regressão zero: `test:piloto-cobranca` (38/38), `test:piloto-sales-recovery` (41/41), `test:sales-recovery-attribution` (25/25), `test:sales-recovery-dashboard` (38/38), `test:runtime-operations` (31/31), `test:runtime-process-fabric` (42/42), `test:runtime-confirmation` (32/32), `test:runtime-executor-execute` (22/22), `test:runtime-execute-e2e` (27/27)
+  - `npx tsc --noEmit` → limpo (exit 0)
+- **Decisões micro:**
+  - (i) **Opt-in por design** — CLI NUNCA desliga uma flag automaticamente. Roda 1× liga o que veio; 2ª roda com opts vazio não muda nada. Pra desligar, dono usa SQL direto ou reverte manualmente. Evita que 2 rodadas com opts diferentes apaguem configuração feita manualmente entre elas.
+  - (ii) **Cascade como erro de apply (não warning)** — `--collection` sem `--runtime` (nem já ligado) lança erro. Se fosse warning, dono aplicaria achando que ligou, e o piloto ficaria silencioso atrás do `runtimeGate` (403). Falha rápido é melhor UX.
+  - (iii) **Seed de policies força valores corretos** — se policy já existe com `autonomy=observe`/`execution_mode=shadow`, o seed CORRIGE pra `execute`+`approved_execution`+`active=1`. Idempotente com melhoria. Dono não precisa lembrar que existia policy divergente pra outro teste.
+  - (iv) **G-4c-1 preservada — nunca seta `autonomous`** — o CLI só semeia `approved_execution`. Se dono quiser autonomous, tem que fazer SQL manual (proposital: modo autonomous continua BLOQUEADO em decisão #4 LGPD).
+  - (v) **Guarda de DATA_DIR igual ao TOULON CLI** — antes de importar qualquer service, verifica que `zappflow.db` existe naquele diretório. Importar `db.js` num diretório errado CRIA banco vazio silencioso (bug já observado no ADR-150).
+  - (vi) **Cascade "sub sem base"** — `--followup`/`--attribution` sem `--sales-recovery` também lança erro (mesmo racional: ficariam órfãos).
+  - (vii) **Validação numérica no service (não só na CLI)** — API interna (`RuntimePilotService.apply`) também recusa. Se algum dia surgir rota HTTP pra rollout, o range vem grátis.
+  - (viii) **Owner sem PIN NÃO bloqueia** — CLI da Clínica bloqueava por causa da alta médica, mas piloto do Runtime só precisa que exista owner (é ele quem aprova envios pelo painel — clique, não PIN). Warning é suficiente.
+- **Cross-service:** ADITIVO PURO — nenhum service pré-existente mudou. `RuntimePilotService` só faz UPDATE/INSERT em tabelas já existentes (`organization_settings` + `agent_policies`). Audit via `logAuthEvent` (helper único do repo). Zero rota HTTP nova nesta fatia — se surgir, é F4d.2.
+- **Resultado:** Rollout de nova org piloto agora é 1 comando:
+  ```
+  DATA_DIR=/data node dist/pilot-runtime.cjs --org <id> --apply \\
+    --runtime --collection --sales-recovery --followup --attribution --seed-policies
+  ```
+  Diagnóstico prévio: `node dist/pilot-runtime.cjs --org <id>` — mostra o que já está ligado, prereqs (canais/contatos/owners/OpenAI/policies) e o checklist de pendências antes de ligar de fato.
+- **Pendências criadas:**
+  - F4d.2 (opcional) — rota HTTP `POST /api/runtime/pilot/apply` pra CLI ser acionada pelo painel Master Admin sem SSH. Só faz sentido depois de rollout em >5 orgs pra provar que a ergonomia CLI segura o volume.
+  - F4d.3 (opcional) — comando `--disable` pra desligar flags (invertível). Não incluído nesta fatia por design — desligar é raro (piloto ligado permanece; se problema, dono roda SQL). Se demanda aparecer, é 1 fatia isolada.
+- **Próximo passo:** com o rollout ergonômico no ar, decidir com o dono: (a) **agendar revisão LGPD** pra desbloquear modo `autonomous` (decisão #4 — sem isso, F4c fica limitado a approved_execution); (b) **F4d.2** (rota HTTP do rollout); (c) **próxima ADR** se surgir dor priorizada.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

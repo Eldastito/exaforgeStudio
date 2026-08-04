@@ -7,7 +7,7 @@
     "dev": "tsx server.ts",
     "dev:vision-cloud": "tsx apps/vision-cloud/server.ts",
     "dev:edge": "tsx apps/edge/server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild scripts/seed-reference-autonomos.cli.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/seed-reference-autonomos.cjs && esbuild scripts/pilot-retail-floor.cli.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/pilot-retail-floor.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild scripts/seed-reference-autonomos.cli.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/seed-reference-autonomos.cjs && esbuild scripts/pilot-retail-floor.cli.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/pilot-retail-floor.cjs && esbuild scripts/pilot-runtime.cli.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/pilot-runtime.cjs",
     "build:vision-cloud": "esbuild apps/vision-cloud/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/vision-cloud.cjs",
     "build:supervisor": "esbuild scripts/supervisor.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/supervisor.cjs",
     "build:edge": "esbuild apps/edge/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/edge.cjs",
@@ -169,6 +169,8 @@
     "test:retail-floor-kiosk": "tsx scripts/test-retail-floor-kiosk.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",
+    "pilot:runtime": "tsx scripts/pilot-runtime.cli.ts",
+    "pilot:runtime:prod": "node dist/pilot-runtime.cjs",
     "test:product-sale-mode": "tsx scripts/test-product-sale-mode.ts",
     "test:product-instock": "tsx scripts/test-product-instock.ts",
     "test:retail-transfer": "tsx scripts/test-retail-transfer.ts",
@@ -369,7 +371,8 @@
     "test:sales-recovery-reply": "tsx scripts/test-sales-recovery-reply.ts",
     "test:sales-recovery-followup": "tsx scripts/test-sales-recovery-followup.ts",
     "test:sales-recovery-attribution": "tsx scripts/test-sales-recovery-attribution.ts",
-    "test:sales-recovery-dashboard": "tsx scripts/test-sales-recovery-dashboard.ts"
+    "test:sales-recovery-dashboard": "tsx scripts/test-sales-recovery-dashboard.ts",
+    "test:pilot-runtime": "tsx scripts/test-pilot-runtime.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

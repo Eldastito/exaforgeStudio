@@ -302,6 +302,7 @@ Campos:
 | Fase 6 (fechamento) | **F4a** | Primeiro piloto (menor risco) |
 | Fase 7 (Operações UI) | F3 | Antes dos pilotos |
 | Fase 8 (Shadow + rollout) | Transversal | `execution_mode` em cada piloto |
+| Fase 8b (CLI de rollout multi-org) | **F4d.1** | `pilot:runtime` (`RuntimePilotService` — plan/apply idempotente + seed policies) |
 
 ## §21 — Critérios globais de aceite (validado ao FIM do projeto)
 
@@ -323,6 +324,7 @@ Cada linha volta a ser marcada `[x]` só quando a evidência estiver no repo.
 - [ ] Exceções apresentadas
 - [ ] UI mostra resultados e não apenas tarefas
 - [ ] Orgs existentes protegidas por flags
+- [x] Rollout ergonômico multi-org (CLI idempotente `pilot:runtime` — F4d.1)
 - [ ] Testes completos verdes
 - [ ] Documentação atualizada
 - [ ] Esta matriz preenchida (100% dos itens em estado formal)

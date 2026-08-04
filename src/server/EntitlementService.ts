@@ -364,6 +364,41 @@ export class EntitlementService {
   }
 
   /**
+   * Decisão puramente ORG-level: "esse módulo está disponível para essa org?".
+   * Sem RBAC, sem billing — igual ao antigo `ModuleService.isEnabled`, mas
+   * devolve `{available, reason, state}` estruturado pra middleware do server.ts
+   * (ADR-153 F1.2) exibir o motivo do 403 (`module_off` vs `plan_ceiling`) no
+   * response, sem forçar o consumidor a fazer heurística no lado dele.
+   *
+   * IMPORTANTE (não-regressão): NÃO checa billing_status aqui — o middleware
+   * de read-only (server.ts:359-378) já cuida disso pra escritas; se checasse
+   * aqui, GETs em org `blocked/suspended` retornariam 403 e regrediria a
+   * política "manter visibilidade, bloquear escrita" do ADR-091.
+   */
+  static isModuleAvailable(orgId: string, moduleKey: string): { available: boolean; reason: EntitlementReason; state: EntitlementState } {
+    if (isCore(moduleKey)) {
+      return { available: true, reason: "core_module", state: "active" };
+    }
+    // Delegação canônica: ModuleService.isEnabled compõe plan + addon + enabled_modules.
+    // Se ele diz allowed, o middleware libera — comportamento IDÊNTICO ao atual.
+    const enabled = ModuleService.isEnabled(orgId, moduleKey);
+    if (enabled) return { available: true, reason: "allowed", state: "active" };
+
+    // Não allowed — distinguir o porquê pra devolver reason estruturada.
+    const em = ModuleService.enabledModules(orgId);
+    const planMods = PlanService.modulesForPlan(orgId);
+    const inEnabled = em == null ? false : em.includes(moduleKey);
+    const inPlan = planMods == null || planMods.includes(moduleKey);
+
+    if (!inPlan) return { available: false, reason: "plan_ceiling", state: "available_to_buy" };
+    if (!inEnabled) return { available: false, reason: "module_off", state: "available_to_enable" };
+    // Fallback improvável (isEnabled=false mas está no plano E em enabled_modules?
+    // acontece só se ModuleService adicionar novos gates — mantemos aberto pra
+    // evolução sem quebrar contrato).
+    return { available: false, reason: "not_in_product", state: "hidden" };
+  }
+
+  /**
    * Decisão de rota (segment, method). Compatível com PermissionService.
    * checkRouteAccess — futuro F1.2 substitui o middleware por este método.
    * F1.1 é somente aditivo: método NOVO, mas ninguém consome ainda.

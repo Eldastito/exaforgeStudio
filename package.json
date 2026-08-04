@@ -373,7 +373,8 @@
     "test:sales-recovery-attribution": "tsx scripts/test-sales-recovery-attribution.ts",
     "test:sales-recovery-dashboard": "tsx scripts/test-sales-recovery-dashboard.ts",
     "test:pilot-runtime": "tsx scripts/test-pilot-runtime.ts",
-    "test:entitlement-service": "tsx scripts/test-entitlement-service.ts"
+    "test:entitlement-service": "tsx scripts/test-entitlement-service.ts",
+    "test:entitlement-middleware": "tsx scripts/test-entitlement-middleware.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -61,6 +61,33 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-04 (Fatia 1.2 — middleware consome EntitlementService)
+
+- **Fase:** 1 (continua — porta única de decisão), Fatia 1.2 (`server.ts:436` migrado).
+- **Itens executados:** todos os 3 da Fatia 1.2 (novo `EntitlementService.isModuleAvailable`, migração do middleware do `server.ts`, teste da via HTTP simulada).
+- **Arquivos criados:**
+  - `scripts/test-entitlement-middleware.ts` — **29/29 checks** cobrindo os 12 casos do header (segmento fora do mapa, sem organizationId, module ligado, module off, plan_ceiling, add-on ativo abre teto, PLAN_FREE_ADDONS, `enabled_modules=NULL`, billing blocked NÃO afeta este gate, isolamento cross-tenant, orgs virgens, `isModuleAvailable` direto).
+- **Arquivos alterados:**
+  - `src/server/EntitlementService.ts` — novo método `isModuleAvailable(orgId, moduleKey)` retornando `{available, reason, state}`. Aditivo puro — não altera comportamento existente.
+  - `server.ts` — import + middleware (`server.ts:436`) troca `ModuleService.isEnabled` direto pelo `EntitlementService.isModuleAvailable`. Response 403 ganha `reason` (`module_off` vs `plan_ceiling`) + `state` (`available_to_enable` vs `available_to_buy`) SEM remover `error: "module_disabled"` + `module` (backward compat total).
+  - `package.json` — script `test:entitlement-middleware`.
+- **Testes executados:**
+  - `npm run test:entitlement-middleware` → **29/29 OK**.
+  - Regressão zero: `test:entitlement-service` (47/47), `test:rbac-granular` (27/27), `test:vertical-plan-intersection` (19/19), `test:addons` (13/13), `test:rbac-enforcement` (15/15).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **`isModuleAvailable` NÃO checa billing** — se checasse aqui, GETs em orgs `blocked/suspended` retornariam 403 e regrediria a política ADR-091 "manter visibilidade, bloquear escrita" que o read-only middleware do `server.ts:359-378` já cumpre. Billing fica com o middleware de escrita, este gate segue puramente lógico do módulo.
+  - (ii) **`isModuleAvailable` NÃO checa RBAC** — o middleware de módulo é ORG-level (2ª camada do enforcement é o `enforceModulePermission` já existente com finance-opt-in + audit — F1.2 NÃO toca nele; migração dele fica pra fatia futura se surgir demanda).
+  - (iii) **Distinguir `module_off` vs `plan_ceiling`** — se módulo está no plano mas dono não ligou → dono é a solução (frontend mostra toggle). Se não está no plano → dono não tem solução sem comprar (frontend mostra upgrade). Ambos hoje davam a mesma resposta `module_disabled`; F1.2 diferencia sem quebrar consumidores antigos.
+  - (iv) **Backward compat total** — `error: "module_disabled"` + `module` intactos. `reason` e `state` são ADITIVOS. Zero consumidor precisa mudar.
+  - (v) **Delegação canônica pra `ModuleService.isEnabled`** — se o gate liga, ambos concordam. `isModuleAvailable` só desce mais fundo pra explicar por que NÃO liga. Comportamento é idêntico ao anterior (`test:vertical-plan-intersection` + `test:addons` + `test:rbac-granular` passam intocados).
+- **Cross-service:** `ModuleService.isEnabled` continua funcional em TODOS os call sites (Sidebar, ModulesPanel, useStore, requirePermission, routes/plans.ts, etc.). Nenhum consumer atual foi migrado. `enforceModulePermission` (2º middleware) intacto. F1.3 migra o frontend (useStore) pra chamar `/api/entitlements/me`.
+- **Resultado:** Middleware unificou "quem decide se módulo está disponível" na porta canônica `EntitlementService.isModuleAvailable`. Frontend pode agora ler `reason` do 403 pra escolher UX (toggle vs upgrade). Zero regressão em produção.
+- **Pendências criadas:** nenhuma nova. Migração do 2º middleware (`enforceModulePermission`) fica pra futuro se surgir demanda — não bloqueia F2 (correção Comigo) nem F3 (Blueprints).
+- **Próximo passo:** F1.3 — migra o frontend (`useStore.loadOrgConfig` + `loadPermissions`) pra consumir `/api/entitlements/me` em vez de compor localmente `ModuleService` + `PermissionService`. Sidebar + `ModulesPanel` (Configurações) passam a exibir 3 seções segundo os estados. Independe de novas decisões do dono.
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

@@ -112,6 +112,7 @@ import { ComigoPixService } from "./src/server/ComigoPixService.js";
 import { AsaasService } from "./src/server/AsaasService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission } from "./src/server/middleware/auth.js";
 import { ModuleService } from "./src/server/ModuleService.js";
+import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
@@ -433,12 +434,21 @@ async function startServer() {
   // GATING DE MÓDULOS: bloqueia rotas de módulos opcionais que a organização
   // não tem habilitados (deriva o módulo do 1º segmento do path). Rotas core/
   // infra não estão no mapa e seguem sempre. enabled_modules NULL = tudo ligado.
+  //
+  // ADR-153 F1.2: agora consome EntitlementService.isModuleAvailable — mesma
+  // lógica de sempre (delega internamente pro ModuleService.isEnabled), mas o
+  // response 403 ganha `reason` estruturado (`module_off` ou `plan_ceiling`)
+  // + `state` (`available_to_enable` vs `available_to_buy`) pra frontend
+  // distinguir "dono precisa ligar" de "precisa pagar upgrade". Zero regressão:
+  // consumers antigos leem `error`+`module` como antes.
   protectedApi.use((req: any, res, next) => {
     const seg = (req.path || "").split("/")[1];
     const mod = ModuleService.MODULE_BY_ROUTE[seg];
     if (!mod) return next();
-    if (!req.organizationId || ModuleService.isEnabled(req.organizationId, mod)) return next();
-    return res.status(403).json({ error: "module_disabled", module: mod });
+    if (!req.organizationId) return next();
+    const dec = EntitlementService.isModuleAvailable(req.organizationId, mod);
+    if (dec.available) return next();
+    return res.status(403).json({ error: "module_disabled", module: mod, reason: dec.reason, state: dec.state });
   });
 
   // ENFORCEMENT RBAC (ADR-095 Bloco 5): depois do gate de módulo da org, aplica

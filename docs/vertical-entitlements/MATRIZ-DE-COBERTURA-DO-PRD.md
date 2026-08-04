@@ -32,7 +32,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [~] Empresas verem apenas o que contrataram — hoje `ModuleService.overview` mostra `upgrade` como locked card (vaza catálogo global). Fatia 4.1 corrige.
 - [~] Impedir habilitação manual fora do plano — backend já impede uso, mas UI mostra a opção. Fatia 4.1.
-- [~] Coerência plano/vertical/add-on/módulo — hoje funcional mas com fontes duplicadas (`ModuleService.MODULE_BY_ROUTE` × `PermissionService.ROUTE_MODULE`). Fatia 1.2.
+- [~] Coerência plano/vertical/add-on/módulo — F1.2 migrou o middleware do `server.ts` pra `EntitlementService.isModuleAvailable`. Restantes (Sidebar, ModulesPanel via useStore) migram em F1.3.
 - [!] Upgrades sem perda de funcionalidades — bug conhecido (`copiloto` em Autônomo only). **Decisão #1** + Fatia 2.1.
 - [ ] Automatizar venda + pagamento + ativação — não existe fluxo real. Fase 5.
 - [ ] IA recomenda plano certo no momento certo — motor não existe. Fase 7.

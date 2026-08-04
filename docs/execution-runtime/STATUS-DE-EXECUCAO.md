@@ -572,6 +572,40 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Pendências criadas:** nenhuma nova. F4c está funcionalmente completo em `approved_execution`.
 - **Próximo passo:** decidir com o dono se: (a) **F4c.4** (medição revenueRecovered real quando ticket→ganho); (b) **CLI de rollout dos pilotos** (padrão TOULON); (c) **UI dedicada `SalesRecoveryPanel`** (F4c.5); (d) agendar revisão LGPD pra desbloquear modo autonomous futuro.
 
+### Sessão 2026-08-04 (Fatia 4c.4 do ADR-152 — Atribuição de revenue_recovered real)
+- **Fase:** 4c.4 (fecha a medição de impacto do Piloto Recuperação Comercial)
+- **Escopo:** quando um ticket vira `stage=ganho` DEPOIS de uma proposta de recuperação aprovada (F4c) em janela configurável, o Runtime atribui o valor REAL da venda (soma `orders.total_amount` pagos, com fallbacks) ao outcome F3.1 `revenueRecovered` amarrado à ação de recuperação. Segue o padrão do ADR-136 RIC (`ric_recovery_actions`) mas aplicado ao Runtime autônomo.
+- **Arquivos criados:**
+  - `src/server/SalesRecoveryAttributionService.ts` — `tickAll`/`runForOrg`/`attributeOne`/`computeTicketValue`. Precedência de fonte: `orders` (fact) → `quotes` accepted (estimate) → `contacts.avg_ticket` (estimate) → zero (skip). Guardas G-4c.4-1..8.
+  - `scripts/test-sales-recovery-attribution.ts` — **25/25 checks** (5 computeValue + 7 attributeOne + 8 runForOrg/Scheduler + 3 audit/ledger + 3 E2E).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — nova tabela `sales_recovery_attributions` (UNIQUE(org, ticket, stage_change_at)) + 2 aditivos org_settings (`sales_recovery_attribution_enabled INTEGER DEFAULT 0` + `sales_recovery_attribution_window_days INTEGER DEFAULT 30`).
+  - `src/server/Scheduler.ts` — nova `salesRecoveryAttributionPass()` chamada após `salesRecoveryFollowupPass` no tick.
+  - `package.json` — script `test:sales-recovery-attribution`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §14 "Receita com evidência" vira [x].
+- **Testes executados:**
+  - `npm run test:sales-recovery-attribution` → **25/25 OK**
+  - Regressão sem quebras: `test:piloto-sales-recovery` (41/41), `test:sales-recovery-reply` (44/44), `test:sales-recovery-followup` (32/32), `test:piloto-cobranca` (38/38), `test:runtime-execute-e2e` (27/27), `test:runtime-operations` (31/31), `test:business-signals` (12/12), `test:runtime-process-fabric` (42/42)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:**
+  - (i) **Opt-in isolado** via `sales_recovery_attribution_enabled=1` — evita que orgs com F4c MVP passem a contabilizar revenue automaticamente sem configurar. Dono decide quando confia no critério de janela.
+  - (ii) **Precedência clara** de fonte com `basis` correspondente — `orders` é `fact`, quotes/avg são `estimate`. Preserva ADR-085 D4 (fact + estimate separados no ledger).
+  - (iii) **UNIQUE(org, ticket, stage_change_at)** — reversão (ganho→open→ganho) atribui 2× porque são 2 stage_logs distintos. Ledger acumula (isso é o correto: se cliente ganhou→cancelou→ganhou de novo, dono do funil trabalhou 2× e ambos são revenue eventos).
+  - (iv) **Elegibilidade do reply_intent** = `NULL` / `interested` / `meeting_request`. Se cliente tinha marcado `remove_me` ou `already_bought` e depois "ganhou", isso NÃO conta como recuperação bem-sucedida (é ruído; provavelmente o dono transicionou o stage por engano).
+  - (v) **Ticket value=0 → skip** — evita poluir ledger com linhas zeradas. Se dono não tem orders/quotes/avg registrados, provavelmente é edge (deal simbólico); ele registra manualmente depois.
+  - (vi) **Sem hook direto no `POST /tickets/:id/stage`** — poll-based via Scheduler é mais robusto (roda mesmo se stage mudou via edge command handler ou script CLI, não só rota HTTP).
+- **Cross-service:** ADITIVO PURO — nenhum service pré-existente muda. Novo pass é opt-in (default 0). Tabela nova + duas colunas org_settings aditivas.
+- **Resultado:** Piloto Recuperação Comercial agora tem medição de impacto REAL. Fluxo E2E:
+  1. Runtime detecta deal parado → propõe msg (F4c)
+  2. Dono aprova → touch registrado (F4c/4c.2)
+  3. Cliente responde `interested` → sinal + reply (F4c.2)
+  4. Se sem resposta há gap+ → propõe 2ª/3ª (F4c.3)
+  5. Vendedor negocia offline (CRM) → ticket vira `ganho` no kanban
+  6. **F4c.4**: `Scheduler.salesRecoveryAttributionPass` detecta ganho + touch em janela → grava outcome F3.1 com `revenueRecovered=SUM(orders.total_amount)`
+  7. Aba Operações (F3.2) mostra revenue recuperado real do Runtime — dono vê ROI concreto do piloto
+- **Pendências criadas:** nenhuma nova crítica. F4c está funcionalmente completo em `approved_execution` com medição real.
+- **Próximo passo:** decidir com o dono: (a) **CLI de rollout dos pilotos** (padrão TOULON — script idempotente `zappflow-*-tenant-setup.ts` pra ativar em orgs piloto); (b) **UI dedicada `SalesRecoveryPanel`** (F4c.5); (c) agendar **revisão LGPD** pra desbloquear modo `autonomous` de F4c.3.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

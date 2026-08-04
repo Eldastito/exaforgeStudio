@@ -7439,6 +7439,42 @@ const initDb = () => {
   // recuperação é conversa aberta).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_followup_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_followup_days_gap INTEGER DEFAULT 5`); } catch(e){}
+
+  // ADR-152 Fatia 4c.4 — atribuição de revenue_recovered real. Quando
+  // um ticket vira `stage=ganho` (via kanban manual, `POST /tickets/
+  // :id/stage` — `routes/tickets.ts:153`) DEPOIS de uma proposta de
+  // recuperação aprovada, o Runtime atribui o valor real da venda ao
+  // outcome F3.1 (revenueRecovered).
+  //
+  // Precedente: ADR-136 RIC `ric_recovery_actions` já atribui revenue
+  // por campanha; F4c.4 aplica a mesma lógica pra pilotos autônomos.
+  //
+  // UNIQUE(org, ticket_id, stage_change_at) — reversal edge (ganho →
+  // aberto → ganho de novo) atribui 2× (eventos distintos).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sales_recovery_attributions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        touch_id TEXT,                        -- FK sales_recovery_touches (touch mais recente pré-ganho)
+        action_id TEXT,                       -- FK decision_actions (mesma action do touch)
+        stage_change_at DATETIME NOT NULL,    -- timestamp do ticket_stage_logs.created_at
+        ticket_value REAL NOT NULL,           -- valor da venda calculado (soma orders / quotes / avg)
+        revenue_recovered REAL NOT NULL,      -- = ticket_value (por ora idêntico; poderia aplicar attribution %)
+        source TEXT NOT NULL,                 -- 'orders' | 'quotes' | 'contacts_avg_ticket' | 'zero'
+        basis TEXT NOT NULL,                  -- 'fact' (source=orders) | 'estimate' (demais)
+        outcome_id TEXT,                      -- action_outcomes.id gerado
+        attributed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_recovery_attr_dedupe
+        ON sales_recovery_attributions (organization_id, ticket_id, stage_change_at);
+      CREATE INDEX IF NOT EXISTS idx_sales_recovery_attr_ticket
+        ON sales_recovery_attributions (organization_id, ticket_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar sales_recovery_attributions (ADR-152 F4c.4)', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_attribution_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_attribution_window_days INTEGER DEFAULT 30`); } catch(e){}
 };
 
 initDb();

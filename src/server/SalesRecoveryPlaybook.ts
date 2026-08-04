@@ -419,6 +419,120 @@ export class SalesRecoveryPlaybookService {
       detectedAt: r.detected_at,
     }));
   }
+
+  // ── F4c.5 — Dashboard endpoints ──────────────────────────────────────
+
+  /**
+   * Métricas agregadas do piloto pro `SalesRecoveryPanel`. Todas as
+   * queries filtram `organization_id` (isolamento cross-tenant). Contagens
+   * por janelas rolantes (hoje/7d/30d). Best-effort — se uma tabela
+   * ainda não tem dados retorna 0.
+   */
+  static metrics(orgId: string): any {
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+    const todayIso = today.toISOString();
+    const d7Iso = new Date(Date.now() - 7 * 86400_000).toISOString();
+    const d30Iso = new Date(Date.now() - 30 * 86400_000).toISOString();
+
+    const q = (sql: string, ...params: any[]) => {
+      try { return (db.prepare(sql).get(orgId, ...params) as any) || {}; } catch { return {}; }
+    };
+
+    // Sinais (propostas)
+    const openProposals = Number(q(`SELECT COUNT(*) AS n FROM business_signals WHERE organization_id = ? AND signal_type = 'sales_recovery_proposed' AND status = 'open'`).n || 0);
+    const proposedToday = Number(q(`SELECT COUNT(*) AS n FROM business_signals WHERE organization_id = ? AND signal_type = 'sales_recovery_proposed' AND detected_at >= ?`, todayIso).n || 0);
+    const proposed7d = Number(q(`SELECT COUNT(*) AS n FROM business_signals WHERE organization_id = ? AND signal_type = 'sales_recovery_proposed' AND detected_at >= ?`, d7Iso).n || 0);
+
+    // Touches (envios aprovados)
+    const touchesToday = Number(q(`SELECT COUNT(*) AS n FROM sales_recovery_touches WHERE organization_id = ? AND sent_at >= ?`, todayIso).n || 0);
+    const touches7d = Number(q(`SELECT COUNT(*) AS n FROM sales_recovery_touches WHERE organization_id = ? AND sent_at >= ?`, d7Iso).n || 0);
+    const touches30d = Number(q(`SELECT COUNT(*) AS n FROM sales_recovery_touches WHERE organization_id = ? AND sent_at >= ?`, d30Iso).n || 0);
+    const touchesWithReply7d = Number(q(`SELECT COUNT(*) AS n FROM sales_recovery_touches WHERE organization_id = ? AND sent_at >= ? AND reply_intent IS NOT NULL`, d7Iso).n || 0);
+
+    // Replies por intent (7d)
+    let replyBreakdown7d: Record<string, number> = {};
+    try {
+      const rows = db.prepare(`SELECT reply_intent AS intent, COUNT(*) AS n FROM sales_recovery_touches WHERE organization_id = ? AND sent_at >= ? AND reply_intent IS NOT NULL GROUP BY reply_intent`).all(orgId, d7Iso) as any[];
+      for (const r of rows) replyBreakdown7d[String(r.intent)] = Number(r.n || 0);
+    } catch { /* ok */ }
+
+    // Attributions (F4c.4)
+    const revenueTotal = Number(q(`SELECT COALESCE(SUM(revenue_recovered), 0) AS total FROM sales_recovery_attributions WHERE organization_id = ?`).total || 0);
+    const revenue30d = Number(q(`SELECT COALESCE(SUM(revenue_recovered), 0) AS total FROM sales_recovery_attributions WHERE organization_id = ? AND attributed_at >= ?`, d30Iso).total || 0);
+    const attributions30dCount = Number(q(`SELECT COUNT(*) AS n FROM sales_recovery_attributions WHERE organization_id = ? AND attributed_at >= ?`, d30Iso).n || 0);
+
+    // Opt-outs (LGPD F4c.2)
+    const optOuts = Number(q(`SELECT COUNT(*) AS n FROM contacts WHERE organization_id = ? AND COALESCE(marketing_opt_out, 0) = 1`).n || 0);
+
+    // Config flags pra UI mostrar "F4c.3 ligado", "atribuição ligada".
+    const settings = q(`SELECT COALESCE(sales_recovery_enabled, 0) AS mvp, COALESCE(sales_recovery_followup_enabled, 0) AS followup, COALESCE(sales_recovery_attribution_enabled, 0) AS attribution, COALESCE(sales_recovery_stalled_days, 10) AS stalledDays, COALESCE(sales_recovery_followup_days_gap, 5) AS followupGap, COALESCE(sales_recovery_attribution_window_days, 30) AS attributionWindow FROM organization_settings WHERE organization_id = ?`);
+
+    return {
+      proposals: { open: openProposals, today: proposedToday, last7d: proposed7d },
+      touches: { today: touchesToday, last7d: touches7d, last30d: touches30d, withReply7d: touchesWithReply7d },
+      replyBreakdown7d,
+      revenue: { total: revenueTotal, last30d: revenue30d, attributions30d: attributions30dCount },
+      optOuts,
+      config: {
+        salesRecoveryEnabled: Number(settings.mvp) === 1,
+        followupEnabled: Number(settings.followup) === 1,
+        attributionEnabled: Number(settings.attribution) === 1,
+        stalledDays: Number(settings.stalledDays || 10),
+        followupGapDays: Number(settings.followupGap || 5),
+        attributionWindowDays: Number(settings.attributionWindow || 30),
+      },
+    };
+  }
+
+  /** Últimos N touches (envios aprovados) com status pra UI de histórico. */
+  static listTouches(orgId: string, opts: { limit?: number } = {}): any[] {
+    const limit = Math.max(1, Math.min(Number(opts.limit ?? 30), 200));
+    const rows = db.prepare(`
+      SELECT t.id, t.ticket_id AS ticketId, t.contact_id AS contactId, t.phone,
+             t.channel_id AS channelId, t.sent_at AS sentAt, t.reply_received_at AS replyReceivedAt,
+             t.reply_intent AS replyIntent, t.approved_by AS approvedBy, t.message_id AS messageId,
+             c.name AS contactName
+        FROM sales_recovery_touches t
+        LEFT JOIN contacts c ON c.id = t.contact_id AND c.organization_id = t.organization_id
+       WHERE t.organization_id = ?
+       ORDER BY t.sent_at DESC
+       LIMIT ?
+    `).all(orgId, limit) as any[];
+    return rows.map((r) => ({
+      id: r.id, ticketId: r.ticketId, contactId: r.contactId,
+      contactName: r.contactName || null, phone: r.phone, channelId: r.channelId,
+      sentAt: r.sentAt, approvedBy: r.approvedBy || null, messageId: r.messageId || null,
+      replyReceivedAt: r.replyReceivedAt || null,
+      replyIntent: r.replyIntent || null,
+    }));
+  }
+
+  /** Últimas N atribuições de revenue (F4c.4) pra UI mostrar ganhos. */
+  static listAttributions(orgId: string, opts: { limit?: number; windowDays?: number } = {}): any[] {
+    const limit = Math.max(1, Math.min(Number(opts.limit ?? 30), 200));
+    const windowDays = Math.max(1, Math.min(Number(opts.windowDays ?? 30), 365));
+    const cutoffIso = new Date(Date.now() - windowDays * 86400_000).toISOString();
+    const rows = db.prepare(`
+      SELECT a.id, a.ticket_id AS ticketId, a.touch_id AS touchId, a.action_id AS actionId,
+             a.stage_change_at AS stageChangeAt, a.ticket_value AS ticketValue,
+             a.revenue_recovered AS revenueRecovered, a.source, a.basis, a.attributed_at AS attributedAt,
+             c.name AS contactName
+        FROM sales_recovery_attributions a
+        LEFT JOIN tickets t ON t.id = a.ticket_id AND t.organization_id = a.organization_id
+        LEFT JOIN contacts c ON c.id = t.contact_id AND c.organization_id = t.organization_id
+       WHERE a.organization_id = ?
+         AND a.attributed_at >= ?
+       ORDER BY a.attributed_at DESC
+       LIMIT ?
+    `).all(orgId, cutoffIso, limit) as any[];
+    return rows.map((r) => ({
+      id: r.id, ticketId: r.ticketId, touchId: r.touchId, actionId: r.actionId,
+      contactName: r.contactName || null,
+      stageChangeAt: r.stageChangeAt, ticketValue: Number(r.ticketValue),
+      revenueRecovered: Number(r.revenueRecovered),
+      source: r.source, basis: r.basis, attributedAt: r.attributedAt,
+    }));
+  }
 }
 
 export default SalesRecoveryPlaybookService;

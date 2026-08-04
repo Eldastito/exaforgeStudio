@@ -233,6 +233,27 @@ router.get("/sales-recovery/proposals", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// F4c.5 — Métricas agregadas do painel Recuperação.
+router.get("/sales-recovery/metrics", (req: AuthRequest, res): any => {
+  try { res.json(SalesRecoveryPlaybookService.metrics(req.organizationId!)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// F4c.5 — Últimos touches (envios aprovados) com status de reply.
+router.get("/sales-recovery/touches", (req: AuthRequest, res): any => {
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  try { res.json({ items: SalesRecoveryPlaybookService.listTouches(req.organizationId!, { limit }) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// F4c.5 — Últimas atribuições de revenue (F4c.4).
+router.get("/sales-recovery/attributions", (req: AuthRequest, res): any => {
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const windowDays = req.query.window ? Number(req.query.window) : undefined;
+  try { res.json({ items: SalesRecoveryPlaybookService.listAttributions(req.organizationId!, { limit, windowDays }) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // APROVAÇÃO HUMANA — o dono revisa a proposta e clica "aprovar" (com ou
 // sem editar o texto). AQUI é onde a mensagem sai. G-4c-1: sem esta rota
 // batida, NADA é enviado pelo Runtime.

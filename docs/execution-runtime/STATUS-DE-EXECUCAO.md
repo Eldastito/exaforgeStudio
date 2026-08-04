@@ -606,6 +606,42 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Pendências criadas:** nenhuma nova crítica. F4c está funcionalmente completo em `approved_execution` com medição real.
 - **Próximo passo:** decidir com o dono: (a) **CLI de rollout dos pilotos** (padrão TOULON — script idempotente `zappflow-*-tenant-setup.ts` pra ativar em orgs piloto); (b) **UI dedicada `SalesRecoveryPanel`** (F4c.5); (c) agendar **revisão LGPD** pra desbloquear modo `autonomous` de F4c.3.
 
+### Sessão 2026-08-04 (Fatia 4c.5 do ADR-152 — SalesRecoveryPanel UI no ExecutiveView)
+- **Fase:** 4c.5 (UI dedicada pro Piloto Recuperação Comercial)
+- **Escopo:** aba "Recuperação" no ExecutiveView com KPIs (revenue recuperado 30d, propostas em aberto, envios 7d, opt-outs), lista de propostas em aberto (aprovar direto ou editar-e-aprovar ou dispensar), reply breakdown por intent (7d), envios recentes com status de resposta, deals ganhos atribuídos ao piloto (F4c.4). Backend: 3 novas rotas GET (metrics, touches, attributions) + 3 service methods. Gate: mesmo `execution_runtime_enabled` + RBAC do módulo `runtime` da aba Operações (F3.2).
+- **Arquivos alterados:**
+  - `src/server/SalesRecoveryPlaybook.ts` — 3 métodos novos: `metrics(orgId)` (contagens agregadas de propostas/touches/attributions/opt-outs + flags de config), `listTouches(orgId, {limit})` (envios com contact name + reply status), `listAttributions(orgId, {limit, windowDays})` (revenue recuperado com source/basis).
+  - `src/server/routes/runtime.ts` — 3 rotas `GET /sales-recovery/{metrics,touches,attributions}` (thin wrappers sob `runtimeGate`).
+  - `src/features/ExecutiveView.tsx` — nova aba `'recuperacao'` (Tab union), botão gated por `showOperacoes` (mesmo padrão F3.2), componente `RecuperacaoTab` (350 linhas) com 5 blocos: config chips, KPIs, reply breakdown, propostas em aberto (com edit inline), envios recentes, deals ganhos. Reusa `Metric`/`EmptyHint`/`brl`/`relativeTime` do arquivo.
+  - `package.json` — script `test:sales-recovery-dashboard`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §14 fecha UI critério.
+- **Arquivos criados:**
+  - `scripts/test-sales-recovery-dashboard.ts` — **38/38 checks** (metrics: 18 checks incluindo replyBreakdown, isolamento, config flags; listTouches: 5; listAttributions: 5; isolamento cross-tenant: 5; config off: 5).
+- **Testes executados:**
+  - `npm run test:sales-recovery-dashboard` → **38/38 OK**
+  - Regressão sem quebras: `test:piloto-sales-recovery` (41/41), `test:sales-recovery-reply` (44/44), `test:sales-recovery-followup` (32/32), `test:sales-recovery-attribution` (25/25), `test:runtime-operations` (31/31)
+  - `npx tsc --noEmit` → limpo (frontend + backend)
+- **Decisões micro:**
+  - (i) **1 aba nova ("Recuperação")** em vez de sub-seção da Operações — dono do produto quer painel dedicado pro piloto autônomo separado do dashboard genérico. Gate igual (`showOperacoes = isMasterAdmin || canAccessModule('runtime')`).
+  - (ii) **Aprovar + editar-e-aprovar + dispensar** — 3 ações inline por proposta. Edit vira um `<textarea>` inline (padrão CRM minimalista) em vez de modal — decisão UX pra menos cliques.
+  - (iii) **G-4c-1 preservada visualmente** — cabeçalho da aba diz explicitamente "cada envio passa pelo seu clique — modo autônomo bloqueado por LGPD".
+  - (iv) **Config chips no topo** (Recuperação / Follow-up / Atribuição) — dono vê rapidamente qual sub-piloto está ligado. Serve pra debug e pra decisão de escalar (ex.: "atribuição desligada, ligo pra medir ROI").
+  - (v) **Reply breakdown 7d** — pill list colorida por intent (interested/meeting em verde, remove_me em vermelho, objection em ambar). Dono lê em 3s "meu piloto está gerando conversa? tem opt-outs?".
+  - (vi) **Deals ganhos com borda emerald** (F4c.4) — bloco só aparece quando há atribuições (evita clutter em orgs no piloto inicial). Faixa temporal explicada no rodapé.
+  - (vii) **Métodos read-only expostos via service** — decisão de manter a lógica de agregação no backend (não SQL na rota) pra reuso futuro (ex: CLI de rollout, relatório PDF, notificações).
+- **Cross-service:** hook no ExecutiveView é ADITIVO PURO — nova aba renderiza só se `showOperacoes` (RBAC runtime), existente antes; sem opt-in, aba não aparece. Rotas GET novas atrás do mesmo `runtimeGate`. Zero breaking.
+- **Resultado:** Piloto Recuperação Comercial 100% completo (backend + UI). Fluxo do dono:
+  1. Detector encontra deals parados (automático via Scheduler ou clique "Detectar agora")
+  2. Runtime propõe msg via LLM
+  3. Dono vê proposta na aba **Recuperação** → revisa/edita/aprova/dispensa
+  4. Cliente responde → Runtime classifica + publica sinal visível na aba
+  5. Sem resposta → propõe 2ª/3ª (mais suave) — dono aprova de novo
+  6. Vendedor ganha o deal → Runtime atribui revenue ao ledger F3.1
+  7. Dono vê ROI concreto ("Receita recuperada 30d: R$ 4.500") no mesmo painel
+  Sem OPENAI_API_KEY, tudo cai pra template fallback — painel continua funcionando.
+- **Pendências criadas:** nenhuma. F4c está funcionalmente completo em `approved_execution` com medição real e UI dedicada.
+- **Próximo passo:** decidir com o dono: (a) **CLI de rollout dos pilotos** (padrão TOULON ADR-150 — script idempotente `zappflow-*-tenant-setup.ts`); (b) agendar **revisão LGPD** pra desbloquear modo `autonomous` (decisão #4).
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

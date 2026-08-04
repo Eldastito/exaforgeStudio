@@ -7426,6 +7426,19 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar sales_recovery_touches (ADR-152 F4c.2)', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_reply_window_days INTEGER DEFAULT 14`); } catch(e){}
+
+  // ADR-152 Fatia 4c.3 — cadência multi-tentativa de recuperação
+  // comercial. AINDA em modo approved_execution — cada 2ª/3ª msg é
+  // PROPOSTA (sinal + reply canned) mas o envio real continua exigindo
+  // dono clicar "aprovar" (G-4c.3-1). Modo autonomous continua
+  // BLOQUEADO na decisão #4 LGPD.
+  //
+  // Opt-in DENTRO do opt-in F4c — org pode ter recuperação MVP
+  // (`sales_recovery_enabled=1`) sem follow-up automático. Gap entre
+  // tentativas configurável (default 5 dias — mais suave que cobrança;
+  // recuperação é conversa aberta).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_followup_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_followup_days_gap INTEGER DEFAULT 5`); } catch(e){}
 };
 
 initDb();

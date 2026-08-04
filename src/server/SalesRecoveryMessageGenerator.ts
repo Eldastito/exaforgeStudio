@@ -40,11 +40,18 @@ export interface GenerateInput {
   contactName?: string | null;
   stage: string;         // qualificado | proposta | negociacao | orcamento
   daysStalled: number;
+  // ADR-152 F4c.3 — tentativa 1 (default), 2 (follow-up suave) ou 3
+  // (última tentativa, tom "vou deixar em stand-by"). Nunca chega
+  // além de 3 (G-4c.3-3). Tom fica MAIS SUAVE a cada tentativa —
+  // recuperação comercial ≠ cobrança; queremos preservar a relação.
+  attemptNumber?: 1 | 2 | 3;
 }
 
-const SYSTEM_PROMPT = `Você escreve UMA mensagem curta em PT-BR pra RETOMAR uma conversa comercial parada.
+const SYSTEM_PROMPT_BASE = `Você escreve UMA mensagem curta em PT-BR pra RETOMAR uma conversa comercial parada.
 
 Contexto: você é do time comercial de uma empresa. Um cliente ficou algum tempo sem responder no funil. Precisa reabrir a conversa de um jeito CORDIAL e SEM PRESSÃO — LGPD/CDC exigem que a comunicação seja informativa, nunca coercitiva.
+
+{ATTEMPT_HINT}
 
 Devolva EXCLUSIVAMENTE um JSON:
   {"text": "<mensagem>"}
@@ -59,6 +66,12 @@ Regras rígidas:
 - Se stage='proposta' ou 'orcamento', menciona brevemente a proposta pendente; se 'negociacao', foca em "onde paramos".
 - NUNCA devolva markdown, prefixos ou texto fora do JSON.`;
 
+const ATTEMPT_HINTS: Record<1 | 2 | 3, string> = {
+  1: "Esta é a PRIMEIRA tentativa de retomar. Tom leve e curioso — provavelmente o cliente só esqueceu de responder.",
+  2: "Esta é a SEGUNDA tentativa (a primeira não teve resposta). Tom AINDA mais leve, quase se desculpando por insistir. Pode reconhecer que a pessoa está ocupada. Pergunta aberta simples.",
+  3: "Esta é a TERCEIRA (e ÚLTIMA) tentativa antes de deixar em stand-by. Tom cordial mas com fechamento respeitoso — algo como 'vou deixar em stand-by e se um dia quiser retomar, é só me chamar'. NÃO pareça ressentido nem ameaçador.",
+};
+
 function sanitizeName(name: string | null | undefined): string {
   if (!name) return "";
   // Remove qualquer coisa que pareça instrução de prompt (defesa vs injection).
@@ -68,6 +81,15 @@ function sanitizeName(name: string | null | undefined): string {
 function template(input: GenerateInput): string {
   const nome = sanitizeName(input.contactName);
   const oi = nome ? `Oi, ${nome}!` : "Oi!";
+  const attempt = (input.attemptNumber ?? 1) as 1 | 2 | 3;
+  // Templates 2ª/3ª ficam mais suaves — recuperação NÃO é cobrança;
+  // preservar a relação vale mais que insistir.
+  if (attempt === 3) {
+    return `${oi} 🙂 Vou deixar essa conversa em stand-by por aqui — se um dia quiser retomar, é só me chamar. Obrigado! 🙏`;
+  }
+  if (attempt === 2) {
+    return `${oi} 🙂 Sei que a rotina corre — só passando pra ver se ainda faz sentido a gente conversar. Sem pressão nenhuma.`;
+  }
   if (input.stage === "proposta" || input.stage === "orcamento") {
     return `${oi} 🙂 Faz uns dias que a gente não conversa por aqui — a proposta que enviei ainda faz sentido pra você? Se precisar ajustar algo, é só me falar.`;
   }
@@ -87,10 +109,13 @@ export async function generate(input: GenerateInput): Promise<GeneratedMessage> 
   const nome = sanitizeName(input.contactName);
   const stage = String(input.stage || "").slice(0, 40);
   const days = Math.max(0, Math.min(Math.trunc(input.daysStalled || 0), 365));
-  const userText = `Contexto do cliente:\n- nome: ${nome || "(desconhecido)"}\n- stage no funil: ${stage}\n- dias sem resposta: ${days}\n\nEscreva a mensagem seguindo TODAS as regras.`;
+  const attempt = (input.attemptNumber ?? 1) as 1 | 2 | 3;
+  const attemptHint = ATTEMPT_HINTS[attempt] ?? ATTEMPT_HINTS[1];
+  const system = SYSTEM_PROMPT_BASE.replace("{ATTEMPT_HINT}", attemptHint);
+  const userText = `Contexto do cliente:\n- nome: ${nome || "(desconhecido)"}\n- stage no funil: ${stage}\n- dias sem resposta: ${days}\n- tentativa: ${attempt} de 3\n\nEscreva a mensagem seguindo TODAS as regras.`;
 
   let raw = "";
-  try { raw = await _chat(userText, { system: SYSTEM_PROMPT, json: true, temperature: 0.6 }); }
+  try { raw = await _chat(userText, { system, json: true, temperature: 0.6 }); }
   catch { return fallback; }
 
   let parsed: any = null;

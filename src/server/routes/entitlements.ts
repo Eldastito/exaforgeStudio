@@ -11,18 +11,36 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { EntitlementService, type EntitlementAction } from "../EntitlementService.js";
+import { PermissionService } from "../PermissionService.js";
+import { FalaTuService } from "../FalaTuService.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
+import db from "../db.js";
 
 const router = Router();
 
 // GET /api/entitlements/me — mapa completo (todos os módulos CORE + OPTIONAL)
-// pra o usuário logado. Substitui, no consumidor, a combinação de
-// GET /api/analytics/settings + GET /api/permissions/me + ModuleService.overview.
+// pra o usuário logado, MAIS bloco `meta` com o contexto de plano/vertical/
+// isMasterAdmin/hasProfile/falatuEnabled/permissions — fonte única do frontend.
+// Substitui a combinação de GET /api/analytics/settings + GET /api/permissions/me
+// + ModuleService.overview em uma chamada só (ADR-153 F1.3).
 router.get("/me", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   try {
     const map = EntitlementService.overview(orgId, req.user);
-    res.json({ entitlements: map });
+    const org = db.prepare(
+      `SELECT vertical, plan_id, default_landing_view FROM organization_settings WHERE organization_id = ? AND deleted_at IS NULL`,
+    ).get(orgId) as any || {};
+    const meta = {
+      isMasterAdmin: !!(req.user.email && req.user.email === MASTER_ADMIN_EMAIL),
+      hasProfile: PermissionService.hasProfile(orgId, req.user),
+      falatuEnabled: FalaTuService.orgEnabled(orgId),
+      vertical: org.vertical || null,
+      planId: org.plan_id || null,
+      defaultLandingView: org.default_landing_view || null,
+      permissions: PermissionService.permissionMap(orgId, req.user),
+    };
+    res.json({ entitlements: map, meta });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

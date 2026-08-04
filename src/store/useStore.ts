@@ -96,6 +96,30 @@ export type RagDocument = {
   uploadDate: string;
 };
 
+// ADR-153 F1.3 — resposta de GET /api/entitlements/me (por módulo).
+// Reflete `EntitlementDecision` do backend. Mantemos o shape minimalista aqui
+// (só o que o frontend consome hoje) — se surgir demanda por mais campos,
+// aditivo.
+export type EntitlementDecision = {
+  resource: string;
+  action: 'view' | 'use' | 'enable' | 'buy' | 'execute';
+  allowed: boolean;
+  visibility: 'visible' | 'hidden';
+  state: 'active' | 'available_to_enable' | 'available_to_buy' | 'hidden' | 'suspended' | 'deprecated' | 'pilot_only';
+  reason: string;
+  source: {
+    verticalBlueprint: string | null;
+    vertical: string | null;
+    plan: string | null;
+    addon: string | null;
+    rbac: 'none' | 'read' | 'write' | 'full';
+  };
+  upgradeEligible: boolean;
+  upgradeTargetPlan: string | null;
+  addonEligible: boolean;
+  addonPrice: number | null;
+};
+
 type AppState = {
   viewMode: ViewMode;
   sidebarOpen: boolean;
@@ -108,6 +132,12 @@ type AppState = {
   enabledModules: string[] | null; // null = todos habilitados (legado)
   loadOrgConfig: () => Promise<void>;
   isModuleEnabled: (moduleKey: string) => boolean;
+  // ADR-153 F1.3 — mapa de entitlements do usuário logado, vindo de
+  // GET /api/entitlements/me numa chamada só. Substitui, no consumidor,
+  // a combinação enabledModules + permissions + isMasterAdmin + falatuEnabled.
+  // Mantemos os campos abaixo como fallback (populados pela mesma request).
+  entitlements: Record<string, EntitlementDecision> | null;
+  loadEntitlements: () => Promise<void>;
   // RBAC granular (ADR-095 Bloco 4): permissões do usuário logado por módulo.
   permissions: Record<string, string> | null; // null = ainda não carregado
   hasProfile: boolean;                         // usuário tem perfil atribuído?
@@ -266,29 +296,52 @@ export const useStore = create<AppState>((set, get) => ({
 
   vertical: null,
   enabledModules: null,
-  loadOrgConfig: async () => {
+  entitlements: null,
+  // ADR-153 F1.3 — porta única de leitura do frontend. Faz UMA chamada a
+  // /api/entitlements/me e derrama TUDO no store: entitlements + vertical +
+  // permissions + isMasterAdmin + hasProfile + falatuEnabled + enabledModules
+  // (derivado). loadOrgConfig e loadPermissions delegam pra cá — manter
+  // backward-compat com chamadas antigas em componentes que ainda não
+  // migraram (ex.: SettingsView.loadOrgConfig após alterar módulos).
+  loadEntitlements: async () => {
     try {
-      const res = await apiFetch('/api/analytics/settings');
-      const s = await res.json().catch(() => ({}));
-      let mods: string[] | null = null;
-      if (typeof s?.enabled_modules === 'string' && s.enabled_modules) {
-        try { const a = JSON.parse(s.enabled_modules); if (Array.isArray(a)) mods = a; } catch {}
-      } else if (Array.isArray(s?.enabled_modules)) {
-        mods = s.enabled_modules;
-      }
-      set({ vertical: s?.vertical || null, enabledModules: mods });
-      const landing = s?.default_landing_view;
+      const res = await apiFetch('/api/entitlements/me');
+      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      const ent = data?.entitlements || null;
+      const meta = data?.meta || {};
+      // Derivar enabledModules dos entitlements — módulos com state='active'
+      // são os ligados. Mantém compat com consumidores que ainda leem esse array.
+      const enabled: string[] = ent ? Object.entries(ent as Record<string, EntitlementDecision>).filter(([, d]) => d.state === 'active').map(([k]) => k) : [];
+      set({
+        entitlements: ent,
+        vertical: meta.vertical || null,
+        enabledModules: ent ? enabled : null,
+        permissions: meta.permissions || null,
+        hasProfile: !!meta.hasProfile,
+        isMasterAdmin: !!meta.isMasterAdmin,
+        falatuEnabled: !!meta.falatuEnabled,
+      });
+      const landing = meta.defaultLandingView;
       if (landing && !localStorage.getItem('zappflow_view')) {
         set({ viewMode: landing as ViewMode });
       }
-    } catch (e) { /* mantém null = tudo liberado */ }
+    } catch (e) { /* mantém defaults */ }
+  },
+  loadOrgConfig: async () => {
+    // Delegado — o endpoint /api/entitlements/me carrega tudo.
+    await get().loadEntitlements();
   },
   isModuleEnabled: (moduleKey) => {
-    const em = get().enabledModules;
-    // Sem config explícita ⇒ só o núcleo (os itens core da sidebar não passam
-    // por aqui). Evita o "todo mundo vê tudo" enquanto a vertical não é definida.
-    if (em == null) return false;
-    return em.includes(moduleKey);
+    const { entitlements, enabledModules } = get();
+    // Preferir entitlements quando disponível (F1.3+). Fallback pro array
+    // legado (enabledModules) só se o loader ainda não rodou.
+    if (entitlements) {
+      const d = entitlements[moduleKey];
+      return !!d && d.state === 'active';
+    }
+    if (enabledModules == null) return false;
+    return enabledModules.includes(moduleKey);
   },
 
   // RBAC granular (ADR-095 Bloco 4). Carrega o mapa módulo→nível do usuário.
@@ -297,18 +350,24 @@ export const useStore = create<AppState>((set, get) => ({
   isMasterAdmin: false,
   falatuEnabled: false,
   loadPermissions: async () => {
-    try {
-      const res = await apiFetch('/api/permissions/me');
-      if (!res.ok) return;
-      const data = await res.json().catch(() => ({}));
-      set({ permissions: data?.permissions || null, hasProfile: !!data?.hasProfile, isMasterAdmin: !!data?.isMasterAdmin, falatuEnabled: !!data?.falatuEnabled });
-    } catch (e) { /* mantém null = sem restrição visual */ }
+    // Delegado — /api/entitlements/me já traz `meta.permissions` + hasProfile
+    // + isMasterAdmin + falatuEnabled em uma única chamada. Mantido pra não
+    // quebrar callers antigos (App.tsx, etc.) — pode ser removido em F1.4+.
+    await get().loadEntitlements();
   },
   // O usuário pode ver/entrar num módulo? Opt-in: só restringe quem tem perfil
   // atribuído (hasProfile). Sem perfil ⇒ enxerga como antes. Módulo fora do RBAC
   // (ex.: canais/infra) nunca é escondido por aqui.
   canAccessModule: (moduleKey) => {
-    const { permissions, hasProfile } = get();
+    const { entitlements, permissions, hasProfile } = get();
+    // Preferir entitlements (F1.3+). visibility='hidden' cobre RBAC=none já.
+    if (entitlements) {
+      const d = entitlements[moduleKey];
+      // Sem entry (módulo desconhecido — não gateado por RBAC) → passa.
+      if (!d) return true;
+      return d.visibility === 'visible';
+    }
+    // Fallback legado: opt-in por hasProfile, mesmo comportamento anterior.
     if (!hasProfile || !permissions) return true;
     const lvl = permissions[moduleKey];
     if (lvl === undefined) return true;

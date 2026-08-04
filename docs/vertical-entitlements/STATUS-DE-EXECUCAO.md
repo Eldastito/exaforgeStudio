@@ -88,6 +88,38 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-04 (Fatia 1.3 — frontend consome /api/entitlements/me)
+
+- **Fase:** 1 (continua), Fatia 1.3 (frontend consumindo fonte única).
+- **Itens executados:** todos os 4 da Fatia 1.3 (backend estendido, useStore consumindo `/api/entitlements/me`, ModulesPanel com 3 seções, placeholder da aba "Plano e Expansões").
+- **Arquivos alterados:**
+  - `src/server/routes/entitlements.ts` — `GET /me` ganha bloco `meta` com `{isMasterAdmin, hasProfile, falatuEnabled, vertical, planId, defaultLandingView, permissions}` (fonte única no payload).
+  - `src/store/useStore.ts` — novo tipo `EntitlementDecision`, novo state `entitlements`, nova action `loadEntitlements()`. `loadOrgConfig` e `loadPermissions` viram DELEGATES pra `loadEntitlements`. `isModuleEnabled` e `canAccessModule` derivam de `entitlements` quando disponível (fallback pro legado).
+  - `src/features/SettingsView.tsx` — `ModulesPanel` consome `/api/entitlements/me`. 3 seções: **Seus recursos** (`state=active`), **Disponíveis no seu plano** (`state=available_to_enable`), **Expansões recomendadas** (`state=available_to_buy` — link colapsado pra nova aba). Estado `hidden` não aparece. Nova aba **Plano e Expansões** com `PlanoExpansoesPlaceholder` (F4.2 preenche).
+  - `scripts/test-entitlement-service.ts` — 2 checks novos cobrindo `source.vertical` + `source.plan`.
+  - `package.json` — script `test:entitlements-me`.
+- **Arquivos criados:**
+  - `scripts/test-entitlements-me.ts` — **25/25 checks** cobrindo payload da rota: `entitlements` + `meta` (isMasterAdmin, hasProfile, falatuEnabled, vertical, planId, defaultLandingView, permissions), cross-tenant isolation, todos os 4 estados principais (`active`, `available_to_enable`, `available_to_buy`, `hidden`), master admin bypass.
+- **Testes executados:**
+  - `npm run test:entitlements-me` → **25/25 OK** (nova suíte).
+  - `npm run test:entitlement-service` → **49/49 OK** (+2 checks de F1.3).
+  - `npm run test:entitlement-middleware` → **29/29 OK** (regressão).
+  - `npm run test:rbac-granular` (27/27), `test:vertical-plan-intersection` (19/19), `test:addons` (13/13), `test:rbac-enforcement` (15/15).
+  - `npx tsc --noEmit` → limpo (frontend + backend).
+- **Decisões micro:**
+  - (i) **`loadOrgConfig` e `loadPermissions` viram delegates de `loadEntitlements`** em vez de removidos. Motivo: callers antigos (App.tsx faz `loadOrgConfig() + loadPermissions()` no login; SettingsView chama `loadOrgConfig` após alterar módulos) continuam funcionando sem alteração. Zero risco de quebrar tela por chamada dupla — só faz 1 request pra `/api/entitlements/me` em vez de 2.
+  - (ii) **`isModuleEnabled` e `canAccessModule` mantêm fallback legado** — se `entitlements` ainda é `null` (loader não rodou), usam os arrays antigos (`enabledModules`, `permissions`). Isso protege sub-componentes que renderizam antes do loader terminar.
+  - (iii) **ModulesPanel: 3 seções em vez de 3 categorias** — antes `recommended | available | upgrade` do backend `overview()`; agora `active | available_to_enable | available_to_buy` do EntitlementService. Estado `hidden` sai (não é mostrado — é o que a vertical/blueprint esconde). Estado `available_to_buy` vira link colapsado pra "Plano e Expansões" — evita clutter no editor de módulos.
+  - (iv) **Placeholder da nova aba `Plano e Expansões`** — só um card "em construção (F4.2)" com link cruzado pra Módulos e Cobrança. Registra a aba no menu pra a mudança de UX ser aditiva já em F1.3 (dono já vê o layout novo, F4.2 preenche o conteúdo com comparação de plano + add-ons + recomendação IA).
+  - (v) **`MODULE_META` duplicado no frontend** — labels/descrições dos módulos hoje vivem em `ModuleService.MODULE_META` (backend). Adicionamos cópia no frontend porque a rota `/api/entitlements/me` não devolve metadados por módulo (só decisão). Trade-off aceitável: em fatia futura o backend pode expor `meta.moduleMeta` pra virar single source. Por ora manter duplicado é mais barato que expandir o payload.
+  - (vi) **`ADDON_MODULES` também duplicado no frontend** — mesmo motivo. Se mudar no backend, atualizar aqui.
+- **Cross-service:** frontend agora tem 1 rota consumida (`/api/entitlements/me`) em vez de 2 (`/api/analytics/settings` + `/api/permissions/me`). Consumidores intermediários (`ModulesPanel`, `Sidebar`) leem do store. Zero breaking. Backend `EntitlementService.overview` estava OK; só a rota `/me` ganhou `meta`.
+- **Resultado:** Fonte única de verdade dos entitlements no frontend. Menu, Configurações › Módulos, futuros consumidores (aba "Plano e Expansões" F4.2, motor de recomendação F7) chegam ao store e leem do mesmo objeto. Zero regressão em produção — telas antigas continuam funcionando; sub-componentes veem apenas dados mais ricos.
+- **Pendências criadas:** nenhuma nova. Duplicação de `MODULE_META`/`ADDON_MODULES` fica pra fatia futura (não bloqueia F2/F3).
+- **Próximo passo:** F1.4 — implementar estado `hidden` de verdade via `blueprint.hiddenModules`. Hoje `HIDDEN_BY_VERTICAL` é estático dentro do `EntitlementService.ts` (F1.1). F1.4 substitui pelo mapa vindo do Blueprint (F3 é pré-requisito da versão final; F1.4 pode adiantar com blueprint mock/estático mais rico). Alternativa: iniciar F2 (correção grade + Comigo persistente — Decisão #1 já aprovada). **Recomendo F2.1 (Comigo persistente)** — decisão aprovada, alto impacto, baixo esforço.
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

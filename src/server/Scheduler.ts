@@ -485,6 +485,24 @@ export class Scheduler {
   }
 
   /**
+   * ADR-152 Fatia 4c.4 — atribuição de revenue_recovered real. Varre
+   * ticket_stage_logs recentes com `to_stage='ganho'` cujo ticket teve
+   * touch de recuperação em janela, calcula ticket_value (orders →
+   * quotes → avg) e grava outcome F3.1. Idempotência forte via
+   * UNIQUE(org, ticket, stage_change_at). Import dinâmico pra quebrar
+   * ciclo.
+   */
+  static async salesRecoveryAttributionPass() {
+    try {
+      const { SalesRecoveryAttributionService } = await import("./SalesRecoveryAttributionService.js");
+      const r = await SalesRecoveryAttributionService.tickAll();
+      if (r.attributed > 0 || r.orgsScanned > 0) {
+        console.info(`[Runtime F4c.4] atribuição de revenue: ${r.orgsScanned} org(s), ${r.attributed} atribuída(s), ${r.skipped} skip.`);
+      }
+    } catch (e: any) { console.error("[Runtime F4c.4] attribution pass falhou", e?.message); }
+  }
+
+  /**
    * ADR-152 Fatia 4c.3 — cadência multi-tentativa de recuperação.
    * Varre touches aprovados há N dias SEM reply do cliente e PROPÕE
    * 2ª/3ª msg (via SalesRecoveryPlaybookService.proposeForTicket com
@@ -655,6 +673,11 @@ export class Scheduler {
     // pro dono aprovar). Fica DEPOIS da detecção pra usar o estado
     // atualizado de touches (aprovação recente reflete no próximo tick).
     await this.salesRecoveryFollowupPass().catch(e => console.error('[Scheduler] follow-up Recuperação Comercial F4c.3 falhou', e));
+    // ADR-152 F4c.4 — atribuição de revenue quando ticket vira ganho.
+    // Independente da cadência; escaneia ticket_stage_logs recentes
+    // pra atribuir revenue às ações do Runtime. Fica no fim da chain de
+    // recuperação pra ver o estado final dos touches/tickets do tick.
+    await this.salesRecoveryAttributionPass().catch(e => console.error('[Scheduler] attribution F4c.4 falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

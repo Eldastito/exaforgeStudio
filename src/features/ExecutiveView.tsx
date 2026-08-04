@@ -2,11 +2,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/button';
 import { toast } from '@/src/lib/toast';
-import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target, Activity, AlertTriangle, Clock, Zap } from 'lucide-react';
+import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target, Activity, AlertTriangle, Clock, Zap, Handshake, Repeat2, UserX, MessageCircle } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 
 type Msg = { role: 'user' | 'ai'; text: string };
-type Tab = 'conversar' | 'plano' | 'funciona' | 'operacoes';
+type Tab = 'conversar' | 'plano' | 'funciona' | 'operacoes' | 'recuperacao';
 
 const DOMAIN_LABEL: Record<string, string> = {
   finance: 'Finanças', production: 'Produção', procurement: 'Compras', inventory: 'Estoque',
@@ -43,9 +43,10 @@ export function ExecutiveView() {
           <TabButton active={tab === 'plano'} onClick={() => setTab('plano')} icon={<ListChecks className="h-4 w-4" />} label="Plano de Ação" />
           <TabButton active={tab === 'funciona'} onClick={() => setTab('funciona')} icon={<TrendingUp className="h-4 w-4" />} label="O que funciona" />
           {showOperacoes && <TabButton active={tab === 'operacoes'} onClick={() => setTab('operacoes')} icon={<Activity className="h-4 w-4" />} label="Operações" />}
+          {showOperacoes && <TabButton active={tab === 'recuperacao'} onClick={() => setTab('recuperacao')} icon={<Handshake className="h-4 w-4" />} label="Recuperação" />}
         </div>
       </div>
-      {tab === 'conversar' ? <ConversarTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : <FuncionaTab />}
+      {tab === 'conversar' ? <ConversarTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : tab === 'recuperacao' ? <RecuperacaoTab /> : <FuncionaTab />}
     </div>
   );
 }
@@ -596,4 +597,301 @@ function relativeTime(iso: string): string {
     const days = Math.floor(h / 24);
     return `há ${days} dia${days > 1 ? 's' : ''}`;
   } catch { return iso; }
+}
+
+// ===== Aba: Recuperação Comercial (ADR-152 F4c.5) =====
+// Consome /api/runtime/sales-recovery/{metrics,proposals,touches,attributions}.
+// Gateado por `runtimeGate` (execution_runtime_enabled) — igual à Operações.
+// G-4c-1 preservada na UI: nenhuma msg é enviada sem o dono clicar "Aprovar"
+// (aprovação humana obrigatória; modo autonomous continua bloqueado em
+// decisão #4 LGPD).
+
+const REPLY_INTENT_LABEL: Record<string, string> = {
+  interested: 'Interessado',
+  meeting_request: 'Pediu reunião',
+  not_now: 'Adiou',
+  objection: 'Objeção',
+  remove_me: 'Opt-out (LGPD)',
+  already_bought: 'Comprou em outro',
+  unknown: 'Não interpretado',
+};
+const REPLY_INTENT_COLOR = (i: string): string => {
+  switch (i) {
+    case 'interested': case 'meeting_request': return 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30';
+    case 'remove_me': return 'text-rose-300 bg-rose-500/10 border-rose-500/30';
+    case 'objection': return 'text-amber-300 bg-amber-500/10 border-amber-500/30';
+    case 'already_bought': return 'text-fuchsia-300 bg-fuchsia-500/10 border-fuchsia-500/30';
+    default: return 'text-zinc-300 bg-zinc-500/10 border-zinc-500/30';
+  }
+};
+
+const STAGE_LABEL: Record<string, string> = {
+  novo_lead: 'Novo lead', qualificado: 'Qualificado', proposta: 'Proposta',
+  orcamento: 'Orçamento', negociacao: 'Negociação', ganho: 'Ganho', perdido: 'Perdido', desqualificado: 'Desqualificado',
+};
+
+function RecuperacaoTab() {
+  const [metrics, setMetrics] = useState<any | null>(null);
+  const [proposals, setProposals] = useState<any[]>([]);
+  const [touches, setTouches] = useState<any[]>([]);
+  const [attributions, setAttributions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [editingProposal, setEditingProposal] = useState<string | null>(null);
+  const [editText, setEditText] = useState<string>('');
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+
+  const load = () => {
+    setLoading(true); setGateError(null);
+    Promise.all([
+      apiFetch('/api/runtime/sales-recovery/metrics'),
+      apiFetch('/api/runtime/sales-recovery/proposals?limit=50'),
+      apiFetch('/api/runtime/sales-recovery/touches?limit=20'),
+      apiFetch('/api/runtime/sales-recovery/attributions?limit=20&window=30'),
+    ]).then(async ([mR, pR, tR, aR]) => {
+      if (mR.status === 403) {
+        const j = await mR.json().catch(() => ({}));
+        setGateError(j?.error || 'Execution Runtime não está habilitado para esta organização.');
+        return;
+      }
+      const [m, p, t, a] = await Promise.all([
+        mR.json().catch(() => null),
+        pR.json().catch(() => ({ items: [] })),
+        tR.json().catch(() => ({ items: [] })),
+        aR.json().catch(() => ({ items: [] })),
+      ]);
+      setMetrics(m || null);
+      setProposals(Array.isArray(p?.items) ? p.items : []);
+      setTouches(Array.isArray(t?.items) ? t.items : []);
+      setAttributions(Array.isArray(a?.items) ? a.items : []);
+    }).catch(() => setGateError('Falha ao carregar o painel de Recuperação Comercial.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const markBusy = (id: string, on: boolean) => setBusyIds((prev) => {
+    const next = new Set(prev);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  });
+
+  const approve = async (id: string, messageOverride?: string) => {
+    markBusy(id, true);
+    try {
+      const r = await apiFetch(`/api/runtime/sales-recovery/proposals/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(messageOverride ? { messageOverride } : {}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(j?.error || 'Erro ao aprovar.'); return; }
+      if (j.sent) toast.success('Mensagem enviada!');
+      else toast.info(j.error || 'Aprovado mas envio falhou. Verifique o sinal.');
+      setEditingProposal(null);
+      load();
+    } catch (e: any) { toast.error(e?.message || 'Erro ao aprovar.'); }
+    finally { markBusy(id, false); }
+  };
+
+  const dismiss = async (id: string) => {
+    markBusy(id, true);
+    try {
+      const r = await apiFetch(`/api/runtime/sales-recovery/proposals/${id}/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(j?.error || 'Erro ao dispensar.'); return; }
+      toast.success('Proposta dispensada.');
+      load();
+    } catch (e: any) { toast.error(e?.message || 'Erro ao dispensar.'); }
+    finally { markBusy(id, false); }
+  };
+
+  const detectNow = async () => {
+    try {
+      const r = await apiFetch('/api/runtime/sales-recovery/detect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(j?.error || 'Erro na detecção.'); return; }
+      toast.success(`Detecção: ${j.detected || 0} deals; ${j.proposed || 0} propostas novas.`);
+      load();
+    } catch (e: any) { toast.error(e?.message || 'Erro na detecção.'); }
+  };
+
+  if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><RefreshCw className="h-5 w-5 animate-spin mr-2" /> Carregando Recuperação…</div>;
+
+  if (gateError) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="max-w-md rounded-xl border border-amber-500/40 bg-amber-500/5 p-5">
+          <div className="flex items-center gap-2 text-amber-300 font-semibold"><ShieldCheck className="h-5 w-5" /> Execution Runtime desligado</div>
+          <p className="text-sm text-zinc-300 mt-2">{gateError}</p>
+          <p className="text-xs text-zinc-500 mt-3">A Recuperação Comercial exige o Runtime ativo (<code className="text-zinc-400">execution_runtime_enabled</code>) e o opt-in do módulo (<code className="text-zinc-400">sales_recovery_enabled</code>). Fale com o operador da plataforma.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const cfg = metrics?.config || {};
+  const revenue = metrics?.revenue || {};
+  const propsCount = metrics?.proposals || {};
+  const touchesCount = metrics?.touches || {};
+  const replyBreakdown = metrics?.replyBreakdown7d || {};
+  const optOuts = Number(metrics?.optOuts || 0);
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex items-center gap-2 text-sm text-zinc-300">
+          <Handshake className="h-4 w-4 text-indigo-400" />
+          Painel de <strong>Recuperação Comercial</strong> — Runtime detecta deals parados no funil, propõe mensagem, você aprova/dispensa. Cada envio passa pelo seu clique — modo autônomo bloqueado por LGPD.
+          <button onClick={detectNow} className="ml-auto inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 border border-zinc-700 rounded px-2 py-1"><Zap className="h-3.5 w-3.5" /> Detectar agora</button>
+          <button onClick={load} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"><RefreshCw className="h-3.5 w-3.5" /> Atualizar</button>
+        </div>
+
+        {/* Config flags */}
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          <ConfigChip label="Recuperação" on={!!cfg.salesRecoveryEnabled} />
+          <ConfigChip label="Follow-up automático" on={!!cfg.followupEnabled} />
+          <ConfigChip label="Atribuição de revenue" on={!!cfg.attributionEnabled} />
+          {cfg.stalledDays != null && <span className="text-zinc-500 self-center">Parado ≥ {cfg.stalledDays}d</span>}
+          {cfg.attributionWindowDays != null && <span className="text-zinc-500 self-center">Janela atribuição: {cfg.attributionWindowDays}d</span>}
+        </div>
+
+        {/* Bloco 1 — KPIs */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Impacto do piloto</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Metric label="Propostas em aberto" value={String(propsCount.open || 0)} accent={propsCount.open > 0 ? 'amber' : undefined} />
+            <Metric label="Envios (7d)" value={String(touchesCount.last7d || 0)} />
+            <Metric label="Receita recuperada (30d)" value={brl(revenue.last30d || 0)} accent={Number(revenue.last30d || 0) > 0 ? 'emerald' : undefined} />
+            <Metric label="Opt-outs formalizados" value={String(optOuts)} accent={optOuts > 0 ? 'amber' : undefined} />
+          </div>
+          {revenue.total > revenue.last30d && (
+            <p className="text-[11px] text-zinc-500 mt-2">Total acumulado: {brl(revenue.total || 0)} · {revenue.attributions30d || 0} atribuições nos últimos 30 dias.</p>
+          )}
+        </div>
+
+        {/* Bloco 2 — Reply breakdown (7d) */}
+        {Object.keys(replyBreakdown).length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><MessageCircle className="h-3.5 w-3.5" /> Respostas dos clientes (7d)</h3>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(replyBreakdown).map(([intent, n]) => (
+                <span key={intent} className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${REPLY_INTENT_COLOR(intent)}`}>
+                  {REPLY_INTENT_LABEL[intent] || intent}: <strong className="ml-1">{Number(n)}</strong>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Bloco 3 — Propostas em aberto */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><ListChecks className="h-3.5 w-3.5" /> Propostas em aberto ({proposals.length})</h3>
+          {proposals.length === 0 ? (
+            <EmptyHint text="Sem propostas em aberto. Clique em 'Detectar agora' pra escanear deals parados." />
+          ) : (
+            <div className="space-y-3">
+              {proposals.map((p) => {
+                const ev = p.evidence || {};
+                const attempt = ev.attemptNumber || 1;
+                const busy = busyIds.has(p.id);
+                const isEditing = editingProposal === p.id;
+                return (
+                  <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-zinc-100">{ev.contactName || ev.phone || 'Sem nome'}</span>
+                      <span className="text-[11px] text-zinc-500">{STAGE_LABEL[ev.stage] || ev.stage} · parado há {ev.daysStalled || 0}d</span>
+                      <span className="text-[11px] px-1.5 py-0.5 rounded border border-indigo-500/30 text-indigo-300 bg-indigo-500/10">Tentativa {attempt}/3</span>
+                      {ev.messageSource === 'llm' && <span className="text-[11px] text-emerald-400 inline-flex items-center gap-1"><Sparkles className="h-3 w-3" /> LLM</span>}
+                      {ev.messageSource === 'template' && <span className="text-[11px] text-zinc-500">template</span>}
+                      <span className="ml-auto text-[11px] text-zinc-500 inline-flex items-center gap-1"><Clock className="h-3 w-3" /> {relativeTime(p.detectedAt)}</span>
+                    </div>
+                    {isEditing ? (
+                      <textarea
+                        className="w-full min-h-[80px] rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        placeholder="Edite a mensagem antes de enviar…"
+                      />
+                    ) : (
+                      <p className="text-sm text-zinc-200 whitespace-pre-wrap italic">"{ev.proposedText || '(sem texto)'}"</p>
+                    )}
+                    <div className="flex items-center gap-2 pt-1">
+                      {isEditing ? (
+                        <>
+                          <Button size="sm" onClick={() => approve(p.id, editText)} disabled={busy || !editText.trim()}><CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Aprovar editado</Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingProposal(null)} disabled={busy}>Cancelar</Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" onClick={() => approve(p.id)} disabled={busy}><CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Aprovar e enviar</Button>
+                          <Button size="sm" variant="outline" onClick={() => { setEditingProposal(p.id); setEditText(ev.proposedText || ''); }} disabled={busy}>Editar</Button>
+                          <Button size="sm" variant="ghost" onClick={() => dismiss(p.id)} disabled={busy}><XCircle className="h-3.5 w-3.5 mr-1" /> Dispensar</Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Bloco 4 — Envios recentes */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><Send className="h-3.5 w-3.5" /> Envios recentes ({touches.length})</h3>
+          {touches.length === 0 ? (
+            <EmptyHint text="Nenhum envio ainda. Aprove uma proposta acima pra começar." />
+          ) : (
+            <div className="space-y-2">
+              {touches.map((t) => (
+                <div key={t.id} className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3 flex items-center gap-3">
+                  <span className="text-sm text-zinc-200 min-w-[120px] truncate">{t.contactName || t.phone || t.contactId}</span>
+                  <span className="text-[11px] text-zinc-500 inline-flex items-center gap-1"><Clock className="h-3 w-3" /> {relativeTime(t.sentAt)}</span>
+                  {t.replyIntent ? (
+                    <span className={`ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${REPLY_INTENT_COLOR(t.replyIntent)}`}>{REPLY_INTENT_LABEL[t.replyIntent] || t.replyIntent}</span>
+                  ) : (
+                    <span className="ml-auto text-[11px] text-zinc-500">aguardando resposta</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Bloco 5 — Revenue atribuído (F4c.4) */}
+        {attributions.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><Repeat2 className="h-3.5 w-3.5" /> Deals ganhos (atribuídos ao piloto)</h3>
+            <div className="space-y-2">
+              {attributions.map((a) => (
+                <div key={a.id} className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 flex items-center gap-3">
+                  <span className="text-sm text-zinc-200 min-w-[120px] truncate">{a.contactName || `ticket ${String(a.ticketId).slice(0, 8)}`}</span>
+                  <span className="text-[11px] text-zinc-500">{a.source === 'orders' ? 'venda concretizada' : a.source === 'quotes' ? 'proposta aceita' : 'ticket médio (estimativa)'} · {a.basis}</span>
+                  <span className="ml-auto text-sm font-semibold text-emerald-300">{brl(a.revenueRecovered)}</span>
+                  <span className="text-[11px] text-zinc-500 inline-flex items-center gap-1 min-w-[80px] justify-end"><Clock className="h-3 w-3" /> {relativeTime(a.attributedAt)}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-zinc-500 mt-2">Atribuição automática quando o ticket vira <em>ganho</em> em até {cfg.attributionWindowDays || 30}d após o envio aprovado.</p>
+          </div>
+        )}
+
+        {optOuts > 0 && (
+          <p className="text-[11px] text-zinc-500 inline-flex items-center gap-1"><UserX className="h-3 w-3" /> {optOuts} contato(s) com opt-out formalizado — Runtime não propõe pra eles (LGPD Art.8 §5).</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConfigChip({ label, on }: { label: string; on: boolean }) {
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${on ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : 'text-zinc-500 border-zinc-700'}`}>
+      {on ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />} {label}
+    </span>
+  );
 }

@@ -368,7 +368,8 @@
     "test:piloto-sales-recovery": "tsx scripts/test-piloto-sales-recovery.ts",
     "test:sales-recovery-reply": "tsx scripts/test-sales-recovery-reply.ts",
     "test:sales-recovery-followup": "tsx scripts/test-sales-recovery-followup.ts",
-    "test:sales-recovery-attribution": "tsx scripts/test-sales-recovery-attribution.ts"
+    "test:sales-recovery-attribution": "tsx scripts/test-sales-recovery-attribution.ts",
+    "test:sales-recovery-dashboard": "tsx scripts/test-sales-recovery-dashboard.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

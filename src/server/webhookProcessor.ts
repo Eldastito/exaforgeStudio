@@ -416,6 +416,21 @@ export async function processIncomingMessage(
     }
   } catch (e) { console.error('[Cobrança F4b.2] Falha no reply router', e); }
 
+  // 4.6. ADR-152 F4c.2 — se o contato foi contactado pela recuperação
+  // comercial recentemente (touch em `sales_recovery_touches` na janela
+  // opt-in por-org, default 14d), classifica intent + publica sinal +
+  // manda reply canned. Fica DEPOIS da cobrança (que tem SLA duro) e
+  // ANTES da IA. Intent=remove_me seta `contacts.marketing_opt_out=1`
+  // (LGPD Art.8 §5). Best-effort.
+  try {
+    const { SalesRecoveryReplyService } = await import('./SalesRecoveryReplyService.js');
+    const result = await SalesRecoveryReplyService.tryHandle(orgId, contact.id, payload.senderId || '', payload.text || '');
+    if (result.handled && result.reply) {
+      await deliverBotMessage({ orgId, ticketId: ticket.id, contactId: contact.id, channel, recipient: payload.senderId, text: result.reply, io });
+      return;
+    }
+  } catch (e) { console.error('[Recuperação F4c.2] Falha no reply router', e); }
+
   // 5. Call AI if enabled
   if (channel.ai_enabled === 1 && ticket.ai_paused === 0) {
       try {

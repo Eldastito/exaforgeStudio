@@ -365,7 +365,8 @@
     "test:cobranca-intent-classifier": "tsx scripts/test-cobranca-intent-classifier.ts",
     "test:cobranca-cadencia-multitentativa": "tsx scripts/test-cobranca-cadencia-multitentativa.ts",
     "test:cobranca-promise-recheck": "tsx scripts/test-cobranca-promise-recheck.ts",
-    "test:piloto-sales-recovery": "tsx scripts/test-piloto-sales-recovery.ts"
+    "test:piloto-sales-recovery": "tsx scripts/test-piloto-sales-recovery.ts",
+    "test:sales-recovery-reply": "tsx scripts/test-sales-recovery-reply.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -290,6 +290,24 @@ export class SalesRecoveryPlaybookService {
       throw new Error(`Ticket ${ticketId} saiu do funil (stage=${ticket.stage}).`);
     }
 
+    // ADR-152 F4c.2 — LGPD Art.8 §5. Se o contato pediu opt-out (via
+    // reply intent=remove_me OU marcação manual), NÃO envia nova msg.
+    // Erro claro pra a UI destacar "contato optou por não receber".
+    const contactId: string | null = evidence.contactId || null;
+    if (contactId) {
+      const contact = db.prepare(`SELECT marketing_opt_out FROM contacts WHERE id = ? AND organization_id = ?`).get(contactId, orgId) as any;
+      if (contact && Number(contact.marketing_opt_out) === 1) {
+        // Dispensa o sinal automaticamente pra não ficar poluindo o painel.
+        try { BusinessSignalService.resolveByDedupe(orgId, sig.dedupe_key); } catch { /* noop */ }
+        try {
+          logAuthEvent(orgId, input.actorId, contactId, "RUNTIME_SALES_RECOVERY_BLOCKED_OPT_OUT", {
+            ticketId, signalId, phone,
+          });
+        } catch { /* noop */ }
+        throw new Error("Contato optou por não receber mensagens (LGPD Art.8 §5). Proposta descartada automaticamente.");
+      }
+    }
+
     const finalText = (input.messageOverride || evidence.proposedText || "").toString().trim().slice(0, 1000);
     if (!finalText) throw new Error("Mensagem vazia — nada a enviar.");
 
@@ -315,6 +333,19 @@ export class SalesRecoveryPlaybookService {
     // Toca `tickets.updated_at` — sinaliza atividade no ticket pra o
     // detector NÃO re-propor amanhã (a mensagem foi enviada).
     try { db.prepare(`UPDATE tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(ticketId, orgId); } catch { /* noop */ }
+    // ADR-152 F4c.2 — registra touch pra o SalesRecoveryReplyService
+    // poder correlacionar a resposta do cliente. Import dinâmico pra
+    // quebrar ciclo (SalesRecoveryReplyService importa BusinessSignal
+    // que pode importar isso). Best-effort — se falha, o loop de envio
+    // continua funcionando, só perde o registro do touch.
+    try {
+      const { SalesRecoveryReplyService } = await import("./SalesRecoveryReplyService.js");
+      SalesRecoveryReplyService.recordTouch(orgId, {
+        ticketId, contactId: contactId || evidence.contactId || null as any,
+        phone, channelId, proposedSignalId: signalId,
+        approvedBy: input.actorId, messageId: messageId || null,
+      });
+    } catch (e) { console.warn("[Sales Recovery F4c.2] recordTouch falhou", e); }
 
     // Se veio da execução do playbook, temos actionId no evidence pra
     // amarrar o outcome. F3.1 registra timeSavedMinutes (o que o dono

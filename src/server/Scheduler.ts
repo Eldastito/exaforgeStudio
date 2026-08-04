@@ -455,6 +455,36 @@ export class Scheduler {
   }
 
   /**
+   * ADR-152 Fatia 4c — Piloto Recuperação Comercial. Detecta deals
+   * parados (tickets no funil sem update recente + sem resposta do
+   * contato) e cria PROPOSTAS pro dono aprovar/dispensar. NUNCA envia
+   * autonomamente (LGPD-safe — decisão #4 do dono ainda aberta). Só
+   * varre orgs opt-in (`sales_recovery_enabled=1`, default 0).
+   * Import dinâmico pra quebrar ciclo.
+   */
+  static async salesRecoveryDetectionPass() {
+    try {
+      const rows = db.prepare(`
+        SELECT organization_id AS orgId, COALESCE(sales_recovery_stalled_days, 10) AS stalledDays
+          FROM organization_settings
+         WHERE COALESCE(sales_recovery_enabled, 0) = 1
+      `).all() as any[];
+      if (!rows.length) return;
+      const { SalesRecoveryPlaybookService } = await import("./SalesRecoveryPlaybook.js");
+      let totalProposed = 0;
+      for (const r of rows) {
+        try {
+          // Seed é idempotente — garante a definição antes do 1º start.
+          SalesRecoveryPlaybookService.seed(r.orgId, "runtime");
+          const res = await SalesRecoveryPlaybookService.detectAndProposeAll(r.orgId, { stalledDays: Number(r.stalledDays), limit: 50 });
+          totalProposed += res.proposed;
+        } catch (e) { console.error("[Runtime F4c] detectAndProposeAll falhou pra org", r.orgId, e); }
+      }
+      if (totalProposed > 0) console.info(`[Runtime F4c] Recuperação Comercial: ${rows.length} org(s), ${totalProposed} proposta(s) criada(s).`);
+    } catch (e: any) { console.error("[Runtime F4c] detection pass falhou", e?.message); }
+  }
+
+  /**
    * ADR-152 Fatia 4b.4 — re-check automático de promessa de pagamento.
    * Delega ao `CollectionPromiseService.tickAll` que percorre orgs opt-in
    * e trata cada promise cuja data prometida chegou:
@@ -597,6 +627,11 @@ export class Scheduler {
     // meio-tempo, o re-check já marca fulfilled em vez de disparar
     // follow-up desnecessário).
     await this.collectionPromiseCheckPass().catch(e => console.error('[Scheduler] re-check de promessas F4b.4 falhou', e));
+    // ADR-152 F4c — detecção + proposta de recuperação comercial. NUNCA
+    // envia autonomamente; só publica sinal pra dono aprovar via UI. Fica
+    // depois da cadência de cobrança pra respeitar ordem de prioridade
+    // do dono (cobrança tem SLA mais duro; recuperação é discovery).
+    await this.salesRecoveryDetectionPass().catch(e => console.error('[Scheduler] detecção Recuperação Comercial F4c falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

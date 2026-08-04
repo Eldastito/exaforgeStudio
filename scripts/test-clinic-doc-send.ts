@@ -139,8 +139,13 @@ async function main() {
     const resolved = ClinicDocumentDeliveryService.resolveSignedFile(key, exp, sig);
     check("resolveSignedFile devolve caminho quando HMAC ok", resolved === path.join(CLINIC_DOCS_DIR, key));
 
-    // sig errada
-    const bad = ClinicDocumentDeliveryService.resolveSignedFile(key, exp, sig.replace(/.$/, "0"));
+    // sig errada. NÃO usar `.replace(/.$/, "0")` — se a sig original já
+    // termina em "0" (~1/16 dos hex), a substituição fica idêntica e
+    // este check vira flake (bug pré-existente da suíte, exposto na CI).
+    // Sempre trocar por um char DIFERENTE do último.
+    const lastChar = sig.slice(-1);
+    const replacement = lastChar === "0" ? "1" : "0";
+    const bad = ClinicDocumentDeliveryService.resolveSignedFile(key, exp, sig.slice(0, -1) + replacement);
     check("resolveSignedFile recusa sig inválida", bad === null);
 
     // exp expirado

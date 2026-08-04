@@ -7374,6 +7374,18 @@ const initDb = () => {
   // Dias de graça pós-promessa antes de marcar broken (default 0 =
   // marca broken no MESMO dia da promessa que passou). Configurável por-org.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_promise_grace_days INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-152 Fatia 4c — Piloto Recuperação Comercial (MVP em modo
+  // approved_execution — SEM autonomous, que exige LGPD signoff).
+  // Runtime DETECTA deals parados (tickets no funil sem update recente)
+  // e PROPÕE mensagem de reengajamento via LLM — mas NUNCA envia sem
+  // aprovação humana (rota POST /api/runtime/sales-recovery/approve/:id).
+  //
+  // Opt-in por org: sem `sales_recovery_enabled=1`, o detector nunca
+  // varre. `sales_recovery_stalled_days` = quantos dias sem update pra
+  // um ticket ser considerado parado (default 10).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_stalled_days INTEGER DEFAULT 10`); } catch(e){}
 };
 
 initDb();

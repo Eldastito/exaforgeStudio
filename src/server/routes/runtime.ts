@@ -7,6 +7,7 @@ import { RuntimeExceptionsService } from "../RuntimeExceptionsService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { RetailClosingPlaybookService } from "../RetailClosingPlaybook.js";
 import { CollectionPlaybookService } from "../CollectionPlaybook.js";
+import { SalesRecoveryPlaybookService } from "../SalesRecoveryPlaybook.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -205,6 +206,49 @@ router.post("/collection/start", (req: AuthRequest, res): any => {
       confirmationDeadline: b.confirmationDeadline,
     }, actorId(req)));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Piloto F4c: Recuperação Comercial ─────────────────────────────────────
+
+// Seed idempotente do playbook `sales_recovery_v1` na org.
+router.post("/sales-recovery/seed", (req: AuthRequest, res): any => {
+  try { res.json(SalesRecoveryPlaybookService.seed(req.organizationId!, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Detecção manual: varre deals parados + cria propostas (padrão do
+// Scheduler.salesRecoveryDetectionPass). Útil pro "Detectar agora" na UI.
+router.post("/sales-recovery/detect", async (req: AuthRequest, res): Promise<any> => {
+  const b = req.body || {};
+  const stalledDays = b.stalledDays != null ? Number(b.stalledDays) : undefined;
+  const limit = b.limit != null ? Number(b.limit) : undefined;
+  try { res.json(await SalesRecoveryPlaybookService.detectAndProposeAll(req.organizationId!, { stalledDays, limit })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Lista propostas em aberto pra UI.
+router.get("/sales-recovery/proposals", (req: AuthRequest, res): any => {
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  try { res.json({ items: SalesRecoveryPlaybookService.listOpenProposals(req.organizationId!, { limit }) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// APROVAÇÃO HUMANA — o dono revisa a proposta e clica "aprovar" (com ou
+// sem editar o texto). AQUI é onde a mensagem sai. G-4c-1: sem esta rota
+// batida, NADA é enviado pelo Runtime.
+router.post("/sales-recovery/proposals/:id/approve", async (req: AuthRequest, res): Promise<any> => {
+  const b = req.body || {};
+  const messageOverride = typeof b.messageOverride === "string" ? b.messageOverride : undefined;
+  try { res.json(await SalesRecoveryPlaybookService.approve(req.organizationId!, req.params.id, { messageOverride, actorId: actorId(req) })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// DISPENSA — dono descarta sem enviar. Registra motivo pra audit.
+router.post("/sales-recovery/proposals/:id/dismiss", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const reason = typeof b.reason === "string" ? b.reason.slice(0, 500) : undefined;
+  try { res.json(SalesRecoveryPlaybookService.dismiss(req.organizationId!, req.params.id, { reason, actorId: actorId(req) })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Runner: roda o playbook até completar / falhar / esperar externo.

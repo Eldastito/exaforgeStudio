@@ -466,6 +466,41 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
 - **Pendências criadas:** nenhuma nova. Todas as fatias F4b* estão fechadas.
 - **Próximo passo:** F4c (Piloto Recuperação Comercial) — segue BLOQUEADA em decisão #4 LGPD do dono (§F do DECISOES-E-PENDENCIAS.md — contato proativo em massa a leads exige revisão jurídica). Alternativas: (a) refactor genérico do SchedulerActionCommandHandler pra reuso em F4c; (b) fechar Piloto Cobrança com CLI de setup/rollout (padrão do TOULON no ADR-150).
 
+### Sessão 2026-08-04 (Fatia 4c do ADR-152 — Piloto Recuperação Comercial MVP)
+- **Fase:** 4c (Piloto 3 dos 3, MVP em modo `approved_execution`)
+- **Escopo escolhido:** F4c MVP **PROPÕE, NÃO ENVIA autonomamente** — respeita a decisão pendente #4 (LGPD signoff pra modo `autonomous`) e a R10 (F4c permanece em assisted/approved até revisão jurídica). Runtime detecta deals parados, gera mensagem via LLM, publica sinal — dono aprova/edita/dispensa via UI. G-4c-1 é a guarda-mãe: nenhuma mensagem sai do Runtime sem batida explícita do dono na rota `POST /api/runtime/sales-recovery/proposals/:id/approve`.
+- **Arquivos criados:**
+  - `src/server/SalesStalledDealDetectorService.ts` — detecta `tickets` no funil (`stage ∈ {qualificado, proposta, negociacao, orcamento}`) + `status='open'` + `updated_at < now - stalledDays` + sem msg inbound recente do contato. Puro/read-only.
+  - `src/server/SalesRecoveryMessageGenerator.ts` — gera texto via `chat()` do llm.ts. Fallback pra template estático (source='template') quando LLM ausente/erro. Sanitiza nome contra prompt injection. Setter `__setGeneratorChatForTests` isolado.
+  - `src/server/SalesRecoveryPlaybook.ts` — handler `sales_recovery_propose_message` (registra sinal, NÃO envia) + playbook `sales_recovery_v1` de 1 step + `SalesRecoveryPlaybookService.seed/proposeForTicket/detectAndProposeAll/approve/dismiss/listOpenProposals`. Aprovação/dispensa registram audit + `resolveByDedupe` do sinal.
+  - `scripts/test-piloto-sales-recovery.ts` — **41/41 checks** (9 detector + 5 generator + 27 playbook/rotas incluindo isolamento cross-tenant, dedupe, WA-fail, ticket-saiu-do-funil).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — aditivos `sales_recovery_enabled INTEGER DEFAULT 0` + `sales_recovery_stalled_days INTEGER DEFAULT 10`. Nenhuma tabela nova (reusa `business_signals` pra proposta, `tickets` pra fonte).
+  - `server.ts` — side-effect import de `SalesRecoveryPlaybook.js`.
+  - `src/server/routes/runtime.ts` — 5 rotas F4c: `/sales-recovery/{seed,detect,proposals,proposals/:id/approve,proposals/:id/dismiss}`.
+  - `src/server/Scheduler.ts` — nova `salesRecoveryDetectionPass()` chamada após `collectionPromiseCheckPass` no tick. Opt-in por-org.
+  - `package.json` — script `test:piloto-sales-recovery`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §14 atualiza 5 critérios.
+- **Testes executados:**
+  - `npm run test:piloto-sales-recovery` → **41/41 OK**
+  - Regressão sem quebras: `test:piloto-cobranca` (38/38), `test:cobranca-intent-classifier` (35/35), `test:cobranca-cadencia-multitentativa` (38/38), `test:cobranca-promise-recheck` (33/33), `test:runtime-execute-e2e` (27/27), `test:runtime-confirmation` (32/32), `test:runtime-operations` (31/31), `test:business-signals` (12/12), `test:piloto-fechamento-retail` (26/26), `test:runtime-process-fabric` (42/42)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:**
+  - (i) **`SchedulerActionCommandHandler` genérico continua aspiracional** — F4c não precisou (padrão `Scheduler.*Pass` já cobre). Só se ≥2 domínios precisarem no futuro.
+  - (ii) **Nenhuma tabela nova pra propostas** — reusa `business_signals` (severity=attention, signal_type=`sales_recovery_proposed`, dedupe por ticket+dia). A UI já sabe listar sinais (`listOpenProposals` é conveniência sobre `BusinessSignalService.list`).
+  - (iii) **Approval-first**: `approve()` reconfirma ticket ainda open+stage-válido ANTES de enviar (o dono pode ter deixado a proposta na fila por dias; o ticket pode ter fechado no meio-tempo). E toca `tickets.updated_at` no envio pra o detector NÃO re-propor amanhã.
+  - (iv) **`messageOverride` no approve()** — fluxo padrão: dono revisa proposta, edita texto se quiser, aprova. Sem obrigar edição.
+  - (v) **Dedupe do sinal por dia** (`sales_recovery:proposed:${ticketId}:${todayIso}`) — se o detector varrer 2× num dia antes do dono decidir, atualiza a mesma linha em vez de spam.
+  - (vi) **Detector filtra msg inbound recente do CONTATO** (não bot/agent) — se o cliente respondeu em qualquer canal, o dono do funil está ativo e não precisa de "recuperação".
+- **Cross-service:** rotas usam mesmo `runtimeGate` do resto (flag `execution_runtime_enabled=1` + RBAC do módulo `runtime`). Ordem no Scheduler.tick preserva chain existente e coloca F4c depois de F4b (cobrança tem SLA mais duro, recuperação é discovery). ADITIVO PURO — nenhum caller pré-existente muda.
+- **Resultado:** Loop de Recuperação Comercial em produção HOJE em modo `approved_execution`. Runtime detecta oportunidades comerciais paradas (via `tickets.stage + updated_at + messages`) + propõe mensagem de reengajamento (LLM ou template) + aguarda decisão humana. Aprovar → envia via WhatsApp + resolve sinal + registra outcome F3.1. Dispensar → resolve sem enviar + registra motivo. Sem OPENAI_API_KEY, F4c continua funcionando (template estático).
+- **Pendências criadas:**
+  - **F4c.2** — reply router (`SalesRecoveryReplyService`, padrão F4b.2) pra interpretar resposta do cliente após reengajamento (intents: `interested`, `not_now`, `remove_me` → LGPD opt-out).
+  - **F4c.3** — cadência multi-tentativa (padrão F4b.3): se dono aprovou mas não veio resposta em N dias, propõe 2ª msg. **Depende de decisão #4 LGPD ainda.**
+  - **F4c.4** — medição `revenueRecovered` real: quando `ticket.stage` vira `ganho` após recovery approval, atualiza outcome F3.1 com valor real (hoje registra `revenue_recovered=0`).
+  - **F4c.5** — UI dedicada (`SalesRecoveryPanel` no ExecutiveView) — MVP usa aba Operações genérica.
+- **Próximo passo:** **Piloto Cobrança está 100% completo (F4b + 4b.2 + 4b.3 + 4b.4)**; **Piloto Recuperação Comercial MVP 100% completo (F4c)** em modo approved_execution. Ambos os pilotos autoconsistentes. Decidir com o dono: (a) CLI de rollout (`zappflow-collection-tenant-setup.ts`) pra ativar piloto Cobrança numa org piloto; (b) F4c.4 (medição revenueRecovered real do sales recovery); (c) F4c.2 (reply router de recuperação); (d) agendar revisão LGPD pra desbloquear modo autonomous.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

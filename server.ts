@@ -99,6 +99,8 @@ import "./src/server/RuntimeCommandHandlers.js";
 import "./src/server/RetailClosingPlaybook.js";
 // ADR-152 F4b — piloto Cobrança MVP (registra collection_send_reminder).
 import "./src/server/CollectionPlaybook.js";
+// ADR-152 F4c — piloto Recuperação Comercial (registra sales_recovery_propose_message).
+import "./src/server/SalesRecoveryPlaybook.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";

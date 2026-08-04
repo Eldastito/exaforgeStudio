@@ -186,21 +186,21 @@ Campos:
 
 ## §14 — Processo prioritário 2 (Recuperação comercial)
 
-| §14.6 Critério | Status | Fase |
-|---|---|---|
-| Oportunidades paradas detectadas | [x] | — (`OpportunityRadarService`) |
-| Prioridade explicável | [x] | — (`ImpactPrioritizationService`) |
-| Cadência criada | [x] | — (`cadences`) |
-| Responsável definido | [~] | F4c |
-| Mensagens enviadas | [x] | — (`MessageProviderService`) |
-| Respostas interpretadas | [~] | F4c |
-| CRM atualizado | [x] | — (services do CRM) |
-| Reuniões agendadas | [~] | F4c |
-| Nova tentativa programada | [ ] | F4c |
-| Objeções escaladas | [ ] | F4c |
-| Receita com evidência | [x] | — (`revenue_recovered` do RIC) |
-| Opt-out e limites respeitados | [!] BLOQUEADO | F4c | Depende de revisão LGPD |
-| Testes cobrem fluxo completo | [ ] | F4c |
+| §14.6 Critério | Status | Fase | Evidência / plano |
+|---|---|---|---|
+| Oportunidades paradas detectadas | [x] F4c | F4c | `SalesStalledDealDetectorService.detect` — `tickets.stage ∈ {qualificado, proposta, negociacao, orcamento}` + `status='open'` + `updated_at < now - N` + sem msg inbound recente. Config `sales_recovery_stalled_days` (default 10) |
+| Prioridade explicável | [x] | — | `ImpactPrioritizationService` (ADR-136) — `daysSinceLastActivity` alimenta `priority` do processo |
+| Cadência criada | [~] F4c MVP | F4c.3 | F4c MVP: 1 mensagem proposta pro dono. F4c.3 (pós-LGPD signoff): cadência multi-tentativa via padrão F4b.3 |
+| Responsável definido | [~] MVP | F4c.2 | MVP: dono (RBAC do módulo `runtime`) aprova. F4c.2 pode atribuir a vendedor específico via `ticket.assigned_to` |
+| Mensagens enviadas | [x] F4c MVP | F4c | `MessageProviderService.sendMessage` chamado por `SalesRecoveryPlaybookService.approve` (após aprovação humana). Nunca autonomamente (G-4c-1). Verificado por `test-piloto-sales-recovery.ts` (41/41) |
+| Respostas interpretadas | [ ] BLOQUEADO F4c.2 | F4c.2 | Reply router `SalesRecoveryReplyService` (padrão F4b.2 CollectionReplyService) — intents `interested`/`not_now`/`remove_me`/`meeting_request`/`objection`. F4c.2 fica pra próxima fatia |
+| CRM atualizado | [~] MVP | F4c.2 | Approve toca `tickets.updated_at` (evita re-detecção imediata). F4c.2 pode transitar `stage` (proposta→negociacao) baseado em resposta |
+| Reuniões agendadas | [ ] BLOQUEADO F4c.2 | F4c.2 | Depende do intent classifier de recuperação. Reusa padrão do `PromiseService` F4b.4 |
+| Nova tentativa programada | [ ] BLOQUEADO F4c.3 | F4c.3 | Cadência multi-tentativa. **Depende de decisão #4 LGPD (F4c.3 sai de `approved_execution` só após signoff)** |
+| Objeções escaladas | [~] MVP | F4c.2 | MVP: dono dispensa via `POST /proposals/:id/dismiss` com `reason`. F4c.2 categoriza objeção via LLM |
+| Receita com evidência | [~] MVP + F4c.4 | F4c.4 | F4c MVP: outcome F3.1 gravado com `revenue_recovered=0` (o handler só propõe). F4c.4 atualiza `revenueRecovered` quando `ticket.stage` vira `ganho` após approval |
+| Opt-out e limites respeitados | [x] MVP (approval-first) | F4c.2 | MVP: G-4c-1 garante que NADA sai sem aprovação humana explícita (respeita LGPD). F4c.2 formaliza opt-out via intent `remove_me` → transiciona ticket + registra em audit |
+| Testes cobrem fluxo completo | [x] F4c MVP | F4c | `test-piloto-sales-recovery.ts` (41/41): detector (9), generator (5), playbook + rotas (27) — inclui isolamento cross-tenant, dedupe, WA-fail recovery, ticket-saiu-do-funil |
 
 ## §15 — Processo prioritário 3 (Fechamento retail)
 

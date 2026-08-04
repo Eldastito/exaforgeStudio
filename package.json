@@ -375,7 +375,9 @@
     "test:pilot-runtime": "tsx scripts/test-pilot-runtime.ts",
     "test:entitlement-service": "tsx scripts/test-entitlement-service.ts",
     "test:entitlement-middleware": "tsx scripts/test-entitlement-middleware.ts",
-    "test:entitlements-me": "tsx scripts/test-entitlements-me.ts"
+    "test:entitlements-me": "tsx scripts/test-entitlements-me.ts",
+    "test:comigo-preserved-on-upgrade": "tsx scripts/test-comigo-preserved-on-upgrade.ts",
+    "test:upgrade-matrix": "tsx scripts/test-upgrade-matrix.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

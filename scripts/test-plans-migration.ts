@@ -48,7 +48,10 @@ async function main() {
   check("Growth herda Start + estudio/reservas/assinaturas", mods("start").every(m => mods("growth").includes(m)) && ["estudio", "reservas", "assinaturas"].every(m => mods("growth").includes(m)));
   check("Scale adiciona compras/eventos/radar/retail", ["compras", "eventos", "radar", "retail"].every(m => mods("scale").includes(m)));
   check("Enterprise adiciona vms/clinica/prospect", ["vms", "clinica", "prospect"].every(m => mods("enterprise").includes(m)));
-  check("copiloto é exclusivo do Autônomo", mods("autonomo").includes("copiloto") && !mods("start").includes("copiloto"));
+  // ADR-153 F2.1 / Decisão #1: copiloto agora persistente em TODOS os planos
+  // (upgrade nunca remove capacidade — G-153-2). Antes: exclusivo do Autônomo.
+  check("copiloto está em TODOS os planos (ADR-153 F2.1)",
+    ["autonomo","start","growth","scale","enterprise"].every((t) => mods(t).includes("copiloto")));
 
   // ===== 4. Migração das orgs da grade antiga =====
   // Recria planos legados + orgs neles, e roda a migração de novo (idempotente).

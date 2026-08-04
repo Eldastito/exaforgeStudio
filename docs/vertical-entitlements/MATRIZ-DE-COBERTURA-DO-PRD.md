@@ -33,7 +33,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 - [~] Empresas verem apenas o que contrataram — hoje `ModuleService.overview` mostra `upgrade` como locked card (vaza catálogo global). Fatia 4.1 corrige.
 - [~] Impedir habilitação manual fora do plano — backend já impede uso, mas UI mostra a opção. Fatia 4.1.
 - [x] Coerência plano/vertical/add-on/módulo — F1.2 migrou o middleware, F1.3 migrou o frontend. Sidebar + ModulesPanel + útiles derivam de `useStore.entitlements` alimentado por `GET /api/entitlements/me`. Fonte única no backend + frontend.
-- [!] Upgrades sem perda de funcionalidades — bug conhecido (`copiloto` em Autônomo only). **Decisão #1** + Fatia 2.1.
+- [x] Upgrades sem perda de funcionalidades — bug fechado em F2.1 (Decisão #1 aprovada: `copiloto` agora em todos os 5 tiers). Matriz completa `origem × destino × módulos` no `test:upgrade-matrix` (93/93 OK) garante que nenhum upgrade remove módulo pré-existente.
 - [ ] Automatizar venda + pagamento + ativação — não existe fluxo real. Fase 5.
 - [ ] IA recomenda plano certo no momento certo — motor não existe. Fase 7.
 - [ ] Consentimento explícito pra qualquer alteração contratual — nenhum aceite gravado. Fatia 5.1 (**Decisão #2**).
@@ -98,8 +98,8 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ## §8 — Correção da grade
 
-- [!] Comigo persistente OU add-on. **Decisão #1.** Fatia 2.1.
-- [ ] Matriz `origem × destino × vertical × módulos` testada. Fatia 2.1 + `test-upgrade-matrix.ts`.
+- [x] Comigo persistente (Decisão #1 = Opção A, aprovada). Implementado em F2.1: `plansGrade.ts` — `START = [...AUTONOMO, ...]` propaga copiloto via cascade. Descrição em `ModuleService.MODULE_META.copiloto` atualizada.
+- [x] Matriz `origem × destino × módulos` testada. F2.1 — `scripts/test-upgrade-matrix.ts` (93/93 OK). Vertical não entra na matriz (ADR-153 §7 diz "blueprint ∩ plano" — vertical é preset independente).
 
 ## §9 — Vertical Blueprint
 
@@ -220,7 +220,7 @@ Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `
 
 ## §29 — Aceite upgrade
 
-- [!] Upgrade não remove Comigo. **Decisão #1.** Fatia 2.1.
+- [x] Upgrade não remove Comigo. F2.1 — validado em `test:comigo-preserved-on-upgrade` (peixaria autonomo → start/growth/scale/enterprise mantém `copiloto.state='active'`).
 - [ ] Preview mostra preço + proporcionalidade. Fatia 6.1.
 - [!] Consentimento obrigatório. **Decisão #2.** Fatia 5.1 + 6.1.
 - [ ] Cobrança confirmada ativa recursos. Fatia 6.1.

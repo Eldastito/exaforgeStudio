@@ -8,7 +8,7 @@ Cada decisão abaixo BLOQUEIA uma ou mais fatias do plano (`PLANO-DE-IMPLEMENTAC
 
 ## §A — Grade de planos
 
-### Decisão #1 — Comigo persistente vs Add-on
+### Decisão #1 — Comigo persistente vs Add-on ✅ **APROVADA 2026-08-04: Opção A (persistente)**
 
 **Contexto (PRD §8.1):** hoje `copiloto` só está em `AUTONOMO` (`plansGrade.ts:16`). Upgrade Autônomo→Start remove o balcão da peixaria/chaveiro sem aviso. É o risco de maior impacto no PRD.
 
@@ -191,7 +191,7 @@ Cada decisão abaixo BLOQUEIA uma ou mais fatias do plano (`PLANO-DE-IMPLEMENTAC
 
 | # | Bloqueia | Prioridade | Recomendação |
 |---|---|---|---|
-| 1 (Comigo) | F2.1 | Máxima | Opção A (persistente) |
+| 1 (Comigo) | F2.1 | ✅ **APROVADA** | Opção A (persistente) — implementar na F2.1 |
 | 2 (ToS) | F5.1 → F5-6 | Máxima | Opção A (jurídico) |
 | 3 (HMAC) | F5.2 | Alta | Opção A (migrar) |
 | 4 (Nomes Blueprint) | F3.2, F8.2-3 | Média | Opção A + 2 primeiros |

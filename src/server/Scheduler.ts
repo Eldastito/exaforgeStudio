@@ -485,6 +485,25 @@ export class Scheduler {
   }
 
   /**
+   * ADR-152 Fatia 4c.3 — cadência multi-tentativa de recuperação.
+   * Varre touches aprovados há N dias SEM reply do cliente e PROPÕE
+   * 2ª/3ª msg (via SalesRecoveryPlaybookService.proposeForTicket com
+   * attemptNumber). CADA proposta ainda passa por aprovação humana
+   * (G-4c.3-1) — modo autonomous continua bloqueado em LGPD signoff.
+   * Opt-in duplo: `sales_recovery_enabled=1 AND sales_recovery_
+   * followup_enabled=1`.
+   */
+  static async salesRecoveryFollowupPass() {
+    try {
+      const { SalesRecoveryFollowupService } = await import("./SalesRecoveryFollowupService.js");
+      const r = await SalesRecoveryFollowupService.tickAll();
+      if (r.proposed > 0 || r.orgsScanned > 0) {
+        console.info(`[Runtime F4c.3] follow-up de recuperação: ${r.orgsScanned} org(s), ${r.proposed} proposta(s), ${r.skipped} skip.`);
+      }
+    } catch (e: any) { console.error("[Runtime F4c.3] follow-up pass falhou", e?.message); }
+  }
+
+  /**
    * ADR-152 Fatia 4b.4 — re-check automático de promessa de pagamento.
    * Delega ao `CollectionPromiseService.tickAll` que percorre orgs opt-in
    * e trata cada promise cuja data prometida chegou:
@@ -632,6 +651,10 @@ export class Scheduler {
     // depois da cadência de cobrança pra respeitar ordem de prioridade
     // do dono (cobrança tem SLA mais duro; recuperação é discovery).
     await this.salesRecoveryDetectionPass().catch(e => console.error('[Scheduler] detecção Recuperação Comercial F4c falhou', e));
+    // ADR-152 F4c.3 — follow-up de recuperação (2ª/3ª tentativa proposta
+    // pro dono aprovar). Fica DEPOIS da detecção pra usar o estado
+    // atualizado de touches (aprovação recente reflete no próximo tick).
+    await this.salesRecoveryFollowupPass().catch(e => console.error('[Scheduler] follow-up Recuperação Comercial F4c.3 falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

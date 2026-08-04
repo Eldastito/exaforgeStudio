@@ -97,6 +97,11 @@ const SalesRecoveryProposeHandler: CommandHandler = {
       throwHandler("non_retryable", `ticket ${p.ticketId} saiu do funil (stage=${ticket.stage}).`);
     }
 
+    // ADR-152 F4c.3: attemptNumber vem do payload (default 1). Cadência
+    // usa 2/3 pra propostas de follow-up. O gerador varia o tom por
+    // tentativa (2ª mais leve, 3ª = fechamento respeitoso).
+    const attemptNumber = (Number(p.attemptNumber) === 2 ? 2 : Number(p.attemptNumber) === 3 ? 3 : 1) as 1 | 2 | 3;
+
     // Gera msg (LLM ou fallback template).
     let gen: { text: string; source: "llm" | "template" };
     try {
@@ -104,6 +109,7 @@ const SalesRecoveryProposeHandler: CommandHandler = {
         contactName: p.contactName || null,
         stage: String(ticket.stage),
         daysStalled: Number(p.daysStalled || 0),
+        attemptNumber,
       });
     } catch (e: any) {
       // NUNCA propaga throw — usa fallback.
@@ -111,10 +117,11 @@ const SalesRecoveryProposeHandler: CommandHandler = {
     }
 
     // Publica sinal com proposta. UI/aba Operações lista e permite aprovar.
-    // Dedupe por ticket + dia — se o detector varrer 2× no mesmo dia
-    // (antes do dono decidir), atualiza mesma linha em vez de duplicar.
+    // Dedupe por ticket + attempt + dia — F4c.3 permite propostas
+    // diferentes por tentativa no mesmo dia (edge: 1ª saiu ontem, hoje
+    // sistema propõe 2ª após gap). Sem attempt no dedupe, 2ª sobrescreveria.
     const todayIso = new Date().toISOString().slice(0, 10);
-    const dedupeKey = `sales_recovery:proposed:${p.ticketId}:${todayIso}`;
+    const dedupeKey = `sales_recovery:proposed:${p.ticketId}:a${attemptNumber}:${todayIso}`;
     let signalId: string | null = null;
     try {
       const pub = BusinessSignalService.publish(orgId, {
@@ -134,6 +141,7 @@ const SalesRecoveryProposeHandler: CommandHandler = {
           channelId: p.channelId,
           stage: ticket.stage,
           daysStalled: Number(p.daysStalled || 0),
+          attemptNumber,
           proposedText: gen.text,
           messageSource: gen.source,
           actionId: action.id,
@@ -146,16 +154,16 @@ const SalesRecoveryProposeHandler: CommandHandler = {
     try {
       logAuthEvent(orgId, null, p.contactId, "RUNTIME_SALES_RECOVERY_PROPOSED", {
         ticketId: p.ticketId, stage: ticket.stage, daysStalled: p.daysStalled,
-        messageSource: gen.source, signalId,
+        attemptNumber, messageSource: gen.source, signalId,
       });
     } catch { /* noop */ }
 
     return {
-      summary: `Rascunho pra ${p.contactName || p.ticketId}: "${gen.text.slice(0, 60)}${gen.text.length > 60 ? "…" : ""}"`,
+      summary: `Rascunho (tentativa ${attemptNumber}/3) pra ${p.contactName || p.ticketId}: "${gen.text.slice(0, 60)}${gen.text.length > 60 ? "…" : ""}"`,
       artifact: {
         kind: "sales_recovery_proposed",
         ticketId: p.ticketId, contactId: p.contactId, stage: ticket.stage,
-        proposedText: gen.text, messageSource: gen.source, signalId,
+        attemptNumber, proposedText: gen.text, messageSource: gen.source, signalId,
       },
       effect: "sales_recovery_proposed",
       externalRef: signalId || undefined,
@@ -223,11 +231,19 @@ export class SalesRecoveryPlaybookService {
    * Dispara UM processo pra um ticket específico. Dedupe automático via
    * `startForSubject` (subject=ticket:ticketId). Retorna a instance.
    */
-  static async proposeForTicket(orgId: string, deal: StalledDeal, createdBy?: string): Promise<any> {
+  static async proposeForTicket(orgId: string, deal: StalledDeal, createdBy?: string, opts: { attemptNumber?: 1 | 2 | 3 } = {}): Promise<any> {
+    // ADR-152 F4c.3: `attemptNumber` propagado ao handler via context/
+    // payload. Como o ProcessRuntimeService.startForSubject usa subject
+    // dedupe, chamar 2× pro mesmo ticket devolveria a MESMA instance
+    // com o attemptNumber ORIGINAL — quebrando o follow-up. Solução:
+    // pra tentativas 2/3 (F4c.3), embutir attemptNumber no subject
+    // (`ticket:attempt`) pra criar processos separados por tentativa.
+    const attemptNumber = (opts.attemptNumber ?? 1) as 1 | 2 | 3;
+    const subjectId = attemptNumber === 1 ? deal.ticketId : `${deal.ticketId}:a${attemptNumber}`;
     const inst = ProcessRuntimeService.startForSubject(orgId, {
       processType: "sales_recovery_v1",
       subjectType: "ticket",
-      subjectId: deal.ticketId,
+      subjectId,
       context: {
         ticketId: deal.ticketId,
         contactId: deal.contactId,
@@ -237,6 +253,7 @@ export class SalesRecoveryPlaybookService {
         stage: deal.stage,
         temperature: deal.temperature,
         daysStalled: deal.daysSinceLastActivity,
+        attemptNumber,
       },
       priority: Math.min(10, Math.max(1, Math.floor(deal.daysSinceLastActivity / 3))),
       riskLevel: "low",

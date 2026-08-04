@@ -534,6 +534,44 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
   - **F4c.5** — UI dedicada `SalesRecoveryPanel`.
 - **Próximo passo:** decidir com o dono se: (a) F4c.4 (medição revenue real quando ticket ganho); (b) CLI de rollout dos pilotos (padrão TOULON); (c) agendar revisão LGPD pra desbloquear F4c.3 (cadência multi-tentativa autônoma).
 
+### Sessão 2026-08-04 (Fatia 4c.3 do ADR-152 — Cadência multi-tentativa de Recuperação Comercial)
+- **Fase:** 4c.3 (extensão do F4c MVP/4c.2, ainda em modo `approved_execution`)
+- **Escopo:** motor de follow-up multi-tentativa (2ª/3ª msg) que PROPÕE via sinal — cada tentativa passa por dono aprovar. Reusa handler F4c + reply router F4c.2 (touch registrado atualiza cadência; reply para cadência). Mensagens 2ª/3ª mais SUAVES via generator estendido (recuperação ≠ cobrança). Modo autonomous continua BLOQUEADO em decisão #4 LGPD.
+- **Guarda-mãe G-4c.3-1:** cada tentativa passa por dono aprovar (G-4c-1 do MVP preservado). Runtime NUNCA envia autonomamente.
+- **Arquivos criados:**
+  - `src/server/SalesRecoveryFollowupService.ts` — `tickAll` + `runForOrg` + `findCandidates` (touches sem reply há gap+ dias). Reusa `SalesRecoveryPlaybookService.proposeForTicket(deal, {attemptNumber:N})`. Import dinâmico pra quebrar ciclo.
+  - `scripts/test-sales-recovery-followup.ts` — **32/32 checks** (5 generator estendido + 4 handler + 13 followup service + 4 integração E2E).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — 2 aditivos org_settings (`sales_recovery_followup_enabled INTEGER DEFAULT 0`, `sales_recovery_followup_days_gap INTEGER DEFAULT 5`). Opt-in DENTRO do opt-in F4c (org com F4c MVP não ganha follow-up sem ativar essa 2ª flag).
+  - `src/server/SalesRecoveryMessageGenerator.ts` — `GenerateInput.attemptNumber` opcional (1/2/3). Template + prompt LLM variam por tentativa via `ATTEMPT_HINTS`. Recuperação = tom SUAVE, não coercitivo (LGPD Art.8 §5). 3ª = "vou deixar em stand-by" (fechamento respeitoso).
+  - `src/server/SalesRecoveryPlaybook.ts` — handler propaga `attemptNumber` do payload pro generator. Sinal `sales_recovery_proposed` tem `evidence.attemptNumber`. Dedupe key inclui `:aN:` pra propostas distintas por tentativa coexistirem. `proposeForTicket(..., {attemptNumber})` embute attempt no subject (`ticket:aN`) pra dedupe do `startForSubject` não devolver a instance da 1ª quando follow-up chega.
+  - `src/server/Scheduler.ts` — nova `salesRecoveryFollowupPass()` chamada no tick após `salesRecoveryDetectionPass` (usa estado atualizado dos touches recentes).
+  - `package.json` — script `test:sales-recovery-followup`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §14 "Nova tentativa programada" vira [x].
+- **Testes executados:**
+  - `npm run test:sales-recovery-followup` → **32/32 OK**
+  - Regressão sem quebras: `test:piloto-sales-recovery` (41/41), `test:sales-recovery-reply` (44/44), `test:piloto-cobranca` (38/38), `test:cobranca-cadencia-multitentativa` (38/38), `test:cobranca-promise-recheck` (33/33), `test:runtime-execute-e2e` (27/27), `test:runtime-confirmation` (32/32), `test:business-signals` (12/12), `test:runtime-process-fabric` (42/42)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:**
+  - (i) **Cobrança AUTO-ENVIA T2/T3 (F4b.3); Recuperação PROPÕE 2ª/3ª pro dono aprovar (F4c.3).** Diferença legal: cobrança é a cliente conhecido (LGPD Art.7 §V — execução de contrato); recuperação é a lead qualificado (Art.8 §5 exige consentimento renovado — dono aprova cada envio).
+  - (ii) **`attemptNumber` no subject dedupe** (`ticket:a2`, `ticket:a3`) — sem isso, `startForSubject` devolveria a instance da 1ª tentativa em vez de criar processo pra follow-up. Alternativa era `startForSubject` opcional-single, mas isso quebraria outros callers.
+  - (iii) **Cadência PARA se cliente respondeu** (`reply_intent != NULL` da F4c.2). Qualquer intent (inclusive `unknown`) pausa — dono continua no controle.
+  - (iv) **Contato opt-out double-check** — o detector já filtra em `SalesStalledDealDetectorService`, mas o followup faz um segundo check porque o touch pode ter sido criado ANTES do opt-out ser marcado (F4c.2 `remove_me`).
+  - (v) **Mensagens 2ª/3ª FALLBACK templates hardcoded** (não passam pela lógica de stage) — a tentativa 2 é "sem pressão", a 3 é "stand-by". LLM tem hints similares no system prompt.
+  - (vi) **Gap default 5 dias** (não 3 como cobrança) — recuperação é conversa mais aberta; insistir todo dia sim, todo dia não afasta.
+- **Cross-service audit:** todas as mudanças em `SalesRecoveryMessageGenerator` (`GenerateInput.attemptNumber` opcional, default 1) e `SalesRecoveryPlaybook` (payload `attemptNumber` opcional, dedupe key mudou de `:d:` pra `:aN:d`) são backward-compatible — chamadas sem attemptNumber continuam funcionando como F4c MVP. Novo pass no Scheduler é opt-in duplo (default 0).
+- **Resultado:** Loop de recuperação comercial COMPLETO. Runtime agora:
+  1. Detecta deals parados (F4c)
+  2. Propõe 1ª msg via LLM → sinal (F4c MVP)
+  3. Dono aprova → envia + touch (F4c/4c.2)
+  4. Cliente responde → intent categorizado + reply canned + opt-out formalizado se remove_me (F4c.2)
+  5. **Sem resposta há gap+ dias → propõe 2ª msg (F4c.3) — dono aprova de novo**
+  6. Ainda sem resposta → propõe 3ª msg (F4c.3, tom stand-by) — dono aprova
+  7. Após 3 tentativas OU cliente respondeu OU opt-out → cadência PARA
+  Sem OPENAI_API_KEY, tudo cai pra templates fixos que variam por attempt.
+- **Pendências criadas:** nenhuma nova. F4c está funcionalmente completo em `approved_execution`.
+- **Próximo passo:** decidir com o dono se: (a) **F4c.4** (medição revenueRecovered real quando ticket→ganho); (b) **CLI de rollout dos pilotos** (padrão TOULON); (c) **UI dedicada `SalesRecoveryPanel`** (F4c.5); (d) agendar revisão LGPD pra desbloquear modo autonomous futuro.
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

@@ -48,9 +48,9 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ### §11.1 EntitlementService (novo)
 
-- [ ] Serviço `EntitlementService` com `check()` retornando `{allowed, visibility, reason, source, upgradeEligible}`. Fatia 1.1.
-- [ ] Rotas `/api/entitlements/{me,modules,resource/:key}`. Fatia 1.1.
-- [ ] Estados: `active | available_to_enable | available_to_buy | hidden | suspended | deprecated | pilot_only`. Fatia 1.1 + 1.4.
+- [x] Serviço `EntitlementService` com `check()` retornando `{allowed, visibility, reason, state, source, upgradeEligible, upgradeTargetPlan, addonEligible, addonPrice}`. Fatia 1.1 — `src/server/EntitlementService.ts`.
+- [x] Rotas `/api/entitlements/{me,modules,resource/:key}`. Fatia 1.1 — `src/server/routes/entitlements.ts` (`GET` only).
+- [~] Estados: `active | available_to_enable | available_to_buy | hidden | suspended` implementados (F1.1). `deprecated | pilot_only` reservados como enum mas sem detector (F1.4/futuro).
 
 ### §11.2 VerticalBlueprintService (novo)
 

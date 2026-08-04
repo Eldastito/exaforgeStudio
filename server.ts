@@ -89,6 +89,7 @@ import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import falatuRoutes from "./src/server/routes/falatu.js";
 import runtimeRoutes from "./src/server/routes/runtime.js";
+import entitlementsRoutes from "./src/server/routes/entitlements.js";
 // ADR-152 F2.3 — import pro side-effect de registerHandler (registra os 3
 // handlers concretos do Execution Runtime: WhatsAppSend, AsaasPixCharge,
 // AlterdataFetch). Sem esse import, o registry ficaria com só os 5 handlers
@@ -515,6 +516,10 @@ async function startServer() {
   // (flag opt-in `execution_runtime_enabled` da org, Master Admin bypass) +
   // RBAC granular do módulo `runtime` (enforceModulePermission acima).
   protectedApi.use("/runtime", runtimeRoutes);
+  // ADR-153 F1.1 — porta única de decisão de entitlement. Aditivo puro:
+  // GET-only, consumidores atuais (menu/middleware) continuam com os primitivos
+  // até F1.2/F1.3 migrarem.
+  protectedApi.use("/entitlements", entitlementsRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
   protectedApi.use("/permissions", permissionsRoutes);

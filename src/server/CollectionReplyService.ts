@@ -3,6 +3,7 @@ import { logAuthEvent } from "./auditLog.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { classify, type IntentLabel } from "./CollectionIntentClassifier.js";
 import { CollectionResendPixService } from "./CollectionResendPixService.js";
+import { CollectionPromiseService } from "./CollectionPromiseService.js";
 
 /**
  * Reply router de cobrança (ADR-152 F4b.2).
@@ -247,6 +248,27 @@ export class CollectionReplyService {
         confidence: result.confidence, viaLLM: !!process.env.OPENAI_API_KEY,
       });
     } catch { /* noop */ }
+
+    // ADR-152 F4b.4 — se intent=promise, cria linha em
+    // `collection_payment_promises` pra o `Scheduler.collectionPromiseCheckPass`
+    // fazer o re-check na data prometida. Só cria se temos channelId +
+    // phone + dueDate (senão follow-up automático não conseguiria enviar).
+    // Best-effort — nunca lança pro caller.
+    if (intent === "promise" && live.channelId && live.phone && live.dueDate) {
+      try {
+        CollectionPromiseService.create(orgId, {
+          actionId: live.actionId,
+          receivableId: live.receivableId,
+          contactId: live.contactId || contactId,
+          phone: live.phone,
+          channelId: live.channelId,
+          amount: live.amount,
+          dueDate: live.dueDate,
+          promisedDate: result.promiseDate ?? null,
+          signalId: signalId,
+        });
+      } catch (e) { console.warn("[Cobrança F4b.4] create promise falhou", e); }
+    }
 
     // ADR-152 F4b.3 — re-emissão automática de PIX quando o cliente pediu.
     // Só dispara se temos paymentId + channelId + phone amarrados na

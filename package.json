@@ -363,7 +363,8 @@
     "test:piloto-fechamento-retail": "tsx scripts/test-piloto-fechamento-retail.ts",
     "test:piloto-cobranca": "tsx scripts/test-piloto-cobranca.ts",
     "test:cobranca-intent-classifier": "tsx scripts/test-cobranca-intent-classifier.ts",
-    "test:cobranca-cadencia-multitentativa": "tsx scripts/test-cobranca-cadencia-multitentativa.ts"
+    "test:cobranca-cadencia-multitentativa": "tsx scripts/test-cobranca-cadencia-multitentativa.ts",
+    "test:cobranca-promise-recheck": "tsx scripts/test-cobranca-promise-recheck.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

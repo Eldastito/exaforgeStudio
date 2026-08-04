@@ -430,6 +430,42 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
   - F4b.4 (nova) — agendar re-check automático quando intent=`promise` via `SchedulerActionCommandHandler`. Hoje o sinal é publicado mas o dono precisa lembrar de conferir na data prometida.
 - **Próximo passo:** decidir com o dono se F4b.4 (automação restante do promise) ou F4c (Recuperação Comercial — bloqueada em decisão #4 LGPD) vem primeiro.
 
+### Sessão 2026-08-04 (Fatia 4b.4 do ADR-152 — Re-check automático de promessa de pagamento)
+- **Fase:** 4b.4 (fecha o loop de cobrança autônoma iniciado no F4b/4b.2/4b.3)
+- **Itens executados:** classifier estendido pra extrair `promiseDate` do LLM quando intent=promise + nova tabela `collection_payment_promises` (UNIQUE parcial por status='pending') + service `CollectionPromiseService.create/tickAll/runForOrg` + `Scheduler.collectionPromiseCheckPass` no tick (após F4b.3 pra ver estado atualizado). Ao promise chegar a data: cliente pagou → mark fulfilled + resolve o sinal reply_promise; ainda open → mark broken + envia WhatsApp follow-up + sinal risk.
+- **Arquivos criados:**
+  - `src/server/CollectionPromiseService.ts` — create + tickAll + guardas G-4b.4-1..9.
+  - `scripts/test-cobranca-promise-recheck.ts` — **33/33 checks** (4 classifier + 8 create + 21 checkPass/tick).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — nova tabela `collection_payment_promises` + aditivo `collection_promise_grace_days INTEGER DEFAULT 0`. Aditivos posicionados após F4b.3 (final do initDb).
+  - `src/server/CollectionIntentClassifier.ts` — `ClassificationResult.promiseDate?: string | null`. Prompt estendido pra pedir data (com `{TODAY}` substituído). Validação estrita YYYY-MM-DD + rejeita valores fora do padrão (fallback null).
+  - `src/server/CollectionReplyService.ts` — quando intent=promise, chama `CollectionPromiseService.create` best-effort. Só cria se `channelId + phone + dueDate` disponíveis (senão follow-up automático não conseguiria enviar).
+  - `src/server/Scheduler.ts` — nova `collectionPromiseCheckPass()` chamada no tick após `collectionCadencePass` (ordem importa: F4b.3 e F4b.4 dividem `collection_cadence_enabled` opt-in).
+  - `package.json` — script `test:cobranca-promise-recheck`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §13 "Promessa agenda nova verificação" vira [x].
+- **Testes executados:**
+  - `npm run test:cobranca-promise-recheck` → **33/33 OK**
+  - Regressão sem quebras: `test:cobranca-intent-classifier` (35/35), `test:cobranca-cadencia-multitentativa` (38/38), `test:piloto-cobranca` (38/38), `test:runtime-execute-e2e` (27/27), `test:runtime-confirmation` (32/32), `test:runtime-operations` (31/31), `test:business-signals` (12/12), `test:clinic-reminder-reply` (37/37), `test:asaas-billing` (16/16)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:**
+  - (i) **`SchedulerActionCommandHandler` genérico (mencionado no ADR/PLANO) fica aspiracional** — pro caso pontual da F4b.4 (re-check de promessa) o padrão `Scheduler.*Pass` já vem funcionando (F4b.3). Um handler genérico só se justifica se ≥2 domínios precisarem agendar comandos futuros — hoje só cobrança precisa. Nota adicionada em PLANO-DE-IMPLEMENTACAO.md pra revisar em F4c.
+  - (ii) **Opt-in compartilhado** com F4b.3 (`collection_cadence_enabled`). Quem opta por cadência autônoma opta pelo re-check.
+  - (iii) **G-4b.4-2**: promiseDate no passado (LLM confuso ou "amanhã" enquanto hoje já é depois de amanhã) → fallback pra `hoje+1`. Nunca cria promise com data já vencida.
+  - (iv) **UNIQUE parcial** (só `pending`) permite: cliente promete, quebra, promete de novo (adiou). A anterior fica `broken`/`cancelled` no histórico; só há 1 pending por vez.
+  - (v) **WA falha preserva PENDING** — não avança `checked_at`, próximo tick retenta (mesmo padrão F4b.3).
+  - (vi) **Fulfilled resolve reply_promise via resolveByDedupe** — o sinal atention do painel some quando o loop fecha; o dono não fica revisando promessa já cumprida.
+- **Cross-service change:** hook em CollectionReplyService é ADITIVO — só cria promise se `intent=promise` + campos disponíveis; caller pré-existente não muda. Ordem no Scheduler.tick preserva chain existente (confirmationTimeoutPass → collectionCadencePass → collectionPromiseCheckPass).
+- **Resultado:** Loop de cobrança autônoma FECHADO. Runtime hoje:
+  1. Envia lembrete inicial + PIX (F4b).
+  2. Interpreta 10 tipos de resposta (F4b.2).
+  3. Re-envia PIX quando cliente pede (F4b.3).
+  4. Cadência automática de 2ª/3ª tentativa se cliente não responde (F4b.3).
+  5. Agenda re-check da data prometida quando cliente diz "vou pagar" e cobra follow-up se não pagou (F4b.4).
+  6. Marca revenue_recovered no ledger F3.1 quando webhook Asaas confirma.
+  Tudo atrás de guardrails opt-in por-org + policies + audit log completo.
+- **Pendências criadas:** nenhuma nova. Todas as fatias F4b* estão fechadas.
+- **Próximo passo:** F4c (Piloto Recuperação Comercial) — segue BLOQUEADA em decisão #4 LGPD do dono (§F do DECISOES-E-PENDENCIAS.md — contato proativo em massa a leads exige revisão jurídica). Alternativas: (a) refactor genérico do SchedulerActionCommandHandler pra reuso em F4c; (b) fechar Piloto Cobrança com CLI de setup/rollout (padrão do TOULON no ADR-150).
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

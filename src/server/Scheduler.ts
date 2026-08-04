@@ -455,6 +455,24 @@ export class Scheduler {
   }
 
   /**
+   * ADR-152 Fatia 4b.4 — re-check automático de promessa de pagamento.
+   * Delega ao `CollectionPromiseService.tickAll` que percorre orgs opt-in
+   * e trata cada promise cuja data prometida chegou:
+   *   - receivable pago → mark fulfilled + resolve o sinal reply_promise;
+   *   - ainda open → envia follow-up WhatsApp + mark broken + sinal risk.
+   * Import dinâmico pra quebrar ciclo com MessageProviderService.
+   */
+  static async collectionPromiseCheckPass() {
+    try {
+      const { CollectionPromiseService } = await import("./CollectionPromiseService.js");
+      const r = await CollectionPromiseService.tickAll();
+      if (r.fulfilled > 0 || r.broken > 0) {
+        console.info(`[Runtime F4b.4] re-check promessas: ${r.orgsScanned} org(s), ${r.fulfilled} cumpridas, ${r.broken} quebradas, ${r.skipped} skip.`);
+      }
+    } catch (e: any) { console.error("[Runtime F4b.4] re-check falhou", e?.message); }
+  }
+
+  /**
    * FalaTu (ADR-151 Fatia 6) — ENTREGA do briefing por WhatsApp. Consome os
    * sinais `falatu_daily_briefing` publicados pelo falatuBriefingPass (por
    * isso roda DEPOIS dele no tick) e manda o resumo da manhã pro WhatsApp de
@@ -574,6 +592,11 @@ export class Scheduler {
     // atualizado das confirmações (uma cobrança que virou timed_out no
     // sweep sai da fila e não recebe follow-up desnecessário).
     await this.collectionCadencePass().catch(e => console.error('[Scheduler] cadência de cobrança F4b.3 falhou', e));
+    // ADR-152 F4b.4 — re-check de promessas fica DEPOIS da cadência pra
+    // ver o estado atualizado (se o webhook Asaas fechou uma cobrança no
+    // meio-tempo, o re-check já marca fulfilled em vez de disparar
+    // follow-up desnecessário).
+    await this.collectionPromiseCheckPass().catch(e => console.error('[Scheduler] re-check de promessas F4b.4 falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));

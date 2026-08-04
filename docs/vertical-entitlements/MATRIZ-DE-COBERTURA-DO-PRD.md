@@ -1,0 +1,302 @@
+# ADR-153 — Matriz de Cobertura do PRD
+
+Cada linha rastreia um item concreto do PRD (`docs/prd/PRD-VERTICAL-ENTITLEMENTS-ASSINATURAS.md`). Estados:
+
+- `[ ]` — não implementado.
+- `[~]` — parcialmente implementado ou existe mas precisa refactor.
+- `[x]` — implementado + testado + doc atualizado (conforme critério em `STATUS-DE-EXECUCAO.md § Como marcar item como concluído`).
+- `[!]` — bloqueado em decisão do dono.
+
+Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
+
+---
+
+## §1–3 — Instruções de processo (Fase 0)
+
+- [x] PRD lido integralmente pela IA Dev — evidência: `STATUS-DE-EXECUCAO.md` sessão 2026-08-04.
+- [x] Codebase mapeado — 4 agentes Explore, relatórios consolidados em `ANALISE-ARQUITETURAL.md §1`.
+- [x] Componentes existentes mapeados: `verticals.ts`, `ModuleService`, `PlanService`, `plansGrade.ts`, `AddonService`, `PermissionService`, `AsaasService`, `BusinessSignalService`, `OnboardingTemplateService`, `Scheduler` — todos catalogados com file:line em `ANALISE-ARQUITETURAL.md`.
+- [x] Divergências entre PRD e código identificadas — tabela em `ANALISE-ARQUITETURAL.md §2` (21 linhas).
+- [x] Ponderações registradas — `ANALISE-ARQUITETURAL.md §3` (9 seções).
+- [x] Arquitetura mínima proposta — 4 primitivas novas + 3 correções em `ADR-153.md § Decisão`.
+- [x] PRD salvo em `docs/prd/`.
+- [x] Plano de implementação salvo em `docs/vertical-entitlements/PLANO-DE-IMPLEMENTACAO.md`.
+- [x] Matriz de cobertura criada (este arquivo).
+- [ ] Desenvolvimento (Fase 1+) — aguardando decisões pendentes.
+
+---
+
+## §4–6 — Contexto e problema (informativo, não gera item)
+
+## §7 — Objetivos
+
+- [~] Empresas verem apenas o que contrataram — hoje `ModuleService.overview` mostra `upgrade` como locked card (vaza catálogo global). Fatia 4.1 corrige.
+- [~] Impedir habilitação manual fora do plano — backend já impede uso, mas UI mostra a opção. Fatia 4.1.
+- [~] Coerência plano/vertical/add-on/módulo — hoje funcional mas com fontes duplicadas (`ModuleService.MODULE_BY_ROUTE` × `PermissionService.ROUTE_MODULE`). Fatia 1.2.
+- [!] Upgrades sem perda de funcionalidades — bug conhecido (`copiloto` em Autônomo only). **Decisão #1** + Fatia 2.1.
+- [ ] Automatizar venda + pagamento + ativação — não existe fluxo real. Fase 5.
+- [ ] IA recomenda plano certo no momento certo — motor não existe. Fase 7.
+- [ ] Consentimento explícito pra qualquer alteração contratual — nenhum aceite gravado. Fatia 5.1 (**Decisão #2**).
+- [ ] Verticais → produtos replicáveis (Blueprints versionados) — conceito não existe. Fase 3.
+- [ ] Backend/menu/configurações/automações usam mesma fonte de verdade — 3-4 camadas hoje independentes. Fase 1 unifica via `EntitlementService`.
+
+## §9 — Conceito de trabalho pronto (padrão de aceite)
+
+- Todo item marcado `[x]` obedece o checklist do `STATUS-DE-EXECUCAO.md § Como marcar item como concluído`.
+
+## §11 — Componentes obrigatórios
+
+### §11.1 EntitlementService (novo)
+
+- [ ] Serviço `EntitlementService` com `check()` retornando `{allowed, visibility, reason, source, upgradeEligible}`. Fatia 1.1.
+- [ ] Rotas `/api/entitlements/{me,modules,resource/:key}`. Fatia 1.1.
+- [ ] Estados: `active | available_to_enable | available_to_buy | hidden | suspended | deprecated | pilot_only`. Fatia 1.1 + 1.4.
+
+### §11.2 VerticalBlueprintService (novo)
+
+- [ ] Tabelas `vertical_blueprints`, `organization_blueprints`. Fatia 3.1.
+- [ ] Métodos: `createBlueprint, publishVersion, getBlueprint, listBlueprints, assignToOrganization, cloneToOrganization, previewEntitlements, upgradeBlueprintVersion, compareVersions, rollbackVersion`. Fatia 3.1 (7 primeiros), 3.3 (3 últimos).
+- [ ] Imutabilidade após publish. Fatia 3.1 (test cobre).
+- [ ] Override por org em `organization_blueprints.overrides_json`. Fatia 3.1.
+
+### §11.3 SubscriptionOrchestratorService (novo)
+
+- [ ] Tabelas `subscription_change_requests`, `upgrade_recommendations`, `terms_versions`. Fatia 5.1 + 5.2 + 7.3.
+- [ ] Métodos: `preview, confirm, cancel`. Fatia 5.2.
+- [ ] Rotas `/api/billing/{plans,current,checkout,upgrade/preview,upgrade/confirm,downgrade}`. Fatias 5.3 + 6.1 + 6.2.
+- [ ] Proporcionalidade upgrade imediato. Fatia 6.1.
+- [ ] Downgrade agendado no próximo ciclo. Fatia 6.2.
+- [ ] Idempotência via `subscription_change_requests.provider_reference`. Fatia 5.2.
+
+### §11.4 UpgradeRecommendationEngine (novo)
+
+- [ ] `PlanFitDetectorService` (scanner puro). Fatia 7.1.
+- [ ] `PlanFitSignalPublisher` (publish + resolve por dedupe_key). Fatia 7.1.
+- [ ] Novos sinais `domain='plan'` com signal_types (`plan_near_limit_ai`, `plan_near_limit_channels`, `plan_module_gap_<key>`, `plan_capacity_bottleneck`). Fatia 7.1.
+- [ ] `Scheduler.planFitPass()` no slow pass. Fatia 7.1.
+- [ ] Score 0–100 baseado em 6 dimensões (§14 do PRD). Fatia 7.2.
+- [ ] `evidence_json` com breakdown por dimensão. Fatia 7.2.
+- [ ] Explicabilidade em linguagem natural. Fatia 7.2 + 7.4.
+- [ ] Frequency control (§15 do PRD). Fatia 7.3 (**Decisão #7**).
+- [ ] LGPD: rejeição pausa nova oferta. Fatia 7.3.
+- [ ] Rotas `/api/billing/recommendation/{dismiss,accept}`. Fatia 7.3.
+
+## §5 — Princípios obrigatórios
+
+- [ ] G-153-1 — Nenhuma tela define permissão. Fatia 1.3 (frontend consume único `/api/entitlements/me`).
+- [ ] G-153-2 — Upgrade nunca remove capacidade. Fatia 2.1 + matriz de upgrades (`test-upgrade-matrix.ts`).
+- [ ] G-153-3 — IA nunca contrata sem clique. Fatia 7.5 (test cobre).
+- [ ] G-153-4 — Preços calculados no backend, HMAC webhook. Fatia 5.2 + 5.3 (**Decisão #3**).
+- [ ] G-153-5 — Blueprint publicado é imutável. Fatia 3.1 (test cobre).
+- [ ] G-153-6 — Recomendação ≥60 + sem rejeição 30d + org não em incidente. Fatia 7.3.
+- [ ] G-153-7 — Downgrade preserva dados via `read_only`. Fatia 4.3 + 6.2 (**Decisão #9**).
+
+## §7 — Modelo de entitlement
+
+- [ ] Resolução `blueprint ∩ plano + add-ons + concessões ∩ enabled_modules ∩ RBAC ∩ flags`. Fatia 1.1 (composição inicial) + 3.2 (blueprint substitui `HIDDEN_BY_VERTICAL` estático).
+- [ ] Estado `hidden` diferente de `available_to_buy`. Fatia 1.4 + 3.2.
+
+## §8 — Correção da grade
+
+- [!] Comigo persistente OU add-on. **Decisão #1.** Fatia 2.1.
+- [ ] Matriz `origem × destino × vertical × módulos` testada. Fatia 2.1 + `test-upgrade-matrix.ts`.
+
+## §9 — Vertical Blueprint
+
+- [ ] Estrutura JSON `{key, version, baseVertical, allowedPlans, defaultPlan, minimumPlan, requiredModules, optionalModules, commercialUpgrades, hiddenModules, quickStartPack, runtimePlaybooks}`. Fatia 3.1.
+
+## §10 — Blueprints iniciais
+
+- [!] `moda_loja_unica_v1`. **Decisão #4.** Fatia 3.2.
+- [!] `moda_rede_lojas_v1`. **Decisão #4.** Fatia 3.2.
+- [!] `clinica_multiespecialidades_v1`. **Decisão #4 + #5.** Fatia 3.2 + 2.2 (bundle).
+- [!] `chaveiro_autonomo_v1`. **Decisão #4.** Fatia 3.2.
+- [!] `peixaria_balcao_peso_v1`. **Decisão #4.** Fatia 3.2.
+
+## §11 — Regra de visibilidade
+
+- [ ] Menu principal só mostra `visible + active + RBAC != none`. Fatia 1.3.
+- [ ] Configurações › Módulos com 3 áreas (`Seus recursos + Disponíveis no plano + Expansões`). Fatia 4.1.
+- [ ] `Configurações › Plano e Expansões` tela separada. Fatia 4.2.
+
+## §12–14 — Motor de recomendação
+
+- [ ] Sinais permitidos (§12.1) — 15 dimensões documentadas. Fatia 7.1 implementa as principais (`ai_this_month`, `channels`, `contacts`, `users`, signal_density).
+- [ ] Sinais proibidos isoladamente (§12.2) — só rechaça pattern não-informativo (visita repetida da tela = não-signal). Fatia 7.1 (test cobre).
+- [ ] Condições pra recomendar (§13) — 7 pré-condições. Fatia 7.3.
+- [ ] Score 0-100 com breakdown (§14). Fatia 7.2.
+
+## §15 — Frequência
+
+- [!] Cooldown 30 dias por `target_plan_id`. **Decisão #7.** Fatia 7.3.
+- [ ] Rejeição/inadimplência/incidente pausam. Fatia 7.3.
+
+## §16 — Explicabilidade
+
+- [ ] Recomendação explica motivo + dados + funcionalidade + problema + preço + impacto + limitações. Fatia 7.4 (modal do card).
+
+## §17 — Automação venda
+
+- [ ] Fluxo `escolha → resumo → aceite → checkout → cobrança → confirmação → ativação → onboarding → comprovante`. Fatia 5.2 + 5.3.
+- [ ] Checkout coleta CPF/CNPJ + responsável + método + aceite. Fatia 5.3.
+- [ ] Métodos PIX/cartão/boleto (via Asaas `billingType='UNDEFINED'`). Já existe (Fatia 5.3 usa mesmo).
+- [ ] Persistência `{provider, customer_id, subscription_id, payment_id, plan_id, billing_cycle, price, start, end, status, terms_accepted, terms_version}`. Fatia 5.1 + 5.2.
+
+## §18 — Fluxo de upgrade
+
+- [ ] Preview + comparação + valor proporcional + aceite → checkout → webhook → entitlement. Fatia 6.1.
+- [ ] IA nunca contrata sem clique explícito. Fatia 7.5 (test cobre).
+
+## §19 — Proporcionalidade
+
+- [ ] Upgrade imediato: ativa agora, cobra diferença proporcional, mantém data renovação. Fatia 6.1.
+- [ ] Downgrade: próximo ciclo, avisa perdas, impede se dependência ativa não resolvida. Fatia 6.2.
+
+## §20 — Add-ons
+
+- [~] Add-ons existem (`AddonService`, mock). Precisa integração Asaas real. Fatia 6.3.
+- [ ] Cada add-on tem `{preço, ciclo, módulos, limites, dependências, compatibilidade_blueprint, regras_cancelamento}`. Fatia 6.3.
+
+## §21 — Aplicação de entitlements
+
+- [ ] Ativação SÓ após webhook confirmado + assinatura válida + entitlement calculado + módulos aplicados. Fatia 5.2 (inverte fluxo atual que aplica antes da confirmação).
+
+## §22 — Falha no pagamento
+
+- [ ] Falha mantém plano anterior; não libera recursos; registra tentativa; informa usuário; permite retry. Fatia 5.2 + 6.1.
+
+## §23 — Cancelamento e downgrade
+
+- [ ] Políticas: solicitação, retenção, data efetiva, exportação, recursos perdidos, dados preservados, reativação, carência. Fatia 6.2 + **Decisão #9**.
+- [ ] Módulos removidos viram `read_only` (não delete). Fatia 4.3 + 6.2.
+
+## §24 — VerticalBlueprintService detalhado
+
+Já mapeado em §11.2. Ver Fatia 3.1 + 3.3 + 3.4.
+
+## §25 — Tabelas conceituais
+
+- [ ] `vertical_blueprints`. Fatia 3.1.
+- [ ] `organization_blueprints`. Fatia 3.1.
+- [ ] `plan_entitlements`. Fatia 1.1 (opcional — hoje derivamos de `plans.features.modules`; se performance exigir, materializa depois).
+- [ ] `organization_entitlements`. Fatia 4.3 (necessário pra estado `read_only` + concessões explícitas).
+- [ ] `upgrade_recommendations`. Fatia 7.3.
+- [ ] `subscription_change_requests`. Fatia 5.2.
+- [ ] `terms_versions`. Fatia 5.1.
+
+## §26 — APIs
+
+Entitlements: [ ] `/me`, [ ] `/modules`, [ ] `/resource/:key` — Fatia 1.1.
+Blueprints: [ ] `GET`, [ ] `POST`, [ ] `POST /:id/publish`, [ ] `POST /orgs/:id/blueprint` — Fatia 3.1 + 3.3.
+Planos: [ ] `GET /billing/plans`, [ ] `GET /billing/current`, [ ] `POST /billing/checkout`, [ ] `POST /billing/upgrade/preview`, [ ] `POST /billing/upgrade/confirm`, [ ] `POST /billing/downgrade` — Fatias 5.3 + 6.1 + 6.2.
+Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `POST .../accept` — Fatia 7.3.
+
+## §27 — Segurança
+
+- [~] Isolamento multi-tenant — já existe (todo query filtra `organization_id`). Manter em todos os novos services (Fatias 1, 3, 5, 6, 7).
+- [~] RBAC — `PermissionService` existe. Fatia 1.2 unifica com EntitlementService.
+- [!] Webhook autenticado — hoje token estático. **Decisão #3** (HMAC). Fatia 5.2.
+- [~] Idempotência webhook — hoje existe (`asaas_webhook_events`). Fatia 5.2 estende com `provider_reference` na `subscription_change_requests`.
+- [!] Consentimento — não existe pra SaaS. **Decisão #2.** Fatia 5.1.
+- [~] Auditoria — `logAuthEvent` existe. Fatias 5.2 + 6.1 + 7.3 adicionam eventos novos.
+- [~] Replay/duplicação — dedup por `subscription_change_requests.provider_reference`. Fatia 5.2.
+- [ ] Valores calculados no backend — checkout preview envia proporção calculada; frontend só exibe. Fatia 6.1.
+- [~] LGPD — parcial (contact-level existe). Falta contrato org-level. Fatia 5.1.
+- [!] Contrato versionado — **Decisão #2**. Fatia 5.1.
+- [ ] Trilha de aceite — `terms_accepted_at + terms_version + terms_accepted_ip`. Fatia 5.1.
+
+## §28 — Aceite visibilidade
+
+- [ ] Chaveiro não vê Clínica. Fatia 1.4 + 3.2.
+- [ ] Peixaria não vê Escola. Fatia 1.4 + 3.2.
+- [ ] Clínica não vê Retail Ops sem entitlement. Fatia 3.2.
+- [ ] Admin não consegue ativar módulo fora do plano. Fatia 1.2 (middleware) + 4.1.
+- [ ] Payload frontend modificado não fura backend. Fatia 1.1 (backend re-valida).
+- [ ] Menu e API dão mesma resposta. Fatia 1.3.
+- [ ] Configurações mostra só relevantes. Fatia 4.1.
+- [ ] Upgrade aparece só em Plano e Expansões. Fatia 4.1 + 4.2.
+- [ ] Usuário sem RBAC não vê módulo ativo. Fatia 1.2 + 1.3.
+- [ ] Add-on cancelado é removido do entitlement. Fatia 3.1 + 4.3.
+
+## §29 — Aceite upgrade
+
+- [!] Upgrade não remove Comigo. **Decisão #1.** Fatia 2.1.
+- [ ] Preview mostra preço + proporcionalidade. Fatia 6.1.
+- [!] Consentimento obrigatório. **Decisão #2.** Fatia 5.1 + 6.1.
+- [ ] Cobrança confirmada ativa recursos. Fatia 6.1.
+- [ ] Cobrança falha mantém plano anterior. Fatia 6.1 (test cobre).
+- [ ] Webhook duplicado não duplica upgrade. Fatia 5.2 (dedup por `provider_reference`).
+- [ ] Upgrade auditado. Fatia 5.2 + 6.1.
+- [ ] Downgrade só no próximo ciclo. Fatia 6.2.
+- [ ] Dados de módulos removidos preservados. Fatia 4.3 + 6.2 (**Decisão #9**).
+- [ ] Add-ons continuam ativos se compatíveis. Fatia 6.3.
+
+## §30 — Aceite recomendação
+
+- [ ] Usa dados reais. Fatia 7.1 (consulta `PlanService.getUsage` + `business_signals` counts).
+- [ ] Score registrado. Fatia 7.2 (grava em `upgrade_recommendations.score`).
+- [ ] Razões explicáveis. Fatia 7.2 + 7.4.
+- [ ] Respeita vertical (Blueprint restringe `commercialUpgrades`). Fatia 3.2 + 7.2.
+- [ ] Não recomenda módulo oculto. Fatia 7.1 (test cobre — publisher filtra por `blueprint.hiddenModules`).
+- [ ] IA não altera plano sozinha. Fatia 7.5.
+- [ ] Rejeição pausa. Fatia 7.3 (**Decisão #7**).
+- [ ] Benefício estimado rotulado como estimativa. Fatia 7.2 (`basis='estimate'` em `expected_impact`).
+- [ ] Preço vem do backend. Fatia 7.4 + 6.1.
+- [ ] Aceite explícito obrigatório. Fatia 7.4 + 6.1 (fluxo `card → preview → confirm`).
+
+## §31 — Testes obrigatórios
+
+- [ ] Matriz `Blueprint × Plano × Add-on × Módulo × RBAC × Menu × Configurações × API`. Script pós-Fase 3 (`test-entitlement-matrix.ts`).
+- [ ] Casos mínimos: peixaria Autônomo/Growth, chaveiro Autônomo/Start, clínica bundle/sem-add-on, moda loja única, TOULON rede, downgrade, upgrade, cobrança falha, webhook duplicado, add-on, usuário sem permissão, admin tentando alterar payload. Scripts por Fatia (referenciar cada em `STATUS-DE-EXECUCAO.md`).
+
+## §32 — Roadmap
+
+- [x] Fase 0 (Auditoria) — esta sessão.
+- [ ] Fase 1 (EntitlementService) — Fatias 1.1–1.4.
+- [ ] Fase 2 (Correção grade) — Fatias 2.1–2.2 (**Decisão #1, #5**).
+- [ ] Fase 3 (Blueprints) — Fatias 3.1–3.4 (**Decisão #4, #5, #6**).
+- [ ] Fase 4 (Interface) — Fatias 4.1–4.3 (**Decisão #9**).
+- [ ] Fase 5 (Checkout e assinatura) — Fatias 5.1–5.3 (**Decisão #2, #3**).
+- [ ] Fase 6 (Upgrade) — Fatias 6.1–6.3.
+- [ ] Fase 7 (Recomendação IA) — Fatias 7.1–7.5 (**Decisão #7, #8**).
+- [ ] Fase 8 (Rollout) — Fatias 8.1–8.4.
+
+## §33 — Bloqueadores pra vender em escala
+
+- [!] Corrigir perda do Comigo (**Decisão #1** + Fatia 2.1).
+- [ ] EntitlementService (Fase 1).
+- [ ] Impedir exposição de módulos indevidos (Fatia 3.2 + 4.1).
+- [ ] Definir produto Clínica (**Decisão #5** + Fatia 2.2 + 3.2).
+- [ ] Upgrade financeiro Asaas (Fase 6).
+- [ ] Checkout (Fase 5).
+- [ ] Aceite (Fatia 5.1 — **Decisão #2**).
+- [ ] Webhook + idempotência (Fatia 5.2).
+- [ ] Downgrade (Fatia 6.2 — **Decisão #9**).
+- [ ] 4 blueprints (**Decisão #4** + Fatia 3.2).
+- [ ] Testes autorização (matriz — pós-Fase 3).
+- [ ] Contratos + LGPD (**Decisão #2**).
+
+## §34 — Vendas controladas (bridge)
+
+- [ ] Rollout supervisionado (TOULON, peixaria, chaveiro, clínica piloto) — Fase 8.1–8.3.
+
+## §35 — Política comercial
+
+- [~] Labels/preços dos planos — precisam ser revisitados. Bundle Clínica (Fatia 2.2) é o primeiro exemplo.
+
+## §36 — Resultado esperado
+
+- [ ] Sistema responde "esta empresa pertence ao nicho X, contratou Y, tem plano Z e add-ons W. Vê só isso." Cumprido quando Fase 3 + 4 fecharem.
+- [ ] Sistema recomenda "próximo plano é Growth porque..." Cumprido quando Fase 7 fechar.
+- [ ] Alteração só após consentimento + confirmação pagamento. Cumprido quando Fase 5 + 6 fecharem.
+
+## Critérios globais de aceite (validado ao FIM do projeto)
+
+- [ ] Nenhuma tela mostra módulo fora do contrato.
+- [ ] Nenhum admin liberação módulo fora do plano.
+- [ ] Nenhum upgrade remove capacidade.
+- [ ] IA nunca contrata sem clique.
+- [ ] Todo pagamento resulta em estado consistente.
+- [ ] Frontend/backend sempre concordam.
+- [ ] Blueprint imutável funcionando.
+- [ ] 100% dos itens do PRD marcados `[x]` com evidência aqui.

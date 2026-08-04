@@ -189,6 +189,10 @@ async function main() {
   check("overview inclui 'catalogo' (optional)", overview["catalogo"] != null);
   check("overview inclui 'clinica' (hidden)", overview["clinica"] != null && overview["clinica"].state === "hidden");
   check("overview tem ≥ CORE(4) + OPTIONAL(28) = 32 entries", Object.keys(overview).length >= 30);
+  // Meta agregada (F1.3) — vertical + plan derivados. Toda EntitlementDecision expõe
+  // isso em `source`; consumidores de UI leem uma única entrada pra pegar contexto.
+  check("overview.catalogo.source.vertical = varejo", overview["catalogo"].source.vertical === "varejo");
+  check("overview.catalogo.source.plan = autonomo", overview["catalogo"].source.plan === "autonomo");
 
   // ===== 16. checkRoute compatível com semântica de PermissionService =====
   const route1 = EntitlementService.checkRoute(orgV, ownerV, "products", "GET");

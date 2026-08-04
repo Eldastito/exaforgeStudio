@@ -32,7 +32,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [~] Empresas verem apenas o que contrataram — hoje `ModuleService.overview` mostra `upgrade` como locked card (vaza catálogo global). Fatia 4.1 corrige.
 - [~] Impedir habilitação manual fora do plano — backend já impede uso, mas UI mostra a opção. Fatia 4.1.
-- [~] Coerência plano/vertical/add-on/módulo — F1.2 migrou o middleware do `server.ts` pra `EntitlementService.isModuleAvailable`. Restantes (Sidebar, ModulesPanel via useStore) migram em F1.3.
+- [x] Coerência plano/vertical/add-on/módulo — F1.2 migrou o middleware, F1.3 migrou o frontend. Sidebar + ModulesPanel + útiles derivam de `useStore.entitlements` alimentado por `GET /api/entitlements/me`. Fonte única no backend + frontend.
 - [!] Upgrades sem perda de funcionalidades — bug conhecido (`copiloto` em Autônomo only). **Decisão #1** + Fatia 2.1.
 - [ ] Automatizar venda + pagamento + ativação — não existe fluxo real. Fase 5.
 - [ ] IA recomenda plano certo no momento certo — motor não existe. Fase 7.
@@ -115,9 +115,9 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ## §11 — Regra de visibilidade
 
-- [ ] Menu principal só mostra `visible + active + RBAC != none`. Fatia 1.3.
-- [ ] Configurações › Módulos com 3 áreas (`Seus recursos + Disponíveis no plano + Expansões`). Fatia 4.1.
-- [ ] `Configurações › Plano e Expansões` tela separada. Fatia 4.2.
+- [x] Menu principal só mostra `visible + active + RBAC != none`. F1.3 — Sidebar consome `useStore.isModuleEnabled` + `canAccessModule`, ambos derivados de `entitlements[k].state === 'active'` e `entitlements[k].visibility === 'visible'`.
+- [x] Configurações › Módulos com 3 áreas (`Seus recursos + Disponíveis no plano + Expansões`). F1.3 (ModulesPanel migrado; `available_to_buy` vira link colapsado pra `Plano e Expansões`).
+- [~] `Configurações › Plano e Expansões` tela separada. F1.3 registra o **placeholder** ("em construção — F4.2 preenche"). Fatia 4.2 conteúdo real (comparação de plano + add-ons + recomendação IA + checkout).
 
 ## §12–14 — Motor de recomendação
 

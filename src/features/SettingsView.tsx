@@ -78,6 +78,11 @@ export function SettingsView() {
           <button onClick={() => setActiveTab('modulos')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'modulos' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <LayoutGrid className="w-4 h-4" /> Módulos
           </button>
+          {/* ADR-153 F1.3 — placeholder da nova aba "Plano e Expansões" (F4.2 detalha
+              o conteúdo com comparação de plano + add-ons compatíveis + CTA de upgrade). */}
+          <button onClick={() => setActiveTab('planoexpansoes')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'planoexpansoes' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Rocket className="w-4 h-4" /> Plano e Expansões
+          </button>
           <button onClick={() => setActiveTab('seguranca')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'seguranca' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <ShieldCheck className="w-4 h-4" /> Segurança (2FA)
           </button>
@@ -215,7 +220,8 @@ export function SettingsView() {
           {activeTab === 'atendimento' && <AiAttendancePanel />}
           {activeTab === 'cobranca' && <BillingPanel />}
 
-          {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('cobranca')} />}
+          {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('planoexpansoes')} />}
+          {activeTab === 'planoexpansoes' && <PlanoExpansoesPlaceholder />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
           {activeTab === 'governanca' && <GovernancePanel />}
@@ -640,24 +646,105 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
-type ModuleOverviewItem = { key: string; label: string; desc: string; section: 'recommended' | 'available' | 'upgrade'; enabled: boolean; recommended: boolean; addon?: boolean };
+// ADR-153 F1.3 — placeholder da nova aba "Plano e Expansões" (PRD §11.3).
+// F4.2 preenche com: plano atual + uso + limites + próximos níveis + add-ons
+// compatíveis + recomendação da IA (F7) + CTA de upgrade (F6). Por ora só
+// registra a aba no menu pra a mudança de UX ser aditiva já em F1.3.
+function PlanoExpansoesPlaceholder() {
+  return (
+    <>
+      <div className="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
+        <div>
+          <h2 className="zf-page-title flex items-center gap-2">
+            <Rocket className="w-6 h-6 text-teal-300" /> Plano e Expansões
+          </h2>
+          <p className="text-zinc-400 text-sm mt-1">Comparação de planos, add-ons compatíveis com o seu Blueprint e recomendações da IA.</p>
+        </div>
+      </div>
+      <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-6">
+        <p className="text-sm text-indigo-300 font-semibold">Em construção (ADR-153 F4.2)</p>
+        <p className="text-xs text-zinc-400 mt-2">
+          Esta aba vai reunir: plano atual + uso × limites + próximos níveis + add-ons compatíveis + preço + recomendação inteligente + checkout de upgrade.
+          Enquanto isso, veja seus recursos em <b>Módulos</b> e faça upgrade em <b>Cobrança</b>.
+        </p>
+      </div>
+    </>
+  );
+}
+
+// ADR-153 F1.3: usa o mesmo shape de EntitlementDecision do backend.
+type EntitlementItem = {
+  resource: string;
+  label: string;
+  desc: string;
+  state: 'active' | 'available_to_enable' | 'available_to_buy' | 'hidden' | 'suspended' | 'deprecated' | 'pilot_only';
+  upgradeTargetPlan: string | null;
+  addonPrice: number | null;
+  addon: boolean;
+};
+
+// Rótulos + descrições dos módulos (fonte visível pro dono). Deveria vir do
+// backend em uma fatia futura (por ex., /api/entitlements/me poderia incluir
+// meta.moduleMeta), mas por ora mantemos aqui pra não expandir o payload da
+// rota. Segue os mesmos rótulos do ModuleService.MODULE_META no backend.
+const MODULE_META: Record<string, { label: string; desc: string }> = {
+  agenda: { label: 'Agenda', desc: 'Agendamentos e horários (Google Calendar).' },
+  catalogo: { label: 'Catálogo', desc: 'Produtos e serviços.' },
+  vendas: { label: 'Vendas', desc: 'Pedidos e fechamento de vendas.' },
+  loja: { label: 'Loja Virtual', desc: 'Vitrine online para o cliente comprar.' },
+  pagamentos: { label: 'Pagamentos', desc: 'Recebimento por PIX / gateway.' },
+  campanhas: { label: 'Campanhas', desc: 'Disparos segmentados.' },
+  cadencias: { label: 'Cadências', desc: 'Sequências de follow-up automático.' },
+  areas: { label: 'Áreas de Atendimento', desc: 'Vários profissionais num número.' },
+  integracoes: { label: 'Integrações', desc: 'Google Workspace e outras conexões.' },
+  reservas: { label: 'Reservas', desc: 'Reservas por período com controle de disponibilidade.' },
+  assinaturas: { label: 'Assinaturas', desc: 'Cobrança recorrente.' },
+  compras: { label: 'Compras', desc: 'Reposição inteligente por IA.' },
+  orcamentos: { label: 'Orçamentos', desc: 'Orçamento rastreável com follow-up até a validade.' },
+  eventos: { label: 'Eventos & Grupos', desc: 'Pipeline consultivo de eventos.' },
+  diretor: { label: 'Diretor Executivo IA', desc: 'Conselheiro de gestão com dados reais.' },
+  estudio: { label: 'Estúdio de Criação', desc: 'IA gera imagens e vídeos de campanha.' },
+  rie: { label: 'Revenue Intelligence', desc: 'Índice, drivers e plano de ação.' },
+  execucao: { label: 'Execução / Tarefas', desc: 'Delegação com Coordenador IA.' },
+  prospect: { label: 'Prospect AI', desc: 'Prospecção B2B ativa.' },
+  vms: { label: 'Vision VMS', desc: 'Monitoramento de câmeras (add-on).' },
+  radar: { label: 'Radar de Execução IA', desc: 'Diagnóstico de maturidade em IA.' },
+  clinica: { label: 'Clínica', desc: 'Prontuário, agenda clínica, portal do paciente.' },
+  retail: { label: 'Retail Ops', desc: 'Operação de rede de lojas.' },
+  retail_floor: { label: 'Atendimento de Loja', desc: 'Lista da vez, cronômetro, conciliação PDV.' },
+  copiloto: { label: 'Comigo (Copiloto)', desc: 'Balcão de vendas + precificação + fiado.' },
+  escola: { label: 'Escola', desc: 'Resumo diário do aluno pela família.' },
+  valor: { label: 'Painel de Valor', desc: 'Impacto medido do ZappFlow no negócio.' },
+};
+
+// ADDONs (definidos em verticals.ts do backend) — marcados visualmente.
+const ADDON_MODULES = new Set(['vms', 'radar', 'prospect', 'clinica', 'retail', 'escola', 'retail_floor']);
 
 function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
-  const loadOrgConfig = useStore(s => s.loadOrgConfig);
-  const [items, setItems] = useState<ModuleOverviewItem[] | null>(null);
+  const loadEntitlements = useStore(s => s.loadEntitlements);
+  const [items, setItems] = useState<EntitlementItem[] | null>(null);
   const [enabled, setEnabled] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/analytics/modules-overview')
+    apiFetch('/api/entitlements/me')
       .then(r => r.json())
-      .then((d: { items?: ModuleOverviewItem[] }) => {
-        const list = Array.isArray(d?.items) ? d.items : [];
+      .then((d: { entitlements?: Record<string, any> }) => {
+        const raw = d?.entitlements || {};
+        const list: EntitlementItem[] = Object.entries(raw)
+          .filter(([, dec]: [string, any]) => dec?.state && MODULE_META[dec.resource])
+          .map(([, dec]: [string, any]) => ({
+            resource: dec.resource,
+            label: MODULE_META[dec.resource].label,
+            desc: MODULE_META[dec.resource].desc,
+            state: dec.state,
+            upgradeTargetPlan: dec.upgradeTargetPlan || null,
+            addonPrice: dec.addonPrice ?? null,
+            addon: ADDON_MODULES.has(dec.resource),
+          }));
         setItems(list);
-        // Só os módulos DENTRO do teto do plano (recomendados/disponíveis) podem
-        // estar ligados; os de upgrade nunca entram no override.
-        setEnabled(new Set(list.filter(m => m.section !== 'upgrade' && m.enabled).map(m => m.key)));
+        setEnabled(new Set(list.filter(m => m.state === 'active').map(m => m.resource)));
       })
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
@@ -671,31 +758,36 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
     if (!items) return;
     setSaving(true);
     try {
-      // Envia apenas o que está dentro do teto do plano e ligado.
-      const payload = items.filter(m => m.section !== 'upgrade' && enabled.has(m.key)).map(m => m.key);
+      // Envia só os toggleáveis (active + available_to_enable) que estão ligados.
+      const payload = items
+        .filter(m => (m.state === 'active' || m.state === 'available_to_enable') && enabled.has(m.resource))
+        .map(m => m.resource);
       await apiFetch('/api/analytics/settings/modules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled_modules: payload }),
       });
-      await loadOrgConfig(); // atualiza o menu lateral na hora
+      await loadEntitlements(); // atualiza o menu lateral + entitlements do store na hora
       toast.success('Módulos atualizados!');
     } catch (e) { toast.error('Falha ao salvar os módulos.'); }
     finally { setSaving(false); }
   };
 
-  const recommended = (items || []).filter(m => m.section === 'recommended');
-  const available = (items || []).filter(m => m.section === 'available');
-  const upgrade = (items || []).filter(m => m.section === 'upgrade');
+  // ADR-153 §11.2 — 3 seções: Seus recursos + Disponíveis no plano + Expansões.
+  // Estados `hidden`/`suspended` não aparecem aqui (por design — hidden é o que a
+  // vertical/blueprint não recomenda, suspended é problema de billing).
+  const ativos = (items || []).filter(m => m.state === 'active');
+  const disponiveis = (items || []).filter(m => m.state === 'available_to_enable');
+  const expansoes = (items || []).filter(m => m.state === 'available_to_buy');
 
-  const Row: React.FC<{ m: ModuleOverviewItem }> = ({ m }) => {
-    const on = enabled.has(m.key);
+  const Row: React.FC<{ m: EntitlementItem }> = ({ m }) => {
+    const on = enabled.has(m.resource);
     return (
       <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
         <div>
           <p className="text-sm font-medium text-zinc-100 flex items-center gap-2">{m.label}{m.addon && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">add-on</span>}</p>
           <p className="text-xs text-zinc-500">{m.desc}</p>
         </div>
-        <button onClick={() => toggle(m.key)}
+        <button onClick={() => toggle(m.resource)}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
           <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
@@ -721,48 +813,39 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
         <p className="text-zinc-500 text-sm">Carregando…</p>
       ) : (
         <div className="space-y-6">
-          {/* Recomendados para o seu negócio */}
-          {recommended.length > 0 && (
+          {/* Seus recursos (ativos) */}
+          {ativos.length > 0 && (
             <div>
-              <p className="text-sm font-semibold text-emerald-300 mb-2">✅ Recomendados para o seu negócio</p>
-              <p className="text-xs text-zinc-500 mb-3">Ligados por padrão conforme a sua categoria. Desligue o que não usar.</p>
-              <div className="space-y-2">{recommended.map(m => <Row key={m.key} m={m} />)}</div>
+              <p className="text-sm font-semibold text-emerald-300 mb-2">✅ Seus recursos</p>
+              <p className="text-xs text-zinc-500 mb-3">Módulos que já estão ligados na sua conta. Desligue o que não usar.</p>
+              <div className="space-y-2">{ativos.map(m => <Row key={m.resource} m={m} />)}</div>
             </div>
           )}
 
-          {/* Disponível no seu plano */}
-          {available.length > 0 && (
+          {/* Disponível no seu plano (podem ligar sem pagar) */}
+          {disponiveis.length > 0 && (
             <div>
-              <p className="text-sm font-semibold text-zinc-200 mb-2">➕ Disponível no seu plano</p>
-              <p className="text-xs text-zinc-500 mb-3">Não vêm ligados por padrão, mas o seu plano permite. Ligue se quiser.</p>
-              <div className="space-y-2">{available.map(m => <Row key={m.key} m={m} />)}</div>
+              <p className="text-sm font-semibold text-zinc-200 mb-2">➕ Recursos disponíveis no seu plano</p>
+              <p className="text-xs text-zinc-500 mb-3">Ligue quando quiser — já estão no seu plano.</p>
+              <div className="space-y-2">{disponiveis.map(m => <Row key={m.resource} m={m} />)}</div>
             </div>
           )}
 
-          {/* Requer upgrade (colapsado) */}
-          {upgrade.length > 0 && (
-            <details className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
-              <summary className="cursor-pointer text-sm font-semibold text-indigo-300 flex items-center gap-2">
-                <Lock className="w-4 h-4" /> Requer upgrade de plano ({upgrade.length})
-              </summary>
-              <p className="text-xs text-zinc-500 mt-2 mb-3">Disponíveis em planos superiores. {onUpgrade && 'Veja em Cobrança e Plano.'}</p>
-              <div className="space-y-2">
-                {upgrade.map(m => (
-                  <div key={m.key} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 opacity-80">
-                    <div>
-                      <p className="text-sm font-medium text-zinc-300 flex items-center gap-2">{m.label}{m.recommended && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">sugerido p/ você</span>}</p>
-                      <p className="text-xs text-zinc-500">{m.desc}</p>
-                    </div>
-                    <Lock className="w-4 h-4 text-zinc-600 flex-shrink-0" />
-                  </div>
-                ))}
-              </div>
+          {/* Expansões — link pra Plano e Expansões (F4.2 detalha). */}
+          {expansoes.length > 0 && (
+            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+              <p className="text-sm font-semibold text-indigo-300 flex items-center gap-2 mb-2">
+                <Lock className="w-4 h-4" /> Expansões recomendadas ({expansoes.length})
+              </p>
+              <p className="text-xs text-zinc-500 mb-3">
+                Recursos disponíveis via upgrade ou add-on. Veja detalhes em <b>Plano e Expansões</b>.
+              </p>
               {onUpgrade && (
-                <button onClick={onUpgrade} className="mt-3 text-xs text-indigo-300 hover:text-indigo-200 font-medium">
-                  Ver planos e fazer upgrade →
+                <button onClick={onUpgrade} className="text-xs text-indigo-300 hover:text-indigo-200 font-medium">
+                  Ver Plano e Expansões →
                 </button>
               )}
-            </details>
+            </div>
           )}
         </div>
       )}

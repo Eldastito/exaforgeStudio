@@ -55,16 +55,21 @@ export interface ClassificationResult {
   intent: IntentLabel;
   confidence: number;   // 0..1 — quando LLM não dá, cai pra 0
   rationale: string;    // uma linha curta pra auditoria
+  // ADR-152 F4b.4 — quando intent=`promise`, LLM tenta extrair a data
+  // prometida (YYYY-MM-DD). Se não conseguir OU intent != promise,
+  // fica null. O CollectionReplyService usa isso pra criar a linha em
+  // `collection_payment_promises` — se null, aplica fallback "hoje+3".
+  promiseDate?: string | null;
 }
 
 const WHITELIST: Set<string> = new Set(INTENT_LABELS as unknown as string[]);
 
-const SYSTEM_PROMPT = `Você é um classificador de intenções de RESPOSTAS DE COBRANÇA em PT-BR.
+const SYSTEM_PROMPT_BASE = `Você é um classificador de intenções de RESPOSTAS DE COBRANÇA em PT-BR.
 
 Receberá UMA mensagem enviada pelo devedor (cliente) reagindo a um lembrete de cobrança que a empresa acabou de mandar (PIX, valor, vencimento).
 
 Devolva EXCLUSIVAMENTE um JSON com este shape:
-  {"intent": "<one_of_enum>", "reason": "<uma frase curta>"}
+  {"intent": "<one_of_enum>", "reason": "<uma frase curta>", "promiseDate": "YYYY-MM-DD" | null}
 
 O enum tem exatamente estes valores (use um deles literalmente, sem inventar):
   - "promise"         → cliente promete pagar em data futura. Ex.: "Vou pagar amanhã.", "Pago sexta.", "Semana que vem eu acerto."
@@ -82,6 +87,7 @@ Regras rígidas:
 - Escolha SEMPRE a intenção QUE MELHOR DESCREVE a mensagem. Se estiver genuinamente ambígua ou o texto não parece resposta de cobrança (spam, saudação vazia, gíria isolada, emoji só, etc), devolva "intent" fora do enum ou string vazia — o consumidor tratará como desconhecido.
 - Se a mensagem contém MAIS DE UMA intenção, priorize nesta ordem: claims_paid > dispute > escalate_human > promise > installment > partial > hardship > resend_pix > callback_later > churn.
 - "reason" deve ser UMA frase curta (≤ 15 palavras) em PT-BR justificando.
+- "promiseDate" (ADR-152 F4b.4): APENAS quando intent="promise" e o cliente indica QUANDO vai pagar. Converta pra YYYY-MM-DD assumindo que HOJE é {TODAY}. Exemplos: "amanhã" → dia seguinte; "sexta"/"na sexta" → próxima sexta futura; "dia 15" → próximo dia 15 futuro (se hoje é depois do 15, o mês seguinte); "semana que vem" → +7 dias; "no fim do mês" → último dia do mês corrente. Se não conseguir extrair ou intent!=promise, devolva null. NUNCA invente uma data que o cliente não sugeriu.
 - NÃO devolva markdown, prefixos, código. APENAS o JSON.`;
 
 /**
@@ -89,37 +95,53 @@ Regras rígidas:
  * `sample` fica limitado a 500 chars pra proteger contra prompt-injection
  * por payload gigante (política default do orchestrator ADR-050).
  */
-export async function classify(text: string): Promise<ClassificationResult> {
+export async function classify(text: string, opts: { today?: string } = {}): Promise<ClassificationResult> {
   const sample = String(text || "").trim().slice(0, 500);
-  if (!sample) return { intent: "unknown", confidence: 0, rationale: "mensagem vazia" };
+  if (!sample) return { intent: "unknown", confidence: 0, rationale: "mensagem vazia", promiseDate: null };
   if (!process.env.OPENAI_API_KEY) {
-    return { intent: "unknown", confidence: 0, rationale: "LLM indisponível (OPENAI_API_KEY ausente)" };
+    return { intent: "unknown", confidence: 0, rationale: "LLM indisponível (OPENAI_API_KEY ausente)", promiseDate: null };
   }
+
+  const today = opts.today || new Date().toISOString().slice(0, 10);
+  const system = SYSTEM_PROMPT_BASE.replace("{TODAY}", today);
 
   let raw = "";
   try {
-    raw = await _chat(sample, { system: SYSTEM_PROMPT, json: true, temperature: 0 });
+    raw = await _chat(sample, { system, json: true, temperature: 0 });
   } catch (e: any) {
-    return { intent: "unknown", confidence: 0, rationale: `LLM erro: ${e?.message || e}` };
+    return { intent: "unknown", confidence: 0, rationale: `LLM erro: ${e?.message || e}`, promiseDate: null };
   }
 
   let parsed: any = null;
   try { parsed = JSON.parse(raw); } catch { /* deixa null */ }
   if (!parsed || typeof parsed !== "object") {
-    return { intent: "unknown", confidence: 0, rationale: "resposta LLM não é JSON válido" };
+    return { intent: "unknown", confidence: 0, rationale: "resposta LLM não é JSON válido", promiseDate: null };
   }
 
   const rawIntent = String(parsed.intent || "").trim();
   const rationale = String(parsed.reason || "").trim().slice(0, 200);
   if (!WHITELIST.has(rawIntent) || rawIntent === "unknown") {
-    return { intent: "unknown", confidence: 0, rationale: rationale || "intent fora do enum" };
+    return { intent: "unknown", confidence: 0, rationale: rationale || "intent fora do enum", promiseDate: null };
+  }
+
+  // promiseDate: só faz sentido quando intent=promise. Validação estrita
+  // do formato YYYY-MM-DD pra rejeitar lixo do LLM ("amanhã", "sexta",
+  // etc). Se inválido ou intent!=promise, fica null — o
+  // CollectionPromiseService aplica fallback "hoje+3".
+  let promiseDate: string | null = null;
+  if (rawIntent === "promise" && parsed.promiseDate) {
+    const s = String(parsed.promiseDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const parsedD = new Date(s + "T00:00:00Z");
+      if (!isNaN(parsedD.getTime())) promiseDate = s;
+    }
   }
 
   // Whitelist passou — confiança default 0.9 (o modelo com temp=0 e prompt
   // enum-forçado é bastante estável; se quiséssemos calibrar mais fino,
   // pediríamos "confidence" no JSON — mas isso adiciona superfície ao
   // prompt sem ganho pra MVP).
-  return { intent: rawIntent as IntentLabel, confidence: 0.9, rationale: rationale || "classificado pelo LLM" };
+  return { intent: rawIntent as IntentLabel, confidence: 0.9, rationale: rationale || "classificado pelo LLM", promiseDate };
 }
 
 export const CollectionIntentClassifier = { classify, INTENT_LABELS };

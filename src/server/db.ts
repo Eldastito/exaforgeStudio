@@ -7331,6 +7331,49 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_cadence_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_reminder_2_days_after_due INTEGER DEFAULT 3`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_reminder_3_days_after_due INTEGER DEFAULT 7`); } catch(e){}
+
+  // ADR-152 Fatia 4b.4 — re-check automático de promessa de pagamento.
+  // Quando o intent classifier (F4b.2) detecta `promise` na resposta do
+  // cliente, o CollectionReplyService cria uma linha aqui com a data
+  // prometida (extraída pelo LLM ou fallback "hoje+3"). A cada tick do
+  // Scheduler, `collectionPromiseCheckPass` percorre promises `pending`
+  // cuja `promised_date` chegou e:
+  //   - se receivable virou 'received' → marca `fulfilled` + resolve o
+  //     sinal reply_promise (fecha o loop no painel);
+  //   - se ainda `open` → marca `broken` + envia WhatsApp de follow-up +
+  //     publica sinal severity=risk pro dono acompanhar.
+  //
+  // UNIQUE parcial (só `pending`) permite que uma nova promessa depois
+  // de broken/fulfilled seja criada — cliente pode prometer 2× (adia).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS collection_payment_promises (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,             -- decision_action collection_send_reminder amarrada
+        receivable_id TEXT,
+        contact_id TEXT,
+        phone TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        amount REAL,                         -- valor prometido; default = amount original
+        due_date TEXT NOT NULL,              -- YYYY-MM-DD vencimento do receivable
+        promised_date TEXT NOT NULL,         -- YYYY-MM-DD quando cliente prometeu pagar
+        promised_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status TEXT DEFAULT 'pending',       -- pending | fulfilled | broken | escalated | cancelled
+        checked_at DATETIME,                 -- último tick que passou por essa promessa
+        signal_id TEXT,                      -- id do business_signal reply_promise (dedupe pra resolveByDedupe)
+        source TEXT DEFAULT 'llm'            -- 'llm' | 'default' | 'manual'
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_action_pending
+        ON collection_payment_promises (organization_id, action_id)
+        WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS idx_collection_promise_check
+        ON collection_payment_promises (organization_id, status, promised_date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar collection_payment_promises (ADR-152 F4b.4)', e); }
+  // Dias de graça pós-promessa antes de marcar broken (default 0 =
+  // marca broken no MESMO dia da promessa que passou). Configurável por-org.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_promise_grace_days INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

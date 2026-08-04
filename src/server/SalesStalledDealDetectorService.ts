@@ -64,6 +64,10 @@ export class SalesStalledDealDetectorService {
     // (ignora bot/agent). Se essa data > cutoff, o ticket teve resposta
     // recente e NÃO está parado — filtramos com HAVING (LEFT JOIN
     // preserva tickets sem nenhuma msg do contato).
+    // ADR-152 F4c.2 — filtro LGPD: `contacts.marketing_opt_out=0`.
+    // Contatos que pediram opt-out via reply intent=remove_me nunca
+    // mais entram na fila de recuperação. `COALESCE` porque orgs
+    // pré-existentes podem ter null.
     const rows = db.prepare(`
       SELECT t.id AS ticketId, t.contact_id AS contactId, t.stage, t.temperature,
              t.updated_at AS updatedAt,
@@ -75,6 +79,7 @@ export class SalesStalledDealDetectorService {
          AND t.status = 'open'
          AND t.stage IN (${stagesPlaceholders})
          AND t.updated_at < ?
+         AND COALESCE(c.marketing_opt_out, 0) = 0
        ORDER BY t.updated_at ASC
        LIMIT ?
     `).all(orgId, ...SALES_STAGES, cutoffIso, limit) as any[];

@@ -501,6 +501,39 @@ Cada atualização deve registrar: data, fase, item, arquivos alterados, testes 
   - **F4c.5** — UI dedicada (`SalesRecoveryPanel` no ExecutiveView) — MVP usa aba Operações genérica.
 - **Próximo passo:** **Piloto Cobrança está 100% completo (F4b + 4b.2 + 4b.3 + 4b.4)**; **Piloto Recuperação Comercial MVP 100% completo (F4c)** em modo approved_execution. Ambos os pilotos autoconsistentes. Decidir com o dono: (a) CLI de rollout (`zappflow-collection-tenant-setup.ts`) pra ativar piloto Cobrança numa org piloto; (b) F4c.4 (medição revenueRecovered real do sales recovery); (c) F4c.2 (reply router de recuperação); (d) agendar revisão LGPD pra desbloquear modo autonomous.
 
+### Sessão 2026-08-04 (Fatia 4c.2 do ADR-152 — Reply Router de Recuperação Comercial + opt-out LGPD)
+- **Fase:** 4c.2 (fecha o loop de recuperação comercial iniciado no F4c MVP)
+- **Escopo:** interceptar RESPOSTAS de recuperação (após F4c MVP enviar), classificar em 7 intents (`interested`, `meeting_request`, `not_now`, `objection`, `remove_me`, `already_bought`, `unknown`), publicar sinal categorizado + reply canned. Formalizar opt-out LGPD via `contacts.marketing_opt_out=1` (F4c detector já filtra por essa flag na próxima varredura).
+- **Arquivos criados:**
+  - `src/server/SalesRecoveryReplyClassifier.ts` — 7 intents PT-BR. JSON mode + enum whitelist. Prompt prioriza `remove_me` (interpretação protetiva LGPD). Setter `__setSalesReplyChatForTests`.
+  - `src/server/SalesRecoveryReplyService.ts` — `tryHandle(orgId, contactId, phone, text)` correlaciona reply → touch recente (janela `sales_recovery_reply_window_days` default 14) via query `sales_recovery_touches`, classifica, publica sinal, atualiza touch com `reply_intent + reply_signal_id`. `remove_me` seta `marketing_opt_out=1` ATOMICAMENTE. `recordTouch(...)` chamado pelo F4c.approve() após envio bem-sucedido.
+  - `scripts/test-sales-recovery-reply.ts` — **44/44 checks** (10 classifier + 14 tryHandle intents/janela/isolamento + 20 integração F4c+F4c.2/LGPD/edge).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — nova tabela `sales_recovery_touches` (id, org, ticket, contact, phone, channel, proposed_signal_id, approved_by, message_id, sent_at, reply_received_at, reply_intent, reply_signal_id) + índices por contact/phone/ticket. Aditivo `sales_recovery_reply_window_days INTEGER DEFAULT 14`.
+  - `src/server/SalesRecoveryPlaybook.ts` — approve() agora (a) BLOQUEIA envio se `contacts.marketing_opt_out=1` (LGPD Art.8 §5) — throw + `RUNTIME_SALES_RECOVERY_BLOCKED_OPT_OUT` + descarta sinal; (b) chama `SalesRecoveryReplyService.recordTouch` após envio bem-sucedido (import dinâmico pra quebrar ciclo).
+  - `src/server/SalesStalledDealDetectorService.ts` — JOIN com contacts filtra `COALESCE(c.marketing_opt_out, 0) = 0` (LGPD: contato opted-out nunca entra na fila).
+  - `src/server/webhookProcessor.ts` — hook `SalesRecoveryReplyService.tryHandle` após `CollectionReplyService` (F4b.2) e antes da IA. Ordem: clinic → collection → sales_recovery → AI (cobrança tem SLA mais duro que recuperação).
+  - `package.json` — script `test:sales-recovery-reply`.
+  - `docs/execution-runtime/MATRIZ-DE-COBERTURA-DO-PRD.md` — §14 atualiza 5 critérios (respostas interpretadas, reuniões, objeções, opt-out formalizado, CRM atualizado).
+- **Testes executados:**
+  - `npm run test:sales-recovery-reply` → **44/44 OK**
+  - Regressão sem quebras: `test:piloto-sales-recovery` (41/41), `test:piloto-cobranca` (38/38), `test:cobranca-intent-classifier` (35/35), `test:cobranca-cadencia-multitentativa` (38/38), `test:cobranca-promise-recheck` (33/33), `test:runtime-execute-e2e` (27/27), `test:runtime-confirmation` (32/32), `test:runtime-operations` (31/31), `test:business-signals` (12/12), `test:clinic-reminder-reply` (37/37), `test:runtime-process-fabric` (42/42)
+  - `npx tsc --noEmit` → limpo
+- **Decisões micro:**
+  - (i) **Reusa `contacts.marketing_opt_out`** (bandeira nativa) em vez de nova tabela `sales_recovery_optouts`. Sem duplicação — LGPD Art.8 §5 respeitado por single-flag.
+  - (ii) **Query do touch não filtra por `reply_intent IS NULL`** — LGPD requer que `remove_me` seja honrado MESMO se o cliente já respondeu antes com outro intent (edge case: "muito caro" → "para de me mandar msg"). Dedupe por (touch, intent) do BusinessSignal evita spam.
+  - (iii) **`remove_me` severity=`risk`** (não info) — LGPD é evento noticiável, não rotina.
+  - (iv) **`recordTouch` só é chamado após envio bem-sucedido** — WA falha não cria touch (não haveria correlação real com reply do cliente).
+  - (v) **`approve()` BLOQUEIA envio se opt-out** — descarta sinal automaticamente pra não poluir painel + audit `BLOCKED_OPT_OUT`. Dono não precisa aprovar/dispensar; sistema decide sozinho porque LGPD é decisão dura.
+  - (vi) **Ordem no webhookProcessor**: cobrança > recuperação. Cobrança tem SLA duro; recuperação é conversa aberta.
+- **Cross-service audit:** hook no webhookProcessor é ADITIVO PURO — sem touch, retorna `{handled:false}` e fluxo AI segue. Bloqueio LGPD no approve() é BREAKING intencional (contatos opt-out não recebem — comportamento pré-existente da main permitia; agora rejeita). Nenhuma outra chamada mudou.
+- **Resultado:** Loop de recuperação comercial autônomo COMPLETO. Runtime detecta deals parados → propõe msg → dono aprova (com LGPD guard) → envia → cliente responde → classifica intent → publica sinal + reply canned + (se remove_me) opt-out formalizado + detector nunca mais propõe pra esse contato. Ciclo fechado com LGPD compliance.
+- **Pendências criadas:**
+  - **F4c.3** — cadência multi-tentativa de recuperação. Ainda BLOQUEADA em decisão #4 LGPD (envios múltiplos sem approval humano exigem signoff jurídico).
+  - **F4c.4** — medição `revenueRecovered` real (ticket→`ganho` após approval — hook em `ticket_stage_logs`).
+  - **F4c.5** — UI dedicada `SalesRecoveryPanel`.
+- **Próximo passo:** decidir com o dono se: (a) F4c.4 (medição revenue real quando ticket ganho); (b) CLI de rollout dos pilotos (padrão TOULON); (c) agendar revisão LGPD pra desbloquear F4c.3 (cadência multi-tentativa autônoma).
+
 ### Sessão AAAA-MM-DD (template para próxima)
 - **Fase:** …
 - **Itens executados:** …

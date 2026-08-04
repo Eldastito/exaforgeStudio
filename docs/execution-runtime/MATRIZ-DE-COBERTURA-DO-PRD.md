@@ -193,14 +193,14 @@ Campos:
 | Cadência criada | [~] F4c MVP | F4c.3 | F4c MVP: 1 mensagem proposta pro dono. F4c.3 (pós-LGPD signoff): cadência multi-tentativa via padrão F4b.3 |
 | Responsável definido | [~] MVP | F4c.2 | MVP: dono (RBAC do módulo `runtime`) aprova. F4c.2 pode atribuir a vendedor específico via `ticket.assigned_to` |
 | Mensagens enviadas | [x] F4c MVP | F4c | `MessageProviderService.sendMessage` chamado por `SalesRecoveryPlaybookService.approve` (após aprovação humana). Nunca autonomamente (G-4c-1). Verificado por `test-piloto-sales-recovery.ts` (41/41) |
-| Respostas interpretadas | [ ] BLOQUEADO F4c.2 | F4c.2 | Reply router `SalesRecoveryReplyService` (padrão F4b.2 CollectionReplyService) — intents `interested`/`not_now`/`remove_me`/`meeting_request`/`objection`. F4c.2 fica pra próxima fatia |
-| CRM atualizado | [~] MVP | F4c.2 | Approve toca `tickets.updated_at` (evita re-detecção imediata). F4c.2 pode transitar `stage` (proposta→negociacao) baseado em resposta |
-| Reuniões agendadas | [ ] BLOQUEADO F4c.2 | F4c.2 | Depende do intent classifier de recuperação. Reusa padrão do `PromiseService` F4b.4 |
+| Respostas interpretadas | [x] F4c.2 | F4c.2 | `SalesRecoveryReplyClassifier` mapeia 7 intents (`interested`/`meeting_request`/`not_now`/`objection`/`remove_me`/`already_bought`/`unknown`) via LLM JSON mode + whitelist. `SalesRecoveryReplyService.tryHandle` hookado no `webhookProcessor` (após F4b.2, antes IA). Verificado por `test-sales-recovery-reply.ts` (44/44) |
+| CRM atualizado | [~] F4c.2 | F4c.4 | F4c: approve toca `tickets.updated_at`. F4c.2: touch guarda reply_intent — dono vê estado da conversa. F4c.4 (nova) pode transitar `ticket.stage` (proposta→negociacao) baseado em resposta. Ganho/perdido continua manual |
+| Reuniões agendadas | [~] F4c.2 sinal + humano | F4c.4 | F4c.2: intent `meeting_request` publica sinal severity=`attention` + reply canned (dono decide horário/vendedor). Automação via `SchedulerActionCommandHandler` fica pra F4c.4 |
 | Nova tentativa programada | [ ] BLOQUEADO F4c.3 | F4c.3 | Cadência multi-tentativa. **Depende de decisão #4 LGPD (F4c.3 sai de `approved_execution` só após signoff)** |
-| Objeções escaladas | [~] MVP | F4c.2 | MVP: dono dispensa via `POST /proposals/:id/dismiss` com `reason`. F4c.2 categoriza objeção via LLM |
-| Receita com evidência | [~] MVP + F4c.4 | F4c.4 | F4c MVP: outcome F3.1 gravado com `revenue_recovered=0` (o handler só propõe). F4c.4 atualiza `revenueRecovered` quando `ticket.stage` vira `ganho` após approval |
-| Opt-out e limites respeitados | [x] MVP (approval-first) | F4c.2 | MVP: G-4c-1 garante que NADA sai sem aprovação humana explícita (respeita LGPD). F4c.2 formaliza opt-out via intent `remove_me` → transiciona ticket + registra em audit |
-| Testes cobrem fluxo completo | [x] F4c MVP | F4c | `test-piloto-sales-recovery.ts` (41/41): detector (9), generator (5), playbook + rotas (27) — inclui isolamento cross-tenant, dedupe, WA-fail recovery, ticket-saiu-do-funil |
+| Objeções escaladas | [x] F4c.2 | F4c.2 | Intent `objection` publica sinal severity=`attention` + reply canned. Dono revisa evidence com `reply_text_sample` + `rationale` (LLM). Padrão F4b.2 |
+| Receita com evidência | [~] MVP + F4c.4 | F4c.4 | F4c MVP: outcome F3.1 gravado com `revenue_recovered=0`. F4c.4 (nova) atualiza `revenueRecovered` quando `ticket.stage` vira `ganho` após approval |
+| Opt-out e limites respeitados | [x] F4c + F4c.2 (LGPD Art.8 §5) | F4c.2 | F4c: G-4c-1 (nada sai sem aprovação humana). F4c.2: intent `remove_me` seta `contacts.marketing_opt_out=1` ATOMICAMENTE + audit `RUNTIME_SALES_RECOVERY_OPT_OUT`; detector filtra `COALESCE(c.marketing_opt_out,0)=0` (nunca mais propõe pra opt-out); `approve()` BLOQUEIA envio se contato opt-out (LGPD Art.8 §5) + audit `BLOCKED_OPT_OUT` |
+| Testes cobrem fluxo completo | [x] F4c + F4c.2 | F4c/F4c.2 | `test-piloto-sales-recovery.ts` (41/41) + `test-sales-recovery-reply.ts` (44/44) — inclui isolamento cross-tenant, dedupe, WA-fail recovery, ticket-saiu-do-funil, integração E2E F4c+F4c.2 + LGPD opt-out end-to-end |
 
 ## §15 — Processo prioritário 3 (Fechamento retail)
 

@@ -7386,6 +7386,46 @@ const initDb = () => {
   // um ticket ser considerado parado (default 10).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_stalled_days INTEGER DEFAULT 10`); } catch(e){}
+
+  // ADR-152 Fatia 4c.2 — reply router de recuperação comercial.
+  // Rastreia CADA envio aprovado (approve() da F4c MVP) pra o reply
+  // router poder correlacionar respostas do cliente com o touch mais
+  // recente. Também guarda a resposta interpretada (intent + signal)
+  // pra o dono ver histórico completo.
+  //
+  // `contacts.marketing_opt_out` (já existente) é a fonte da verdade
+  // LGPD — não criamos tabela dedicada de opt-out, só setamos essa
+  // flag quando o cliente responde intent=`remove_me`.
+  //
+  // Janela de correlação: reply é considerada "sobre a recuperação"
+  // se veio em até `sales_recovery_reply_window_days` (default 14).
+  // Depois disso, cai no fluxo normal (IA).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sales_recovery_touches (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        proposed_signal_id TEXT,          -- ID do business_signal sales_recovery_proposed
+        approved_by TEXT,                 -- user_id que aprovou
+        message_id TEXT,                  -- wamid do provider
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reply_received_at DATETIME,       -- populado quando cliente responde
+        reply_intent TEXT,                -- interested | meeting_request | not_now | objection | remove_me | already_bought | unknown
+        reply_signal_id TEXT              -- ID do business_signal sales_recovery_reply_* criado
+      );
+      CREATE INDEX IF NOT EXISTS idx_sales_recovery_touches_contact
+        ON sales_recovery_touches (organization_id, contact_id, sent_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_sales_recovery_touches_phone
+        ON sales_recovery_touches (organization_id, phone, sent_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_sales_recovery_touches_ticket
+        ON sales_recovery_touches (organization_id, ticket_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar sales_recovery_touches (ADR-152 F4c.2)', e); }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_reply_window_days INTEGER DEFAULT 14`); } catch(e){}
 };
 
 initDb();

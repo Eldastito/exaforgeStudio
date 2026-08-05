@@ -117,7 +117,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [x] Menu principal só mostra `visible + active + RBAC != none`. F1.3 — Sidebar consome `useStore.isModuleEnabled` + `canAccessModule`, ambos derivados de `entitlements[k].state === 'active'` e `entitlements[k].visibility === 'visible'`.
 - [x] Configurações › Módulos com 3 áreas (`Seus recursos + Disponíveis no plano + Expansões`). F1.3 (ModulesPanel migrado; `available_to_buy` vira link colapsado pra `Plano e Expansões`).
-- [~] `Configurações › Plano e Expansões` tela separada. F1.3 registra o **placeholder** ("em construção — F4.2 preenche"). Fatia 4.2 conteúdo real (comparação de plano + add-ons + recomendação IA + checkout).
+- [x] `Configurações › Plano e Expansões` tela separada. F4.2 preenche com 7 blocos: plano atual + blueprint + status; uso × limites; bundles verticais recomendados; próximos níveis (comparação PLAN_GRADE); add-ons compatíveis (filtrados por blueprint); add-ons ativos; slot IA (F7 popula). CTA leva pra Cobrança (checkout real vem em F5.3).
 
 ## §12–14 — Motor de recomendação
 

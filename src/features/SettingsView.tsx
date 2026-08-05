@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download, History, Clock } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -646,6 +646,75 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
+// ADR-153 F4.3 — Linha individual do histórico de recomendações. Consome
+// `upgrade_recommendations` via /api/billing/recommendations (F7.3). Read-only
+// na aba — não expõe accept aqui (dono aceita via card pending F7.4 acima).
+// Mostra badge de status + label alvo (target_plan_id + moduleKey?) + data
+// relevante (accepted_at / dismissed_at) + cooldown restante quando dismissed.
+const RecommendationHistoryRow: React.FC<{ rec: any }> = ({ rec }) => {
+  const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> = {
+    pending: { bg: 'bg-blue-500/15 border-blue-500/30', text: 'text-blue-300', label: 'pendente' },
+    accepted: { bg: 'bg-emerald-500/15 border-emerald-500/30', text: 'text-emerald-300', label: 'aceita' },
+    dismissed: { bg: 'bg-zinc-700/40 border-zinc-600/30', text: 'text-zinc-300', label: 'dispensada' },
+    expired: { bg: 'bg-zinc-800/50 border-zinc-700/30', text: 'text-zinc-500', label: 'expirada' },
+  };
+  const s = STATUS_STYLE[rec.status] || STATUS_STYLE.pending;
+  const target = rec.targetModuleKey
+    ? `Módulo "${rec.targetModuleKey}" · plano ${rec.targetPlanId || '—'}`
+    : `Plano ${rec.targetPlanId || '—'}`;
+  const fmtDate = (iso: string | null | undefined) => {
+    if (!iso) return null;
+    try { return new Date(iso).toLocaleDateString('pt-BR'); } catch { return null; }
+  };
+  const daysUntil = (iso: string | null | undefined) => {
+    if (!iso) return null;
+    try {
+      const diff = new Date(iso).getTime() - Date.now();
+      return Math.max(0, Math.ceil(diff / (24 * 3600 * 1000)));
+    } catch { return null; }
+  };
+  const brl = (n: number | null | undefined) => (
+    n != null ? `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null
+  );
+
+  let detail: string | null = null;
+  if (rec.status === 'dismissed' && rec.cooldownUntil) {
+    const dLeft = daysUntil(rec.cooldownUntil);
+    detail = dLeft != null && dLeft > 0
+      ? `Pausada por mais ${dLeft} dia${dLeft === 1 ? '' : 's'} (até ${fmtDate(rec.cooldownUntil)})`
+      : `Cooldown terminou em ${fmtDate(rec.cooldownUntil)}`;
+  } else if (rec.status === 'accepted') {
+    detail = `Aceita em ${fmtDate(rec.acceptedAt)}`;
+  } else if (rec.status === 'expired') {
+    detail = `Cooldown expirou — pode ser re-oferecida.`;
+  } else if (rec.status === 'pending') {
+    detail = 'Aguardando decisão do dono.';
+  }
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-3 ${s.bg}`}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${s.text} bg-black/25`}>
+            {s.label}
+          </span>
+          <span className="text-sm text-zinc-100 truncate">{target}</span>
+          {rec.score > 0 && (
+            <span className="text-[10px] text-zinc-400">score {rec.score}/100</span>
+          )}
+          {rec.impactAmount != null && rec.impactAmount > 0 && (
+            <span className="text-[10px] text-emerald-400">≈ {brl(rec.impactAmount)}/mês</span>
+          )}
+          {rec.rejectionCount > 1 && (
+            <span className="text-[10px] text-zinc-500">· {rec.rejectionCount}ª rejeição</span>
+          )}
+        </div>
+        {detail && <p className="text-[11px] text-zinc-400 mt-0.5">{detail}</p>}
+      </div>
+    </div>
+  );
+};
+
 // ADR-153 F7.4 — Card individual de recomendação de upgrade (sinal
 // business_signals domain='plan' publicado pelo PlanFitSignalPublisher/F7.1).
 // Renderiza título humanizado (mapeado por signal_type), evidência formatada
@@ -786,6 +855,11 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
   // severity + evidence completa. F7.2 vai adicionar score/uplift em BRL.
   const [planSignals, setPlanSignals] = useState<any[]>([]);
   const [dismissingSignal, setDismissingSignal] = useState<string | null>(null);
+  // ADR-153 F4.3 — histórico de recomendações (pending/accepted/dismissed/expired).
+  // Consome /api/billing/recommendations (F7.3). Read-only na aba — dono já
+  // vê pending como cards F7.4 acima; aqui é o rastro auditável.
+  const [recHistory, setRecHistory] = useState<any[]>([]);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadPlanSignals = () => {
@@ -793,6 +867,13 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
       .then(r => r.json())
       .then(d => setPlanSignals(Array.isArray(d?.signals) ? d.signals : []))
       .catch(() => setPlanSignals([]));
+  };
+
+  const loadRecHistory = () => {
+    apiFetch('/api/billing/recommendations?includeExpired=true')
+      .then(r => r.json())
+      .then(d => setRecHistory(Array.isArray(d?.recommendations) ? d.recommendations : []))
+      .catch(() => setRecHistory([]));
   };
 
   useEffect(() => {
@@ -808,6 +889,7 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
       setAddons(ad && !ad.error ? ad : null);
     }).finally(() => setLoading(false));
     loadPlanSignals();
+    loadRecHistory();
   }, []);
 
   const dismissSignal = async (signalId: string) => {
@@ -817,6 +899,7 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
       if (!r.ok) { toast.error('Não foi possível dispensar a recomendação.'); return; }
       toast.success('Recomendação dispensada.');
       loadPlanSignals();
+      loadRecHistory(); // F4.3 — histórico reflete nova rejeição+cooldown
     } catch (e) { toast.error('Erro ao dispensar.'); }
     finally { setDismissingSignal(null); }
   };
@@ -1060,6 +1143,34 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
               </div>
             )}
           </div>
+
+          {/* F4.3 — Histórico de recomendações (aceitas/dispensadas/expiradas). */}
+          {recHistory.length > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-2">
+                <History className="w-4 h-4" /> Histórico de recomendações
+                <span className="text-[10px] text-zinc-600">({recHistory.length})</span>
+              </p>
+              <div className="space-y-2">
+                {(showAllHistory ? recHistory : recHistory.slice(0, 5)).map((r: any) => (
+                  <RecommendationHistoryRow key={r.id} rec={r} />
+                ))}
+              </div>
+              {recHistory.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllHistory(v => !v)}
+                  className="mt-2 text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1"
+                >
+                  <Clock className="w-3 h-3" />
+                  {showAllHistory ? `Ver só os 5 mais recentes` : `Ver todas (${recHistory.length})`}
+                </button>
+              )}
+              <p className="text-[11px] text-zinc-500 italic mt-2">
+                Auditável — cada rejeição/aceite fica no ledger com data e cooldown. Nenhuma IA reescreve isso.
+              </p>
+            </div>
+          )}
 
           {/* CTA final */}
           <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">

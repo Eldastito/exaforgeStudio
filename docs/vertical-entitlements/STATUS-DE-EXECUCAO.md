@@ -431,6 +431,37 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 - **Pendências criadas:** nenhuma nova. F7.5 (IA no Executive Chat menciona sob demanda), F3.3 (migração v1→v2 blueprint), F5.1 (ToS versionado — depende Decisão #2 jurídico) continuam elegíveis.
 - **Próximo passo:** decidir com o dono: (a) **F7.5 — IA no Executive Chat menciona recomendações sob demanda** — dono pergunta "vale upgrade?" e IA cita sinais com score+uplift+status de cooldown; (b) **F3.3 — migração v1→v2 de blueprint** (Master Admin evolui blueprints com preview de diff); (c) **F5.1 — ToS versionado** (bloqueada por Decisão #2 jurídico); (d) **F4.3 — Card de "recomendações aceitas / dispensadas" na aba Plano e Expansões** (usa a rota `/api/billing/recommendations?status=accepted|dismissed`). **Recomendo F4.3** — fecha o loop de UX transparente: dono vê seu próprio histórico + auditor tem uma tela dedicada.
 
+### Sessão 2026-08-05 (Fatia 4.3 — histórico de recomendações na aba Plano e Expansões)
+
+- **Fase:** 4 (aba Plano e Expansões) + 7 (recomendação IA). Fatia 4.3 fecha o loop de transparência de UX: dono agora vê o próprio rastro de recomendações que a IA já fez — pending, accepted, dismissed com cooldown restante, expired. Consome a rota `/api/billing/recommendations` que F7.3 abriu. Read-only na aba (o dono decide/aceita via card F7.4 acima; aqui é auditoria).
+- **Itens executados:** 3 (subcomponente `RecommendationHistoryRow`, integração no `PlanoExpansoesPanel` consumindo `/api/billing/recommendations?includeExpired=true`, refresh cascata no dismiss existente).
+- **Arquivos alterados:**
+  - `src/features/SettingsView.tsx` — 4 mudanças:
+    - Novos ícones `History, Clock` importados de lucide-react.
+    - Novo componente `RecommendationHistoryRow` (~70 linhas) — badge de status colorido (pending=azul, accepted=verde, dismissed=zinc, expired=zinc muted), label do target (`Módulo "X" · plano Y` ou `Plano Y`), score badge, uplift em BRL, contador de rejeições (`Xª rejeição`), linha de detalhe contextual (cooldown restante em dias pra dismissed; data de aceite; nota sobre re-oferta pra expired).
+    - `PlanoExpansoesPanel` ganha state `recHistory` + `showAllHistory` + fetcher `loadRecHistory()` chamando `/api/billing/recommendations?includeExpired=true`.
+    - Nova seção "Histórico de recomendações" entre o bloco de recomendação inteligente e o CTA final. Mostra 5 mais recentes por default + botão "Ver todas (N)" pra expandir. Só renderiza quando `recHistory.length > 0` (org nova = seção some).
+    - `dismissSignal` agora chama `loadRecHistory()` além de `loadPlanSignals` — histórico atualiza imediato após dispensa (nova linha com badge dismissed + cooldown).
+- **Testes executados:**
+  - Regressão: `test:upgrade-recommendations` (47/47), `test:plan-fit-detector` (65/65). Todos verdes.
+  - `npx tsc --noEmit` → limpo.
+  - Backend intocado — nenhuma nova rota.
+- **Decisões micro:**
+  - (i) **Read-only na aba** — não expõe accept/dismiss aqui. Dono aceita via card F7.4 (pending) que já tem CTA "Ver em Cobrança"; dispensar via mesmo card. Aba de histórico é rastro auditável, não painel de ação — evita duplicação de UX e confusão sobre "onde eu clico pra aceitar".
+  - (ii) **Consume `/api/billing/recommendations?includeExpired=true`** — inclui expired pra dono ver histórico completo. Se ficar visualmente ruidoso no futuro, adicionar filtro tab (Todas / Pendentes / Aceitas / Dispensadas). MVP: uma lista só.
+  - (iii) **Seção só aparece quando há histórico** (`recHistory.length > 0`) — org nova sem sinais nem interações ainda não vê a seção. Zero ruído.
+  - (iv) **Colapsado em 5 por default** — dono normal quer ver rastro recente. Botão "Ver todas (N)" pra auditor / caso queira revisar. Não pagina — assume que <200 recomendações não precisam paginação (rota já limita a 100 por padrão).
+  - (v) **Cooldown restante em dias, não data absoluta como label principal** — "Pausada por mais 27 dias (até 15/10/2026)" é mais actionable que "Pausada até 15/10/2026". Ambos aparecem. Se dLeft=0, mostra "Cooldown terminou em DD/MM".
+  - (vi) **Contador de rejeição só aparece a partir da 2ª** — 1ª rejeição é o comportamento default; mostrar "1ª rejeição" seria ruído. "2ª rejeição" e "3ª rejeição" ajudam dono a entender o motivo da escala 30→90→180.
+  - (vii) **Cross-recarga no dismiss** (`loadPlanSignals` + `loadRecHistory`) — dispensou o pending card F7.4 → nova linha aparece no histórico com badge dismissed + cooldown 30d. UX é imediata, não precisa refresh manual.
+  - (viii) **Zero backend novo** — rota `/api/billing/recommendations` da F7.3 já retorna tudo (`status`, `cooldownUntil`, `acceptedAt`, `dismissedAt`, `rejectionCount`, `impactAmount`, `score`, `targetPlanId`, `targetModuleKey`). Só faltava consumir.
+  - (ix) **Isolamento multi-tenant garantido pela rota** — `req.organizationId` filtra tudo backend-side. Frontend não precisa se preocupar.
+  - (x) **Nota rodapé "Auditável — cada rejeição/aceite fica no ledger com data e cooldown. Nenhuma IA reescreve isso."** — reforça G-153-6 (determinístico) e G-153-3 (nada auto). Dono lê e sabe que o rastro é confiável.
+- **Cross-service:** ADITIVO PURO no frontend. Zero mudança backend. Nenhuma rota nova. F7.3 já expunha tudo. F7.4 card pending continua funcionando com zero mudança de contrato.
+- **Resultado:** Loop de UX de recomendação fecha visualmente. Dono agora tem visibilidade completa do que a IA sugeriu, o que ele aceitou, o que dispensou (e quanto tempo ainda tá pausado), o que expirou. Auditor tem uma tela dedicada pra revisar decisões passadas. Nenhum novo endpoint necessário — F7.3 já entregava tudo.
+- **Pendências criadas:** nenhuma nova. F7.5 (IA no Executive Chat), F3.3 (migração v1→v2 blueprint), F5.1 (ToS versionado) continuam elegíveis.
+- **Próximo passo:** decidir com o dono: (a) **F7.5 — IA no Executive Chat cita recomendações sob demanda** — chat pergunta "vale upgrade?" e IA consulta `/api/billing/recommendations?status=pending` + `/api/billing/recommendations?status=dismissed`; menciona score + uplift + cooldown ativo (LGPD §14: se cooldown ativo, IA diz "essa sugestão está pausada até X"). Requer Decisão #8 (IA framing); (b) **F3.3 — migração v1→v2 blueprint** (Master Admin evolui blueprints com preview de diff); (c) **F5.1 — ToS versionado** (bloqueada por Decisão #2 jurídico); (d) **F7.6 — tela admin `AdminUpgradeRecommendationsView`** — todos os pedidos aceitos aguardando checkout, filtro por status, org, target. **Recomendo F7.5** — fecha a experiência conversacional: dono pergunta em linguagem natural e recebe evidência estruturada; hoje IA responde genérico. Baixo risco arquitetural (só consulta ledger).
+
 ---
 
 ## Sessão AAAA-MM-DD (template para próxima)

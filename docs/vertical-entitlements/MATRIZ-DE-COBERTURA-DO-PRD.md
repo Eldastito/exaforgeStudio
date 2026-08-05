@@ -107,11 +107,11 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ## §10 — Blueprints iniciais
 
-- [!] `moda_loja_unica_v1`. **Decisão #4.** Fatia 3.2.
-- [!] `moda_rede_lojas_v1`. **Decisão #4.** Fatia 3.2.
-- [~] `clinica_multiespecialidades_v1`. F2.2 entregou o **bundle** (PLAN_BUNDLES.growth_clinica). Falta a **estrutura Blueprint** (F3.2) que amarra vertical `saude` → bundle default.
-- [!] `chaveiro_autonomo_v1`. **Decisão #4.** Fatia 3.2.
-- [!] `peixaria_balcao_peso_v1`. **Decisão #4.** Fatia 3.2.
+- [x] `moda_loja_unica_v1`. F3.2 — seedado + publicado; migração automática pra orgs `vertical=moda + plan!=scale/enterprise`.
+- [x] `moda_rede_lojas_v1`. F3.2 — seedado + publicado; migração automática pra orgs `vertical=moda + plan=scale/enterprise` (TOULON).
+- [x] `clinica_multiespecialidades_v1`. F2.2 + F3.2 — bundle Growth+Clínica + blueprint com `defaultBundleKey='growth_clinica'`; migração automática pra `vertical=saude`.
+- [x] `chaveiro_autonomo_v1`. F3.2 — seedado + publicado; migração automática pra `vertical=servicos + plan=autonomo`.
+- [x] `peixaria_balcao_peso_v1`. F3.2 — seedado + publicado; migração automática pra `vertical=varejo + plan=autonomo`.
 
 ## §11 — Regra de visibilidade
 
@@ -272,7 +272,7 @@ Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `
 - [ ] Aceite (Fatia 5.1 — **Decisão #2**).
 - [ ] Webhook + idempotência (Fatia 5.2).
 - [ ] Downgrade (Fatia 6.2 — **Decisão #9**).
-- [ ] 4 blueprints (**Decisão #4** + Fatia 3.2).
+- [x] 4 blueprints — F3.2 entregou **5** (moda_loja_unica, moda_rede_lojas, clinica_multiespecialidades, chaveiro_autonomo, peixaria_balcao_peso) todos v1 published + seed automático no initDb.
 - [ ] Testes autorização (matriz — pós-Fase 3).
 - [ ] Contratos + LGPD (**Decisão #2**).
 

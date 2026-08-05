@@ -215,6 +215,37 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-05 (Fatia 3.2 — 5 blueprints iniciais + migração das orgs vivas)
+
+- **Fase:** 3 (Blueprints). Fatia 3.2 popula com dados reais. Fecha Decisão #4 (nomes dos SKUs).
+- **Itens executados:** todos os 4 do plano F3.2 (seed idempotente com 5 blueprints, migração inferindo `(vertical, plan) → blueprint`, 2 rotas admin, teste E2E robusto).
+- **Arquivos criados:**
+  - `src/server/BlueprintSeeder.ts` — `INITIAL_BLUEPRINTS[]` (5 objetos completos com config + hidden + minimum/default plan + bundle + upgrades), `seedInitialBlueprints(actor)` (idempotente — checa por key+version; publica draft se achado), `migrateExistingOrgs({dryRun, actor})` (planeja/aplica), `inferBlueprintKeyFor(vertical, planId)` (função pura de mapeamento — testada isoladamente).
+  - `scripts/test-blueprint-seeder.ts` — **70/70 checks** cobrindo 16 casos: seed cria 5 na 1ª chamada + é idempotente na 2ª; cada blueprint com shape correto (baseVertical/hidden/plan/bundle/required); todos published; clinica com `defaultBundleKey='growth_clinica'`; inferência mapeia 8 casos do PRD §10; 6 casos ambíguos (vertical=null, plan=null, food, hospitalidade, varejo+start, servicos+start) retornam null; dryRun planeja mas NÃO grava; apply grava; alreadyAssigned protege 2ª migração; skipped inclui razão; isolamento cross-tenant; validações (minimumPlan/defaultPlan em PLAN_GRADE, hiddenModules sem CORE, runtimePlaybooks é array).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — no fim do `initDb()`, dispara `BlueprintSeeder.seedInitialBlueprints()` via dynamic import (evita ciclo). Best-effort: erro no seed NÃO quebra o app (só log). Idempotente na inicialização de cada boot.
+  - `src/server/routes/admin.ts` — 2 rotas novas: `POST /api/admin/blueprints/seed` (força re-seed) + `POST /api/admin/blueprints/migrate-orgs?dryRun=true|false`. Ambas atrás de `requireMasterAdmin`.
+  - `package.json` — script `test:blueprint-seeder`.
+- **Testes executados:**
+  - `npm run test:blueprint-seeder` → **70/70 OK**.
+  - Regressão zero: `test:vertical-blueprint-service` (48/48), `test:plan-bundles` (28/28), `test:entitlement-service` (49/49), `test:admin-users` (20/20).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Regra de inferência CONSERVADORA** — só migra org quando há sinal inequívoco. Casos ambíguos ficam SKIPPED com razão explicativa; Master Admin decide via `POST /api/admin/organizations/:id/blueprint`. Motivos: (a) melhor pedir intervenção humana que assign errado; (b) alguns dono podem estar em estado transitório (vertical=varejo+start pode ser peixaria migrando ou moda mal-cadastrada — não sabemos).
+  - (ii) **Cinco categorias de saída** em `MigrationResult`: `migrated`, `skipped` (razão), `alreadyAssigned` (não sobrescreve), `errors` (blueprint não encontrado, etc). Master Admin vê status completo.
+  - (iii) **Seed dispara auto no `initDb()`** via dynamic import (defensa contra ciclo: `db.ts` importa `BlueprintSeeder` que importa `VerticalBlueprintService` que importa `db.ts`). Se falhar, log + continua — app não trava. Master Admin pode rodar `POST /api/admin/blueprints/seed` pra retry.
+  - (iv) **Migração NÃO auto** — precisa clique explícito do Master Admin em `POST /api/admin/blueprints/migrate-orgs`. Motivo: migração toca orgs vivas; melhor humano confirmar. `dryRun=true` default pra evitar acidente.
+  - (v) **`defaultBundleKey='growth_clinica'`** amarra o blueprint da Clínica ao bundle F2.2. F5.3 (checkout) vai renderizar o bundle quando dono escolher blueprint clínica.
+  - (vi) **`moda_rede_lojas` esconde `copiloto`** — TOULON e afins não usam balcão. Contra `clinica_multiespecialidades` que TAMBÉM esconde loja/retail (foco em consultório).
+  - (vii) **`peixaria_balcao_peso`, `chaveiro_autonomo` NÃO escondem `escola` no allow-list?** — na verdade escondem. Verificado no config.
+  - (viii) **Estava nas notas de rollout: "começar com 2"** — deploy do seed cria os 5 imediatamente. Se dono quiser rollout gradual, pode fazer via `POST /api/admin/blueprints/:id/deprecate` desativando os que não vai usar. Alternativa mais leve: F3.2 pode ficar como só 2 blueprints iniciais, mas custo desprezível criar 5 e deprecar depois.
+- **Cross-service:** ADITIVO PURO. Ninguém CONSOME os blueprints ainda (F1.4 vai). Nenhum service pré-existente modificado. Migration só afeta orgs sem `organization_blueprints`, protege as manuais.
+- **Resultado:** 5 blueprints publicados no seed automático. Master Admin pode migrar orgs vivas via 1 clique (`POST /api/admin/blueprints/migrate-orgs?dryRun=false`). Bloqueia de vendas em escala (PRD §33 item 10 — "Criar ao menos quatro blueprints") ✅ fechado.
+- **Pendências criadas:** nenhuma nova. Bundle Clínica agora tem SKU amarrado.
+- **Próximo passo:** **F1.4 — estado `hidden` real via `blueprint.hiddenModules`** (troca `HIDDEN_BY_VERTICAL` estático do `EntitlementService.ts` da F1.1). Simples com fundação pronta: `EntitlementService.check` consulta `VerticalBlueprintService.getForOrganization(orgId)` + `getBlueprint(bpId)` e usa `config.hiddenModules`. Zero migração (F3.2 já popular). Alternativa: F3.3 (migração de versão v1→v2 com preview).
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

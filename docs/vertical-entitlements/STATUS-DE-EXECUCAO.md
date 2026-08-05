@@ -527,6 +527,33 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 - **Pendências criadas:** nenhuma nova. Continuam elegíveis: F3.3 (v1→v2 blueprint), F4.4 (gráfico aceitas-vs-dispensadas temporal), Fase 5 (assinaturas+checkout Asaas — bloqueada Decisão #2 ToS).
 - **Próximo passo:** com a operacionalização admin pronta, os elegíveis mudam de peso. Opções: (a) **F3.3 — migração v1→v2 blueprint com preview de diff** (fecha imutabilidade Fase 3); (b) **F4.4 — gráfico temporal aceitas vs dispensadas** (dono vê tendência ao longo do tempo, insight pra ajustar oferta); (c) **F7.7 — job scheduled `expireOldCooldowns` diário via JobQueueService** (limpeza automática do que já rolou); (d) desbloquear **Fase 5** (Decisão #2 jurídica pendente). **Recomendo (c) F7.7** — 30 min de trabalho, fecha a única loose-end técnica da Fase 7 (cleanup lazy hoje depende de trigger manual), aditivo puro.
 
+### Sessão 2026-08-05 (Fatia 7.7 — cooldown-expire pass automático no Scheduler)
+
+- **Fase:** 7 (recomendação IA). Fatia 7.7 fecha a única loose-end técnica: hoje `UpgradeRecommendationService.expireOldCooldowns` só rodava se alguém chamasse; agora entra no `Scheduler.tick()` hora em hora, cross-tenant, com o mesmo padrão de todos os outros passes (best-effort try/catch no chamador). Aditivo puro; 2 linhas no `tick()` + 1 método novo + 1 import.
+- **Itens executados:** 2 (novo método `Scheduler.planFitCooldownExpirePass` + wiring no `tick()`).
+- **Arquivos alterados:**
+  - `src/server/Scheduler.ts` — import de `UpgradeRecommendationService`. Novo método `planFitCooldownExpirePass()` (~15 linhas) que chama `UpgradeRecommendationService.expireOldCooldowns()` cross-tenant (sem `orgId`) e loga só quando `changed > 0` (evita spam). Header explica por que hora em hora mesmo com cooldowns de 30/90/180d (op é O(N vencidas) barato; latência ≤1h pro admin não ver estado desatualizado; `hasActiveCooldown` já usa comparação com `now` e não depende do sweep pra correctness). Wired no `tick()` DEPOIS de `planFitPass()` — se o publisher acabou de re-detectar signal cujo cooldown venceu, esta pass limpa a linha antiga na mesma volta.
+  - `package.json` — script `test:scheduler-plan-fit-cooldown-expire`. CI descobre via `ci-shard.mjs`.
+- **Arquivos criados:**
+  - `scripts/test-scheduler-plan-fit-cooldown-expire.ts` — 10 checks. Cobre: sweep sem recs é NO-OP (não throw), cross-tenant expira só linhas vencidas de todas as orgs numa call, dismissed com cooldown futuro permanece intocado, pending/accepted/expired NÃO tocados, idempotência (segunda call retorna 0), `Scheduler.planFitCooldownExpirePass` está exportado.
+- **Testes executados:**
+  - `npm run test:scheduler-plan-fit-cooldown-expire` → 10/10 PASS.
+  - Regressão: `test:upgrade-recommendations` (47/47), `test:admin-upgrade-recommendations` (21/21), `test:plan-fit-detector` (65/65), `test:executive-plan-recommendations-block` (23/23). Todos verdes.
+  - `npx tsc --noEmit` limpo.
+- **Decisões micro:**
+  - (i) **Cross-tenant sem orgId** — `expireOldCooldowns()` já suportava chamada sem arg (single UPDATE com WHERE em cooldown_until). Uma única query cobre todas as orgs. Não precisa iterar `SELECT DISTINCT organization_id` como outros passes fazem (grep no Scheduler mostra 4-5 padrões diferentes; escolhi o simples aqui porque a operação é intrinsecamente cross-tenant).
+  - (ii) **Hora em hora, não diário** — segue o padrão de todos os outros passes do `tick()` (retenção LGPD, RIC snapshot, plan-fit detector, etc.). Adicionar cron diário exigiria infra nova ou state ("last_expire_run"); reusar o tick horário custa <1ms extra e é consistente com o resto do arquivo. Cooldowns de 30/90/180d significam que 99% das horas a query retorna 0 changes — barato.
+  - (iii) **Wired DEPOIS de `planFitPass()`** — importante: se o publisher acabou de re-publicar um sinal cujo cooldown venceu (ele ignora cooldowns ativos via `hasActiveCooldown`), esta pass limpa a linha antiga na mesma volta. Se rodasse ANTES, teria latência de 1h pra housekeeping.
+  - (iv) **Log só quando mudou** — passes silenciosos são a norma no arquivo (`retailFloorReconciliationPass`, `clinicRetentionPass`). Log só quando `changed > 0` evita poluir stdout em orgs sem atividade de dismissal.
+  - (v) **Try/catch no chamador, não no método** — sigo o padrão dos outros passes. O `tick()` faz `try { this.planFitCooldownExpirePass() } catch (e: any) { console.error(...); }`. Métodos poderiam também ter try interno (e o `planFitCooldownExpirePass` tem, pra idiomatic parity com `planFitPass`), mas o cinto duplo protege se surgir edge case.
+  - (vi) **Sem opt-in por org** — cooldown expire é housekeeping global do ledger; não faz sentido "org X quer que cooldown expire, org Y não". Diferente de features como `retail_pattern_memory_enabled`.
+  - (vii) **Zero mudança em `UpgradeRecommendationService.expireOldCooldowns`** — método já existia (F7.3). Só ganhou 1 chamador novo (o Scheduler).
+  - (viii) **AdminUpgradeRecommendationsPanel (F7.6) beneficiado automaticamente** — o filtro "Expiradas" agora mostra estado atualizado sem admin precisar rodar cleanup manual. Latência máxima: 1 tick horário do Scheduler.
+- **Cross-service:** ADITIVO PURO. `Scheduler.tick()` ganha 1 chamada nova (barata). `UpgradeRecommendationService` intocado (só ganhou 1 consumidor). Nenhum consumidor existente muda.
+- **Resultado:** Ledger `upgrade_recommendations` mantém-se limpo automaticamente. Fase 7 do ADR-153 fechada operacionalmente e tecnicamente. Motor F7.1 → score F7.2 → cooldown F7.3 → UI card F7.4 → diretor IA F7.5 → funil admin F7.6 → **cleanup automático F7.7**.
+- **Pendências criadas:** nenhuma nova. Continuam elegíveis: F3.3 (v1→v2 blueprint), F4.4 (gráfico temporal), Fase 5 (bloqueada Decisão #2 ToS).
+- **Próximo passo:** com Fase 7 100% fechada, os naturais são: (a) **F3.3 — migração v1→v2 blueprint com preview de diff** — Master Admin evolui blueprints (`previewEntitlements` já existe); fecha imutabilidade Fase 3; (b) **F4.4 — gráfico temporal aceitas vs dispensadas** na aba Plano e Expansões — usa histórico F4.3, insight sazonal pro dono; (c) desbloquear **Fase 5** (bloqueada Decisão #2). **Recomendo (a) F3.3** — é a última loose-end de arquitetura (Fase 3 fechada mas sem UX pro admin evoluir blueprint publicado; preview já implementado mas sem tela). Fecha simetria: blueprint publica imutável (F3.1) → cria nova versão v2 (F3.3) → preview de diff (F3.3) → migra orgs opt-in (F3.2 já existe). Alternativa (b) é mais leve e visível pro dono; alternativa (c) precisa decisão jurídica primeiro.
+
 ---
 
 ## Sessão AAAA-MM-DD (template para próxima)

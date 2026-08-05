@@ -359,4 +359,126 @@ export class VerticalBlueprintService {
       },
     };
   }
+
+  /**
+   * ADR-153 F3.3 — cria a próxima versão de um blueprint existente.
+   *
+   * Contexto: G-153-5 diz que blueprint `published` é IMUTÁVEL. Corrigir/
+   * evoluir o preset de um nicho (ex.: Clínica Multi ganhou módulo `rie`)
+   * exige criar `key vN+1` em status `draft`, revisar o diff, publicar,
+   * e então re-atribuir as orgs (opt-in) via `assignToOrganization`.
+   *
+   * Este método clona toda a config da versão-base e aplica overrides
+   * pontuais (edits) — evita que o Master Admin precise re-escrever
+   * requiredModules/optionalModules/etc do zero. Auto-incrementa version.
+   *
+   * Regra: só é possível bumpar a partir de `published` ou `draft`. Não
+   * a partir de `deprecated` (blueprint aposentado não deve gerar linha
+   * nova; se necessário, criar do zero com key nova).
+   *
+   * Edits aceitos: qualquer subconjunto do BlueprintConfig + name +
+   * minimumPlanId + defaultPlanId + defaultBundleKey. Config vem por
+   * merge shallow (arrays substituem completamente, não concatenam).
+   */
+  static createNextVersion(
+    sourceBlueprintId: string,
+    edits: Partial<Omit<CreateBlueprintInput, "key" | "baseVertical" | "version">>,
+    actor?: string | null,
+  ): Blueprint {
+    const source = this.getBlueprint(sourceBlueprintId);
+    if (!source) throw new Error(`Blueprint origem não encontrado: ${sourceBlueprintId}`);
+    if (source.status === "deprecated") {
+      throw new Error(`Blueprint ${source.key} v${source.version} está deprecated — não é permitido bumpar versão a partir dele. Crie um novo com key diferente.`);
+    }
+
+    // Merge shallow: campos escalares e config substituem inteiros; se edits
+    // não incluir config, mantém o source.config verbatim.
+    const mergedConfig: BlueprintConfig = edits.config
+      ? normalizeConfig({ ...source.config, ...edits.config })
+      : source.config;
+
+    return this.createBlueprint({
+      key: source.key,
+      // version omitido → createBlueprint calcula MAX(version)+1 automaticamente.
+      name: edits.name ?? source.name,
+      baseVertical: source.baseVertical,
+      minimumPlanId: edits.minimumPlanId ?? source.minimumPlanId ?? undefined,
+      defaultPlanId: edits.defaultPlanId ?? source.defaultPlanId ?? undefined,
+      defaultBundleKey: edits.defaultBundleKey ?? source.defaultBundleKey ?? undefined,
+      config: mergedConfig,
+    }, actor);
+  }
+
+  /**
+   * ADR-153 F3.3 — diff entre dois blueprints SEM depender de org atribuída.
+   *
+   * `previewEntitlements` compara blueprint alvo × org atual — útil pro passo
+   * "vou migrar essa org". Este método compara blueprint × blueprint direto,
+   * útil pro passo ANTERIOR: "acabei de criar v2, mostra o que mudou vs v1
+   * antes de eu publicar". Independente de qualquer org.
+   *
+   * Inclui, além dos módulos (mesmo formato do previewEntitlements), diffs
+   * dos escalares: name / minimumPlanId / defaultPlanId / defaultBundleKey /
+   * quickStartPack / commercialUpgrades / runtimePlaybooks. Motor de UI usa
+   * essa estrutura pra renderizar "antes → depois" campo a campo.
+   */
+  static previewBlueprintDiff(sourceBlueprintId: string, targetBlueprintId: string): {
+    source: Blueprint;
+    target: Blueprint;
+    diff: {
+      hiddenAdded: string[];
+      hiddenRemoved: string[];
+      requiredAdded: string[];
+      requiredRemoved: string[];
+      optionalAdded: string[];
+      optionalRemoved: string[];
+      commercialUpgradesAdded: string[];
+      commercialUpgradesRemoved: string[];
+      runtimePlaybooksAdded: string[];
+      runtimePlaybooksRemoved: string[];
+      scalarChanges: Array<{ field: string; from: any; to: any }>;
+    };
+  } {
+    const source = this.getBlueprint(sourceBlueprintId);
+    if (!source) throw new Error(`Blueprint origem não encontrado: ${sourceBlueprintId}`);
+    const target = this.getBlueprint(targetBlueprintId);
+    if (!target) throw new Error(`Blueprint alvo não encontrado: ${targetBlueprintId}`);
+
+    const setDiff = (from: string[], to: string[]) => {
+      const fromSet = new Set(from);
+      const toSet = new Set(to);
+      return {
+        added: to.filter((m) => !fromSet.has(m)),
+        removed: from.filter((m) => !toSet.has(m)),
+      };
+    };
+    const hidden = setDiff(source.config.hiddenModules, target.config.hiddenModules);
+    const required = setDiff(source.config.requiredModules, target.config.requiredModules);
+    const optional = setDiff(source.config.optionalModules, target.config.optionalModules);
+    const upgrades = setDiff(source.config.commercialUpgrades, target.config.commercialUpgrades);
+    const playbooks = setDiff(source.config.runtimePlaybooks, target.config.runtimePlaybooks);
+
+    const scalarChanges: Array<{ field: string; from: any; to: any }> = [];
+    const check = (field: string, from: any, to: any) => {
+      if (from !== to) scalarChanges.push({ field, from, to });
+    };
+    check("name", source.name, target.name);
+    check("minimumPlanId", source.minimumPlanId, target.minimumPlanId);
+    check("defaultPlanId", source.defaultPlanId, target.defaultPlanId);
+    check("defaultBundleKey", source.defaultBundleKey, target.defaultBundleKey);
+    check("quickStartPack", source.config.quickStartPack, target.config.quickStartPack);
+
+    return {
+      source,
+      target,
+      diff: {
+        hiddenAdded: hidden.added, hiddenRemoved: hidden.removed,
+        requiredAdded: required.added, requiredRemoved: required.removed,
+        optionalAdded: optional.added, optionalRemoved: optional.removed,
+        commercialUpgradesAdded: upgrades.added, commercialUpgradesRemoved: upgrades.removed,
+        runtimePlaybooksAdded: playbooks.added, runtimePlaybooksRemoved: playbooks.removed,
+        scalarChanges,
+      },
+    };
+  }
 }

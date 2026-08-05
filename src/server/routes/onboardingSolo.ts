@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import db from "../db.js";
 import { logAuthEvent } from "../auditLog.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
+import { FalaTuSoloWhatsAppService } from "../FalaTuSoloWhatsAppService.js";
 
 // Inline pra não criar módulo separado: mesma política do POST /register.
 function passwordPolicyError(pw: string): string | null {
@@ -90,10 +91,31 @@ router.post("/", async (req: Request, res: Response): Promise<any> => {
       email, blueprintKey: bp.key, blueprintVersion: bp.version, businessName: bizName,
     });
 
+    // ADR-154 Fatia 4.1 — provision Evolution DEDICADA best-effort. Se
+    // EVOLUTION_BASE_URL/API_KEY não estiver configurado (dev local, CI) ou a
+    // Evolution estiver fora do ar, NÃO derruba o cadastro — usuário pode
+    // chamar POST /api/falatu-solo/whatsapp/provision depois pra tentar QR.
+    // O flag `whatsapp_instance_kind='dedicated'` é setado pelo service mesmo
+    // se a chamada de rede falhar (é intenção declarada, não estado da rede).
+    let whatsapp: { instanceName?: string; qrBase64?: string; channelId?: string; provisionError?: string } | undefined;
+    try {
+      const prov = await FalaTuSoloWhatsAppService.provision(orgId, userId);
+      whatsapp = {
+        instanceName: prov.instanceName,
+        qrBase64: prov.qrBase64,
+        channelId: prov.channelId,
+        provisionError: prov.ok ? undefined : prov.error,
+      };
+    } catch (e: any) {
+      console.warn("[Onboarding Solo] provision Evolution falhou (best-effort):", e?.message || e);
+      whatsapp = { provisionError: e?.message || "provision indisponível" };
+    }
+
     res.status(201).json({
       message: "Registration successful",
       organizationId: orgId,
       blueprint: { key: bp.key, version: bp.version, mode: bp.mode, name: bp.name },
+      whatsapp,
     });
   } catch (error: any) {
     console.error("[Onboarding Solo] error:", error);

@@ -366,6 +366,79 @@ export class UpgradeRecommendationService {
   }
 
   /**
+   * ADR-153 F4.4 — série temporal de decisões (aceitas × dispensadas) por bucket
+   * diário. Alimenta o gráfico de tendência na aba "Plano e Expansões" pra o dono
+   * ver sazonalidade das próprias decisões (ex.: "dispensei muito em julho mas
+   * aceitei em agosto" = pista de mudança de intenção).
+   *
+   * Bucketiza por `date(COALESCE(accepted_at, dismissed_at, updated_at))` porque
+   * accepted_at/dismissed_at só são populados quando o dono decide (accept/dismiss
+   * bumpam ambos updated_at + o timestamp específico). Fallback pra updated_at
+   * cobre linhas legadas hipoteticamente sem timestamp de decisão.
+   *
+   * SÓ conta `accepted`/`dismissed` (não `pending`/`expired`) porque a métrica é
+   * "decisão explícita do dono". `expired` é housekeeping automático (F7.7);
+   * `pending` está no ledger da F4.3 acima.
+   *
+   * Days é clampado 7..180 pra proteger o payload (janela default 30d bate com
+   * cooldown mínimo da F7.3 — dono vê o efeito de cada dispensa/aceite no mês).
+   *
+   * Retorna série alinhada aos últimos N dias — dias sem decisão vêm com 0/0
+   * (não gap na série). Frontend renderiza direto sem preencher.
+   *
+   * Isolamento multi-tenant: organization_id em toda query.
+   */
+  static historyByBucket(orgId: string, opts?: { days?: number }): {
+    days: number;
+    series: Array<{ date: string; accepted: number; dismissed: number }>;
+    totalAccepted: number;
+    totalDismissed: number;
+  } {
+    const days = Math.max(7, Math.min(180, Math.floor(opts?.days ?? 30)));
+
+    const rows = db.prepare(
+      `SELECT date(COALESCE(accepted_at, dismissed_at, updated_at)) AS bucket_date,
+              status,
+              COUNT(*) AS cnt
+         FROM upgrade_recommendations
+        WHERE organization_id = ?
+          AND status IN ('accepted', 'dismissed')
+          AND COALESCE(accepted_at, dismissed_at, updated_at) >= datetime('now', ?)
+        GROUP BY bucket_date, status
+        ORDER BY bucket_date ASC`,
+    ).all(orgId, `-${days} days`) as any[];
+
+    // Indexa contagens por (bucket_date, status).
+    const acceptedByDate = new Map<string, number>();
+    const dismissedByDate = new Map<string, number>();
+    for (const r of rows) {
+      const d = String(r.bucket_date || "");
+      const c = Number(r.cnt || 0);
+      if (r.status === "accepted") acceptedByDate.set(d, c);
+      else if (r.status === "dismissed") dismissedByDate.set(d, c);
+    }
+
+    // Preenche série alinhada aos últimos N dias (dias sem decisão = 0/0).
+    // Mesma abordagem do buildDailySeries em AnalyticsService.ts.
+    const series: Array<{ date: string; accepted: number; dismissed: number }> = [];
+    let totalAccepted = 0;
+    let totalDismissed = 0;
+    const now = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setUTCDate(now.getUTCDate() - i);
+      const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      const a = acceptedByDate.get(key) || 0;
+      const x = dismissedByDate.get(key) || 0;
+      series.push({ date: key, accepted: a, dismissed: x });
+      totalAccepted += a;
+      totalDismissed += x;
+    }
+
+    return { days, series, totalAccepted, totalDismissed };
+  }
+
+  /**
    * Cleanup lazy: recomendações `dismissed` com cooldown_until já passado viram
    * `expired`. Sweep opt-in (chamável por scheduler/manutenção). Não é crítico —
    * `hasActiveCooldown` já filtra por `cooldown_until > now`.

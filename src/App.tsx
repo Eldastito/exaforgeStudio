@@ -34,6 +34,7 @@ import { EscutaView } from '@/src/features/EscutaView';
 import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
+import { AiUsageDashboardView } from '@/src/features/AiUsageDashboardView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
 import { RetailFloorView } from '@/src/features/RetailFloorView';
 import { LegalAdvisorView } from '@/src/features/LegalAdvisorView';
@@ -262,6 +263,7 @@ export default function App() {
              {viewMode === 'manifesto' && 'Manifesto da Marca'}
              {viewMode === 'escuta' && 'Escuta Ativa'}
              {viewMode === 'admin' && 'Admin Master'}
+             {viewMode === 'ai_usage' && 'Consumo de IA'}
              {viewMode === 'retailops' && 'Operação da Rede'}
              {viewMode === 'retailfloor' && 'Atendimento de Loja'}
              {viewMode === 'channels' && 'Canais e IA'}
@@ -376,6 +378,7 @@ export default function App() {
           {viewMode === 'manifesto' && <ManifestoView />}
           {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
+          {viewMode === 'ai_usage' && <AiUsageDashboardView />}
           {viewMode === 'retailops' && <RetailOpsView />}
           {viewMode === 'retailfloor' && <RetailFloorView />}
           {viewMode === 'comigo' && <ComigoView />}

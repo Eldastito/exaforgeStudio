@@ -389,7 +389,8 @@
     "test:scheduler-plan-fit-cooldown-expire": "tsx scripts/test-scheduler-plan-fit-cooldown-expire.ts",
     "test:blueprint-next-version": "tsx scripts/test-blueprint-next-version.ts",
     "test:recommendation-history-chart": "tsx scripts/test-recommendation-history-chart.ts",
-    "test:ai-usage-ledger": "tsx scripts/test-ai-usage-ledger.ts"
+    "test:ai-usage-ledger": "tsx scripts/test-ai-usage-ledger.ts",
+    "test:ai-usage-dashboard": "tsx scripts/test-ai-usage-dashboard.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

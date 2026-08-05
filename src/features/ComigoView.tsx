@@ -64,6 +64,15 @@ export function ComigoView() {
   }, []);
   useEffect(() => { loadOverview(); loadArch(); }, [loadOverview, loadArch]);
 
+  // Primeira carga em modo agenda: entra direto na Agenda em vez do Balcão.
+  // IMPORTANTE: este hook precisa ficar ANTES do early return de onboarding
+  // (arch.configured === false); do contrário a contagem de hooks muda entre
+  // renders e o React derruba a árvore com error #300.
+  useEffect(() => {
+    if (arch?.mode === 'agenda' && tab === 'balcao') setTab('agenda');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arch]);
+
   // Sem arquétipo definido: o tutor abre com as 3 perguntas (ADR-120).
   if (arch && arch.configured === false) {
     return (
@@ -90,12 +99,6 @@ export function ComigoView() {
     (tab === 'mesa' && mesaHidden) ||
     (tab === 'agenda' && !agendaVisible)
   ) ? (agendaVisible ? 'agenda' : 'balcao') : tab;
-
-  // Primeira carga em modo agenda: entra direto na Agenda em vez do Balcão.
-  useEffect(() => {
-    if (agendaVisible && tab === 'balcao') setTab('agenda');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agendaVisible]);
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto p-3 md:p-6">

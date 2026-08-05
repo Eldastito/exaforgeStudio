@@ -2,6 +2,8 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
+import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
+import db from "../db.js";
 
 // Ledger de Sinais Empresariais (ADR-136, Epic 2 — C1). Rota core.
 const router = Router();
@@ -33,11 +35,26 @@ router.post("/:id/acknowledge", (req: AuthRequest, res): any => {
 });
 
 // POST /api/signals/:id/dismiss — dispensa o sinal.
+// ADR-153 F7.3: se o sinal for `domain='plan'`, propaga cooldown pra
+// UpgradeRecommendationService (LGPD §14 — rejeição pausa nova oferta).
 router.post("/:id/dismiss", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const out = BusinessSignalService.dismiss(orgId, req.params.id);
+  const signalId = req.params.id;
+  const out = BusinessSignalService.dismiss(orgId, signalId);
   if (!out.ok) return res.status(404).json({ error: "Sinal não encontrado." });
+
+  // Best-effort: checa se é sinal 'plan' e aplica cooldown na recomendação
+  // linkada. Erro aqui NÃO deve falhar o dismiss original (idempotência UX).
+  try {
+    const row = db.prepare("SELECT domain FROM business_signals WHERE id = ? AND organization_id = ?").get(signalId, orgId) as any;
+    if (row?.domain === "plan") {
+      const actor = (req as any).user?.userId || null;
+      UpgradeRecommendationService.dismissBySignalId(orgId, signalId, actor);
+    }
+  } catch (e) {
+    console.error("[routes/signals] hook UpgradeRecommendationService falhou (best-effort)", e);
+  }
   res.json(out);
 });
 

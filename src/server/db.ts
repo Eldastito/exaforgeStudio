@@ -7551,6 +7551,55 @@ const initDb = () => {
       });
     }
   } catch(e) { console.error('[DB] Falha ao seedar blueprints iniciais (ADR-153 F3.2)', e); }
+
+  // ADR-153 F7.3 — Frequency control + histórico de recomendações de upgrade.
+  //
+  // PRD §14/§15 + Decisão #7: quando dono dispensa uma recomendação, ela não
+  // pode ser re-oferecida no MESMO alvo (target_plan_id + target_module_key)
+  // pelos próximos N dias. Escala 30d → 90d → 180d na sequência de rejeições
+  // (RN-153-F7.3-002; 180d é o teto). Cooldown NÃO se aplica a severity=critical
+  // — cliente já travado (uso ≥100%) precisa saber (RN-153-F7.3-003).
+  //
+  // Ao publicar um sinal `domain='plan'`, `PlanFitSignalPublisher` grava/atualiza
+  // uma linha aqui apontando pro signal_id — histórico auditável separado do
+  // ledger genérico de sinais. Ao dispensar via /api/signals/:id/dismiss OU
+  // /api/billing/recommendations/:id/dismiss, incrementa rejection_count e
+  // seta cooldown_until.
+  //
+  // status: 'pending' | 'accepted' | 'dismissed' | 'expired'. `expired` é
+  // aplicado lazy — quando cooldown_until < now e alguém lista/varre.
+  //
+  // Isolamento multi-tenant: organization_id em toda query.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS upgrade_recommendations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        signal_id TEXT,                        -- FK business_signals.id (nullable — sinal pode ter sido purgado)
+        signal_type TEXT NOT NULL,             -- plan_near_limit_ai | plan_module_gap | etc.
+        target_plan_id TEXT,                   -- 'growth' | 'scale' | 'enterprise' | null
+        target_module_key TEXT,                -- pra plan_module_gap; null pra near_limit
+        score INTEGER NOT NULL DEFAULT 0,      -- 0-100
+        impact_amount REAL,                    -- BRL/mês estimado
+        impact_unit TEXT,                      -- 'BRL' | null
+        evidence_json TEXT,                    -- snapshot do evidence do sinal
+        status TEXT NOT NULL DEFAULT 'pending',-- pending | accepted | dismissed | expired
+        rejection_count INTEGER NOT NULL DEFAULT 0,
+        cooldown_until DATETIME,               -- se status=dismissed, próxima data em que pode re-oferecer
+        actor TEXT,                            -- quem dispensou/aceitou (audit)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        dismissed_at DATETIME,
+        accepted_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_upgrade_recommendations_org
+        ON upgrade_recommendations (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_upgrade_recommendations_target
+        ON upgrade_recommendations (organization_id, target_plan_id, target_module_key, cooldown_until);
+      CREATE INDEX IF NOT EXISTS idx_upgrade_recommendations_signal
+        ON upgrade_recommendations (organization_id, signal_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar upgrade_recommendations (ADR-153 F7.3)', e); }
 };
 
 initDb();

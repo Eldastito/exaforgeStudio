@@ -16,6 +16,7 @@
 import db from "./db.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { PlanFitDetectorService } from "./PlanFitDetectorService.js";
+import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 
 export class PlanFitSignalPublisher {
   /**
@@ -38,6 +39,19 @@ export class PlanFitSignalPublisher {
     let deduped = 0;
 
     for (const c of candidates) {
+      // F7.3 — respeita cooldown por rejeição (LGPD §14).
+      // `skipForCritical` liberado: uso ≥100% (severity=critical) SEMPRE avisa,
+      // mesmo dentro do cooldown — dono já travado precisa saber (RN-153-F7.3-003).
+      const targetModuleKey = c.evidence.moduleKey || null;
+      if (UpgradeRecommendationService.hasActiveCooldown(orgId, c.targetPlanId, targetModuleKey, {
+        skipForCritical: true,
+        severity: c.severity,
+      })) {
+        // Cooldown ativo → não publica. dedupeKey NÃO vai pro validKeys,
+        // então se existir sinal aberto anterior, será resolved abaixo.
+        continue;
+      }
+
       validKeys.add(c.dedupeKey);
       const res = BusinessSignalService.publish(orgId, {
         domain: "plan",
@@ -67,6 +81,23 @@ export class PlanFitSignalPublisher {
       });
       if (res.deduped) deduped++;
       else published++;
+
+      // F7.3 — grava/atualiza recomendação apontando pro sinal. Best-effort;
+      // erro aqui NÃO deve quebrar publish (sinal já persistiu).
+      try {
+        UpgradeRecommendationService.record(orgId, {
+          signalId: res.id,
+          signalType: c.signalType,
+          targetPlanId: c.targetPlanId,
+          targetModuleKey,
+          score: c.score,
+          impactAmount: c.impactAmount,
+          impactUnit: c.impactUnit,
+          evidence: c.evidence,
+        });
+      } catch (e) {
+        console.error("[PlanFitSignalPublisher] UpgradeRecommendationService.record falhou (best-effort)", e);
+      }
     }
 
     // Fecha sinais que existiam antes e não estão mais válidos.

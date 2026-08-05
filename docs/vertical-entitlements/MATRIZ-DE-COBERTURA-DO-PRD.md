@@ -61,7 +61,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ### §11.3 SubscriptionOrchestratorService (novo)
 
-- [ ] Tabelas `subscription_change_requests`, `upgrade_recommendations`, `terms_versions`. Fatia 5.1 + 5.2 + 7.3.
+- [~] Tabelas `subscription_change_requests`, `upgrade_recommendations`, `terms_versions`. F7.3 entregou `upgrade_recommendations` (ledger + cooldown). `subscription_change_requests` fica pra F5.2; `terms_versions` pra F5.1 (bloqueada Decisão #2).
 - [ ] Métodos: `preview, confirm, cancel`. Fatia 5.2.
 - [ ] Rotas `/api/billing/{plans,current,checkout,upgrade/preview,upgrade/confirm,downgrade}`. Fatias 5.3 + 6.1 + 6.2.
 - [ ] Proporcionalidade upgrade imediato. Fatia 6.1.
@@ -78,9 +78,10 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 - [x] `evidence_json` com breakdown por dimensão. F7.2 — `evidence.scoreBreakdown` com 6 chaves nomeadas + `total`; `premises.scoreThreshold` + `premises.scoreTotal` em cada sinal.
 - [x] Explicabilidade em linguagem natural. F7.2+F7.4 — card mostra título humanizado, badge `score X/100`, "Ganho estimado: R$ X/mês" (uplift 3× diff de preço), botão expandível revela grid das 6 dimensões nomeadas em PT-BR.
 - [x] `impact_amount` em BRL/mês (uplift estimado). F7.2 — `estimateUpliftBrl(current, target) = 3× (target.price − current.price)` (payback conservador); `impactUnit='BRL'`.
-- [ ] Frequency control (§15 do PRD). Fatia 7.3 (**Decisão #7**).
-- [ ] LGPD: rejeição pausa nova oferta. Fatia 7.3.
-- [ ] Rotas `/api/billing/recommendation/{dismiss,accept}`. Fatia 7.3.
+- [x] Frequency control (§15 do PRD). F7.3 — cooldown determinístico 30d → 90d → 180d por (org, target_plan_id, target_module_key); TETO em 180 na 4ª+ rejeição; `hasActiveCooldown` filtra ANTES do publisher publicar.
+- [x] LGPD: rejeição pausa nova oferta. F7.3 — `POST /api/signals/:id/dismiss` propaga cooldown via hook (`dismissBySignalId`), UI existente (F7.4) continua funcionando com zero mudança. RN-153-F7.3-003: severity=critical bypassa cooldown (uso ≥100% precisa saber).
+- [x] Rotas `/api/billing/recommendation/{dismiss,accept}`. F7.3 — `POST /api/billing/recommendations/:id/dismiss` (idem hook, mas explícito), `POST /api/billing/recommendations/:id/accept` (marca aceita + retorna `redirectTo` pra Cobrança; G-153-3: nada cobrado aqui). Também `GET /api/billing/recommendations` (lista com filtro status).
+- [x] Tabela `upgrade_recommendations`. F7.3 — ledger dedicado; campos incluem `signal_id, target_plan_id, target_module_key, score, impact_amount, evidence_json, status, rejection_count, cooldown_until, accepted_at, dismissed_at`.
 
 ## §5 — Princípios obrigatórios
 
@@ -89,7 +90,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 - [ ] G-153-3 — IA nunca contrata sem clique. Fatia 7.5 (test cobre).
 - [ ] G-153-4 — Preços calculados no backend, HMAC webhook. Fatia 5.2 + 5.3 (**Decisão #3**).
 - [ ] G-153-5 — Blueprint publicado é imutável. Fatia 3.1 (test cobre).
-- [ ] G-153-6 — Recomendação ≥60 + sem rejeição 30d + org não em incidente. Fatia 7.3.
+- [~] G-153-6 — Recomendação ≥60 + sem rejeição 30d + org não em incidente. F7.2 fez o threshold ≥60 (MIN_PUBLISH_SCORE). F7.3 fez o cooldown por rejeição (30/90/180d). "Org não em incidente" continua dependendo de detecção de incidente (fatia futura); billing_status blocked/cancelled/past_due já skipa desde F7.1.
 - [ ] G-153-7 — Downgrade preserva dados via `read_only`. Fatia 4.3 + 6.2 (**Decisão #9**).
 
 ## §7 — Modelo de entitlement
@@ -124,13 +125,13 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [ ] Sinais permitidos (§12.1) — 15 dimensões documentadas. Fatia 7.1 implementa as principais (`ai_this_month`, `channels`, `contacts`, `users`, signal_density).
 - [ ] Sinais proibidos isoladamente (§12.2) — só rechaça pattern não-informativo (visita repetida da tela = não-signal). Fatia 7.1 (test cobre).
-- [ ] Condições pra recomendar (§13) — 7 pré-condições. Fatia 7.3.
-- [ ] Score 0-100 com breakdown (§14). Fatia 7.2.
+- [~] Condições pra recomendar (§13) — 7 pré-condições. F7.1+F7.2+F7.3 cobrem: (1) uso alto (near_limit ≥80%) — F7.1; (2) score ≥60 — F7.2; (3) upgrade tem valor (uplift BRL positivo) — F7.2; (4) blueprint alinhado — F7.2 `plan_module_gap`; (5) sem cooldown ativo — F7.3; (6) org não bloqueada — F7.1 (billing_status skip). (7) "sem incidente ativo" fica pra fatia futura.
+- [x] Score 0-100 com breakdown (§14). F7.2 — 6 dimensões determinísticas, threshold DURO ≥60, breakdown exposto em `evidence.scoreBreakdown`.
 
 ## §15 — Frequência
 
-- [!] Cooldown 30 dias por `target_plan_id`. **Decisão #7.** Fatia 7.3.
-- [ ] Rejeição/inadimplência/incidente pausam. Fatia 7.3.
+- [x] Cooldown 30 dias por `target_plan_id`. F7.3 — escala 30/90/180 (RN-153-F7.3-001/002). Decisão #7 resolvida no código (documentada em `COOLDOWN_LADDER_DAYS`).
+- [~] Rejeição/inadimplência/incidente pausam. F7.3 — rejeição pausa via `dismiss` (30/90/180d). Inadimplência já pausa desde F7.1 (`billing_status IN blocked/cancelled/past_due` skipa detector). Incidente pausa fica pra fatia futura (requer sinal de incidente detectado).
 
 ## §16 — Explicabilidade
 
@@ -181,7 +182,7 @@ Já mapeado em §11.2. Ver Fatia 3.1 + 3.3 + 3.4.
 - [x] `organization_blueprints`. F3.1 — `db.ts` (organization_id PK, blueprint_id, blueprint_key, blueprint_version, assigned_at, assigned_by, overrides_json, status).
 - [ ] `plan_entitlements`. Fatia 1.1 (opcional — hoje derivamos de `plans.features.modules`; se performance exigir, materializa depois).
 - [ ] `organization_entitlements`. Fatia 4.3 (necessário pra estado `read_only` + concessões explícitas).
-- [ ] `upgrade_recommendations`. Fatia 7.3.
+- [x] `upgrade_recommendations`. F7.3 — tabela criada em `db.ts` com 3 índices (org+status, target composto, signal).
 - [ ] `subscription_change_requests`. Fatia 5.2.
 - [ ] `terms_versions`. Fatia 5.1.
 
@@ -190,7 +191,7 @@ Já mapeado em §11.2. Ver Fatia 3.1 + 3.3 + 3.4.
 Entitlements: [ ] `/me`, [ ] `/modules`, [ ] `/resource/:key` — Fatia 1.1.
 Blueprints: [x] `GET /api/admin/blueprints` + `GET /:id`, [x] `POST /api/admin/blueprints`, [x] `POST /:id/publish` + `POST /:id/deprecate`, [x] `POST /api/admin/organizations/:id/blueprint` + `GET /api/admin/organizations/:id/blueprint` + `GET /.../blueprint/preview`. F3.1 entregou todas.
 Planos: [ ] `GET /billing/plans`, [ ] `GET /billing/current`, [ ] `POST /billing/checkout`, [ ] `POST /billing/upgrade/preview`, [ ] `POST /billing/upgrade/confirm`, [ ] `POST /billing/downgrade` — Fatias 5.3 + 6.1 + 6.2.
-Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `POST .../accept` — Fatia 7.3.
+Recomendação: [x] `GET /api/billing/recommendations`, [x] `POST .../:id/dismiss`, [x] `POST .../:id/accept` (não executa upgrade — G-153-3) — F7.3. Adicionalmente `GET /api/billing/recommendations/:id` (detalhe).
 
 ## §27 — Segurança
 
@@ -240,7 +241,7 @@ Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `
 - [x] Respeita vertical (Blueprint). F7.2 — `plan_module_gap` só publica em orgs com blueprint assignado; `adequacao_vertical` dá +10 quando alinhado ao blueprint.
 - [x] Não recomenda módulo oculto. F7.2 — `plan_module_gap` só varre `blueprint.config.requiredModules`+`optionalModules` (nunca `hiddenModules`); `EntitlementService` já esconde os hidden via F1.4.
 - [ ] IA não altera plano sozinha. Fatia 7.5 (chat menciona sob demanda).
-- [ ] Rejeição pausa. Fatia 7.3 (**Decisão #7**).
+- [x] Rejeição pausa. F7.3 — cooldown 30/90/180d por (org, target_plan, module); `UpgradeRecommendationService.hasActiveCooldown` bloqueia publish. Decisão #7 resolvida no código (escala determinística documentada).
 - [x] Benefício estimado rotulado como estimativa. F7.2 — `impact_amount` em BRL + card mostra "Ganho ESTIMADO" (label explícito); premise `basis='fact'` refere-se aos contadores; futura `expected_impact` no card evoluí em F5.3 (checkout mostra preço real).
 - [ ] Preço vem do backend. Fatia 7.4 + 6.1.
 - [ ] Aceite explícito obrigatório. Fatia 7.4 + 6.1 (fluxo `card → preview → confirm`).

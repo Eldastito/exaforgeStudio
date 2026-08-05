@@ -192,6 +192,12 @@ export class FalaTuService {
       if (gate.reason === "monthly_limit") throw new Error("Limite mensal de ações de IA do plano atingido. Compre um pacote extra ou aguarde a virada do mês.");
       throw new Error("Conta bloqueada ou cobrança pendente — captura por IA indisponível.");
     }
+    // ADR-154 F1.1 — atribui o consumo desta captura ao FalaTu (org + usuário +
+    // módulo). Sem isto, chamadas downstream em llm.ts caem no default
+    // module='legacy' e o dashboard admin não consegue separar quanto o FalaTu
+    // gastou vs. outros módulos. É o backfill best-effort do primeiro módulo.
+    const { setUsageContext } = await import("./usageContext.js");
+    setUsageContext({ orgId, userId, module: "falatu" });
     const extraction = await FalaTuService.interpret(input);
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;

@@ -7600,6 +7600,26 @@ const initDb = () => {
         ON upgrade_recommendations (organization_id, signal_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar upgrade_recommendations (ADR-153 F7.3)', e); }
+
+  // ADR-154 Fatia 1.1 — AI usage ledger estendido com atribuição por
+  // USUÁRIO + MÓDULO + OPERAÇÃO + LATÊNCIA + custo em CENTAVOS (INTEGER, pra
+  // queries determinísticas — cost_brl REAL fica pra compat com admin
+  // dashboard existente). Aditivo puro no `ai_usage_log`: nenhuma coluna
+  // renomeada, todas as queries antigas seguem funcionando. Grava default
+  // module='legacy' quando o call site ainda não passou pelo setUsageContext
+  // (backfill best-effort — ver usageContext.ts).
+  try {
+    const cols = db.prepare(`PRAGMA table_info(ai_usage_log)`).all() as any[];
+    const has = (n: string) => cols.some((c: any) => c.name === n);
+    if (!has("user_id"))     db.exec(`ALTER TABLE ai_usage_log ADD COLUMN user_id TEXT`);
+    if (!has("module"))      db.exec(`ALTER TABLE ai_usage_log ADD COLUMN module TEXT DEFAULT 'legacy'`);
+    if (!has("operation"))   db.exec(`ALTER TABLE ai_usage_log ADD COLUMN operation TEXT`);
+    if (!has("latency_ms"))  db.exec(`ALTER TABLE ai_usage_log ADD COLUMN latency_ms INTEGER DEFAULT 0`);
+    if (!has("cost_cents"))  db.exec(`ALTER TABLE ai_usage_log ADD COLUMN cost_cents INTEGER DEFAULT 0`);
+    if (!has("request_id"))  db.exec(`ALTER TABLE ai_usage_log ADD COLUMN request_id TEXT`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_org_module_date ON ai_usage_log (organization_id, module, created_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_org_user_date   ON ai_usage_log (organization_id, user_id, created_at)`);
+  } catch(e){ console.error('[DB] Falha ao estender ai_usage_log (ADR-154 F1.1)', e); }
 };
 
 initDb();

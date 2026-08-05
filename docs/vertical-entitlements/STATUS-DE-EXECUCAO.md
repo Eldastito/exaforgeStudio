@@ -246,6 +246,40 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-05 (Fatia 1.4 — hidden real via blueprint.hiddenModules)
+
+- **Fase:** 1 (última fatia — Fase 1 fecha em 4/4). ADR-153 §7 (`hidden` distinguindo o que o produto atual NÃO oferece) agora com fonte estruturada.
+- **Itens executados:** todos os 3 do plano F1.4 (importar VerticalBlueprintService, substituir `HIDDEN_BY_VERTICAL` estático pela consulta dinâmica, ctx cache no overview, teste cobrindo ambos os paths).
+- **Arquivos alterados:**
+  - `src/server/EntitlementService.ts` — 4 mudanças:
+    - Import de `VerticalBlueprintService`.
+    - Renomeou `HIDDEN_BY_VERTICAL` → `FALLBACK_HIDDEN_BY_VERTICAL` (indica que é safety net pra orgs sem blueprint).
+    - Nova função `resolveHiddenForOrg(orgId, verticalFallback)` — consulta `getForOrganization` + `getBlueprint`; se achar, usa `config.hiddenModules`; senão fallback. Best-effort (erro cai no fallback silenciosamente).
+    - `check()` ganha `ctx?: EntitlementContext` opcional pra receber o resultado pré-resolvido (evita N × 2 queries em `overview`).
+    - `source.verticalBlueprint` populado com `"<key>:v<version>"` quando blueprint assignado; `null` quando não.
+    - `overview()` pré-resolve o blueprint UMA vez e passa `ctx` pras chamadas de `check`.
+  - `package.json` — script `test:entitlement-hidden-via-blueprint`.
+- **Arquivos criados:**
+  - `scripts/test-entitlement-hidden-via-blueprint.ts` — **28/28 checks** cobrindo 12 casos: (1) org SEM blueprint usa fallback estático; (2) org COM blueprint usa `blueprint.hiddenModules`; (3) blueprint esconde diferente do fallback (vms hidden pelo blueprint peixaria mas available_to_buy no fallback varejo); (4) `source.verticalBlueprint` formato `<key>:v<version>`; (5) mudar de blueprint muda hidden imediatamente (sem cache); (6) overview ctx compartilhado (todos os itens com mesmo blueprint); (7) master admin bypass preservado; (8) cross-tenant; (9) blueprint órfão (deletado direto do DB) → cai no fallback + `verticalBlueprint=null`; (10) `hidden` só quando plano NÃO cobre (peixaria em enterprise: clinica hidden→available_to_enable); (11) available_to_buy quando plano não cobre + blueprint NÃO esconde; (12) `reason='hidden_by_vertical'` preservado (public API — frontend switch).
+- **Testes executados:**
+  - `npm run test:entitlement-hidden-via-blueprint` → **28/28 OK**.
+  - Regressão zero: `test:entitlement-service` (49/49), `test:entitlement-middleware` (29/29), `test:entitlements-me` (25/25), `test:vertical-blueprint-service` (48/48), `test:blueprint-seeder` (70/70), `test:vertical-plan-intersection` (19/19).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Rename `HIDDEN_BY_VERTICAL` → `FALLBACK_HIDDEN_BY_VERTICAL`** — deixa explícito que é safety net, não a fonte principal. Blueprint (F3.2) é a fonte estruturada.
+  - (ii) **Fallback preservado** — orgs em transição (que ainda não migraram pra blueprint via `POST /admin/blueprints/migrate-orgs`) continuam com o comportamento antigo. Zero regressão em produção pré-migração.
+  - (iii) **Ctx opcional em `check`** — overview pré-resolve blueprint (1 query) e passa via `ctx.blueprintHidden` + `ctx.blueprintKey` + `ctx.blueprintVersion`. Consultas pontuais (middleware, `/resource/:key`) resolvem on-the-fly (1 query — custo aceitável). Isso evita N × 2 queries em overview (~64 queries → 2 queries).
+  - (iv) **`source.verticalBlueprint = "<key>:v<version>"`** — formato semântico legível pra frontend/audit. Frontend pode `split(':')` se quiser separar. Antes era sempre `null`.
+  - (v) **Best-effort na resolução** — `try/catch` em torno da consulta do blueprint. Se algo falhar (blueprint órfão apontando pra id deletado, exception em getBlueprint, etc), cai silenciosamente no fallback estático. Melhor UX que 500.
+  - (vi) **`reason='hidden_by_vertical'` preservado** — public API estável (frontend pode switchar por reason). Semanticamente ainda representa "escondido pela definição do produto atual" — blueprint é a materialização da vertical comercial.
+  - (vii) **Blueprint órfão** — se `organization_blueprints.blueprint_id` aponta pra registro que não existe mais em `vertical_blueprints`, o `getBlueprint` devolve `null` e o fallback estático assume. Master Admin re-assign resolve. Testado.
+- **Cross-service:** ADITIVO PURO. `EntitlementService.check` continua com mesma assinatura pública (ctx é opcional). Nenhum consumer atual (middleware server.ts, useStore, /api/entitlements/me) muda de código. Apenas os RESULTADOS enriquecem — `source.verticalBlueprint` agora é preenchido; `hidden` agora usa blueprint real quando presente.
+- **Resultado:** Fase 1 do ADR-153 **completa** (F1.1 + F1.2 + F1.3 + F1.4). Porta única de decisão de entitlement, com blueprint como fonte da verdade do que o produto atual esconde. Motor de recomendação (F7) já pode usar `blueprint.config.commercialUpgrades` + `hiddenModules` pra sugerir upgrades coerentes com o nicho. Fluxo pronto pra piloto (F8.1 shadow mode).
+- **Pendências criadas:** nenhuma nova. Duplicação `FALLBACK_HIDDEN_BY_VERTICAL` × `blueprint.hiddenModules` é intencional pro período de transição; pode ser removida quando 100% das orgs vivas estiverem migradas (F8.4).
+- **Próximo passo:** decidir com o dono: (a) **F3.3 — migração de versão v1→v2 com preview + apply** (permite Master Admin evoluir blueprints sem forçar orgs vivas); (b) **F4.2 — conteúdo real da aba "Plano e Expansões"** (agora que Blueprint tem `commercialUpgrades`); (c) iniciar Fase 5 (checkout Asaas real — depende de Decisão #2 ToS jurídico); (d) iniciar Fase 7 (motor de recomendação de plano). **Recomendo F4.2** — dono passa a ver Plano e Expansões preenchido, valida bundle Clínica + destrava a UI que motiva upgrade (F7 vai popular com recomendação).
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

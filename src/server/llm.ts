@@ -1,7 +1,7 @@
 import OpenAI, { toFile } from "openai";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
-import { currentOrgId } from "./usageContext.js";
+import { currentUsageContext } from "./usageContext.js";
 
 /**
  * Camada única de IA (OpenAI) usada por todos os agentes:
@@ -52,19 +52,46 @@ function priceFor(model: string): { in: number; out: number } {
 // sem a duração exata, usamos uma estimativa configurável).
 const WHISPER_COST_USD = Number(process.env.OPENAI_WHISPER_COST_USD || 0.006);
 
-/** Registra o consumo de uma chamada de IA na empresa do contexto atual. */
-function recordUsage(model: string, kind: string, inputTokens: number, outputTokens: number, costUsdOverride?: number): void {
+/**
+ * Registra o consumo de uma chamada de IA no ledger `ai_usage_log`.
+ *
+ * ADR-154 F1.1: grava também user_id, module ('legacy' se o call site não
+ * migrou), operation (mais granular que kind), latency_ms e cost_cents
+ * (INTEGER — usa Math.round pra evitar drift de float). Continua best-effort:
+ * qualquer falha aqui é engolida — medição NUNCA pode quebrar o atendimento
+ * (convenção nº 7). Uma call sem org no contexto não é gravada.
+ */
+function recordUsage(
+  model: string,
+  kind: string,
+  inputTokens: number,
+  outputTokens: number,
+  costUsdOverride?: number,
+  latencyMs?: number,
+): void {
   try {
-    const orgId = currentOrgId();
+    const { orgId, userId, module } = currentUsageContext();
     if (!orgId) return; // sem org no contexto: não atribui (ex.: jobs internos)
     const p = priceFor(model);
     const costUsd = costUsdOverride != null
       ? costUsdOverride
       : (inputTokens / 1e6) * p.in + (outputTokens / 1e6) * p.out;
+    const costBrl = costUsd * USD_BRL;
+    // Centavos como INTEGER (nunca REAL): auditoria/quota derivada de SUM
+    // não pode sofrer drift de float. cost_brl REAL fica preservado pra
+    // compat com o admin dashboard existente.
+    const costCents = Math.round(costBrl * 100);
     db.prepare(
-      `INSERT INTO ai_usage_log (id, organization_id, model, kind, input_tokens, output_tokens, total_tokens, cost_usd, cost_brl)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(randomUUID(), orgId, model, kind, inputTokens, outputTokens, inputTokens + outputTokens, costUsd, costUsd * USD_BRL);
+      `INSERT INTO ai_usage_log (
+         id, organization_id, user_id, model, kind, module, operation,
+         input_tokens, output_tokens, total_tokens,
+         cost_usd, cost_brl, cost_cents, latency_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      randomUUID(), orgId, userId || null, model, kind, module || "legacy", kind,
+      inputTokens, outputTokens, inputTokens + outputTokens,
+      costUsd, costBrl, costCents, Math.max(0, Math.round(latencyMs || 0)),
+    );
   } catch { /* medição nunca pode quebrar o atendimento */ }
 }
 
@@ -77,21 +104,23 @@ export async function chat(
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: prompt });
 
+  const t0 = Date.now();
   const res = await getClient().chat.completions.create({
     model: CHAT_MODEL,
     messages,
     temperature: opts.temperature ?? 0.4,
     ...(opts.json ? { response_format: { type: "json_object" } } : {}),
   });
-  recordUsage(CHAT_MODEL, "chat", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  recordUsage(CHAT_MODEL, "chat", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0, undefined, Date.now() - t0);
   return res.choices[0]?.message?.content || "";
 }
 
 /** Embeddings de uma lista de textos. Retorna um vetor por texto. */
 export async function embed(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
+  const t0 = Date.now();
   const res = await getClient().embeddings.create({ model: EMBED_MODEL, input: texts });
-  recordUsage(EMBED_MODEL, "embed", res.usage?.prompt_tokens || 0, 0);
+  recordUsage(EMBED_MODEL, "embed", res.usage?.prompt_tokens || 0, 0, undefined, Date.now() - t0);
   return res.data.map((d) => d.embedding as number[]);
 }
 
@@ -309,12 +338,13 @@ export async function transcribeAudio(
   mimetype = "audio/ogg"
 ): Promise<string> {
   const file = await toFile(buffer, filename, { type: mimetype });
+  const t0 = Date.now();
   const res = await getClient().audio.transcriptions.create({
     file,
     model: TRANSCRIBE_MODEL,
     language: process.env.OPENAI_TRANSCRIBE_LANG || "pt", // melhora a precisão em PT-BR
   });
-  recordUsage(TRANSCRIBE_MODEL, "audio", 0, 0, WHISPER_COST_USD);
+  recordUsage(TRANSCRIBE_MODEL, "audio", 0, 0, WHISPER_COST_USD, Date.now() - t0);
   return res.text || "";
 }
 

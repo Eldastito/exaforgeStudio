@@ -388,7 +388,8 @@
     "test:admin-upgrade-recommendations": "tsx scripts/test-admin-upgrade-recommendations.ts",
     "test:scheduler-plan-fit-cooldown-expire": "tsx scripts/test-scheduler-plan-fit-cooldown-expire.ts",
     "test:blueprint-next-version": "tsx scripts/test-blueprint-next-version.ts",
-    "test:recommendation-history-chart": "tsx scripts/test-recommendation-history-chart.ts"
+    "test:recommendation-history-chart": "tsx scripts/test-recommendation-history-chart.ts",
+    "test:ai-usage-ledger": "tsx scripts/test-ai-usage-ledger.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -280,6 +280,34 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-05 (Fatia 4.2 — conteúdo real da aba "Plano e Expansões")
+
+- **Fase:** 4 (Interface). Fatia 4.2 substitui o `PlanoExpansoesPlaceholder` registrado na F1.3 pelo painel real.
+- **Itens executados:** 1 substituição de componente + testes de regressão.
+- **Arquivos alterados:**
+  - `src/features/SettingsView.tsx` — `PlanoExpansoesPlaceholder` (~20 linhas) → `PlanoExpansoesPanel` (~200 linhas). 7 blocos: (1) Plano atual + blueprint + status badge + contagem de estados; (2) Uso × Limites (reusa `UsageBar`); (3) Bundles verticais recomendados (filtrados por `verticalHints ⊇ meta.vertical`); (4) Próximos níveis (comparação com PLAN_GRADE, mostra módulos novos por tier); (5) Add-ons compatíveis (filtrados por blueprint: não sugere modulo em `hiddenModules`); (6) Add-ons ativos (informativo); (7) Recomendação IA (placeholder pra F7 popular). CTA final "Ir para Cobrança" leva pro fluxo de assinatura existente.
+  - Novo tipo `PlanBundleT` local (mirror do backend).
+  - Tab hookup: `activeTab === 'planoexpansoes'` renderiza `PlanoExpansoesPanel` com `onGoToCobranca={() => setActiveTab('cobranca')}`.
+- **Testes executados:**
+  - `npx tsc --noEmit` → limpo.
+  - Regressão zero: `test:plan-bundles` (28/28), `test:entitlement-service` (49/49), `test:entitlements-me` (25/25), `test:entitlement-hidden-via-blueprint` (28/28), `test:blueprint-seeder` (70/70).
+- **Decisões micro:**
+  - (i) **Sem novo endpoint** — usa 4 rotas EXISTENTES (`/api/plans/current`, `/api/plans`, `/api/plans/bundles`, `/api/plans/addons`) + `useStore.entitlements` já carregado. Frontend é agrupador; backend não muda.
+  - (ii) **Sem checkout aqui** — CTA sempre leva pra aba "Cobrança" (F5.3 vai unificar quando ligar checkout real). G-153-3 preservada: nenhum upgrade acontece só com clique no CTA — aceite explícito continua em Cobrança.
+  - (iii) **Bundles filtrados por vertical hint** — mostra o Growth+Clínica só pra `vertical=saude` (ou pra bundles sem `verticalHints`). Peixaria não vê bundle Clínica; clínica não vê bundle Peixaria. Fecha a coerência PRD §11.2 ("Expansões recomendadas — somente upgrades aprovados pelo Blueprint").
+  - (iv) **Add-ons filtrados por blueprint** — se `entitlements[key].state === 'hidden'`, NÃO aparece como sugestão de add-on. Ex.: peixaria não vê `clinica` como add-on comprável (blueprint peixaria esconde clinica).
+  - (v) **Blueprint mostrado como badge `<key>:v<version>`** — reutiliza `source.verticalBlueprint` populado na F1.4. Dono vê "Blueprint: peixaria_balcao_peso:v1" em fonte mono; muito útil pra Master Admin identificar o produto ativo.
+  - (vi) **Contagem de estados no header** — 3 pills: ativos / podem ligar / expansões. Dono vê rapidamente "tenho 5 ativos, 3 podem ligar sem pagar, 8 expansões disponíveis". Motiva exploração.
+  - (vii) **Recomendação IA como placeholder** — bloco indigo com `BrainCircuit` icon + texto "Em breve F7". Registra o slot pra quando o motor chegar. Também comunica G-153-3 explicitamente ("sem pressão comercial").
+  - (viii) **Reuso máximo** — `UsageBar` (F4.2 usa igual `BillingPanel`), `brl` helper local, tipos `Plan`/`Snapshot` já existentes. Nenhum service nova criado.
+  - (ix) **Trial countdown destacado** — se `snap.trialDaysLeft != null && billingStatus === 'trialing'`, mostra "Trial: X dias restantes" em azul. Reforça urgência sem ser agressivo.
+- **Cross-service:** ADITIVO PURO no frontend. Zero mudança backend. `PlanoExpansoesPlaceholder` foi removido; substituído pelo painel. Aba "Plano e Expansões" agora tem conteúdo real desde o primeiro deploy pós-merge.
+- **Resultado:** Aba "Plano e Expansões" é o dashboard comercial do dono do lojista: onde estou (plano+status+blueprint), quanto uso (4 barras), o que posso ligar sem pagar (contagem), o que ganhar se contratar bundle/upgrade/addon coerente com meu nicho, e o próximo passo comercial (link pra Cobrança). Fecha o pilar §11.3 do PRD.
+- **Pendências criadas:** nenhuma nova. Motor de recomendação IA (F7) vai popular o placeholder quando entregue.
+- **Próximo passo:** decidir com o dono: (a) **F3.3** — migração de versão de blueprint v1→v2 com preview + apply (Master Admin evolui blueprints); (b) **F4.1** — reescrita do ModulesPanel com 3 áreas mais explícitas (F1.3 já entregou versão básica com estados; F4.1 pode enriquecer se precisar); (c) **F7 — motor de recomendação de plano** (destrava o placeholder de recomendação IA que acabamos de colocar); (d) **F5.1 — Terms of Service versionado** (bloqueia F5 completa; depende de Decisão #2 jurídico). **Recomendo F7** — placeholder já está no ar e o motor consome sinais + entitlements que já temos.
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

@@ -221,7 +221,7 @@ export function SettingsView() {
           {activeTab === 'cobranca' && <BillingPanel />}
 
           {activeTab === 'modulos' && <ModulesPanel onUpgrade={() => setActiveTab('planoexpansoes')} />}
-          {activeTab === 'planoexpansoes' && <PlanoExpansoesPlaceholder />}
+          {activeTab === 'planoexpansoes' && <PlanoExpansoesPanel onGoToCobranca={() => setActiveTab('cobranca')} />}
           {activeTab === 'seguranca' && <SecurityPanel />}
           {activeTab === 'privacidade' && <LgpdPanel />}
           {activeTab === 'governanca' && <GovernancePanel />}
@@ -646,11 +646,91 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
-// ADR-153 F1.3 — placeholder da nova aba "Plano e Expansões" (PRD §11.3).
-// F4.2 preenche com: plano atual + uso + limites + próximos níveis + add-ons
-// compatíveis + recomendação da IA (F7) + CTA de upgrade (F6). Por ora só
-// registra a aba no menu pra a mudança de UX ser aditiva já em F1.3.
-function PlanoExpansoesPlaceholder() {
+// ADR-153 F4.2 — Aba "Plano e Expansões" (PRD §11.3). Fonte única do "onde
+// estou / quanto uso / próximo passo comercial". Consome:
+//   - GET /api/plans/current  (plano + status + uso × limites)
+//   - GET /api/plans          (grade completa pra comparação de upgrade)
+//   - GET /api/plans/bundles  (bundles verticais — F2.2)
+//   - GET /api/plans/addons   (add-ons disponíveis + ativos)
+//   - useStore.entitlements   (blueprint da org via /api/entitlements/me — F1.3)
+//
+// NÃO faz checkout aqui — Cobrança ainda é a tela de assinatura real (F5.3
+// vai unificar). NÃO faz recomendação de IA — F7 popula quando o motor rodar.
+// Motor de score/frequência (§14-16 do PRD) fica em fatia futura; aqui é só a
+// vitrine estruturada. G-153-3 preservada: nenhum upgrade é executado só com
+// clique no CTA — leva pra tela de cobrança onde há aceite explícito.
+function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void }) {
+  const entitlements = useStore(s => s.entitlements);
+  const vertical = useStore(s => s.vertical);
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [bundles, setBundles] = useState<PlanBundleT[]>([]);
+  const [addons, setAddons] = useState<{ available: any[]; active: any[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/plans/current').then(r => r.json()).catch(() => null),
+      fetch('/api/plans').then(r => r.json()).catch(() => []),
+      fetch('/api/plans/bundles').then(r => r.json()).catch(() => ({ bundles: [] })),
+      apiFetch('/api/plans/addons').then(r => r.json()).catch(() => null),
+    ]).then(([cur, ps, bd, ad]) => {
+      setSnap(cur && !cur.error ? cur : null);
+      setPlans(Array.isArray(ps) ? ps : []);
+      setBundles(Array.isArray(bd?.bundles) ? bd.bundles : []);
+      setAddons(ad && !ad.error ? ad : null);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const brl = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // Ordem tier — pra "próximos níveis" (skip current + skip cortesia).
+  const TIER_ORDER = ['autonomo', 'start', 'growth', 'scale', 'enterprise'];
+  const currentTierIdx = snap?.plan ? TIER_ORDER.indexOf(snap.plan.id) : -1;
+  const upgrades = plans
+    .filter(p => p.id !== 'cortesia' && TIER_ORDER.indexOf(p.id) > currentTierIdx)
+    .sort((a, b) => TIER_ORDER.indexOf(a.id) - TIER_ORDER.indexOf(b.id));
+
+  // Bundles filtrados pra vertical da org (blueprint hint).
+  const recommendedBundles = bundles.filter(b =>
+    !b.verticalHints || b.verticalHints.length === 0 || (vertical && b.verticalHints.includes(vertical))
+  );
+
+  // Blueprint da org (derivado dos entitlements — qualquer decision tem
+  // source.verticalBlueprint que veio da F1.4).
+  const blueprintLabel = entitlements
+    ? Object.values(entitlements)[0]?.source?.verticalBlueprint || null
+    : null;
+
+  // Add-ons DISPONÍVEIS que ligam módulos NÃO escondidos pelo blueprint
+  // (evita sugerir clínica pra chaveiro). Sem blueprint: mostra todos.
+  const hiddenSet = new Set<string>(
+    entitlements
+      ? Object.values(entitlements).filter((d: any) => d.state === 'hidden').map((d: any) => d.resource)
+      : []
+  );
+  const relevantAddons = (addons?.available || []).filter((a: any) => !hiddenSet.has(a.key));
+
+  // Contagem por estado (pra mostrar "expansões disponíveis" no header).
+  const stateCount = { available_to_buy: 0, available_to_enable: 0, active: 0 };
+  if (entitlements) {
+    for (const d of Object.values(entitlements) as any[]) {
+      if (d.state in stateCount) (stateCount as any)[d.state]++;
+    }
+  }
+
+  const statusChip = (status: string) => {
+    const styles: Record<string, string> = {
+      trialing: 'bg-blue-500/20 text-blue-300',
+      active: 'bg-emerald-500/20 text-emerald-300',
+      past_due: 'bg-amber-500/20 text-amber-300',
+      suspended: 'bg-orange-500/20 text-orange-300',
+      blocked: 'bg-red-500/20 text-red-300',
+      cancelled: 'bg-zinc-500/20 text-zinc-300',
+    };
+    return <span className={`text-[10px] px-2 py-0.5 rounded ${styles[status] || 'bg-zinc-500/20 text-zinc-300'}`}>{status}</span>;
+  };
+
   return (
     <>
       <div className="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
@@ -658,19 +738,198 @@ function PlanoExpansoesPlaceholder() {
           <h2 className="zf-page-title flex items-center gap-2">
             <Rocket className="w-6 h-6 text-teal-300" /> Plano e Expansões
           </h2>
-          <p className="text-zinc-400 text-sm mt-1">Comparação de planos, add-ons compatíveis com o seu Blueprint e recomendações da IA.</p>
+          <p className="text-zinc-400 text-sm mt-1">Onde você está e o próximo passo do produto. Cobrança fica em <b>Cobrança</b>.</p>
         </div>
       </div>
-      <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-6">
-        <p className="text-sm text-indigo-300 font-semibold">Em construção (ADR-153 F4.2)</p>
-        <p className="text-xs text-zinc-400 mt-2">
-          Esta aba vai reunir: plano atual + uso × limites + próximos níveis + add-ons compatíveis + preço + recomendação inteligente + checkout de upgrade.
-          Enquanto isso, veja seus recursos em <b>Módulos</b> e faça upgrade em <b>Cobrança</b>.
-        </p>
-      </div>
+
+      {loading ? (
+        <p className="text-zinc-500 text-sm">Carregando…</p>
+      ) : (
+        <div className="space-y-6">
+          {/* 1. Plano atual + blueprint + status */}
+          {snap?.plan && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Seu produto atual</p>
+                  <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+                    {snap.plan.name} {statusChip(snap.billingStatus)}
+                  </h3>
+                  <p className="text-sm text-zinc-400 mt-1">
+                    {brl(snap.plan.price)}/mês
+                    {snap.trialDaysLeft != null && snap.billingStatus === 'trialing' && (
+                      <> · Trial: <b className="text-blue-300">{snap.trialDaysLeft} dia{snap.trialDaysLeft === 1 ? '' : 's'} restantes</b></>
+                    )}
+                  </p>
+                  {blueprintLabel && (
+                    <p className="text-xs text-zinc-500 mt-2">
+                      Blueprint: <span className="text-teal-300 font-mono">{blueprintLabel}</span>
+                    </p>
+                  )}
+                </div>
+                <div className="text-right text-xs text-zinc-500">
+                  <p>Ativos: <b className="text-emerald-300">{stateCount.active}</b></p>
+                  <p>Podem ligar: <b className="text-zinc-300">{stateCount.available_to_enable}</b></p>
+                  <p>Expansões: <b className="text-indigo-300">{stateCount.available_to_buy}</b></p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 2. Uso × Limites */}
+          {snap && (
+            <div>
+              <p className="text-sm font-semibold text-zinc-200 mb-3">Uso do plano</p>
+              <div className="space-y-2">
+                <UsageBar label="Respostas de IA (este mês)" used={snap.usage.ai_this_month} limit={snap.limits?.ai_monthly_limit} />
+                <UsageBar label="Contatos" used={snap.usage.contacts} limit={snap.limits?.contacts_limit} />
+                <UsageBar label="Canais" used={snap.usage.channels} limit={snap.limits?.channels_limit} />
+                <UsageBar label="Usuários" used={snap.usage.users} limit={snap.limits?.users_limit} />
+              </div>
+            </div>
+          )}
+
+          {/* 3. Bundles verticais recomendados (F2.2) */}
+          {recommendedBundles.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-emerald-300 mb-2">🎯 Bundles recomendados para o seu nicho</p>
+              <p className="text-xs text-zinc-500 mb-3">Combinações prontas de plano + add-ons, com desconto sobre a compra avulsa.</p>
+              <div className="space-y-3">
+                {recommendedBundles.map(b => (
+                  <div key={b.key} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-zinc-100">{b.name}</p>
+                        <p className="text-xs text-zinc-400 mt-1">{b.description}</p>
+                        <p className="text-xs text-zinc-500 mt-2">
+                          Plano <b>{b.basePlan}</b> + add-ons: {b.addons.join(', ')}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-emerald-300">{brl(b.priceMonthly)}/mês</p>
+                        {b.priceAnnualMonth != null && (
+                          <p className="text-xs text-zinc-500">{brl(b.priceAnnualMonth)}/mês no anual</p>
+                        )}
+                        <p className="text-xs text-emerald-400 mt-1">
+                          Economia de {brl(b.bundleDiscount.savingsMonthly)} ({b.bundleDiscount.savingsPercent}%)
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={onGoToCobranca} className="mt-3 text-xs text-emerald-300 hover:text-emerald-200 font-medium">
+                      Contratar em Cobrança →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 4. Próximos níveis (upgrade path) */}
+          {upgrades.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-zinc-200 mb-2">🚀 Próximos níveis</p>
+              <p className="text-xs text-zinc-500 mb-3">Planos superiores comparados ao seu. Escolha em <b>Cobrança</b>.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {upgrades.slice(0, 4).map(p => {
+                  const currentMods = new Set<string>(snap?.plan?.features?.modules || []);
+                  const newMods = (p.features?.modules || []).filter((m: string) => !currentMods.has(m));
+                  return (
+                    <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm font-semibold text-zinc-100">{p.name}</p>
+                        <p className="text-sm text-teal-300">{brl(p.price)}/mês</p>
+                      </div>
+                      {newMods.length > 0 && (
+                        <p className="text-xs text-zinc-400">
+                          Adiciona: <span className="text-zinc-300">{newMods.slice(0, 5).join(', ')}</span>
+                          {newMods.length > 5 && <span className="text-zinc-500"> +{newMods.length - 5}</span>}
+                        </p>
+                      )}
+                      <p className="text-xs text-zinc-500 mt-2">
+                        IA: {p.features?.ai_monthly_limit === 0 ? 'ilimitado' : p.features?.ai_monthly_limit?.toLocaleString('pt-BR')} · Usuários: {p.features?.users_limit === 0 ? 'ilimitado' : p.features?.users_limit}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 5. Add-ons compatíveis */}
+          {relevantAddons.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-zinc-200 mb-2">➕ Add-ons compatíveis</p>
+              <p className="text-xs text-zinc-500 mb-3">Módulos que você pode contratar avulso, respeitando seu Blueprint.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {relevantAddons.map((a: any) => (
+                  <div key={a.key} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-zinc-100">{a.key}</p>
+                      <p className="text-sm text-teal-300">{brl(a.price)}/mês</p>
+                    </div>
+                    <button onClick={onGoToCobranca} className="mt-2 text-xs text-teal-300 hover:text-teal-200 font-medium">
+                      Contratar em Cobrança →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 6. Add-ons ATIVOS (informativo) */}
+          {addons?.active && addons.active.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-zinc-200 mb-2">Add-ons ativos</p>
+              <div className="flex flex-wrap gap-2">
+                {addons.active.map((a: any) => (
+                  <span key={a.key} className="text-xs px-2 py-1 rounded bg-amber-500/20 text-amber-300">
+                    {a.key} · {brl(a.price)}/mês
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 7. Recomendação IA (placeholder F7) */}
+          <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-5">
+            <div className="flex items-start gap-3">
+              <BrainCircuit className="w-5 h-5 text-indigo-300 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-indigo-300">Recomendação inteligente</p>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Em breve (ADR-153 F7): a IA vai analisar seu uso, sinais de operação e vertical pra sugerir o próximo passo — com evidência, score e explicação. Sem pressão comercial: sem clique explícito, nada muda.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* CTA final */}
+          <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
+            <p className="text-xs text-zinc-500">
+              Quer trocar de plano ou contratar? Vá em <b>Cobrança</b> pra escolher método de pagamento e aceite.
+            </p>
+            <Button onClick={onGoToCobranca} className="zf-button zf-button-primary">
+              <CreditCard className="w-4 h-4 mr-2" /> Ir para Cobrança
+            </Button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
+
+// Tipo pro bundle vindo de /api/plans/bundles (F2.2).
+type PlanBundleT = {
+  key: string;
+  name: string;
+  description: string;
+  basePlan: string;
+  addons: string[];
+  priceMonthly: number;
+  priceAnnualMonth: number | null;
+  verticalHints: string[];
+  bundleDiscount: { avulsoTotal: number; savingsMonthly: number; savingsPercent: number };
+};
 
 // ADR-153 F1.3: usa o mesmo shape de EntitlementDecision do backend.
 type EntitlementItem = {

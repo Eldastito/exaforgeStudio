@@ -26,6 +26,7 @@ import { ClinicRetentionService } from "./ClinicRetentionService.js";
 import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
+import { PlanFitSignalPublisher } from "./PlanFitSignalPublisher.js";
 import { FalaTuService } from "./FalaTuService.js";
 import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
@@ -680,7 +681,27 @@ export class Scheduler {
     await this.salesRecoveryAttributionPass().catch(e => console.error('[Scheduler] attribution F4c.4 falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
+    // ADR-153 F7.1 — detector de plan-fit (near_limit_*). Publica sinais em
+    // `business_signals` domain='plan' quando org está ≥80% de qualquer limite.
+    // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
+    try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
+  }
+
+  /**
+   * ADR-153 F7.1 — varredura de recomendação de plano. Best-effort: erro numa
+   * org não trava as outras. Idempotente por (org, dedupe_key). Roda no slow
+   * pass junto com clinica/escola.
+   */
+  static planFitPass() {
+    try {
+      const r = PlanFitSignalPublisher.runAll();
+      if (r.totalPublished > 0 || r.totalResolved > 0) {
+        console.log(`[Scheduler] plan-fit: ${r.orgsSeen} orgs varridas, ${r.totalPublished} sinais publicados, ${r.totalResolved} resolvidos.`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] plan-fit falhou', e);
+    }
   }
 
   /**

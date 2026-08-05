@@ -70,10 +70,10 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ### §11.4 UpgradeRecommendationEngine (novo)
 
-- [ ] `PlanFitDetectorService` (scanner puro). Fatia 7.1.
-- [ ] `PlanFitSignalPublisher` (publish + resolve por dedupe_key). Fatia 7.1.
-- [ ] Novos sinais `domain='plan'` com signal_types (`plan_near_limit_ai`, `plan_near_limit_channels`, `plan_module_gap_<key>`, `plan_capacity_bottleneck`). Fatia 7.1.
-- [ ] `Scheduler.planFitPass()` no slow pass. Fatia 7.1.
+- [x] `PlanFitDetectorService` (scanner puro). F7.1 — 4 métricas (ai/contacts/channels/users), severity determinística [80/90/100], targetPlanId, guardas cortesia/blocked/past_due/soft-deleted.
+- [x] `PlanFitSignalPublisher` (publish + resolve por dedupe_key). F7.1 — pattern ClinicRenewalTaskService, dedupe mensal por métrica, runAll best-effort.
+- [~] Novos sinais `domain='plan'` — F7.1 entregou 4 signal_types (`plan_near_limit_ai/contacts/channels/users`). `plan_module_gap_<key>` + `plan_capacity_bottleneck` ficam pra F7.2.
+- [x] `Scheduler.planFitPass()` no slow pass. F7.1 — best-effort, tick após clinicRetention + schoolCoordination + antes de billingDunning.
 - [ ] Score 0–100 baseado em 6 dimensões (§14 do PRD). Fatia 7.2.
 - [ ] `evidence_json` com breakdown por dimensão. Fatia 7.2.
 - [ ] Explicabilidade em linguagem natural. Fatia 7.2 + 7.4.

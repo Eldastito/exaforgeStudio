@@ -308,6 +308,41 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-05 (Fatia 7.1 — motor de detecção de plan-fit)
+
+- **Fase:** 7 (Recomendação IA). Fatia 7.1 monta a fundação: detector + publisher + wire no Scheduler + ACTION_MAP. F7.2 vai adicionar score 0-100 + explicabilidade + `plan_module_gap`. F7.3 vai adicionar frequency control + tabela `upgrade_recommendations`. F7.4-F7.5 UI e chat.
+- **Itens executados:** todos os 4 do plano F7.1 (detector puro, publisher sweep+resolve, ACTION_MAP+STRATEGIC entries em ImpactPrioritizationService, Scheduler.planFitPass no slow tier).
+- **Arquivos criados:**
+  - `src/server/PlanFitDetectorService.ts` — scanner puro (`detect(orgId): PlanFitCandidate[]`). Detecta 4 métricas (ai, contacts, channels, users) contra o teto do plano atual. Severity determinística: `pct ∈ [80,90) → attention; [90,100) → risk; ≥100 → critical`. `targetPlanId` aponta pro tier superior que aumenta o limite. Guardas: skip cortesia, skip billing_status blocked/cancelled/past_due (RN-F7.1-003 — LGPD §15 "não recomendar em inadimplência"), skip soft-deleted, skip Enterprise (limit=0=ilimitado).
+  - `src/server/PlanFitSignalPublisher.ts` — pattern `publish + sweep + resolveByDedupe` (idêntico ao `ClinicRenewalTaskService.run`). Dedupe key mensal `plan:near_limit:${metric}:${YYYY-MM}` — 1 sinal por métrica por mês, F7.3 adiciona rolling 30d. `runAll()` best-effort com skip de cortesia/blocked/past_due na query. Sinais com `basis='fact'`, `confidence=1`, evidence + premises preenchidos.
+  - `scripts/test-plan-fit-detector.ts` — **39/39 checks** cobrindo 18 casos: severity por faixa (attention/risk/critical), 4 métricas independentes, targetPlanId, Enterprise ilimitado, cortesia skip, billing skip (blocked/cancelled/past_due), soft-deleted skip, publisher publish + dedupe mensal + resolveByDedupe (stale → resolved), evidence completa, runAll skipa corretamente, isolamento cross-tenant, ACTION_MAP entry, prioritize inclui domain='plan'.
+- **Arquivos alterados:**
+  - `src/server/ImpactPrioritizationService.ts` — `STRATEGIC` ganha `plan: 0.9` (alto porque afeta capacidade operacional + custo comercial claro; abaixo de segurança/compliance/finance). `ACTION_MAP` ganha 4 entries `plan_near_limit_*` → `{actionType: 'propose_upgrade', label: '...'}`.
+  - `src/server/Scheduler.ts` — import `PlanFitSignalPublisher`; novo método `planFitPass()`; chamado no tick após clinicRetentionPass + schoolCoordinationPass + antes de billingDunningPass. Best-effort: erro numa org não trava as outras.
+  - `package.json` — script `test:plan-fit-detector`.
+- **Testes executados:**
+  - `npm run test:plan-fit-detector` → **39/39 OK**.
+  - Regressão zero: `test:entitlement-service` (49/49), `test:impact-prioritization` (14/14), `test:business-signals` (12/12), `test:decision-actions` (16/16), `test:outcome-measurement` (17/17).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Severity determinística por faixa** (não IA) — dono/auditor podem inspecionar/refutar. Tabela hard `[80,90)→attention; [90,100)→risk; ≥100→critical` é PRD §14 aplicado mecanicamente. F7.2 adiciona SCORE 0-100 (mais rico).
+  - (ii) **`targetPlanId` calculado no service, não no frontend** — G-153-4 (preços/próximos passos calculados no backend). Frontend só renderiza.
+  - (iii) **Enterprise (limit=0) NÃO dispara** — ilimitado é fim da linha. Se dono tá em Enterprise e 100k IA, é sinal pra vender pacote de IA extra (F7.2/F7 futuro), não trocar de plano.
+  - (iv) **Cortesia NÃO dispara** — regra política (dono não paga, não faz sentido recomendar). Se surgir demanda pra pessoas do cortesia migrarem, removem.
+  - (v) **`billing_status blocked/cancelled/past_due` NÃO dispara** — PRD §15 explícito: "não exibir recomendação durante inadimplência". Fecha risco jurídico/imagem (cliente já com problema não deve receber pressão comercial).
+  - (vi) **`basis='fact', confidence=1`** — evidência é uma contagem SQL, não estimativa. `impactAmount=null` por ora (F7.2 calcula uplift em BRL).
+  - (vii) **Dedupe mensal por métrica** — 1 sinal por mês por métrica por org. F7.3 adiciona rolling 30d + cooldown crescente por rejeição (30d→90d→180d).
+  - (viii) **Publisher sweep+resolve** — sinal aberto que não está mais no set válido vira `resolved` automaticamente. Se dono aumenta limite (upgrade real ou top-up), o sinal fecha silenciosamente sem intervenção humana.
+  - (ix) **Domain 'plan' no ImpactPrioritizationService** — sinais entram no Pareto global (`/api/insights`, `/api/business/priorities`). Frontend consome sem mudança (F4.2 já mostra placeholder; F7.4 renderiza card específico). STRATEGIC=0.9 garante que empatam com finance.
+  - (x) **Scheduler tick no slow pass** — junto com clinicRetention, schoolCoordination, billingDunning. Não precisa granularidade alta (mensal); sinal fica "aberto" o mês inteiro e o publisher só atualiza a evidência.
+  - (xi) **Sem novo endpoint** — sinais aparecem via `GET /api/insights` (já existente do ADR-136). F7.4 vai adicionar UI dedicada; F7.5 IA chat.
+- **Cross-service:** ADITIVO PURO. Nenhum service pré-existente foi modificado. Só adiciona: 2 novos services + 5 entries em ImpactPrioritizationService (aditivo puro no objeto) + 1 método no Scheduler + chamada no tick.
+- **Resultado:** Motor de plan-fit no ar em produção. A partir do próximo tick do Scheduler, orgs com uso ≥80% de qualquer limite geram sinais `domain='plan'` em `business_signals`. Consumidores atuais (Insights UI, Impact Ledger) enxergam sem mudança. Aba "Plano e Expansões" (F4.2) já tem placeholder pra recomendação IA — F7.4 vai popular com card real usando `/api/business/priorities?domain=plan` ou similar.
+- **Pendências criadas:** nenhuma nova. F7.2 pode começar quando dono quiser (score + explicabilidade + `plan_module_gap` + evidência de uplift).
+- **Próximo passo:** decidir com o dono: (a) **F7.2 — score 0-100 + explicabilidade + module_gap** (enriquece o sinal); (b) **F7.4 — UI card na aba Plano e Expansões** (dono vê o sinal); (c) **F7.3 — frequency control + tabela upgrade_recommendations** (LGPD hardening); (d) **F3.3 — migração de versão de blueprint** (Master Admin evolui blueprints). Recomendo **F7.4** — dono passa a VER o motor rodando (validação empírica antes de investir em score elaborado).
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

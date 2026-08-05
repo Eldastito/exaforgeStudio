@@ -343,6 +343,31 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-05 (Fatia 7.4 — UI card de recomendação IA)
+
+- **Fase:** 7 (recomendação IA). Fatia 7.4 fecha o loop visual — sinais que o publisher (F7.1) emite aparecem na aba com CTA. Substitui o placeholder que a F4.2 colocou.
+- **Itens executados:** 3 (componente `PlanFitCard`, integração no `PlanoExpansoesPanel` consumindo `/api/signals?domain=plan&status=open`, ação dismiss consumindo `/api/signals/:id/dismiss`).
+- **Arquivos alterados:**
+  - `src/features/SettingsView.tsx` — novo componente `PlanFitCard` (~75 linhas) — renderiza um sinal domain='plan' com badge de severity (attention/risk/critical), título humanizado por signal_type, evidence formatada (`used de limit — pctInt%`), sugestão de upgrade path (`upgradeTargetPlan`), CTA "Ver planos em Cobrança", botão "Dispensar". Consome cores hard por severity (âmbar/laranja/vermelho). `PlanoExpansoesPanel` ganha state `planSignals` + `dismissingSignal`, action `loadPlanSignals()` + `dismissSignal(id)`. Substitui o block 7 (placeholder IA) por: sem sinais → mensagem informativa "Nada urgente"; com sinais → cards + nota rodapé "G-153-3: nenhum upgrade sem clique em Cobrança".
+- **Testes executados:**
+  - Regressão zero: `test:plan-fit-detector` (39/39), `test:entitlement-service` (49/49), `test:business-signals` (12/12).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Rota `/api/signals?domain=plan&status=open`** (existente do ADR-136) em vez de rota nova dedicada — reusa infra, filtro por domínio já suporta. Se dono acessar via `/api/insights` (Pareto rankeado), também vê sinais plan (ImpactPrioritizationService inclui domain='plan' com STRATEGIC=0.9 desde F7.1).
+  - (ii) **Componente stateless `PlanFitCard`** — recebe signal + callbacks. Fácil de testar isoladamente se surgir demanda; hoje é usado só aqui.
+  - (iii) **Botão Dispensar** consome `POST /api/signals/:id/dismiss` (ADR-136 já expõe). Muda status pra `dismissed` — publisher F7.1 não reabre no próximo tick (dedupe mensal continua vigente). Semântica: dono aceita a sugestão OU dispensa; F7.3 vai adicionar cooldown crescente por rejeição (30d→90d→180d).
+  - (iv) **CTA "Ver planos em Cobrança"** — sem checkout inline. G-153-3 aplica: nenhum upgrade acontece com clique no card. Vai pra tela Cobrança onde há aceite explícito + CPF/CNPJ + método de pagamento. F5.3 vai unificar checkout real.
+  - (v) **Severity → cores hard** (attention=âmbar, risk=laranja, critical=vermelho) — sem ambiguidade visual. Sem interpretação IA no meio.
+  - (vi) **Título humanizado por signal_type** — hard-coded no componente (mapa 4 entries). Backend ainda expõe signal_type técnico; frontend traduz. F7.5 pode adicionar labels no ImpactPrioritizationService pra unificar (já tem `ACTION_MAP.label`, mas é diferente semanticamente — label é sobre a AÇÃO, título é sobre o SINAL).
+  - (vii) **Estado vazio informativo** — quando `planSignals.length === 0`, mostra card informativo explicando o motor. Dono não fica em dúvida se "não tem nada aparecendo por bug ou por não haver".
+  - (viii) **Sem novo endpoint** — 100% aditivo no frontend. Backend já expunha tudo desde F7.1.
+- **Cross-service:** ADITIVO PURO no frontend. Zero mudança backend. Card renderiza apenas quando há sinais publicados pelo Scheduler (F7.1). Se F7.1 ainda não teve tempo de rodar (org nova sem uso), estado vazio comunica isso.
+- **Resultado:** Loop de recomendação de plano fecha visualmente. Dono abre "Plano e Expansões" → vê o cabeçalho com estado atual → sees badges de severity nos cards de recomendação IA → clica "Ver planos em Cobrança" pra fazer o upgrade real. Motor F7.1 emite sinal mensalmente; F7.3 vai adicionar rate limit + LGPD hardening; F7.5 vai fazer IA mencionar no Executive Chat quando dono perguntar.
+- **Pendências criadas:** nenhuma nova. F7.2 (score 0-100 + explicabilidade + module_gap) e F7.3 (frequency control + tabela) podem começar quando dono validar visualmente que o card faz sentido.
+- **Próximo passo:** decidir com o dono: (a) **F7.2 — score 0-100 + explicabilidade + module_gap** (enriquece o sinal); (b) **F7.3 — frequency control + `upgrade_recommendations`** (LGPD hardening); (c) **F7.5 — IA no Executive Chat** (chat menciona sob demanda); (d) **F3.3 — migração de versão de blueprint**. **Recomendo F7.2** — dono agora vê os cards em produção mas eles são simples (severity + evidência); score + uplift em BRL + module_gap enriquecem consideravelmente a recomendação.
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

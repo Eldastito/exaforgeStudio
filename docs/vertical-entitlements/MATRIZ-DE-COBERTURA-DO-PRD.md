@@ -54,10 +54,10 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ### §11.2 VerticalBlueprintService (novo)
 
-- [ ] Tabelas `vertical_blueprints`, `organization_blueprints`. Fatia 3.1.
-- [ ] Métodos: `createBlueprint, publishVersion, getBlueprint, listBlueprints, assignToOrganization, cloneToOrganization, previewEntitlements, upgradeBlueprintVersion, compareVersions, rollbackVersion`. Fatia 3.1 (7 primeiros), 3.3 (3 últimos).
-- [ ] Imutabilidade após publish. Fatia 3.1 (test cobre).
-- [ ] Override por org em `organization_blueprints.overrides_json`. Fatia 3.1.
+- [x] Tabelas `vertical_blueprints`, `organization_blueprints`. F3.1 — schema em `db.ts` com `UNIQUE(key, version)` + índices status/base_vertical/org_key.
+- [x] Métodos: `createBlueprint, publishVersion, getBlueprint, getBlueprintByKeyVersion, getLatestPublished, listBlueprints, assignToOrganization, getForOrganization, cloneToOrganization, previewEntitlements` (10 métodos). F3.1 entregou. F3.3 vai adicionar `upgradeBlueprintVersion`, `compareVersions`, `rollbackVersion`.
+- [x] Imutabilidade após publish. F3.1 — enforced no service (rejeita `assignToOrganization` de draft; publish idempotente; deprecate one-way). Test cobre.
+- [x] Override por org em `organization_blueprints.overrides_json`. F3.1 — coluna criada + `assignToOrganization` grava + `cloneToOrganization` copia.
 
 ### §11.3 SubscriptionOrchestratorService (novo)
 
@@ -176,8 +176,8 @@ Já mapeado em §11.2. Ver Fatia 3.1 + 3.3 + 3.4.
 
 ## §25 — Tabelas conceituais
 
-- [ ] `vertical_blueprints`. Fatia 3.1.
-- [ ] `organization_blueprints`. Fatia 3.1.
+- [x] `vertical_blueprints`. F3.1 — `db.ts` (id, key, name, base_vertical, version, status, minimum_plan_id, default_plan_id, default_bundle_key, config_json, created_at, published_at, UNIQUE(key, version)).
+- [x] `organization_blueprints`. F3.1 — `db.ts` (organization_id PK, blueprint_id, blueprint_key, blueprint_version, assigned_at, assigned_by, overrides_json, status).
 - [ ] `plan_entitlements`. Fatia 1.1 (opcional — hoje derivamos de `plans.features.modules`; se performance exigir, materializa depois).
 - [ ] `organization_entitlements`. Fatia 4.3 (necessário pra estado `read_only` + concessões explícitas).
 - [ ] `upgrade_recommendations`. Fatia 7.3.
@@ -187,7 +187,7 @@ Já mapeado em §11.2. Ver Fatia 3.1 + 3.3 + 3.4.
 ## §26 — APIs
 
 Entitlements: [ ] `/me`, [ ] `/modules`, [ ] `/resource/:key` — Fatia 1.1.
-Blueprints: [ ] `GET`, [ ] `POST`, [ ] `POST /:id/publish`, [ ] `POST /orgs/:id/blueprint` — Fatia 3.1 + 3.3.
+Blueprints: [x] `GET /api/admin/blueprints` + `GET /:id`, [x] `POST /api/admin/blueprints`, [x] `POST /:id/publish` + `POST /:id/deprecate`, [x] `POST /api/admin/organizations/:id/blueprint` + `GET /api/admin/organizations/:id/blueprint` + `GET /.../blueprint/preview`. F3.1 entregou todas.
 Planos: [ ] `GET /billing/plans`, [ ] `GET /billing/current`, [ ] `POST /billing/checkout`, [ ] `POST /billing/upgrade/preview`, [ ] `POST /billing/upgrade/confirm`, [ ] `POST /billing/downgrade` — Fatias 5.3 + 6.1 + 6.2.
 Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `POST .../accept` — Fatia 7.3.
 

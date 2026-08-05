@@ -7475,6 +7475,62 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar sales_recovery_attributions (ADR-152 F4c.4)', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_attribution_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_attribution_window_days INTEGER DEFAULT 30`); } catch(e){}
+
+  // ADR-153 F3.1 — Vertical Blueprints (produtos por nicho versionados).
+  //
+  // Um Blueprint = SKU comercial vendido pra uma vertical/nicho específico:
+  // moda_loja_unica_v1, moda_rede_lojas_v1, clinica_multiespecialidades_v1,
+  // chaveiro_autonomo_v1, peixaria_balcao_peso_v1 (PRD §9/§10).
+  //
+  // Imutabilidade: uma vez `status='published'`, o `config_json` NÃO pode ser
+  // alterado. Correção = nova versão (mesmo `key`, `version+1`). Enforcement
+  // no VerticalBlueprintService (não em constraint SQL — flexível pra migração
+  // manual). UNIQUE(key, version) impede duplicar acidentalmente.
+  //
+  // Ordem: SEMPRE aditivo. Nenhum service pré-existente lê essas tabelas até
+  // F3.2 amarrar org→blueprint (F1.4 substitui HIDDEN_BY_VERTICAL estático).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vertical_blueprints (
+        id TEXT PRIMARY KEY,                  -- randomUUID por versão
+        key TEXT NOT NULL,                    -- 'clinica_multiespecialidades' (semver sem _v1)
+        name TEXT NOT NULL,                   -- rótulo comercial ("ZappFlow Clínica")
+        base_vertical TEXT NOT NULL,          -- 'saude' | 'varejo' | 'servicos' | etc.
+        version INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'draft', -- 'draft' | 'published' | 'deprecated'
+        minimum_plan_id TEXT,                 -- ex.: 'growth' (Blueprint Clínica)
+        default_plan_id TEXT,                 -- default do onboarding
+        default_bundle_key TEXT,              -- opcional: aponta pra PLAN_BUNDLES (ex.: 'growth_clinica')
+        config_json TEXT NOT NULL,            -- {requiredModules, optionalModules, hiddenModules, commercialUpgrades, quickStartPack, runtimePlaybooks}
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        published_at DATETIME
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_vertical_blueprints_key_version
+        ON vertical_blueprints (key, version);
+      CREATE INDEX IF NOT EXISTS idx_vertical_blueprints_status
+        ON vertical_blueprints (status, base_vertical);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar vertical_blueprints (ADR-153 F3.1)', e); }
+
+  // organization_blueprints: 1 org → 1 blueprint aplicado (upgrade de versão via
+  // rota admin — F3.3). overrides_json guarda personalizações do dono que não
+  // devem sumir num upgrade de versão (branding, horário, mensagens — PRD §24.3).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS organization_blueprints (
+        organization_id TEXT PRIMARY KEY,
+        blueprint_id TEXT NOT NULL,           -- FK vertical_blueprints.id (versão específica)
+        blueprint_key TEXT NOT NULL,          -- denormalizado (query rápida sem JOIN)
+        blueprint_version INTEGER NOT NULL,
+        assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        assigned_by TEXT,                     -- user_id do master admin (audit)
+        overrides_json TEXT,                  -- overrides do dono (opcional)
+        status TEXT NOT NULL DEFAULT 'active' -- 'active' | 'migrating' | 'suspended'
+      );
+      CREATE INDEX IF NOT EXISTS idx_organization_blueprints_key
+        ON organization_blueprints (blueprint_key, blueprint_version);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar organization_blueprints (ADR-153 F3.1)', e); }
 };
 
 initDb();

@@ -60,7 +60,7 @@ Cada decisão abaixo BLOQUEIA uma ou mais fatias do plano (`PLANO-DE-IMPLEMENTAC
 
 ## §B — Blueprint
 
-### Decisão #4 — Nome dos primeiros 5 Blueprints (SKUs)
+### Decisão #4 — Nome dos primeiros 5 Blueprints (SKUs) ✅ **APROVADA + IMPLEMENTADA em F3.2 (nomes do PRD aceitos verbatim)**
 
 **Contexto (PRD §9.1/§10):** blueprints são o SKU comercial vendido. Nome vira label no marketing, no checkout, no site. **Uma vez publicado, é imutável** — mudar depois exige v2 + migração.
 
@@ -194,7 +194,7 @@ Cada decisão abaixo BLOQUEIA uma ou mais fatias do plano (`PLANO-DE-IMPLEMENTAC
 | 1 (Comigo) | F2.1 | ✅ **APROVADA + IMPLEMENTADA** | Opção A (persistente em todos os planos) — F2.1 |
 | 2 (ToS) | F5.1 → F5-6 | Máxima | Opção A (jurídico) |
 | 3 (HMAC) | F5.2 | Alta | Opção A (migrar) |
-| 4 (Nomes Blueprint) | F3.2, F8.2-3 | Média | Opção A + 2 primeiros |
+| 4 (Nomes Blueprint) | F3.2, F8.2-3 | ✅ **APROVADA + IMPLEMENTADA** | Opção A (nomes do PRD): moda_loja_unica, moda_rede_lojas, clinica_multiespecialidades, chaveiro_autonomo, peixaria_balcao_peso (todos v1) — F3.2 |
 | 5 (Bundle Clínica) | F2.2, F3.2 | ✅ **APROVADA + IMPLEMENTADA (F2.2 catálogo)** | Opção A (bundle Growth+addon Clínica) — F3.2 amarra ao blueprint clinica_multi_v1 |
 | 6 (Migração v1→v2) | F3.3 | Média | Opção B (proposta + aprovação) |
 | 7 (Frequência) | F7.3 | Média | A + C combinadas |

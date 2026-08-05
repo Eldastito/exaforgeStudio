@@ -7531,6 +7531,26 @@ const initDb = () => {
         ON organization_blueprints (blueprint_key, blueprint_version);
     `);
   } catch(e){ console.error('[DB] Falha ao criar organization_blueprints (ADR-153 F3.1)', e); }
+
+  // ADR-153 F3.2 — Seed idempotente dos 5 blueprints iniciais (moda_loja_unica,
+  // moda_rede_lojas, clinica_multiespecialidades, chaveiro_autonomo,
+  // peixaria_balcao_peso), todos em versão 1 publicada. `BlueprintSeeder` checa
+  // por (key, version) antes de criar — 2× não duplica. Import dinâmico pra
+  // evitar ciclo (db.ts é importado por VerticalBlueprintService).
+  try {
+    // Só seedar quando as tabelas base existem (defensa contra ordem de init).
+    const hasBp = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vertical_blueprints'").get();
+    if (hasBp) {
+      // Dynamic import; erros aqui NÃO devem quebrar a inicialização do app
+      // (o seed é operacional, não crítico — se falhar, admin roda manual).
+      import("./BlueprintSeeder.js").then((m) => {
+        try { m.BlueprintSeeder.seedInitialBlueprints(); }
+        catch (e) { console.error('[DB] Seed inicial de blueprints falhou (ADR-153 F3.2)', e); }
+      }).catch((e) => {
+        console.error('[DB] Falha ao importar BlueprintSeeder (ADR-153 F3.2)', e);
+      });
+    }
+  } catch(e) { console.error('[DB] Falha ao seedar blueprints iniciais (ADR-153 F3.2)', e); }
 };
 
 initDb();

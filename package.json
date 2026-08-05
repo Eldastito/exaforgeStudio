@@ -379,7 +379,8 @@
     "test:comigo-preserved-on-upgrade": "tsx scripts/test-comigo-preserved-on-upgrade.ts",
     "test:upgrade-matrix": "tsx scripts/test-upgrade-matrix.ts",
     "test:plan-bundles": "tsx scripts/test-plan-bundles.ts",
-    "test:vertical-blueprint-service": "tsx scripts/test-vertical-blueprint-service.ts"
+    "test:vertical-blueprint-service": "tsx scripts/test-vertical-blueprint-service.ts",
+    "test:blueprint-seeder": "tsx scripts/test-blueprint-seeder.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

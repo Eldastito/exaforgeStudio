@@ -7,6 +7,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
+import { BlueprintSeeder } from "../BlueprintSeeder.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -546,6 +547,28 @@ router.get("/organizations/:id/blueprint", (req: AuthRequest, res): any => {
   if (!assignment) return res.json({ assignment: null });
   const bp = VerticalBlueprintService.getBlueprint(assignment.blueprintId);
   res.json({ assignment, blueprint: bp });
+});
+
+// POST /api/admin/blueprints/seed — força re-seed idempotente dos 5 blueprints
+// iniciais. Normalmente chamado uma vez no primeiro deploy; disponível como
+// rota pra Master Admin poder rodar novamente em caso de precisar corrigir
+// blueprints que ficaram no meio do caminho.
+router.post("/blueprints/seed", (req: AuthRequest, res): any => {
+  try {
+    const result = BlueprintSeeder.seedInitialBlueprints(req.user?.userId);
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/admin/blueprints/migrate-orgs?dryRun=true|false — migra orgs vivas
+// pra blueprints inferidos por (vertical, plan_id). ADR-153 F3.2. `dryRun` só
+// reporta o que faria (Master Admin revisa antes de aplicar).
+router.post("/blueprints/migrate-orgs", (req: AuthRequest, res): any => {
+  try {
+    const dryRun = String(req.query.dryRun ?? "true").toLowerCase() === "true";
+    const result = BlueprintSeeder.migrateExistingOrgs({ dryRun, actor: req.user?.userId });
+    res.json({ dryRun, ...result });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/admin/organizations/:id/blueprint/preview?blueprintId=... — preview do diff pra F3.3.

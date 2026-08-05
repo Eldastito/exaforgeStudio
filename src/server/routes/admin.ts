@@ -6,6 +6,7 @@ import { SecurityAuditService } from "../SecurityAuditService.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
+import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -470,6 +471,91 @@ router.delete("/users/:id", (req: AuthRequest, res): any => {
     } catch { /* noop */ }
     res.json({ ok: true, changes: r.changes });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-153 F3.1 — Vertical Blueprints (Master Admin).
+// Rotas gateadas pelo `requireMasterAdmin` já aplicado no mount de /api/admin.
+// ─────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/blueprints — lista blueprints (?status=draft|published|deprecated&key=...&baseVertical=...)
+router.get("/blueprints", (req: AuthRequest, res): any => {
+  try {
+    const filter: any = {};
+    if (typeof req.query.status === "string") filter.status = req.query.status;
+    if (typeof req.query.key === "string") filter.key = req.query.key;
+    if (typeof req.query.baseVertical === "string") filter.baseVertical = req.query.baseVertical;
+    res.json({ blueprints: VerticalBlueprintService.listBlueprints(filter) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/blueprints/:id — busca blueprint por id.
+router.get("/blueprints/:id", (req: AuthRequest, res): any => {
+  const bp = VerticalBlueprintService.getBlueprint(String(req.params.id));
+  if (!bp) return res.status(404).json({ error: "Blueprint não encontrado" });
+  res.json(bp);
+});
+
+// POST /api/admin/blueprints — cria blueprint em status draft.
+router.post("/blueprints", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  if (!b.key || !b.name || !b.baseVertical || !b.config) {
+    return res.status(400).json({ error: "key, name, baseVertical, config são obrigatórios" });
+  }
+  try {
+    const bp = VerticalBlueprintService.createBlueprint(
+      { key: b.key, name: b.name, baseVertical: b.baseVertical, version: b.version, minimumPlanId: b.minimumPlanId, defaultPlanId: b.defaultPlanId, defaultBundleKey: b.defaultBundleKey, config: b.config },
+      req.user?.userId,
+    );
+    res.status(201).json(bp);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/admin/blueprints/:id/publish — publica (draft → published, imutável).
+router.post("/blueprints/:id/publish", (req: AuthRequest, res): any => {
+  try {
+    const bp = VerticalBlueprintService.publishVersion(String(req.params.id), req.user?.userId);
+    res.json(bp);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/admin/blueprints/:id/deprecate — marca como deprecated.
+router.post("/blueprints/:id/deprecate", (req: AuthRequest, res): any => {
+  try {
+    const bp = VerticalBlueprintService.deprecateBlueprint(String(req.params.id), req.user?.userId);
+    res.json(bp);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/admin/organizations/:id/blueprint — atribui blueprint publicado à org.
+// Body: { blueprintId: string, overrides?: object }.
+router.post("/organizations/:id/blueprint", (req: AuthRequest, res): any => {
+  const orgId = String(req.params.id);
+  const b = req.body || {};
+  if (!b.blueprintId) return res.status(400).json({ error: "blueprintId é obrigatório" });
+  try {
+    const assignment = VerticalBlueprintService.assignToOrganization(orgId, b.blueprintId, req.user?.userId, b.overrides);
+    res.json(assignment);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/admin/organizations/:id/blueprint — devolve o blueprint atual da org (+ overrides).
+router.get("/organizations/:id/blueprint", (req: AuthRequest, res): any => {
+  const orgId = String(req.params.id);
+  const assignment = VerticalBlueprintService.getForOrganization(orgId);
+  if (!assignment) return res.json({ assignment: null });
+  const bp = VerticalBlueprintService.getBlueprint(assignment.blueprintId);
+  res.json({ assignment, blueprint: bp });
+});
+
+// GET /api/admin/organizations/:id/blueprint/preview?blueprintId=... — preview do diff pra F3.3.
+router.get("/organizations/:id/blueprint/preview", (req: AuthRequest, res): any => {
+  const orgId = String(req.params.id);
+  const blueprintId = String(req.query.blueprintId || "");
+  if (!blueprintId) return res.status(400).json({ error: "blueprintId query param é obrigatório" });
+  try {
+    res.json(VerticalBlueprintService.previewEntitlements(orgId, blueprintId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

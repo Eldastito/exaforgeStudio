@@ -184,6 +184,37 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-05 (Fatia 3.1 — fundação VerticalBlueprintService)
+
+- **Fase:** 3 (Blueprints). Fatia 3.1 monta a infraestrutura pra os 5 blueprints iniciais virem em F3.2.
+- **Itens executados:** todos os 4 da Fatia 3.1 (2 tabelas + service com 10 métodos + 7 rotas admin + teste E2E).
+- **Arquivos criados:**
+  - `src/server/VerticalBlueprintService.ts` — service (10 métodos): `createBlueprint`, `publishVersion`, `deprecateBlueprint`, `getBlueprint`, `getBlueprintByKeyVersion`, `getLatestPublished`, `listBlueprints`, `assignToOrganization`, `getForOrganization`, `cloneToOrganization`, `previewEntitlements`. Validação estrita (slug em `key`, planId válido, bundleKey válido, módulos conhecidos, `commercialUpgrades` referências válidas). Imutabilidade dura: `published` não permite alteração de `config_json` (novo blueprint = nova versão via mesmo `key + version+1`).
+  - `scripts/test-vertical-blueprint-service.ts` — **48/48 checks** cobrindo 19 casos: schema criado (+ 3 indexes); auto-versionamento; validações de key/planId/bundleKey/módulo/commercialUpgrades; rejeição de duplicata (key, version); publish idempotente; publish rejeita deprecated; deprecate marca; imutabilidade (não assigna draft); assign upsert idempotente com sobrescrita de overrides + `assigned_at` atualiza (delay 1.1s pra granularidade CURRENT_TIMESTAMP); rejeições (org inexistente/soft-deleted/blueprint inexistente); clone; preview diff (`hiddenAdded`/`hiddenRemoved`/etc); `getLatestPublished`; `listBlueprints` filtros; isolamento cross-tenant; 4 audit log types (BLUEPRINT_CREATED/PUBLISHED/DEPRECATED/ASSIGNED).
+- **Arquivos alterados:**
+  - `src/server/db.ts` — 2 tabelas novas: `vertical_blueprints` (id + key + name + base_vertical + version + status + minimum_plan_id + default_plan_id + default_bundle_key + config_json + created_at + published_at + `UNIQUE(key, version)` + índice status) + `organization_blueprints` (organization_id PK + blueprint_id + blueprint_key + blueprint_version + assigned_at + assigned_by + overrides_json + status). Aditivo puro no fim do initDb.
+  - `src/server/routes/admin.ts` — 7 rotas novas em `/api/admin/blueprints` (GET list/get, POST create/publish/deprecate) + `/api/admin/organizations/:id/blueprint` (POST assign, GET current, GET preview). Todas atrás do `requireMasterAdmin` já aplicado no mount.
+  - `package.json` — script `test:vertical-blueprint-service`.
+- **Testes executados:**
+  - `npm run test:vertical-blueprint-service` → **48/48 OK**.
+  - Regressão zero: `test:plan-bundles` (28/28), `test:upgrade-matrix` (93/93), `test:entitlement-service` (49/49), `test:entitlements-me` (25/25), `test:admin-users` (20/20).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Imutabilidade no service (não em SQL)** — SQLite não tem trigger fácil pra bloquear UPDATE em rows específicas. Melhor fazer no service, com mensagem clara. `publishVersion` idempotente aceita 2ª chamada sem erro; `assignToOrganization` rejeita blueprint em `draft`.
+  - (ii) **Auto-versionamento em `createBlueprint`** — se `version` omitido, calcula `MAX(version) + 1` pra a mesma key. Facilita criar `clinica_multiespecialidades_v2` sem contar manualmente. Também permite passar `version` explícito quando o Master Admin quer criar versão específica.
+  - (iii) **`config_json` como JSON blob** em vez de tabela normalizada (`blueprint_modules(blueprint_id, module_key, category)`). Trade-off: JSON perde queryability (não dá pra `WHERE blueprint_id IN (SELECT ... WHERE module=X)`), mas ganha simplicidade (config é 1-para-1 com blueprint). Se essa query surgir em fatia futura, extrai. Por ora, `EntitlementService` (F1.4) vai apenas ler o blueprint atribuído da org e olhar o array.
+  - (iv) **`default_bundle_key` opcional** — bundle é orientação pro checkout, não obrigatório. Blueprint pode ter só `defaultPlanId` sem bundle (ex.: chaveiro_autonomo aponta `default_plan_id='autonomo'` sem bundle).
+  - (v) **UPSERT em `organization_blueprints`** via SQLite `ON CONFLICT(organization_id) DO UPDATE` — org tem no máximo 1 blueprint ativo por vez. Mudar de blueprint = re-assign (histórico anterior fica só no audit log — se preciso, F futura cria `organization_blueprint_history`).
+  - (vi) **`assignToOrganization` NÃO ativa módulos automaticamente** — só grava o link org→blueprint. O `EntitlementService` (F1.4) vai LER o blueprint pra decidir estados (`hiddenModules` vira `state='hidden'`). Ativação real de módulo continua via `ModuleService.enableModule` — dono decide o que ligar dentro do que o blueprint permite. Isso preserva a separação "vertical recomenda, plano restringe, dono liga".
+  - (vii) **Validação de módulos aceita CORE** — `hiddenModules: ['atendimento']` seria absurdo mas o parser não rejeita CORE. Rejeita só o desconhecido. Se surgir demanda pra bloquear CORE aqui, é 1 linha.
+  - (viii) **`cloneToOrganization` copy-verbatim (blueprint + overrides)** — F3.4 pode enriquecer com merge de overrides parciais (ex.: "quero blueprint da matriz mas manter meu horário próprio"). MVP é copy total.
+- **Cross-service:** ADITIVO PURO. Nenhum service pré-existente foi modificado. `EntitlementService`, `ModuleService`, `PlanService` continuam funcionando idênticos. Nenhuma tabela pré-existente foi alterada — só 2 tabelas novas.
+- **Resultado:** Fundação Blueprint pronta pro F3.2 seedar os 5 blueprints iniciais (moda_loja_unica_v1, moda_rede_lojas_v1, clinica_multiespecialidades_v1, chaveiro_autonomo_v1, peixaria_balcao_peso_v1) e migrar as orgs vivas inferindo por `(vertical, plan)`. F1.4 (estado `hidden` real) fica trivial: `EntitlementService` consulta `VerticalBlueprintService.getForOrganization(orgId)` + `getBlueprint(bpId)` e usa `config.hiddenModules`.
+- **Pendências criadas:** nenhuma nova. Blueprints prontos pra popular.
+- **Próximo passo:** F3.2 — seed dos 5 blueprints iniciais + migração inferindo `(vertical, plan)` → blueprint. Alternativa: F1.4 (troca HIDDEN_BY_VERTICAL estático pelo blueprint.hiddenModules — trivial agora). Recomendo **F3.2** — destrava piloto de rollout (F8) + valida a fundação com dados reais.
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

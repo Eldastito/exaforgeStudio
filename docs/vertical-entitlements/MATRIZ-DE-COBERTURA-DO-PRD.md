@@ -35,7 +35,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 - [x] Coerência plano/vertical/add-on/módulo — F1.2 migrou o middleware, F1.3 migrou o frontend. Sidebar + ModulesPanel + útiles derivam de `useStore.entitlements` alimentado por `GET /api/entitlements/me`. Fonte única no backend + frontend.
 - [x] Upgrades sem perda de funcionalidades — bug fechado em F2.1 (Decisão #1 aprovada: `copiloto` agora em todos os 5 tiers). Matriz completa `origem × destino × módulos` no `test:upgrade-matrix` (93/93 OK) garante que nenhum upgrade remove módulo pré-existente.
 - [ ] Automatizar venda + pagamento + ativação — não existe fluxo real. Fase 5.
-- [ ] IA recomenda plano certo no momento certo — motor não existe. Fase 7.
+- [x] IA recomenda plano certo no momento certo. Fase 7 fechada: F7.1 (motor + publisher) + F7.2 (score 0-100 + module_gap) + F7.3 (cooldown LGPD §14) + F7.4 (UI card) + F7.5 (Diretor IA cita no chat). Sinais domain='plan' aparecem em Insights, aba Plano e Expansões, PANORAMA do Diretor Executivo.
 - [ ] Consentimento explícito pra qualquer alteração contratual — nenhum aceite gravado. Fatia 5.1 (**Decisão #2**).
 - [ ] Verticais → produtos replicáveis (Blueprints versionados) — conceito não existe. Fase 3.
 - [ ] Backend/menu/configurações/automações usam mesma fonte de verdade — 3-4 camadas hoje independentes. Fase 1 unifica via `EntitlementService`.
@@ -87,7 +87,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [ ] G-153-1 — Nenhuma tela define permissão. Fatia 1.3 (frontend consume único `/api/entitlements/me`).
 - [ ] G-153-2 — Upgrade nunca remove capacidade. Fatia 2.1 + matriz de upgrades (`test-upgrade-matrix.ts`).
-- [ ] G-153-3 — IA nunca contrata sem clique. Fatia 7.5 (test cobre).
+- [x] G-153-3 — IA nunca contrata sem clique. F7.5 — bloco `planRecommendationsBlock` embute framing DIRETO no PANORAMA: "sugerir clicar em Cobrança, NUNCA executar upgrade"; nenhum tool call novo no LLM (só contexto de leitura). Test cobre framing presente no bloco.
 - [ ] G-153-4 — Preços calculados no backend, HMAC webhook. Fatia 5.2 + 5.3 (**Decisão #3**).
 - [ ] G-153-5 — Blueprint publicado é imutável. Fatia 3.1 (test cobre).
 - [~] G-153-6 — Recomendação ≥60 + sem rejeição 30d + org não em incidente. F7.2 fez o threshold ≥60 (MIN_PUBLISH_SCORE). F7.3 fez o cooldown por rejeição (30/90/180d). "Org não em incidente" continua dependendo de detecção de incidente (fatia futura); billing_status blocked/cancelled/past_due já skipa desde F7.1.
@@ -147,7 +147,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 ## §18 — Fluxo de upgrade
 
 - [ ] Preview + comparação + valor proporcional + aceite → checkout → webhook → entitlement. Fatia 6.1.
-- [ ] IA nunca contrata sem clique explícito. Fatia 7.5 (test cobre).
+- [x] IA nunca contrata sem clique explícito. F7.5 — Diretor IA recebe recomendações via `planRecommendationsBlock` como contexto PASSIVO (leitura); framing G-153-3 embutido diz "sugerir clicar em Cobrança, NUNCA executar upgrade"; ZERO tool call / function call novo (só string composition). Test cobre.
 
 ## §19 — Proporcionalidade
 
@@ -240,7 +240,7 @@ Recomendação: [x] `GET /api/billing/recommendations`, [x] `POST .../:id/dismis
 - [x] Razões explicáveis. F7.2+F7.4 — breakdown por dimensão + uplift em BRL exposto no card + título humanizado por signal_type.
 - [x] Respeita vertical (Blueprint). F7.2 — `plan_module_gap` só publica em orgs com blueprint assignado; `adequacao_vertical` dá +10 quando alinhado ao blueprint.
 - [x] Não recomenda módulo oculto. F7.2 — `plan_module_gap` só varre `blueprint.config.requiredModules`+`optionalModules` (nunca `hiddenModules`); `EntitlementService` já esconde os hidden via F1.4.
-- [ ] IA não altera plano sozinha. Fatia 7.5 (chat menciona sob demanda).
+- [x] IA não altera plano sozinha. F7.5 — bloco no PANORAMA cita pending/dismissed/accepted como fatos; framing G-153-3 obriga "sugerir clicar em Cobrança"; nenhum tool call implementado. Aditivo puro no `ExecutiveAdvisorService`. `buildPanorama` inclui automaticamente pra `ask()` / `briefing()` / `auditPlan()`.
 - [x] Rejeição pausa. F7.3 — cooldown 30/90/180d por (org, target_plan, module); `UpgradeRecommendationService.hasActiveCooldown` bloqueia publish. Decisão #7 resolvida no código (escala determinística documentada).
 - [x] Benefício estimado rotulado como estimativa. F7.2 — `impact_amount` em BRL + card mostra "Ganho ESTIMADO" (label explícito); premise `basis='fact'` refere-se aos contadores; futura `expected_impact` no card evoluí em F5.3 (checkout mostra preço real).
 - [ ] Preço vem do backend. Fatia 7.4 + 6.1.
@@ -260,7 +260,7 @@ Recomendação: [x] `GET /api/billing/recommendations`, [x] `POST .../:id/dismis
 - [ ] Fase 4 (Interface) — Fatias 4.1–4.3 (**Decisão #9**).
 - [ ] Fase 5 (Checkout e assinatura) — Fatias 5.1–5.3 (**Decisão #2, #3**).
 - [ ] Fase 6 (Upgrade) — Fatias 6.1–6.3.
-- [ ] Fase 7 (Recomendação IA) — Fatias 7.1–7.5 (**Decisão #7, #8**).
+- [x] Fase 7 (Recomendação IA) — Fatias 7.1 (motor) + 7.2 (score/gap) + 7.3 (cooldown LGPD §14 — Decisão #7 resolvida) + 7.4 (UI card) + 7.5 (chat cita — framing G-153-3 embutido) FECHADAS. Decisão #8 (chat framing) resolvida pelo padrão adotado (contexto passivo, sem tool call).
 - [ ] Fase 8 (Rollout) — Fatias 8.1–8.4.
 
 ## §33 — Bloqueadores pra vender em escala
@@ -289,7 +289,7 @@ Recomendação: [x] `GET /api/billing/recommendations`, [x] `POST .../:id/dismis
 ## §36 — Resultado esperado
 
 - [ ] Sistema responde "esta empresa pertence ao nicho X, contratou Y, tem plano Z e add-ons W. Vê só isso." Cumprido quando Fase 3 + 4 fecharem.
-- [ ] Sistema recomenda "próximo plano é Growth porque..." Cumprido quando Fase 7 fechar.
+- [x] Sistema recomenda "próximo plano é Growth porque..." F7.1–F7.5 fecharam: card na aba mostra "Plano growth, score 71/100, ganho ≈R$ 3600/mês, você usa 95% do limite de IA"; Diretor IA cita o mesmo bloco no chat.
 - [ ] Alteração só após consentimento + confirmação pagamento. Cumprido quando Fase 5 + 6 fecharem.
 
 ## Critérios globais de aceite (validado ao FIM do projeto)

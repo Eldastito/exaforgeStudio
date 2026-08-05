@@ -8,6 +8,8 @@ import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { PatternMemoryService } from "./PatternMemoryService.js";
 import { ModuleService } from "./ModuleService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
+import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
+import { PlanService } from "./PlanService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -33,7 +35,97 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId);
+    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
+  }
+
+  /**
+   * ADR-153 F7.5 — bloco de recomendações de upgrade + plano atual + cooldowns.
+   *
+   * Quando dono pergunta "vale a pena upgrade?", "quanto custa o próximo plano?",
+   * "estou perto do limite?", a IA precisa citar EVIDÊNCIA REAL — não improvisar.
+   * Este bloco expõe:
+   *   1. Plano atual (id, preço mensal).
+   *   2. Recomendações PENDING (score + uplift BRL + target + módulo se gap).
+   *   3. Recomendações DISMISSED com cooldown ATIVO (dias restantes) — LGPD §14:
+   *      IA respeita a pausa; se dono perguntar, cita mas explica que está pausada.
+   *   4. Recomendações ACCEPTED aguardando checkout (dono aceitou mas não finalizou).
+   *
+   * Framing (embutido no cabeçalho do bloco):
+   *   - G-153-3: IA sugere clicar em "Cobrança"; NUNCA executa upgrade.
+   *   - G-153-6: score é determinístico (motor F7.2); não inventar dimensão.
+   *   - LGPD §14: cooldown ativo é rejeição — não pressionar.
+   *
+   * Bloco só aparece se há dados a citar (evita ruído em org sem recomendações).
+   */
+  static planRecommendationsBlock(orgId: string): string {
+    try {
+      // Plano atual (nome + preço) — contexto pra IA responder "quanto custa X"
+      // sem depender de recomendação existente.
+      const plan = PlanService.getCurrentPlan(orgId);
+      const planLine = plan
+        ? `- Plano atual: ${plan.name} (${plan.id}) — R$ ${Number(plan.price || 0).toFixed(2)}/mês`
+        : "- Plano atual: sem dado";
+
+      // Filtra o ledger: pending, dismissed com cooldown ATIVO, accepted.
+      // includeExpired=false porque expired é ruído (não tem cooldown ativo).
+      const recs = UpgradeRecommendationService.list(orgId, { includeExpired: false, limit: 30 });
+      const nowIso = new Date().toISOString();
+      const pending = recs.filter((r) => r.status === "pending");
+      const dismissedActive = recs.filter(
+        (r) => r.status === "dismissed" && r.cooldownUntil && r.cooldownUntil > nowIso,
+      );
+      const accepted = recs.filter((r) => r.status === "accepted");
+
+      if (pending.length === 0 && dismissedActive.length === 0 && accepted.length === 0) {
+        // Sem sinais → bloco mínimo (só plano atual) pra IA poder responder
+        // "quanto custa hoje" mesmo sem recomendação. Não incluir cabeçalho
+        // longo evita o modelo achar que tem 100 recomendações a citar.
+        return `\n\n=== PLANO E RECOMENDAÇÕES DE UPGRADE (fatos; nenhuma recomendação ativa no momento) ===
+${planLine}`;
+      }
+
+      const fmtRec = (r: any) => {
+        const target = r.targetModuleKey
+          ? `módulo "${r.targetModuleKey}" (via plano ${r.targetPlanId || "?"})`
+          : `plano ${r.targetPlanId || "?"}`;
+        const uplift = r.impactAmount != null && r.impactAmount > 0
+          ? `, ganho ≈R$ ${Number(r.impactAmount).toFixed(0)}/mês`
+          : "";
+        const score = r.score > 0 ? `, score ${r.score}/100` : "";
+        return `${target}${score}${uplift}`;
+      };
+
+      const lines: string[] = [planLine];
+
+      if (pending.length > 0) {
+        lines.push("- Pendentes (dono ainda não decidiu):");
+        for (const r of pending.slice(0, 8)) lines.push(`   · ${fmtRec(r)}`);
+      }
+
+      if (dismissedActive.length > 0) {
+        // Formato: cooldown restante em dias. IA respeita — não sugere de novo,
+        // mas se dono perguntar direto, cita e explica que está pausada.
+        lines.push("- Pausadas por rejeição recente (LGPD §14 — NÃO sugerir; se dono perguntar, dizer que está pausada):");
+        for (const r of dismissedActive.slice(0, 8)) {
+          const daysLeft = Math.ceil(
+            (new Date(r.cooldownUntil!).getTime() - Date.now()) / (24 * 3600 * 1000),
+          );
+          lines.push(`   · ${fmtRec(r)} — pausada por mais ${daysLeft}d (${r.rejectionCount}ª rejeição)`);
+        }
+      }
+
+      if (accepted.length > 0) {
+        lines.push("- Aceitas aguardando checkout (dono aceitou mas ainda não finalizou em Cobrança):");
+        for (const r of accepted.slice(0, 5)) lines.push(`   · ${fmtRec(r)}`);
+      }
+
+      return `\n\n=== PLANO E RECOMENDAÇÕES DE UPGRADE (fatos do ledger \`upgrade_recommendations\` — NUNCA invente score/uplift/cooldown; G-153-3: sugerir clicar em "Cobrança", NUNCA executar upgrade) ===
+${lines.join("\n")}`;
+    } catch (e) {
+      // Best-effort — se o service falhar, IA continua respondendo sem esse bloco.
+      console.error("[ExecutiveAdvisorService] planRecommendationsBlock falhou (best-effort)", e);
+      return "";
+    }
   }
 
   /**

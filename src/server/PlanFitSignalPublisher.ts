@@ -45,16 +45,23 @@ export class PlanFitSignalPublisher {
         severity: c.severity,
         basis: "fact",
         confidence: 1,
-        impactAmount: null,             // F7.2 calcula uplift estimado em BRL
-        impactUnit: null,
+        // F7.2 — uplift em BRL/mês (payback conservador 3× diff de preço).
+        impactAmount: c.impactAmount,
+        impactUnit: c.impactUnit,
         sourceService: "PlanFitSignalPublisher",
         sourceEntityType: "org_plan",
         sourceEntityId: c.planId,
         evidence: c.evidence,
         premises: {
           detector: "PlanFitDetectorService",
-          rule: `pct=${c.evidence.pctInt} → ${c.severity}`,
+          rule: c.signalType === "plan_module_gap"
+            ? `module_gap:${c.evidence.moduleKey} → ${c.severity} (score=${c.score})`
+            : `pct=${c.evidence.pctInt} → ${c.severity} (score=${c.score})`,
           upgradePath: c.evidence.upgradeTargetPlan,
+          // F7.2 — score threshold aplicado no detector; qualquer sinal
+          // publicado tem score ≥ 60 (PRD §14).
+          scoreThreshold: 60,
+          scoreTotal: c.score,
         },
         dedupeKey: c.dedupeKey,
       });
@@ -63,11 +70,11 @@ export class PlanFitSignalPublisher {
     }
 
     // Fecha sinais que existiam antes e não estão mais válidos.
-    // Filtra pela família dos 4 signalTypes deste service.
+    // F7.2: inclui `plan_module_gap` na família de resolve.
     const open = db.prepare(
       `SELECT dedupe_key FROM business_signals
         WHERE organization_id = ? AND domain = 'plan' AND status = 'open'
-          AND signal_type IN ('plan_near_limit_ai','plan_near_limit_contacts','plan_near_limit_channels','plan_near_limit_users')`,
+          AND signal_type IN ('plan_near_limit_ai','plan_near_limit_contacts','plan_near_limit_channels','plan_near_limit_users','plan_module_gap')`,
     ).all(orgId) as any[];
 
     let resolved = 0;

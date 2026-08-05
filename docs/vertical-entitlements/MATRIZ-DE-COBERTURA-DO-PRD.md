@@ -72,11 +72,12 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [x] `PlanFitDetectorService` (scanner puro). F7.1 — 4 métricas (ai/contacts/channels/users), severity determinística [80/90/100], targetPlanId, guardas cortesia/blocked/past_due/soft-deleted.
 - [x] `PlanFitSignalPublisher` (publish + resolve por dedupe_key). F7.1 — pattern ClinicRenewalTaskService, dedupe mensal por métrica, runAll best-effort.
-- [~] Novos sinais `domain='plan'` — F7.1 entregou 4 signal_types (`plan_near_limit_ai/contacts/channels/users`). `plan_module_gap_<key>` + `plan_capacity_bottleneck` ficam pra F7.2.
+- [~] Novos sinais `domain='plan'` — F7.1+F7.2 entregou 5 signal_types (`plan_near_limit_ai/contacts/channels/users` + `plan_module_gap`). `plan_capacity_bottleneck` fica pra fatia futura (agregador de múltiplas near_limit no mesmo mês).
 - [x] `Scheduler.planFitPass()` no slow pass. F7.1 — best-effort, tick após clinicRetention + schoolCoordination + antes de billingDunning.
-- [ ] Score 0–100 baseado em 6 dimensões (§14 do PRD). Fatia 7.2.
-- [ ] `evidence_json` com breakdown por dimensão. Fatia 7.2.
-- [~] Explicabilidade em linguagem natural. F7.4 entregou versão MVP (título humanizado por signal_type + `used de limit — pctInt%` + sugestão `upgrade pro plano <target>`). F7.2 vai enriquecer com uplift em BRL + score breakdown.
+- [x] Score 0–100 baseado em 6 dimensões (§14 do PRD). F7.2 — `computeNearLimitScore`+`computeModuleGapScore` determinísticos, threshold DURO `MIN_PUBLISH_SCORE = 60` filtra antes de publicar.
+- [x] `evidence_json` com breakdown por dimensão. F7.2 — `evidence.scoreBreakdown` com 6 chaves nomeadas + `total`; `premises.scoreThreshold` + `premises.scoreTotal` em cada sinal.
+- [x] Explicabilidade em linguagem natural. F7.2+F7.4 — card mostra título humanizado, badge `score X/100`, "Ganho estimado: R$ X/mês" (uplift 3× diff de preço), botão expandível revela grid das 6 dimensões nomeadas em PT-BR.
+- [x] `impact_amount` em BRL/mês (uplift estimado). F7.2 — `estimateUpliftBrl(current, target) = 3× (target.price − current.price)` (payback conservador); `impactUnit='BRL'`.
 - [ ] Frequency control (§15 do PRD). Fatia 7.3 (**Decisão #7**).
 - [ ] LGPD: rejeição pausa nova oferta. Fatia 7.3.
 - [ ] Rotas `/api/billing/recommendation/{dismiss,accept}`. Fatia 7.3.
@@ -133,7 +134,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ## §16 — Explicabilidade
 
-- [~] Recomendação explica motivo + dados + funcionalidade + problema + preço + impacto + limitações. F7.4 entregou motivo (severity+título) + dados (used/limit/pct) + funcionalidade (upgradeTargetPlan) + problema (implícito na severity). Preço + impacto em BRL + limitações ficam pra F7.2 (score + uplift) e F5.3 (checkout com preço real do Asaas).
+- [~] Recomendação explica motivo + dados + funcionalidade + problema + preço + impacto + limitações. F7.4+F7.2 entregou motivo (severity+título humanizado por signal_type, incluindo "módulo do seu Blueprint" pra `plan_module_gap`) + dados (used/limit/pct + `evidence.scoreBreakdown` 6-dim) + funcionalidade (upgradeTargetPlan + moduleKey quando aplica) + problema (severity) + impacto em BRL (`estimatedUpliftMonthly` 3× diff de preço). Preço final do plano + checkout ficam pra F5.3 (Asaas + aceite explícito).
 
 ## §17 — Automação venda
 
@@ -233,14 +234,14 @@ Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `
 
 ## §30 — Aceite recomendação
 
-- [ ] Usa dados reais. Fatia 7.1 (consulta `PlanService.getUsage` + `business_signals` counts).
-- [ ] Score registrado. Fatia 7.2 (grava em `upgrade_recommendations.score`).
-- [ ] Razões explicáveis. Fatia 7.2 + 7.4.
-- [ ] Respeita vertical (Blueprint restringe `commercialUpgrades`). Fatia 3.2 + 7.2.
-- [ ] Não recomenda módulo oculto. Fatia 7.1 (test cobre — publisher filtra por `blueprint.hiddenModules`).
-- [ ] IA não altera plano sozinha. Fatia 7.5.
+- [x] Usa dados reais. F7.1 (`PlanService.getUsage` + `PlanFitDetectorService` consulta SQL puro).
+- [~] Score registrado. F7.2 grava `score` em `business_signals.premises.scoreTotal` + breakdown em `evidence.scoreBreakdown`; tabela dedicada `upgrade_recommendations` (com histórico + cooldown) fica pra F7.3.
+- [x] Razões explicáveis. F7.2+F7.4 — breakdown por dimensão + uplift em BRL exposto no card + título humanizado por signal_type.
+- [x] Respeita vertical (Blueprint). F7.2 — `plan_module_gap` só publica em orgs com blueprint assignado; `adequacao_vertical` dá +10 quando alinhado ao blueprint.
+- [x] Não recomenda módulo oculto. F7.2 — `plan_module_gap` só varre `blueprint.config.requiredModules`+`optionalModules` (nunca `hiddenModules`); `EntitlementService` já esconde os hidden via F1.4.
+- [ ] IA não altera plano sozinha. Fatia 7.5 (chat menciona sob demanda).
 - [ ] Rejeição pausa. Fatia 7.3 (**Decisão #7**).
-- [ ] Benefício estimado rotulado como estimativa. Fatia 7.2 (`basis='estimate'` em `expected_impact`).
+- [x] Benefício estimado rotulado como estimativa. F7.2 — `impact_amount` em BRL + card mostra "Ganho ESTIMADO" (label explícito); premise `basis='fact'` refere-se aos contadores; futura `expected_impact` no card evoluí em F5.3 (checkout mostra preço real).
 - [ ] Preço vem do backend. Fatia 7.4 + 6.1.
 - [ ] Aceite explícito obrigatório. Fatia 7.4 + 6.1 (fluxo `card → preview → confirm`).
 

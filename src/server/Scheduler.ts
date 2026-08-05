@@ -27,6 +27,7 @@ import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { PlanFitSignalPublisher } from "./PlanFitSignalPublisher.js";
+import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 import { FalaTuService } from "./FalaTuService.js";
 import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
@@ -685,6 +686,12 @@ export class Scheduler {
     // `business_signals` domain='plan' quando org está ≥80% de qualquer limite.
     // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
     try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
+    // ADR-153 F7.7 — expira cooldowns vencidos (dismissed → expired) no ledger
+    // de upgrade_recommendations. Cleanup lazy até então; agora automático.
+    // Depende do planFitPass ter rodado antes: se um novo sinal viu que o
+    // cooldown expirou, publisher já pode re-publicar; este pass só limpa a
+    // linha antiga pra não confundir dashboards/rotas.
+    try { this.planFitCooldownExpirePass(); } catch (e: any) { console.error('[Scheduler] expiração de cooldown F7.7 falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
   }
 
@@ -701,6 +708,35 @@ export class Scheduler {
       }
     } catch (e) {
       console.error('[Scheduler] plan-fit falhou', e);
+    }
+  }
+
+  /**
+   * ADR-153 F7.7 — sweep de expiração de cooldowns vencidos no ledger
+   * `upgrade_recommendations`. Cross-tenant (sem `orgId`) — uma única UPDATE
+   * transiciona todas as linhas `dismissed` com `cooldown_until <= now` pra
+   * `expired`. Antes desta fatia o sweep era lazy (só rodava se alguém
+   * chamasse `expireOldCooldowns()` explicitamente); agora hora em hora.
+   *
+   * Por que hora em hora, mesmo com cooldowns de 30/90/180 dias?
+   * - Operação é O(N linhas dismissed com timeout passado) — barato mesmo
+   *   em escala (index no cooldown_until permite short-circuit).
+   * - `AdminUpgradeRecommendationsPanel` (F7.6) filtra por status; se admin
+   *   olhar uma cooldown que já venceu mas ainda está `dismissed`, vê estado
+   *   desatualizado. Sweep hora em hora garante latência ≤ 1h.
+   * - `hasActiveCooldown` no publisher já usa `cooldown_until > now` (não
+   *   depende do sweep pra correctness) — este pass é UX + housekeeping.
+   *
+   * Idempotente. Silencioso quando nada mudou (evita spam de log).
+   */
+  static planFitCooldownExpirePass() {
+    try {
+      const changed = UpgradeRecommendationService.expireOldCooldowns();
+      if (changed > 0) {
+        console.log(`[Scheduler] plan-fit cooldown-expire: ${changed} recomendaç${changed === 1 ? 'ão' : 'ões'} passaram pra expired.`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] plan-fit cooldown-expire falhou', e);
     }
   }
 

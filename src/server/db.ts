@@ -7657,6 +7657,20 @@ const initDb = () => {
       db.exec(`ALTER TABLE organization_settings ADD COLUMN whatsapp_instance_kind TEXT NOT NULL DEFAULT 'shared'`);
     }
   } catch(e){ console.error('[DB] Falha ao adicionar whatsapp_instance_kind (ADR-154 F4.1)', e); }
+
+  // ADR-154 Fatia 4.2 — modo de resposta do FalaTu no canal interno:
+  // 'always' (default, retrocompat — Controller/Coordenador seguem rodando
+  // quando FalaTu não capturou) vs 'trigger_only' (Solo com Evolution
+  // dedicado — SILÊNCIO absoluto se não bater gatilho FalaTu). O default
+  // MUST ser 'always' pra não regredir suíte; o provision da Fase 4.1 seta
+  // 'trigger_only' explicitamente pra Solo. Guardrail RN-154: "assistente
+  // pessoal, não intervém na vida do dono do número".
+  try {
+    const cols = db.prepare(`PRAGMA table_info(organization_settings)`).all() as any[];
+    if (!cols.some((c: any) => c.name === "falatu_reply_mode")) {
+      db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_reply_mode TEXT NOT NULL DEFAULT 'always'`);
+    }
+  } catch(e){ console.error('[DB] Falha ao adicionar falatu_reply_mode (ADR-154 F4.2)', e); }
 };
 
 initDb();

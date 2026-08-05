@@ -182,6 +182,20 @@ export async function processIncomingMessage(
     } catch (e) {
       console.error('[FalaTu] Falha na captura via canal interno:', e);
     }
+
+    // ADR-154 F4.2 — SILÊNCIO em Solo dedicado + trigger_only: se o FalaTu
+    // não capturou o gatilho ("anota…"/"confere"/"descarta"/"é N"), a
+    // mensagem NÃO vai pro Controller/Coordenador/Diretor IA. Guardrail
+    // RN-154: o assistente pessoal NÃO interfere com a vida do dono do
+    // número. Uma única linha, escopo cirúrgico — orgs suíte
+    // (whatsapp_instance_kind='shared' OU falatu_reply_mode='always')
+    // seguem 100% do fluxo abaixo. Try/catch pra jamais bloquear suíte
+    // por falha de consulta.
+    try {
+      const s = db.prepare(`SELECT whatsapp_instance_kind, falatu_reply_mode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      if (s?.whatsapp_instance_kind === 'dedicated' && s?.falatu_reply_mode === 'trigger_only') return;
+    } catch { /* segue fluxo suíte (fail-open) */ }
+
     // Controller Financeiro IA (ADR-139): quando a org habilitou o gestor por
     // WhatsApp e o número é de um gestor, comandos CLAROS de gestão (saldo, a
     // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.

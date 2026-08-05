@@ -91,9 +91,12 @@ export class FalaTuSoloWhatsAppService {
       return { ok: false, error: e?.message || "Org não é Solo" };
     }
 
-    // 1. Marca a flag (idempotente).
+    // 1. Marca a flag (idempotente). ADR-154 F4.2: junto com 'dedicated',
+    //    seta também `falatu_reply_mode='trigger_only'` — é o pacote Solo.
+    //    Se o dono quiser voltar pra 'always' (não recomendado — vira quase
+    //    uma suíte), o toggle vai na FalaTuSettingsView (Fase 3).
     try {
-      db.prepare(`UPDATE organization_settings SET whatsapp_instance_kind = 'dedicated' WHERE organization_id = ?`).run(orgId);
+      db.prepare(`UPDATE organization_settings SET whatsapp_instance_kind = 'dedicated', falatu_reply_mode = 'trigger_only' WHERE organization_id = ?`).run(orgId);
     } catch (e) {
       console.error(`[FalaTuSoloWA] Falha ao setar whatsapp_instance_kind pra ${orgId}:`, e);
     }

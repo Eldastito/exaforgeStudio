@@ -37,7 +37,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 - [ ] Automatizar venda + pagamento + ativação — não existe fluxo real. Fase 5.
 - [x] IA recomenda plano certo no momento certo. Fase 7 fechada: F7.1 (motor + publisher) + F7.2 (score 0-100 + module_gap) + F7.3 (cooldown LGPD §14) + F7.4 (UI card) + F7.5 (Diretor IA cita no chat). Sinais domain='plan' aparecem em Insights, aba Plano e Expansões, PANORAMA do Diretor Executivo.
 - [ ] Consentimento explícito pra qualquer alteração contratual — nenhum aceite gravado. Fatia 5.1 (**Decisão #2**).
-- [ ] Verticais → produtos replicáveis (Blueprints versionados) — conceito não existe. Fase 3.
+- [x] Verticais → produtos replicáveis (Blueprints versionados). Fase 3 fechada: F3.1 (schema + service imutável G-153-5) + F3.2 (seed 5 verticais + migração orgs vivas) + F3.3 (UI Master Admin evolui v1→v2 com preview de diff + publica). Master Admin agora completa o ciclo end-to-end sem SSH/CLI.
 - [ ] Backend/menu/configurações/automações usam mesma fonte de verdade — 3-4 camadas hoje independentes. Fase 1 unifica via `EntitlementService`.
 
 ## §9 — Conceito de trabalho pronto (padrão de aceite)

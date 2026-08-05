@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
-import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal, TrendingUp, CheckCircle2, Clock, XCircle } from 'lucide-react';
+import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal, TrendingUp, CheckCircle2, Clock, XCircle, Layers, Plus, ArrowRight, Minus } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
 export function AdminMasterView() {
@@ -392,7 +392,297 @@ export function AdminMasterView() {
 
       <UpgradeRecommendationsPanel />
 
+      <BlueprintsPanel />
+
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+/**
+ * ADR-153 Fatia 3.3 — Master Admin evolui blueprints de nicho (v1→v2)
+ * com preview de diff. Blueprint publicado é IMUTÁVEL (G-153-5); pra
+ * corrigir/expandir um preset, cria-se nova versão como draft, revisa
+ * o diff campo a campo, publica, e re-atribui orgs opt-in.
+ *
+ * Fluxo desta tela:
+ *   1. Lista todas as versões por key (v3 draft, v2 published, v1 deprecated).
+ *   2. Botão "Nova versão" clona config da versão base + abre editor de
+ *      módulos (hidden/required/optional) via checkboxes CSV simples.
+ *   3. Preview de diff mostra +/- por módulo e mudanças escalares.
+ *   4. Botão "Publicar" transiciona draft → published (imutável).
+ *
+ * Fora do escopo: editor completo de config (limits, features, pricing).
+ * O admin edita esses via API se necessário. UI cobre o caso 80% (evoluir
+ * módulos exibidos/obrigatórios do nicho).
+ */
+function BlueprintsPanel() {
+  const [blueprints, setBlueprints] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [savingNext, setSavingNext] = useState(false);
+  const [diffing, setDiffing] = useState<any | null>(null);
+  const [publishing, setPublishing] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/admin/blueprints');
+      const d = await r.json();
+      setBlueprints(Array.isArray(d?.blueprints) ? d.blueprints : []);
+    } catch { setBlueprints([]); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // Agrupa por key, mais recente primeiro
+  const byKey = blueprints.reduce<Record<string, any[]>>((acc, b) => {
+    (acc[b.key] = acc[b.key] || []).push(b);
+    return acc;
+  }, {});
+  for (const k in byKey) byKey[k].sort((a, b) => b.version - a.version);
+
+  const openEditor = (source: any) => {
+    setEditing({
+      sourceId: source.id,
+      sourceKey: source.key,
+      sourceVersion: source.version,
+      name: source.name,
+      requiredModules: (source.config?.requiredModules || []).join(', '),
+      optionalModules: (source.config?.optionalModules || []).join(', '),
+      hiddenModules: (source.config?.hiddenModules || []).join(', '),
+      minimumPlanId: source.minimumPlanId || '',
+      defaultPlanId: source.defaultPlanId || '',
+    });
+    setDiffing(null);
+  };
+
+  const csv = (s: string) => s.split(',').map((x: string) => x.trim()).filter(Boolean);
+
+  const saveNext = async () => {
+    if (!editing) return;
+    setSavingNext(true);
+    try {
+      const body = {
+        edits: {
+          name: editing.name,
+          minimumPlanId: editing.minimumPlanId || undefined,
+          defaultPlanId: editing.defaultPlanId || undefined,
+          config: {
+            requiredModules: csv(editing.requiredModules),
+            optionalModules: csv(editing.optionalModules),
+            hiddenModules: csv(editing.hiddenModules),
+          },
+        },
+      };
+      const r = await fetch(`/api/admin/blueprints/${editing.sourceId}/next-version`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast.error(`Falha: ${d?.error || r.status}`); return; }
+      toast.success(`Nova versão criada: ${d.key} v${d.version} (draft).`);
+      const diffRes = await fetch(`/api/admin/blueprints/${editing.sourceId}/diff?targetId=${d.id}`);
+      const diff = await diffRes.json();
+      setDiffing({ newBp: d, diff });
+      setEditing(null);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao criar próxima versão');
+    } finally { setSavingNext(false); }
+  };
+
+  const publish = async (id: string) => {
+    if (!(await confirmDialog('Publicar essa versão? Após publicar, o config fica IMUTÁVEL (só corrige via nova versão).', {}))) return;
+    setPublishing(id);
+    try {
+      const r = await fetch(`/api/admin/blueprints/${id}/publish`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) { toast.error(`Falha: ${d?.error || r.status}`); return; }
+      toast.success(`Blueprint publicado: ${d.key} v${d.version}.`);
+      setDiffing(null);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao publicar');
+    } finally { setPublishing(null); }
+  };
+
+  const statusPill = (s: string) => {
+    const map: Record<string, string> = {
+      published: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
+      draft: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+      deprecated: 'bg-zinc-700/30 text-zinc-400 border-zinc-700/50',
+    };
+    return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${map[s] || map.draft}`}>{s}</span>;
+  };
+
+  return (
+    <div className="mt-8 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+            <Layers className="w-5 h-5 text-violet-400" />
+            Vertical Blueprints
+          </h3>
+          <p className="text-sm text-zinc-400 mt-1">
+            Presets de nicho (Clínica Multi, Chaveiro Autônomo, etc.). Publicados são IMUTÁVEIS —
+            corrigir/evoluir = nova versão. Orgs migram opt-in via /api/admin/organizations/:id/blueprint.
+          </p>
+        </div>
+        <Button onClick={load} size="sm" variant="secondary">Atualizar</Button>
+      </div>
+
+      {loading && <div className="text-zinc-500 text-sm py-4 text-center">Carregando…</div>}
+
+      {!loading && Object.keys(byKey).length === 0 && (
+        <div className="text-zinc-500 text-sm py-4 text-center">Nenhum blueprint cadastrado.</div>
+      )}
+
+      <div className="space-y-3">
+        {(Object.entries(byKey) as [string, any[]][]).map(([key, versions]) => {
+          const latest = versions[0];
+          const expanded = expandedKey === key;
+          return (
+            <div key={key} className="bg-zinc-950/40 border border-zinc-800 rounded p-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <div className="text-zinc-100 font-medium">{latest.name} <span className="text-zinc-500 text-xs">({key})</span></div>
+                  <div className="text-xs text-zinc-500">
+                    {versions.length} versão(ões) · última: v{latest.version} {statusPill(latest.status)}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setExpandedKey(expanded ? null : key)}>
+                    {expanded ? 'Ocultar' : 'Ver versões'}
+                  </Button>
+                  <Button size="sm" onClick={() => openEditor(latest)}>+ Nova versão</Button>
+                </div>
+              </div>
+
+              {expanded && (
+                <div className="mt-3 space-y-1 border-t border-zinc-800 pt-2">
+                  {versions.map((v: any) => (
+                    <div key={v.id} className="flex justify-between items-center text-xs py-1">
+                      <div className="flex gap-2 items-center">
+                        <span className="font-mono text-zinc-400">v{v.version}</span>
+                        {statusPill(v.status)}
+                        <span className="text-zinc-500">criado {new Date(v.createdAt).toLocaleString()}</span>
+                      </div>
+                      {v.status === 'draft' && (
+                        <Button size="sm" onClick={() => publish(v.id)} disabled={publishing === v.id}>
+                          {publishing === v.id ? 'Publicando…' : 'Publicar'}
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Editor modal-like inline */}
+      {editing && (
+        <div className="mt-4 border border-violet-500/30 bg-violet-500/5 rounded p-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <h4 className="text-zinc-100 font-medium">Nova versão de {editing.sourceKey} (baseada em v{editing.sourceVersion})</h4>
+            <button onClick={() => setEditing(null)} className="text-zinc-500 hover:text-zinc-300 text-xs">Cancelar</button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-zinc-400 space-y-1">
+              <span>Nome</span>
+              <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100" />
+            </label>
+            <label className="text-xs text-zinc-400 space-y-1">
+              <span>Plano mínimo</span>
+              <input value={editing.minimumPlanId} onChange={(e) => setEditing({ ...editing, minimumPlanId: e.target.value })}
+                placeholder="growth" className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 font-mono" />
+            </label>
+          </div>
+          <label className="text-xs text-zinc-400 space-y-1 block">
+            <span>Módulos obrigatórios (CSV)</span>
+            <textarea rows={2} value={editing.requiredModules} onChange={(e) => setEditing({ ...editing, requiredModules: e.target.value })}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 font-mono" />
+          </label>
+          <label className="text-xs text-zinc-400 space-y-1 block">
+            <span>Módulos opcionais (CSV)</span>
+            <textarea rows={2} value={editing.optionalModules} onChange={(e) => setEditing({ ...editing, optionalModules: e.target.value })}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 font-mono" />
+          </label>
+          <label className="text-xs text-zinc-400 space-y-1 block">
+            <span>Módulos escondidos — NUNCA mostrar pra org (CSV)</span>
+            <textarea rows={2} value={editing.hiddenModules} onChange={(e) => setEditing({ ...editing, hiddenModules: e.target.value })}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 font-mono" />
+          </label>
+          <div className="flex justify-end">
+            <Button onClick={saveNext} disabled={savingNext}>
+              {savingNext ? 'Criando…' : 'Criar draft + ver diff'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Diff viewer */}
+      {diffing && (
+        <div className="mt-4 border border-emerald-500/30 bg-emerald-500/5 rounded p-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <h4 className="text-zinc-100 font-medium">
+              Diff: v{diffing.diff?.source?.version} → v{diffing.diff?.target?.version} ({diffing.newBp.key})
+            </h4>
+            <button onClick={() => setDiffing(null)} className="text-zinc-500 hover:text-zinc-300 text-xs">Fechar</button>
+          </div>
+
+          <DiffSection label="Módulos obrigatórios" added={diffing.diff.diff.requiredAdded} removed={diffing.diff.diff.requiredRemoved} />
+          <DiffSection label="Módulos opcionais" added={diffing.diff.diff.optionalAdded} removed={diffing.diff.diff.optionalRemoved} />
+          <DiffSection label="Módulos escondidos" added={diffing.diff.diff.hiddenAdded} removed={diffing.diff.diff.hiddenRemoved} />
+          <DiffSection label="Upgrades comerciais" added={diffing.diff.diff.commercialUpgradesAdded} removed={diffing.diff.diff.commercialUpgradesRemoved} />
+
+          {diffing.diff.diff.scalarChanges?.length > 0 && (
+            <div className="text-xs">
+              <div className="text-zinc-400 mb-1">Mudanças escalares:</div>
+              {diffing.diff.diff.scalarChanges.map((c: any, i: number) => (
+                <div key={i} className="flex items-center gap-2 font-mono text-zinc-300">
+                  <span className="text-zinc-500">{c.field}:</span>
+                  <span className="line-through text-rose-300">{String(c.from ?? '—')}</span>
+                  <ArrowRight className="w-3 h-3 text-zinc-500" />
+                  <span className="text-emerald-300">{String(c.to ?? '—')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2 border-t border-emerald-500/20">
+            <Button onClick={() => publish(diffing.newBp.id)} disabled={publishing === diffing.newBp.id}>
+              {publishing === diffing.newBp.id ? 'Publicando…' : `Publicar v${diffing.newBp.version} (fica imutável)`}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffSection({ label, added, removed }: { label: string; added: string[]; removed: string[] }) {
+  if (!added?.length && !removed?.length) return null;
+  return (
+    <div className="text-xs">
+      <div className="text-zinc-400 mb-1">{label}:</div>
+      <div className="flex flex-wrap gap-1 pl-2">
+        {added?.map((m) => (
+          <span key={`a-${m}`} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 font-mono">
+            <Plus className="w-3 h-3" /> {m}
+          </span>
+        ))}
+        {removed?.map((m) => (
+          <span key={`r-${m}`} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 font-mono">
+            <Minus className="w-3 h-3" /> {m}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

@@ -582,6 +582,32 @@ router.get("/organizations/:id/blueprint/preview", (req: AuthRequest, res): any 
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ADR-153 F3.3 — cria a próxima versão de um blueprint existente clonando
+// a config e aplicando edits. Auto-incrementa `version`.
+// Body: { edits: { name?, minimumPlanId?, defaultPlanId?, defaultBundleKey?,
+//                   config?: { requiredModules?, optionalModules?, hiddenModules?,
+//                              commercialUpgrades?, quickStartPack?, runtimePlaybooks? }}}
+router.post("/blueprints/:id/next-version", (req: AuthRequest, res): any => {
+  const sourceId = String(req.params.id || "");
+  const edits = (req.body && req.body.edits) || {};
+  try {
+    const bp = VerticalBlueprintService.createNextVersion(sourceId, edits, req.user?.userId);
+    res.status(201).json(bp);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ADR-153 F3.3 — diff entre dois blueprints sem depender de org atribuída.
+// Usado pelo Master Admin ANTES de publicar uma nova versão pra revisar
+// o que mudou vs a versão anterior.
+router.get("/blueprints/:id/diff", (req: AuthRequest, res): any => {
+  const sourceId = String(req.params.id);
+  const targetId = String(req.query.targetId || "");
+  if (!targetId) return res.status(400).json({ error: "targetId query param é obrigatório" });
+  try {
+    res.json(VerticalBlueprintService.previewBlueprintDiff(sourceId, targetId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // ADR-153 F7.6 — Ledger de recomendações de upgrade (Master Admin).
 //

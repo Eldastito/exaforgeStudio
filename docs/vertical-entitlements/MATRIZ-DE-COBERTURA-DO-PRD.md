@@ -76,7 +76,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 - [x] `Scheduler.planFitPass()` no slow pass. F7.1 — best-effort, tick após clinicRetention + schoolCoordination + antes de billingDunning.
 - [ ] Score 0–100 baseado em 6 dimensões (§14 do PRD). Fatia 7.2.
 - [ ] `evidence_json` com breakdown por dimensão. Fatia 7.2.
-- [ ] Explicabilidade em linguagem natural. Fatia 7.2 + 7.4.
+- [~] Explicabilidade em linguagem natural. F7.4 entregou versão MVP (título humanizado por signal_type + `used de limit — pctInt%` + sugestão `upgrade pro plano <target>`). F7.2 vai enriquecer com uplift em BRL + score breakdown.
 - [ ] Frequency control (§15 do PRD). Fatia 7.3 (**Decisão #7**).
 - [ ] LGPD: rejeição pausa nova oferta. Fatia 7.3.
 - [ ] Rotas `/api/billing/recommendation/{dismiss,accept}`. Fatia 7.3.
@@ -133,7 +133,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 ## §16 — Explicabilidade
 
-- [ ] Recomendação explica motivo + dados + funcionalidade + problema + preço + impacto + limitações. Fatia 7.4 (modal do card).
+- [~] Recomendação explica motivo + dados + funcionalidade + problema + preço + impacto + limitações. F7.4 entregou motivo (severity+título) + dados (used/limit/pct) + funcionalidade (upgradeTargetPlan) + problema (implícito na severity). Preço + impacto em BRL + limitações ficam pra F7.2 (score + uplift) e F5.3 (checkout com preço real do Asaas).
 
 ## §17 — Automação venda
 

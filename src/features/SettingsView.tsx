@@ -646,19 +646,92 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
+// ADR-153 F7.4 — Card individual de recomendação de upgrade (sinal
+// business_signals domain='plan' publicado pelo PlanFitSignalPublisher/F7.1).
+// Renderiza título humanizado (mapeado por signal_type), evidência formatada
+// (used/limit/pct), badge de severity, CTA "Ver em Cobrança" e Dispensar.
+// G-153-3: nenhum upgrade é executado no clique — leva pra tela de aceite.
+const PlanFitCard: React.FC<{
+  signal: any;
+  dismissing: boolean;
+  onDismiss: () => void;
+  onGoToCobranca: () => void;
+}> = ({ signal, dismissing, onDismiss, onGoToCobranca }) => {
+  const METRIC_LABEL: Record<string, string> = {
+    plan_near_limit_ai: 'Uso de IA (respostas do mês)',
+    plan_near_limit_contacts: 'Base de contatos',
+    plan_near_limit_channels: 'Canais conectados',
+    plan_near_limit_users: 'Usuários da equipe',
+  };
+  const SEV_STYLE: Record<string, { bg: string; text: string; label: string }> = {
+    attention: { bg: 'bg-amber-500/15 border-amber-500/30', text: 'text-amber-300', label: 'atenção' },
+    risk: { bg: 'bg-orange-500/15 border-orange-500/30', text: 'text-orange-300', label: 'risco' },
+    critical: { bg: 'bg-red-500/15 border-red-500/30', text: 'text-red-300', label: 'crítico' },
+    info: { bg: 'bg-blue-500/15 border-blue-500/30', text: 'text-blue-300', label: 'info' },
+  };
+  const ev = signal.evidence || {};
+  const sev = SEV_STYLE[signal.severity] || SEV_STYLE.info;
+  const title = METRIC_LABEL[signal.signal_type] || signal.signal_type;
+  return (
+    <div className={`rounded-xl border p-4 ${sev.bg}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded ${sev.text} ${sev.bg}`}>
+              {sev.label}
+            </span>
+            <p className="text-sm font-semibold text-zinc-100">{title}</p>
+          </div>
+          {ev.used != null && ev.limit != null && (
+            <p className="text-xs text-zinc-400">
+              Uso: <b className="text-zinc-200">{Number(ev.used).toLocaleString('pt-BR')} de {Number(ev.limit).toLocaleString('pt-BR')}</b>
+              {ev.pctInt != null && <span className={`ml-2 ${sev.text}`}>({ev.pctInt}%)</span>}
+            </p>
+          )}
+          {ev.upgradeTargetPlan && (
+            <p className="text-xs text-zinc-400 mt-1">
+              Sugestão: upgrade pro plano <b className="text-teal-300">{ev.upgradeTargetPlan}</b>
+              {ev.upgradeTargetLimit != null && ev.upgradeTargetLimit > 0 && (
+                <> — {Number(ev.upgradeTargetLimit).toLocaleString('pt-BR')} de teto</>
+              )}
+              {ev.upgradeTargetLimit === 0 && <> — sem limite</>}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={onGoToCobranca}
+          className={`text-xs font-medium ${sev.text} hover:opacity-80`}
+        >
+          Ver planos em Cobrança →
+        </button>
+        <span className="text-zinc-700">·</span>
+        <button
+          onClick={onDismiss}
+          disabled={dismissing}
+          className="text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+        >
+          {dismissing ? 'Dispensando…' : 'Dispensar (não me mostre este mês)'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ADR-153 F4.2 — Aba "Plano e Expansões" (PRD §11.3). Fonte única do "onde
 // estou / quanto uso / próximo passo comercial". Consome:
 //   - GET /api/plans/current  (plano + status + uso × limites)
 //   - GET /api/plans          (grade completa pra comparação de upgrade)
 //   - GET /api/plans/bundles  (bundles verticais — F2.2)
 //   - GET /api/plans/addons   (add-ons disponíveis + ativos)
+//   - GET /api/signals?domain=plan (recomendação IA — F7.4)
 //   - useStore.entitlements   (blueprint da org via /api/entitlements/me — F1.3)
 //
 // NÃO faz checkout aqui — Cobrança ainda é a tela de assinatura real (F5.3
-// vai unificar). NÃO faz recomendação de IA — F7 popula quando o motor rodar.
-// Motor de score/frequência (§14-16 do PRD) fica em fatia futura; aqui é só a
-// vitrine estruturada. G-153-3 preservada: nenhum upgrade é executado só com
-// clique no CTA — leva pra tela de cobrança onde há aceite explícito.
+// vai unificar). Motor de score/frequência (§14-16 do PRD) fica em F7.2/F7.3;
+// F7.4 renderiza os sinais que o publisher F7.1 já emite. G-153-3 preservada:
+// nenhum upgrade é executado só com clique no CTA — leva pra tela de cobrança.
 function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void }) {
   const entitlements = useStore(s => s.entitlements);
   const vertical = useStore(s => s.vertical);
@@ -666,7 +739,19 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
   const [plans, setPlans] = useState<Plan[]>([]);
   const [bundles, setBundles] = useState<PlanBundleT[]>([]);
   const [addons, setAddons] = useState<{ available: any[]; active: any[] } | null>(null);
+  // ADR-153 F7.4 — sinais domain='plan' publicados pelo PlanFitSignalPublisher
+  // (F7.1). Fonte da recomendação inteligente na aba. Sinal aberto com
+  // severity + evidence completa. F7.2 vai adicionar score/uplift em BRL.
+  const [planSignals, setPlanSignals] = useState<any[]>([]);
+  const [dismissingSignal, setDismissingSignal] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const loadPlanSignals = () => {
+    apiFetch('/api/signals?domain=plan&status=open')
+      .then(r => r.json())
+      .then(d => setPlanSignals(Array.isArray(d?.signals) ? d.signals : []))
+      .catch(() => setPlanSignals([]));
+  };
 
   useEffect(() => {
     Promise.all([
@@ -680,7 +765,19 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
       setBundles(Array.isArray(bd?.bundles) ? bd.bundles : []);
       setAddons(ad && !ad.error ? ad : null);
     }).finally(() => setLoading(false));
+    loadPlanSignals();
   }, []);
+
+  const dismissSignal = async (signalId: string) => {
+    setDismissingSignal(signalId);
+    try {
+      const r = await apiFetch(`/api/signals/${signalId}/dismiss`, { method: 'POST' });
+      if (!r.ok) { toast.error('Não foi possível dispensar a recomendação.'); return; }
+      toast.success('Recomendação dispensada.');
+      loadPlanSignals();
+    } catch (e) { toast.error('Erro ao dispensar.'); }
+    finally { setDismissingSignal(null); }
+  };
 
   const brl = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -890,17 +987,33 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
             </div>
           )}
 
-          {/* 7. Recomendação IA (placeholder F7) */}
-          <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-5">
-            <div className="flex items-start gap-3">
-              <BrainCircuit className="w-5 h-5 text-indigo-300 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-indigo-300">Recomendação inteligente</p>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Em breve (ADR-153 F7): a IA vai analisar seu uso, sinais de operação e vertical pra sugerir o próximo passo — com evidência, score e explicação. Sem pressão comercial: sem clique explícito, nada muda.
+          {/* 7. Recomendação IA — sinais domain='plan' (ADR-153 F7.4) */}
+          <div>
+            <p className="text-sm font-semibold text-indigo-300 mb-2 flex items-center gap-2">
+              <BrainCircuit className="w-4 h-4" /> Recomendação inteligente
+            </p>
+            {planSignals.length === 0 ? (
+              <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+                <p className="text-xs text-zinc-400">
+                  Nada urgente por aqui. O motor (ADR-153 F7) varre uso × limites do seu plano periodicamente — quando algo passar de 80%, aparece um card aqui com evidência e sugestão. Nunca contrata nada por conta própria (G-153-3).
                 </p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                {planSignals.map((s: any) => (
+                  <PlanFitCard
+                    key={s.id}
+                    signal={s}
+                    dismissing={dismissingSignal === s.id}
+                    onDismiss={() => dismissSignal(s.id)}
+                    onGoToCobranca={onGoToCobranca}
+                  />
+                ))}
+                <p className="text-[11px] text-zinc-500 italic px-2">
+                  A IA nunca contrata sozinha (G-153-3). Todo upgrade exige clique explícito em Cobrança.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* CTA final */}

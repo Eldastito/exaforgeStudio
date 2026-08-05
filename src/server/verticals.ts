@@ -37,6 +37,11 @@ export const OPTIONAL_MODULES = [
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
   "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor",
+  // ADR-151 F2: falatu virou módulo opcional multi-tenant (ligado por org via
+  // organization_settings.falatu_enabled + RBAC). ADR-154 F2.1 formaliza como
+  // módulo conhecido pra poder aparecer em blueprint.requiredModules
+  // (falatu_solo_v1) sem quebrar a validação `assertValidModules`.
+  "falatu",
 ] as const;
 
 // "vms" (ZappFlow Vision VMS) é um produto add-on que depende de hardware de

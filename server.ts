@@ -24,6 +24,7 @@ import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
 import authRoutes from "./src/server/routes/auth.js";
+import onboardingSoloRoutes from "./src/server/routes/onboardingSolo.js";
 import usersRoutes from "./src/server/routes/users.js";
 import permissionsRoutes from "./src/server/routes/permissions.js";
 import auditRoutes from "./src/server/routes/audit.js";
@@ -381,6 +382,9 @@ async function startServer() {
   });
 
   app.use("/api/auth", authRoutes);
+  // ADR-154 F2.1 — onboarding standalone (assistente pessoal). Público (sem
+  // auth), mesmo shape do /auth/register mas exige blueprintKey mode='solo'.
+  app.use("/api/onboarding-solo", onboardingSoloRoutes);
 
   // Provador Virtual (Fashion AI Studio, FAS-1) — auth PRÓPRIA de cliente
   // final (JWT com segredo derivado, ver FashionCustomerService). Registrado

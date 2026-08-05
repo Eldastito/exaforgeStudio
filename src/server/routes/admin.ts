@@ -9,6 +9,7 @@ import { PlanService } from "../PlanService.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { BlueprintSeeder } from "../BlueprintSeeder.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
+import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -636,6 +637,24 @@ router.get("/upgrade-recommendations", (req: AuthRequest, res): any => {
 router.get("/upgrade-recommendations/summary", (_req: AuthRequest, res): any => {
   try {
     res.json(UpgradeRecommendationService.summaryAcrossOrgs());
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ADR-154 F1.2 — Dashboard de consumo de IA por org (master admin).
+// Ordem importa (Express match order): path específico ANTES do :param.
+
+// GET /api/admin/ai-usage?days=N  — 1 linha por org com totais da janela.
+router.get("/ai-usage", (req: AuthRequest, res): any => {
+  try {
+    const rows = AiUsageDashboardService.listOrgs(Number(req.query.days));
+    res.json({ days: AiUsageDashboardService.clampDays(Number(req.query.days)), items: rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/ai-usage/:orgId?days=N — drill-down (série + breakdowns).
+router.get("/ai-usage/:orgId", (req: AuthRequest, res): any => {
+  try {
+    res.json(AiUsageDashboardService.byOrg(req.params.orgId, Number(req.query.days)));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

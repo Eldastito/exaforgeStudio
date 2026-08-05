@@ -81,6 +81,9 @@ export function Sidebar() {
                <NavItem icon={<ShieldCheck />} label="Admin Master" active={viewMode === 'admin'} onClick={() => setViewMode('admin')} />
              )}
              {isMasterAdmin && (
+               <NavItem icon={<BarChart3 />} label="Consumo de IA" active={viewMode === 'ai_usage'} onClick={() => setViewMode('ai_usage')} />
+             )}
+             {isMasterAdmin && (
                <NavItem icon={<Radar />} label="Radar — Consultor" active={viewMode === 'radar_consultant'} onClick={() => setViewMode('radar_consultant')} />
              )}
              {/* FalaTu (ADR-151 F2): master sempre; org só com a flag ligada E

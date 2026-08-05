@@ -25,6 +25,11 @@ const WEIGHTS = { impact: 0.4, urgency: 0.2, confidence: 0.15, strategic: 0.15, 
 const STRATEGIC: Record<string, number> = {
   security: 1.0, compliance: 1.0,
   finance: 1.0, procurement: 0.85, inventory: 0.85, sales: 0.8, education: 0.8, retail_ops: 0.7, tasks: 0.55,
+  // ADR-153 F7.1: domínio `plan` (recomendação de upgrade) — peso alto porque
+  // afeta capacidade operacional imediata + tem custo comercial claro. Fica
+  // abaixo de segurança/compliance/finance (que representam risco existencial)
+  // mas acima de sales/education (que são otimizações).
+  plan: 0.9,
 };
 const STRATEGIC_DEFAULT = 0.6;
 
@@ -66,6 +71,13 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   horario_no_show_recorrente: { actionType: "create_task", label: "Reforçar lembrete / rever encaixe no horário de faltas" },
   produto_queda_giro_recorrente: { actionType: "create_task", label: "Reagir à queda de giro do produto (preço/vitrine/campanha)" },
   categoria_queda_giro_recorrente: { actionType: "create_task", label: "Rever mix e exposição da categoria em queda" },
+  // ADR-153 F7.1 — sinais de recomendação de plano (domínio `plan`).
+  // Todos apontam pra `propose_upgrade` — action handler concreto vem em F7.4/F7.5
+  // (por ora fica como recomendação visível no painel Plano e Expansões).
+  plan_near_limit_ai: { actionType: "propose_upgrade", label: "Uso de IA perto do limite — considerar upgrade" },
+  plan_near_limit_contacts: { actionType: "propose_upgrade", label: "Base de contatos perto do limite — considerar upgrade" },
+  plan_near_limit_channels: { actionType: "propose_upgrade", label: "Canais conectados no limite — considerar upgrade" },
+  plan_near_limit_users: { actionType: "propose_upgrade", label: "Usuários no limite — considerar upgrade" },
   // Módulo Escola (ADR-144) — sinais de coordenação no domínio `education`.
   student_absence: { actionType: "create_task", label: "Falar com a família sobre a falta do aluno" },
   class_not_held: { actionType: "create_task", label: "Cobrir a aula não realizada (professor/substituto)" },

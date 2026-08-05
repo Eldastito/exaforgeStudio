@@ -284,6 +284,88 @@ export class UpgradeRecommendationService {
   }
 
   /**
+   * ADR-153 F7.6 — LISTAGEM CROSS-TENANT PRA MASTER ADMIN.
+   *
+   * Retorna recomendações de TODAS as organizações, com o nome da empresa
+   * embutido pra tela `AdminUpgradeRecommendationsView` exibir sem N+1.
+   * ATENÇÃO: rota chamadora DEVE gatear com `requireMasterAdmin` — este
+   * método pula o filtro `organization_id`. É a única exceção documentada
+   * ao "toda query filtra organization_id" (RN convenção crítica #1) e existe
+   * porque Master Admin precisa ver o funil consolidado (aceitas aguardando
+   * checkout de todas as orgs) pra processar upgrade manual até Fase 5
+   * automatizar via Asaas.
+   *
+   * Filtros: status (accepted/pending/dismissed/expired), targetPlanId,
+   * targetModuleKey, organizationId (se admin filtrar por uma). Ordem: mais
+   * recentes primeiro (updated_at DESC). Cap 500 pra proteger o payload
+   * (Master Admin com 200+ orgs — improvável, mas defensivo).
+   */
+  static listAcrossOrgs(opts?: {
+    status?: string;
+    targetPlanId?: string;
+    targetModuleKey?: string;
+    organizationId?: string;
+    limit?: number;
+  }): Array<UpgradeRecommendation & { organizationName?: string | null }> {
+    const clauses: string[] = ["1=1"];
+    const params: any[] = [];
+    if (opts?.status) { clauses.push("ur.status = ?"); params.push(opts.status); }
+    if (opts?.targetPlanId) { clauses.push("ur.target_plan_id = ?"); params.push(opts.targetPlanId); }
+    if (opts?.targetModuleKey) { clauses.push("ur.target_module_key = ?"); params.push(opts.targetModuleKey); }
+    if (opts?.organizationId) { clauses.push("ur.organization_id = ?"); params.push(opts.organizationId); }
+    const limit = Math.min(500, Math.max(1, opts?.limit ?? 200));
+
+    const rows = db.prepare(
+      `SELECT ur.*, os.business_name AS org_name
+         FROM upgrade_recommendations ur
+         LEFT JOIN organization_settings os ON os.organization_id = ur.organization_id
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY CASE ur.status
+                   WHEN 'accepted' THEN 0
+                   WHEN 'pending' THEN 1
+                   WHEN 'dismissed' THEN 2
+                   ELSE 3
+                 END,
+                 ur.updated_at DESC
+        LIMIT ${limit}`,
+    ).all(...params) as any[];
+
+    return rows.map((r) => ({
+      ...rowToRec(r),
+      organizationName: r.org_name || null,
+    }));
+  }
+
+  /**
+   * ADR-153 F7.6 — resumo agregado pro dashboard admin (Master Admin only).
+   * Conta por status (todas as orgs). Custo O(1) via GROUP BY sobre a tabela
+   * inteira. Sem cache — a tabela é pequena (< 1M linhas mesmo em escala).
+   */
+  static summaryAcrossOrgs(): {
+    byStatus: Record<string, number>;
+    acceptedAwaitingCheckout: number;
+    totalPendingUplift: number;
+  } {
+    const rows = db.prepare(
+      `SELECT status, COUNT(*) as cnt FROM upgrade_recommendations GROUP BY status`,
+    ).all() as any[];
+    const byStatus: Record<string, number> = {};
+    for (const r of rows) byStatus[String(r.status)] = Number(r.cnt || 0);
+
+    const uplift = db.prepare(
+      `SELECT COALESCE(SUM(impact_amount), 0) as total
+         FROM upgrade_recommendations
+        WHERE status = 'pending' AND impact_unit = 'BRL'`,
+    ).get() as any;
+
+    return {
+      byStatus,
+      acceptedAwaitingCheckout: byStatus["accepted"] || 0,
+      totalPendingUplift: Number(uplift?.total || 0),
+    };
+  }
+
+  /**
    * Cleanup lazy: recomendações `dismissed` com cooldown_until já passado viram
    * `expired`. Sweep opt-in (chamável por scheduler/manutenção). Não é crítico —
    * `hasActiveCooldown` já filtra por `cooldown_until > now`.

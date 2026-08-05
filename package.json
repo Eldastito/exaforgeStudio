@@ -384,7 +384,8 @@
     "test:entitlement-hidden-via-blueprint": "tsx scripts/test-entitlement-hidden-via-blueprint.ts",
     "test:plan-fit-detector": "tsx scripts/test-plan-fit-detector.ts",
     "test:upgrade-recommendations": "tsx scripts/test-upgrade-recommendations.ts",
-    "test:executive-plan-recommendations-block": "tsx scripts/test-executive-plan-recommendations-block.ts"
+    "test:executive-plan-recommendations-block": "tsx scripts/test-executive-plan-recommendations-block.ts",
+    "test:admin-upgrade-recommendations": "tsx scripts/test-admin-upgrade-recommendations.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

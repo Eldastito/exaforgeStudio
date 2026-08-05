@@ -8,6 +8,7 @@ import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { BlueprintSeeder } from "../BlueprintSeeder.js";
+import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -579,6 +580,37 @@ router.get("/organizations/:id/blueprint/preview", (req: AuthRequest, res): any 
   try {
     res.json(VerticalBlueprintService.previewEntitlements(orgId, blueprintId));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-153 F7.6 — Ledger de recomendações de upgrade (Master Admin).
+//
+// Cross-tenant: Master Admin vê o funil consolidado (aceitas aguardando
+// checkout, pendentes, dispensadas) de TODAS as orgs pra processar upgrade
+// MANUAL até a Fase 5 automatizar via Asaas. Já gateado pelo mount de
+// /api/admin com `requireMasterAdmin`.
+// ─────────────────────────────────────────────────────────────────────────
+
+// GET /api/admin/upgrade-recommendations
+// ?status=accepted|pending|dismissed|expired
+// &targetPlanId=growth&targetModuleKey=clinica&organizationId=org_xxx&limit=200
+router.get("/upgrade-recommendations", (req: AuthRequest, res): any => {
+  try {
+    const opts: any = {};
+    if (typeof req.query.status === "string") opts.status = req.query.status;
+    if (typeof req.query.targetPlanId === "string") opts.targetPlanId = req.query.targetPlanId;
+    if (typeof req.query.targetModuleKey === "string") opts.targetModuleKey = req.query.targetModuleKey;
+    if (typeof req.query.organizationId === "string") opts.organizationId = req.query.organizationId;
+    if (req.query.limit) opts.limit = Number(req.query.limit);
+    res.json({ items: UpgradeRecommendationService.listAcrossOrgs(opts) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/upgrade-recommendations/summary — agregados pro dashboard.
+router.get("/upgrade-recommendations/summary", (_req: AuthRequest, res): any => {
+  try {
+    res.json(UpgradeRecommendationService.summaryAcrossOrgs());
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

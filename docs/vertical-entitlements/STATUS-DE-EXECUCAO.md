@@ -491,6 +491,42 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 - **Pendências criadas:** nenhuma nova. F3.3 (migração v1→v2 blueprint), F5.1 (ToS versionado — bloqueada Decisão #2), F5.2/5.3/6.1/6.2 (checkout Asaas + upgrade real) continuam elegíveis.
 - **Próximo passo:** decidir com o dono: (a) **F7.6 — `AdminUpgradeRecommendationsView`** — tela admin listando todas as `accepted` aguardando checkout, filtro por org/target/data. Prepara terreno pra Fase 5. Aditivo puro; (b) **F3.3 — migração v1→v2 blueprint** — Master Admin evolui blueprints com preview de diff (`VerticalBlueprintService.previewEntitlements` já existe); (c) **Fase 5 — assinaturas + checkout Asaas** (F5.1 bloqueada Decisão #2 jurídico; F5.2/5.3 depende); (d) **F4.4 — gráfico de "sinais aceitos vs dispensados" na aba Plano e Expansões** (usa histórico da F4.3 pra insight temporal). **Recomendo F7.6** — fecha o funil operacional (admin vê pedidos + pode agir manual antes de F5.3 automatizar). Baixo risco, mesma stack.
 
+### Sessão 2026-08-05 (Fatia 7.6 — AdminUpgradeRecommendationsPanel)
+
+- **Fase:** 7 (recomendação IA) + operacionalização admin. F7.6 é o funil admin do motor F7.1–F7.5 — Master Admin ganha visão consolidada das recomendações de upgrade de TODAS as orgs num painel dentro do `AdminMasterView`. Foco no caso "aceitas aguardando checkout" (dono aceitou o card, mas Fase 5 ainda não automatiza o pagamento via Asaas; admin processa manual). Aditivo puro — nova rota + novo service method + novo painel; zero mudança em fluxo do dono.
+- **Itens executados:** 3 (service `listAcrossOrgs` + `summaryAcrossOrgs`; rotas admin `GET /api/admin/upgrade-recommendations` + `.../summary`; painel `UpgradeRecommendationsPanel` no `AdminMasterView`).
+- **Arquivos alterados:**
+  - `src/server/UpgradeRecommendationService.ts` — dois novos métodos: `listAcrossOrgs(opts?)` (cross-tenant, faz JOIN com `organization_settings` pra trazer `business_name` embutido; ordem `accepted → pending → dismissed`; cap 500) e `summaryAcrossOrgs()` (byStatus + acceptedAwaitingCheckout + totalPendingUplift agregando só pending+BRL). Header do método `listAcrossOrgs` documenta explicitamente que é a ÚNICA exceção à convenção "toda query filtra organization_id" e exige gate `requireMasterAdmin` na rota.
+  - `src/server/routes/admin.ts` — imports + duas rotas novas ao final do arquivo (antes do `export default`). Gate `requireMasterAdmin` já aplicado no mount de `/api/admin` (comentário existente no arquivo confirma). Filtros via querystring: status, targetPlanId, targetModuleKey, organizationId (drill down opcional), limit.
+  - `src/features/AdminMasterView.tsx` — imports de 4 ícones novos (TrendingUp, CheckCircle2, Clock, XCircle) + `<UpgradeRecommendationsPanel />` inline entre `UsersManagementPanel` e `AuditLogsPanel`. Componente segue o mesmo padrão dos outros painéis do arquivo (mesma estilização Tailwind, mesmas cores por status usando escala emerald/sky/amber/zinc já usada no ExecutiveView).
+  - `package.json` — script `test:admin-upgrade-recommendations`. CI descobre via `ci-shard.mjs`.
+- **Arquivos criados:**
+  - `scripts/test-admin-upgrade-recommendations.ts` — 21 checks. Cobre listAcrossOrgs (sem filtro / com cada filtro), organizationName do JOIN, cap 500, ordem accepted-first, summaryAcrossOrgs (byStatus / acceptedAwaitingCheckout / totalPendingUplift ignorando não-BRL), rota HTTP mock com filtros via querystring. Convenção do repo: middleware `requireMasterAdmin` é testado em outro suíte, foco aqui é a lógica do endpoint.
+- **UX do painel:**
+  - **Cabeçalho:** título + filtro de status (default: "Aceitas (aguardando checkout)" — é o caso mais actionable) + botão Atualizar.
+  - **4 stat cards:** aceitas aguardando checkout, pendentes, dispensadas em cooldown, MRR incremental em pendentes (soma em BRL).
+  - **Tabela:** empresa (nome + org_id em mono), alvo (módulo em destaque quando module_gap; plano abaixo), score X/100, ganho/mês em BRL, status (pill colorida com ícone), rejeições N×, cooldown Nd restantes, atualizado há Nd.
+  - **Rodapé:** aviso explícito "Read-only. Master Admin não aceita/dispensa em nome do dono (LGPD §14). Pra aplicar upgrade manual: /api/admin/organizations/:id/plan (fluxo existente)."
+- **Testes executados:**
+  - `npm run test:admin-upgrade-recommendations` → 21/21 PASS.
+  - Regressão: `test:upgrade-recommendations` (47/47), `test:executive-plan-recommendations-block` (23/23), `test:plan-fit-detector` (65/65), `test:admin-users` (20/20). Todos verdes.
+  - `npx tsc --noEmit` limpo.
+- **Decisões micro:**
+  - (i) **Cross-tenant é a EXCEÇÃO documentada.** O service `listAcrossOrgs` pula o filtro `organization_id` — normalmente proibido pela convenção crítica #1. Documentado no header do método com aviso "rota chamadora DEVE gatear com requireMasterAdmin" e justificativa (funil consolidado é necessidade real do admin até Fase 5). Único método `Across*` do service.
+  - (ii) **JOIN com `organization_settings` no service, não no frontend.** Evita N+1 (uma request pra listar + uma por org pra buscar nome). Frontend consome `organizationName` diretamente.
+  - (iii) **Ordem `accepted → pending → dismissed`** — inverte o padrão do `list()` per-org (que prioriza pending). Motivo: pro admin o mais actionable é "quem aceitou e não pagou"; pending pode esperar; dismissed é histórico.
+  - (iv) **`summary.totalPendingUplift` ignora não-BRL.** Sinais em `units` (ex.: "acabaram os 3 canais do plano") não são somáveis com valor monetário. Filtro `impact_unit = 'BRL'` no SQL.
+  - (v) **Read-only pelo admin.** Nada de "aceitar/dispensar em nome do dono" — LGPD §14 é claro: só o titular decide. Rodapé aponta pro fluxo existente `/api/admin/organizations/:id/plan` pro caso admin precisar aplicar upgrade manual (que a Fase 5 vai automatizar).
+  - (vi) **Painel inline em `AdminMasterView`, não view separada.** AdminMasterView já tem 4 painéis inline (Plans, Users, Audit, ...). Manter consistência. Se crescer muito, refatoramos em tab-based navigation depois.
+  - (vii) **Cap 500 respostas.** Master admin com 200+ orgs improvável nos próximos 12+ meses, mas defensive limit protege payload/render. Se batermos no limite, adiciona paginação depois (opt-in).
+  - (viii) **Filtro drill-down por `organizationId`** — admin pode focar numa org específica sem precisar do funil de toda a base. Útil pra suporte ("me manda tudo da org X").
+  - (ix) **`byStatus` é um Record livre**, não enum estrito. Se surgirem novos status no futuro (F7.3+ pode adicionar `manually_processed`, etc.), o frontend continua funcionando (usa `map[s] || map.pending` como fallback).
+  - (x) **Sem cache no `summaryAcrossOrgs`.** GROUP BY sobre tabela pequena (<1M rows mesmo em escala) — custo O(N linhas). Se virar hotspot, cachear com TTL. Por agora simples é melhor.
+- **Cross-service:** ADITIVO PURO. `UpgradeRecommendationService.list` (per-org) intocado. `admin.ts` mount de rotas intocado. `AdminMasterView` mantém todos os painéis existentes; ganha um novo entre Users e Audit. Nenhum consumidor existente muda.
+- **Resultado:** Admin ganha o funil consolidado que faltava pro ciclo pré-Fase-5 rodar operacionalmente. Motor F7.1 detecta → F7.2 pontua → F7.3 gate LGPD → F7.4 UI card → dono aceita → **F7.6 admin processa manual até F5.3 automatizar**. Loop end-to-end operacional (embora ainda com checkout manual).
+- **Pendências criadas:** nenhuma nova. Continuam elegíveis: F3.3 (v1→v2 blueprint), F4.4 (gráfico aceitas-vs-dispensadas temporal), Fase 5 (assinaturas+checkout Asaas — bloqueada Decisão #2 ToS).
+- **Próximo passo:** com a operacionalização admin pronta, os elegíveis mudam de peso. Opções: (a) **F3.3 — migração v1→v2 blueprint com preview de diff** (fecha imutabilidade Fase 3); (b) **F4.4 — gráfico temporal aceitas vs dispensadas** (dono vê tendência ao longo do tempo, insight pra ajustar oferta); (c) **F7.7 — job scheduled `expireOldCooldowns` diário via JobQueueService** (limpeza automática do que já rolou); (d) desbloquear **Fase 5** (Decisão #2 jurídica pendente). **Recomendo (c) F7.7** — 30 min de trabalho, fecha a única loose-end técnica da Fase 7 (cleanup lazy hoje depende de trigger manual), aditivo puro.
+
 ---
 
 ## Sessão AAAA-MM-DD (template para próxima)

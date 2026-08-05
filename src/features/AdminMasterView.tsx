@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
-import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal } from 'lucide-react';
+import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal, TrendingUp, CheckCircle2, Clock, XCircle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 
 export function AdminMasterView() {
@@ -390,7 +390,183 @@ export function AdminMasterView() {
 
       <UsersManagementPanel />
 
+      <UpgradeRecommendationsPanel />
+
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+/**
+ * ADR-153 Fatia 7.6 — Master Admin visualiza o funil consolidado de
+ * recomendações de upgrade de TODAS as orgs. Casos de uso:
+ *   1. "Quem aceitou upgrade e ainda não pagou?" — filtra por status=accepted;
+ *      admin pode ligar/processar checkout manual (até Fase 5 automatizar Asaas).
+ *   2. "Meu motor de recomendação está publicando demais?" — vê ratio
+ *      accepted/pending/dismissed no cabeçalho.
+ *   3. "Quanto de MRR incremental há em pending?" — soma uplift em BRL.
+ *
+ * Tudo read-only (sem "resetar cooldown" ou "aceitar por eles" — LGPD §14 diz
+ * que apenas o dono da org decide). Se admin quiser processar upgrade, faz por
+ * fora via /api/admin/organizations/:id/plan (fluxo existente).
+ */
+function UpgradeRecommendationsPanel() {
+  const [items, setItems] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>(null);
+  const [status, setStatus] = useState<string>('accepted');
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '200' });
+      if (status) params.set('status', status);
+      const [rItems, rSummary] = await Promise.all([
+        fetch(`/api/admin/upgrade-recommendations?${params.toString()}`).then(r => r.json()),
+        fetch(`/api/admin/upgrade-recommendations/summary`).then(r => r.json()),
+      ]);
+      setItems(Array.isArray(rItems?.items) ? rItems.items : []);
+      setSummary(rSummary && !rSummary.error ? rSummary : null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao carregar recomendações');
+      setItems([]);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, [status]);
+
+  const brl = (v?: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const relTime = (d?: string) => {
+    if (!d) return '—';
+    const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+    if (days <= 0) return 'hoje';
+    if (days === 1) return 'ontem';
+    return `há ${days}d`;
+  };
+  const cooldownRemaining = (until?: string) => {
+    if (!until) return '—';
+    const ms = new Date(until).getTime() - Date.now();
+    if (ms <= 0) return 'expirou';
+    const days = Math.ceil(ms / 86400000);
+    return `${days}d restante(s)`;
+  };
+  const statusPill = (s: string) => {
+    const map: Record<string, { color: string; icon: any; label: string }> = {
+      accepted: { color: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', icon: CheckCircle2, label: 'aceita — aguardando checkout' },
+      pending: { color: 'bg-sky-500/10 text-sky-300 border-sky-500/30', icon: Clock, label: 'pendente' },
+      dismissed: { color: 'bg-amber-500/10 text-amber-300 border-amber-500/30', icon: XCircle, label: 'dispensada' },
+      expired: { color: 'bg-zinc-700/30 text-zinc-400 border-zinc-700/50', icon: XCircle, label: 'expirada' },
+    };
+    const cfg = map[s] || map.pending;
+    const Icon = cfg.icon;
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${cfg.color}`}>
+        <Icon className="w-3 h-3" /> {cfg.label}
+      </span>
+    );
+  };
+
+  return (
+    <div className="mt-8 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-emerald-400" />
+            Recomendações de Upgrade (funil consolidado)
+          </h3>
+          <p className="text-sm text-zinc-400 mt-1">
+            Aceitas aguardando checkout, pendentes e histórico de dispensadas — todas as orgs.
+            Use pra processar upgrade manual até Fase 5 automatizar via Asaas.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm rounded px-2 py-1"
+          >
+            <option value="accepted">Aceitas (aguardando checkout)</option>
+            <option value="pending">Pendentes</option>
+            <option value="dismissed">Dispensadas</option>
+            <option value="expired">Expiradas</option>
+            <option value="">Todas</option>
+          </select>
+          <Button onClick={load} size="sm" variant="secondary">Atualizar</Button>
+        </div>
+      </div>
+
+      {summary && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded p-3">
+            <div className="text-xs text-zinc-400">Aceitas aguardando checkout</div>
+            <div className="text-xl font-semibold text-emerald-300">{summary.acceptedAwaitingCheckout || 0}</div>
+          </div>
+          <div className="bg-sky-500/5 border border-sky-500/20 rounded p-3">
+            <div className="text-xs text-zinc-400">Pendentes</div>
+            <div className="text-xl font-semibold text-sky-300">{summary.byStatus?.pending || 0}</div>
+          </div>
+          <div className="bg-amber-500/5 border border-amber-500/20 rounded p-3">
+            <div className="text-xs text-zinc-400">Dispensadas (cooldown)</div>
+            <div className="text-xl font-semibold text-amber-300">{summary.byStatus?.dismissed || 0}</div>
+          </div>
+          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded p-3">
+            <div className="text-xs text-zinc-400">MRR incremental em pendentes</div>
+            <div className="text-xl font-semibold text-indigo-300">{brl(summary.totalPendingUplift)}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm text-zinc-300">
+          <thead className="bg-zinc-900 border-b border-zinc-800">
+            <tr>
+              <th className="px-3 py-2 font-medium text-zinc-400">Empresa</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Alvo</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Score</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Ganho/mês</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Status</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Rejeições</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Cooldown</th>
+              <th className="px-3 py-2 font-medium text-zinc-400">Atualizado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-zinc-500">Carregando…</td></tr>
+            )}
+            {!loading && items.length === 0 && (
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
+                Nenhuma recomendação {status ? `com status "${status}"` : 'no ledger'} agora.
+              </td></tr>
+            )}
+            {!loading && items.map((it: any) => (
+              <tr key={it.id} className="border-b border-zinc-800/60">
+                <td className="px-3 py-2">
+                  <div className="text-zinc-100">{it.organizationName || <span className="text-zinc-500">(sem nome)</span>}</div>
+                  <div className="text-xs font-mono text-zinc-500">{it.organizationId}</div>
+                </td>
+                <td className="px-3 py-2">
+                  {it.targetModuleKey && <div>módulo <span className="text-white">{it.targetModuleKey}</span></div>}
+                  <div className="text-zinc-400">plano <span className="text-white">{it.targetPlanId || '—'}</span></div>
+                </td>
+                <td className="px-3 py-2 tabular-nums">{it.score || 0}/100</td>
+                <td className="px-3 py-2 tabular-nums">
+                  {it.impactAmount && it.impactUnit === 'BRL' ? brl(it.impactAmount) : '—'}
+                </td>
+                <td className="px-3 py-2">{statusPill(it.status)}</td>
+                <td className="px-3 py-2 tabular-nums">{it.rejectionCount || 0}×</td>
+                <td className="px-3 py-2 text-xs text-zinc-400">{cooldownRemaining(it.cooldownUntil)}</td>
+                <td className="px-3 py-2 text-xs text-zinc-400">{relTime(it.updatedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-xs text-zinc-500 mt-3">
+        Read-only. Master Admin não aceita/dispensa em nome do dono (LGPD §14). Pra aplicar upgrade
+        manual: fluxo existente em <span className="font-mono">/api/admin/organizations/:id/plan</span>.
+      </p>
     </div>
   );
 }

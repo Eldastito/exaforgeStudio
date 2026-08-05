@@ -7645,6 +7645,18 @@ const initDb = () => {
       db.exec(`ALTER TABLE organization_settings ADD COLUMN ai_monthly_limit_cents INTEGER`);
     }
   } catch(e){ console.error('[DB] Falha ao adicionar ai_monthly_limit_cents (ADR-154 F1.3)', e); }
+
+  // ADR-154 Fatia 4.1 — kind da instância WhatsApp por org: 'shared' (default,
+  // pool interno da plataforma — orgs suíte compartilham) vs 'dedicated' (org
+  // Solo tem instância Evolution PRÓPRIA, com número do assinante conectado
+  // via QR). Aditivo puro: orgs existentes seguem 'shared'. F4.2 vai plugar
+  // `falatu_reply_mode` (always vs trigger_only) sobre este mesmo flag.
+  try {
+    const cols = db.prepare(`PRAGMA table_info(organization_settings)`).all() as any[];
+    if (!cols.some((c: any) => c.name === "whatsapp_instance_kind")) {
+      db.exec(`ALTER TABLE organization_settings ADD COLUMN whatsapp_instance_kind TEXT NOT NULL DEFAULT 'shared'`);
+    }
+  } catch(e){ console.error('[DB] Falha ao adicionar whatsapp_instance_kind (ADR-154 F4.1)', e); }
 };
 
 initDb();

@@ -392,7 +392,8 @@
     "test:ai-usage-ledger": "tsx scripts/test-ai-usage-ledger.ts",
     "test:ai-usage-dashboard": "tsx scripts/test-ai-usage-dashboard.ts",
     "test:ai-quota-signal": "tsx scripts/test-ai-quota-signal.ts",
-    "test:blueprint-solo": "tsx scripts/test-blueprint-solo.ts"
+    "test:blueprint-solo": "tsx scripts/test-blueprint-solo.ts",
+    "test:falatu-solo-whatsapp": "tsx scripts/test-falatu-solo-whatsapp.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

@@ -221,15 +221,15 @@ A IA/módulo Solo do FalaTu **nunca**:
 
 | Fatia | Status | PR |
 |-------|--------|----|
-| 1.1 | Pending | — |
-| 1.2 | Pending | — |
-| 1.3 | Pending | — |
-| 2.1 | Pending | — |
+| 1.1 | MERGED | #791 |
+| 1.2 | MERGED | #792 |
+| 1.3 | MERGED | #793 |
+| 2.1 | MERGED | #795 |
 | 2.2 | Pending | — |
 | 3.1 | Pending | — |
 | 3.2 | Pending | — |
 | 3.3 | Pending | — |
-| 4.1 | Pending | — |
+| 4.1 | In Progress | — |
 | 4.2 | Pending | — |
 | 5.1 | Pending | — |
 | 5.2 | Pending | — |

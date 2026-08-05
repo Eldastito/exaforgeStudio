@@ -30,6 +30,7 @@ import { AddonService } from "./AddonService.js";
 import { PLAN_GRADE } from "./plansGrade.js";
 import { OPTIONAL_MODULES, ADDON_MODULES } from "./verticals.js";
 import { MASTER_ADMIN_EMAIL } from "./config/secret.js";
+import { VerticalBlueprintService } from "./VerticalBlueprintService.js";
 
 // 7 estados do PRD §7.1. Cada resource decidido cai em exatamente um.
 export type EntitlementState =
@@ -81,13 +82,17 @@ export interface EntitlementDecision {
   addonPrice: number | null;
 }
 
-// Mapa temporário de "vertical esconde módulo" — placeholder de F1.1. F1.4
-// remove isso em favor de blueprint.hiddenModules (F3). Regra atual: opinião
-// mínima e defensiva. Só marca `hidden` o que é OBVIAMENTE incoerente pro
-// nicho (chaveiro não vê Clínica; peixaria não vê Escola). Qualquer módulo
-// não listado aqui e não coberto pelo plano volta como `available_to_buy`
-// (upgrade coerente) ou fallback `hidden`.
-const HIDDEN_BY_VERTICAL: Record<string, string[]> = {
+// FALLBACK do "vertical esconde módulo" — usado quando a org NÃO tem blueprint
+// assignado (ex.: org antiga que nunca rodou `POST /api/admin/blueprints/
+// migrate-orgs` ou vertical fora da inferência do BlueprintSeeder — food,
+// hospitalidade, educacao, outro). ADR-153 F1.4 endureceu a fonte principal
+// pra `blueprint.config.hiddenModules` (F3.2 popula 5 blueprints iniciais);
+// este mapa fica como safety net pra orgs em transição.
+//
+// Regra: opinião mínima e defensiva. Só marca `hidden` o obviamente incoerente
+// pro nicho. Qualquer módulo fora daqui + fora do plano vira `available_to_buy`
+// (upgrade coerente) ou fallback `hidden` (§7 do PRD).
+const FALLBACK_HIDDEN_BY_VERTICAL: Record<string, string[]> = {
   varejo: ["clinica", "escola"],
   moda: ["clinica", "escola"],
   food: ["clinica", "escola"],
@@ -97,6 +102,41 @@ const HIDDEN_BY_VERTICAL: Record<string, string[]> = {
   hospitalidade: ["clinica", "escola"],
   // 'outro' não esconde nada — dono explora catálogo cheio.
 };
+
+/**
+ * Contexto opcional passado pelo `overview` pra evitar N × 2 queries de
+ * blueprint (uma por módulo). `check` chamado direto (sem ctx) resolve on-the-fly.
+ */
+interface EntitlementContext {
+  blueprintHidden?: string[];
+  blueprintKey?: string | null;
+  blueprintVersion?: number | null;
+}
+
+/**
+ * Fonte de `hidden` — blueprint tem prioridade, fallback pro mapa estático.
+ * F1.4 mudança: usa blueprint quando assignado.
+ */
+function resolveHiddenForOrg(orgId: string, verticalFallback: string | null): { hidden: string[]; blueprintKey: string | null; blueprintVersion: number | null } {
+  try {
+    const orgBp = VerticalBlueprintService.getForOrganization(orgId);
+    if (orgBp) {
+      const bp = VerticalBlueprintService.getBlueprint(orgBp.blueprintId);
+      if (bp) {
+        return {
+          hidden: bp.config.hiddenModules || [],
+          blueprintKey: bp.key,
+          blueprintVersion: bp.version,
+        };
+      }
+    }
+  } catch { /* best-effort — cai no fallback */ }
+  return {
+    hidden: verticalFallback ? (FALLBACK_HIDDEN_BY_VERTICAL[verticalFallback] || []) : [],
+    blueprintKey: null,
+    blueprintVersion: null,
+  };
+}
 
 // Tier ordering pra `upgradeTargetPlan` — o índice determina "acima" vs "abaixo".
 const PLAN_TIER = ["autonomo", "start", "growth", "scale", "enterprise"] as const;
@@ -159,8 +199,9 @@ function rbacRankOk(level: "none" | "read" | "write" | "full", required: "read" 
 export class EntitlementService {
   static REGISTERED_MODULES = OPTIONAL_MODULES as readonly string[];
 
-  /** Decisão única. Consumers: middleware (F1.2), UI (F1.3), motor de recomendação (F7). */
-  static check(orgId: string, user: any, resource: string, action: EntitlementAction): EntitlementDecision {
+  /** Decisão única. Consumers: middleware (F1.2), UI (F1.3), motor de recomendação (F7).
+   *  ADR-153 F1.4: `ctx` opcional pra overview pre-resolver o blueprint uma vez. */
+  static check(orgId: string, user: any, resource: string, action: EntitlementAction, ctx?: EntitlementContext): EntitlementDecision {
     const org = db.prepare(
       `SELECT vertical, plan_id, billing_status FROM organization_settings WHERE organization_id = ? AND deleted_at IS NULL`,
     ).get(orgId) as any || {};
@@ -173,8 +214,28 @@ export class EntitlementService {
       ? "full"
       : PermissionService.levelFor(orgId, user, resource);
 
+    // ADR-153 F1.4: resolução de `hidden` via blueprint (prioridade) ou fallback
+    // estático. Overview pré-resolve (evita N × 2 queries); consulta pontual
+    // (middleware, /resource/:key) resolve on-the-fly.
+    let hiddenList: string[];
+    let blueprintKey: string | null;
+    let blueprintVersion: number | null;
+    if (ctx && Array.isArray(ctx.blueprintHidden)) {
+      hiddenList = ctx.blueprintHidden;
+      blueprintKey = ctx.blueprintKey ?? null;
+      blueprintVersion = ctx.blueprintVersion ?? null;
+    } else {
+      const resolved = resolveHiddenForOrg(orgId, vertical);
+      hiddenList = resolved.hidden;
+      blueprintKey = resolved.blueprintKey;
+      blueprintVersion = resolved.blueprintVersion;
+    }
+    // Formato semântico "clinica_multiespecialidades:v1" pra ficar legível no
+    // response da rota; frontend pode fazer split(":") se quiser separar.
+    const blueprintLabel = blueprintKey ? `${blueprintKey}:v${blueprintVersion}` : null;
+
     const source: EntitlementSource = {
-      verticalBlueprint: null,    // F3 preenche
+      verticalBlueprint: blueprintLabel,
       vertical,
       plan: planId,
       addon: AddonService.isActive(orgId, resource) ? resource : null,
@@ -222,14 +283,14 @@ export class EntitlementService {
     const covered = planMods == null || planMods.includes(resource);
     const enabled = ModuleService.isEnabled(orgId, resource); // já intersecciona plano+addon+enabled_modules
 
-    // 4) `hidden` = vertical marca como incoerente E plano não cobre.
-    //    (Se plano cobre, mesmo em vertical "esconde", devolve available — se
-    //    dono ligou explicitamente ou está no plano, respeita — F1.1 é
-    //    defensivo; F1.4/F3 endurece via blueprint.)
-    const hiddenByVertical =
-      vertical != null &&
-      (HIDDEN_BY_VERTICAL[vertical] || []).includes(resource) &&
-      !covered;
+    // 4) `hidden` = blueprint marca como incoerente E plano não cobre.
+    //    (Se plano cobre, mesmo em blueprint "esconde", devolve available — se
+    //    dono ligou explicitamente ou está no plano, respeita. Comportamento
+    //    intencionalmente defensivo pra não esconder algo que a org realmente
+    //    tem contratado. G-153-2 aplica.) ADR-153 F1.4: fonte é
+    //    `blueprint.config.hiddenModules` (via `resolveHiddenForOrg` acima)
+    //    quando org tem blueprint assignado; senão FALLBACK_HIDDEN_BY_VERTICAL.
+    const hiddenByVertical = hiddenList.includes(resource) && !covered;
 
     if (hiddenByVertical) {
       return {
@@ -350,15 +411,26 @@ export class EntitlementService {
     };
   }
 
-  /** Mapa completo de todos os OPTIONAL_MODULES pra `view`. Usado por /me e /modules. */
+  /** Mapa completo de todos os OPTIONAL_MODULES pra `view`. Usado por /me e /modules.
+   *  ADR-153 F1.4: pré-resolve o blueprint UMA vez e passa por `ctx` pra evitar
+   *  N × 2 queries de blueprint (uma por módulo × 32 módulos = 64 queries). */
   static overview(orgId: string, user: any): Record<string, EntitlementDecision> {
+    const org = db.prepare(
+      `SELECT vertical FROM organization_settings WHERE organization_id = ? AND deleted_at IS NULL`,
+    ).get(orgId) as any || {};
+    const resolved = resolveHiddenForOrg(orgId, org.vertical || null);
+    const ctx: EntitlementContext = {
+      blueprintHidden: resolved.hidden,
+      blueprintKey: resolved.blueprintKey,
+      blueprintVersion: resolved.blueprintVersion,
+    };
     const out: Record<string, EntitlementDecision> = {};
     for (const key of OPTIONAL_MODULES as readonly string[]) {
-      out[key] = this.check(orgId, user, key, "view");
+      out[key] = this.check(orgId, user, key, "view", ctx);
     }
     // Core também entra no overview — consumidor de UI quer o mapa fechado.
     for (const key of ModuleService.CORE as readonly string[]) {
-      out[key] = this.check(orgId, user, key, "view");
+      out[key] = this.check(orgId, user, key, "view", ctx);
     }
     return out;
   }

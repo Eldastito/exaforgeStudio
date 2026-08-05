@@ -50,7 +50,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [x] Serviço `EntitlementService` com `check()` retornando `{allowed, visibility, reason, state, source, upgradeEligible, upgradeTargetPlan, addonEligible, addonPrice}`. Fatia 1.1 — `src/server/EntitlementService.ts`.
 - [x] Rotas `/api/entitlements/{me,modules,resource/:key}`. Fatia 1.1 — `src/server/routes/entitlements.ts` (`GET` only).
-- [~] Estados: `active | available_to_enable | available_to_buy | hidden | suspended` implementados (F1.1). `deprecated | pilot_only` reservados como enum mas sem detector (F1.4/futuro).
+- [x] Estados: `active | available_to_enable | available_to_buy | hidden | suspended` implementados. F1.4 endureceu `hidden` via `blueprint.config.hiddenModules` (fonte estruturada + fallback estático pra orgs em transição). `deprecated | pilot_only` continuam reservados como enum sem detector (fatia futura só se surgir demanda concreta).
 
 ### §11.2 VerticalBlueprintService (novo)
 
@@ -207,9 +207,9 @@ Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `
 
 ## §28 — Aceite visibilidade
 
-- [ ] Chaveiro não vê Clínica. Fatia 1.4 + 3.2.
-- [ ] Peixaria não vê Escola. Fatia 1.4 + 3.2.
-- [ ] Clínica não vê Retail Ops sem entitlement. Fatia 3.2.
+- [x] Chaveiro não vê Clínica. F1.4 + F3.2 — blueprint `chaveiro_autonomo_v1.hiddenModules` inclui `clinica` (fonte de verdade); `EntitlementService.check` respeita.
+- [x] Peixaria não vê Escola. F1.4 + F3.2 — blueprint `peixaria_balcao_peso_v1.hiddenModules` inclui `escola`.
+- [x] Clínica não vê Retail Ops sem entitlement. F1.4 + F3.2 — blueprint `clinica_multiespecialidades_v1.hiddenModules` inclui `retail` + `retail_floor`.
 - [ ] Admin não consegue ativar módulo fora do plano. Fatia 1.2 (middleware) + 4.1.
 - [ ] Payload frontend modificado não fura backend. Fatia 1.1 (backend re-valida).
 - [ ] Menu e API dão mesma resposta. Fatia 1.3.

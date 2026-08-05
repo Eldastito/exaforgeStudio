@@ -657,11 +657,13 @@ const PlanFitCard: React.FC<{
   onDismiss: () => void;
   onGoToCobranca: () => void;
 }> = ({ signal, dismissing, onDismiss, onGoToCobranca }) => {
+  const [showBreakdown, setShowBreakdown] = useState(false);
   const METRIC_LABEL: Record<string, string> = {
     plan_near_limit_ai: 'Uso de IA (respostas do mês)',
     plan_near_limit_contacts: 'Base de contatos',
     plan_near_limit_channels: 'Canais conectados',
     plan_near_limit_users: 'Usuários da equipe',
+    plan_module_gap: 'Módulo do seu nicho fora do plano',
   };
   const SEV_STYLE: Record<string, { bg: string; text: string; label: string }> = {
     attention: { bg: 'bg-amber-500/15 border-amber-500/30', text: 'text-amber-300', label: 'atenção' },
@@ -671,18 +673,29 @@ const PlanFitCard: React.FC<{
   };
   const ev = signal.evidence || {};
   const sev = SEV_STYLE[signal.severity] || SEV_STYLE.info;
-  const title = METRIC_LABEL[signal.signal_type] || signal.signal_type;
+  const title = ev.moduleKey
+    ? `Módulo "${ev.moduleKey}" faz sentido pro seu Blueprint`
+    : (METRIC_LABEL[signal.signal_type] || signal.signal_type);
+  const brl = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const uplift = ev.estimatedUpliftMonthly ?? signal.impact_amount ?? null;
+  const scoreBreak = ev.scoreBreakdown || null;
+  const score = scoreBreak?.total ?? null;
   return (
     <div className={`rounded-xl border p-4 ${sev.bg}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded ${sev.text} ${sev.bg}`}>
               {sev.label}
             </span>
+            {score != null && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-800 text-zinc-300`}>
+                score {score}/100
+              </span>
+            )}
             <p className="text-sm font-semibold text-zinc-100">{title}</p>
           </div>
-          {ev.used != null && ev.limit != null && (
+          {ev.used != null && ev.limit != null && signal.signal_type !== 'plan_module_gap' && (
             <p className="text-xs text-zinc-400">
               Uso: <b className="text-zinc-200">{Number(ev.used).toLocaleString('pt-BR')} de {Number(ev.limit).toLocaleString('pt-BR')}</b>
               {ev.pctInt != null && <span className={`ml-2 ${sev.text}`}>({ev.pctInt}%)</span>}
@@ -697,8 +710,37 @@ const PlanFitCard: React.FC<{
               {ev.upgradeTargetLimit === 0 && <> — sem limite</>}
             </p>
           )}
+          {uplift != null && uplift > 0 && (
+            <p className="text-xs text-zinc-400 mt-1">
+              Ganho estimado: <b className="text-emerald-300">{brl(uplift)}/mês</b>
+              <span className="text-zinc-500 italic ml-1">(estimativa; §16 PRD)</span>
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Breakdown do score — expandível pra explicabilidade (PRD §16) */}
+      {scoreBreak && (
+        <div className="mt-3">
+          <button
+            onClick={() => setShowBreakdown(!showBreakdown)}
+            className="text-[11px] text-zinc-500 hover:text-zinc-300 underline decoration-dotted"
+          >
+            {showBreakdown ? 'Ocultar' : 'Ver'} breakdown do score
+          </button>
+          {showBreakdown && (
+            <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-zinc-400">
+              <span>Necessidade operacional: <b className="text-zinc-200">{scoreBreak.necessidade_operacional}/30</b></span>
+              <span>Uso próximo ao limite: <b className="text-zinc-200">{scoreBreak.uso_proximo_limite}/20</b></span>
+              <span>Ganho financeiro: <b className="text-zinc-200">{scoreBreak.ganho_financeiro_provavel}/20</b></span>
+              <span>Recorrência: <b className="text-zinc-200">{scoreBreak.recorrencia_necessidade}/15</b></span>
+              <span>Adequação vertical: <b className="text-zinc-200">{scoreBreak.adequacao_vertical}/10</b></span>
+              <span>Confiança dos dados: <b className="text-zinc-200">{scoreBreak.confianca_dados}/5</b></span>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={onGoToCobranca}

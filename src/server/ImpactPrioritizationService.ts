@@ -78,6 +78,7 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   plan_near_limit_contacts: { actionType: "propose_upgrade", label: "Base de contatos perto do limite — considerar upgrade" },
   plan_near_limit_channels: { actionType: "propose_upgrade", label: "Canais conectados no limite — considerar upgrade" },
   plan_near_limit_users: { actionType: "propose_upgrade", label: "Usuários no limite — considerar upgrade" },
+  plan_module_gap: { actionType: "propose_upgrade", label: "Módulo do seu nicho fora do plano — considerar upgrade" },
   // Módulo Escola (ADR-144) — sinais de coordenação no domínio `education`.
   student_absence: { actionType: "create_task", label: "Falar com a família sobre a falta do aluno" },
   class_not_held: { actionType: "create_task", label: "Cobrir a aula não realizada (professor/substituto)" },

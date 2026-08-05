@@ -1053,6 +1053,9 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
                 ))}
                 <p className="text-[11px] text-zinc-500 italic px-2">
                   A IA nunca contrata sozinha (G-153-3). Todo upgrade exige clique explícito em Cobrança.
+                  {/* F7.3 — cooldown por rejeição (LGPD §14). Backend aplica sozinho no dismiss. */}
+                  <br />
+                  Ao dispensar, essa sugestão fica pausada por 30 dias (90d na 2ª, 180d nas seguintes). Uso ≥100% ignora a pausa — não deixamos você travado sem avisar.
                 </p>
               </div>
             )}

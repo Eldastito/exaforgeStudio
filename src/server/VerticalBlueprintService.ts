@@ -38,6 +38,19 @@ import { PLAN_GRADE, PLAN_BUNDLES } from "./plansGrade.js";
 import { OPTIONAL_MODULES } from "./verticals.js";
 
 export type BlueprintStatus = "draft" | "published" | "deprecated";
+/**
+ * ADR-154 F2.1 — modo do blueprint:
+ * - 'suite' (default, comportamento pré-F2.1): org enxerga N módulos.
+ * - 'solo': org enxerga UM módulo só (ex.: FalaTu como assistente pessoal),
+ *   com o resto em hiddenModules. Marketing/pricing/onboarding próprios.
+ *
+ * Guardrail: em modo 'solo', requiredModules DEVE ter exatamente 1 módulo
+ * (o primary do produto) e optionalModules DEVE ser vazio — se não fosse
+ * assim, deixaria de ser "solo". A whitelist é decisão de produto; alterar
+ * = mudar o `mode` explicitamente (não é acidente de v2).
+ */
+export type BlueprintMode = "suite" | "solo";
+const VALID_MODES: BlueprintMode[] = ["suite", "solo"];
 
 // Módulos categorizados no config do blueprint. Todos os arrays contêm keys
 // de OPTIONAL_MODULES (module-key namespace). O EntitlementService (F1.4)
@@ -58,6 +71,7 @@ export interface Blueprint {
   baseVertical: string;
   version: number;
   status: BlueprintStatus;
+  mode: BlueprintMode;
   minimumPlanId: string | null;
   defaultPlanId: string | null;
   defaultBundleKey: string | null;
@@ -131,6 +145,7 @@ function rowToBlueprint(row: any): Blueprint {
     baseVertical: row.base_vertical,
     version: Number(row.version),
     status: row.status as BlueprintStatus,
+    mode: (row.mode as BlueprintMode) || "suite", // default 'suite' pra blueprints pré-F2.1
     minimumPlanId: row.minimum_plan_id || null,
     defaultPlanId: row.default_plan_id || null,
     defaultBundleKey: row.default_bundle_key || null,
@@ -145,6 +160,7 @@ export interface CreateBlueprintInput {
   name: string;
   baseVertical: string;
   version?: number;               // default 1; use N+1 pra nova versão de mesmo key
+  mode?: BlueprintMode;           // default 'suite' (ADR-154 F2.1)
   minimumPlanId?: string | null;
   defaultPlanId?: string | null;
   defaultBundleKey?: string | null;
@@ -167,6 +183,21 @@ export class VerticalBlueprintService {
     assertValidModules(config.hiddenModules, "hiddenModules");
     assertValidCommercialUpgrades(config.commercialUpgrades);
 
+    // ADR-154 F2.1 — valida mode + guardrail Solo. 'solo' exige exatamente
+    // UM módulo em requiredModules e zero em optionalModules (é isso que faz
+    // ser "solo"). Se v2 tentar adicionar 2 módulos ou trazer opcional, quebra
+    // aqui — a whitelist é decisão de produto, mudança consciente do mode.
+    const mode: BlueprintMode = input.mode ?? "suite";
+    if (!VALID_MODES.includes(mode)) throw new Error(`mode deve ser 'suite' ou 'solo' (recebido: "${mode}")`);
+    if (mode === "solo") {
+      if (config.requiredModules.length !== 1) {
+        throw new Error(`Blueprint 'solo' exige EXATAMENTE 1 módulo em requiredModules (recebido: ${config.requiredModules.length}). Whitelist do solo é decisão de produto — pra abrir mais de 1 módulo, use mode='suite'.`);
+      }
+      if (config.optionalModules.length > 0) {
+        throw new Error(`Blueprint 'solo' não permite optionalModules (recebido: ${config.optionalModules.length}). Solo é módulo único — pra opcional, use mode='suite'.`);
+      }
+    }
+
     // Auto-versionamento: se `version` omitido, próxima livre pra key.
     let version = input.version ?? 1;
     if (input.version == null) {
@@ -185,18 +216,29 @@ export class VerticalBlueprintService {
     ).get(input.key, version) as any;
     if (existing) throw new Error(`Blueprint (${input.key}, v${version}) já existe (id=${existing.id}). Use outra version.`);
 
+    // Guardrail F2.1: quando cria uma NOVA versão de uma key existente, o `mode`
+    // NÃO PODE MUDAR entre versões — v1 é 'solo' → v2 tem que ser 'solo'.
+    // Alteração de mode é ruptura de contrato pro cliente Solo (viraria suíte
+    // de repente). Se precisar mudar, cria KEY nova.
+    if (version > 1) {
+      const priorMode = (db.prepare(`SELECT mode FROM vertical_blueprints WHERE key = ? ORDER BY version DESC LIMIT 1`).get(input.key) as any)?.mode;
+      if (priorMode && priorMode !== mode) {
+        throw new Error(`Blueprint '${input.key}' já existe em modo '${priorMode}' — nova versão deve manter o mesmo mode (recebido: '${mode}'). Pra mudar de mode, crie uma key nova.`);
+      }
+    }
+
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO vertical_blueprints (id, key, name, base_vertical, version, status, minimum_plan_id, default_plan_id, default_bundle_key, config_json)
-       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
+      `INSERT INTO vertical_blueprints (id, key, name, base_vertical, version, status, mode, minimum_plan_id, default_plan_id, default_bundle_key, config_json)
+       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
     ).run(
-      id, input.key, input.name.trim(), input.baseVertical.trim(), version,
+      id, input.key, input.name.trim(), input.baseVertical.trim(), version, mode,
       input.minimumPlanId || null, input.defaultPlanId || null, input.defaultBundleKey || null,
       JSON.stringify(config),
     );
 
     try {
-      logAuthEvent(null, actor || null, null, "BLUEPRINT_CREATED", { id, key: input.key, version, baseVertical: input.baseVertical });
+      logAuthEvent(null, actor || null, null, "BLUEPRINT_CREATED", { id, key: input.key, version, mode, baseVertical: input.baseVertical });
     } catch { /* noop */ }
 
     return this.getBlueprint(id)!;

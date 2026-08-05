@@ -132,6 +132,39 @@ export const INITIAL_BLUEPRINTS: CreateBlueprintInput[] = [
       runtimePlaybooks: [],
     },
   },
+  // ADR-154 F2.1 — BLUEPRINT SOLO: assistente pessoal FalaTu vendido como app
+  // único. mode='solo' esconde qualquer navegação/menu fora do único módulo
+  // requerido (RN-154 §1 — vazamento de módulo hidden = bug de segurança).
+  // Sem `optionalModules` (guardrail do createBlueprint enforça).
+  // Sem `commercialUpgrades` — solo NÃO oferece upgrade suíte (produto
+  // diferente; conversão suíte é outra história).
+  // Sem `defaultPlanId` — plano comercial "Assistente Pessoal" vem em F2.2.
+  {
+    key: "falatu_solo",
+    name: "FalaTu — Assistente Pessoal",
+    baseVertical: "outro",
+    version: 1,
+    mode: "solo",
+    minimumPlanId: null,
+    defaultPlanId: null,
+    defaultBundleKey: null,
+    config: {
+      requiredModules: ["falatu"],
+      optionalModules: [],
+      // hiddenModules: TUDO que não é falatu (todos os OPTIONAL_MODULES exceto
+      // 'falatu' + os CORE não-obrigatórios). Preenchido explicitamente pra
+      // deixar o intent claro e pro EntitlementService.hiddenModules puxar.
+      hiddenModules: [
+        "agenda", "catalogo", "vendas", "loja", "pagamentos",
+        "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
+        "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
+        "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor",
+      ],
+      commercialUpgrades: [],
+      quickStartPack: null,
+      runtimePlaybooks: [],
+    },
+  },
 ];
 
 export interface MigrationResult {

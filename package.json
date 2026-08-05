@@ -391,7 +391,8 @@
     "test:recommendation-history-chart": "tsx scripts/test-recommendation-history-chart.ts",
     "test:ai-usage-ledger": "tsx scripts/test-ai-usage-ledger.ts",
     "test:ai-usage-dashboard": "tsx scripts/test-ai-usage-dashboard.ts",
-    "test:ai-quota-signal": "tsx scripts/test-ai-quota-signal.ts"
+    "test:ai-quota-signal": "tsx scripts/test-ai-quota-signal.ts",
+    "test:blueprint-solo": "tsx scripts/test-blueprint-solo.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

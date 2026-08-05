@@ -2,7 +2,9 @@
  * TEST — Fatia 3.2 (ADR-153): BlueprintSeeder (seed inicial + migração).
  *
  * Cobre:
- *   1. seedInitialBlueprints cria os 5 esperados na 1ª chamada.
+ *   1. seedInitialBlueprints cria os N esperados na 1ª chamada (5 iniciais +
+ *      ADR-154 F2.1 adiciona falatu_solo → 6 total; conta é derivada de
+ *      INITIAL_BLUEPRINTS.length pra não regredir a cada seed novo).
  *   2. Seed 2× é IDEMPOTENTE (não duplica).
  *   3. Cada blueprint tem shape correto (baseVertical/hidden/plan/bundle).
  *   4. Todos os 5 blueprints saem em status `published`.
@@ -48,19 +50,20 @@ async function main() {
   const { PLAN_GRADE } = await import("../src/server/plansGrade.js");
 
   // ===== 1-4. Seed inicial =====
+  const expectedCount = INITIAL_BLUEPRINTS.length; // derivado do array — não regride ao adicionar novos
   const seedResult1 = BlueprintSeeder.seedInitialBlueprints("test-actor");
   const totalOps1 = seedResult1.created.length + seedResult1.published.length + seedResult1.skipped.length;
-  check("1ª chamada de seed toca todos os 5 blueprints (created+published+skipped >= 5)", totalOps1 >= 5);
+  check(`1ª chamada de seed toca todos os ${expectedCount} blueprints (created+published+skipped >= ${expectedCount})`, totalOps1 >= expectedCount);
 
   const allBps = VerticalBlueprintService.listBlueprints();
-  check(`seed produz 5 blueprints (got ${allBps.length})`, allBps.length === 5);
+  check(`seed produz ${expectedCount} blueprints (got ${allBps.length})`, allBps.length === expectedCount);
   const expectedKeys = new Set(INITIAL_BLUEPRINTS.map((b) => b.key));
   const actualKeys = new Set(allBps.map((b) => b.key));
   for (const key of expectedKeys) {
     check(`seed inclui blueprint '${key}'`, actualKeys.has(key));
   }
   const allPublished = allBps.every((b) => b.status === "published");
-  check("todos os 5 blueprints publicados após seed", allPublished);
+  check(`todos os ${expectedCount} blueprints publicados após seed`, allPublished);
 
   // ===== 5. clinica com defaultBundleKey =====
   const clinica = allBps.find((b) => b.key === "clinica_multiespecialidades");
@@ -75,9 +78,9 @@ async function main() {
   // ===== 2. Seed 2× idempotente =====
   const seedResult2 = BlueprintSeeder.seedInitialBlueprints("test-actor");
   check("2ª chamada de seed não cria novo (created.length === 0)", seedResult2.created.length === 0);
-  check("2ª chamada de seed todos vão pra skipped ou já-published", seedResult2.skipped.length + seedResult2.published.length === 5);
+  check(`2ª chamada de seed todos vão pra skipped ou já-published (${expectedCount})`, seedResult2.skipped.length + seedResult2.published.length === expectedCount);
   const allBpsAfter = VerticalBlueprintService.listBlueprints();
-  check(`ainda 5 blueprints (não duplicou — got ${allBpsAfter.length})`, allBpsAfter.length === 5);
+  check(`ainda ${expectedCount} blueprints (não duplicou — got ${allBpsAfter.length})`, allBpsAfter.length === expectedCount);
 
   // ===== 6. inferBlueprintKeyFor =====
   check("saude+autonomo → clinica_multiespecialidades", inferBlueprintKeyFor("saude", "autonomo")?.key === "clinica_multiespecialidades");

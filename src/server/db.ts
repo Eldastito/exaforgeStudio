@@ -7621,6 +7621,18 @@ const initDb = () => {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_org_user_date   ON ai_usage_log (organization_id, user_id, created_at)`);
   } catch(e){ console.error('[DB] Falha ao estender ai_usage_log (ADR-154 F1.1)', e); }
 
+  // ADR-154 Fatia 2.1 — `mode` no blueprint: 'suite' (default, comportamento
+  // atual — org enxerga vários módulos) vs 'solo' (org enxerga UM módulo só —
+  // assistente pessoal). Aditivo puro: blueprints existentes ficam 'suite'
+  // automaticamente. F1.4 (hiddenModules) + este `mode` são o que faz o
+  // blueprint solo esconder tudo mais que não o único módulo permitido.
+  try {
+    const cols = db.prepare(`PRAGMA table_info(vertical_blueprints)`).all() as any[];
+    if (!cols.some((c: any) => c.name === "mode")) {
+      db.exec(`ALTER TABLE vertical_blueprints ADD COLUMN mode TEXT NOT NULL DEFAULT 'suite'`);
+    }
+  } catch(e){ console.error('[DB] Falha ao adicionar mode em vertical_blueprints (ADR-154 F2.1)', e); }
+
   // ADR-154 Fatia 1.3 — cota mensal em CENTAVOS (INTEGER) por org, ajustável
   // pelo master admin (POST /api/admin/organizations/:id/ai-quota). É uma
   // dimensão SEPARADA do `ai_monthly_limit` do plano (que é count-based):

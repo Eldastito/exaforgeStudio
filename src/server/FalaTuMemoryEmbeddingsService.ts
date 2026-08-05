@@ -1,10 +1,31 @@
 /**
- * ADR-154 Fatia 5.1 — FalaTuMemoryEmbeddingsService.
+ * ADR-154 Fatia 5.1 + 5.2 — FalaTuMemoryEmbeddingsService.
  *
- * Gera embeddings da memória do FalaTu (entidades + notas confirmadas)
- * ASSÍNCRONAMENTE via JobQueue, sem atrasar o "Fala → Faz → Confere".
- * A busca top-K + injeção no prompt é o próximo passo (F5.2) — F5.1 só
- * constrói o alicerce: tabela + handler + hook no confirm.
+ * F5.1 (fundação): gera embeddings da memória do FalaTu (entidades + notas
+ * confirmadas) ASSÍNCRONAMENTE via JobQueue, sem atrasar o "Fala → Faz →
+ * Confere". Tabela + handler + hook no confirm.
+ *
+ * F5.2 (RAG on-read): dado o texto de entrada de uma captura, faz busca
+ * top-K por similaridade cosseno em falatu_memory_embeddings — filtro
+ * OBRIGATÓRIO por (organization_id, user_id) — e devolve um bloco
+ * <memoria_relevante>...</memoria_relevante> pra ser prepend no system do
+ * llm.chat DENTRO de FalaTuService.interpret. Só roda se
+ * organization_settings.falatu_rag_enabled=1 (default 0). Custo do embedding
+ * da query é atribuído à org via setUsageContext ANTES da chamada (F1.1).
+ *
+ * Cálculo em SQLite: fallback puro JS (loop cosseno) — o ADR aceita porque o
+ * volume por usuário é pequeno (<1000). sqlite-vss é otimização futura.
+ *
+ * RN-154 §RAG (duros, testados em test-falatu-rag):
+ *  - Só busca em memória CONFIRMADA (F5.1 já garante — só entra na tabela
+ *    quando confirm() chama enqueue*).
+ *  - Filtro (organization_id, user_id) OBRIGATÓRIO — cross-tenant é bug de
+ *    segurança (convenção nº 1 do CLAUDE.md).
+ *  - System prompt injetado é ROTULADO como "contexto histórico" e instrui
+ *    explicitamente a NÃO inventar fatos — se a memória contradiz a entrada,
+ *    prevalece a entrada (RN-151 "não invente").
+ *  - Best-effort: qualquer erro no RAG (embed falha, DB down) NUNCA impede a
+ *    captura — devolve "" e a interpretação segue sem preamble.
  *
  * Guardrails RN-154 (duros, testados):
  *  §4 (RAG): só gera sobre conteúdo CONFIRMADO — hook só é chamado no
@@ -221,6 +242,117 @@ export class FalaTuMemoryEmbeddingsService {
     return db
       .prepare(`SELECT * FROM falatu_memory_embeddings WHERE organization_id = ? AND user_id = ? ORDER BY created_at DESC`)
       .all(orgId, userId) as EmbeddingRow[];
+  }
+
+  // ============================================================
+  // F5.2 — busca top-K + montagem do bloco <memoria_relevante>
+  // ============================================================
+
+  /**
+   * Chama llm.embed com o texto da query e devolve o vetor (ou null se IA
+   * não configurada / vazio). Método próprio pra ser mockável em teste
+   * (ESM não permite mutar o binding `llm.embed` — mesmo padrão de
+   * embedAndStore em F5.1).
+   */
+  static async embedQuery(text: string): Promise<number[] | null> {
+    const llm = await import("./llm.js");
+    if (!llm.isAIConfigured()) return null;
+    const vecs = await llm.embed([text]);
+    return vecs[0] || null;
+  }
+
+  /**
+   * Similaridade cosseno. Vetores devem ter mesma dimensão. Retorna 0 se
+   * qualquer um dos vetores tiver norma zero (evita NaN — protege o sort).
+   * Faz o dot product e as normas num único loop (uma passada só) porque
+   * cada vetor tem 1536 dimensões e a busca roda em todos os embeddings do
+   * usuário na captura — o caminho crítico é sensível a alocação.
+   */
+  static cosine(a: number[], b: number[]): number {
+    if (a.length !== b.length || a.length === 0) return 0;
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+      const av = a[i], bv = b[i];
+      dot += av * bv;
+      na += av * av;
+      nb += bv * bv;
+    }
+    if (na === 0 || nb === 0) return 0;
+    return dot / (Math.sqrt(na) * Math.sqrt(nb));
+  }
+
+  /**
+   * Busca top-K memórias mais similares a `queryText` pra (orgId, userId).
+   * Passos:
+   *   1) Embed do queryText via llm.embed — custo atribuído à org via
+   *      setUsageContext (o caller precisa já ter setado — capture() faz).
+   *   2) Carrega TODOS os embeddings do (org, user) — filtro obrigatório.
+   *   3) Deserializa e computa cosseno em JS (fallback aceitável — <1000
+   *      embeddings por usuário no volume esperado).
+   *   4) Ordena desc por score, devolve top K.
+   *
+   * Retorna [] se: RAG desligado, queryText vazio, sem embeddings, ou erro
+   * (best-effort — F5.2 nunca pode derrubar interpret).
+   */
+  static async searchTopK(
+    orgId: string, userId: string, queryText: string, k = 5,
+  ): Promise<Array<{ sourceType: EmbeddingSourceType; sourceId: string; snippet: string; score: number }>> {
+    if (!this.isEnabled(orgId)) return [];
+    const q = (queryText || "").trim();
+    if (!q) return [];
+
+    try {
+      const rows = db
+        .prepare(`SELECT source_type, source_id, content_snippet, embedding FROM falatu_memory_embeddings WHERE organization_id = ? AND user_id = ?`)
+        .all(orgId, userId) as Array<{ source_type: EmbeddingSourceType; source_id: string; content_snippet: string; embedding: Buffer }>;
+      if (rows.length === 0) return [];
+
+      // Custo do embed da query vai pro ai_usage_log com module='falatu' e
+      // (orgId, userId) — o caller (capture) já setou o contexto; reafirma
+      // aqui pra ficar defensivo caso F5.2 seja chamada por outro caminho.
+      setUsageContext({ orgId, userId, module: "falatu" });
+      const qvec = await this.embedQuery(q);
+      if (!qvec || qvec.length === 0) return [];
+
+      const scored = rows.map((r) => ({
+        sourceType: r.source_type,
+        sourceId: r.source_id,
+        snippet: r.content_snippet,
+        score: this.cosine(qvec, this.deserializeEmbedding(Buffer.from(r.embedding))),
+      }));
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, Math.max(1, k));
+    } catch (e) {
+      console.error("[FalaTuMemoryEmbeddings] searchTopK falhou (best-effort — segue sem RAG):", e);
+      return [];
+    }
+  }
+
+  /**
+   * Monta o bloco `<memoria_relevante>` pra prepend no system prompt de
+   * interpret(). Se não há memória (RAG off, queryText vazio, top-K vazio),
+   * devolve "". O bloco carrega o guardrail RN-154 EXPLÍCITO — "contexto
+   * histórico", "prevalece a entrada", "não invente" — pra a LLM não tratar
+   * memória como verdade ao contradizer o pedido novo do usuário.
+   */
+  static async buildRelevantMemoryBlock(
+    orgId: string, userId: string, queryText: string, k = 5,
+  ): Promise<string> {
+    const hits = await this.searchTopK(orgId, userId, queryText, k);
+    if (hits.length === 0) return "";
+    const items = hits
+      .map((h, i) => `${i + 1}. [${h.sourceType}] ${h.snippet.replace(/\s+/g, " ").trim().slice(0, 240)}`)
+      .join("\n");
+    return [
+      "<memoria_relevante>",
+      "Contexto histórico do usuário (memória do FalaTu — para consulta, não é o pedido atual):",
+      items,
+      "Regras rígidas:",
+      "- Se a memória contradiz a entrada do usuário, PREVALECE a entrada — nunca corrija o usuário a partir da memória.",
+      "- NUNCA invente fatos usando esta memória: ela é referência, não fonte de verdade nova.",
+      "- Se a entrada NÃO cita algo desta memória, NÃO puxe pra dentro do JSON de saída.",
+      "</memoria_relevante>",
+    ].join("\n");
   }
 }
 

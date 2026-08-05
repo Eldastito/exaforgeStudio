@@ -146,17 +146,31 @@ export class FalaTuService {
   /**
    * Chamada de IA isolada num método estático próprio pra ser mockável em
    * teste sem chave OpenAI (mesmo padrão de TaskAudioService.extractTaskFromText).
+   *
+   * F5.2 — se `opts.systemPreamble` está setado (RAG ligou e bateu memória
+   * relevante), o preamble é prepend no `EXTRACTION_SYSTEM` como bloco
+   * `<memoria_relevante>`. O prompt final vira "memória + regras de
+   * extração" — a LLM lê a memória como contexto ANTES de decidir intent,
+   * mas as regras rígidas do EXTRACTION_SYSTEM (não invente data/hora/etc)
+   * seguem valendo. Vale pros dois caminhos (text/audio + imagem).
    */
-  static async interpret(input: FalaTuCaptureInput): Promise<FalaTuExtraction> {
+  static async interpret(
+    input: FalaTuCaptureInput,
+    opts: { systemPreamble?: string } = {},
+  ): Promise<FalaTuExtraction> {
     const llm = await import("./llm.js");
     if (!llm.isAIConfigured()) throw new Error("IA não configurada (OPENAI_API_KEY ausente).");
+
+    const system = opts.systemPreamble
+      ? `${opts.systemPreamble}\n\n${EXTRACTION_SYSTEM}`
+      : EXTRACTION_SYSTEM;
 
     let raw = "";
     if (input.image?.data) {
       raw = await llm.extractStructuredFromImage(
         input.image.data,
         input.image.mimeType || "image/jpeg",
-        EXTRACTION_SYSTEM,
+        system,
         input.text?.trim() || "Extraia os dados pedidos desta imagem e devolva SOMENTE o JSON."
       );
     } else {
@@ -169,7 +183,7 @@ export class FalaTuService {
         text = text ? `${text}\n${transcript}` : transcript;
       }
       if (!text) throw new Error("Entrada vazia.");
-      raw = await llm.chat(text, { json: true, temperature: 0.2, system: EXTRACTION_SYSTEM });
+      raw = await llm.chat(text, { json: true, temperature: 0.2, system });
     }
 
     let parsed: any = {};
@@ -198,7 +212,24 @@ export class FalaTuService {
     // gastou vs. outros módulos. É o backfill best-effort do primeiro módulo.
     const { setUsageContext } = await import("./usageContext.js");
     setUsageContext({ orgId, userId, module: "falatu" });
-    const extraction = await FalaTuService.interpret(input);
+    // ADR-154 F5.2 — RAG: se a org ligou `falatu_rag_enabled`, faz busca
+    // top-K por similaridade cosseno na memória confirmada (F5.1) usando o
+    // texto de entrada como query, e monta um bloco `<memoria_relevante>`
+    // pra prepend no system do llm.chat DENTRO de interpret(). O custo do
+    // embedding da query é cobrado da org (setUsageContext já rodou acima).
+    // Sem texto (áudio ou imagem sem legenda), pula — F5.3 pode plugar RAG
+    // sobre transcrito. Best-effort: erro no RAG nunca derruba a captura.
+    let systemPreamble = "";
+    try {
+      const queryText = input.text?.trim() || "";
+      if (queryText) {
+        const { FalaTuMemoryEmbeddingsService } = await import("./FalaTuMemoryEmbeddingsService.js");
+        systemPreamble = await FalaTuMemoryEmbeddingsService.buildRelevantMemoryBlock(orgId, userId, queryText, 5);
+      }
+    } catch (e) {
+      console.error("[FalaTu] RAG preamble falhou (best-effort — segue sem memória):", e);
+    }
+    const extraction = await FalaTuService.interpret(input, systemPreamble ? { systemPreamble } : {});
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;
     const mentions = FalaTuService.analyzeMentions(orgId, userId, extraction);
@@ -219,7 +250,7 @@ export class FalaTuService {
       db.prepare(`INSERT INTO ai_interactions_log (id, organization_id, agent_used, input_prompt, output_response, confidence) VALUES (?, ?, 'falatu', ?, ?, ?)`)
         .run(randomUUID(), orgId, (input.text?.trim() || (mediaType ? `[${mediaType}]` : "")).slice(0, 500), extraction.summary || extraction.intent, extraction.confidence);
     } catch { /* noop */ }
-    logAuthEvent(orgId, userId, null, "FALATU_CAPTURE", { inboxItemId: id, intent: extraction.intent, mediaType, confidence: extraction.confidence });
+    logAuthEvent(orgId, userId, null, "FALATU_CAPTURE", { inboxItemId: id, intent: extraction.intent, mediaType, confidence: extraction.confidence, ragInjected: !!systemPreamble });
     return FalaTuService.getInboxItem(orgId, userId, id);
   }
 

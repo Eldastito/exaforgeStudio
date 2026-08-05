@@ -109,7 +109,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [!] `moda_loja_unica_v1`. **Decisão #4.** Fatia 3.2.
 - [!] `moda_rede_lojas_v1`. **Decisão #4.** Fatia 3.2.
-- [!] `clinica_multiespecialidades_v1`. **Decisão #4 + #5.** Fatia 3.2 + 2.2 (bundle).
+- [~] `clinica_multiespecialidades_v1`. F2.2 entregou o **bundle** (PLAN_BUNDLES.growth_clinica). Falta a **estrutura Blueprint** (F3.2) que amarra vertical `saude` → bundle default.
 - [!] `chaveiro_autonomo_v1`. **Decisão #4.** Fatia 3.2.
 - [!] `peixaria_balcao_peso_v1`. **Decisão #4.** Fatia 3.2.
 
@@ -266,7 +266,7 @@ Recomendação: [ ] `GET /billing/recommendation`, [ ] `POST .../dismiss`, [ ] `
 - [!] Corrigir perda do Comigo (**Decisão #1** + Fatia 2.1).
 - [ ] EntitlementService (Fase 1).
 - [ ] Impedir exposição de módulos indevidos (Fatia 3.2 + 4.1).
-- [ ] Definir produto Clínica (**Decisão #5** + Fatia 2.2 + 3.2).
+- [~] Definir produto Clínica — F2.2 fechou o **bundle comercial** (Growth+Clínica R$3500). F3.2 fecha a estrutura Blueprint amarrando vertical `saude` → bundle default.
 - [ ] Upgrade financeiro Asaas (Fase 6).
 - [ ] Checkout (Fase 5).
 - [ ] Aceite (Fatia 5.1 — **Decisão #2**).

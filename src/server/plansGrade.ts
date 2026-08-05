@@ -61,6 +61,69 @@ export const LEGACY_PLAN_MAP: Record<string, string> = {
 };
 
 /**
+ * ADR-153 F2.2 — Bundles verticais (produtos "prontos" pra nicho).
+ *
+ * Um bundle é uma OFERTA COMERCIAL pré-composta: `plano base + add-ons +
+ * blueprint hint`. Serve pra vender pra nichos onde o plano genérico não
+ * inclui o módulo central da vertical (ex.: Clínica só existe em Enterprise
+ * hoje, mas o público-alvo de Clínica não paga Enterprise — bundle Growth +
+ * Clínica resolve o mismatch comercial identificado no PRD §10.3).
+ *
+ * Decisão #5 aprovada (Opção A): bundle `Growth + Clínica`. Add-on Clínica
+ * hoje mora em ADDON_CATALOG.scale (R$3000); no bundle o preço agregado é
+ * R$3500 (bundle discount ~27% vs comprar avulso: R$1797 growth + R$3000
+ * clinica add-on ao Scale = R$4797). Preço final ajustável pelo Master Admin
+ * via plans table quando F5 ligar o checkout real.
+ *
+ * F5.2 (SubscriptionOrchestratorService) vai orquestrar a compra:
+ *   1. Cria assinatura Asaas no `basePlan` (com valor do bundle).
+ *   2. Grava `org_addons` pra cada addon do bundle.
+ *   3. Chama ModuleService.enableModule pra cada addon (idempotente).
+ *   4. Grava origem em `subscription_change_requests` com bundle_key.
+ *
+ * F1.3+ (frontend): a aba "Plano e Expansões" (placeholder da fatia F1.3)
+ * vai listar `bundles` do GET /api/plans junto dos `plans` genéricos.
+ *
+ * `verticalHints` guia o onboarding: quando dono escolhe vertical `saude`,
+ * o wizard sugere o bundle recomendado (F3.2 + F8 rollout).
+ */
+export type PlanBundle = {
+  key: string;
+  name: string;
+  description: string;
+  basePlan: string;             // id em PLAN_GRADE
+  addons: string[];             // module keys (mesmo namespace do AddonService)
+  priceMonthly: number;         // R$ mensal (bundle discount aplicado)
+  priceAnnualMonth: number | null;
+  verticalHints: string[];      // verticais recomendadas (usa no onboarding)
+  bundleDiscount: {             // pra UX explicar o desconto no checkout
+    avulsoTotal: number;        // basePlan.price + soma dos addons avulsos
+    savingsMonthly: number;     // avulsoTotal - priceMonthly
+    savingsPercent: number;     // arredondado
+  };
+};
+
+export const PLAN_BUNDLES: PlanBundle[] = [
+  {
+    key: "growth_clinica",
+    name: "Growth + Clínica",
+    description:
+      "Bundle recomendado para clínicas multiespecialidade — plano Growth (cadências, assinaturas, Diretor IA, RIE) + módulo Clínica (agenda clínica, prontuário, portal do paciente) incluído.",
+    basePlan: "growth",
+    addons: ["clinica"],
+    priceMonthly: 3500,
+    priceAnnualMonth: 2997,
+    verticalHints: ["saude"],
+    bundleDiscount: {
+      // Growth (1797) + addon Clinica normal (Scale-tier R$3000) = 4797 avulso
+      avulsoTotal: 4797,
+      savingsMonthly: 1297,       // 4797 - 3500
+      savingsPercent: 27,         // arred.
+    },
+  },
+];
+
+/**
  * Aplica a grade nova de forma IDEMPOTENTE:
  *  1. Garante os 5 tiers (INSERT OR IGNORE — não sobrescreve edição do admin).
  *  2. Migra as orgs da grade antiga para a nova.

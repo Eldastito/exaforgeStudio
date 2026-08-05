@@ -155,6 +155,35 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-08-04 (Fatia 2.2 — Bundle Clínica no catálogo)
+
+- **Fase:** 2 (correção da grade — última fatia). Fecha a Decisão #5 aprovada.
+- **Correção comercial resolvida:** PRD §10.3 identificou o mismatch — módulo Clínica só existe no Enterprise, mas o público-alvo (clínicas multiespecialidade médias) não paga Enterprise. Bundle `growth_clinica` (Growth base + addon Clínica) resolve pra vertical `saude` com desconto de 27% vs comprar avulso.
+- **Itens executados:** 3 (adição de PLAN_BUNDLES + rota + teste). Aditivo puro.
+- **Arquivos alterados:**
+  - `src/server/plansGrade.ts` — novo tipo `PlanBundle` + constante `PLAN_BUNDLES` com bundle `growth_clinica` (basePlan=growth, addons=[clinica], priceMonthly=3500, priceAnnualMonth=2997, verticalHints=[saude], bundleDiscount={avulsoTotal:4797, savingsMonthly:1297, savingsPercent:27}).
+  - `src/server/routes/plans.ts` — nova rota `GET /api/plans/bundles` devolvendo `{bundles: PLAN_BUNDLES}`. Não altera `GET /api/plans` (que continua devolvendo array pra backward compat com LoginView, AdminMasterView, SettingsView).
+  - `package.json` — script `test:plan-bundles`.
+- **Arquivos criados:**
+  - `scripts/test-plan-bundles.ts` — **28/28 checks** cobrindo: PLAN_BUNDLES exportado + shape (11 campos obrigatórios), bundle growth_clinica presente com dados corretos, basePlan válido em PLAN_GRADE, addons válidos em ADDON_CATALOG, verticalHints não-vazio, bundleDiscount consistente (avulsoTotal - priceMonthly = savingsMonthly), priceMonthly < avulsoTotal (é desconto real), rota `/bundles` devolve `{bundles: [...]}`, PLAN_GRADE continua funcional (backward compat), sem duplicatas em key, plano anual ≤ mensal.
+- **Testes executados:**
+  - `npm run test:plan-bundles` → **28/28 OK**.
+  - Regressão zero: `test:upgrade-matrix` (93/93), `test:comigo-preserved-on-upgrade` (16/16), `test:plans-migration` (24/24), `test:addons` (13/13).
+  - `npx tsc --noEmit` → limpo.
+- **Decisões micro:**
+  - (i) **Rota separada `/api/plans/bundles`** em vez de expandir `/api/plans` — o response de `/api/plans` é ARRAY (`Plan[]`) e 3 consumidores (LoginView, AdminMasterView, SettingsView) usam `Array.isArray(d) ? d : []`. Mudar pra objeto quebraria silenciosamente (retornariam array vazio, sem planos na UI). Rota nova é aditivo puro, zero risco.
+  - (ii) **Bundle `growth_clinica` com preço R$3500** — hoje avulso seria: Growth R$1797 + addon Clínica R$3000 (escala) = R$4797. Bundle preço R$3500 = 27% de desconto. Preço final é ajustável pelo Master Admin via `plans` table quando F5 ligar o checkout real. Fonte: Decisão #5 aprovada + regra ADR-091 §112 (anti-canibalização — bundle competitivo vs comprar avulso).
+  - (iii) **`bundleDiscount` embutido no objeto** pra UX no checkout — dono vê "R$3500/mês (economia de R$1297)" sem o frontend precisar recalcular. Testado que os 3 valores são consistentes (avulsoTotal - priceMonthly = savingsMonthly).
+  - (iv) **`verticalHints` guia o onboarding** — `growth_clinica.verticalHints = ['saude']`. Quando F3.2 (Blueprints) + F8 (rollout) chegarem, o wizard vai recomendar bundle quando dono escolher vertical saude. Fatia atual só expõe o dado; consumidor vem depois.
+  - (v) **Bundle NÃO cria plano fantasma no DB** — não roda `INSERT INTO plans`. PLAN_BUNDLES é catálogo comercial em memória (exportado). Quando F5.2 (SubscriptionOrchestratorService) orquestrar a compra, vai criar subscription Asaas no `basePlan` + gravar cada addon em `org_addons`. Assim o gating (`ModuleService.isEnabled`, `PlanService.modulesForPlan`) continua funcionando via mecanismo atual (plano + addons ativos = teto).
+  - (vi) **Nada foi feito no frontend** — a aba "Plano e Expansões" (placeholder F1.3) vai listar bundles quando F4.2 preencher. F5.3 wira checkout. F2.2 só disponibiliza a fonte.
+- **Cross-service:** ADITIVO PURO. Nenhum service pré-existente modificado. `PlanService.listPlans` intacto. `AddonService` intacto. Só a `plansGrade.ts` ganha uma constante + a rota `/api/plans/bundles` ganha existência.
+- **Resultado:** Fase 2 (correção da grade) fechada. Bug crítico do Comigo (F2.1 / Decisão #1) + gap comercial da Clínica (F2.2 / Decisão #5) resolvidos. Ambos são bloqueadores do PRD §33 pra vendas em escala.
+- **Pendências criadas:** nenhuma nova. Bundle Clínica pronto pra ser consumido; F3.2 vai amarrar ao blueprint `clinica_multiespecialidades_v1` como `defaultBundle`; F5.3 vai renderizar no checkout.
+- **Próximo passo:** decidir entre (a) **F1.4 — estado `hidden` real** (substitui HIDDEN_BY_VERTICAL estático pelo blueprint.hiddenModules — depende parcialmente de F3.1 pra ter o Blueprint real, mas pode adiantar com mock); (b) **F3.1 — fundação Blueprints** (novo `VerticalBlueprintService` + tabelas + rotas admin). Recomendo **F3.1** — destrava toda Fase 3 (5 blueprints iniciais), toda Fase 4 (UI Plano+Expansões), e simplifica F1.4 pra ser trivial (hoje é workaround estático).
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

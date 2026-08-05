@@ -5,6 +5,7 @@ import { AsaasService } from "../AsaasService.js";
 import { ConsumptionService } from "../ConsumptionService.js";
 import { AddonService } from "../AddonService.js";
 import { ModuleService } from "../ModuleService.js";
+import { PLAN_BUNDLES } from "../plansGrade.js";
 import db from "../db.js";
 
 const addonLabel = (key: string) => (ModuleService as any).MODULE_META?.[key]?.label || key;
@@ -13,9 +14,23 @@ const addonDesc = (key: string) => (ModuleService as any).MODULE_META?.[key]?.de
 const router = Router();
 
 // GET /api/plans — lista os planos disponíveis (público para a UI de escolha).
+// Formato ARRAY mantido pra backward compat (LoginView, AdminMasterView e
+// SettingsView leem via `Array.isArray(d) ? d : []`). Bundles ficam em rota
+// dedicada abaixo (ADR-153 F2.2).
 router.get("/", (req: AuthRequest, res): any => {
   try {
     res.json(PlanService.listPlans());
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/plans/bundles — catálogo de bundles verticais (ADR-153 F2.2).
+// Um bundle = `plano base + add-ons + blueprint hint` pré-composto, vendido
+// pra nichos onde o plano genérico não inclui o módulo central da vertical
+// (ex.: Clínica é add-on Scale mas o público-alvo compra Growth). F5.3
+// consome pra listar bundles no checkout ao lado dos planos genéricos.
+router.get("/bundles", (_req: AuthRequest, res): any => {
+  try {
+    res.json({ bundles: PLAN_BUNDLES });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

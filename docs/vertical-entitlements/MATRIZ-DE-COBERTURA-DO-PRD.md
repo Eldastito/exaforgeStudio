@@ -260,7 +260,7 @@ Recomendação: [x] `GET /api/billing/recommendations`, [x] `POST .../:id/dismis
 - [ ] Fase 4 (Interface) — Fatias 4.1–4.3 (**Decisão #9**).
 - [ ] Fase 5 (Checkout e assinatura) — Fatias 5.1–5.3 (**Decisão #2, #3**).
 - [ ] Fase 6 (Upgrade) — Fatias 6.1–6.3.
-- [x] Fase 7 (Recomendação IA) — Fatias 7.1 (motor) + 7.2 (score/gap) + 7.3 (cooldown LGPD §14 — Decisão #7 resolvida) + 7.4 (UI card) + 7.5 (chat cita — framing G-153-3 embutido) FECHADAS. Decisão #8 (chat framing) resolvida pelo padrão adotado (contexto passivo, sem tool call).
+- [x] Fase 7 (Recomendação IA) — Fatias 7.1 (motor) + 7.2 (score/gap) + 7.3 (cooldown LGPD §14 — Decisão #7 resolvida) + 7.4 (UI card) + 7.5 (chat cita — framing G-153-3 embutido) + 7.6 (funil admin cross-tenant `AdminUpgradeRecommendationsPanel`) FECHADAS. Decisão #8 (chat framing) resolvida pelo padrão adotado (contexto passivo, sem tool call). Admin agora pode processar upgrade manual dos "accepted awaiting checkout" até Fase 5 automatizar via Asaas.
 - [ ] Fase 8 (Rollout) — Fatias 8.1–8.4.
 
 ## §33 — Bloqueadores pra vender em escala

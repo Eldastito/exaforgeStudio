@@ -10,6 +10,7 @@ import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { BlueprintSeeder } from "../BlueprintSeeder.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
+import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -655,6 +656,35 @@ router.get("/ai-usage", (req: AuthRequest, res): any => {
 router.get("/ai-usage/:orgId", (req: AuthRequest, res): any => {
   try {
     res.json(AiUsageDashboardService.byOrg(req.params.orgId, Number(req.query.days)));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ADR-154 F1.3 — ajuste de cota mensal de custo (centavos) pela org.
+// body: { monthlyLimitCents: number|null }  (null desativa o teto de custo).
+// Também roda AiQuotaSignalService.run() pra dar feedback imediato — se a org
+// já estourou o novo teto, o admin já sai vendo o sinal recém-publicado; se
+// aumentou o teto além do consumo atual, o sinal antigo é resolved.
+router.post("/organizations/:id/ai-quota", (req: AuthRequest, res): any => {
+  const orgId = req.params.id;
+  const raw = req.body?.monthlyLimitCents;
+  let value: number | null;
+  if (raw === null || raw === undefined || raw === "") {
+    value = null;
+  } else {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) {
+      return res.status(400).json({ error: "monthlyLimitCents deve ser INTEGER ≥ 0 ou null" });
+    }
+    value = n;
+  }
+  try {
+    const changes = db.prepare(
+      `UPDATE organization_settings SET ai_monthly_limit_cents = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?`
+    ).run(value, orgId).changes;
+    if (changes === 0) return res.status(404).json({ error: "Org não encontrada" });
+    logAuthEvent(orgId, req.user?.userId, orgId, "ADMIN_AI_QUOTA_UPDATE", { newLimitCents: value });
+    const outcome = AiQuotaSignalService.run(orgId);
+    res.json({ ok: true, monthlyLimitCents: value, quota: outcome });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

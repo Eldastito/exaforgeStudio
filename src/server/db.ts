@@ -7620,6 +7620,19 @@ const initDb = () => {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_org_module_date ON ai_usage_log (organization_id, module, created_at)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_org_user_date   ON ai_usage_log (organization_id, user_id, created_at)`);
   } catch(e){ console.error('[DB] Falha ao estender ai_usage_log (ADR-154 F1.1)', e); }
+
+  // ADR-154 Fatia 1.3 — cota mensal em CENTAVOS (INTEGER) por org, ajustável
+  // pelo master admin (POST /api/admin/organizations/:id/ai-quota). É uma
+  // dimensão SEPARADA do `ai_monthly_limit` do plano (que é count-based):
+  // aqui é limite de CUSTO (R$/mês). NULL = sem teto de custo — o gate real
+  // continua sendo PlanService.aiAllowed (por count). Esta coluna alimenta
+  // o AiQuotaSignalService (80% attention / 100% critical).
+  try {
+    const cols = db.prepare(`PRAGMA table_info(organization_settings)`).all() as any[];
+    if (!cols.some((c: any) => c.name === "ai_monthly_limit_cents")) {
+      db.exec(`ALTER TABLE organization_settings ADD COLUMN ai_monthly_limit_cents INTEGER`);
+    }
+  } catch(e){ console.error('[DB] Falha ao adicionar ai_monthly_limit_cents (ADR-154 F1.3)', e); }
 };
 
 initDb();

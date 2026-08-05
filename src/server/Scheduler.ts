@@ -27,6 +27,7 @@ import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { PlanFitSignalPublisher } from "./PlanFitSignalPublisher.js";
+import { AiQuotaSignalService } from "./AiQuotaSignalService.js";
 import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 import { FalaTuService } from "./FalaTuService.js";
 import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
@@ -686,6 +687,7 @@ export class Scheduler {
     // `business_signals` domain='plan' quando org está ≥80% de qualquer limite.
     // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
     try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
+    try { this.aiQuotaPass(); } catch (e: any) { console.error('[Scheduler] ai-quota sinais F1.3 falhou', e?.message); }
     // ADR-153 F7.7 — expira cooldowns vencidos (dismissed → expired) no ledger
     // de upgrade_recommendations. Cleanup lazy até então; agora automático.
     // Depende do planFitPass ter rodado antes: se um novo sinal viu que o
@@ -708,6 +710,23 @@ export class Scheduler {
       }
     } catch (e) {
       console.error('[Scheduler] plan-fit falhou', e);
+    }
+  }
+
+  /**
+   * ADR-154 F1.3 — publica sinais de cota de IA (80% attention / 100% critical)
+   * pra orgs com `ai_monthly_limit_cents` definido. Best-effort e idempotente
+   * (dedupe_key mensal por org). Só notifica — o gate real está em
+   * PlanService.aiAllowed.
+   */
+  static aiQuotaPass() {
+    try {
+      const r = AiQuotaSignalService.runAll();
+      if (r.warnings > 0 || r.exceeded > 0 || r.resolved > 0) {
+        console.log(`[Scheduler] ai-quota: ${r.seen} orgs varridas, ${r.warnings} warning, ${r.exceeded} exceeded, ${r.resolved} resolvidos.`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] ai-quota falhou', e);
     }
   }
 

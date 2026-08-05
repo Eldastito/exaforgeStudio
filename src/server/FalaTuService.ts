@@ -343,6 +343,10 @@ export class FalaTuService {
       ? (timeRe.test(overrides.eventTime || "") ? overrides.eventTime : null)
       : (entities?.eventTime || null);
 
+    // ADR-154 F5.1: coleta IDs de entidades tocadas nesta confirmação pra
+    // enfileirar embeddings DEPOIS da transação — nunca dentro (evita atrasar
+    // commit por chamada de rede + queremos o embedding SÓ do que persistiu).
+    const touchedEntityIds = new Set<string>();
     const result = db.transaction(() => {
       let confirmedKind: string | null = null;
       let refId: string | null = null;
@@ -391,17 +395,29 @@ export class FalaTuService {
         for (const m of memory.mentions) {
           if (m.resolvedEntityId) {
             touch.run(item.summary || null, m.resolvedEntityId, orgId, userId);
+            touchedEntityIds.add(m.resolvedEntityId);
           } else if (m.status === "new" || m.resolvedNew) {
-            upsert.run(randomUUID(), orgId, userId, m.type === "PROJECT" ? "PROJECT" : "PERSON", m.mention, m.mention.trim().toLowerCase(), item.summary || null);
+            const type = m.type === "PROJECT" ? "PROJECT" : "PERSON";
+            const nameNorm = m.mention.trim().toLowerCase();
+            upsert.run(randomUUID(), orgId, userId, type, m.mention, nameNorm, item.summary || null);
+            // Após upsert, resolve o id (novo OU existente atualizado — ON CONFLICT).
+            const row = db.prepare(`SELECT id FROM falatu_entities WHERE organization_id = ? AND user_id = ? AND entity_type = ? AND name_norm = ?`).get(orgId, userId, type, nameNorm) as any;
+            if (row?.id) touchedEntityIds.add(row.id);
           }
         }
       } else {
         // Itens capturados antes da Fatia 5 (sem memory_json): comportamento original.
         for (const p of (Array.isArray(entities?.people) ? entities.people : [])) {
-          upsert.run(randomUUID(), orgId, userId, "PERSON", p, p.trim().toLowerCase(), item.summary || null);
+          const nameNorm = p.trim().toLowerCase();
+          upsert.run(randomUUID(), orgId, userId, "PERSON", p, nameNorm, item.summary || null);
+          const row = db.prepare(`SELECT id FROM falatu_entities WHERE organization_id = ? AND user_id = ? AND entity_type = 'PERSON' AND name_norm = ?`).get(orgId, userId, nameNorm) as any;
+          if (row?.id) touchedEntityIds.add(row.id);
         }
         for (const p of (Array.isArray(entities?.projects) ? entities.projects : [])) {
-          upsert.run(randomUUID(), orgId, userId, "PROJECT", p, p.trim().toLowerCase(), item.summary || null);
+          const nameNorm = p.trim().toLowerCase();
+          upsert.run(randomUUID(), orgId, userId, "PROJECT", p, nameNorm, item.summary || null);
+          const row = db.prepare(`SELECT id FROM falatu_entities WHERE organization_id = ? AND user_id = ? AND entity_type = 'PROJECT' AND name_norm = ?`).get(orgId, userId, nameNorm) as any;
+          if (row?.id) touchedEntityIds.add(row.id);
         }
       }
 
@@ -411,6 +427,24 @@ export class FalaTuService {
     })();
 
     logAuthEvent(orgId, userId, null, "FALATU_CONFIRM", { inboxItemId: item.id, kind: result.confirmedKind, refId: result.refId });
+
+    // ADR-154 F5.1: enfileira embeddings da memória (assíncrono, opt-in via
+    // falatu_rag_enabled). Best-effort — SoloEmbeddingsService swallows erros
+    // e o service skipa silenciosamente se a org não ligou RAG. Chamada DEPOIS
+    // do logAuth pra não atrasar o caminho crítico do "Fala → Faz → Confere".
+    // Import dinâmico quebra ciclo potencial (Embeddings importaria FalaTu via
+    // testes futuros) e mantém convenção nº 11 do CLAUDE.md.
+    void import("./FalaTuMemoryEmbeddingsService.js").then((m) => {
+      try {
+        m.FalaTuMemoryEmbeddingsService.enqueueForInboxItem(orgId, userId, item.id);
+        for (const eid of touchedEntityIds) {
+          m.FalaTuMemoryEmbeddingsService.enqueueForEntity(orgId, userId, eid);
+        }
+      } catch (e) {
+        console.error("[FalaTu] Falha ao enfileirar embeddings (best-effort):", e);
+      }
+    }).catch(() => { /* import falhou — não impacta confirm */ });
+
     return { success: true, kind: result.confirmedKind, refId: result.refId, item: FalaTuService.getInboxItem(orgId, userId, inboxItemId) };
   }
 

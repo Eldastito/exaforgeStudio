@@ -7671,6 +7671,53 @@ const initDb = () => {
       db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_reply_mode TEXT NOT NULL DEFAULT 'always'`);
     }
   } catch(e){ console.error('[DB] Falha ao adicionar falatu_reply_mode (ADR-154 F4.2)', e); }
+
+  // ADR-154 Fatia 5.1 — flag opt-in do RAG do FalaTu. Default 0 (off) porque:
+  // (a) gera custo de embedding no ai_usage_log, (b) a Fase 5.2 vai injetar
+  // <memoria_relevante> no prompt e a org deve ligar conscientemente, (c) a
+  // captura hoje já funciona sem RAG. Ligar = a partir do próximo confirm(),
+  // entidades/notas materializadas geram embeddings assíncronos (JobQueue).
+  try {
+    const cols = db.prepare(`PRAGMA table_info(organization_settings)`).all() as any[];
+    if (!cols.some((c: any) => c.name === "falatu_rag_enabled")) {
+      db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_rag_enabled INTEGER NOT NULL DEFAULT 0`);
+    }
+  } catch(e){ console.error('[DB] Falha ao adicionar falatu_rag_enabled (ADR-154 F5.1)', e); }
+
+  // ADR-154 Fatia 5.1 — tabela de embeddings da memória do FalaTu (RAG).
+  // Aditiva; alimentada assíncronamente no confirm(). RN-151 preservado:
+  // só grava sobre conteúdo já CONFIRMADO (pending nunca gera embedding —
+  // o gate é `falatu_inbox_items.status='confirmed'` conferido pelo service).
+  // Isolamento multi-tenant OBRIGATÓRIO em toda query: filtro por
+  // (organization_id, user_id) — guardrail RN-154 §7. LGPD Art.18: se a
+  // entidade/nota é apagada, o embedding correspondente também vai (a Fase
+  // 5.3 vai plugar isso; F5.1 se limita a criar+gerar).
+  //
+  // Schema conforme ADR (linhas 114-120):
+  //   embedding BLOB — vetor 1536-dim serializado como Float32Array bytes
+  //     (nunca como JSON de doubles — 6x mais espaço + drift de arredondamento).
+  //   model TEXT — 'text-embedding-3-small' default (mesma dim que a F5.2 espera).
+  //   source_type — 'entity' | 'note': o que o embedding representa (entidade
+  //     mem+contexto, ou item de inbox confirmado como nota/tarefa/etc).
+  //   source_id — id da linha em falatu_entities OU falatu_inbox_items.
+  //   content_snippet — texto usado pra gerar o embedding (pra debugging e
+  //     futuros re-embeddings quando trocarmos de modelo).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS falatu_memory_embeddings (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      content_snippet TEXT NOT NULL,
+      embedding BLOB NOT NULL,
+      model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (organization_id, user_id, source_type, source_id, model)
+    );
+    CREATE INDEX IF NOT EXISTS idx_falatu_memory_embeddings_user
+      ON falatu_memory_embeddings(organization_id, user_id, source_type);
+  `);
 };
 
 initDb();

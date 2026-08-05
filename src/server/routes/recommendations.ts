@@ -31,6 +31,17 @@ router.get("/", (req: AuthRequest, res): any => {
   res.json({ recommendations: UpgradeRecommendationService.list(orgId, { status, includeExpired, limit }) });
 });
 
+// ADR-153 F4.4 — série temporal aceitas × dispensadas por bucket diário. Consumido
+// pelo RecommendationTrendChart na aba "Plano e Expansões". Dias clampado 7..180
+// no service (default 30).
+// GET /api/billing/recommendations/history-chart?days=30
+router.get("/history-chart", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = req.query?.days ? Number(req.query.days) : undefined;
+  res.json(UpgradeRecommendationService.historyByBucket(orgId, { days }));
+});
+
 // GET /api/billing/recommendations/:id
 router.get("/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

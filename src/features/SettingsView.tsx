@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download, History, Clock } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download, History, Clock, BarChart3 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
@@ -646,6 +647,116 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit?:
   );
 }
 
+// ADR-153 F4.4 — tooltip do gráfico de tendência (aceitas × dispensadas por dia).
+// Mesmo padrão visual do TrendChart de rie/components (bg escuro, borda sutil).
+const TrendTooltip: React.FC<any> = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex items-center gap-2 text-[12px]">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color }} />
+          <span className="text-zinc-300">{p.name}:</span>
+          <span className="font-semibold text-white tabular-nums">{p.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ADR-153 F4.4 — gráfico temporal de decisões do dono (aceitas × dispensadas).
+// Consome /api/billing/recommendations/history-chart?days=N (F4.4 service).
+// Motivação: dono já vê o card pending (F7.4) + histórico linha-a-linha (F4.3);
+// falta a TENDÊNCIA — "aceitei mais em agosto que em julho" = insight sazonal
+// pra reforçar/rever quais expansões o motor sugere.
+// Empty state: se nenhum dia da janela tem decisão, mostra frase amigável em
+// vez de bar chart vazio (visualmente feio + confuso).
+const RecommendationTrendChart: React.FC<{ days?: number }> = ({ days = 30 }) => {
+  const [data, setData] = useState<{
+    series: Array<{ date: string; accepted: number; dismissed: number }>;
+    totalAccepted: number;
+    totalDismissed: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/billing/recommendations/history-chart?days=${days}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!alive) return;
+        setData({
+          series: Array.isArray(d?.series) ? d.series : [],
+          totalAccepted: Number(d?.totalAccepted || 0),
+          totalDismissed: Number(d?.totalDismissed || 0),
+        });
+      })
+      .catch(() => { if (alive) setData({ series: [], totalAccepted: 0, totalDismissed: 0 }); });
+    return () => { alive = false; };
+  }, [days]);
+
+  if (data === null) {
+    return (
+      <div className="h-40 rounded-lg bg-zinc-900/40 border border-zinc-800 animate-pulse" />
+    );
+  }
+
+  const hasAnyDecision = data.totalAccepted + data.totalDismissed > 0;
+  if (!hasAnyDecision) {
+    return (
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-center">
+        <p className="text-sm text-zinc-500">Ainda não há decisões nos últimos {days} dias.</p>
+        <p className="text-[11px] text-zinc-600 mt-1">
+          Aceites e dispensas aparecem aqui conforme você decide sobre as recomendações.
+        </p>
+      </div>
+    );
+  }
+
+  // Formata "YYYY-MM-DD" pra "MM-DD" no eixo — mais legível em 30 barras.
+  const chartRows = data.series.map(s => ({
+    name: s.date.slice(5), // MM-DD
+    aceitas: s.accepted,
+    dispensadas: s.dismissed,
+  }));
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-2 text-[11px] text-zinc-400">
+        <span>
+          <b className="text-emerald-400 tabular-nums">{data.totalAccepted}</b> aceitas
+        </span>
+        <span>
+          <b className="text-zinc-300 tabular-nums">{data.totalDismissed}</b> dispensadas
+        </span>
+        <span className="text-zinc-600">nos últimos {days} dias</span>
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <BarChart data={chartRows} barGap={4} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+          <XAxis
+            dataKey="name"
+            tick={{ fill: '#71717a', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fill: '#71717a', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            allowDecimals={false}
+          />
+          <Tooltip cursor={{ fill: '#ffffff08' }} content={<TrendTooltip />} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} iconType="circle" />
+          <Bar dataKey="aceitas" name="Aceitas" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={20} />
+          <Bar dataKey="dispensadas" name="Dispensadas" fill="#a1a1aa" radius={[3, 3, 0, 0]} maxBarSize={20} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
 // ADR-153 F4.3 — Linha individual do histórico de recomendações. Consome
 // `upgrade_recommendations` via /api/billing/recommendations (F7.3). Read-only
 // na aba — não expõe accept aqui (dono aceita via card pending F7.4 acima).
@@ -1168,6 +1279,19 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
               )}
               <p className="text-[11px] text-zinc-500 italic mt-2">
                 Auditável — cada rejeição/aceite fica no ledger com data e cooldown. Nenhuma IA reescreve isso.
+              </p>
+            </div>
+          )}
+
+          {/* F4.4 — Gráfico temporal de decisões (aceitas × dispensadas). */}
+          {recHistory.length > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" /> Tendência de decisões
+              </p>
+              <RecommendationTrendChart days={30} />
+              <p className="text-[11px] text-zinc-500 italic mt-2">
+                Série diária persistida — o motor não reescreve o passado; só publica novas recomendações quando cabe (score ≥ 60 + fora do cooldown).
               </p>
             </div>
           )}

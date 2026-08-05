@@ -383,7 +383,8 @@
     "test:blueprint-seeder": "tsx scripts/test-blueprint-seeder.ts",
     "test:entitlement-hidden-via-blueprint": "tsx scripts/test-entitlement-hidden-via-blueprint.ts",
     "test:plan-fit-detector": "tsx scripts/test-plan-fit-detector.ts",
-    "test:upgrade-recommendations": "tsx scripts/test-upgrade-recommendations.ts"
+    "test:upgrade-recommendations": "tsx scripts/test-upgrade-recommendations.ts",
+    "test:executive-plan-recommendations-block": "tsx scripts/test-executive-plan-recommendations-block.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

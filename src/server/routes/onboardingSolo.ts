@@ -5,6 +5,7 @@ import db from "../db.js";
 import { logAuthEvent } from "../auditLog.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { FalaTuSoloWhatsAppService } from "../FalaTuSoloWhatsAppService.js";
+import { EntitlementService } from "../EntitlementService.js";
 
 // Inline pra não criar módulo separado: mesma política do POST /register.
 function passwordPolicyError(pw: string): string | null {
@@ -56,8 +57,30 @@ router.post("/", async (req: Request, res: Response): Promise<any> => {
   }
 
   try {
-    const existingUser = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
-    if (existingUser) return res.status(400).json({ error: "Email already in use" });
+    // F2.1c: email duplicado vira 409 estruturado (B.1 — 1 email = 1 conta).
+    // Contexto pro frontend decidir a próxima ação:
+    //   - `falatuInPlan=true`  → usuário JÁ pode usar FalaTu, faz login normal.
+    //   - `falatuInPlan=false` → sugere upgrade do plano da conta existente.
+    // Nunca vazamos existência de conta pra terceiros (o próprio usuário
+    // recebe essa resposta autenticando pelo campo `email` que ele digitou —
+    // não é enumeração cruzada).
+    const existingUser = db.prepare(
+      "SELECT id, organization_id FROM users WHERE email = ?",
+    ).get(email) as { id: string; organization_id: string } | undefined;
+    if (existingUser) {
+      let falatuInPlan = false;
+      try {
+        const decision = EntitlementService.check(existingUser.organization_id, { userId: existingUser.id, email } as any, "falatu", "view");
+        falatuInPlan = !!decision && decision.state === "active";
+      } catch { /* best-effort — na dúvida assume false */ }
+      return res.status(409).json({
+        error: "email_in_use",
+        falatuInPlan,
+        message: falatuInPlan
+          ? "Este email já tem conta. Faça login normal — o FalaTu está no seu plano."
+          : "Este email já tem conta ZappFlow. Adicione o FalaTu ao seu plano atual em vez de criar uma conta separada.",
+      });
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
     const orgId = "org_" + uuidv4().substring(0, 8);
@@ -65,9 +88,13 @@ router.post("/", async (req: Request, res: Response): Promise<any> => {
 
     // Cria a org com o vertical do blueprint (herda o base_vertical) e status
     // active — solo não passa por onboarding wizard (nada pra configurar).
+    // F2.1c: default_landing_view='falatu' pra que /entitlements/me devolva
+    // isso e o useStore aterrissar em FalaTu por padrão (não em 'saude', que é
+    // o fallback pra suíte). Sem isso, cada refresh joga o usuário Solo pra
+    // Central de Saúde que ele nem tem acesso (blueprint solo esconde tudo).
     db.prepare(`
-      INSERT INTO organization_settings (id, organization_id, business_name, phone, vertical, status, onboarding_status, plan_id, billing_status)
-      VALUES (?, ?, ?, ?, ?, 'active', 'completed', ?, 'active')
+      INSERT INTO organization_settings (id, organization_id, business_name, phone, vertical, status, onboarding_status, plan_id, billing_status, default_landing_view)
+      VALUES (?, ?, ?, ?, ?, 'active', 'completed', ?, 'active', 'falatu')
     `).run(uuidv4(), orgId, bizName, phone || null, bp.baseVertical, bp.defaultPlanId || null);
 
     // Solo do FalaTu: liga a flag opt-in do módulo já no cadastro pra que o

@@ -7,6 +7,9 @@ import { Eye, EyeOff, Smartphone, RefreshCw, CheckCircle2 } from 'lucide-react';
 // SÓ quando o WhatsApp conecta (canal fica utilizável). Se parar em 'qr' sem
 // escanear, o usuário nunca vira "logado" no app — evita cadastro-fantasma.
 type SoloStep = 'form' | 'qr' | 'connecting';
+// F2.1c — dentro do `form`, ainda existe o toggle "cadastro vs. login" pra
+// quem já tem conta (evita loop "email in use" → tela morta).
+type SoloMode = 'register' | 'login';
 
 export function LoginView() {
   const { login } = useAuth();
@@ -42,12 +45,16 @@ export function LoginView() {
   // cadastro abandonado deixaria conta logada num app sem canal — pior UX.
   const [soloBlueprint, setSoloBlueprint] = useState('');
   const [soloStep, setSoloStep] = useState<SoloStep>('form');
+  const [soloMode, setSoloMode] = useState<SoloMode>('register');
   const [soloQr, setSoloQr] = useState('');
   const [soloToken, setSoloToken] = useState('');
   const [soloUser, setSoloUser] = useState<any>(null);
   const [soloOrgId, setSoloOrgId] = useState('');
   const [soloReprovisioning, setSoloReprovisioning] = useState(false);
   const [soloElapsed, setSoloElapsed] = useState(0);
+  // F2.1c — resposta 409 "email_in_use" traz `falatuInPlan`; usamos pra
+  // sugerir "login normal" (se tem FalaTu no plano) ou "ver planos" (se não).
+  const [soloFalatuInPlan, setSoloFalatuInPlan] = useState<boolean | null>(null);
 
   // Link de convite: ?invite=TOKEN&email=... abre o cadastro já preenchido.
   // (o app não envia e-mail, então o owner compartilha esse link manualmente)
@@ -113,7 +120,7 @@ export function LoginView() {
   // se qr vier vazio, mostra tela QR mesmo assim com botão pra gerar.
   const handleSoloRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(''); setSuccess(''); setLoading(true);
+    setError(''); setSuccess(''); setLoading(true); setSoloFalatuInPlan(null);
     try {
       const res = await fetch('/api/onboarding-solo', {
         method: 'POST',
@@ -121,7 +128,19 @@ export function LoginView() {
         body: JSON.stringify({ name, email, phone, password, blueprintKey: soloBlueprint || 'falatu_solo' }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro no cadastro');
+      if (!res.ok) {
+        // F2.1c: 409 com error='email_in_use' vem do backend com contexto
+        // (`falatuInPlan`). Guarda o flag e mostra mensagem específica —
+        // NÃO cai no throw genérico (que só mostraria "email in use" sem
+        // ação clara pro usuário).
+        if (res.status === 409 && data?.error === 'email_in_use') {
+          setSoloFalatuInPlan(!!data.falatuInPlan);
+          setError(data.message || 'Este email já tem conta.');
+          setLoading(false);
+          return;
+        }
+        throw new Error(data.error || 'Erro no cadastro');
+      }
       setSoloOrgId(data.organizationId);
 
       // Auto-login em background — token ainda NÃO vai pro context (senão o
@@ -143,6 +162,49 @@ export function LoginView() {
         setError(`WhatsApp offline: ${data.whatsapp.provisionError}. Clique em "Gerar QR" pra tentar de novo.`);
       }
       setSoloStep('qr');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // F2.1c — modo login dentro da view solo. Se o usuário já criou conta Solo
+  // antes e voltou pelo mesmo link `?solo=<key>`, ele precisa LOGAR (não
+  // recadastrar). Fluxo: POST /api/auth/login → se der certo, checamos o
+  // WhatsApp status: se já conectado, chama context.login e o App leva pra
+  // FalaTuView pelo default_landing_view; se não conectado, mostramos QR
+  // pra ele terminar o pareamento.
+  const handleSoloLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setSuccess(''); setLoading(true);
+    try {
+      const rL = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const dL = await rL.json();
+      if (!rL.ok) throw new Error(dL.error || 'Email ou senha inválidos');
+      setSoloToken(dL.token);
+      setSoloUser(dL.user);
+
+      // Consulta status do WhatsApp: se já conectado, entra direto no app;
+      // se não, cai na tela QR pra terminar o pareamento.
+      try {
+        const rS = await fetch('/api/falatu-solo/whatsapp/status', {
+          headers: { 'Authorization': `Bearer ${dL.token}` },
+        });
+        const s = rS.ok ? await rS.json() : null;
+        if (s?.connected) {
+          setSoloStep('connecting');
+          login(dL.token, dL.user);
+          return;
+        }
+      } catch { /* segue pra QR mesmo assim */ }
+
+      setSoloQr('');
+      setSoloStep('qr'); // dispara o effect de polling; usuário reautoriza QR se precisar
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -339,7 +401,7 @@ export function LoginView() {
           )}
 
           {view === 'solo' && soloStep === 'form' && (
-            <form onSubmit={handleSoloRegister} className="space-y-4">
+            <form onSubmit={soloMode === 'register' ? handleSoloRegister : handleSoloLogin} className="space-y-4">
               <div className="mb-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">
                 <div className="flex items-center gap-2 font-medium">
                   <Smartphone className="w-4 h-4" /> FalaTu — seu assistente pessoal
@@ -348,30 +410,60 @@ export function LoginView() {
                   Fale, fotografe ou digite. Ele registra pra você e responde no seu WhatsApp.
                 </p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Nome completo</label>
-                <input type="text" required value={name} onChange={e => setName(e.target.value)}
-                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  placeholder="Seu nome" />
-              </div>
+
+              {/* F2.1c — quando o backend devolveu 409 email_in_use, mostramos
+                  ação contextual em vez do erro genérico vermelho. */}
+              {soloFalatuInPlan !== null && (
+                <div className="mb-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm">
+                  <p className="text-amber-200 font-medium mb-2">Este email já tem conta ZappFlow</p>
+                  {soloFalatuInPlan ? (
+                    <>
+                      <p className="text-xs text-amber-100/80 mb-2">O FalaTu já está no seu plano. É só fazer login.</p>
+                      <button type="button" onClick={() => { setSoloMode('login'); setSoloFalatuInPlan(null); setError(''); }}
+                        className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm py-2">
+                        Fazer login →
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-amber-100/80 mb-2">Pra usar o FalaTu, adicione ao seu plano atual (não crie uma segunda conta).</p>
+                      <button type="button" onClick={() => setView('login')}
+                        className="w-full rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm py-2">
+                        Ir para meu login (upgrade lá dentro)
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {soloMode === 'register' && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-1">Nome completo</label>
+                  <input type="text" required value={name} onChange={e => setName(e.target.value)}
+                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    placeholder="Seu nome" />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Email</label>
                 <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
                   className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
                   placeholder="voce@exemplo.com" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Telefone WhatsApp (opcional)</label>
-                <input type="text" value={phone} onChange={e => setPhone(e.target.value)}
-                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  placeholder="+55 11 99999-9999" />
-              </div>
+              {soloMode === 'register' && (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-1">Telefone WhatsApp (opcional)</label>
+                  <input type="text" value={phone} onChange={e => setPhone(e.target.value)}
+                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    placeholder="+55 11 99999-9999" />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Senha</label>
                 <div className="relative">
                   <input type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
                     className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 pr-10 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    placeholder="Mínimo 8 caracteres, letras e números" />
+                    placeholder={soloMode === 'register' ? 'Mínimo 8 caracteres, letras e números' : 'Sua senha'} />
                   <button type="button" onClick={() => setShowPassword(s => !s)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                     tabIndex={-1} aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}>
@@ -380,8 +472,27 @@ export function LoginView() {
                 </div>
               </div>
               <Button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white mt-4">
-                {loading ? 'Criando conta…' : 'Continuar → conectar WhatsApp'}
+                {loading
+                  ? (soloMode === 'register' ? 'Criando conta…' : 'Entrando…')
+                  : (soloMode === 'register' ? 'Continuar → conectar WhatsApp' : 'Entrar no FalaTu')}
               </Button>
+
+              {/* F2.1c — toggle explícito entre cadastro e login DENTRO da view solo,
+                  evita loop "email in use" (usuário volta pela URL, cai no cadastro,
+                  descobre que já tem conta, tem que ir pro login normal — chato). */}
+              <div className="text-center pt-1">
+                {soloMode === 'register' ? (
+                  <button type="button" onClick={() => { setSoloMode('login'); setError(''); setSoloFalatuInPlan(null); }}
+                    className="text-xs text-emerald-400 hover:text-emerald-300 underline">
+                    Já tem conta FalaTu? Fazer login
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => { setSoloMode('register'); setError(''); setSoloFalatuInPlan(null); }}
+                    className="text-xs text-zinc-400 hover:text-zinc-300 underline">
+                    Não tem conta? Criar agora
+                  </button>
+                )}
+              </div>
             </form>
           )}
 
@@ -621,10 +732,20 @@ export function LoginView() {
                    Voltar para o login
                  </button>
              )}
-             {view === 'solo' && soloStep !== 'connecting' && (
-                 <button onClick={() => { setView('login'); setSoloStep('form'); setSoloQr(''); setSoloToken(''); setError(''); }}
+             {view === 'solo' && soloStep === 'qr' && (
+                 // F2.1c — antes: "Voltar para o login" saía da view solo pro
+                 // login do ZappFlow (confuso). Agora limpa só o QR e volta pro
+                 // form da mesma view solo — usuário decide se quer tentar
+                 // outro cadastro OU logar naquela mesma tela.
+                 <button onClick={() => { setSoloStep('form'); setSoloQr(''); setSoloToken(''); setSoloUser(null); setSoloOrgId(''); setSoloElapsed(0); setError(''); }}
                    className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
-                   Voltar para o login
+                   Cancelar
+                 </button>
+             )}
+             {view === 'solo' && soloStep === 'form' && (
+                 <button onClick={() => { setView('login'); setSoloStep('form'); setSoloQr(''); setSoloToken(''); setError(''); setSoloFalatuInPlan(null); }}
+                   className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
+                   Voltar para o login do ZappFlow
                  </button>
              )}
           </div>

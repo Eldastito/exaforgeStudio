@@ -258,6 +258,11 @@ superfície confusa.
 
 - **F7.1** — entry point por hostname `falatu.*` + `FalatuApp` (auth próprio +
   tela de conexão QR persistente + `FalaTuView`). Só app funcional.
+- **F7.1b** — porteiro pós-login: o backend compartilhado aceita login de
+  QUALQUER conta, então o app classifica o acesso (`/entitlements/me` +
+  `/whatsapp/status`) antes de rotear: org solo → QR; suíte com FalaTu →
+  app direto; suíte sem FalaTu → tela explicativa (mata o loop de 403 do
+  provision pra conta suíte).
 - **F7.2** (pending) — landing comercial "assine o FalaTu" + checkout de plano
   próprio (reusa ADR-091 billing).
 - **F4.1e** (pending) — corrige QR vazio do Evolution GO (sequência

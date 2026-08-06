@@ -231,21 +231,41 @@ export class EvolutionService {
     // Evolution GO pode ficar com um client em memória NÃO logado cujo loop
     // de QR já expirou. Nesse estado o GetQr entra no branch "Client exists
     // but not connected" e NUNCA reinicia a sessão — o QR fica vazio pra
-    // sempre. O remédio (do fonte) é POST /instance/forcereconnect/:id
-    // (auth = GLOBAL key), que dá Disconnect() no client e recria o loop.
+    // sempre.
+    //
+    // Remédio (validado no fonte + teste manual): forcereconnect NÃO serve
+    // pra instância nunca-pareada (exige `number` e procura um device JÁ
+    // pareado no whatsmeow_device). O caminho certo é DELETE
+    // /instance/delete/:id (AuthAdmin) — Disconnect() no client + limpeza de
+    // clientPointer/killChannel/cache — e RECRIAR a instância do zero.
     // Só roda quando as 3 tentativas normais falharam E temos o instanceId.
     if (!qrBase64 && instanceId) {
       try {
-        await fetch(`${cfg.baseUrl}/instance/forcereconnect/${instanceId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: cfg.apiKey },
-          body: JSON.stringify({ number: "" }),
+        await fetch(`${cfg.baseUrl}/instance/delete/${instanceId}`, {
+          method: "DELETE",
+          headers: { apikey: cfg.apiKey },
         });
-      } catch { /* best-effort — as tentativas abaixo decidem */ }
-      for (let attempt = 0; attempt < 2 && !qrBase64; attempt++) {
-        await new Promise((r) => setTimeout(r, 3000));
-        qrBase64 = await tryFetchQr();
-      }
+        const recreated = await this.createInstance(instanceName, config);
+        if (recreated.ok && recreated.token) {
+          // Token/instância novos — o closure de tryFetchQr lê `activeToken`,
+          // e o caller grava o token retornado no canal; reatribuir o param
+          // mantém os dois consistentes.
+          activeToken = recreated.token;
+          // O registro de webhook+subscribe do passo 1 morreu com o delete —
+          // re-registra na instância nova antes de pedir o QR.
+          try {
+            await fetch(`${cfg.baseUrl}/instance/connect`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
+              body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
+            });
+          } catch { /* best-effort */ }
+          for (let attempt = 0; attempt < 2 && !qrBase64; attempt++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            qrBase64 = await tryFetchQr();
+          }
+        }
+      } catch { /* best-effort — sem heal, devolve o erro padrão abaixo */ }
     }
 
     // 3. Fallback legacy — /instance/connect/<name> (Evolution API Node oficial).

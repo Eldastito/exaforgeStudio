@@ -82,6 +82,8 @@ async function main() {
     json: async () => {
       if (String(url).endsWith("/instance/all")) return { data: [] };
       if (String(url).endsWith("/instance/create")) return { data: { token: "tok" } };
+      // F4.1c: /instance/qr (Evolution GO real) tem prioridade sobre /api/v1/instance/qr.
+      if (String(url).endsWith("/instance/qr")) return { base64: "QR" };
       if (String(url).includes("/api/v1/instance/qr")) return { base64: "QR" };
       return {};
     },

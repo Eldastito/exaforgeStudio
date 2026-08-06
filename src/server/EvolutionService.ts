@@ -163,23 +163,36 @@ export class EvolutionService {
       });
     } catch { /* best-effort */ }
 
-    // 2. Pega QR — tenta Go pattern primeiro
+    // 2. Pega QR — 3 variantes de endpoint testadas em ordem, primeira que
+    // retornar base64 vence. Ordem escolhida por probabilidade em produção:
+    //   a) `/instance/qr`         — Evolution GO (whatsmeow, evoapicloud) ★
+    //   b) `/api/v1/instance/qr`  — variante Go antiga (algumas builds mais velhas)
+    //   c) `/instance/connect/<name>` — Evolution API oficial (Node/legacy)
+    // Todas usam header `apikey:` (confirmado em produção com Evolution GO).
+    // O header `instance:` sobra em builds que não usam — inofensivo.
     let qrBase64 = "";
     let state = "";
-    try {
-      const qrResp = (await fetch(`${cfg.baseUrl}/api/v1/instance/qr`, {
-        headers: { apikey: activeToken, instance: instanceName },
-      })) as FetchResult;
-      if (qrResp.ok) {
+    const qrEndpoints = [
+      `${cfg.baseUrl}/instance/qr`,
+      `${cfg.baseUrl}/api/v1/instance/qr`,
+    ];
+    for (const url of qrEndpoints) {
+      if (qrBase64) break;
+      try {
+        const qrResp = (await fetch(url, {
+          headers: { apikey: activeToken, instance: instanceName },
+        })) as FetchResult;
+        if (!qrResp.ok) continue;
         const ct = qrResp.headers?.get?.("content-type") || "application/json";
-        if (String(ct).includes("application/json")) {
-          const qrData = await qrResp.json();
-          qrBase64 = qrData?.base64 || qrData?.data?.Qrcode || qrData?.qrcode?.base64 || "";
-        }
-      }
-    } catch { /* fallback pra legacy */ }
+        if (!String(ct).includes("application/json")) continue;
+        const qrData = await qrResp.json();
+        qrBase64 = qrData?.base64 || qrData?.data?.Qrcode || qrData?.qrcode?.base64 || qrData?.data?.qr || qrData?.qr || "";
+      } catch { /* tenta próximo endpoint */ }
+    }
 
-    // 3. Fallback legacy — /instance/connect/<name>
+    // 3. Fallback legacy — /instance/connect/<name> (Evolution API Node oficial).
+    // Este endpoint devolve o próprio QR na resposta do "connect" — comportamento
+    // diferente do Go/whatsmeow, que separa `connect` (subscribe) de `qr` (obter).
     if (!qrBase64) {
       try {
         const legacyResp = (await fetch(`${cfg.baseUrl}/instance/connect/${instanceName}`, {

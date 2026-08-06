@@ -81,11 +81,15 @@ function stubFetch(responder: (url: string, init: any) => any) {
 function restoreFetch() { (globalThis as any).fetch = realFetch; }
 
 // Responder padrão pra Evolution: /instance/all vazio, /instance/create ok
-// com token, /api/v1/instance/qr devolve base64.
+// com token. F4.1c: Evolution GO real usa /instance/qr (sem /api/v1); mantenho
+// /api/v1/instance/qr também no stub porque o service tenta os dois em ordem
+// (compat com builds antigas do padrão Go).
 function evolutionOkResponder(): (url: string, init: any) => any {
   return (url: string) => {
     if (url.endsWith("/instance/all")) return { body: { data: [] } };
     if (url.endsWith("/instance/create")) return { body: { data: { token: "evo_token_abc" }, qrcode: null } };
+    // Evolution GO real: /instance/qr (endpoint canônico do build atual)
+    if (url.endsWith("/instance/qr")) return { body: { base64: "PNGBASE64_QR_STUB" } };
     if (url.includes("/api/v1/instance/qr")) return { body: { base64: "PNGBASE64_QR_STUB" } };
     if (url.includes("/webhook/set/")) return { body: {} };
     if (url.endsWith("/instance/connect")) return { body: {} };
@@ -156,7 +160,9 @@ async function main() {
   restoreFetch();
   check("6.1 connectAndGetQr ok", qrResult.ok === true);
   check("6.2 connectAndGetQr devolve base64 formatado data:image/png", (qrResult.qrBase64 || "").startsWith("data:image/png;base64,"));
-  check("6.3 chamou /api/v1/instance/qr (Go pattern)", capturedCalls.some((c) => c.url.includes("/api/v1/instance/qr")));
+  // F4.1c: prioridade agora é /instance/qr (Evolution GO real). O de /api/v1
+  // fica como fallback pra builds mais velhas.
+  check("6.3 chamou /instance/qr (Evolution GO real)", capturedCalls.some((c) => c.url.endsWith("/instance/qr")));
 
   // ===== 7. FalaTuSoloWhatsAppService.assertSoloOrg =====
   const orgSoloId = "org_" + randomUUID().substring(0, 8);

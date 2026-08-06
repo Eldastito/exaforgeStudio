@@ -205,7 +205,12 @@ async function main() {
   const p2 = await post("/api/onboarding-solo", {
     name: "Outro", email: email1, password: "senha1234ABC", blueprintKey: "falatu_solo",
   });
-  check("email duplicado → 400", p2.status === 400);
+  // F2.1c: email duplicado agora vira 409 estruturado (era 400 até F6.1)
+  // pra frontend renderizar CTA contextual (login vs upgrade) — mais
+  // correto semanticamente (409 Conflict é o status pra recurso já existe).
+  check("email duplicado → 409 email_in_use", p2.status === 409 && p2.body?.error === "email_in_use");
+  check("email duplicado inclui `falatuInPlan` boolean", typeof p2.body?.falatuInPlan === "boolean");
+  check("email duplicado inclui `message` humano", typeof p2.body?.message === "string" && p2.body.message.length > 0);
 
   // Senha fraca
   const p3 = await post("/api/onboarding-solo", {

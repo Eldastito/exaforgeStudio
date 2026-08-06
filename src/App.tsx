@@ -53,9 +53,15 @@ import io from 'socket.io-client';
 
 export default function App() {
   const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, loadPermissions, isModuleEnabled, canAccessModule, setViewMode, enabledModules } = useStore();
-  const { user, token, loading } = useAuth();
+  const { user, token, loading, logout } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  // F2.1c — se o navegador tem sessão ativa e o usuário abre `?solo=<key>`
+  // (link de onboarding Solo), mostramos um modal explicando que ele já
+  // está logado e ofereço logout, senão o parâmetro seria ignorado em
+  // silêncio (o LoginView só roda pra deslogados) e o usuário ficaria sem
+  // saber pra onde ir.
+  const [soloConflict, setSoloConflict] = useState<string | null>(null);
   // Continuity Layer (ADR-082, Fase 0): estado de conectividade real do cliente.
   // 'online' (rede + socket ok), 'unstable' (rede ok, socket caiu), 'offline'.
   const [connectivity, setConnectivity] = useState<'online' | 'unstable' | 'offline'>(
@@ -99,6 +105,21 @@ export default function App() {
     // RBAC granular (ADR-095): carrega o nível de acesso do usuário por módulo.
     loadPermissions();
   }, [token, hydrate, loadOrgConfig, loadPermissions]);
+
+  // F2.1c — detecta ?solo=<key> em sessão logada. Nunca faz redirect
+  // automático (respeitamos a sessão ativa); o usuário decide se quer
+  // deslogar pra criar conta Solo, ou continuar na sessão atual.
+  useEffect(() => {
+    if (!token) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const solo = params.get('solo') || params.get('blueprint');
+      if (solo) {
+        setSoloConflict(solo);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch { /* noop */ }
+  }, [token]);
 
   // Se a aba atual aponta para um módulo desligado, volta para o Atendimento.
   useEffect(() => {
@@ -242,6 +263,38 @@ export default function App() {
 
   return (
     <div className="zf-page-shell flex h-screen w-full overflow-hidden text-foreground font-sans">
+      {/* F2.1c — modal explicando ?solo=<key> quando sessão já ativa. */}
+      {soloConflict && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-6">
+            <h3 className="text-lg font-semibold text-zinc-100 mb-2">Você já está logado</h3>
+            <p className="text-sm text-zinc-400 mb-4">
+              Você abriu um link de cadastro do FalaTu ({soloConflict}), mas já existe uma sessão ativa como <span className="text-zinc-200 font-medium">{user?.email}</span>. Escolha o que fazer:
+            </p>
+            <div className="flex flex-col gap-2">
+              <button onClick={() => setSoloConflict(null)}
+                className="w-full rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm py-2.5 font-medium">
+                Continuar nesta sessão
+              </button>
+              <button onClick={() => {
+                // Guarda o slug pra reabrir o fluxo Solo já na tela de login
+                // pós-logout — logout() zera token+user, React re-renderiza,
+                // LoginView monta, effect lê o `?solo=` e cai direto no form.
+                const target = `/?solo=${encodeURIComponent(soloConflict)}`;
+                logout();
+                setSoloConflict(null);
+                try { window.location.replace(target); } catch { /* noop */ }
+              }}
+                className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm py-2.5 font-medium">
+                Fazer logout e criar conta FalaTu Solo
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500 mt-3 text-center">
+              Dica: se você quer o FalaTu com este mesmo email, é mais fácil adicionar o módulo ao seu plano atual.
+            </p>
+          </div>
+        </div>
+      )}
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         {/* Top Navbar */}

@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { Button } from '@/src/components/ui/button';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Smartphone, RefreshCw, CheckCircle2 } from 'lucide-react';
+
+// ADR-154 F6.1 — sub-etapas da view 'solo'. Onboarding standalone termina
+// SÓ quando o WhatsApp conecta (canal fica utilizável). Se parar em 'qr' sem
+// escanear, o usuário nunca vira "logado" no app — evita cadastro-fantasma.
+type SoloStep = 'form' | 'qr' | 'connecting';
 
 export function LoginView() {
   const { login } = useAuth();
-  const [view, setView] = useState<'login' | 'register' | 'forgot' | 'reset' | 'plans'>('login');
+  const [view, setView] = useState<'login' | 'register' | 'forgot' | 'reset' | 'plans' | 'solo'>('login');
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,6 +35,19 @@ export function LoginView() {
   const [showPassword, setShowPassword] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
+
+  // ADR-154 F6.1 — estado do fluxo Solo. O token do auto-login fica AQUI
+  // (não no localStorage/context) até o WhatsApp conectar; só aí chamamos
+  // context.login(), que grava e re-renderiza pro FalaTuView. Sem isso, um
+  // cadastro abandonado deixaria conta logada num app sem canal — pior UX.
+  const [soloBlueprint, setSoloBlueprint] = useState('');
+  const [soloStep, setSoloStep] = useState<SoloStep>('form');
+  const [soloQr, setSoloQr] = useState('');
+  const [soloToken, setSoloToken] = useState('');
+  const [soloUser, setSoloUser] = useState<any>(null);
+  const [soloOrgId, setSoloOrgId] = useState('');
+  const [soloReprovisioning, setSoloReprovisioning] = useState(false);
+  const [soloElapsed, setSoloElapsed] = useState(0);
 
   // Link de convite: ?invite=TOKEN&email=... abre o cadastro já preenchido.
   // (o app não envia e-mail, então o owner compartilha esse link manualmente)
@@ -65,8 +83,18 @@ export function LoginView() {
         // Limpa a URL para não deixar o código exposto no histórico/barra.
         window.history.replaceState({}, document.title, window.location.pathname);
       } else {
-        const plan = params.get('plan');
-        if (plan) { setPlanId(plan); setView('register'); window.history.replaceState({}, document.title, window.location.pathname); }
+        // ADR-154 F6.1 — link direto pro onboarding Solo (assistente pessoal
+        // FalaTu). Aceita ?solo=<key> ou ?blueprint=<key>. Blueprint precisa
+        // ser mode='solo' publicado; o backend valida em POST /api/onboarding-solo.
+        const solo = params.get('solo') || params.get('blueprint');
+        if (solo) {
+          setView('solo');
+          setSoloBlueprint(solo);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else {
+          const plan = params.get('plan');
+          if (plan) { setPlanId(plan); setView('register'); window.history.replaceState({}, document.title, window.location.pathname); }
+        }
       }
     } catch { /* noop */ }
   }, []);
@@ -78,6 +106,96 @@ export function LoginView() {
 
   const brl = (v?: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR')}`;
   const selectedPlan = plans.find(p => p.id === planId);
+
+  // ADR-154 F6.1 — cadastro Solo. Passos: POST /api/onboarding-solo → guarda
+  // orgId + qrBase64 → auto-login em background pra guardar Bearer necessário
+  // pro polling /status → soloStep='qr'. Provision é best-effort no backend;
+  // se qr vier vazio, mostra tela QR mesmo assim com botão pra gerar.
+  const handleSoloRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setSuccess(''); setLoading(true);
+    try {
+      const res = await fetch('/api/onboarding-solo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, phone, password, blueprintKey: soloBlueprint || 'falatu_solo' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro no cadastro');
+      setSoloOrgId(data.organizationId);
+
+      // Auto-login em background — token ainda NÃO vai pro context (senão o
+      // App re-renderiza e sai desta tela antes do QR aparecer). Só usamos
+      // pra chamar /status com Authorization no polling.
+      const rL = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const dL = await rL.json();
+      if (!rL.ok) throw new Error(dL.error || 'Erro no login automático');
+      setSoloToken(dL.token);
+      setSoloUser(dL.user);
+
+      if (data.whatsapp?.qrBase64) {
+        setSoloQr(data.whatsapp.qrBase64);
+      } else if (data.whatsapp?.provisionError) {
+        setError(`WhatsApp offline: ${data.whatsapp.provisionError}. Clique em "Gerar QR" pra tentar de novo.`);
+      }
+      setSoloStep('qr');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReprovision = async () => {
+    if (!soloToken) return;
+    setSoloReprovisioning(true); setError('');
+    try {
+      const r = await fetch('/api/falatu-solo/whatsapp/provision', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${soloToken}` },
+      });
+      const d = await r.json();
+      if (!r.ok || !d.qrBase64) throw new Error(d.error || 'Falha ao gerar QR');
+      setSoloQr(d.qrBase64);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSoloReprovisioning(false);
+    }
+  };
+
+  // Polling do status enquanto na etapa 'qr'. Para quando conectar (aí
+  // dispara context.login e o App sobe). Intervalo curto (3s) — usuário está
+  // olhando pra tela esperando.
+  useEffect(() => {
+    if (view !== 'solo' || soloStep !== 'qr' || !soloToken) return;
+    let stopped = false;
+    const start = Date.now();
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const r = await fetch('/api/falatu-solo/whatsapp/status', {
+          headers: { 'Authorization': `Bearer ${soloToken}` },
+        });
+        if (r.ok) {
+          const s = await r.json();
+          setSoloElapsed(Math.floor((Date.now() - start) / 1000));
+          if (s.connected) {
+            setSoloStep('connecting');
+            login(soloToken, soloUser); // desmonta a view; efeito é limpado
+            return;
+          }
+        }
+      } catch { /* silencioso — próxima tentativa cobre */ }
+      if (!stopped) setTimeout(tick, 3000);
+    };
+    tick();
+    return () => { stopped = true; };
+  }, [view, soloStep, soloToken, soloUser, login]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,6 +294,9 @@ export function LoginView() {
                {view === 'forgot' && 'Recuperar Senha'}
                {view === 'reset' && 'Redefinir Senha'}
                {view === 'plans' && 'Escolha seu plano e comece o teste grátis'}
+               {view === 'solo' && soloStep === 'form' && 'Cadastro do assistente FalaTu'}
+               {view === 'solo' && soloStep === 'qr' && 'Conecte seu WhatsApp'}
+               {view === 'solo' && soloStep === 'connecting' && 'Tudo pronto!'}
             </p>
           </div>
 
@@ -217,7 +338,99 @@ export function LoginView() {
             </div>
           )}
 
-          {view !== 'plans' && (
+          {view === 'solo' && soloStep === 'form' && (
+            <form onSubmit={handleSoloRegister} className="space-y-4">
+              <div className="mb-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">
+                <div className="flex items-center gap-2 font-medium">
+                  <Smartphone className="w-4 h-4" /> FalaTu — seu assistente pessoal
+                </div>
+                <p className="text-xs text-emerald-400/80 mt-1">
+                  Fale, fotografe ou digite. Ele registra pra você e responde no seu WhatsApp.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Nome completo</label>
+                <input type="text" required value={name} onChange={e => setName(e.target.value)}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  placeholder="Seu nome" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Email</label>
+                <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  placeholder="voce@exemplo.com" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Telefone WhatsApp (opcional)</label>
+                <input type="text" value={phone} onChange={e => setPhone(e.target.value)}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  placeholder="+55 11 99999-9999" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Senha</label>
+                <div className="relative">
+                  <input type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
+                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 pr-10 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    placeholder="Mínimo 8 caracteres, letras e números" />
+                  <button type="button" onClick={() => setShowPassword(s => !s)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    tabIndex={-1} aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}>
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <Button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white mt-4">
+                {loading ? 'Criando conta…' : 'Continuar → conectar WhatsApp'}
+              </Button>
+            </form>
+          )}
+
+          {view === 'solo' && soloStep === 'qr' && (
+            <div className="space-y-4 text-center">
+              <div className="mb-1 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300 text-left">
+                <div className="flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4" /> Conta criada
+                </div>
+                <p className="text-xs text-emerald-400/80 mt-1">
+                  Agora conecte o WhatsApp que o FalaTu vai usar pra falar com você.
+                </p>
+              </div>
+              {soloQr ? (
+                <div className="bg-white rounded-xl p-4 inline-block mx-auto">
+                  <img src={`data:image/png;base64,${soloQr}`} alt="QR do WhatsApp" className="w-64 h-64" />
+                </div>
+              ) : (
+                <div className="w-64 h-64 mx-auto rounded-xl border border-dashed border-zinc-700 bg-zinc-950 flex items-center justify-center text-zinc-500 text-sm">
+                  QR indisponível — gere abaixo
+                </div>
+              )}
+              <ol className="text-left text-xs text-zinc-400 space-y-1 max-w-xs mx-auto">
+                <li>1. Abra o WhatsApp no celular</li>
+                <li>2. <b>Menu → Aparelhos conectados → Conectar aparelho</b></li>
+                <li>3. Aponte a câmera pro QR acima</li>
+              </ol>
+              <div className="flex flex-col gap-2 items-center pt-1">
+                <button type="button" onClick={handleReprovision} disabled={soloReprovisioning}
+                  className="text-sm text-indigo-400 hover:text-indigo-300 flex items-center gap-1 disabled:opacity-50">
+                  <RefreshCw className={`w-3 h-3 ${soloReprovisioning ? 'animate-spin' : ''}`} />
+                  {soloReprovisioning ? 'Gerando…' : soloQr ? 'Gerar QR novamente' : 'Gerar QR agora'}
+                </button>
+                <p className="text-[11px] text-zinc-500">
+                  Aguardando conexão… {soloElapsed > 0 ? `(${soloElapsed}s)` : ''}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {view === 'solo' && soloStep === 'connecting' && (
+            <div className="text-center py-8">
+              <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+              <p className="text-zinc-200 font-medium">WhatsApp conectado!</p>
+              <p className="text-xs text-zinc-500 mt-1">Abrindo seu FalaTu…</p>
+            </div>
+          )}
+
+          {view !== 'plans' && view !== 'solo' && (
           <form onSubmit={handleSubmit} className="space-y-4">
              {view === 'register' && (
                 <>
@@ -405,6 +618,12 @@ export function LoginView() {
              )}
              {(view === 'forgot' || view === 'reset') && (
                  <button onClick={() => setView('login')} className="text-sm text-zinc-400 hover:text-zinc-300 transition-colors">
+                   Voltar para o login
+                 </button>
+             )}
+             {view === 'solo' && soloStep !== 'connecting' && (
+                 <button onClick={() => { setView('login'); setSoloStep('form'); setSoloQr(''); setSoloToken(''); setError(''); }}
+                   className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
                    Voltar para o login
                  </button>
              )}

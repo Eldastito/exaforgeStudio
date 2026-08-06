@@ -29,6 +29,7 @@ export interface CreateInstanceResult {
   ok: boolean;
   instanceName: string;
   token?: string; // token específico da instância (se Evolution retornou)
+  instanceId?: string; // id interno da instância no Evolution GO (F4.1f — usado no forcereconnect)
   qrBase64?: string; // QR já veio no create (Evolution API)
   alreadyExists?: boolean;
   error?: string;
@@ -85,7 +86,7 @@ export class EvolutionService {
         const data = await listResp.json();
         const existing = data?.data?.find?.((i: any) => i.name === instanceName || i.instanceName === instanceName);
         if (existing) {
-          return { ok: true, instanceName, token: existing.token || existing.apikey, alreadyExists: true };
+          return { ok: true, instanceName, token: existing.token || existing.apikey, instanceId: existing.id, alreadyExists: true };
         }
       }
     } catch { /* segue pro create */ }
@@ -137,8 +138,9 @@ export class EvolutionService {
     // o dele em `data.token`/`instance.token`/`hash.apikey`. Usa o retornado
     // se veio (respeita geração server-side); senão volta pro que geramos.
     const token = data?.data?.token || data?.instance?.token || data?.hash?.apikey || instanceToken;
+    const instanceId = data?.data?.id || data?.instance?.id || undefined;
     const qrBase64 = data?.qrcode?.base64 || data?.data?.Qrcode;
-    return { ok: true, instanceName, token, qrBase64 };
+    return { ok: true, instanceName, token, instanceId, qrBase64 };
   }
 
   /**
@@ -151,6 +153,7 @@ export class EvolutionService {
     instanceName: string,
     activeToken: string,
     config?: EvolutionConfig,
+    instanceId?: string,
   ): Promise<ConnectAndQrResult> {
     const cfg = config ?? this.getConfig();
     if (!cfg) return { ok: false, error: "EVOLUTION_BASE_URL/EVOLUTION_API_KEY não configurados" };
@@ -224,6 +227,27 @@ export class EvolutionService {
       qrBase64 = await tryFetchQr();
     }
 
+    // F4.1f — auto-heal do client zumbi. Visto em produção: o whatsmeow do
+    // Evolution GO pode ficar com um client em memória NÃO logado cujo loop
+    // de QR já expirou. Nesse estado o GetQr entra no branch "Client exists
+    // but not connected" e NUNCA reinicia a sessão — o QR fica vazio pra
+    // sempre. O remédio (do fonte) é POST /instance/forcereconnect/:id
+    // (auth = GLOBAL key), que dá Disconnect() no client e recria o loop.
+    // Só roda quando as 3 tentativas normais falharam E temos o instanceId.
+    if (!qrBase64 && instanceId) {
+      try {
+        await fetch(`${cfg.baseUrl}/instance/forcereconnect/${instanceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: cfg.apiKey },
+          body: JSON.stringify({ number: "" }),
+        });
+      } catch { /* best-effort — as tentativas abaixo decidem */ }
+      for (let attempt = 0; attempt < 2 && !qrBase64; attempt++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        qrBase64 = await tryFetchQr();
+      }
+    }
+
     // 3. Fallback legacy — /instance/connect/<name> (Evolution API Node oficial).
     // Este endpoint devolve o próprio QR na resposta do "connect" — comportamento
     // diferente do Go/whatsmeow, que separa `connect` (subscribe) de `qr` (obter).
@@ -260,7 +284,7 @@ export class EvolutionService {
     if (!created.ok) return { ok: false, instanceName, error: created.error };
     const activeToken = created.token || (config?.apiKey ?? process.env.EVOLUTION_API_KEY ?? "");
     if (!activeToken) return { ok: false, instanceName, error: "Sem token pra connectAndGetQr" };
-    const qr = await this.connectAndGetQr(instanceName, activeToken, config);
+    const qr = await this.connectAndGetQr(instanceName, activeToken, config, created.instanceId);
     return { ...qr, instanceName, alreadyExists: created.alreadyExists };
   }
 }

@@ -14,6 +14,7 @@
  * exceto por erro de config — instância dedicada precisa de env válido, sem
  * ela o caminho Solo não faz sentido; falha de rede vira `error` no retorno).
  */
+import { randomUUID } from "crypto";
 
 // Compat: fetch nativo Node 18+; o teste stub'a `globalThis.fetch`.
 type FetchResult = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<any>; headers?: any };
@@ -90,8 +91,15 @@ export class EvolutionService {
     } catch { /* segue pro create */ }
 
     // 2. Cria (payload rico primeiro)
+    // F4.1d: Evolution GO EXIGE `token` no payload (retorna 400 "token is
+    // required" sem ele). Geramos UUID por instância — vira o "hash/apikey"
+    // que autentica requests futuros pra essa instância específica (padrão
+    // que vi na resposta de /instance/all: cada linha tem seu próprio
+    // `token` UUID). Passamos junto no payload rico (compat Node oficial,
+    // que ignora se não usa) e no minimal (obrigatório no GO).
+    const instanceToken = randomUUID();
     const richPayload = {
-      instanceName, name: instanceName, qrcode: true,
+      instanceName, name: instanceName, token: instanceToken, qrcode: true,
       webhook: cfg.webhookUrl,
       events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"],
     };
@@ -106,13 +114,13 @@ export class EvolutionService {
       return { ok: false, instanceName, error: `Rede ao criar: ${e?.message || e}` };
     }
 
-    // Se rico falhou 400, tenta payload minimal (Evolution GO)
+    // Se rico falhou 400, tenta payload minimal (Evolution GO exige `name` + `token`)
     if (!createResp.ok && createResp.status === 400) {
       try {
         createResp = (await fetch(`${cfg.baseUrl}/instance/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: cfg.apiKey },
-          body: JSON.stringify({ name: instanceName }),
+          body: JSON.stringify({ name: instanceName, token: instanceToken }),
         })) as FetchResult;
       } catch (e: any) {
         return { ok: false, instanceName, error: `Rede ao criar (retry): ${e?.message || e}` };
@@ -125,7 +133,10 @@ export class EvolutionService {
     }
 
     let data: any = {}; try { data = await createResp.json(); } catch { /* noop */ }
-    const token = data?.data?.token || data?.instance?.token || data?.hash?.apikey;
+    // F4.1d: Evolution GO ecoa nosso `token` na resposta; Node oficial gera
+    // o dele em `data.token`/`instance.token`/`hash.apikey`. Usa o retornado
+    // se veio (respeita geração server-side); senão volta pro que geramos.
+    const token = data?.data?.token || data?.instance?.token || data?.hash?.apikey || instanceToken;
     const qrBase64 = data?.qrcode?.base64 || data?.data?.Qrcode;
     return { ok: true, instanceName, token, qrBase64 };
   }

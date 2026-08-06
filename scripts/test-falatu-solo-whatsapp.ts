@@ -142,6 +142,10 @@ async function main() {
   check("4.1 createInstance ok", created.ok === true);
   check("4.2 createInstance devolveu token", created.token === "evo_token_abc");
   check("4.3 fez POST /instance/create", capturedCalls.some((c) => c.url.endsWith("/instance/create") && c.init?.method === "POST"));
+  // F4.1d: Evolution GO exige `token` no payload — sem ele volta "400 token is required"
+  const createCall = capturedCalls.find((c) => c.url.endsWith("/instance/create"));
+  const createBody = createCall?.init?.body ? JSON.parse(String(createCall.init.body)) : {};
+  check("4.3b payload contém `token` (Evolution GO)", typeof createBody.token === "string" && createBody.token.length >= 8);
   check("4.4 header apikey enviado", capturedCalls.some((c) => c.init?.headers?.apikey === "K123"));
 
   // ===== 5. createInstance — instância já existe (dedup via /instance/all) =====

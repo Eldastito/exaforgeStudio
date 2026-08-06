@@ -156,11 +156,20 @@ export class EvolutionService {
     if (!cfg) return { ok: false, error: "EVOLUTION_BASE_URL/EVOLUTION_API_KEY não configurados" };
 
     // 1. Configura webhook (dois formatos — Evolution GO e Evolution API legacy)
+    // F4.1e (lido do fonte EvolutionAPI/evolution-go):
+    // - Auth das rotas de instância (`Auth` middleware) resolve a instância
+    //   PELO TOKEN no header `apikey` (GetInstanceByToken). A GLOBAL_API_KEY
+    //   só vale nas rotas admin (create/all/delete). `activeToken` aqui é o
+    //   token da instância — correto.
+    // - `subscribe` é validado case-SENSITIVE contra MESSAGE/CONNECTION/...
+    //   (event_types.go). Nosso antigo ["messages","connection"] era descartado
+    //   em silêncio → instância ficava sem NENHUM evento → o webhook nunca
+    //   receberia a conexão nem mensagens. Maiúsculo é obrigatório.
     try {
       await fetch(`${cfg.baseUrl}/instance/connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
-        body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["messages", "connection"] }),
+        body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
       });
     } catch { /* best-effort */ }
 
@@ -179,26 +188,40 @@ export class EvolutionService {
     //   a) `/instance/qr`         — Evolution GO (whatsmeow, evoapicloud) ★
     //   b) `/api/v1/instance/qr`  — variante Go antiga (algumas builds mais velhas)
     //   c) `/instance/connect/<name>` — Evolution API oficial (Node/legacy)
-    // Todas usam header `apikey:` (confirmado em produção com Evolution GO).
-    // O header `instance:` sobra em builds que não usam — inofensivo.
+    //
+    // F4.1e — formato REAL do Evolution GO (instance_service.go GetQr):
+    //   { "message": "success", "data": { "qrcode": "data:image/png;base64,...",
+    //     "code": "2@..." } }
+    // O campo é `data.qrcode` MINÚSCULO e já vem como data URL completo — o
+    // parser antigo só tentava `data.Qrcode` e nunca achava ("retornou vazio").
+    // Timing: o GetQr do servidor auto-inicia a sessão whatsmeow e espera ~5s;
+    // se o QR ainda não saiu, responde 400 "no QR code available. Please wait
+    // a moment and try again" — por isso o retry com pausa de 2.5s (3 rodadas).
     let qrBase64 = "";
     let state = "";
     const qrEndpoints = [
       `${cfg.baseUrl}/instance/qr`,
       `${cfg.baseUrl}/api/v1/instance/qr`,
     ];
-    for (const url of qrEndpoints) {
-      if (qrBase64) break;
-      try {
-        const qrResp = (await fetch(url, {
-          headers: { apikey: activeToken, instance: instanceName },
-        })) as FetchResult;
-        if (!qrResp.ok) continue;
-        const ct = qrResp.headers?.get?.("content-type") || "application/json";
-        if (!String(ct).includes("application/json")) continue;
-        const qrData = await qrResp.json();
-        qrBase64 = qrData?.base64 || qrData?.data?.Qrcode || qrData?.qrcode?.base64 || qrData?.data?.qr || qrData?.qr || "";
-      } catch { /* tenta próximo endpoint */ }
+    const tryFetchQr = async (): Promise<string> => {
+      for (const url of qrEndpoints) {
+        try {
+          const qrResp = (await fetch(url, {
+            headers: { apikey: activeToken, instance: instanceName },
+          })) as FetchResult;
+          if (!qrResp.ok) continue;
+          const ct = qrResp.headers?.get?.("content-type") || "application/json";
+          if (!String(ct).includes("application/json")) continue;
+          const qrData = await qrResp.json();
+          const got = qrData?.data?.qrcode || qrData?.base64 || qrData?.data?.Qrcode || qrData?.qrcode?.base64 || qrData?.data?.qr || qrData?.qr || "";
+          if (got) return String(got);
+        } catch { /* tenta próximo endpoint */ }
+      }
+      return "";
+    };
+    for (let attempt = 0; attempt < 3 && !qrBase64; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2500));
+      qrBase64 = await tryFetchQr();
     }
 
     // 3. Fallback legacy — /instance/connect/<name> (Evolution API Node oficial).

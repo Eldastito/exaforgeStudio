@@ -961,6 +961,34 @@ async function startServer() {
           io: (global as any).io,
         });
         
+      } else if (normalizedEvent === "connected" || normalizedEvent === "pairsuccess" || normalizedEvent === "loggedout") {
+        // F4.1e — Evolution GO (whatsmeow) NÃO manda "connection.update"; os
+        // eventos de ciclo de vida são "Connected", "PairSuccess" e "LoggedOut"
+        // com {instanceName, instanceToken, instanceId} na RAIZ do payload
+        // (fonte: whatsmeow.go + webhook_producer.go). Sem este bloco, escanear
+        // o QR nunca marcava o canal Solo como 'connected' e o polling do app
+        // standalone ficava eterno.
+        const instName = String(payload.instanceName || payload.instance || "");
+        const newStatus = normalizedEvent === "loggedout" ? "disconnected" : "connected";
+        console.log(`[Evolution Webhook][GO] ${rawEvent} → canal '${instName}' → ${newStatus}`);
+        if (instName) {
+          try {
+            // Instância Solo dedicada: nome determinístico falatu_solo_<orgId>
+            // (EvolutionService.instanceNameForOrg) → deriva a org e atualiza
+            // com filtro multi-tenant. Outras instâncias: match global pelo
+            // identifier (é único — nome de instância não repete na Evolution).
+            if (instName.startsWith("falatu_solo_")) {
+              const orgId = instName.slice("falatu_solo_".length);
+              db.prepare(`UPDATE channels SET status = ? WHERE organization_id = ? AND identifier = ?`)
+                .run(newStatus, orgId, instName);
+            } else {
+              db.prepare(`UPDATE channels SET status = ? WHERE identifier = ?`).run(newStatus, instName);
+            }
+          } catch (e) { console.error("[Evolution Webhook][GO] Falha ao atualizar canal:", e); }
+          if ((global as any).io && newStatus === "connected") {
+            (global as any).io.emit("wa_web_status", { status: 'connected_evo' });
+          }
+        }
       } else if (normalizedEvent === "connection.update") {
         console.log(`[Evolution Webhook] Status da conexão: ${payload.data?.state || payload.data?.status}`);
         if ((payload.data?.state === 'open' || payload.data?.status === 'open') && (global as any).io) {

@@ -88,8 +88,10 @@ function evolutionOkResponder(): (url: string, init: any) => any {
   return (url: string) => {
     if (url.endsWith("/instance/all")) return { body: { data: [] } };
     if (url.endsWith("/instance/create")) return { body: { data: { token: "evo_token_abc" }, qrcode: null } };
-    // Evolution GO real: /instance/qr (endpoint canônico do build atual)
-    if (url.endsWith("/instance/qr")) return { body: { base64: "PNGBASE64_QR_STUB" } };
+    // Evolution GO real (F4.1e): /instance/qr responde no formato do fonte
+    // (instance_handler.go): {message:"success", data:{qrcode:<dataURL>, code}}.
+    // Stub usa o shape REAL pra exercitar o parse de `data.qrcode` minúsculo.
+    if (url.endsWith("/instance/qr")) return { body: { message: "success", data: { qrcode: "data:image/png;base64,PNGBASE64_QR_STUB", code: "2@stubcode" } } };
     if (url.includes("/api/v1/instance/qr")) return { body: { base64: "PNGBASE64_QR_STUB" } };
     if (url.includes("/webhook/set/")) return { body: {} };
     if (url.endsWith("/instance/connect")) return { body: {} };

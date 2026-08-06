@@ -49,6 +49,10 @@ Object.defineProperty(window, 'fetch', {
       input.startsWith('/api') &&
       !input.startsWith('/api/auth/register') &&
       !input.startsWith('/api/auth/login') &&
+      // ADR-154 F6.1: onboarding Solo é pré-auth (cria a conta). Se o navegador
+      // já tem token de OUTRA sessão no localStorage, injetá-lo aqui confundiria
+      // o backend — a rota é pública, tem que sair sem Authorization.
+      !input.startsWith('/api/onboarding-solo') &&
       !input.startsWith('/api/public/');
     if (injectable) {
       const headers = new Headers(init?.headers);

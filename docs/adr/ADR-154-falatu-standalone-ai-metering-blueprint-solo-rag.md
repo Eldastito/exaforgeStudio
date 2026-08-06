@@ -185,7 +185,8 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 1 | 1.1 | `ai_usage_ledger` + interceptor tipado em `llm.ts` + backfill best-effort dos módulos existentes | — | Grande |
 | 1 | 1.2 | `AiUsageDashboardView` (tabela + drill-down + gráfico temporal) | 1.1 | Média |
 | 1 | 1.3 | Sinais de cota (80%/100%) em `business_signals` + rota `POST /admin/organizations/:id/ai-quota` | 1.1 | Pequena |
-| 2 | 2.1 | Campo `blueprint.mode` + seed `falatu-solo-v1` + onboarding standalone | ADR-153 F3.1 | Média |
+| 2 | 2.1 | Campo `blueprint.mode` + seed `falatu-solo-v1` + onboarding standalone (backend) | ADR-153 F3.1 | Média |
+| 2 | 2.1b | UI de onboarding Solo — LoginView view `solo` (form → QR → polling → auto-login) | 2.1, 4.1 | Pequena |
 | 2 | 2.2 | Catálogo comercial "Assistente Pessoal" + checkout Asaas/Stone | 2.1, ADR-091 | Média |
 | 3 | 3.1 | `FalaTuSettingsView` aba Config — blocos WhatsApp + Timezone + LGPD | — | Média |
 | 3 | 3.2 | Bloco Memória (toggle RAG + listar/editar/apagar) | 5.2 | Média |
@@ -225,6 +226,7 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 1.2 | MERGED | #792 |
 | 1.3 | MERGED | #793 |
 | 2.1 | MERGED | #795 |
+| 2.1b | In Progress | — |
 | 2.2 | Pending | — |
 | 3.1 | Pending | — |
 | 3.2 | Pending | — |
@@ -232,7 +234,7 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 4.1 | MERGED | #796 |
 | 4.2 | MERGED | #797 |
 | 5.1 | MERGED | #798 |
-| 5.2 | In Progress | — |
+| 5.2 | MERGED | #799 |
 | 5.3 | Pending | — |
 | 6.1 | Pending | — |
 | 6.2 | Pending | — |

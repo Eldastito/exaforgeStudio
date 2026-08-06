@@ -11,6 +11,20 @@ import { RadarRespondentWizard } from './radar-public/RadarRespondentWizard.tsx'
 import { ClinicPortalPage } from './clinic-public/ClinicPortalPage.tsx';
 import { PatientPortalPage } from './clinic-public/PatientPortalPage.tsx';
 import { ComigoMesaPage } from './comigo-public/ComigoMesaPage.tsx';
+import { FalatuApp } from './falatu-app/FalatuApp.tsx';
+
+// ADR-154 F7.1 — app FalaTu STANDALONE por subdomínio dedicado. Quando o
+// host começa com `falatu.` (ex.: falatu.tesseractauto.com.br), servimos um
+// bundle próprio: só login/cadastro do FalaTu + tela de conexão + app. Sem
+// suíte, sem sidebar, sem master admin. A origem própria isola o localStorage
+// da sessão do painel (mata a sessão-fantasma da F2.1c por construção).
+// Override local pra dev: ?falatu=1 força o app sem precisar do subdomínio.
+const isFalatuApp = (() => {
+  try {
+    if (window.location.hostname.startsWith('falatu.')) return true;
+    return new URLSearchParams(window.location.search).get('falatu') === '1';
+  } catch { return false; }
+})();
 
 // Vitrine pública (loja virtual) — renderizada fora do app autenticado.
 // Qualquer URL /loja/:slug abre a landing page Glass Toggle, sem login.
@@ -70,7 +84,12 @@ if (!rootEl) {
 
 createRoot(rootEl).render(
   <StrictMode>
-    {isStorefront ? (
+    {isFalatuApp ? (
+      <AuthProvider>
+        <FalatuApp />
+        <Toaster />
+      </AuthProvider>
+    ) : isStorefront ? (
       <Storefront />
     ) : isLanding ? (
       <LandingPage />

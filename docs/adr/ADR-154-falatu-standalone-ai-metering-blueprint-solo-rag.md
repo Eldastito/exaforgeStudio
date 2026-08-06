@@ -239,3 +239,26 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 6.1 | Pending | — |
 | 6.2 | Pending | — |
 | 6.3 | Pending | — |
+| 7.1 | In Progress | — |
+
+## Fase 7 — FalaTu standalone por subdomínio (decidido 2026-08-06)
+
+Depois do primeiro onboarding Solo real em produção, ficou claro que enxertar
+um produto B2C single-user (FalaTu Solo) na superfície de auth/sessão/shell da
+suíte B2B multi-tenant gerava atrito estrutural: sessão-fantasma no mesmo
+navegador, landing errada no refresh, colisão de email, confusão com master
+admin. Decisão do dono: **separar o frontend por subdomínio dedicado**
+(`falatu.tesseractauto.com.br`), mantendo o **backend compartilhado**.
+
+Não é fork de backend — é o mesmo padrão multi-root que o `main.tsx` já usa
+(`isStorefront`, `isClinicPortal`, `isComigoMesa`). A origem própria isola o
+`localStorage` da sessão do painel pelo próprio navegador — a segurança na API
+segue idêntica (email→master, `org_id`→tenant); o subdomínio só remove a
+superfície confusa.
+
+- **F7.1** — entry point por hostname `falatu.*` + `FalatuApp` (auth próprio +
+  tela de conexão QR persistente + `FalaTuView`). Só app funcional.
+- **F7.2** (pending) — landing comercial "assine o FalaTu" + checkout de plano
+  próprio (reusa ADR-091 billing).
+- **F4.1e** (pending) — corrige QR vazio do Evolution GO (sequência
+  connect→qr; precisa debug ao vivo contra a instância de produção).

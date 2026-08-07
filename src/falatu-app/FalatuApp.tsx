@@ -4,7 +4,21 @@ import { startOutboxFlusher } from '@/src/lib/continuity/sync';
 import { FalatuAuth } from './FalatuAuth';
 import { FalaTuView } from '@/src/features/FalaTuView';
 import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
-import { RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft } from 'lucide-react';
+import { useFalatuTheme, type FalatuTheme } from './useFalatuTheme';
+import { RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft, Sun, Moon } from 'lucide-react';
+
+// Botão de alternância claro/escuro — reusado no header (Shell) e na tela de
+// auth. Sol quando está escuro (vai clarear), Lua quando está claro.
+function ThemeToggle({ theme, onToggle }: { theme: FalatuTheme; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle}
+      className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-[var(--color-ft-text-muted)] hover:text-[var(--color-ft-text)] hover:bg-ft-surface-2 transition-colors"
+      title={theme === 'dark' ? 'Mudar para o modo claro' : 'Mudar para o modo escuro'}
+      aria-label={theme === 'dark' ? 'Mudar para o modo claro' : 'Mudar para o modo escuro'}>
+      {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+    </button>
+  );
+}
 
 // F9.1 — branding de documento em RUNTIME (não em index.html, que segue
 // ZappFlow pra suíte). Roda só aqui, no app standalone: título, theme-color
@@ -22,9 +36,7 @@ function applyFalatuDocumentBrand() {
     setLink('icon', '/falatu-brand/icon.svg', { type: 'image/svg+xml' });
     setLink('apple-touch-icon', '/falatu-brand/apple-touch-icon.png');
     setLink('manifest', '/falatu.webmanifest');
-    let theme = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    if (!theme) { theme = document.createElement('meta'); theme.name = 'theme-color'; document.head.appendChild(theme); }
-    theme.content = '#0e1a2e';
+    // O <meta theme-color> é gerido pelo useFalatuTheme (varia com claro/escuro).
   } catch { /* branding é cosmético — nunca derruba o app */ }
 }
 
@@ -58,18 +70,21 @@ function applyFalatuDocumentBrand() {
 type WaStatus = { kind: string; connected: boolean; hasQr: boolean } | null;
 type Access = 'checking' | 'solo' | 'shared' | 'denied';
 
-function Shell({ email, onLogout, children }: { email?: string; onLogout: () => void; children: React.ReactNode }) {
+function Shell({ email, onLogout, theme, onToggleTheme, children }: {
+  email?: string; onLogout: () => void; theme: FalatuTheme; onToggleTheme: () => void; children: React.ReactNode;
+}) {
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-ft-ink)' }}>
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-ft-bg)' }}>
       <header
         className="flex h-14 items-center justify-between px-4 backdrop-blur-sm shrink-0"
-        style={{ borderBottom: '1px solid var(--color-ft-line)', background: 'color-mix(in srgb, var(--color-ft-ink) 80%, transparent)' }}
+        style={{ borderBottom: '1px solid var(--color-ft-border)', background: 'color-mix(in srgb, var(--color-ft-bg) 80%, transparent)' }}
       >
         <FalatuLogo size={28} withWordmark />
-        <div className="flex items-center gap-3">
-          {email && <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-ft-nuvem-muted)' }}>{email}</span>}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {email && <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-ft-text-muted)' }}>{email}</span>}
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <button onClick={onLogout}
-            className="flex items-center gap-1.5 text-sm text-[var(--color-ft-nuvem-muted)] hover:text-[var(--color-ft-nuvem)]" title="Sair">
+            className="flex items-center gap-1.5 text-sm text-[var(--color-ft-text-muted)] hover:text-[var(--color-ft-text)]" title="Sair">
             <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Sair</span>
           </button>
         </div>
@@ -131,16 +146,16 @@ function FalatuConnect({ token, onConnected, onBack }: { token: string; onConnec
     <div className="flex-1 flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md text-center">
         <button type="button" onClick={onBack}
-          className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-200">
+          className="mb-4 inline-flex items-center gap-1 text-sm text-ft-text-muted hover:text-ft-text">
           <ArrowLeft className="w-4 h-4" /> Voltar pro app
         </button>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-1">Conecte seu WhatsApp</h2>
-        <p className="text-sm text-zinc-400 mb-5">
+        <h2 className="text-lg font-semibold text-ft-text mb-1">Conecte seu WhatsApp</h2>
+        <p className="text-sm text-ft-text-muted mb-5">
           Opcional — o app já funciona pelo navegador. Conectando, você também captura mandando áudio pelo WhatsApp.
         </p>
 
         {error && (
-          <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">{error}</div>
+          <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-ft-on-amber text-sm">{error}</div>
         )}
 
         {qrSrc ? (
@@ -148,12 +163,12 @@ function FalatuConnect({ token, onConnected, onBack }: { token: string; onConnec
             <img src={qrSrc} alt="QR do WhatsApp" className="w-64 h-64" />
           </div>
         ) : (
-          <div className="w-64 h-64 mx-auto rounded-xl border border-dashed border-zinc-700 bg-zinc-900 flex items-center justify-center text-zinc-500 text-sm">
+          <div className="w-64 h-64 mx-auto rounded-xl border border-dashed border-ft-border bg-ft-surface flex items-center justify-center text-ft-text-faint text-sm">
             {provisioning ? <Loader2 className="w-6 h-6 animate-spin" /> : 'QR indisponível — gere abaixo'}
           </div>
         )}
 
-        <ol className="text-left text-xs text-zinc-400 space-y-1 max-w-xs mx-auto mt-5">
+        <ol className="text-left text-xs text-ft-text-muted space-y-1 max-w-xs mx-auto mt-5">
           <li>1. Abra o WhatsApp no celular</li>
           <li>2. <b>Menu → Aparelhos conectados → Conectar aparelho</b></li>
           <li>3. Aponte a câmera pro QR acima</li>
@@ -165,7 +180,7 @@ function FalatuConnect({ token, onConnected, onBack }: { token: string; onConnec
             <RefreshCw className={`w-3 h-3 ${provisioning ? 'animate-spin' : ''}`} />
             {provisioning ? 'Gerando…' : qr ? 'Gerar QR novamente' : 'Gerar QR agora'}
           </button>
-          <p className="text-[11px] text-zinc-500">Aguardando conexão… {elapsed > 0 ? `(${elapsed}s)` : ''}</p>
+          <p className="text-[11px] text-ft-text-faint">Aguardando conexão… {elapsed > 0 ? `(${elapsed}s)` : ''}</p>
         </div>
       </div>
     </div>
@@ -180,7 +195,7 @@ function WhatsAppOptInBanner({ onConnect, onDismiss }: { onConnect: () => void; 
   return (
     <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-ft-menta/25 bg-ft-menta/5 px-3 py-2.5">
       <MessageCircle className="w-4 h-4 text-ft-menta shrink-0" />
-      <p className="flex-1 text-xs" style={{ color: 'var(--color-ft-nuvem)' }}>
+      <p className="flex-1 text-xs" style={{ color: 'var(--color-ft-text)' }}>
         Quer capturar mandando áudio pelo WhatsApp também? Conecte seu número quando quiser.
       </p>
       <button type="button" onClick={onConnect}
@@ -188,7 +203,7 @@ function WhatsAppOptInBanner({ onConnect, onDismiss }: { onConnect: () => void; 
         Conectar
       </button>
       <button type="button" onClick={onDismiss} title="Agora não"
-        className="text-zinc-500 hover:text-zinc-300 shrink-0">
+        className="text-ft-text-faint hover:text-ft-text shrink-0">
         <X className="w-3.5 h-3.5" />
       </button>
     </div>
@@ -203,9 +218,9 @@ function FalatuNoAccess({ email, onLogout }: { email?: string; onLogout: () => v
   return (
     <div className="flex-1 flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md text-center">
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">Esta conta não tem o FalaTu</h2>
-        <p className="text-sm text-zinc-400 mb-5">
-          O email <span className="text-zinc-200">{email}</span> pertence a uma conta ZappFlow sem o módulo FalaTu habilitado.
+        <h2 className="text-lg font-semibold text-ft-text mb-2">Esta conta não tem o FalaTu</h2>
+        <p className="text-sm text-ft-text-muted mb-5">
+          O email <span className="text-ft-text">{email}</span> pertence a uma conta ZappFlow sem o módulo FalaTu habilitado.
         </p>
         <div className="flex flex-col gap-2 max-w-xs mx-auto">
           <button onClick={onLogout}
@@ -214,7 +229,7 @@ function FalatuNoAccess({ email, onLogout }: { email?: string; onLogout: () => v
             Sair e criar uma conta FalaTu (outro email)
           </button>
           <a href="https://zapflowia.tesseractauto.com.br"
-            className="w-full rounded-md border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-sm py-2.5 font-medium">
+            className="w-full rounded-md border border-ft-border hover:border-ft-border-strong text-ft-text text-sm py-2.5 font-medium">
             Ir pro painel ZappFlow (habilitar no plano)
           </a>
         </div>
@@ -229,6 +244,8 @@ export function FalatuApp() {
   const [access, setAccess] = useState<Access>('checking');
   const [showConnect, setShowConnect] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  // F9.2 — tema claro/escuro (aplica a classe no <html>; escolha persiste).
+  const { theme, toggle } = useFalatuTheme();
 
   // F8.2 — o standalone não passa pelo App.tsx da suíte (que já roda o
   // flusher do outbox): liga aqui o reenvio das capturas offline ao montar,
@@ -268,13 +285,13 @@ export function FalatuApp() {
   }, [token]);
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--color-ft-ink)' }}><Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-ft-cobalto)' }} /></div>;
+    return <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--color-ft-bg)' }}><Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-ft-cobalto)' }} /></div>;
   }
-  if (!user || !token) return <FalatuAuth />;
+  if (!user || !token) return <FalatuAuth theme={theme} onToggleTheme={toggle} />;
 
   if (access === 'checking') {
     return (
-      <Shell email={user.email} onLogout={logout}>
+      <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}>
         <div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-ft-cobalto)' }} /></div>
       </Shell>
     );
@@ -282,7 +299,7 @@ export function FalatuApp() {
 
   if (access === 'denied') {
     return (
-      <Shell email={user.email} onLogout={logout}>
+      <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}>
         <FalatuNoAccess email={user.email} onLogout={logout} />
       </Shell>
     );
@@ -293,7 +310,7 @@ export function FalatuApp() {
   // no painel ZappFlow e o banner nem renderiza pra ela.
   if (showConnect) {
     return (
-      <Shell email={user.email} onLogout={logout}>
+      <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}>
         <FalatuConnect token={token} onBack={() => setShowConnect(false)}
           onConnected={() => { setWa({ kind: 'dedicated', connected: true, hasQr: false }); setShowConnect(false); }} />
       </Shell>
@@ -301,7 +318,7 @@ export function FalatuApp() {
   }
 
   return (
-    <Shell email={user.email} onLogout={logout}>
+    <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}>
       {access === 'solo' && !wa?.connected && !bannerDismissed && (
         <WhatsAppOptInBanner onConnect={() => setShowConnect(true)} onDismiss={() => setBannerDismissed(true)} />
       )}

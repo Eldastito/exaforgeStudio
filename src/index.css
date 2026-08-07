@@ -83,6 +83,26 @@
   --color-ft-nuvem: #f4f6fc;
   --color-ft-nuvem-muted: #97a6be;
 
+  /* Tokens SEMÂNTICOS do Fala Tu (F9.2) — superfícies/texto que VIRAM entre
+     claro e escuro. Default aqui = ESCURO (Ink), então a FalaTuView renderizada
+     dentro do painel ZappFlow (que nunca aplica .falatu-theme-light) continua
+     idêntica. O tema claro "Nuvem" é o override em .falatu-theme-light abaixo.
+     Os -on-* são a cor de TEXTO de accent sobre pílula tingida (o -300 dos
+     badges some no claro; no claro vira -700). */
+  --color-ft-bg: #0e1a2e;
+  --color-ft-surface: #16243b;
+  --color-ft-surface-2: #1e2f49;
+  --color-ft-surface-3: #26374f;
+  --color-ft-border: #26374f;
+  --color-ft-border-strong: #33475f;
+  --color-ft-text: #f4f6fc;
+  --color-ft-text-muted: #97a6be;
+  --color-ft-text-faint: #6b7a90;
+  --color-ft-on-violet: #c4b5fd;
+  --color-ft-on-amber: #fcd34d;
+  --color-ft-on-red: #fca5a5;
+  --color-ft-on-menta: #6ee7b7;
+
   /* ==== Paleta oficial ZappFlow (Brand Book v1.0) ====
      Aliases pt-BR usados por landing pública e telas legadas. */
   --color-zf-midnight: #07111f;
@@ -125,6 +145,28 @@
 
   --radius-ric-card: 16px;
   --radius-ric-hero: 20px;
+}
+
+/* F9.2 — tema claro "Nuvem" do Fala Tu. Aplicado via classe no <html> SÓ no
+   app standalone (o hook useFalatuTheme). Redefine os tokens semânticos ft-*
+   pra paleta clara; os utilitários bg-ft-surface/text-ft-text/etc. seguem a
+   cascata e viram sozinhos. Os tokens de MARCA (cobalto/coral/menta) não mudam.
+   O painel ZappFlow nunca recebe esta classe → segue no escuro (default). */
+.falatu-theme-light {
+  color-scheme: light;
+  --color-ft-bg: #f4f6fc;
+  --color-ft-surface: #ffffff;
+  --color-ft-surface-2: #eef1f8;
+  --color-ft-surface-3: #e3e8f2;
+  --color-ft-border: #dbe1ee;
+  --color-ft-border-strong: #c7cfe0;
+  --color-ft-text: #0e1a2e;
+  --color-ft-text-muted: #55647c;
+  --color-ft-text-faint: #8b97a8;
+  --color-ft-on-violet: #6d28d9;
+  --color-ft-on-amber: #b45309;
+  --color-ft-on-red: #b91c1c;
+  --color-ft-on-menta: #047857;
 }
 
 @layer base {

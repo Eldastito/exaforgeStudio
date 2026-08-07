@@ -101,5 +101,28 @@ check('FalaTuView (hero) usa FalatuLogo', viewTsx.includes('brand/FalatuLogo') &
 const html = read('index.html');
 check('index.html compartilhado permanece ZappFlow (marca Fala Tu é só runtime)', html.includes('<title>ZappFlow</title>'));
 
+// 9) F9.2 — tema claro "Nuvem" + toggle claro/escuro.
+// Tokens semânticos com DEFAULT escuro (Ink) → painel ZappFlow segue no escuro.
+check('index.css define --color-ft-bg com default ESCURO (Ink)', css.includes('--color-ft-bg: #0e1a2e'));
+check('index.css define --color-ft-surface (dark)', /--color-ft-surface:\s*#/.test(css));
+check('index.css define --color-ft-text (dark)', /--color-ft-text:\s*#/.test(css));
+// Override do tema claro.
+const lightBlock = (read('src/index.css').match(/\.falatu-theme-light\s*\{[^}]*\}/) || [''])[0].toLowerCase();
+check('index.css tem bloco .falatu-theme-light', lightBlock.length > 0);
+check('.falatu-theme-light vira ft-bg pra Nuvem (#f4f6fc)', lightBlock.includes('--color-ft-bg: #f4f6fc'));
+check('.falatu-theme-light vira ft-text pra Ink (#0e1a2e)', lightBlock.includes('--color-ft-text: #0e1a2e'));
+check('.falatu-theme-light seta color-scheme: light', lightBlock.includes('color-scheme: light'));
+// Hook de tema.
+const hook = exists('src/falatu-app/useFalatuTheme.ts') ? read('src/falatu-app/useFalatuTheme.ts') : '';
+check('useFalatuTheme.ts existe', hook.length > 0);
+check('useFalatuTheme alterna a classe .falatu-theme-light', hook.includes("classList.toggle('falatu-theme-light'"));
+check('useFalatuTheme persiste a escolha (localStorage falatu_theme)', hook.includes('falatu_theme'));
+// Toggle nas superfícies.
+check('FalatuApp tem o toggle claro/escuro', appTsx.includes('ThemeToggle') && appTsx.includes('useFalatuTheme'));
+check('FalatuAuth expõe o toggle claro/escuro', authTsx.includes('onToggleTheme'));
+// FalaTuView convertida pra tokens semânticos (sem cor fixa dark).
+check('FalaTuView não tem mais classes zinc/slate fixas', !/\b(bg|text|border)-(zinc|slate)-\d/.test(viewTsx));
+check('FalaTuView usa tokens semânticos ft-* (bg-ft-surface/text-ft-text)', viewTsx.includes('bg-ft-surface') && viewTsx.includes('text-ft-text'));
+
 console.log(failures === 0 ? '\nOK — 100% PASS' : `\nFALHOU — ${failures} checagem(ns)`);
 process.exit(failures === 0 ? 0 : 1);

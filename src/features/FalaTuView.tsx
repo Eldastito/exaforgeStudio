@@ -53,6 +53,40 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
+// Tetos de mídia (base64 no corpo JSON). Alinhados ao parser dedicado
+// /api/falatu do server.ts (12mb) e ao MAX_MEDIA_B64 do backend (9M chars ≈
+// 6.7MB crus). O usuário fotografa à vontade — o cliente reduz antes de enviar.
+const IMAGE_MAX_DIM = 2048;            // lado maior alvo do downscale (px)
+const MAX_SOURCE_IMAGE_BYTES = 30_000_000; // foto de origem antes do downscale
+const MAX_UPLOAD_BYTES = 6_500_000;   // mídia FINAL enviada (após downscale)
+
+// Reduz/recomprime a foto no cliente ANTES de enviar: uma foto crua de celular
+// (vários MB) vira um JPEG limpo — melhor pra IA de visão ler E cabe no
+// payload. Antes o app só REJEITAVA acima de ~1MB; agora ele adapta. Se algo
+// falhar (formato exótico, canvas indisponível), devolve o original e o
+// backend ainda valida o teto.
+async function prepareImage(file: Blob, maxDim: number): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const largest = Math.max(bitmap.width, bitmap.height);
+    const scale = Math.min(1, maxDim / largest);
+    // Já pequena e leve? não recomprime (evita perda desnecessária).
+    if (scale >= 1 && file.size < 1_000_000) { bitmap.close?.(); return file; }
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { bitmap.close?.(); return file; }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.85));
+    return blob && blob.size < file.size ? blob : file;
+  } catch {
+    return file;
+  }
+}
+
 // Cartão de confirmação: o humano revisa (e pode editar) ANTES de materializar.
 const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, onResolved }) => {
   const ents = parseEntities(item);
@@ -394,7 +428,7 @@ export function FalaTuView() {
         setRecSecs(0);
         if (discardRef.current) return;
         const blob = new Blob(chunksRef.current, { type: mime });
-        if (blob.size > 1_300_000) { toast.error('Áudio muito longo (máx ~1MB). Grave um memo mais curto.'); return; }
+        if (blob.size > MAX_UPLOAD_BYTES) { toast.error('Áudio muito longo. Grave um memo mais curto.'); return; }
         const data = await blobToBase64(blob);
         capture({ audio: { mimeType: mime, data } });
       };
@@ -472,10 +506,20 @@ export function FalaTuView() {
           const blob = await fileRes.blob();
           // WhatsApp manda 'audio/ogg; codecs=opus' — o backend quer só o tipo.
           const mime = (fileRes.headers.get('Content-Type') || blob.type || '').split(';')[0].trim();
-          if (blob.size > 1_300_000) { toast.error('Arquivo compartilhado muito grande (máx ~1MB).'); return; }
-          const data = await blobToBase64(blob);
-          if (mime.startsWith('audio/')) { void capture({ audio: { mimeType: mime, data } }); return; }
-          if (mime.startsWith('image/')) { void capture({ image: { mimeType: mime, data } }); return; }
+          if (mime.startsWith('image/')) {
+            if (blob.size > MAX_SOURCE_IMAGE_BYTES) { toast.error('Imagem compartilhada muito grande (máx 30MB).'); return; }
+            const prepared = await prepareImage(blob, IMAGE_MAX_DIM);
+            if (prepared.size > MAX_UPLOAD_BYTES) { toast.error('Imagem compartilhada muito grande mesmo após compressão.'); return; }
+            const data = await blobToBase64(prepared);
+            void capture({ image: { mimeType: prepared.type || 'image/jpeg', data } });
+            return;
+          }
+          if (mime.startsWith('audio/')) {
+            if (blob.size > MAX_UPLOAD_BYTES) { toast.error('Áudio compartilhado muito grande.'); return; }
+            const data = await blobToBase64(blob);
+            void capture({ audio: { mimeType: mime, data } });
+            return;
+          }
           toast.error('Tipo não suportado — compartilhe um áudio, uma foto ou um texto.');
           return;
         }
@@ -493,9 +537,11 @@ export function FalaTuView() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > 1_300_000) { toast.error('Imagem muito grande (máx ~1MB). Comprima antes.'); return; }
-    const data = await blobToBase64(file);
-    capture({ image: { mimeType: file.type || 'image/jpeg', data } });
+    if (file.size > MAX_SOURCE_IMAGE_BYTES) { toast.error('Imagem muito grande (máx 30MB).'); return; }
+    const prepared = await prepareImage(file, IMAGE_MAX_DIM);
+    if (prepared.size > MAX_UPLOAD_BYTES) { toast.error('Imagem muito grande mesmo após compressão. Tente outra foto.'); return; }
+    const data = await blobToBase64(prepared);
+    capture({ image: { mimeType: prepared.type || 'image/jpeg', data } });
   };
 
   const toggleTask = async (t: any) => {
@@ -526,13 +572,15 @@ export function FalaTuView() {
     e.target.value = '';
     const listId = checkListIdRef.current;
     if (!file || !listId) return;
-    if (file.size > 1_300_000) { toast.error('Imagem muito grande (máx ~1MB). Comprima antes.'); return; }
+    if (file.size > MAX_SOURCE_IMAGE_BYTES) { toast.error('Imagem muito grande (máx 30MB).'); return; }
     setCheckingListId(listId);
     try {
-      const data = await blobToBase64(file);
+      const prepared = await prepareImage(file, IMAGE_MAX_DIM);
+      if (prepared.size > MAX_UPLOAD_BYTES) { toast.error('Imagem muito grande mesmo após compressão. Tente outra foto.'); return; }
+      const data = await blobToBase64(prepared);
       const check = await api(`/lists/${listId}/purchase-check`, {
         method: 'POST',
-        body: JSON.stringify({ image: { mimeType: file.type || 'image/jpeg', data } }),
+        body: JSON.stringify({ image: { mimeType: prepared.type || 'image/jpeg', data } }),
       });
       setCheckByListId((p) => ({ ...p, [listId]: check }));
     } catch (e: any) { toast.error(e.message); }

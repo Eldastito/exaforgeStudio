@@ -15,8 +15,9 @@ import { FalaTuCaptureTokenService } from "../FalaTuCaptureTokenService.js";
 // custo de IA já é governado dentro do capture() (PlanService.aiAllowed +
 // ai_usage_ledger, mesma régua da sessão).
 
-// Mesmo teto da rota de sessão (routes/falatu.ts) — o body global é 2mb.
-const MAX_MEDIA_B64 = 1_900_000;
+// Mesmo teto da rota de sessão (routes/falatu.ts) — o parser dedicado
+// /api/falatu-ingest em server.ts é 12mb.
+const MAX_MEDIA_B64 = 9_000_000;
 
 const router = Router();
 

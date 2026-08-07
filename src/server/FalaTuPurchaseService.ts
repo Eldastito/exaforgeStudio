@@ -59,7 +59,7 @@ export class FalaTuPurchaseService {
   static async readInvoice(image: { mimeType: string; data: string }): Promise<InvoiceReading> {
     const llm = await import("./llm.js");
     if (!llm.isAIConfigured()) throw new Error("IA não configurada (OPENAI_API_KEY ausente).");
-    const raw = await llm.extractInvoiceItems(image.data, image.mimeType || "image/jpeg");
+    const raw = await llm.extractInvoiceItems(image.data, image.mimeType || "image/jpeg", "high"); // nota fiscal: números/itens em texto pequeno pedem detalhe alto.
     let parsed: any = {};
     try { parsed = JSON.parse(raw || "{}"); } catch { /* JSON malformado → leitura vazia, nunca 500 */ }
     const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : null);

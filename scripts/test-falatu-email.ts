@@ -10,6 +10,11 @@
  * no_email_channel sem lançar; sendNow ignora janela/dedupe mas exige
  * opt-in + canal + briefing; isolamento multi-tenant.
  *
+ * F11.1: também cobre o remetente de PLATAFORMA (Resend) como fallback quando
+ * a org não tem Google — channelReady via env, envio por HTTP (fetch stubado),
+ * segredo no Authorization (não no payload), e erro do provedor = send_failed
+ * sem marcar entrega.
+ *
  * Transporte de e-mail INJETADO (sem rede); sweep de briefing real; mock só
  * do interpret (sem chave OpenAI). Uso: npm run test:falatu-email
  */
@@ -23,6 +28,10 @@ process.env.DATA_DIR = tmpDir;
 process.env.NODE_ENV = "production";
 process.env.JWT_SECRET = "test-secret-falatu-email-1234567890";
 delete process.env.OPENAI_API_KEY;
+// Determinismo: o remetente de plataforma (F11.1) é env-based — garante que
+// os casos "sem canal" não peguem carona numa env do runner.
+delete process.env.RESEND_API_KEY;
+delete process.env.FALATU_EMAIL_FROM;
 
 let failures = 0;
 const results: { name: string; ok: boolean }[] = [];
@@ -141,6 +150,57 @@ async function main() {
   const before = delivered.length;
   const nowOk = await FalaTuEmailService.sendNow(orgA, userA, { now: NIGHT, send: okSend });
   check("sendNow envia fora da janela e apesar do dedupe do dia", nowOk.sent === 1 && delivered.length === before + 1);
+
+  // ===== 11. Remetente de PLATAFORMA (F11.1): fallback sem Google, via Resend =====
+  // Sem transporte injetado e sem Google, mas COM env de plataforma, o canal
+  // fica pronto e o envio sai por HTTP (fetch stubado — sem rede).
+  process.env.RESEND_API_KEY = "re_test_key";
+  process.env.FALATU_EMAIL_FROM = "FalaTu <briefing@x.test>";
+  const stPlat = await FalaTuEmailService.status(orgA, userA);
+  check("plataforma configurada → channelReady true mesmo sem Google", stPlat.channelReady === true);
+
+  const calls: Array<{ url: string; from: any; to: any; hasAuth: boolean }> = [];
+  const realFetch = (global as any).fetch;
+  (global as any).fetch = async (url: any, init: any) => {
+    let body: any = {}; try { body = JSON.parse(init?.body || "{}"); } catch { /* noop */ }
+    calls.push({ url: String(url), from: body.from, to: body.to, hasAuth: String(init?.headers?.Authorization || "").includes("re_test_key") });
+    return { ok: true, status: 200, text: async () => "" } as any;
+  };
+
+  const orgC = `org_${randomUUID().slice(0, 8)}`;
+  const userC = randomUUID();
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Org C', 'active')`).run(randomUUID(), orgC);
+  FalaTuService.setOrgEnabled(orgC, true);
+  db.prepare(`INSERT INTO users (id, organization_id, name, email, role, global_status) VALUES (?, ?, 'Dono C', 'c@c.test', 'owner', 'active')`).run(userC, orgC);
+  FalaTuEmailService.setEnabled(orgC, userC, true);
+  await FalaTuService.capture(orgC, userC, { text: "pagar fornecedor" });
+  FalaTuBriefingTaskService.run(orgC, { date: DATE_SP });
+  const platPass = await FalaTuEmailService.runDigestPass(orgC, { now: MORNING }); // SEM send injetado
+  check("sem Google, envia pelo remetente de plataforma (Resend)", platPass.sent === 1);
+  check("chamou a API do Resend uma vez", calls.length === 1 && calls[0].url.includes("api.resend.com/emails"));
+  check("Resend recebe from=FALATU_EMAIL_FROM e to=login do usuário", calls[0]?.from === "FalaTu <briefing@x.test>" && Array.isArray(calls[0]?.to) && calls[0]?.to[0] === "c@c.test");
+  check("segredo vai no Authorization (transporte), não no payload", calls[0]?.hasAuth === true);
+  const delC = db.prepare(`SELECT COUNT(*) c FROM falatu_email_deliveries WHERE organization_id = ? AND user_id = ?`).get(orgC, userC) as any;
+  check("entrega via plataforma marcada no dedupe próprio", delC.c === 1);
+
+  // Erro do provedor (HTTP != 2xx) → send_failed, sem marcar (best-effort intacto).
+  (global as any).fetch = async () => ({ ok: false, status: 500, text: async () => "boom" } as any);
+  const orgE = `org_${randomUUID().slice(0, 8)}`;
+  const userE = randomUUID();
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'Org E', 'active')`).run(randomUUID(), orgE);
+  FalaTuService.setOrgEnabled(orgE, true);
+  db.prepare(`INSERT INTO users (id, organization_id, name, email, role, global_status) VALUES (?, ?, 'Dono E', 'e@e.test', 'owner', 'active')`).run(userE, orgE);
+  FalaTuEmailService.setEnabled(orgE, userE, true);
+  await FalaTuService.capture(orgE, userE, { text: "conferir estoque" });
+  FalaTuBriefingTaskService.run(orgE, { date: DATE_SP });
+  const platFail = await FalaTuEmailService.runDigestPass(orgE, { now: MORNING });
+  check("erro do Resend vira send_failed sem lançar", platFail.sent === 0 && platFail.results.some((r) => r.reason === "send_failed"));
+  const delE = db.prepare(`SELECT COUNT(*) c FROM falatu_email_deliveries WHERE organization_id = ?`).get(orgE) as any;
+  check("erro do Resend NÃO marca entrega (retenta no tick seguinte)", delE.c === 0);
+
+  (global as any).fetch = realFetch;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.FALATU_EMAIL_FROM;
 
   // ===== resumo =====
   console.log("");

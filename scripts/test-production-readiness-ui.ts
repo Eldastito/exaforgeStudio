@@ -64,7 +64,7 @@ check("há pelo menos 1 check de cada nível", ["blocker", "recommended", "optio
 // Honestidade que a tela expõe literalmente (não maquiar).
 const email = r.checks.find((c: any) => c.key === "email");
 const push = r.checks.find((c: any) => c.key === "push");
-check("email aparece como NÃO configurado (transporte é TODO)", email && email.ok === false && !!email.hint);
+check("email off sem remetente de plataforma (Resend/FROM não setados)", email && email.ok === false && !!email.hint);
 check("push aparece como configurado (VAPID auto, sem env)", push && push.ok === true);
 
 // Sem segredo no payload — a tela mostra env NAME, nunca valor.

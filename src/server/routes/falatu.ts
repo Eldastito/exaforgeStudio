@@ -35,10 +35,11 @@ router.use(falatuGate);
 const actorId = (req: any) => req.user?.userId || req.user?.id;
 
 // Mídia inline em base64 dentro do JSON. O limite global do body é 2mb
-// (server.ts), então ~1.4MB de mídia real — suficiente pra memos de voz e
-// fotos comprimidas. Validamos aqui pra falhar com mensagem clara em vez do
-// 413 genérico do body-parser.
-const MAX_MEDIA_B64 = 1_900_000;
+// (parser dedicado /api/falatu em server.ts = 12mb), então ~6.7MB de mídia
+// real — foto de celular já reduzida pelo downscale do cliente com qualidade
+// pra IA de visão ler detalhe fino. Validamos aqui pra falhar com mensagem
+// clara em vez do 413 genérico do body-parser.
+const MAX_MEDIA_B64 = 9_000_000;
 
 router.post("/capture", async (req: AuthRequest, res): Promise<any> => {
   const { text, audio, image, source, commandId } = req.body || {};

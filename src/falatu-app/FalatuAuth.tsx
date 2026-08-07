@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { Eye, EyeOff, Smartphone } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
+import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
 
 // ADR-154 F7.1 — tela de auth do app FalaTu STANDALONE (subdomínio dedicado).
 //
@@ -17,6 +18,9 @@ import { Eye, EyeOff, Smartphone } from 'lucide-react';
 // WhatsApp conectar. Não há suíte pra proteger de "cadastro-fantasma"; e
 // persistir já resolve o problema do refresh cair no login. Quem decide se
 // mostra QR ou app é o FalatuApp, checando o status do WhatsApp.
+//
+// F9.1 — identidade oficial: logo Ciclo Inteligente + paleta Cobalto/Ink/Nuvem
+// (tokens --color-ft-*), no lugar do ícone/emerald placeholder.
 
 type Mode = 'login' | 'register';
 
@@ -75,16 +79,20 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
     }
   };
 
+  // Campos e botões usam a paleta oficial via tokens --color-ft-* (Cobalto é a
+  // cor de ação/primária no app; Ink as superfícies; Nuvem o texto).
+  const inputCls =
+    'w-full rounded-md border px-3 py-2 text-[var(--color-ft-nuvem)] placeholder:text-[var(--color-ft-nuvem-muted)] focus:outline-none focus:ring-1';
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-8">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 mb-3">
-            <Smartphone className="w-6 h-6 text-emerald-300" />
-          </div>
-          <h1 className="text-2xl font-bold text-zinc-100">Fala<span className="text-emerald-400">Tu</span></h1>
-          <p className="text-[11px] uppercase tracking-widest text-zinc-500 mt-0.5">Do pensamento para a vida</p>
-          <p className="text-zinc-400 mt-2 text-sm">
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--color-ft-ink)' }}>
+      <div
+        className="w-full max-w-md rounded-2xl shadow-2xl p-8"
+        style={{ background: 'var(--color-ft-ink-2)', border: '1px solid var(--color-ft-line)' }}
+      >
+        <div className="flex flex-col items-center text-center mb-6">
+          <FalatuLogo size={56} tile withWordmark withTagline />
+          <p className="mt-4 text-sm" style={{ color: 'var(--color-ft-nuvem-muted)' }}>
             {mode === 'register' ? 'Crie sua conta e comece falando' : 'Entre na sua conta'}
           </p>
         </div>
@@ -98,41 +106,46 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Nome completo</label>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Nome completo</label>
               <input type="text" required value={name} onChange={e => setName(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                className={inputCls}
+                style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
                 placeholder="Seu nome" />
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">Email</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Email</label>
             <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className={inputCls}
+              style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
               placeholder="voce@exemplo.com" />
           </div>
           {mode === 'register' && (
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Telefone WhatsApp (opcional)</label>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Telefone WhatsApp (opcional)</label>
               <input type="text" value={phone} onChange={e => setPhone(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                className={inputCls}
+                style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
                 placeholder="+55 11 99999-9999" />
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">Senha</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Senha</label>
             <div className="relative">
               <input type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 pr-10 text-zinc-100 placeholder:text-zinc-500 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                className={`${inputCls} pr-10`}
+                style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
                 placeholder={mode === 'register' ? 'Mínimo 8 caracteres, letras e números' : 'Sua senha'} />
               <button type="button" onClick={() => setShowPassword(s => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-ft-nuvem-muted)] hover:text-[var(--color-ft-nuvem)]"
                 tabIndex={-1} aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}>
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
           <button type="submit" disabled={loading}
-            className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white py-2.5 font-medium transition-colors">
+            className="w-full rounded-md text-white py-2.5 font-semibold transition-colors disabled:opacity-60 hover:brightness-110"
+            style={{ background: 'var(--color-ft-cobalto)' }}>
             {loading
               ? (mode === 'register' ? 'Criando conta…' : 'Entrando…')
               : (mode === 'register' ? 'Criar conta' : 'Entrar')}
@@ -142,12 +155,12 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
         <div className="mt-5 text-center">
           {mode === 'login' ? (
             <button onClick={() => { setMode('register'); setError(''); }}
-              className="text-sm text-emerald-400 hover:text-emerald-300">
+              className="text-sm font-medium hover:brightness-110" style={{ color: 'var(--color-ft-cobalto)' }}>
               Não tem conta? Criar agora
             </button>
           ) : (
             <button onClick={() => { setMode('login'); setError(''); }}
-              className="text-sm text-zinc-400 hover:text-zinc-300">
+              className="text-sm hover:brightness-110" style={{ color: 'var(--color-ft-nuvem-muted)' }}>
               Já tem conta? Fazer login
             </button>
           )}

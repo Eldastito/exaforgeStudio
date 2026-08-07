@@ -361,6 +361,7 @@
     "test:falatu-share-target": "tsx scripts/test-falatu-share-target.ts",
     "test:falatu-email": "tsx scripts/test-falatu-email.ts",
     "test:falatu-protocols": "tsx scripts/test-falatu-protocols.ts",
+    "test:falatu-brand": "tsx scripts/test-falatu-brand.ts",
     "test:falatu-memoria": "tsx scripts/test-falatu-memoria.ts",
     "test:falatu-briefing-digest": "tsx scripts/test-falatu-briefing-digest.ts",
     "test:runtime-process-fabric": "tsx scripts/test-runtime-process-fabric.ts",

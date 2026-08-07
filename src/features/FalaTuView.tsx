@@ -3,6 +3,7 @@ import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
+import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
 
 // FalaTu (ADR-151, Fatia 1) — captura multimodal "Fala → Faz → Confere".
 // Visível só pro Master Admin (Sidebar gateia por isMasterAdmin, cosmético);
@@ -728,15 +729,19 @@ export function FalaTuView() {
               sempre que o inbox está limpo — é a "cara" do app. */}
           {pending.length === 0 && !processing && (
             <div className="text-center pt-8 pb-2 space-y-2">
-              <h2 className="text-3xl font-bold text-zinc-100">Fala<span className="text-emerald-400">Tu</span></h2>
+              {/* F9.1 — logo oficial (Ciclo Inteligente + wordmark "Fala Tu")
+                  no lugar do wordmark em texto. As linhas abaixo seguem a
+                  abertura aprovada: tagline + convite. */}
+              <div className="flex justify-center pb-1"><FalatuLogo size={46} withWordmark /></div>
               <p className="text-lg text-zinc-200">Do pensamento para a vida.</p>
               <p className="text-sm text-zinc-400">Me fala que eu te ajudo a cuidar disso.</p>
               <div className="pt-3">
                 <button
                   onClick={() => (recording && recMode === 'auto') ? stopRecording(false) : (!recording ? void startRecording('auto') : undefined)}
+                  style={recording && recMode === 'auto' ? undefined : { background: 'var(--color-ft-cobalto)' }}
                   className={recording && recMode === 'auto'
                     ? 'inline-flex items-center gap-2 rounded-full bg-red-600 hover:bg-red-500 px-8 py-4 text-base font-semibold text-white animate-pulse select-none'
-                    : 'inline-flex items-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-500 px-8 py-4 text-base font-semibold text-white select-none'}>
+                    : 'inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-semibold text-white select-none hover:brightness-110 transition'}>
                   {recording && recMode === 'auto' ? <><Square className="h-5 w-5" /> {recSecs}s — toque para enviar</> : <><Mic className="h-5 w-5" /> Toque para falar</>}
                 </button>
               </div>

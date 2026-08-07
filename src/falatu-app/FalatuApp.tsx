@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { startOutboxFlusher } from '@/src/lib/continuity/sync';
 import { FalatuAuth } from './FalatuAuth';
 import { FalaTuView } from '@/src/features/FalaTuView';
 import { Smartphone, RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft } from 'lucide-react';
@@ -205,6 +206,12 @@ export function FalatuApp() {
   const [access, setAccess] = useState<Access>('checking');
   const [showConnect, setShowConnect] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // F8.2 — o standalone não passa pelo App.tsx da suíte (que já roda o
+  // flusher do outbox): liga aqui o reenvio das capturas offline ao montar,
+  // ao voltar 'online' e no intervalo de segurança. O sender de
+  // FALATU_CAPTURE registra no import da FalaTuView (cadeia estática).
+  useEffect(() => startOutboxFlusher(), []);
 
   // Ao ganhar sessão: classifica o acesso (entitlements) + status do WhatsApp
   // numa rodada só. Decide a rota sem nunca chamar provision pra org não-solo.

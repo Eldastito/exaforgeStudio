@@ -241,9 +241,9 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 6.3 | Pending | — |
 | 7.1 | In Progress | — |
 | 8.1 | MERGED | #809 |
-| 8.2 | Pending | — |
+| 8.2 | In Progress | — |
 | 8.3 | Pending | — |
-| 8.4 | In Progress | — |
+| 8.4 | MERGED | #810 |
 | 8.5 | Pending | — |
 | 8.6 | Pending | — |
 | 8.7 | Pending | — |

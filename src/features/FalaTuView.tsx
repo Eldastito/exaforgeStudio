@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC, type PointerEvent as ReactPointerEvent } from 'react';
 import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
+import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
 
 // FalaTu (ADR-151, Fatia 1) — captura multimodal "Fala → Faz → Confere".
 // Visível só pro Master Admin (Sidebar gateia por isMasterAdmin, cosmético);
@@ -269,6 +270,14 @@ export function FalaTuView() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const checkFileRef = useRef<HTMLInputElement | null>(null);
   const checkListIdRef = useRef<string | null>(null);
+  // F8.2 — press-and-hold + deep link + fila offline.
+  const [recMode, setRecMode] = useState<'hold' | 'auto'>('hold');
+  const [recSecs, setRecSecs] = useState(0);
+  const [queuedCount, setQueuedCount] = useState(0);
+  const discardRef = useRef(false);      // onstop descarta em vez de enviar (toque acidental)
+  const heldRef = useRef(false);         // ponteiro ainda pressionado? (getUserMedia é assíncrono)
+  const recStartRef = useRef(0);
+  const recTimerRef = useRef<number | null>(null);
 
   const loadPending = useCallback(() => {
     api('/inbox?status=pending').then((d) => setPending(Array.isArray(d) ? d : [])).catch(() => {});
@@ -288,6 +297,17 @@ export function FalaTuView() {
   useEffect(() => { loadPending(); }, [loadPending]);
   useEffect(() => { loadTab(); }, [loadTab]);
 
+  const refreshQueued = useCallback(() => { pendingFalatuCount().then(setQueuedCount).catch(() => {}); }, []);
+
+  // F8.2 — quando o flusher entrega uma captura enfileirada, o sender dispara
+  // este evento (desacopla de QUEM roda o flusher: App da suíte ou FalatuApp).
+  useEffect(() => {
+    refreshQueued();
+    const onSynced = () => { refreshQueued(); loadPending(); };
+    window.addEventListener('falatu:outbox-sent', onSynced);
+    return () => window.removeEventListener('falatu:outbox-sent', onSynced);
+  }, [refreshQueued, loadPending]);
+
   const capture = async (payload: any) => {
     setProcessing(true);
     try {
@@ -295,7 +315,18 @@ export function FalaTuView() {
       setText('');
       loadPending();
     } catch (e: any) {
-      toast.error(e.message);
+      // F8.2 — sem rede a captura NÃO se perde: vai pro outbox (ADR-082) e o
+      // flusher reenvia com commandId (o backend deduplica — nunca duplica).
+      if (isNetworkError(e)) {
+        try {
+          await enqueueCapture(crypto.randomUUID(), payload);
+          setText('');
+          refreshQueued();
+          toast.info('Sem conexão — captura guardada. Envio automático quando a internet voltar.');
+        } catch { toast.error('Sem conexão e não deu pra guardar a captura. Tente de novo.'); }
+      } else {
+        toast.error(e.message);
+      }
     } finally {
       setProcessing(false);
     }
@@ -303,15 +334,19 @@ export function FalaTuView() {
 
   const sendText = () => { if (text.trim()) capture({ text }); };
 
-  const startRecording = async () => {
+  const startRecording = async (mode: 'hold' | 'auto') => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
       const rec = new MediaRecorder(stream, { mimeType: mime });
       chunksRef.current = [];
+      discardRef.current = false;
       rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (recTimerRef.current) { window.clearInterval(recTimerRef.current); recTimerRef.current = null; }
+        setRecSecs(0);
+        if (discardRef.current) return;
         const blob = new Blob(chunksRef.current, { type: mime });
         if (blob.size > 1_300_000) { toast.error('Áudio muito longo (máx ~1MB). Grave um memo mais curto.'); return; }
         const data = await blobToBase64(blob);
@@ -319,12 +354,56 @@ export function FalaTuView() {
       };
       rec.start();
       mediaRecorderRef.current = rec;
+      recStartRef.current = Date.now();
+      recTimerRef.current = window.setInterval(() => setRecSecs(Math.floor((Date.now() - recStartRef.current) / 1000)), 250);
+      setRecMode(mode);
       setRecording(true);
+      // getUserMedia é assíncrono: se o dedo já soltou enquanto o navegador
+      // pedia permissão, não deixa a gravação rodando "sozinha".
+      if (mode === 'hold' && !heldRef.current) stopRecording(true);
     } catch {
       toast.error('Não foi possível acessar o microfone.');
     }
   };
-  const stopRecording = () => { mediaRecorderRef.current?.stop(); setRecording(false); };
+
+  const stopRecording = (discard = false) => {
+    if (!mediaRecorderRef.current) return;
+    discardRef.current = discard;
+    mediaRecorderRef.current.stop();
+    mediaRecorderRef.current = null;
+    setRecording(false);
+  };
+
+  // Press-and-hold (estilo WhatsApp): segura → grava; solta → envia. Toque
+  // mais curto que 500ms é quase sempre acidental — descarta e ensina o gesto
+  // (melhor que mandar áudio vazio pra IA, que custa).
+  const holdStart = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (processing || recording) return;
+    heldRef.current = true;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    void startRecording('hold');
+  };
+  const holdEnd = () => {
+    heldRef.current = false;
+    if (!recording || recMode !== 'hold') return;
+    const heldMs = Date.now() - recStartRef.current;
+    if (heldMs < 500) { stopRecording(true); toast.info('Segure o botão enquanto fala; solte pra enviar.'); }
+    else stopRecording(false);
+  };
+
+  // F8.2 — deep link ?rec=1: adesivo NFC/atalho abre o app JÁ gravando (modo
+  // 'auto': toque pra parar e enviar). O parâmetro sai do histórico pra
+  // refresh não disparar gravação de novo sozinho.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('rec') !== '1') return;
+    params.delete('rec');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    void startRecording('auto');
+    // roda uma vez no mount — startRecording estável o suficiente pra isto
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onImage = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -450,23 +529,33 @@ export function FalaTuView() {
               </button>
             </div>
             <div className="flex gap-2">
-              {!recording ? (
-                <button onClick={startRecording} disabled={processing}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50">
-                  <Mic className="h-4 w-4" /> Gravar áudio
-                </button>
-              ) : (
-                <button onClick={stopRecording}
-                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 hover:bg-red-500 px-3 py-2 text-sm font-semibold text-white animate-pulse">
-                  <Square className="h-4 w-4" /> Parar e enviar
-                </button>
-              )}
+              {/* F8.2 — um só nó no DOM pros dois estados: trocar de elemento no
+                  meio do gesto derrubaria o pointer capture do press-and-hold. */}
+              <button
+                onPointerDown={holdStart}
+                onPointerUp={holdEnd}
+                onPointerCancel={holdEnd}
+                onClick={recording && recMode === 'auto' ? () => stopRecording(false) : undefined}
+                onContextMenu={(e) => e.preventDefault()}
+                disabled={processing && !recording}
+                className={recording
+                  ? 'inline-flex items-center gap-2 rounded-lg bg-red-600 hover:bg-red-500 px-3 py-2 text-sm font-semibold text-white animate-pulse touch-none select-none'
+                  : 'inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50 touch-none select-none'}>
+                {recording
+                  ? (<><Square className="h-4 w-4" /> {recSecs}s — {recMode === 'hold' ? 'solte pra enviar' : 'toque pra enviar'}</>)
+                  : (<><Mic className="h-4 w-4" /> Segurar pra falar</>)}
+              </button>
               <button onClick={() => fileInputRef.current?.click()} disabled={processing}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50">
                 <ImageIcon className="h-4 w-4" /> Foto / Nota
               </button>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onImage} />
             </div>
+            {queuedCount > 0 && (
+              <p className="text-xs text-amber-300">
+                {queuedCount} captura{queuedCount > 1 ? 's' : ''} aguardando conexão — envio automático quando a internet voltar.
+              </p>
+            )}
           </div>
 
           {pending.length === 0 && !processing && (

@@ -29,8 +29,9 @@ router.post("/capture", async (req, res): Promise<any> => {
   if (!FalaTuService.orgEnabled(tok.orgId)) {
     return res.status(403).json({ error: "FalaTu não está habilitado para esta organização." });
   }
-  const { text, audio, image, source } = req.body || {};
+  const { text, audio, image, source, commandId } = req.body || {};
   if (text !== undefined && typeof text !== "string") return res.status(400).json({ error: "text deve ser string." });
+  if (commandId !== undefined && typeof commandId !== "string") return res.status(400).json({ error: "commandId deve ser string." });
   for (const [name, media] of [["audio", audio], ["image", image]] as const) {
     if (media === undefined) continue;
     if (typeof media?.mimeType !== "string" || typeof media?.data !== "string") {
@@ -40,7 +41,7 @@ router.post("/capture", async (req, res): Promise<any> => {
   }
   if (audio && image) return res.status(400).json({ error: "Envie áudio OU imagem, não ambos." });
   try {
-    res.json(await FalaTuService.capture(tok.orgId, tok.userId, { text, audio, image, source }));
+    res.json(await FalaTuService.capture(tok.orgId, tok.userId, { text, audio, image, source, commandId }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

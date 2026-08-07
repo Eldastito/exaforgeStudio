@@ -7740,6 +7740,23 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_falatu_capture_tokens_user
       ON falatu_capture_tokens(organization_id, user_id);
   `);
+
+  // ADR-154 F8.2 — idempotência de reenvio da fila offline (outbox ADR-082):
+  // o cliente manda um commandId e o capture deduplica por
+  // (org, user, client_command_id) — reenvio após queda de rede nunca duplica
+  // item nem paga extração de IA duas vezes. Unique PARCIAL: capturas sem
+  // commandId (fluxo online normal, WhatsApp) seguem ilimitadas com NULL.
+  try {
+    const cols = db.prepare(`PRAGMA table_info(falatu_inbox_items)`).all() as any[];
+    if (!cols.some((c: any) => c.name === "client_command_id")) {
+      db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN client_command_id TEXT`);
+    }
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_falatu_inbox_client_command
+        ON falatu_inbox_items(organization_id, user_id, client_command_id)
+        WHERE client_command_id IS NOT NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao adicionar client_command_id (ADR-154 F8.2)', e); }
 };
 
 initDb();

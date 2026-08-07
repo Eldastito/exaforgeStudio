@@ -44,7 +44,8 @@ async function main() {
 
   // ===== 2. falatu.webmanifest — share_target completo =====
   const falatuManifest = JSON.parse(read("public/falatu.webmanifest"));
-  check("manifest FalaTu: name", falatuManifest.name === "FalaTu");
+  // F9.1 — nome oficial da marca é "Fala Tu" (duas palavras, Brand Book v1.0).
+  check("manifest FalaTu: name", falatuManifest.name === "Fala Tu");
   check("manifest FalaTu: display standalone", falatuManifest.display === "standalone");
   check("manifest FalaTu: tem ícones", Array.isArray(falatuManifest.icons) && falatuManifest.icons.length >= 2);
   const st = falatuManifest.share_target;

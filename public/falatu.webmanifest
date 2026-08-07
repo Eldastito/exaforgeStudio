@@ -1,21 +1,28 @@
 {
-  "name": "FalaTu",
-  "short_name": "FalaTu",
-  "description": "Fala → Faz → Confere. Capture por voz, foto ou texto — a IA organiza, você confirma.",
+  "name": "Fala Tu",
+  "short_name": "Fala Tu",
+  "description": "Do pensamento para a vida. Fala → Faz → Confere: capture por voz, foto ou texto — a IA organiza, você confirma.",
   "start_url": "/",
   "display": "standalone",
-  "theme_color": "#09090b",
-  "background_color": "#09090b",
+  "theme_color": "#0e1a2e",
+  "background_color": "#0e1a2e",
   "icons": [
     {
-      "src": "/brand/favicon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png"
+      "src": "/falatu-brand/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
     },
     {
-      "src": "/brand/favicon-512x512.png",
+      "src": "/falatu-brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/falatu-brand/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ],
   "share_target": {

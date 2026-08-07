@@ -3,7 +3,30 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { startOutboxFlusher } from '@/src/lib/continuity/sync';
 import { FalatuAuth } from './FalatuAuth';
 import { FalaTuView } from '@/src/features/FalaTuView';
-import { Smartphone, RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft } from 'lucide-react';
+import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
+import { RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft } from 'lucide-react';
+
+// F9.1 — branding de documento em RUNTIME (não em index.html, que segue
+// ZappFlow pra suíte). Roda só aqui, no app standalone: título, theme-color
+// Ink, favicon e manifest oficiais do Fala Tu. Idempotente (cria a <link> uma
+// vez, reusa depois). Mantém as duas marcas separadas na MESMA casca HTML.
+function applyFalatuDocumentBrand() {
+  try {
+    document.title = 'Fala Tu — Do pensamento para a vida';
+    const setLink = (rel: string, href: string, extra?: Record<string, string>) => {
+      let el = document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
+      if (!el) { el = document.createElement('link'); el.rel = rel; document.head.appendChild(el); }
+      el.href = href;
+      if (extra) for (const [k, v] of Object.entries(extra)) el.setAttribute(k, v);
+    };
+    setLink('icon', '/falatu-brand/icon.svg', { type: 'image/svg+xml' });
+    setLink('apple-touch-icon', '/falatu-brand/apple-touch-icon.png');
+    setLink('manifest', '/falatu.webmanifest');
+    let theme = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (!theme) { theme = document.createElement('meta'); theme.name = 'theme-color'; document.head.appendChild(theme); }
+    theme.content = '#0e1a2e';
+  } catch { /* branding é cosmético — nunca derruba o app */ }
+}
 
 // ADR-154 F7.1 — root do app FalaTu STANDALONE (subdomínio dedicado).
 //
@@ -37,17 +60,16 @@ type Access = 'checking' | 'solo' | 'shared' | 'denied';
 
 function Shell({ email, onLogout, children }: { email?: string; onLogout: () => void; children: React.ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-950">
-      <header className="flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-950/80 px-4 backdrop-blur-sm shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-            <Smartphone className="w-4 h-4 text-emerald-300" />
-          </span>
-          <span className="font-semibold text-zinc-100">Fala<span className="text-emerald-400">Tu</span></span>
-        </div>
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-ft-ink)' }}>
+      <header
+        className="flex h-14 items-center justify-between px-4 backdrop-blur-sm shrink-0"
+        style={{ borderBottom: '1px solid var(--color-ft-line)', background: 'color-mix(in srgb, var(--color-ft-ink) 80%, transparent)' }}
+      >
+        <FalatuLogo size={28} withWordmark />
         <div className="flex items-center gap-3">
-          {email && <span className="text-xs text-zinc-500 hidden sm:inline">{email}</span>}
-          <button onClick={onLogout} className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200" title="Sair">
+          {email && <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-ft-nuvem-muted)' }}>{email}</span>}
+          <button onClick={onLogout}
+            className="flex items-center gap-1.5 text-sm text-[var(--color-ft-nuvem-muted)] hover:text-[var(--color-ft-nuvem)]" title="Sair">
             <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Sair</span>
           </button>
         </div>
@@ -139,7 +161,7 @@ function FalatuConnect({ token, onConnected, onBack }: { token: string; onConnec
 
         <div className="flex flex-col items-center gap-2 mt-4">
           <button type="button" onClick={provision} disabled={provisioning}
-            className="text-sm text-emerald-400 hover:text-emerald-300 flex items-center gap-1 disabled:opacity-50">
+            className="text-sm text-ft-menta hover:brightness-110 flex items-center gap-1 disabled:opacity-50">
             <RefreshCw className={`w-3 h-3 ${provisioning ? 'animate-spin' : ''}`} />
             {provisioning ? 'Gerando…' : qr ? 'Gerar QR novamente' : 'Gerar QR agora'}
           </button>
@@ -156,13 +178,13 @@ function FalatuConnect({ token, onConnected, onBack }: { token: string; onConnec
 // volta pra conexão — dispensa permanente trancaria o usuário fora do plugue.
 function WhatsAppOptInBanner({ onConnect, onDismiss }: { onConnect: () => void; onDismiss: () => void }) {
   return (
-    <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2.5">
-      <MessageCircle className="w-4 h-4 text-emerald-300 shrink-0" />
-      <p className="flex-1 text-xs text-zinc-300">
+    <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-ft-menta/25 bg-ft-menta/5 px-3 py-2.5">
+      <MessageCircle className="w-4 h-4 text-ft-menta shrink-0" />
+      <p className="flex-1 text-xs" style={{ color: 'var(--color-ft-nuvem)' }}>
         Quer capturar mandando áudio pelo WhatsApp também? Conecte seu número quando quiser.
       </p>
       <button type="button" onClick={onConnect}
-        className="text-xs font-medium text-emerald-400 hover:text-emerald-300 shrink-0">
+        className="text-xs font-medium text-ft-menta hover:brightness-110 shrink-0">
         Conectar
       </button>
       <button type="button" onClick={onDismiss} title="Agora não"
@@ -187,7 +209,8 @@ function FalatuNoAccess({ email, onLogout }: { email?: string; onLogout: () => v
         </p>
         <div className="flex flex-col gap-2 max-w-xs mx-auto">
           <button onClick={onLogout}
-            className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm py-2.5 font-medium">
+            className="w-full rounded-md text-white text-sm py-2.5 font-medium hover:brightness-110"
+            style={{ background: 'var(--color-ft-cobalto)' }}>
             Sair e criar uma conta FalaTu (outro email)
           </button>
           <a href="https://zapflowia.tesseractauto.com.br"
@@ -212,6 +235,9 @@ export function FalatuApp() {
   // ao voltar 'online' e no intervalo de segurança. O sender de
   // FALATU_CAPTURE registra no import da FalaTuView (cadeia estática).
   useEffect(() => startOutboxFlusher(), []);
+
+  // F9.1 — aplica a marca oficial ao documento assim que o app standalone monta.
+  useEffect(() => { applyFalatuDocumentBrand(); }, []);
 
   // Ao ganhar sessão: classifica o acesso (entitlements) + status do WhatsApp
   // numa rodada só. Decide a rota sem nunca chamar provision pra org não-solo.
@@ -242,14 +268,14 @@ export function FalatuApp() {
   }, [token]);
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-zinc-950"><Loader2 className="w-8 h-8 text-emerald-400 animate-spin" /></div>;
+    return <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--color-ft-ink)' }}><Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-ft-cobalto)' }} /></div>;
   }
   if (!user || !token) return <FalatuAuth />;
 
   if (access === 'checking') {
     return (
       <Shell email={user.email} onLogout={logout}>
-        <div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 text-emerald-400 animate-spin" /></div>
+        <div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-ft-cobalto)' }} /></div>
       </Shell>
     );
   }

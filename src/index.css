@@ -66,6 +66,23 @@
   --color-text-strong: #f5f8fc;
   --color-text-muted: #9baec1;
 
+  /* ==== Paleta oficial Fala Tu (Brand Book v1.0, ADR-154) ====
+     Marca do app STANDALONE, distinta da ZappFlow. "Ciclo Inteligente":
+     Cobalto (marca-mãe) + Coral (ação/energia) + Menta (conclusão/confiança)
+     sobre Ink; Nuvem é o claro. Tokens só consumidos pelos arquivos do FalaTu
+     (falatu-app/*, FalatuLogo, hero da FalaTuView) — não vazam pro ZappFlow. */
+  --color-ft-cobalto: #3b4de0;
+  --color-ft-cobalto-strong: #2e3ec4;
+  --color-ft-coral: #ff6a4d;
+  --color-ft-coral-strong: #f0522e;
+  --color-ft-menta: #12b981;
+  --color-ft-menta-strong: #0e9e6e;
+  --color-ft-ink: #0e1a2e;
+  --color-ft-ink-2: #16243b;
+  --color-ft-line: #26374f;
+  --color-ft-nuvem: #f4f6fc;
+  --color-ft-nuvem-muted: #97a6be;
+
   /* ==== Paleta oficial ZappFlow (Brand Book v1.0) ====
      Aliases pt-BR usados por landing pública e telas legadas. */
   --color-zf-midnight: #07111f;

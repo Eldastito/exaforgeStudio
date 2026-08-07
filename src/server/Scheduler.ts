@@ -587,6 +587,26 @@ export class Scheduler {
     }
   }
 
+  /**
+   * ADR-154 F8.6 — entrega do briefing por e-mail. Terceira porta, dedupe
+   * próprio; só varre orgs com alguém de opt-in ligado. O transporte (Gmail
+   * da conexão Google da org) é resolvido dentro do service; org sem conexão
+   * pula com no_email_channel sem tentar. Best-effort por org.
+   */
+  static async falatuEmailDigestPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT DISTINCT organization_id FROM falatu_email_optins WHERE enabled = 1`).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    const { FalaTuEmailService } = await import("./FalaTuEmailService.js");
+    for (const o of orgs) {
+      try { await FalaTuEmailService.runDigestPass(o.organization_id, { now }); }
+      catch (e) { console.error("[FalaTu] entrega de briefing por e-mail falhou", o.organization_id, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -675,6 +695,7 @@ export class Scheduler {
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));
+    await this.falatuEmailDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por e-mail falhou', e));
     try { this.confirmationTimeoutPass(); } catch (e: any) { console.error('[Scheduler] sweep de timeouts de Confirmation falhou', e?.message); }
     // ADR-152 F4b.3 — cadência multi-tentativa de cobrança (T2/T3). Opt-in
     // por org via `collection_cadence_enabled=1`. Fica DEPOIS de

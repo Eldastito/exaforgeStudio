@@ -209,6 +209,27 @@ router.post("/briefing/push/send-now", async (req: AuthRequest, res): Promise<an
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ── F8.6: porta E-MAIL do briefing — opt-in por usuário, destino é o e-mail
+// de login dele (nunca há destinatário arbitrário). Digest/janela/sinal são
+// os MESMOS das portas WA/push. ──
+
+router.get("/briefing/email", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuEmailService } = await import("../FalaTuEmailService.js");
+  res.json(await FalaTuEmailService.status(req.organizationId!, actorId(req)));
+});
+
+router.post("/briefing/email", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuEmailService } = await import("../FalaTuEmailService.js");
+  try { res.json(FalaTuEmailService.setEnabled(req.organizationId!, actorId(req), !!req.body?.enabled)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/briefing/email/send-now", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuEmailService } = await import("../FalaTuEmailService.js");
+  try { res.json(await FalaTuEmailService.sendNow(req.organizationId!, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // ── F8.4: tokens pessoais de captura. A GESTÃO exige sessão (estas rotas);
 // a INGESTÃO autenticada por token vive em /api/falatu-ingest (fora do
 // protectedApi). O claro do token só aparece na resposta do create. ──

@@ -7800,6 +7800,32 @@ const initDb = () => {
       UNIQUE (organization_id, user_id, briefing_date)
     );
   `);
+
+  // ADR-154 F8.6 — briefing por e-mail (terceira porta do digest).
+  // falatu_email_optins: opt-in POR USUÁRIO (destino é o e-mail de login
+  //   dele — não há canal de org a proteger como no WA). Desligar é UPDATE
+  //   enabled=0 (convenção nº 9: a linha fica como trilha do opt-in).
+  // falatu_email_deliveries: dedupe por (org, user, dia) SEPARADO das outras
+  //   portas (WA/push) — opt-ins independentes, o dono pode receber nas três.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS falatu_email_optins (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (organization_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS falatu_email_deliveries (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      briefing_date TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (organization_id, user_id, briefing_date)
+    );
+  `);
 };
 
 initDb();

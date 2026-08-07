@@ -240,6 +240,15 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 6.2 | Pending | — |
 | 6.3 | Pending | — |
 | 7.1 | In Progress | — |
+| 8.1 | Pending | — |
+| 8.2 | Pending | — |
+| 8.3 | Pending | — |
+| 8.4 | Pending | — |
+| 8.5 | Pending | — |
+| 8.6 | Pending | — |
+| 8.7 | Pending | — |
+| 8.8 | Se demanda | — |
+| 8.9 | Roadmap | — |
 
 ## Fase 7 — FalaTu standalone por subdomínio (decidido 2026-08-06)
 
@@ -267,3 +276,152 @@ superfície confusa.
   próprio (reusa ADR-091 billing).
 - **F4.1e** (pending) — corrige QR vazio do Evolution GO (sequência
   connect→qr; precisa debug ao vivo contra a instância de produção).
+
+## Fase 8 — Canal-agnóstico: browser-first + plugues de captura + Protocolos (decidido 2026-08-07)
+
+### Contexto e motivação
+
+O pareamento por QR do Evolution GO **nunca funcionou de forma confiável** —
+nem no FalaTu Solo, nem no ZappFlow (onde cada número novo é cadastrado
+manualmente direto na Evolution). Quatro fatias de conserto (F4.1c/d/e/f —
+parse do QR, token no payload, client whatsmeow zumbi, auto-heal
+DELETE+recreate) atacaram sintomas. A causa provável do "QR gera mas não
+conecta" é sistêmica: protocolo whatsmeow defasado no fork e/ou QR expirado na
+tela (o QR do WhatsApp rotaciona a cada ~20s; o evento `QRCODE` chega no
+webhook e **não é consumido** — a UI mostra snapshot estático do `GetQr`).
+Decisão do dono (2026-08-07): **o FalaTu não pode ser refém do WhatsApp.**
+
+A auditoria do repo mostrou que a libertação já está ~90% construída:
+
+- `POST /api/falatu/capture` aceita texto, áudio (base64) e imagem por HTTP
+  puro desde a ADR-151 F1 — transcrição, extração, inbox, confirmação, memória
+  e metering são todos agnósticos de canal.
+- A `FalaTuView` já grava áudio pelo navegador (MediaRecorder → capture) e
+  envia foto.
+- A infra de PWA (manifest + service worker) existe desde a ADR-082.
+- O único bloqueio real: a máquina de estados do standalone (F7.1) tranca o
+  usuário Solo atrás da tela de QR — quem nunca pareou WhatsApp **nunca chega
+  no app que já funciona sem WhatsApp**.
+
+### Decisão de arquitetura — "caixa de entrada universal"
+
+O FalaTu deixa de ter canal-fundação e passa a ter **plugues**. Todo canal é um
+adaptador fino sobre 3 funções:
+
+1. **ingest** → alimenta `FalaTuService.capture()` (que já é HTTP);
+2. **confere** → devolve a confirmação no canal de origem (ou na própria UI);
+3. **push** → entrega o briefing (adapters no `FalaTuBriefingDigestService`).
+
+O **browser (PWA) vira o canal primário do Solo**. O WhatsApp é rebaixado a
+plugue opcional — a Evolution sai do caminho crítico do onboarding (cadastro →
+falar, sem QR). Nenhum plugue cria tabela própria de fila/alerta (convenção
+nº 12: sinais via `business_signals`; jobs via `JobQueue`).
+
+### Fatias
+
+- **F8.1 — Browser-first no standalone.** Inverte o gate do `FalatuApp.tsx`:
+  acesso `solo` vai DIRETO pra `FalaTuView` (o app já funcional); a conexão
+  WhatsApp vira card opcional dentro do app ("Conectar WhatsApp pra capturar
+  de lá também"), não um porteiro. Onboarding cai de "cadastro → QR → reza"
+  pra "cadastro → fala". Fatia mínima, destrava o produto hoje.
+
+- **F8.2 — Captura instantânea (PTT + deep link + offline).** Botão
+  press-and-hold com feedback de gravação; parâmetro `?rec=1` que abre o app
+  JÁ gravando (habilita o adesivo NFC no balcão e atalhos de tela inicial —
+  uma etiqueta NFC guarda essa URL; encostar o celular abre o app gravando);
+  fila offline via service worker (captura sem sinal, sincroniza ao
+  reconectar — coisa que o canal WhatsApp nunca entregou).
+
+- **F8.3 — Briefing por Web Push.** Nova tabela aditiva
+  `falatu_push_subscriptions` (endpoint + chaves por user/org) + adapter de
+  entrega no `FalaTuBriefingDigestService` (mesmo molde do digest WA da
+  ADR-151 F6). Opt-in explícito (RN-154 §3). WhatsApp segue como porta
+  alternativa quando conectado.
+
+- **F8.4 — Token pessoal de captura (API aberta).** Tabela aditiva
+  `falatu_capture_tokens` — token longevo por usuário, escopo EXCLUSIVO de
+  `POST /capture` (write-only: não lê inbox, não confirma, não acessa nada
+  além de criar item `pending`). Revogável na Config. É a fundação dos
+  plugues externos: Atalho Siri, Share Target, NFC, Zapier/n8n/ERP. Vazamento
+  do token no pior caso enche o inbox de pendentes — nunca vaza dado (a
+  leitura continua exigindo sessão).
+
+- **F8.5 — Atalho Siri (iOS) + Share Target (Android).** Arquivo `.shortcut`
+  oficial ("E aí Siri, FalaTu" → grava áudio → POST `/capture` com o token da
+  F8.4) + `share_target` no manifest do PWA (compartilhar áudio/foto/texto de
+  QUALQUER app — inclusive um áudio encaminhado do WhatsApp — direto pro
+  FalaTu, sem Evolution). Captura onipresente sem mensageiro nenhum.
+
+- **F8.6 — Briefing por e-mail.** Terceiro adapter de entrega do digest
+  (molde ADR-144). Todo mundo tem e-mail; custo ~zero; nenhuma dependência de
+  mensageiro ou push.
+
+- **F8.7 — Protocolos (tarefas pré-configuradas ativáveis por voz).** O
+  usuário pré-configura na Config uma tarefa nomeada com ação pré-autorizada;
+  a ativação por voz dispara a ação. Caso-bandeira: **"protocolo de
+  segurança"** — a chamada de resgate. O usuário ativa ("FalaTu, protocolo de
+  segurança"), o telefone DELE toca em N minutos; se estiver tudo bem, ignora;
+  se precisar sair de uma situação desconfortável, "pede licença pra atender"
+  e sai com elegância. Tabelas aditivas:
+
+  ```
+  falatu_protocols: id, organization_id, user_id, name, name_norm,
+    action_kind ('call_me' — único no MVP), delay_minutes (default 5),
+    phone_e164, phone_verified_at (nullable), enabled (default 1),
+    created_at, updated_at
+  falatu_protocol_activations: id, organization_id, user_id, protocol_id,
+    source (canal da ativação), requested_at, scheduled_for,
+    status (scheduled|fired|cancelled|failed), provider_call_id (nullable)
+  ```
+
+  Execução: ativação agenda job (`JobQueue` + `Scheduler`) que dispara a
+  ligação via adapter de telefonia (`TelephonyService` — provider Twilio ou
+  Zenvia, decisão na fatia) pro número **verificado do próprio usuário**.
+  "Cancela o protocolo" dentro da janela cancela o job.
+
+  **Guardrails dos Protocolos (duros, testados):**
+  - A IA NUNCA cria/edita/apaga protocolo — CRUD é humano, na Config.
+  - Reconhecimento da ativação é por **regra de código** (match de
+    `name_norm` exato/por prefixo na transcrição — mesmo molde
+    determinístico da desambiguação F5 da ADR-151), nunca palpite de IA.
+    Match ambíguo (2+) pergunta; 0 match → captura segue fluxo normal.
+  - Ligação SÓ pro número do próprio usuário, verificado por código.
+    `phone_e164` sem `phone_verified_at` → protocolo não ativa. NÃO existe
+    campo de destino arbitrário em nenhuma rota — o vetor "usar o FalaTu pra
+    ligar/importunar terceiros" é impossível por construção.
+  - Toda ativação auditada (`logAuthEvent` + linha em
+    `falatu_protocol_activations`; nunca DELETE — cancelamento é UPDATE).
+  - Falha do provider nunca derruba a captura (convenção nº 7) — marca
+    `status='failed'` + sinal `falatu_protocol_failed` em `business_signals`.
+  - Custo de telefonia NÃO sai do saldo de tokens de IA (é custo de
+    provider, rastreado na activation; ledger próprio se escalar).
+  - Feature flag `falatu_protocols_enabled` opt-in por org (convenção nº 10).
+
+- **F8.8 — Telegram bot adapter** *(se demanda)*. API oficial, token em
+  minutos, sem QR. Os botões inline são upgrade sobre o WhatsApp pro Confere
+  (`[Confirmar] [Editar] [Descartar]`) e pro "qual Carlos?".
+
+- **F8.9 — WhatsApp oficial (Cloud API, número-bot)** *(roadmap)*. Número
+  ÚNICO da plataforma na Cloud API oficial da Meta; usuário manda áudio PRO
+  FalaTu; vínculo por deep link `wa.me/<numero>?text=<código>` — um toque,
+  zero QR, zero instância por org, zero risco de ban. Quando entrar, a
+  Evolution é **aposentada no FalaTu** (segue existindo só no ZappFlow, onde
+  número próprio do cliente é requisito — destravar o pareamento de lá é
+  assunto de infra/bridge, fora deste ADR).
+
+### Guardrails RN-154 §8
+
+Além dos guardrails por fatia acima: nenhum plugue novo relaxa os guardrails
+existentes — captura de qualquer canal entra como `pending` (RN-151: a IA
+nunca materializa nada sozinha), o metering da Fase 1 se aplica igual
+(transcrição de áudio do PWA custa o mesmo que custava vindo do WhatsApp), e o
+isolamento `organization_id + user_id` é obrigatório em toda tabela nova.
+
+### Retrocompatibilidade
+
+100% aditiva. O fluxo QR/Evolution continua existindo e funcional (vira card
+opcional); org suíte não muda nada; `falatu_protocols_enabled=0` default;
+nenhuma coluna alterada, só tabelas novas no fim do `db.ts` (convenção nº 2).
+
+**Ordem recomendada:** 8.1 → 8.4 → 8.2 → 8.3 → 8.5 → 8.6 → 8.7 → (8.8/8.9
+quando decidido).

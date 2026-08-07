@@ -3,6 +3,7 @@ import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
+import { FalaTuCaptureTokenService } from "../FalaTuCaptureTokenService.js";
 import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
 import { FalaTuBriefingTaskService } from "../FalaTuBriefingTaskService.js";
 import { FalaTuBriefingDigestService } from "../FalaTuBriefingDigestService.js";
@@ -179,6 +180,24 @@ router.get("/briefing/whatsapp", (req: AuthRequest, res): any => {
 router.post("/briefing/whatsapp", (req: AuthRequest, res): any => {
   if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled deve ser boolean." });
   res.json(FalaTuBriefingDigestService.setWaEnabled(req.organizationId!, req.body.enabled));
+});
+
+// ── F8.4: tokens pessoais de captura. A GESTÃO exige sessão (estas rotas);
+// a INGESTÃO autenticada por token vive em /api/falatu-ingest (fora do
+// protectedApi). O claro do token só aparece na resposta do create. ──
+
+router.get("/capture-tokens", (req: AuthRequest, res): any => {
+  res.json(FalaTuCaptureTokenService.list(req.organizationId!, actorId(req)));
+});
+
+router.post("/capture-tokens", (req: AuthRequest, res): any => {
+  try { res.json(FalaTuCaptureTokenService.create(req.organizationId!, actorId(req), req.body?.label)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/capture-tokens/:id/revoke", (req: AuthRequest, res): any => {
+  try { res.json(FalaTuCaptureTokenService.revoke(req.organizationId!, actorId(req), req.params.id)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
 // "Enviar meu resumo agora" — ignora janela/dedupe, respeita a porta; só pro

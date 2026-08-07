@@ -38,6 +38,8 @@ Guia curto e prático do que precisa estar configurado antes de subir o ZappFlow
 | `META_WEBHOOK_VERIFY_TOKEN` | Handshake de verificação inicial do webhook Meta. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth Google (Sheets/Calendar). |
 | `GOOGLE_IMAGE_MODEL` | Modelo de geração de imagem via Gemini (padrão: `imagen-3.0-generate-002`). |
+| `RESEND_API_KEY` | Briefing do FalaTu por e-mail (ADR-154 F11.1). Remetente de **plataforma** (Resend), usado como **fallback** pra orgs SEM conexão Google. Orgs com Google enviam pela própria conta e dispensam isto. Chave em [resend.com](https://resend.com) → API Keys. |
+| `FALATU_EMAIL_FROM` | Par obrigatório do anterior: remetente **verificado** no Resend, ex.: `FalaTu <briefing@seudominio.com.br>`. Sem os dois, quem não tem Google fica sem o canal de e-mail. |
 
 ## Storage
 

@@ -9,18 +9,28 @@ import { useCallback, useEffect, useState } from 'react';
 // Escopo: roda apenas no bundle standalone (Auth/Shell montam o hook). O painel
 // ZappFlow nunca importa isto e nunca recebe a classe → segue no escuro default.
 //
-// Default LIGHT: a marca oficial ("capa Nuvem") é clara; quem quiser escuro
-// alterna e a escolha persiste. matchMedia NÃO é consultado de propósito — o
-// pedido foi abrir no claro; a preferência do sistema viraria isso sem querer.
+// Primeiro acesso segue a PREFERÊNCIA DO SISTEMA (prefers-color-scheme): abre
+// claro ou escuro conforme o aparelho. Assim que o usuário alterna pelo botão,
+// a escolha explícita passa a mandar e persiste — o sistema só decide enquanto
+// não há escolha salva. Sem sinal do sistema, o default é a marca (claro/Nuvem).
 
 export type FalatuTheme = 'light' | 'dark';
 const STORAGE_KEY = 'falatu_theme';
 const THEME_COLOR: Record<FalatuTheme, string> = { light: '#f4f6fc', dark: '#0e1a2e' };
 
+function systemPref(): FalatuTheme {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 function readStored(): FalatuTheme {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v === 'dark' ? 'dark' : 'light';
+    if (v === 'dark' || v === 'light') return v; // escolha explícita manda
+    return systemPref();                          // 1º acesso: segue o aparelho
   } catch {
     return 'light';
   }

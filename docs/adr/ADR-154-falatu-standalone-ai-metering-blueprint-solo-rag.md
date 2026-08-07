@@ -242,8 +242,9 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 7.1 | In Progress | — |
 | 8.1 | MERGED | #809 |
 | 8.2 | MERGED | #811 |
-| 8.3 | In Progress | — |
+| 8.3 | MERGED | #812 |
 | 8.4 | MERGED | #810 |
+| 8.5 | In Progress | — |
 | 8.5 | Pending | — |
 | 8.6 | Pending | — |
 | 8.7 | Pending | — |
@@ -346,11 +347,26 @@ nº 12: sinais via `business_signals`; jobs via `JobQueue`).
   do token no pior caso enche o inbox de pendentes — nunca vaza dado (a
   leitura continua exigindo sessão).
 
-- **F8.5 — Atalho Siri (iOS) + Share Target (Android).** Arquivo `.shortcut`
-  oficial ("E aí Siri, FalaTu" → grava áudio → POST `/capture` com o token da
-  F8.4) + `share_target` no manifest do PWA (compartilhar áudio/foto/texto de
+- **F8.5 — Atalho Siri (iOS) + Share Target (Android).** Atalho Siri ("E aí
+  Siri, FalaTu" → grava áudio → POST `/capture` com o token da F8.4) +
+  `share_target` no manifest do PWA (compartilhar áudio/foto/texto de
   QUALQUER app — inclusive um áudio encaminhado do WhatsApp — direto pro
   FalaTu, sem Evolution). Captura onipresente sem mensageiro nenhum.
+  *Decisão na fatia (2026-08-07):* o plano original de distribuir um arquivo
+  `.shortcut` morreu no fato de que desde o iOS 15 a Apple só importa atalho
+  **assinado** (contact-signed ou link iCloud) — um `.shortcut` gerado pelo
+  servidor não abre no aparelho. Em vez de um download morto, a aba
+  **Plugues** da FalaTuView traz a receita guiada (gera o token rotulado
+  "Atalho Siri" + endpoint copiável + passos do app Atalhos); se um dia
+  houver link iCloud publicado da plataforma, ele é aditivo aqui. A troca de
+  manifest é por host no server (`hostManifest.ts`): só o subdomínio
+  `falatu.*` declara `share_target` — instalar o painel ZappFlow não cria
+  alvo de compartilhamento. O receptor do POST multipart vive no SW
+  (`falatu-share-sw.js` via `importScripts`, molde F8.3): stash no Cache
+  `falatu-share` → redirect `/?share=1` → FalaTuView lê, limpa e captura
+  pelo fluxo normal (pendente RN-151 + fila offline F8.2). A aba Plugues
+  também entrega a UI de gestão dos tokens F8.4 (criar rotulado / revogar),
+  que até então só existia por API.
 
 - **F8.6 — Briefing por e-mail.** Terceiro adapter de entrega do digest
   (molde ADR-144). Todo mundo tem e-mail; custo ~zero; nenhuma dependência de

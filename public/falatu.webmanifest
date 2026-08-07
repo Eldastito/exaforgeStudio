@@ -1,0 +1,37 @@
+{
+  "name": "FalaTu",
+  "short_name": "FalaTu",
+  "description": "Fala → Faz → Confere. Capture por voz, foto ou texto — a IA organiza, você confirma.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#09090b",
+  "background_color": "#09090b",
+  "icons": [
+    {
+      "src": "/brand/favicon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/favicon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "share_target": {
+    "action": "/falatu-share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": ["audio/*", "image/*"]
+        }
+      ]
+    }
+  }
+}

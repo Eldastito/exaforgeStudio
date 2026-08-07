@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC, type PointerEvent as ReactPointerEvent } from 'react';
-import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt } from 'lucide-react';
+import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2 } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
@@ -249,7 +249,7 @@ const PurchaseCheckCard: FC<{ check: any; onResolved: () => void }> = ({ check, 
 };
 
 export function FalaTuView() {
-  const [tab, setTab] = useState<'inbox' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing'>('inbox');
+  const [tab, setTab] = useState<'inbox' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing' | 'plugues'>('inbox');
   const [text, setText] = useState('');
   const [processing, setProcessing] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -270,6 +270,12 @@ export function FalaTuView() {
   const [pushKey, setPushKey] = useState('');
   const [pushBusy, setPushBusy] = useState(false);
   const pushSupported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // F8.5 — aba Plugues: tokens de captura (F8.4) + receita do Atalho Siri.
+  const [tokens, setTokens] = useState<any[]>([]);
+  const [tokLabel, setTokLabel] = useState('');
+  const [tokBusy, setTokBusy] = useState(false);
+  // O claro do token existe SÓ aqui, logo após o create (o backend guarda hash).
+  const [newTok, setNewTok] = useState<{ token: string; label: string } | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -298,6 +304,7 @@ export function FalaTuView() {
       api('/briefing/whatsapp').then((d) => setWaEnabled(!!d?.enabled)).catch(() => {});
       api('/briefing/push').then((d) => { setPushSubscribed(!!d?.subscribed); setPushKey(d?.publicKey || ''); }).catch(() => {});
     }
+    if (tab === 'plugues') api('/capture-tokens').then((d) => setTokens(Array.isArray(d) ? d : [])).catch(() => {});
   }, [tab]);
 
   useEffect(() => { loadPending(); }, [loadPending]);
@@ -408,6 +415,44 @@ export function FalaTuView() {
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
     void startRecording('auto');
     // roda uma vez no mount — startRecording estável o suficiente pra isto
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // F8.5 — chegada de compartilhamento (Web Share Target). O SW guardou o
+  // conteúdo no Cache 'falatu-share' e redirecionou pra /?share=1: lê, LIMPA
+  // (o stash é estafeta, não histórico) e captura pelo fluxo normal — cai
+  // como pendente no inbox (RN-151) e herda a fila offline da F8.2.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('share') !== '1') return;
+    params.delete('share');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    (async () => {
+      try {
+        const cache = await caches.open('falatu-share');
+        const fileRes = await cache.match('/falatu-share/payload-file');
+        const textRes = await cache.match('/falatu-share/payload-text');
+        await cache.delete('/falatu-share/payload-file');
+        await cache.delete('/falatu-share/payload-text');
+        if (fileRes) {
+          const blob = await fileRes.blob();
+          // WhatsApp manda 'audio/ogg; codecs=opus' — o backend quer só o tipo.
+          const mime = (fileRes.headers.get('Content-Type') || blob.type || '').split(';')[0].trim();
+          if (blob.size > 1_300_000) { toast.error('Arquivo compartilhado muito grande (máx ~1MB).'); return; }
+          const data = await blobToBase64(blob);
+          if (mime.startsWith('audio/')) { void capture({ audio: { mimeType: mime, data } }); return; }
+          if (mime.startsWith('image/')) { void capture({ image: { mimeType: mime, data } }); return; }
+          toast.error('Tipo não suportado — compartilhe um áudio, uma foto ou um texto.');
+          return;
+        }
+        if (textRes) {
+          const shared = (await textRes.text()).trim();
+          if (shared) void capture({ text: shared });
+        }
+      } catch { /* stash vazio ou Cache indisponível — nada a capturar */ }
+    })();
+    // uma vez no mount, mesmo racional do ?rec=1
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -538,6 +583,30 @@ export function FalaTuView() {
     finally { setPushBusy(false); }
   };
 
+  // F8.5 — gestão dos tokens de captura (F8.4) + receita do Atalho Siri.
+  const ingestUrl = `${window.location.origin}/api/falatu-ingest/capture`;
+  const copyText = async (value: string, what: string) => {
+    try { await navigator.clipboard.writeText(value); toast.success(`${what} copiado.`); }
+    catch { toast.error('Não deu pra copiar — selecione e copie manualmente.'); }
+  };
+  const reloadTokens = () => api('/capture-tokens').then((d) => setTokens(Array.isArray(d) ? d : [])).catch(() => {});
+  const createToken = async (label: string) => {
+    setTokBusy(true);
+    try {
+      const r = await api('/capture-tokens', { method: 'POST', body: JSON.stringify({ label }) });
+      setNewTok({ token: r.token, label: r.label });
+      setTokLabel('');
+      reloadTokens();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setTokBusy(false); }
+  };
+  const revokeToken = async (id: string) => {
+    setTokBusy(true);
+    try { await api(`/capture-tokens/${id}/revoke`, { method: 'POST' }); reloadTokens(); toast.success('Token revogado.'); }
+    catch (e: any) { toast.error(e.message); }
+    finally { setTokBusy(false); }
+  };
+
   const TABS = [
     { id: 'inbox', label: 'Inbox', icon: <Inbox className="h-4 w-4" /> },
     { id: 'tasks', label: 'Tarefas', icon: <ListTodo className="h-4 w-4" /> },
@@ -545,6 +614,7 @@ export function FalaTuView() {
     { id: 'lists', label: 'Listas', icon: <Check className="h-4 w-4" /> },
     { id: 'memory', label: 'Memória', icon: <Brain className="h-4 w-4" /> },
     { id: 'briefing', label: 'Briefing', icon: <Sun className="h-4 w-4" /> },
+    { id: 'plugues', label: 'Plugues', icon: <Plug className="h-4 w-4" /> },
   ] as const;
 
   return (
@@ -767,6 +837,102 @@ export function FalaTuView() {
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Listas ativas</h3>
             {briefing.lists?.map((l: any) => <p key={l.id} className="text-sm text-zinc-200 py-1">{l.title} — {l.realized_count}/{l.item_count}</p>)}
+          </div>
+        </div>
+      )}
+
+      {tab === 'plugues' && (
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-400">
+            Capture de qualquer lugar — sem abrir o app. Cada plugue usa um <strong className="text-zinc-200">token de captura</strong>:
+            ele só consegue <em>criar item pendente</em> no seu inbox (nunca lê nem confirma nada).
+          </p>
+
+          {/* Token recém-criado — o claro aparece UMA vez (backend guarda só hash). */}
+          {newTok && (
+            <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 space-y-2">
+              <p className="text-sm text-emerald-200 font-medium">Token “{newTok.label}” criado — copie AGORA (não dá pra ver de novo):</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 truncate rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-zinc-200">{newTok.token}</code>
+                <button onClick={() => copyText(newTok.token, 'Token')}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-2 text-xs text-zinc-300 shrink-0">
+                  <Copy className="h-3.5 w-3.5" /> Copiar
+                </button>
+              </div>
+              <button onClick={() => setNewTok(null)} className="text-xs text-zinc-500 hover:text-zinc-300">Já copiei, pode esconder</button>
+            </div>
+          )}
+
+          {/* Atalho Siri (iOS). Arquivo .shortcut sem assinatura morre no import
+              desde o iOS 15 — por isso a receita guiada no lugar de um download
+              morto (decisão registrada no ADR-154 F8.5). */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+            <p className="text-sm text-zinc-200 font-medium">🍎 Atalho Siri (iPhone)</p>
+            <p className="text-xs text-zinc-500">
+              “E aí Siri, FalaTu” → grava um áudio → cai direto no seu inbox. Monte uma vez no app <strong className="text-zinc-300">Atalhos</strong>:
+            </p>
+            <ol className="text-xs text-zinc-400 space-y-1.5 list-decimal list-inside">
+              <li>Gere o token abaixo e copie.</li>
+              <li>No app <strong className="text-zinc-300">Atalhos</strong>: novo atalho → ação <strong className="text-zinc-300">Gravar áudio</strong> (parar: ao tocar).</li>
+              <li>Ação <strong className="text-zinc-300">Codificar</strong> (Base64, entrada: o áudio gravado).</li>
+              <li>Ação <strong className="text-zinc-300">Obter conteúdo do URL</strong>: cole o endereço abaixo, método <strong className="text-zinc-300">POST</strong>, cabeçalho <code className="text-zinc-300">Authorization</code> = <code className="text-zinc-300">Bearer SEU_TOKEN</code>; corpo JSON: <code className="text-zinc-300">audio</code> = dicionário com <code className="text-zinc-300">mimeType</code> = <code className="text-zinc-300">audio/mp4</code> e <code className="text-zinc-300">data</code> = a saída do Codificar.</li>
+              <li>Nomeie o atalho <strong className="text-zinc-300">FalaTu</strong> — pronto, a Siri atende.</li>
+            </ol>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 min-w-0 truncate rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-zinc-200">{ingestUrl}</code>
+              <button onClick={() => copyText(ingestUrl, 'Endereço')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-2 text-xs text-zinc-300 shrink-0">
+                <Copy className="h-3.5 w-3.5" /> Copiar
+              </button>
+            </div>
+            <button onClick={() => createToken('Atalho Siri')} disabled={tokBusy}
+              className="inline-flex items-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              {tokBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />} Gerar token do atalho
+            </button>
+          </div>
+
+          {/* Share Target (Android/Chrome) — só informativo: quem faz o
+              trabalho é o manifest + SW; aqui é onde o usuário descobre. */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+            <p className="text-sm text-zinc-200 font-medium">🤖 Compartilhar de outros apps (Android)</p>
+            <p className="text-xs text-zinc-500">
+              Instale o FalaTu (menu do navegador → <strong className="text-zinc-300">Adicionar à tela inicial</strong>) e o app passa a aparecer
+              no <strong className="text-zinc-300">Compartilhar</strong> de qualquer aplicativo — um áudio encaminhado do WhatsApp, uma foto,
+              um texto — e cai aqui como captura pendente. Sem configurar nada.
+            </p>
+          </div>
+
+          {/* Tokens ativos (gestão da F8.4): rotular e revogar. */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+            <p className="text-sm text-zinc-200 font-medium">Tokens de captura</p>
+            <div className="flex gap-2">
+              <input value={tokLabel} onChange={(e) => setTokLabel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && tokLabel.trim() && createToken(tokLabel)}
+                placeholder='Nome do plugue (ex.: "Zapier", "NFC do balcão")'
+                className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+              <button onClick={() => createToken(tokLabel)} disabled={tokBusy || !tokLabel.trim()}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50">
+                Criar
+              </button>
+            </div>
+            {tokens.filter((t) => !t.revoked_at).length === 0 && (
+              <p className="text-xs text-zinc-500">Nenhum token ativo. Crie um pro seu primeiro plugue.</p>
+            )}
+            {tokens.filter((t) => !t.revoked_at).map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-zinc-200 truncate">{t.label}</p>
+                  <p className="text-[11px] text-zinc-500">
+                    Criado em {String(t.created_at || '').slice(0, 10)}
+                    {t.last_used_at ? ` · último uso ${String(t.last_used_at).slice(0, 10)}` : ' · nunca usado'}
+                  </p>
+                </div>
+                <button onClick={() => revokeToken(t.id)} disabled={tokBusy} title="Revogar"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50 shrink-0">
+                  <Trash2 className="h-3.5 w-3.5" /> Revogar
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -40,7 +40,9 @@ export default defineConfig(() => {
           // ADR-154 F8.3 — handler de Web Push do FalaTu (briefing como
           // notificação). importScripts puxa o arquivo de public/ pro SW
           // gerado SEM mudar a estratégia acima (API segue fora do SW).
-          importScripts: ['falatu-push-sw.js'],
+          // ADR-154 F8.5 — receptor do Web Share Target (POST /falatu-share
+          // do share sheet → stash no Cache → redirect pro app). Mesmo molde.
+          importScripts: ['falatu-push-sw.js', 'falatu-share-sw.js'],
           // Limpa precaches de versões antigas do SW ao atualizar.
           cleanupOutdatedCaches: true,
           globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff,woff2}'],

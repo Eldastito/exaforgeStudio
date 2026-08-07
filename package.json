@@ -358,6 +358,7 @@
     "test:falatu-capture-token": "tsx scripts/test-falatu-capture-token.ts",
     "test:falatu-capture-dedup": "tsx scripts/test-falatu-capture-dedup.ts",
     "test:falatu-push": "tsx scripts/test-falatu-push.ts",
+    "test:falatu-share-target": "tsx scripts/test-falatu-share-target.ts",
     "test:falatu-memoria": "tsx scripts/test-falatu-memoria.ts",
     "test:falatu-briefing-digest": "tsx scripts/test-falatu-briefing-digest.ts",
     "test:runtime-process-fabric": "tsx scripts/test-runtime-process-fabric.ts",

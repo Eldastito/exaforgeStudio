@@ -27,6 +27,7 @@ import authRoutes from "./src/server/routes/auth.js";
 import onboardingSoloRoutes from "./src/server/routes/onboardingSolo.js";
 import falatuSoloWhatsappRoutes from "./src/server/routes/falatuSoloWhatsapp.js";
 import falatuIngestRoutes from "./src/server/routes/falatuIngest.js";
+import { manifestFileForHost } from "./src/server/hostManifest.js";
 import usersRoutes from "./src/server/routes/users.js";
 import permissionsRoutes from "./src/server/routes/permissions.js";
 import auditRoutes from "./src/server/routes/audit.js";
@@ -1309,6 +1310,17 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+
+    // ADR-154 F8.5 — manifest por host, ANTES do static (senão o static ganha):
+    // o subdomínio falatu.* instala como PWA "FalaTu" com share_target próprio;
+    // qualquer outro host segue no manifest ZappFlow. X-Forwarded-Host cobre o
+    // reverse proxy; "spoofar" o header só troca um estático público por outro.
+    app.get('/site.webmanifest', (req, res, next) => {
+      const file = manifestFileForHost(req.headers['x-forwarded-host'] || req.headers.host);
+      if (file === 'site.webmanifest') return next();
+      res.sendFile(path.join(distPath, file));
+    });
+
     app.use(express.static(distPath));
 
     // ===== SEO: sitemap.xml + robots.txt =====

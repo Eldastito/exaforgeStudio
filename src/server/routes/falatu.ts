@@ -183,6 +183,32 @@ router.post("/briefing/whatsapp", (req: AuthRequest, res): any => {
   res.json(FalaTuBriefingDigestService.setWaEnabled(req.organizationId!, req.body.enabled));
 });
 
+// ── F8.3: briefing por Web Push. A "porta" é a subscription do próprio
+// usuário (assinar já é o opt-in — exige permissão do browser + clique);
+// desligar revoga. O digest/janela/sinal são os MESMOS do canal WA. ──
+
+router.get("/briefing/push", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuPushService } = await import("../FalaTuPushService.js");
+  res.json(await FalaTuPushService.status(req.organizationId!, actorId(req)));
+});
+
+router.post("/briefing/push", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuPushService } = await import("../FalaTuPushService.js");
+  try { res.json(FalaTuPushService.subscribe(req.organizationId!, actorId(req), req.body?.subscription)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/briefing/push/disable", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuPushService } = await import("../FalaTuPushService.js");
+  res.json(FalaTuPushService.disable(req.organizationId!, actorId(req)));
+});
+
+router.post("/briefing/push/send-now", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuPushService } = await import("../FalaTuPushService.js");
+  try { res.json(await FalaTuPushService.sendNow(req.organizationId!, actorId(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // ── F8.4: tokens pessoais de captura. A GESTÃO exige sessão (estas rotas);
 // a INGESTÃO autenticada por token vive em /api/falatu-ingest (fora do
 // protectedApi). O claro do token só aparece na resposta do create. ──

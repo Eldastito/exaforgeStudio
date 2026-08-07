@@ -568,6 +568,25 @@ export class Scheduler {
     }
   }
 
+  /**
+   * ADR-154 F8.3 — entrega do briefing por Web Push. Porta INDEPENDENTE do
+   * canal WA (dedupe próprio); a "flag" é a existência de subscription ativa,
+   * então só varre orgs que têm alguém inscrito. Best-effort por org.
+   */
+  static async falatuPushDigestPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`SELECT DISTINCT organization_id FROM falatu_push_subscriptions WHERE revoked_at IS NULL`).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    const { FalaTuPushService } = await import("./FalaTuPushService.js");
+    for (const o of orgs) {
+      try { await FalaTuPushService.runDigestPass(o.organization_id, { now }); }
+      catch (e) { console.error("[FalaTu] entrega de briefing por push falhou", o.organization_id, e); }
+    }
+  }
+
   static async teacherAgendaPass() {
     let orgs: any[] = [];
     // Só orgs que JÁ têm professor com opt-in (o sinal real de uso da Fatia 2).
@@ -655,6 +674,7 @@ export class Scheduler {
     try { this.clinicRenewalTaskPass(); } catch (e: any) { console.error('[Scheduler] sweep de renovação clínica falhou', e?.message); }
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
+    await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));
     try { this.confirmationTimeoutPass(); } catch (e: any) { console.error('[Scheduler] sweep de timeouts de Confirmation falhou', e?.message); }
     // ADR-152 F4b.3 — cadência multi-tentativa de cobrança (T2/T3). Opt-in
     // por org via `collection_cadence_enabled=1`. Fica DEPOIS de

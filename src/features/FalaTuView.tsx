@@ -265,6 +265,11 @@ export function FalaTuView() {
   const [signals, setSignals] = useState<any[]>([]);
   const [waEnabled, setWaEnabled] = useState<boolean>(false);
   const [waBusy, setWaBusy] = useState(false);
+  // F8.3 — porta Web Push do briefing (opt-in = a própria subscription).
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushKey, setPushKey] = useState('');
+  const [pushBusy, setPushBusy] = useState(false);
+  const pushSupported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -291,6 +296,7 @@ export function FalaTuView() {
       api('/briefing').then(setBriefing).catch(() => {});
       api('/signals').then((d) => setSignals(Array.isArray(d) ? d : [])).catch(() => {});
       api('/briefing/whatsapp').then((d) => setWaEnabled(!!d?.enabled)).catch(() => {});
+      api('/briefing/push').then((d) => { setPushSubscribed(!!d?.subscribed); setPushKey(d?.publicKey || ''); }).catch(() => {});
     }
   }, [tab]);
 
@@ -492,6 +498,46 @@ export function FalaTuView() {
     finally { setWaBusy(false); }
   };
 
+  // F8.3 — assinar exige gesto: permissão do navegador + subscription do SW,
+  // e só então o servidor registra (o registro é o opt-in). urlBase64→bytes é
+  // o formato que o pushManager.subscribe espera pra chave VAPID.
+  const vapidToBytes = (b64: string) => {
+    const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  };
+
+  const togglePush = async () => {
+    setPushBusy(true);
+    try {
+      if (pushSubscribed) {
+        await api('/briefing/push/disable', { method: 'POST' });
+        try { (await (await navigator.serviceWorker.ready).pushManager.getSubscription())?.unsubscribe(); } catch { /* best-effort */ }
+        setPushSubscribed(false);
+        toast.success('Notificações do resumo desligadas.');
+      } else {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { toast.error('Permita notificações no navegador pra ligar o resumo.'); return; }
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidToBytes(pushKey) });
+        await api('/briefing/push', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
+        setPushSubscribed(true);
+        toast.success('Resumo diário por notificação ligado. 🎉');
+      }
+    } catch (e: any) { toast.error(e.message || 'Não foi possível configurar as notificações.'); }
+    finally { setPushBusy(false); }
+  };
+
+  const sendPushNow = async () => {
+    setPushBusy(true);
+    try {
+      const r = await api('/briefing/push/send-now', { method: 'POST' });
+      if (r?.sent) toast.success('Notificação enviada — confere aí. 🔔');
+      else toast.error(r?.reason === 'no_briefing' ? 'Nada pra resumir hoje.' : 'Não foi possível enviar agora.');
+    } catch (e: any) { toast.error(e.message); }
+    finally { setPushBusy(false); }
+  };
+
   const TABS = [
     { id: 'inbox', label: 'Inbox', icon: <Inbox className="h-4 w-4" /> },
     { id: 'tasks', label: 'Tarefas', icon: <ListTodo className="h-4 w-4" /> },
@@ -660,6 +706,27 @@ export function FalaTuView() {
               📣 Briefing de hoje publicado no painel de sinais da operação
               {signals[0]?.severity === 'attention' ? ' — há pendências pedindo sua ação.' : '.'}
             </p>
+          )}
+          {/* F8.3 — entrega por notificação do navegador (Web Push). */}
+          {pushSupported && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-zinc-200">Resumo diário por notificação</p>
+                <p className="text-xs text-zinc-500">O briefing da manhã chega como notificação neste aparelho — sem depender de mensageiro.</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {pushSubscribed && (
+                  <button onClick={sendPushNow} disabled={pushBusy}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-50">
+                    {pushBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Enviar agora
+                  </button>
+                )}
+                <button onClick={togglePush} disabled={pushBusy || (!pushSubscribed && !pushKey)} role="switch" aria-checked={pushSubscribed}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${pushSubscribed ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${pushSubscribed ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+            </div>
           )}
           {/* Fatia 6 — entrega por WhatsApp: opt-in de canal + envio manual. */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">

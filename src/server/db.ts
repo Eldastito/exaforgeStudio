@@ -7757,6 +7757,49 @@ const initDb = () => {
         WHERE client_command_id IS NOT NULL;
     `);
   } catch(e){ console.error('[DB] Falha ao adicionar client_command_id (ADR-154 F8.2)', e); }
+
+  // ADR-154 F8.3 — briefing por Web Push (porta de entrega sem mensageiro).
+  //
+  // falatu_push_vapid: keypair VAPID ÚNICO da plataforma (linha id=1). As
+  //   subscriptions dos browsers ficam amarradas à chave pública — trocar a
+  //   chave invalida todas; por isso persistimos em DB (gerada no 1º uso) em
+  //   vez de derivar de env que pode mudar.
+  // falatu_push_subscriptions: endpoint é UNIQUE global — um endpoint pertence
+  //   a UM perfil de browser; se outra conta assina no mesmo browser, a linha
+  //   muda de dono (upsert) em vez de duplicar. Revogação/endpoint morto é
+  //   UPDATE de revoked_at (convenção nº 9).
+  // falatu_push_deliveries: dedupe por (org, user, dia) SEPARADO do canal WA
+  //   (falatu_briefing_deliveries) — as portas são opt-ins independentes e o
+  //   unique existente do WA não pode ganhar coluna sem quebrar o aditivo.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS falatu_push_vapid (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS falatu_push_subscriptions (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_success_at DATETIME,
+      revoked_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_falatu_push_subs_user
+      ON falatu_push_subscriptions(organization_id, user_id);
+    CREATE TABLE IF NOT EXISTS falatu_push_deliveries (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      briefing_date TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (organization_id, user_id, briefing_date)
+    );
+  `);
 };
 
 initDb();

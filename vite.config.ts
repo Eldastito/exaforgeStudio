@@ -37,6 +37,10 @@ export default defineConfig(() => {
           ],
           // Não deixamos o Workbox inventar cache de runtime para a API.
           runtimeCaching: [],
+          // ADR-154 F8.3 — handler de Web Push do FalaTu (briefing como
+          // notificação). importScripts puxa o arquivo de public/ pro SW
+          // gerado SEM mudar a estratégia acima (API segue fora do SW).
+          importScripts: ['falatu-push-sw.js'],
           // Limpa precaches de versões antigas do SW ao atualizar.
           cleanupOutdatedCaches: true,
           globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff,woff2}'],

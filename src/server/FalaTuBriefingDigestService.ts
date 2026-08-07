@@ -100,8 +100,9 @@ export class FalaTuBriefingDigestService {
     } catch { return ""; }
   }
 
-  /** Sinais de briefing ABERTOS da org publicados PARA o dia `dateSP`. */
-  private static openBriefingsForDay(orgId: string, dateSP: string): any[] {
+  /** Sinais de briefing ABERTOS da org publicados PARA o dia `dateSP`.
+   *  Público desde a F8.3: a porta Web Push consome os MESMOS sinais (fonte única). */
+  static openBriefingsForDay(orgId: string, dateSP: string): any[] {
     return BusinessSignalService.list(orgId, { domain: "falatu", status: "open" })
       .filter((s: any) => s.signal_type === "falatu_daily_briefing" && s.evidence?.date === dateSP && s.evidence?.userId);
   }

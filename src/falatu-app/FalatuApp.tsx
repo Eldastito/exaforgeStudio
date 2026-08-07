@@ -2,29 +2,34 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { FalatuAuth } from './FalatuAuth';
 import { FalaTuView } from '@/src/features/FalaTuView';
-import { Smartphone, RefreshCw, CheckCircle2, LogOut, Loader2 } from 'lucide-react';
+import { Smartphone, RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft } from 'lucide-react';
 
 // ADR-154 F7.1 — root do app FalaTu STANDALONE (subdomínio dedicado).
 //
-// Roteamento mínimo, sem react-router (o app tem 3 estados só):
-//   loading           → spinner (AuthContext validando token)
-//   sem sessão        → FalatuAuth (login/cadastro)
-//   sessão + !conectado → FalatuConnect (QR persistente)
-//   sessão + conectado  → FalaTuView (o app de verdade)
+// Roteamento mínimo, sem react-router:
+//   loading     → spinner (AuthContext validando token)
+//   sem sessão  → FalatuAuth (login/cadastro)
+//   sessão      → FalaTuView (o app de verdade) DIRETO — ver F8.1 abaixo
 //
-// A checagem de status do WhatsApp roda a cada mount de sessão. Enquanto
-// não conecta, o app fica na tela de QR — e como a sessão JÁ está no
-// localStorage (persistida no auth), o refresh mantém o usuário aqui em vez
-// de jogá-lo pro login. Resolve a queixa de persistência direto.
+// A sessão fica no localStorage (persistida no auth), então refresh mantém o
+// usuário no app em vez de jogá-lo pro login.
 //
 // F7.1b — porteiro pós-login. O /api/auth/login aceita QUALQUER conta do
 // backend compartilhado (inclusive contas da suíte ZappFlow). Sem gate, uma
 // conta suíte caía na tela de QR e o provision devolvia 403 em loop ("org
 // não tem blueprint solo"). Agora classificamos o acesso após o login:
-//   'solo'   → org com WhatsApp dedicado (kind='dedicated') → fluxo QR
-//   'shared' → org suíte COM FalaTu habilitado (ou master admin) → app
-//              direto, sem exigir QR (o canal da suíte é gerido no painel)
+//   'solo'   → org com WhatsApp dedicado (kind='dedicated')
+//   'shared' → org suíte COM FalaTu habilitado (ou master admin) — o canal
+//              WhatsApp da suíte é gerido no painel, nunca aqui
 //   'denied' → conta ZappFlow sem FalaTu → tela explicativa, sem loop de 403
+//
+// F8.1 (Fase 8) — browser-first. A tela de QR DEIXOU de ser porteiro do
+// solo: o pareamento por QR do Evolution nunca foi confiável e trancava o
+// usuário fora de um app que funciona 100% pelo navegador (captura por
+// microfone/foto/texto já é HTTP puro). Agora o solo entra direto na
+// FalaTuView; conectar WhatsApp é um banner opcional que abre a FalatuConnect
+// sob demanda. Efeito colateral desejado: o provision (que cria instância na
+// Evolution) só roda quando o usuário PEDE a conexão — não mais no mount.
 
 type WaStatus = { kind: string; connected: boolean; hasQr: boolean } | null;
 type Access = 'checking' | 'solo' | 'shared' | 'denied';
@@ -51,9 +56,10 @@ function Shell({ email, onLogout, children }: { email?: string; onLogout: () => 
   );
 }
 
-// Tela de conexão do WhatsApp — QR + polling. Persistente: a sessão já está
-// gravada, então dar refresh aqui mantém o usuário nesta tela (não no login).
-function FalatuConnect({ token, onConnected }: { token: string; onConnected: () => void }) {
+// Tela de conexão do WhatsApp — QR + polling. Desde a F8.1 é OPT-IN (aberta
+// pelo banner dentro do app), não porteiro — por isso o onBack: o usuário
+// sempre pode voltar pro app sem parear.
+function FalatuConnect({ token, onConnected, onBack }: { token: string; onConnected: () => void; onBack: () => void }) {
   const [qr, setQr] = useState('');
   const [provisioning, setProvisioning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -101,8 +107,14 @@ function FalatuConnect({ token, onConnected }: { token: string; onConnected: () 
   return (
     <div className="flex-1 flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md text-center">
+        <button type="button" onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-200">
+          <ArrowLeft className="w-4 h-4" /> Voltar pro app
+        </button>
         <h2 className="text-lg font-semibold text-zinc-100 mb-1">Conecte seu WhatsApp</h2>
-        <p className="text-sm text-zinc-400 mb-5">Escaneie o código pra ativar seu assistente.</p>
+        <p className="text-sm text-zinc-400 mb-5">
+          Opcional — o app já funciona pelo navegador. Conectando, você também captura mandando áudio pelo WhatsApp.
+        </p>
 
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">{error}</div>
@@ -133,6 +145,29 @@ function FalatuConnect({ token, onConnected }: { token: string; onConnected: () 
           <p className="text-[11px] text-zinc-500">Aguardando conexão… {elapsed > 0 ? `(${elapsed}s)` : ''}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// F8.1 — convite opcional de conexão do WhatsApp pro solo não-pareado.
+// Dispensável só pra sessão (estado, não localStorage): enquanto não existe a
+// FalaTuSettingsView (F3), o banner no próximo acesso é o único caminho de
+// volta pra conexão — dispensa permanente trancaria o usuário fora do plugue.
+function WhatsAppOptInBanner({ onConnect, onDismiss }: { onConnect: () => void; onDismiss: () => void }) {
+  return (
+    <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2.5">
+      <MessageCircle className="w-4 h-4 text-emerald-300 shrink-0" />
+      <p className="flex-1 text-xs text-zinc-300">
+        Quer capturar mandando áudio pelo WhatsApp também? Conecte seu número quando quiser.
+      </p>
+      <button type="button" onClick={onConnect}
+        className="text-xs font-medium text-emerald-400 hover:text-emerald-300 shrink-0">
+        Conectar
+      </button>
+      <button type="button" onClick={onDismiss} title="Agora não"
+        className="text-zinc-500 hover:text-zinc-300 shrink-0">
+        <X className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
@@ -168,6 +203,8 @@ export function FalatuApp() {
   const { user, token, loading, logout } = useAuth();
   const [wa, setWa] = useState<WaStatus>(null);
   const [access, setAccess] = useState<Access>('checking');
+  const [showConnect, setShowConnect] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Ao ganhar sessão: classifica o acesso (entitlements) + status do WhatsApp
   // numa rodada só. Decide a rota sem nunca chamar provision pra org não-solo.
@@ -218,18 +255,23 @@ export function FalatuApp() {
     );
   }
 
-  // Solo sem WhatsApp conectado → tela de pareamento. Suíte ('shared') nunca
-  // passa por aqui: o canal WhatsApp da suíte é gerido no painel ZappFlow.
-  if (access === 'solo' && !wa?.connected) {
+  // F8.1: a tela de pareamento só aparece quando o usuário PEDE (banner →
+  // Conectar). Suíte ('shared') nunca chega aqui: o canal da suíte é gerido
+  // no painel ZappFlow e o banner nem renderiza pra ela.
+  if (showConnect) {
     return (
       <Shell email={user.email} onLogout={logout}>
-        <FalatuConnect token={token} onConnected={() => setWa({ kind: 'dedicated', connected: true, hasQr: false })} />
+        <FalatuConnect token={token} onBack={() => setShowConnect(false)}
+          onConnected={() => { setWa({ kind: 'dedicated', connected: true, hasQr: false }); setShowConnect(false); }} />
       </Shell>
     );
   }
 
   return (
     <Shell email={user.email} onLogout={logout}>
+      {access === 'solo' && !wa?.connected && !bannerDismissed && (
+        <WhatsAppOptInBanner onConnect={() => setShowConnect(true)} onDismiss={() => setBannerDismissed(true)} />
+      )}
       <FalaTuView />
     </Shell>
   );

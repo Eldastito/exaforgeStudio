@@ -247,11 +247,11 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 8.5 | MERGED | #813 |
 | 8.6 | MERGED | #814 |
 | 8.7 | In Progress | — |
-| 8.5 | Pending | — |
-| 8.6 | Pending | — |
-| 8.7 | Pending | — |
 | 8.8 | Se demanda | — |
 | 8.9 | Roadmap | — |
+| 9.3 | MERGED | #818 |
+| 10.1 | MERGED | #818 |
+| 10.2 | In Progress | — |
 
 ## Fase 7 — FalaTu standalone por subdomínio (decidido 2026-08-06)
 
@@ -472,3 +472,32 @@ nenhuma coluna alterada, só tabelas novas no fim do `db.ts` (convenção nº 2)
 
 **Ordem recomendada:** 8.1 → 8.4 → 8.2 → 8.3 → 8.5 → 8.6 → 8.7 → (8.8/8.9
 quando decidido).
+
+## Fase 10 — Prontidão de produção ("infra pra prateleira", decidido 2026-08-07)
+
+Antes de vender, o operador precisa de uma resposta única e honesta pra "este
+deploy está pronto?". A Fase 10 dá essa resposta a partir da config REAL
+(env + disco), sem inventar e sem esconder o que falta.
+
+- **F10.1 — backend + probes** *(MERGED #818)*. `ProductionReadinessService`
+  é a fonte única do estado de cada dependência em três níveis (blocker →
+  OpenAI; recommended → JWT/APP_URL/backup/Asaas; optional → Twilio/Evolution/
+  push/e-mail). Lê env a cada chamada, **sem segredo no payload** (só estado +
+  nome da env). Rollup `blocked`/`degraded`/`ready`. Probes públicos
+  `GET /api/health` (liveness) e `GET /api/health/ready` (200/503 só nos
+  blockers, barato pro load balancer) + `GET /api/admin/production-readiness`
+  (relatório completo, master admin). Honestidade embutida: push = pronto
+  (VAPID auto no DB); **e-mail = não configurado** (F8.6 tem opt-in/dedupe,
+  falta o transporte SMTP — é código, não só env). `.env.example` ganha
+  Twilio/Asaas/DATA_DIR/BACKUPS_DIR.
+
+- **F10.2 — UI master admin** *(esta fatia)*. `ProductionReadinessView` no
+  shell master admin (gate `isMasterAdmin` no menu; `requireMasterAdmin` no
+  backend): banner de verdito pelo rollup, tiles de resumo e as checagens
+  agrupadas por nível, cada uma com estado (configurado/faltando/desligado) e
+  a dica de env. **Pura leitura** — renderiza literalmente o relatório da
+  F10.1, incluindo o e-mail como não-configurado. Sem novo endpoint, sem DB.
+
+**Próximas (roadmap comercial):** transporte de e-mail real (fecha o gap que a
+tela mostra) e o checkout de assinatura Solo (cobrança Asaas — gap nº 1 pra
+faturar, hoje "recommended/faltando" no readiness).

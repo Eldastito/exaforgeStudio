@@ -83,9 +83,9 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
             <Smartphone className="w-6 h-6 text-emerald-300" />
           </div>
           <h1 className="text-2xl font-bold text-zinc-100">Fala<span className="text-emerald-400">Tu</span></h1>
-          <p className="text-[11px] uppercase tracking-widest text-zinc-500 mt-0.5">Seu assistente pessoal</p>
+          <p className="text-[11px] uppercase tracking-widest text-zinc-500 mt-0.5">Do pensamento para a vida</p>
           <p className="text-zinc-400 mt-2 text-sm">
-            {mode === 'register' ? 'Crie sua conta e conecte seu WhatsApp' : 'Entre na sua conta'}
+            {mode === 'register' ? 'Crie sua conta e comece falando' : 'Entre na sua conta'}
           </p>
         </div>
 

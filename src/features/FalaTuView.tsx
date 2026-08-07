@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC, type PointerEvent as ReactPointerEvent } from 'react';
-import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2 } from 'lucide-react';
+import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2, ShieldAlert, PhoneCall } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
@@ -249,7 +249,7 @@ const PurchaseCheckCard: FC<{ check: any; onResolved: () => void }> = ({ check, 
 };
 
 export function FalaTuView() {
-  const [tab, setTab] = useState<'inbox' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing' | 'plugues'>('inbox');
+  const [tab, setTab] = useState<'inbox' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing' | 'plugues' | 'protocols'>('inbox');
   const [text, setText] = useState('');
   const [processing, setProcessing] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -281,6 +281,16 @@ export function FalaTuView() {
   const [tokBusy, setTokBusy] = useState(false);
   // O claro do token existe SÓ aqui, logo após o create (o backend guarda hash).
   const [newTok, setNewTok] = useState<{ token: string; label: string } | null>(null);
+  // F8.7 — Protocolos (chamada de resgate): config humana + ativações.
+  const [protoSettings, setProtoSettings] = useState<{ orgEnabled: boolean; telephonyConfigured: boolean } | null>(null);
+  const [protos, setProtos] = useState<any[]>([]);
+  const [protoActs, setProtoActs] = useState<any[]>([]);
+  const [pName, setPName] = useState('protocolo de segurança');
+  const [pPhone, setPPhone] = useState('+55');
+  const [pDelay, setPDelay] = useState('5');
+  const [verifyId, setVerifyId] = useState<string | null>(null);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [protoBusy, setProtoBusy] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -311,6 +321,11 @@ export function FalaTuView() {
       api('/briefing/email').then((d) => { setEmailEnabled(!!d?.enabled); setEmailAddr(d?.email || ''); setEmailChannelReady(!!d?.channelReady); }).catch(() => {});
     }
     if (tab === 'plugues') api('/capture-tokens').then((d) => setTokens(Array.isArray(d) ? d : [])).catch(() => {});
+    if (tab === 'protocols') {
+      api('/protocols/settings').then(setProtoSettings).catch(() => {});
+      api('/protocols').then((d) => setProtos(Array.isArray(d) ? d : [])).catch(() => {});
+      api('/protocols/activations').then((d) => setProtoActs(Array.isArray(d) ? d : [])).catch(() => {});
+    }
   }, [tab]);
 
   useEffect(() => { loadPending(); }, [loadPending]);
@@ -330,8 +345,19 @@ export function FalaTuView() {
   const capture = async (payload: any) => {
     setProcessing(true);
     try {
-      await api('/capture', { method: 'POST', body: JSON.stringify(payload) });
+      const res = await api('/capture', { method: 'POST', body: JSON.stringify(payload) });
       setText('');
+      // F8.7 — a captura pode ter sido reconhecida como PROTOCOLO (regra de
+      // código no backend): mostra o desfecho em vez de recarregar o inbox.
+      const proto = res?.protocol;
+      if (proto) {
+        if (proto.kind === 'activated') toast.success(`🚨 Protocolo "${proto.name}" ativado — seu telefone toca em ${proto.delayMinutes} min. Diga "cancela o protocolo" pra abortar.`);
+        else if (proto.kind === 'ambiguous') toast.info(`Qual protocolo? Você tem: ${proto.names.join(', ')}. Fale o nome completo.`);
+        else if (proto.kind === 'unverified') toast.error(`O protocolo "${proto.name}" existe, mas o número não foi verificado — confirme na aba Protocolos.`);
+        else if (proto.kind === 'cancelled') toast.success('✅ Protocolo cancelado — a ligação não vai acontecer.');
+        else if (proto.kind === 'nothing_to_cancel') toast.info('Não tinha protocolo agendado pra cancelar.');
+        return;
+      }
       loadPending();
     } catch (e: any) {
       // F8.2 — sem rede a captura NÃO se perde: vai pro outbox (ADR-082) e o
@@ -640,6 +666,36 @@ export function FalaTuView() {
     finally { setTokBusy(false); }
   };
 
+  // F8.7 — handlers da aba Protocolos (CRUD humano + verificação por ligação).
+  const reloadProtos = () => {
+    api('/protocols').then((d) => setProtos(Array.isArray(d) ? d : [])).catch(() => {});
+    api('/protocols/activations').then((d) => setProtoActs(Array.isArray(d) ? d : [])).catch(() => {});
+  };
+  const protoCall = async (fn: () => Promise<any>, okMsg?: string) => {
+    setProtoBusy(true);
+    try { const r = await fn(); if (okMsg) toast.success(okMsg); return r; }
+    catch (e: any) { toast.error(e.message); }
+    finally { setProtoBusy(false); reloadProtos(); }
+  };
+  const toggleProtoOrg = () => protoCall(async () => {
+    const r = await api('/protocols/settings', { method: 'POST', body: JSON.stringify({ enabled: !protoSettings?.orgEnabled }) });
+    setProtoSettings((s) => ({ orgEnabled: !!r?.enabled, telephonyConfigured: !!s?.telephonyConfigured }));
+  });
+  const createProto = () => protoCall(async () => {
+    await api('/protocols', { method: 'POST', body: JSON.stringify({ name: pName, phoneE164: pPhone.replace(/[^\d+]/g, ''), delayMinutes: Number(pDelay) }) });
+    setPName(''); toast.success('Protocolo criado — agora verifique o número.');
+  });
+  const requestVerify = (id: string) => protoCall(async () => {
+    await api(`/protocols/${id}/verify/request`, { method: 'POST' });
+    setVerifyId(id); setVerifyCode('');
+    toast.success('Ligando… atenda e anote o código de 6 dígitos.');
+  });
+  const confirmVerify = (id: string) => protoCall(async () => {
+    await api(`/protocols/${id}/verify/confirm`, { method: 'POST', body: JSON.stringify({ code: verifyCode }) });
+    setVerifyId(null); setVerifyCode('');
+    toast.success('Número verificado! Protocolo pronto pra usar. ✅');
+  });
+
   const TABS = [
     { id: 'inbox', label: 'Inbox', icon: <Inbox className="h-4 w-4" /> },
     { id: 'tasks', label: 'Tarefas', icon: <ListTodo className="h-4 w-4" /> },
@@ -648,6 +704,7 @@ export function FalaTuView() {
     { id: 'memory', label: 'Memória', icon: <Brain className="h-4 w-4" /> },
     { id: 'briefing', label: 'Briefing', icon: <Sun className="h-4 w-4" /> },
     { id: 'plugues', label: 'Plugues', icon: <Plug className="h-4 w-4" /> },
+    { id: 'protocols', label: 'Protocolos', icon: <ShieldAlert className="h-4 w-4" /> },
   ] as const;
 
   return (
@@ -666,6 +723,26 @@ export function FalaTuView() {
 
       {tab === 'inbox' && (
         <>
+          {/* Abertura — o produto se explica sem aula: convite + um toque pra
+              falar (modo 'auto' da F8.2: toque grava, toque envia). Aparece
+              sempre que o inbox está limpo — é a "cara" do app. */}
+          {pending.length === 0 && !processing && (
+            <div className="text-center pt-8 pb-2 space-y-2">
+              <h2 className="text-3xl font-bold text-zinc-100">Fala<span className="text-emerald-400">Tu</span></h2>
+              <p className="text-lg text-zinc-200">Do pensamento para a vida.</p>
+              <p className="text-sm text-zinc-400">Me fala que eu te ajudo a cuidar disso.</p>
+              <div className="pt-3">
+                <button
+                  onClick={() => (recording && recMode === 'auto') ? stopRecording(false) : (!recording ? void startRecording('auto') : undefined)}
+                  className={recording && recMode === 'auto'
+                    ? 'inline-flex items-center gap-2 rounded-full bg-red-600 hover:bg-red-500 px-8 py-4 text-base font-semibold text-white animate-pulse select-none'
+                    : 'inline-flex items-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-500 px-8 py-4 text-base font-semibold text-white select-none'}>
+                  {recording && recMode === 'auto' ? <><Square className="h-5 w-5" /> {recSecs}s — toque para enviar</> : <><Mic className="h-5 w-5" /> Toque para falar</>}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-600 pt-1">Família, trabalho, compromissos, finanças, projetos, viagens, compras…</p>
+            </div>
+          )}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
             <p className="text-sm text-zinc-400">Fala, digita ou fotografa — a IA organiza e <strong className="text-zinc-200">você confirma</strong> antes de qualquer coisa ser criada.</p>
             <div className="flex gap-2">
@@ -707,9 +784,6 @@ export function FalaTuView() {
             )}
           </div>
 
-          {pending.length === 0 && !processing && (
-            <p className="text-sm text-zinc-500 text-center py-6">Caixa de entrada limpa. Fala aí. 🎙️</p>
-          )}
           <div className="space-y-3">
             {pending.map((item) => <ConfirmCard key={item.id} item={item} onResolved={loadPending} />)}
           </div>
@@ -989,6 +1063,133 @@ export function FalaTuView() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {tab === 'protocols' && (
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-400">
+            Tarefas pré-autorizadas ativáveis por voz. O caso clássico: diga <strong className="text-zinc-200">"protocolo de segurança"</strong> em
+            qualquer canal e <strong className="text-zinc-200">seu telefone toca</strong> em alguns minutos — se precisar sair de uma situação
+            desconfortável, "pede licença pra atender" e sai com elegância. A ligação vai <em>sempre e somente</em> pro seu número verificado.
+          </p>
+
+          {/* Opt-in da org (convenção nº 10) */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-zinc-200">Ativar Protocolos</p>
+              <p className="text-xs text-zinc-500">Liga o reconhecimento por voz e o agendamento de ligações nesta conta.</p>
+            </div>
+            <button onClick={toggleProtoOrg} disabled={protoBusy || !protoSettings} role="switch" aria-checked={!!protoSettings?.orgEnabled}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${protoSettings?.orgEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${protoSettings?.orgEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+
+          {protoSettings?.orgEnabled && (
+            <>
+              {!protoSettings.telephonyConfigured && (
+                <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5">
+                  ⚠️ O servidor ainda não tem o provider de voz configurado — a verificação e as ligações não vão funcionar até lá. Fale com o suporte.
+                </p>
+              )}
+
+              {/* Criar protocolo */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                <p className="text-sm text-zinc-200 font-medium">Novo protocolo</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder='Nome falado (ex.: "protocolo de segurança")'
+                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200 sm:col-span-1" />
+                  <input value={pPhone} onChange={(e) => setPPhone(e.target.value)} placeholder="+5511999998888" inputMode="tel"
+                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+                  <div className="flex gap-2">
+                    <input value={pDelay} onChange={(e) => setPDelay(e.target.value)} placeholder="5" inputMode="numeric"
+                      className="w-20 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" title="Minutos até a ligação" />
+                    <button onClick={createProto} disabled={protoBusy || !pName.trim()}
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                      {protoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />} Criar
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-zinc-500">Telefone em formato internacional. Minutos: 1 a 60 (padrão 5).</p>
+              </div>
+
+              {/* Lista de protocolos */}
+              {protos.map((p) => (
+                <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-zinc-200 truncate">
+                        “{p.name}”
+                        {p.phone_verified_at
+                          ? <span className="ml-2 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">verificado</span>
+                          : <span className="ml-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">número não verificado</span>}
+                      </p>
+                      <p className="text-[11px] text-zinc-500">{p.phone_e164} · liga em {p.delay_minutes} min{Number(p.enabled) ? '' : ' · desligado'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {p.phone_verified_at && !!Number(p.enabled) && (
+                        <button onClick={() => protoCall(() => api(`/protocols/${p.id}/activate`, { method: 'POST' }), `🚨 Ativado — seu telefone toca em ${p.delay_minutes} min.`)}
+                          disabled={protoBusy} title="Ativar agora (sem falar)"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50">
+                          <PhoneCall className="h-3.5 w-3.5" /> Ativar
+                        </button>
+                      )}
+                      <button onClick={() => protoCall(() => api(`/protocols/${p.id}`, { method: 'POST', body: JSON.stringify({ enabled: !Number(p.enabled) }) }))}
+                        disabled={protoBusy} role="switch" aria-checked={!!Number(p.enabled)}
+                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${Number(p.enabled) ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${Number(p.enabled) ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </button>
+                      <button onClick={() => protoCall(() => api(`/protocols/${p.id}/remove`, { method: 'POST' }), 'Protocolo removido.')}
+                        disabled={protoBusy} title="Remover"
+                        className="text-zinc-500 hover:text-red-300 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                  {!p.phone_verified_at && (
+                    verifyId === p.id ? (
+                      <div className="flex gap-2">
+                        <input value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} placeholder="Código de 6 dígitos" inputMode="numeric"
+                          className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+                        <button onClick={() => confirmVerify(p.id)} disabled={protoBusy || verifyCode.replace(/\D/g, '').length !== 6}
+                          className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Confirmar</button>
+                        <button onClick={() => requestVerify(p.id)} disabled={protoBusy}
+                          className="rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-xs text-zinc-300 disabled:opacity-50">Ligar de novo</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => requestVerify(p.id)} disabled={protoBusy || !protoSettings.telephonyConfigured}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-xs text-zinc-300 disabled:opacity-50">
+                        <PhoneCall className="h-3.5 w-3.5" /> Verificar número (você recebe uma ligação com o código)
+                      </button>
+                    )
+                  )}
+                </div>
+              ))}
+
+              {/* Ativações recentes */}
+              {protoActs.length > 0 && (
+                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-200 font-medium">Ativações recentes</p>
+                    {protoActs.some((a) => a.status === 'scheduled') && (
+                      <button onClick={() => protoCall(() => api('/protocols/activations/cancel-scheduled', { method: 'POST' }), 'Ligações agendadas canceladas.')}
+                        disabled={protoBusy}
+                        className="rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50">
+                        Cancelar agendadas
+                      </button>
+                    )}
+                  </div>
+                  {protoActs.map((a) => (
+                    <p key={a.id} className="text-xs text-zinc-400">
+                      {a.status === 'scheduled' ? '⏳' : a.status === 'fired' ? '📞' : a.status === 'cancelled' ? '🚫' : '⚠️'}{' '}
+                      “{a.protocol_name}” · {String(a.requested_at || '').replace('T', ' ').slice(0, 16)} ·{' '}
+                      {a.status === 'scheduled' ? `liga às ${String(a.scheduled_for || '').replace('T', ' ').slice(11, 16)}` : a.status === 'fired' ? 'ligação feita' : a.status === 'cancelled' ? 'cancelado' : `falhou (${a.fail_reason || 'erro'})`}
+                      {' '}· via {a.source}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

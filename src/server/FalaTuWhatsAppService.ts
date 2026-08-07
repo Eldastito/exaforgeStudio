@@ -164,6 +164,16 @@ export class FalaTuWhatsAppService {
     }
     try {
       const item = await FalaTuService.capture(orgId, user.id, { text: content, source: "whatsapp" });
+      // F8.7 — a captura pode ter sido reconhecida como PROTOCOLO (regra de
+      // código dentro do capture): responde o desfecho e não trata como nota.
+      const proto = (item as any)?.protocol;
+      if (proto) {
+        if (proto.kind === "activated") return { handled: true, reply: `🚨 Protocolo *${proto.name}* ativado — seu telefone vai tocar em ${proto.delayMinutes} min. Diga *cancela o protocolo* pra abortar.` };
+        if (proto.kind === "ambiguous") return { handled: true, reply: `Qual protocolo? Você tem: ${proto.names.map((n: string) => `*${n}*`).join(", ")}. Fala o nome completo.` };
+        if (proto.kind === "unverified") return { handled: true, reply: `O protocolo *${proto.name}* existe, mas o número ainda não foi verificado — confirme no app (aba Protocolos) antes de usar.` };
+        if (proto.kind === "cancelled") return { handled: true, reply: `✅ Protocolo cancelado — a ligação não vai acontecer.` };
+        if (proto.kind === "nothing_to_cancel") return { handled: true, reply: `Não tinha protocolo agendado pra cancelar.` };
+      }
       const label = INTENT_LABEL[(item.intent as FalaTuIntent) || "NOTE"] || "nota";
       const lines = [`📥 Anotado! Entendi como *${label}*: ${item.summary || content}`];
       // RN-151: compromisso sem data explícita fica sem data — avisamos em vez

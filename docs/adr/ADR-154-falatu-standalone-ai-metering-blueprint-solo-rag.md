@@ -245,7 +245,8 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 8.3 | MERGED | #812 |
 | 8.4 | MERGED | #810 |
 | 8.5 | MERGED | #813 |
-| 8.6 | In Progress | — |
+| 8.6 | MERGED | #814 |
+| 8.7 | In Progress | — |
 | 8.5 | Pending | — |
 | 8.6 | Pending | — |
 | 8.7 | Pending | — |
@@ -423,6 +424,25 @@ nº 12: sinais via `business_signals`; jobs via `JobQueue`).
   - Custo de telefonia NÃO sai do saldo de tokens de IA (é custo de
     provider, rastreado na activation; ledger próprio se escalar).
   - Feature flag `falatu_protocols_enabled` opt-in por org (convenção nº 10).
+
+  *Decisões na fatia (2026-08-07):* provider de voz = **Twilio** atrás do
+  adapter `TelephonyService` (API REST mais simples: um POST cria a chamada
+  com TwiML inline; trocar pra Zenvia é reimplementar `call()` sem tocar
+  consumidor). Config 100% por env (`TWILIO_ACCOUNT_SID/AUTH_TOKEN/
+  FROM_NUMBER`); sem env, a UI avisa e nada meio-funciona. **Verificação do
+  número é por código FALADO em ligação** (não SMS): usa o MESMO transporte
+  do resgate — verificar prova que a chamada de verdade alcança o aparelho —
+  com hash sha256 + timingSafeEqual + 5 tentativas + TTL 10min (molde PIN
+  F28); trocar o telefone reseta a verificação. **Pontualidade**: ativar
+  arma `setTimeout` local (unref) pro minuto certo e o passe rápido do
+  Scheduler (5min) é a rede de segurança pós-restart; o disparo re-checa os
+  guardrails NA HORA (protocolo desligado/nº trocado na janela → não liga) e
+  é idempotente por claim atômico. O gancho de reconhecimento fica DENTRO do
+  `capture()` (cobre webapp, WhatsApp e token Siri F8.4): texto é checado
+  ANTES de qualquer IA (ativação não paga extração nem vira item pendente);
+  áudio paga só a transcrição (metering RN-154 §8 intacto). A frase de
+  cancelamento ("cancela o protocolo") cancela TODAS as agendadas do usuário
+  — dentro da janela, cancelar tudo é o comportamento seguro.
 
 - **F8.8 — Telegram bot adapter** *(se demanda)*. API oficial, token em
   minutos, sem QR. Os botões inline são upgrade sobre o WhatsApp pro Confere

@@ -10,6 +10,7 @@ import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { BlueprintSeeder } from "../BlueprintSeeder.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
+import { ProductionReadinessService } from "../ProductionReadinessService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -19,6 +20,17 @@ import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { EdgeSyncService } from "../EdgeSyncService.js";
 
 const router = Router();
+
+// ADR-154 F10.1 — prontidão de produção (master admin). Relatório completo de
+// quais dependências estão configuradas pra vender: blockers, recomendados e
+// canais opcionais. Sem segredo no payload — só estado + dica.
+router.get("/production-readiness", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(ProductionReadinessService.report());
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
 
 // Master Admin - SaaS overview (métricas agregadas de todas as empresas)
 router.get("/overview", (req: AuthRequest, res) => {

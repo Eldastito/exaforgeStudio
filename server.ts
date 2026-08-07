@@ -45,6 +45,7 @@ import lossRoutes from "./src/server/routes/loss.js";
 import legalRoutes from "./src/server/routes/legal.js";
 import cashRoutes from "./src/server/routes/cash.js";
 import healthCenterRoutes from "./src/server/routes/health.js";
+import { ProductionReadinessService } from "./src/server/ProductionReadinessService.js";
 import dreRoutes from "./src/server/routes/dre.js";
 import ownerRoutes from "./src/server/routes/owner.js";
 import aiGovernanceRoutes from "./src/server/routes/aiGovernance.js";
@@ -364,6 +365,20 @@ async function startServer() {
 
   // Servir mídias recebidas (imagens) — rota pública, fora do /api protegido.
   app.use('/media', express.static(MEDIA_DIR));
+
+  // ADR-154 F10.1 — probes de saúde para monitoramento externo (uptime robots,
+  // load balancer, orquestrador). PÚBLICOS e mínimos, registrados ANTES de
+  // qualquer middleware de auth/tenant/financeiro pra serem independentes do
+  // estado do app. Nunca expõem segredo — só liveness/readiness.
+  //   /api/health       → o processo está de pé (liveness). Sempre 200.
+  //   /api/health/ready → dá pra atender? (readiness). 200 se sem blocker; 503
+  //                       se algo essencial (ex.: OpenAI) não está configurado.
+  app.get("/api/health", (_req, res): any =>
+    res.status(200).json({ status: "ok", service: "exaforge", ts: new Date().toISOString() }));
+  app.get("/api/health/ready", (_req, res): any => {
+    const ok = ProductionReadinessService.blockersOk();
+    return res.status(ok ? 200 : 503).json({ status: ok ? "ready" : "blocked" });
+  });
 
   // Financial Block Middleware (for API routes)
   app.use("/api", (req, res, next) => {

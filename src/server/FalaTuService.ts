@@ -71,6 +71,7 @@ export interface FalaTuCaptureInput {
   audio?: { mimeType: string; data: string }; // base64
   image?: { mimeType: string; data: string }; // base64
   source?: string;
+  commandId?: string; // F8.2 — dedup de reenvio da fila offline (opcional)
 }
 
 const INTENTS: FalaTuIntent[] = ["TASK", "EVENT", "LIST", "NOTE", "UNKNOWN"];
@@ -196,6 +197,16 @@ export class FalaTuService {
     if (!input.text?.trim() && !input.audio?.data && !input.image?.data) {
       throw new Error("Envie texto, áudio ou imagem.");
     }
+    // ADR-154 F8.2 — idempotência de reenvio da fila offline: o MESMO
+    // (org, user, commandId) devolve a captura já registrada ANTES de gastar
+    // qualquer IA (reenvio do outbox não paga extração duas vezes). Checar
+    // antes do aiAllowed é proposital: reenvio de captura já cobrada não pode
+    // ser recusado por teto atingido depois dela.
+    const commandId = input.commandId?.trim() || null;
+    if (commandId) {
+      const existing = db.prepare(`SELECT * FROM falatu_inbox_items WHERE organization_id = ? AND user_id = ? AND client_command_id = ?`).get(orgId, userId, commandId) as any;
+      if (existing) return existing;
+    }
     // Fatia 2 — limite de uso por plano: captura consome IA, então passa pelo
     // mesmo enforcement do atendimento (billing bloqueado + teto mensal do
     // plano + top-ups/recompra automática, ADR-091 §4). Invariante de negócio
@@ -233,16 +244,26 @@ export class FalaTuService {
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;
     const mentions = FalaTuService.analyzeMentions(orgId, userId, extraction);
-    db.prepare(`
-      INSERT INTO falatu_inbox_items (id, organization_id, user_id, source, content, media_type, transcription, summary, intent, entities_json, suggested_action, confidence, status, memory_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    `).run(
-      id, orgId, userId, input.source === "whatsapp" ? "whatsapp" : "webapp",
-      input.text?.trim() || null, mediaType,
-      extraction.transcription || null, extraction.summary || null, extraction.intent,
-      JSON.stringify(extraction.entities), extraction.suggestedAction || null, extraction.confidence,
-      JSON.stringify({ mentions })
-    );
+    try {
+      db.prepare(`
+        INSERT INTO falatu_inbox_items (id, organization_id, user_id, source, content, media_type, transcription, summary, intent, entities_json, suggested_action, confidence, status, memory_json, client_command_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      `).run(
+        id, orgId, userId, input.source === "whatsapp" ? "whatsapp" : "webapp",
+        input.text?.trim() || null, mediaType,
+        extraction.transcription || null, extraction.summary || null, extraction.intent,
+        JSON.stringify(extraction.entities), extraction.suggestedAction || null, extraction.confidence,
+        JSON.stringify({ mentions }), commandId
+      );
+    } catch (e: any) {
+      // Corrida de reenvio simultâneo (duas abas / flush duplo): o unique
+      // parcial decide e devolvemos o vencedor (padrão convenção nº 7).
+      if (commandId && String(e?.code || "").includes("SQLITE_CONSTRAINT")) {
+        const winner = db.prepare(`SELECT * FROM falatu_inbox_items WHERE organization_id = ? AND user_id = ? AND client_command_id = ?`).get(orgId, userId, commandId) as any;
+        if (winner) return winner;
+      }
+      throw e;
+    }
     // Conta a captura como ação de IA do mês (mesma régua do PlanService.getUsage
     // e do aiAllowed) — sem isto o FalaTu seria IA "de graça" fora do plano.
     // Best-effort (convenção nº 7): falha no log de consumo nunca perde a captura.

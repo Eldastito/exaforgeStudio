@@ -207,6 +207,15 @@ export class FalaTuService {
       const existing = db.prepare(`SELECT * FROM falatu_inbox_items WHERE organization_id = ? AND user_id = ? AND client_command_id = ?`).get(orgId, userId, commandId) as any;
       if (existing) return existing;
     }
+    // ADR-154 F8.7 — Protocolos: TEXTO é checado ANTES de qualquer IA (match
+    // é regra de código; ativação de resgate não paga extração nem vira item
+    // pendente). Áudio precisa transcrever primeiro — checado após interpret.
+    // 0 match → null → a captura segue exatamente o fluxo de sempre.
+    if (input.text?.trim()) {
+      const { FalaTuProtocolService } = await import("./FalaTuProtocolService.js");
+      const proto = FalaTuProtocolService.handleCaptureText(orgId, userId, input.text, input.source);
+      if (proto) return { protocol: proto };
+    }
     // Fatia 2 — limite de uso por plano: captura consome IA, então passa pelo
     // mesmo enforcement do atendimento (billing bloqueado + teto mensal do
     // plano + top-ups/recompra automática, ADR-091 §4). Invariante de negócio
@@ -243,6 +252,14 @@ export class FalaTuService {
     const extraction = await FalaTuService.interpret(input, systemPreamble ? { systemPreamble } : {});
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;
+    // F8.7 — Protocolos por ÁUDIO: agora que existe transcrição, aplica a
+    // mesma regra de código. Ativação não vira item pendente (a transcrição
+    // já foi paga — metering RN-154 §8 intacto).
+    if (mediaType === "audio" && extraction.transcription) {
+      const { FalaTuProtocolService } = await import("./FalaTuProtocolService.js");
+      const proto = FalaTuProtocolService.handleCaptureText(orgId, userId, extraction.transcription, input.source);
+      if (proto) return { protocol: proto };
+    }
     const mentions = FalaTuService.analyzeMentions(orgId, userId, extraction);
     try {
       db.prepare(`

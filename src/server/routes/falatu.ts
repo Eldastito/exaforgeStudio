@@ -248,6 +248,76 @@ router.post("/capture-tokens/:id/revoke", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
+// ── F8.7: Protocolos (chamada de resgate). CRUD é HUMANO — só existe nestas
+// rotas de sessão; o caminho de captura apenas lê/ativa/cancela. Nenhuma rota
+// aceita número de destino além do phoneE164 do PRÓPRIO protocolo do usuário
+// (guardrail anti-abuso: ligar pra terceiros é impossível por construção). ──
+
+router.get("/protocols/settings", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  const { TelephonyService } = await import("../TelephonyService.js");
+  res.json({ orgEnabled: FalaTuProtocolService.orgEnabled(req.organizationId!), telephonyConfigured: TelephonyService.configured() });
+});
+
+router.post("/protocols/settings", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(FalaTuProtocolService.setOrgEnabled(req.organizationId!, actorId(req), !!req.body?.enabled)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/protocols", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  res.json(FalaTuProtocolService.list(req.organizationId!, actorId(req)));
+});
+
+router.post("/protocols", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(FalaTuProtocolService.create(req.organizationId!, actorId(req), req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Cancela TODAS as agendadas do usuário — mesmo comportamento da frase de
+// voz ("cancela o protocolo"): dentro da janela, cancelar tudo é o seguro.
+router.post("/protocols/activations/cancel-scheduled", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  res.json({ cancelled: FalaTuProtocolService.cancelScheduled(req.organizationId!, actorId(req), "ui") });
+});
+
+router.get("/protocols/activations", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  res.json(FalaTuProtocolService.listActivations(req.organizationId!, actorId(req)));
+});
+
+router.post("/protocols/:id", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(FalaTuProtocolService.update(req.organizationId!, actorId(req), req.params.id, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/protocols/:id/remove", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(FalaTuProtocolService.remove(req.organizationId!, actorId(req), req.params.id)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.post("/protocols/:id/verify/request", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(await FalaTuProtocolService.requestPhoneVerification(req.organizationId!, actorId(req), req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/protocols/:id/verify/confirm", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(FalaTuProtocolService.confirmPhoneVerification(req.organizationId!, actorId(req), req.params.id, req.body?.code)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/protocols/:id/activate", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuProtocolService } = await import("../FalaTuProtocolService.js");
+  try { res.json(FalaTuProtocolService.activate(req.organizationId!, actorId(req), req.params.id, "webapp")); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // "Enviar meu resumo agora" — ignora janela/dedupe, respeita a porta; só pro
 // próprio usuário. O envio real é resolvido pelo canal da org (mesmo do Scheduler).
 router.post("/briefing/whatsapp/send-now", async (req: AuthRequest, res): Promise<any> => {

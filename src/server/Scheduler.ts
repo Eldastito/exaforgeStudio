@@ -88,6 +88,13 @@ export class Scheduler {
 
   /** Passe rápido (5 min): tarefas sensíveis a minutos. */
   static async fastPass() {
+    // ADR-154 F8.7 — rede de segurança dos Protocolos: dispara ativações
+    // vencidas cujo timer local morreu num restart (claim atômico impede
+    // ligação dupla quando timer e passe correm juntos).
+    try {
+      const { FalaTuProtocolService } = await import('./FalaTuProtocolService.js');
+      await FalaTuProtocolService.fireDue();
+    } catch (e) { console.error('[Scheduler] disparo de protocolos FalaTu falhou', e); }
     await this.pixReminderPass().catch(e => console.error('[Scheduler] lembrete PIX falhou', e));
     await InstagramService.publishScheduledPass().catch(e => console.error('[Scheduler] publicação agendada falhou', e));
     try { MaestroService.reactToVisionEvents(); } catch (e) { console.error('[Scheduler] ponte Vision VMS -> Tarefas falhou', e); }

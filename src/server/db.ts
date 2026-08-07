@@ -7826,6 +7826,55 @@ const initDb = () => {
       UNIQUE (organization_id, user_id, briefing_date)
     );
   `);
+
+  // ADR-154 F8.7 — Protocolos (tarefas pré-autorizadas ativáveis por voz).
+  // falatu_protocols: config HUMANA (a IA nunca escreve aqui). phone_e164 só
+  //   vale com phone_verified_at (código falado em ligação, molde PIN F28 —
+  //   verify_* são o estado transitório dessa verificação). Remoção é
+  //   deleted_at (convenção nº 9). name_norm = régua de normalização da F5.
+  // falatu_protocol_activations: 1 linha por ativação, para sempre —
+  //   cancelamento/falha é UPDATE de status (scheduled|firing|fired|
+  //   cancelled|failed), nunca DELETE. provider_call_id rastreia o custo de
+  //   telefonia (fora do ledger de IA).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_protocols_enabled INTEGER DEFAULT 0`); } catch(e){}
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS falatu_protocols (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      name_norm TEXT NOT NULL,
+      action_kind TEXT NOT NULL DEFAULT 'call_me',
+      delay_minutes INTEGER NOT NULL DEFAULT 5,
+      phone_e164 TEXT NOT NULL,
+      phone_verified_at DATETIME,
+      verify_code_hash TEXT,
+      verify_expires_at DATETIME,
+      verify_attempts INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      deleted_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_falatu_protocols_user
+      ON falatu_protocols(organization_id, user_id);
+    CREATE TABLE IF NOT EXISTS falatu_protocol_activations (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      protocol_id TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'webapp',
+      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      scheduled_for DATETIME NOT NULL,
+      status TEXT NOT NULL DEFAULT 'scheduled',
+      provider_call_id TEXT,
+      fired_at DATETIME,
+      fail_reason TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_falatu_protocol_act_due
+      ON falatu_protocol_activations(status, scheduled_for);
+  `);
 };
 
 initDb();

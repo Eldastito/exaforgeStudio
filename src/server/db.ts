@@ -7718,6 +7718,28 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_falatu_memory_embeddings_user
       ON falatu_memory_embeddings(organization_id, user_id, source_type);
   `);
+
+  // ADR-154 F8.4 — tokens pessoais de captura (API aberta write-only da
+  // Fase 8: Atalho Siri, Share Target, NFC, Zapier/n8n). Guarda-se APENAS o
+  // sha256 do token (nunca o claro): dump do banco não vira credencial. O
+  // escopo write-only não mora aqui — mora no fato de o router de ingestão
+  // expor uma única rota (capture); a tabela só liga hash → (org, user).
+  // Revogação é UPDATE de revoked_at (convenção nº 9, nunca DELETE — a
+  // linha revogada é trilha de auditoria de que a credencial existiu).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS falatu_capture_tokens (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_used_at DATETIME,
+      revoked_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_falatu_capture_tokens_user
+      ON falatu_capture_tokens(organization_id, user_id);
+  `);
 };
 
 initDb();

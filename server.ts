@@ -26,6 +26,7 @@ import notificationsRoutes from "./src/server/routes/notifications.js";
 import authRoutes from "./src/server/routes/auth.js";
 import onboardingSoloRoutes from "./src/server/routes/onboardingSolo.js";
 import falatuSoloWhatsappRoutes from "./src/server/routes/falatuSoloWhatsapp.js";
+import falatuIngestRoutes from "./src/server/routes/falatuIngest.js";
 import usersRoutes from "./src/server/routes/users.js";
 import permissionsRoutes from "./src/server/routes/permissions.js";
 import auditRoutes from "./src/server/routes/audit.js";
@@ -392,6 +393,10 @@ async function startServer() {
   // ADR-154 F4.1 — provision Evolution DEDICADA por org Solo (POST /provision
   // + GET /status). Auth+role=owner por dentro das rotas.
   app.use("/api/falatu-solo/whatsapp", falatuSoloWhatsappRoutes);
+  // ADR-154 F8.4 — ingestão por token pessoal (write-only). FORA do
+  // protectedApi de propósito: autentica pelo token ftk_ (Bearer), não por
+  // JWT — é a porta dos plugues externos (Siri/Share Target/NFC/integrações).
+  app.use("/api/falatu-ingest", falatuIngestRoutes);
 
   // Provador Virtual (Fashion AI Studio, FAS-1) — auth PRÓPRIA de cliente
   // final (JWT com segredo derivado, ver FashionCustomerService). Registrado

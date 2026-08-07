@@ -251,7 +251,9 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 8.9 | Roadmap | — |
 | 9.3 | MERGED | #818 |
 | 10.1 | MERGED | #818 |
-| 10.2 | In Progress | — |
+| 10.2 | MERGED | #819 |
+| 11.1 | In Progress | — |
+| 11.2 | In Progress | — |
 
 ## Fase 7 — FalaTu standalone por subdomínio (decidido 2026-08-06)
 
@@ -498,6 +500,28 @@ deploy está pronto?". A Fase 10 dá essa resposta a partir da config REAL
   a dica de env. **Pura leitura** — renderiza literalmente o relatório da
   F10.1, incluindo o e-mail como não-configurado. Sem novo endpoint, sem DB.
 
-**Próximas (roadmap comercial):** transporte de e-mail real (fecha o gap que a
-tela mostra) e o checkout de assinatura Solo (cobrança Asaas — gap nº 1 pra
-faturar, hoje "recommended/faltando" no readiness).
+**Próximas (roadmap comercial):** o checkout de assinatura Solo (cobrança
+Asaas — gap nº 1 pra faturar, hoje "recommended/faltando" no readiness).
+
+## Fase 11 — Fechando gaps de produção (decidido 2026-08-07)
+
+- **F11.1 — transporte de e-mail de plataforma** *(esta fatia)*. O briefing por
+  e-mail (F8.6) já enviava de verdade pela conexão Google da org; faltava um
+  remetente pra quem NÃO tem Google (orgs Solo). Adicionado o **Resend via
+  `fetch` nativo** (zero dep nova, molde do `gmailSend`) como **fallback
+  aditivo** em `FalaTuEmailService.resolveTransport`: preferimos o Gmail da org
+  (remetente = a própria org); sem Google, cai no remetente de plataforma
+  (`RESEND_API_KEY` + `FALATU_EMAIL_FROM`, só no ambiente — nunca no DB nem no
+  payload). Nenhuma assinatura mudou. O readiness `email` passou de hard-coded
+  `false` pra **env-based** e honesto. Best-effort preservado: erro do provedor
+  = `send_failed` sem marcar entrega (retenta no tick).
+
+- **F11.2 — teto de imagem pra IA de visão** *(esta fatia)*. A captura barrava
+  foto acima de ~1MB e não comprimia. Agora o cliente faz **downscale**
+  (createImageBitmap + canvas, JPEG 0.85, 2048px) — foto crua de celular vira
+  um JPEG limpo, melhor pra IA ler E cabe no payload. Backend: **parser JSON
+  dedicado** pras rotas `/api/falatu*` (12mb, antes do global de 2mb que a
+  ADR-151 §75 mantém pra não abrir DoS) + `MAX_MEDIA_B64` 1.9M→9M (nas duas
+  cópias). Visão: `extractStructuredFromImage`/`extractInvoiceItems` ganham
+  `detail` (default "auto"); o caminho FalaTu pede `"high"` pra não
+  sub-amostrar texto/rótulo pequeno.

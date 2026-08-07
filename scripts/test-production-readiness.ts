@@ -21,6 +21,7 @@ const ENV_KEYS = [
   "OPENAI_API_KEY", "JWT_SECRET", "APP_URL", "ASAAS_API_KEY",
   "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER",
   "EVOLUTION_API_KEY", "EVOLUTION_BASE_URL", "BACKUPS_DIR",
+  "RESEND_API_KEY", "FALATU_EMAIL_FROM",
 ];
 const saved: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) saved[k] = process.env[k];
@@ -38,6 +39,8 @@ process.env.TWILIO_AUTH_TOKEN = "tok";
 process.env.TWILIO_FROM_NUMBER = "+5511999999999";
 process.env.EVOLUTION_API_KEY = "evo";
 process.env.EVOLUTION_BASE_URL = "https://evo.exemplo.com.br";
+process.env.RESEND_API_KEY = "re-test";
+process.env.FALATU_EMAIL_FROM = "FalaTu <briefing@exemplo.com.br>";
 let r = ProductionReadinessService.report();
 check("A: status ready quando tudo configurado", r.status === "ready");
 check("A: blockersOk() true", ProductionReadinessService.blockersOk() === true);
@@ -47,8 +50,8 @@ check("A: whatsapp ok (Evolution completo)", get(r.checks, "whatsapp").ok === tr
 check("A: billing ok (Asaas)", get(r.checks, "billing").ok === true);
 check("A: backups ok (dir gravável)", get(r.checks, "backups").ok === true);
 check("A: push sempre ok (VAPID auto)", get(r.checks, "push").ok === true);
-check("A: email marcado como não-configurado (transporte é TODO)", get(r.checks, "email").ok === false);
-check("A: nenhum segredo vaza no payload", !JSON.stringify(r).includes("sk-test") && !JSON.stringify(r).includes("asa-test"));
+check("A: email ok com remetente de plataforma (F11.1: Resend + FROM)", get(r.checks, "email").ok === true);
+check("A: nenhum segredo vaza no payload", !JSON.stringify(r).includes("sk-test") && !JSON.stringify(r).includes("asa-test") && !JSON.stringify(r).includes("re-test"));
 
 // --- Caso B: sem OpenAI → blocked ---
 reset();
@@ -70,6 +73,7 @@ check("C: blockersOk() true", ProductionReadinessService.blockersOk() === true);
 check("C: recommendedFailing >= 1", r.summary.recommendedFailing >= 1);
 check("C: jwt_secret.ok false sem env", get(r.checks, "jwt_secret").ok === false);
 check("C: app_url.ok false sem env", get(r.checks, "app_url").ok === false);
+check("C: email.ok false sem remetente de plataforma (Resend/FROM)", get(r.checks, "email").ok === false);
 
 // --- Twilio incompleto → telephony off ---
 reset();

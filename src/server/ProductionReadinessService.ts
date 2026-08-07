@@ -167,13 +167,16 @@ export class ProductionReadinessService {
       ok: true, // VAPID é auto-gerado e persistido no DB (FalaTuPushService) — sem env.
       detail: "Pronto — as chaves VAPID são geradas e persistidas automaticamente (sem env).",
     });
+    const emailPlatform = has("RESEND_API_KEY") && has("FALATU_EMAIL_FROM");
     checks.push({
       key: "email",
       label: "E-mail (briefing)",
       level: "optional",
-      ok: false, // F8.6 registra opt-in/entregas; o transporte SMTP real ainda é TODO.
-      detail: "Transporte de e-mail ainda não plugado — opt-in e dedupe existem (F8.6), falta o provedor de envio.",
-      hint: "Plugar SMTP/Resend no FalaTuEmailService (mudança de código, não só env)",
+      ok: emailPlatform, // F11.1: remetente de plataforma (Resend) via env.
+      detail: emailPlatform
+        ? "Remetente de plataforma (Resend) configurado — orgs sem conexão Google também recebem o briefing por e-mail."
+        : "Sem remetente de plataforma: só orgs com conexão Google enviam o briefing por e-mail; orgs Solo ficam sem esse canal.",
+      hint: "RESEND_API_KEY, FALATU_EMAIL_FROM",
     });
 
     const blockersFailing = checks.filter((c) => c.level === "blocker" && !c.ok).length;

@@ -17,12 +17,15 @@ import { FalaTuBriefingTaskService } from "./FalaTuBriefingTaskService.js";
  *   destino é o e-mail de login do próprio usuário — não existe "canal da
  *   org" a proteger como no WA. Desligar é UPDATE enabled=0 (convenção
  *   nº 9: a linha fica como trilha de que o opt-in existiu).
- * - **Transporte = conexão Google da org** (GoogleOAuthService.gmailSend,
- *   o MESMO caminho que a cobrança do Scheduler já usa) — zero infra nova,
- *   zero segredo novo. Org sem conexão Google → a porta fica "ligada mas
- *   sem canal" (reason `no_email_channel`; a UI explica onde conectar).
- *   Um remetente SMTP de plataforma, se um dia existir, entra aqui como
- *   fallback aditivo sem mudar nenhuma assinatura.
+ * - **Transporte com dois caminhos** (resolveTransport, preferência → fallback):
+ *   1. **Gmail da conexão Google da org** (GoogleOAuthService.gmailSend, o
+ *      MESMO caminho da cobrança do Scheduler) — remetente é a própria org,
+ *      melhor identidade/entregabilidade; zero segredo novo.
+ *   2. **Remetente de PLATAFORMA** (Resend via `fetch` nativo, F11.1) quando a
+ *      org NÃO tem Google — o caso das orgs Solo. Ligado por env
+ *      (`RESEND_API_KEY` + `FALATU_EMAIL_FROM`); sem env, a porta fica "ligada
+ *      mas sem canal" (`no_email_channel`; a UI explica). Aditivo puro: as
+ *      assinaturas não mudaram, só o corpo de resolveTransport/channelReady.
  * - **Só e-mail do PRÓPRIO usuário** (login em `users`): não há campo de
  *   destinatário arbitrário em rota nenhuma — o vetor "usar o briefing pra
  *   mandar e-mail pra terceiros" é impossível por construção.
@@ -71,19 +74,63 @@ export class FalaTuEmailService {
     } catch { return ""; }
   }
 
+  /** Há ALGUM canal de envio pra org? Google conectado OU remetente de plataforma. */
   private static async channelReady(orgId: string): Promise<boolean> {
+    if (this.platformConfigured()) return true;
     try {
       const { GoogleOAuthService } = await import("./GoogleOAuthService.js");
       return !!GoogleOAuthService.getConnection(orgId);
     } catch { return false; }
   }
 
-  /** Transporte padrão: Gmail da conexão Google da org (molde da cobrança). */
-  private static defaultTransport(orgId: string): EmailTransport {
+  /** Remetente de plataforma configurado no ambiente? (Resend). */
+  private static platformConfigured(): boolean {
+    return !!(process.env.RESEND_API_KEY && (process.env.RESEND_API_KEY || "").trim() &&
+              process.env.FALATU_EMAIL_FROM && (process.env.FALATU_EMAIL_FROM || "").trim());
+  }
+
+  /**
+   * Resolve o transporte da org: preferimos o Gmail da conexão Google
+   * (remetente = a própria org); sem Google, caímos no remetente de PLATAFORMA
+   * (Resend), o fallback que orgs Solo precisam. Null = nenhum canal.
+   */
+  private static async resolveTransport(orgId: string): Promise<EmailTransport | null> {
+    try {
+      const { GoogleOAuthService } = await import("./GoogleOAuthService.js");
+      if (GoogleOAuthService.getConnection(orgId)) return this.gmailTransport(orgId);
+    } catch { /* sem Google acessível → tenta plataforma */ }
+    if (this.platformConfigured()) return this.platformTransport();
+    return null;
+  }
+
+  /** Transporte 1: Gmail da conexão Google da org (molde da cobrança). */
+  private static gmailTransport(orgId: string): EmailTransport {
     return async (to, subject, body) => {
       const { GoogleOAuthService } = await import("./GoogleOAuthService.js");
       const r = await GoogleOAuthService.gmailSend(orgId, to, subject, body);
       if ((r as any)?.error) throw new Error((r as any).error);
+    };
+  }
+
+  /**
+   * Transporte 2: remetente de plataforma via Resend (HTTP, `fetch` nativo —
+   * zero dep nova, mesmo estilo do GoogleOAuthService.gmailSend). O segredo
+   * (RESEND_API_KEY) fica só no ambiente; nunca no DB nem no payload.
+   */
+  private static platformTransport(): EmailTransport {
+    return async (to, subject, body) => {
+      const resp = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ from: process.env.FALATU_EMAIL_FROM, to: [to], subject, text: body }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.text().catch(() => "");
+        throw new Error(`resend ${resp.status}: ${detail.slice(0, 200)}`);
+      }
     };
   }
 
@@ -116,7 +163,7 @@ export class FalaTuEmailService {
     const out = { sent: 0, skipped: 0, results: [] as Array<{ userId: string; reason?: string; sent: boolean }> };
     const { dateSP, hourSP } = FalaTuBriefingDigestService.spParts(opts.now);
     if (!opts.force && (hourSP < 6 || hourSP >= 12)) return out;
-    const send = opts.send || (await this.channelReady(orgId) ? this.defaultTransport(orgId) : null);
+    const send = opts.send || (await this.resolveTransport(orgId));
     for (const sig of FalaTuBriefingDigestService.openBriefingsForDay(orgId, dateSP)) {
       const userId = sig.evidence.userId as string;
       if (!this.enabled(orgId, userId)) { out.skipped++; out.results.push({ userId, reason: "not_opted_in", sent: false }); continue; }
@@ -147,7 +194,7 @@ export class FalaTuEmailService {
     if (!this.enabled(orgId, userId)) return { sent: 0, skipped: 1, reason: "email_disabled" };
     const email = this.userEmail(orgId, userId);
     if (!email) return { sent: 0, skipped: 1, reason: "no_email" };
-    const send = opts?.send || (await this.channelReady(orgId) ? this.defaultTransport(orgId) : null);
+    const send = opts?.send || (await this.resolveTransport(orgId));
     if (!send) return { sent: 0, skipped: 1, reason: "no_email_channel" };
     const { dateSP } = FalaTuBriefingDigestService.spParts(opts?.now || new Date());
     // Atualiza o sinal do dia (idempotente) pra refletir o estado atual antes do envio.

@@ -418,7 +418,7 @@ Regras rígidas: NUNCA invente marca, peso, categoria ou dígitos do código de 
  * um número. Continua sem sugerir PREÇO DE VENDA — só custo de compra; quem
  * decide a margem/preço final é sempre o humano.
  */
-export async function extractInvoiceItems(base64: string, mimetype = "image/jpeg"): Promise<string> {
+export async function extractInvoiceItems(base64: string, mimetype = "image/jpeg", detail: "auto" | "low" | "high" = "auto"): Promise<string> {
   const system = `Você é um assistente de leitura de notas fiscais e comprovantes de compra de mercadorias para varejo brasileiro. A partir da foto de uma nota fiscal, cupom fiscal ou comprovante de compra, extraia os itens comprados e devolva SOMENTE um JSON:
 {"supplierName": "nome do fornecedor/emitente da nota, se legível (ou null)", "items": [{"name": "nome do item exatamente como aparece na nota", "quantity": <número, quantidade comprada>, "unit": "unidade como aparece na nota, ex.: 'un', 'kg', 'cx' (ou null se não estiver claro)", "unitCost": <número, custo unitário em reais>, "confidence": <número inteiro de 0 a 100, confiança na leitura DESTE item específico>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura da nota>}
 Regras rígidas: liste TODOS os itens de MERCADORIA visíveis na nota — IGNORE linhas de frete, impostos, descontos e a linha de total. NUNCA invente itens que não estejam na nota. Se a quantidade ou o custo unitário de um item não estiverem claros, inclua o item mesmo assim com sua melhor leitura e um confidence baixo nesse item (não descarte o item). Responda SOMENTE o JSON, sem texto ao redor.`;
@@ -430,7 +430,7 @@ Regras rígidas: liste TODOS os itens de MERCADORIA visíveis na nota — IGNORE
         role: "user",
         content: [
           { type: "text", text: "Leia esta nota fiscal e devolva o JSON pedido com todos os itens comprados." },
-          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}`, detail } },
         ],
       },
     ] as any,
@@ -625,14 +625,16 @@ export async function analyzeImageForChat(base64: string, mimetype = "image/jpeg
  * Recebe o system prompt (que define o schema/regras) e devolve o JSON cru.
  * Usado pelo SmartImportService (ADR-101) para "Importar PDF/imagem".
  */
-export async function extractStructuredFromImage(base64: string, mimetype: string, system: string, userText = "Extraia os dados pedidos e devolva SOMENTE o JSON."): Promise<string> {
+export async function extractStructuredFromImage(base64: string, mimetype: string, system: string, userText = "Extraia os dados pedidos e devolva SOMENTE o JSON.", detail: "auto" | "low" | "high" = "auto"): Promise<string> {
   const res = await getClient().chat.completions.create({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
     messages: [
       { role: "system", content: system },
       { role: "user", content: [
         { type: "text", text: userText },
-        { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+        // `detail` explícito: quem lê detalhe fino (ex.: FalaTu) pede "high"
+        // pra IA não sub-amostrar a imagem; os demais ficam em "auto".
+        { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}`, detail } },
       ] },
     ] as any,
     temperature: 0,

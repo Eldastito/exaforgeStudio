@@ -172,7 +172,8 @@ export class FalaTuService {
         input.image.data,
         input.image.mimeType || "image/jpeg",
         system,
-        input.text?.trim() || "Extraia os dados pedidos desta imagem e devolva SOMENTE o JSON."
+        input.text?.trim() || "Extraia os dados pedidos desta imagem e devolva SOMENTE o JSON.",
+        "high", // captura por foto: leitura de detalhe fino (rótulos, valores, texto pequeno).
       );
     } else {
       let text = input.text?.trim() || "";

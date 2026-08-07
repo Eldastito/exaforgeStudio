@@ -360,6 +360,17 @@ async function startServer() {
   };
   await ensureMasterAdmin();
 
+  // O FalaTu manda foto/áudio como base64 DENTRO do corpo JSON (não usa
+  // multipart), então precisa de mais folga que o resto da API. Um parser
+  // dedicado roda ANTES do global: como o express.json marca req._body, o
+  // parser global (2mb) vê o corpo já lido e não reprocessa. Assim só as rotas
+  // /falatu ganham o teto maior — o resto da API fica em 2mb (a ADR-151 §75
+  // alerta: body global alto é vetor de DoS barato). Casa com MAX_MEDIA_B64
+  // em routes/falatu.ts + routes/falatuIngest.ts e o downscale no cliente.
+  const falatuJson = express.json({ limit: '12mb' });
+  app.use('/api/falatu', falatuJson);
+  app.use('/api/falatu-ingest', falatuJson);
+
   // Middleware for parsing JSON with limit blocker
   app.use(express.json({ limit: '2mb' }));
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
+import type { FalatuTheme } from './useFalatuTheme';
 
 // ADR-154 F7.1 — tela de auth do app FalaTu STANDALONE (subdomínio dedicado).
 //
@@ -24,7 +25,9 @@ import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
 
 type Mode = 'login' | 'register';
 
-export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: string }) {
+export function FalatuAuth({ blueprintKey = 'falatu_solo', theme, onToggleTheme }: {
+  blueprintKey?: string; theme?: FalatuTheme; onToggleTheme?: () => void;
+}) {
   const { login } = useAuth();
   const [mode, setMode] = useState<Mode>('login');
   const [name, setName] = useState('');
@@ -82,23 +85,31 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
   // Campos e botões usam a paleta oficial via tokens --color-ft-* (Cobalto é a
   // cor de ação/primária no app; Ink as superfícies; Nuvem o texto).
   const inputCls =
-    'w-full rounded-md border px-3 py-2 text-[var(--color-ft-nuvem)] placeholder:text-[var(--color-ft-nuvem-muted)] focus:outline-none focus:ring-1';
+    'w-full rounded-md border px-3 py-2 text-[var(--color-ft-text)] placeholder:text-[var(--color-ft-text-muted)] focus:outline-none focus:ring-1';
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--color-ft-ink)' }}>
+    <div className="min-h-screen flex items-center justify-center px-4 relative" style={{ background: 'var(--color-ft-bg)' }}>
+      {onToggleTheme && (
+        <button type="button" onClick={onToggleTheme}
+          className="absolute top-4 right-4 inline-flex items-center justify-center w-9 h-9 rounded-lg text-[var(--color-ft-text-muted)] hover:text-[var(--color-ft-text)] hover:bg-ft-surface-2 transition-colors"
+          title={theme === 'dark' ? 'Mudar para o modo claro' : 'Mudar para o modo escuro'}
+          aria-label={theme === 'dark' ? 'Mudar para o modo claro' : 'Mudar para o modo escuro'}>
+          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
+      )}
       <div
         className="w-full max-w-md rounded-2xl shadow-2xl p-8"
-        style={{ background: 'var(--color-ft-ink-2)', border: '1px solid var(--color-ft-line)' }}
+        style={{ background: 'var(--color-ft-surface)', border: '1px solid var(--color-ft-border)' }}
       >
         <div className="flex flex-col items-center text-center mb-6">
           <FalatuLogo size={56} tile withWordmark withTagline />
-          <p className="mt-4 text-sm" style={{ color: 'var(--color-ft-nuvem-muted)' }}>
+          <p className="mt-4 text-sm" style={{ color: 'var(--color-ft-text-muted)' }}>
             {mode === 'register' ? 'Crie sua conta e comece falando' : 'Entre na sua conta'}
           </p>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm text-center">
+          <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-ft-on-amber text-sm text-center">
             {error}
           </div>
         )}
@@ -106,38 +117,38 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Nome completo</label>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-text)' }}>Nome completo</label>
               <input type="text" required value={name} onChange={e => setName(e.target.value)}
                 className={inputCls}
-                style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
+                style={{ background: 'var(--color-ft-bg)', borderColor: 'var(--color-ft-border)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
                 placeholder="Seu nome" />
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Email</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-text)' }}>Email</label>
             <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
               className={inputCls}
-              style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
+              style={{ background: 'var(--color-ft-bg)', borderColor: 'var(--color-ft-border)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
               placeholder="voce@exemplo.com" />
           </div>
           {mode === 'register' && (
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Telefone WhatsApp (opcional)</label>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-text)' }}>Telefone WhatsApp (opcional)</label>
               <input type="text" value={phone} onChange={e => setPhone(e.target.value)}
                 className={inputCls}
-                style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
+                style={{ background: 'var(--color-ft-bg)', borderColor: 'var(--color-ft-border)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
                 placeholder="+55 11 99999-9999" />
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-nuvem)' }}>Senha</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-ft-text)' }}>Senha</label>
             <div className="relative">
               <input type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
                 className={`${inputCls} pr-10`}
-                style={{ background: 'var(--color-ft-ink)', borderColor: 'var(--color-ft-line)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
+                style={{ background: 'var(--color-ft-bg)', borderColor: 'var(--color-ft-border)', ['--tw-ring-color' as any]: 'var(--color-ft-cobalto)' }}
                 placeholder={mode === 'register' ? 'Mínimo 8 caracteres, letras e números' : 'Sua senha'} />
               <button type="button" onClick={() => setShowPassword(s => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-ft-nuvem-muted)] hover:text-[var(--color-ft-nuvem)]"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-ft-text-muted)] hover:text-[var(--color-ft-text)]"
                 tabIndex={-1} aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}>
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -160,7 +171,7 @@ export function FalatuAuth({ blueprintKey = 'falatu_solo' }: { blueprintKey?: st
             </button>
           ) : (
             <button onClick={() => { setMode('login'); setError(''); }}
-              className="text-sm hover:brightness-110" style={{ color: 'var(--color-ft-nuvem-muted)' }}>
+              className="text-sm hover:brightness-110" style={{ color: 'var(--color-ft-text-muted)' }}>
               Já tem conta? Fazer login
             </button>
           )}

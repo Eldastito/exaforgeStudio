@@ -27,20 +27,23 @@ export interface FalatuLogoProps {
   title?: string;
 }
 
-// Símbolo puro (anel + check). checkColor Nuvem por padrão — legível tanto sobre
-// Ink (header/hero) quanto sobre o tile. Sobre fundo claro, passe tile pra não
-// perder o check.
+// Símbolo puro (anel + check). O anel (marca) é fixo. O check adapta ao FUNDO:
+// com tile, fica sempre sobre Ink → Nuvem; sem tile (header/hero), segue o texto
+// do tema (--color-ft-text) pra não sumir no claro. Idem o tile: usa Ink no
+// escuro, mas no tema claro o Ink continua valendo como fundo do ícone (o
+// ícone é sempre "app icon" escuro, mesmo no app claro — igual ao favicon).
 function Mark({ size = 40, tile = false, title = 'Fala Tu' }: { size?: number; tile?: boolean; title?: string }) {
+  const check = tile ? '#f4f6fc' : 'var(--color-ft-text)';
   return (
     <svg width={size} height={size} viewBox="0 0 512 512" fill="none"
       xmlns="http://www.w3.org/2000/svg" role="img" aria-label={title}>
-      {tile && <rect x="16" y="16" width="480" height="480" rx="116" fill="var(--color-ft-ink)" />}
+      {tile && <rect x="16" y="16" width="480" height="480" rx="116" fill="#0e1a2e" />}
       <g fill="none" strokeWidth={44} strokeLinecap="round">
         <path d="M370.9 352.4 A 150 150 0 0 1 141.1 352.4" stroke="var(--color-ft-menta)" />
         <path d="M115.1 307.3 A 150 150 0 0 1 229.9 108.3" stroke="var(--color-ft-cobalto)" />
         <path d="M282.1 108.3 A 150 150 0 0 1 396.9 307.3" stroke="var(--color-ft-coral)" />
       </g>
-      <path d="M179 266 L236 323 L348 195" fill="none" stroke="var(--color-ft-nuvem)"
+      <path d="M179 266 L236 323 L348 195" fill="none" stroke={check}
         strokeWidth={46} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -63,7 +66,7 @@ export function FalatuLogo({
       <span className="flex flex-col leading-none">
         <span
           className="font-semibold tracking-tight"
-          style={{ fontFamily: 'var(--font-sans)', fontSize: size * 0.62, color: 'var(--color-ft-nuvem)' }}
+          style={{ fontFamily: 'var(--font-sans)', fontSize: size * 0.62, color: 'var(--color-ft-text)' }}
         >
           Fala&nbsp;Tu
         </span>

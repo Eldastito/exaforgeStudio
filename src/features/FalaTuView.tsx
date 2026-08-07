@@ -100,40 +100,40 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
   return (
     <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-violet-300">
+        <span className="text-xs font-semibold uppercase tracking-wider text-ft-on-violet">
           {INTENT_LABEL[item.intent] || item.intent} sugerida pela IA
-          {item.media_type && <span className="ml-2 text-zinc-500">({item.media_type === 'audio' ? 'áudio' : 'imagem'})</span>}
+          {item.media_type && <span className="ml-2 text-ft-text-faint">({item.media_type === 'audio' ? 'áudio' : 'imagem'})</span>}
         </span>
         {lowConfidence && (
-          <span className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">
+          <span className="text-xs text-ft-on-amber bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">
             Confiança baixa — revise com atenção
           </span>
         )}
       </div>
-      {item.transcription && <p className="text-sm text-zinc-400 italic">"{item.transcription}"</p>}
-      {item.suggested_action && <p className="text-sm text-zinc-300">{item.suggested_action}</p>}
+      {item.transcription && <p className="text-sm text-ft-text-muted italic">"{item.transcription}"</p>}
+      {item.suggested_action && <p className="text-sm text-ft-text">{item.suggested_action}</p>}
 
       <div className="grid gap-2 sm:grid-cols-2">
         <select value={intent} onChange={(e) => setIntent(e.target.value)}
-          className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-zinc-200">
+          className="rounded-lg bg-ft-surface border border-ft-border px-3 py-2 text-sm text-ft-text">
           {Object.entries(INTENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título"
-          className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+          className="rounded-lg bg-ft-surface border border-ft-border px-3 py-2 text-sm text-ft-text" />
       </div>
       {intent === 'EVENT' && (
         <div className="grid gap-2 sm:grid-cols-2">
           {/* RN-151: a IA não inventa data — sem data na fala, o campo chega vazio e É O HUMANO que preenche. */}
           <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)}
-            className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+            className="rounded-lg bg-ft-surface border border-ft-border px-3 py-2 text-sm text-ft-text" />
           <input type="time" value={eventTime} onChange={(e) => setEventTime(e.target.value)}
-            className="rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+            className="rounded-lg bg-ft-surface border border-ft-border px-3 py-2 text-sm text-ft-text" />
         </div>
       )}
       {intent === 'LIST' && (
         <textarea value={listItems} onChange={(e) => setListItems(e.target.value)} rows={4}
           placeholder="Um item por linha"
-          className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+          className="w-full rounded-lg bg-ft-surface border border-ft-border px-3 py-2 text-sm text-ft-text" />
       )}
 
       {/* Fatia 5 — memória: auto-vínculo transparente + desambiguação ativa.
@@ -141,18 +141,18 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
       {known.map((m) => {
         const linked = m.candidates.find((c) => c.id === m.resolvedEntityId);
         return linked && linked.name !== m.mention ? (
-          <p key={`${m.type}:${m.mention}`} className="text-xs text-zinc-400 flex items-center gap-1.5">
-            <Brain className="h-3.5 w-3.5 text-violet-300" /> {m.mention} → <span className="text-zinc-200">{linked.name}</span> (da sua memória)
+          <p key={`${m.type}:${m.mention}`} className="text-xs text-ft-text-muted flex items-center gap-1.5">
+            <Brain className="h-3.5 w-3.5 text-ft-on-violet" /> {m.mention} → <span className="text-ft-text">{linked.name}</span> (da sua memória)
           </p>
         ) : null;
       })}
       {ambiguous.map((m) => (
         <div key={`${m.type}:${m.mention}`} className="flex items-center gap-2">
-          <span className="text-xs text-violet-300 flex items-center gap-1.5 shrink-0">
+          <span className="text-xs text-ft-on-violet flex items-center gap-1.5 shrink-0">
             <Brain className="h-3.5 w-3.5" /> Qual <strong>{m.mention}</strong>?
           </span>
           <select value={mentionRes[m.mention] || ''} onChange={(e) => setMentionRes((p) => ({ ...p, [m.mention]: e.target.value }))}
-            className="flex-1 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5 text-xs text-zinc-200">
+            className="flex-1 rounded-lg bg-ft-surface border border-ft-border px-2 py-1.5 text-xs text-ft-text">
             <option value="">Não vincular agora</option>
             {m.candidates.map((c) => <option key={c.id} value={c.id}>{c.name}{c.context ? ` — ${c.context}` : ''}</option>)}
             <option value="new">Outro / novo</option>
@@ -166,7 +166,7 @@ const ConfirmCard: FC<{ item: InboxItem; onResolved: () => void }> = ({ item, on
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirmar
         </button>
         <button disabled={busy} onClick={() => resolve('discard')}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-4 py-2 text-sm text-zinc-300 disabled:opacity-50">
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-4 py-2 text-sm text-ft-text disabled:opacity-50">
           <X className="h-4 w-4" /> Descartar
         </button>
       </div>
@@ -199,38 +199,38 @@ const PurchaseCheckCard: FC<{ check: any; onResolved: () => void }> = ({ check, 
 
   return (
     <div className="mx-3 mb-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 space-y-2">
-      <p className="text-xs text-violet-300 font-semibold flex items-center gap-1.5">
+      <p className="text-xs text-ft-on-violet font-semibold flex items-center gap-1.5">
         <Receipt className="h-3.5 w-3.5" /> Conferência da nota{check.supplier_name ? ` — ${check.supplier_name}` : ''}
-        {Number(check.confidence) < 60 && <span className="text-amber-300">(leitura com baixa confiança — revise)</span>}
+        {Number(check.confidence) < 60 && <span className="text-ft-on-amber">(leitura com baixa confiança — revise)</span>}
       </p>
       {matched.length > 0 && (
         <div>
-          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Na nota (marcar como comprado)</p>
+          <p className="text-[11px] uppercase tracking-wider text-ft-text-faint mb-1">Na nota (marcar como comprado)</p>
           {matched.map((m) => (
             <button key={m.listItemId} onClick={() => flip(selected, m.listItemId, setSelected)} className="w-full flex items-center gap-2 py-0.5 text-left">
-              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${selected.has(m.listItemId) ? 'bg-emerald-600 border-emerald-600' : 'border-slate-600'}`}>
+              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${selected.has(m.listItemId) ? 'bg-emerald-600 border-emerald-600' : 'border-ft-border-strong'}`}>
                 {selected.has(m.listItemId) && <Check className="h-3 w-3 text-white" />}
               </span>
-              <span className="text-sm text-zinc-300">{m.listItemName} <span className="text-zinc-500">→ {m.invoiceName}{m.quantity != null ? ` (${m.quantity}${m.unit ? ` ${m.unit}` : ''})` : ''}{cost(m)}</span></span>
+              <span className="text-sm text-ft-text">{m.listItemName} <span className="text-ft-text-faint">→ {m.invoiceName}{m.quantity != null ? ` (${m.quantity}${m.unit ? ` ${m.unit}` : ''})` : ''}{cost(m)}</span></span>
             </button>
           ))}
         </div>
       )}
       {missing.length > 0 && (
         <div>
-          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Não veio na nota</p>
-          {missing.map((m) => <p key={m.listItemId} className="text-sm text-amber-300/80 py-0.5">• {m.name}</p>)}
+          <p className="text-[11px] uppercase tracking-wider text-ft-text-faint mb-1">Não veio na nota</p>
+          {missing.map((m) => <p key={m.listItemId} className="text-sm text-ft-on-amber py-0.5">• {m.name}</p>)}
         </div>
       )}
       {extras.length > 0 && (
         <div>
-          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Na nota, fora da lista (opcional: puxar pra lista)</p>
+          <p className="text-[11px] uppercase tracking-wider text-ft-text-faint mb-1">Na nota, fora da lista (opcional: puxar pra lista)</p>
           {extras.map((x) => (
             <button key={x.invoiceIndex} onClick={() => flip(selExtras, x.invoiceIndex, setSelExtras)} className="w-full flex items-center gap-2 py-0.5 text-left">
-              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${selExtras.has(x.invoiceIndex) ? 'bg-violet-600 border-violet-600' : 'border-slate-600'}`}>
+              <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${selExtras.has(x.invoiceIndex) ? 'bg-violet-600 border-violet-600' : 'border-ft-border-strong'}`}>
                 {selExtras.has(x.invoiceIndex) && <Check className="h-3 w-3 text-white" />}
               </span>
-              <span className="text-sm text-zinc-400">{x.name}{x.quantity != null ? ` (${x.quantity}${x.unit ? ` ${x.unit}` : ''})` : ''}{cost(x)}</span>
+              <span className="text-sm text-ft-text-muted">{x.name}{x.quantity != null ? ` (${x.quantity}${x.unit ? ` ${x.unit}` : ''})` : ''}{cost(x)}</span>
             </button>
           ))}
         </div>
@@ -241,7 +241,7 @@ const PurchaseCheckCard: FC<{ check: any; onResolved: () => void }> = ({ check, 
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirmar conferência
         </button>
         <button disabled={busy} onClick={() => act(`/purchase-checks/${check.id}/discard`)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 text-zinc-300 hover:text-white text-sm px-3 py-1.5 disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border text-ft-text hover:text-white text-sm px-3 py-1.5 disabled:opacity-50">
           <X className="h-4 w-4" /> Descartar
         </button>
       </div>
@@ -713,10 +713,10 @@ export function FalaTuView() {
       {/* Input da foto da nota (Fatia 4) fica fora das abas: o clique vem de
           qualquer lista aberta via checkListIdRef. */}
       <input ref={checkFileRef} type="file" accept="image/*" className="hidden" onChange={onCheckImage} />
-      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-ft-border bg-ft-surface p-1">
         {TABS.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${tab === t.id ? 'bg-violet-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${tab === t.id ? 'bg-violet-600 text-white' : 'text-ft-text-muted hover:text-ft-text'}`}>
             {t.icon} {t.label}
           </button>
         ))}
@@ -733,8 +733,8 @@ export function FalaTuView() {
                   no lugar do wordmark em texto. As linhas abaixo seguem a
                   abertura aprovada: tagline + convite. */}
               <div className="flex justify-center pb-1"><FalatuLogo size={46} withWordmark /></div>
-              <p className="text-lg text-zinc-200">Do pensamento para a vida.</p>
-              <p className="text-sm text-zinc-400">Me fala que eu te ajudo a cuidar disso.</p>
+              <p className="text-lg text-ft-text">Do pensamento para a vida.</p>
+              <p className="text-sm text-ft-text-muted">Me fala que eu te ajudo a cuidar disso.</p>
               <div className="pt-3">
                 <button
                   onClick={() => (recording && recMode === 'auto') ? stopRecording(false) : (!recording ? void startRecording('auto') : undefined)}
@@ -745,15 +745,15 @@ export function FalaTuView() {
                   {recording && recMode === 'auto' ? <><Square className="h-5 w-5" /> {recSecs}s — toque para enviar</> : <><Mic className="h-5 w-5" /> Toque para falar</>}
                 </button>
               </div>
-              <p className="text-xs text-zinc-600 pt-1">Família, trabalho, compromissos, finanças, projetos, viagens, compras…</p>
+              <p className="text-xs text-ft-text-faint pt-1">Família, trabalho, compromissos, finanças, projetos, viagens, compras…</p>
             </div>
           )}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
-            <p className="text-sm text-zinc-400">Fala, digita ou fotografa — a IA organiza e <strong className="text-zinc-200">você confirma</strong> antes de qualquer coisa ser criada.</p>
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-3">
+            <p className="text-sm text-ft-text-muted">Fala, digita ou fotografa — a IA organiza e <strong className="text-ft-text">você confirma</strong> antes de qualquer coisa ser criada.</p>
             <div className="flex gap-2">
               <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendText()}
                 placeholder='Ex.: "reunião com o contador sexta às 10h"'
-                className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+                className="flex-1 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" />
               <button onClick={sendText} disabled={processing || !text.trim()}
                 className="inline-flex items-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
                 {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -771,19 +771,19 @@ export function FalaTuView() {
                 disabled={processing && !recording}
                 className={recording
                   ? 'inline-flex items-center gap-2 rounded-lg bg-red-600 hover:bg-red-500 px-3 py-2 text-sm font-semibold text-white animate-pulse touch-none select-none'
-                  : 'inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50 touch-none select-none'}>
+                  : 'inline-flex items-center gap-2 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-3 py-2 text-sm text-ft-text disabled:opacity-50 touch-none select-none'}>
                 {recording
                   ? (<><Square className="h-4 w-4" /> {recSecs}s — {recMode === 'hold' ? 'solte pra enviar' : 'toque pra enviar'}</>)
                   : (<><Mic className="h-4 w-4" /> Segurar pra falar</>)}
               </button>
               <button onClick={() => fileInputRef.current?.click()} disabled={processing}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-3 py-2 text-sm text-ft-text disabled:opacity-50">
                 <ImageIcon className="h-4 w-4" /> Foto / Nota
               </button>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onImage} />
             </div>
             {queuedCount > 0 && (
-              <p className="text-xs text-amber-300">
+              <p className="text-xs text-ft-on-amber">
                 {queuedCount} captura{queuedCount > 1 ? 's' : ''} aguardando conexão — envio automático quando a internet voltar.
               </p>
             )}
@@ -797,14 +797,14 @@ export function FalaTuView() {
 
       {tab === 'tasks' && (
         <div className="space-y-2">
-          {tasks.length === 0 && <p className="text-sm text-zinc-500 text-center py-6">Nenhuma tarefa ainda.</p>}
+          {tasks.length === 0 && <p className="text-sm text-ft-text-faint text-center py-6">Nenhuma tarefa ainda.</p>}
           {tasks.map((t) => (
             <button key={t.id} onClick={() => toggleTask(t)}
-              className="w-full flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-left hover:bg-slate-800/60">
-              <span className={`h-5 w-5 shrink-0 rounded-full border flex items-center justify-center ${t.completed ? 'bg-emerald-600 border-emerald-600' : 'border-slate-600'}`}>
+              className="w-full flex items-center gap-3 rounded-xl border border-ft-border bg-ft-surface px-4 py-3 text-left hover:bg-ft-surface-2">
+              <span className={`h-5 w-5 shrink-0 rounded-full border flex items-center justify-center ${t.completed ? 'bg-emerald-600 border-emerald-600' : 'border-ft-border-strong'}`}>
                 {!!t.completed && <Check className="h-3 w-3 text-white" />}
               </span>
-              <span className={`text-sm ${t.completed ? 'text-zinc-500 line-through' : 'text-zinc-200'}`}>{t.title}</span>
+              <span className={`text-sm ${t.completed ? 'text-ft-text-faint line-through' : 'text-ft-text'}`}>{t.title}</span>
             </button>
           ))}
         </div>
@@ -812,11 +812,11 @@ export function FalaTuView() {
 
       {tab === 'events' && (
         <div className="space-y-2">
-          {events.length === 0 && <p className="text-sm text-zinc-500 text-center py-6">Nenhum compromisso ainda.</p>}
+          {events.length === 0 && <p className="text-sm text-ft-text-faint text-center py-6">Nenhum compromisso ainda.</p>}
           {events.map((e) => (
-            <div key={e.id} className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-              <p className="text-sm text-zinc-200">{e.title}</p>
-              <p className="text-xs text-zinc-500 mt-0.5">
+            <div key={e.id} className="rounded-xl border border-ft-border bg-ft-surface px-4 py-3">
+              <p className="text-sm text-ft-text">{e.title}</p>
+              <p className="text-xs text-ft-text-faint mt-0.5">
                 {e.event_date ? `${e.event_date.split('-').reverse().join('/')}${e.event_time ? ` às ${e.event_time}` : ''}` : 'Sem data definida'}
               </p>
             </div>
@@ -826,27 +826,27 @@ export function FalaTuView() {
 
       {tab === 'lists' && (
         <div className="space-y-2">
-          {lists.length === 0 && <p className="text-sm text-zinc-500 text-center py-6">Nenhuma lista ainda.</p>}
+          {lists.length === 0 && <p className="text-sm text-ft-text-faint text-center py-6">Nenhuma lista ainda.</p>}
           {lists.map((l) => (
-            <div key={l.id} className="rounded-xl border border-slate-800 bg-slate-900/60">
+            <div key={l.id} className="rounded-xl border border-ft-border bg-ft-surface">
               <button onClick={() => openList(l)} className="w-full flex items-center justify-between px-4 py-3 text-left">
-                <span className="text-sm text-zinc-200">{l.title}</span>
-                <span className="text-xs text-zinc-500">{l.realized_count}/{l.item_count}</span>
+                <span className="text-sm text-ft-text">{l.title}</span>
+                <span className="text-xs text-ft-text-faint">{l.realized_count}/{l.item_count}</span>
               </button>
               {listItemsById[l.id] && (
                 <>
-                  <div className="border-t border-slate-800 px-4 py-2 space-y-1">
+                  <div className="border-t border-ft-border px-4 py-2 space-y-1">
                     {listItemsById[l.id].map((i) => (
                       <button key={i.id} onClick={() => toggleListItem(l.id, i)} className="w-full flex items-center gap-2 py-1 text-left">
-                        <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${i.realized ? 'bg-emerald-600 border-emerald-600' : 'border-slate-600'}`}>
+                        <span className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center ${i.realized ? 'bg-emerald-600 border-emerald-600' : 'border-ft-border-strong'}`}>
                           {!!i.realized && <Check className="h-3 w-3 text-white" />}
                         </span>
-                        <span className={`text-sm ${i.realized ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>{i.name}{i.quantity ? ` (${i.quantity})` : ''}</span>
+                        <span className={`text-sm ${i.realized ? 'text-ft-text-faint line-through' : 'text-ft-text'}`}>{i.name}{i.quantity ? ` (${i.quantity})` : ''}</span>
                       </button>
                     ))}
                     {!checkByListId[l.id] && (
                       <button onClick={() => startPurchaseCheck(l.id)} disabled={checkingListId === l.id}
-                        className="inline-flex items-center gap-1.5 text-xs text-violet-300 hover:text-violet-200 py-1.5 disabled:opacity-50">
+                        className="inline-flex items-center gap-1.5 text-xs text-ft-on-violet hover:text-ft-on-violet py-1.5 disabled:opacity-50">
                         {checkingListId === l.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
                         {checkingListId === l.id ? 'Lendo a nota…' : 'Conferir compra (foto da nota)'}
                       </button>
@@ -864,15 +864,15 @@ export function FalaTuView() {
 
       {tab === 'memory' && (
         <div className="space-y-2">
-          {entities.length === 0 && <p className="text-sm text-zinc-500 text-center py-6">Nenhuma entidade memorizada ainda.</p>}
+          {entities.length === 0 && <p className="text-sm text-ft-text-faint text-center py-6">Nenhuma entidade memorizada ainda.</p>}
           {entities.map((e) => (
-            <div key={e.id} className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center gap-3">
-              <span className="text-xs font-semibold uppercase text-violet-300 bg-violet-500/10 border border-violet-500/30 rounded-full px-2 py-0.5">
+            <div key={e.id} className="rounded-xl border border-ft-border bg-ft-surface px-4 py-3 flex items-center gap-3">
+              <span className="text-xs font-semibold uppercase text-ft-on-violet bg-violet-500/10 border border-violet-500/30 rounded-full px-2 py-0.5">
                 {e.entity_type === 'PERSON' ? 'Pessoa' : e.entity_type === 'PROJECT' ? 'Projeto' : e.entity_type}
               </span>
               <div>
-                <p className="text-sm text-zinc-200">{e.name}</p>
-                {e.context && <p className="text-xs text-zinc-500">{e.context}</p>}
+                <p className="text-sm text-ft-text">{e.name}</p>
+                {e.context && <p className="text-xs text-ft-text-faint">{e.context}</p>}
               </div>
             </div>
           ))}
@@ -884,138 +884,138 @@ export function FalaTuView() {
           {/* Fatia 5 — o sweep diário publicou o briefing como sinal (ADR-136):
               o mesmo resumo aparece no painel de sinais da operação. */}
           {signals.length > 0 && (
-            <p className="text-xs text-violet-300 bg-violet-500/10 border border-violet-500/30 rounded-xl px-4 py-2.5">
+            <p className="text-xs text-ft-on-violet bg-violet-500/10 border border-violet-500/30 rounded-xl px-4 py-2.5">
               📣 Briefing de hoje publicado no painel de sinais da operação
               {signals[0]?.severity === 'attention' ? ' — há pendências pedindo sua ação.' : '.'}
             </p>
           )}
           {/* F8.3 — entrega por notificação do navegador (Web Push). */}
           {pushSupported && (
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="rounded-xl border border-ft-border bg-ft-surface px-4 py-3 flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-zinc-200">Resumo diário por notificação</p>
-                <p className="text-xs text-zinc-500">O briefing da manhã chega como notificação neste aparelho — sem depender de mensageiro.</p>
+                <p className="text-sm text-ft-text">Resumo diário por notificação</p>
+                <p className="text-xs text-ft-text-faint">O briefing da manhã chega como notificação neste aparelho — sem depender de mensageiro.</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {pushSubscribed && (
                   <button onClick={sendPushNow} disabled={pushBusy}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-50">
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-1.5 text-xs text-ft-text disabled:opacity-50">
                     {pushBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Enviar agora
                   </button>
                 )}
                 <button onClick={togglePush} disabled={pushBusy || (!pushSubscribed && !pushKey)} role="switch" aria-checked={pushSubscribed}
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${pushSubscribed ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${pushSubscribed ? 'bg-emerald-600' : 'bg-ft-surface-3'} disabled:opacity-50`}>
                   <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${pushSubscribed ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
             </div>
           )}
           {/* Fatia 6 — entrega por WhatsApp: opt-in de canal + envio manual. */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="rounded-xl border border-ft-border bg-ft-surface px-4 py-3 flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm text-zinc-200">Resumo diário no WhatsApp</p>
-              <p className="text-xs text-zinc-500">Recebe o briefing da manhã no seu WhatsApp cadastrado.</p>
+              <p className="text-sm text-ft-text">Resumo diário no WhatsApp</p>
+              <p className="text-xs text-ft-text-faint">Recebe o briefing da manhã no seu WhatsApp cadastrado.</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {waEnabled && (
                 <button onClick={sendWaNow} disabled={waBusy}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-1.5 text-xs text-ft-text disabled:opacity-50">
                   {waBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Enviar agora
                 </button>
               )}
               <button onClick={toggleWa} disabled={waBusy} role="switch" aria-checked={waEnabled}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${waEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${waEnabled ? 'bg-emerald-600' : 'bg-ft-surface-3'} disabled:opacity-50`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${waEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
               </button>
             </div>
           </div>
           {/* F8.6 — entrega por e-mail: terceira porta, a de menor atrito. */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="rounded-xl border border-ft-border bg-ft-surface px-4 py-3 flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm text-zinc-200">Resumo diário por e-mail</p>
-              <p className="text-xs text-zinc-500">
-                O briefing da manhã chega {emailAddr ? <>em <span className="text-zinc-300">{emailAddr}</span></> : 'no seu e-mail de login'} — sem mensageiro, sem notificação.
-                {emailEnabled && !emailChannelReady && <span className="text-amber-300"> Falta conectar a conta Google da organização (Configurações → Integrações) pra os envios saírem.</span>}
+              <p className="text-sm text-ft-text">Resumo diário por e-mail</p>
+              <p className="text-xs text-ft-text-faint">
+                O briefing da manhã chega {emailAddr ? <>em <span className="text-ft-text">{emailAddr}</span></> : 'no seu e-mail de login'} — sem mensageiro, sem notificação.
+                {emailEnabled && !emailChannelReady && <span className="text-ft-on-amber"> Falta conectar a conta Google da organização (Configurações → Integrações) pra os envios saírem.</span>}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {emailEnabled && (
                 <button onClick={sendEmailNow} disabled={emailBusy}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-1.5 text-xs text-ft-text disabled:opacity-50">
                   {emailBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Enviar agora
                 </button>
               )}
               <button onClick={toggleEmail} disabled={emailBusy} role="switch" aria-checked={emailEnabled}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${emailEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${emailEnabled ? 'bg-emerald-600' : 'bg-ft-surface-3'} disabled:opacity-50`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${emailEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
               </button>
             </div>
           </div>
           {briefing.pendingInbox?.c > 0 && (
-            <p className="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
+            <p className="text-sm text-ft-on-amber bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
               {briefing.pendingInbox.c} item(ns) aguardando sua confirmação no Inbox.
             </p>
           )}
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Compromissos de hoje (e sem data)</h3>
-            {briefing.todayEvents?.length === 0 && <p className="text-sm text-zinc-500">Nada por hoje.</p>}
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ft-text-faint mb-2">Compromissos de hoje (e sem data)</h3>
+            {briefing.todayEvents?.length === 0 && <p className="text-sm text-ft-text-faint">Nada por hoje.</p>}
             {briefing.todayEvents?.map((e: any) => (
-              <p key={e.id} className="text-sm text-zinc-200 py-1">{e.event_time ? `${e.event_time} — ` : ''}{e.title}{!e.event_date && <span className="text-zinc-500"> (sem data)</span>}</p>
+              <p key={e.id} className="text-sm text-ft-text py-1">{e.event_time ? `${e.event_time} — ` : ''}{e.title}{!e.event_date && <span className="text-ft-text-faint"> (sem data)</span>}</p>
             ))}
           </div>
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Tarefas abertas</h3>
-            {briefing.tasks?.length === 0 && <p className="text-sm text-zinc-500">Tudo em dia. ✨</p>}
-            {briefing.tasks?.map((t: any) => <p key={t.id} className="text-sm text-zinc-200 py-1">• {t.title}</p>)}
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ft-text-faint mb-2">Tarefas abertas</h3>
+            {briefing.tasks?.length === 0 && <p className="text-sm text-ft-text-faint">Tudo em dia. ✨</p>}
+            {briefing.tasks?.map((t: any) => <p key={t.id} className="text-sm text-ft-text py-1">• {t.title}</p>)}
           </div>
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Listas ativas</h3>
-            {briefing.lists?.map((l: any) => <p key={l.id} className="text-sm text-zinc-200 py-1">{l.title} — {l.realized_count}/{l.item_count}</p>)}
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ft-text-faint mb-2">Listas ativas</h3>
+            {briefing.lists?.map((l: any) => <p key={l.id} className="text-sm text-ft-text py-1">{l.title} — {l.realized_count}/{l.item_count}</p>)}
           </div>
         </div>
       )}
 
       {tab === 'plugues' && (
         <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            Capture de qualquer lugar — sem abrir o app. Cada plugue usa um <strong className="text-zinc-200">token de captura</strong>:
+          <p className="text-sm text-ft-text-muted">
+            Capture de qualquer lugar — sem abrir o app. Cada plugue usa um <strong className="text-ft-text">token de captura</strong>:
             ele só consegue <em>criar item pendente</em> no seu inbox (nunca lê nem confirma nada).
           </p>
 
           {/* Token recém-criado — o claro aparece UMA vez (backend guarda só hash). */}
           {newTok && (
             <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 space-y-2">
-              <p className="text-sm text-emerald-200 font-medium">Token “{newTok.label}” criado — copie AGORA (não dá pra ver de novo):</p>
+              <p className="text-sm text-ft-on-menta font-medium">Token “{newTok.label}” criado — copie AGORA (não dá pra ver de novo):</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 truncate rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-zinc-200">{newTok.token}</code>
+                <code className="flex-1 min-w-0 truncate rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-xs text-ft-text">{newTok.token}</code>
                 <button onClick={() => copyText(newTok.token, 'Token')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-2 text-xs text-zinc-300 shrink-0">
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-2 text-xs text-ft-text shrink-0">
                   <Copy className="h-3.5 w-3.5" /> Copiar
                 </button>
               </div>
-              <button onClick={() => setNewTok(null)} className="text-xs text-zinc-500 hover:text-zinc-300">Já copiei, pode esconder</button>
+              <button onClick={() => setNewTok(null)} className="text-xs text-ft-text-faint hover:text-ft-text">Já copiei, pode esconder</button>
             </div>
           )}
 
           {/* Atalho Siri (iOS). Arquivo .shortcut sem assinatura morre no import
               desde o iOS 15 — por isso a receita guiada no lugar de um download
               morto (decisão registrada no ADR-154 F8.5). */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
-            <p className="text-sm text-zinc-200 font-medium">🍎 Atalho Siri (iPhone)</p>
-            <p className="text-xs text-zinc-500">
-              “E aí Siri, FalaTu” → grava um áudio → cai direto no seu inbox. Monte uma vez no app <strong className="text-zinc-300">Atalhos</strong>:
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-3">
+            <p className="text-sm text-ft-text font-medium">🍎 Atalho Siri (iPhone)</p>
+            <p className="text-xs text-ft-text-faint">
+              “E aí Siri, FalaTu” → grava um áudio → cai direto no seu inbox. Monte uma vez no app <strong className="text-ft-text">Atalhos</strong>:
             </p>
-            <ol className="text-xs text-zinc-400 space-y-1.5 list-decimal list-inside">
+            <ol className="text-xs text-ft-text-muted space-y-1.5 list-decimal list-inside">
               <li>Gere o token abaixo e copie.</li>
-              <li>No app <strong className="text-zinc-300">Atalhos</strong>: novo atalho → ação <strong className="text-zinc-300">Gravar áudio</strong> (parar: ao tocar).</li>
-              <li>Ação <strong className="text-zinc-300">Codificar</strong> (Base64, entrada: o áudio gravado).</li>
-              <li>Ação <strong className="text-zinc-300">Obter conteúdo do URL</strong>: cole o endereço abaixo, método <strong className="text-zinc-300">POST</strong>, cabeçalho <code className="text-zinc-300">Authorization</code> = <code className="text-zinc-300">Bearer SEU_TOKEN</code>; corpo JSON: <code className="text-zinc-300">audio</code> = dicionário com <code className="text-zinc-300">mimeType</code> = <code className="text-zinc-300">audio/mp4</code> e <code className="text-zinc-300">data</code> = a saída do Codificar.</li>
-              <li>Nomeie o atalho <strong className="text-zinc-300">FalaTu</strong> — pronto, a Siri atende.</li>
+              <li>No app <strong className="text-ft-text">Atalhos</strong>: novo atalho → ação <strong className="text-ft-text">Gravar áudio</strong> (parar: ao tocar).</li>
+              <li>Ação <strong className="text-ft-text">Codificar</strong> (Base64, entrada: o áudio gravado).</li>
+              <li>Ação <strong className="text-ft-text">Obter conteúdo do URL</strong>: cole o endereço abaixo, método <strong className="text-ft-text">POST</strong>, cabeçalho <code className="text-ft-text">Authorization</code> = <code className="text-ft-text">Bearer SEU_TOKEN</code>; corpo JSON: <code className="text-ft-text">audio</code> = dicionário com <code className="text-ft-text">mimeType</code> = <code className="text-ft-text">audio/mp4</code> e <code className="text-ft-text">data</code> = a saída do Codificar.</li>
+              <li>Nomeie o atalho <strong className="text-ft-text">FalaTu</strong> — pronto, a Siri atende.</li>
             </ol>
             <div className="flex items-center gap-2">
-              <code className="flex-1 min-w-0 truncate rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-zinc-200">{ingestUrl}</code>
+              <code className="flex-1 min-w-0 truncate rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-xs text-ft-text">{ingestUrl}</code>
               <button onClick={() => copyText(ingestUrl, 'Endereço')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-2 text-xs text-zinc-300 shrink-0">
+                className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-2 text-xs text-ft-text shrink-0">
                 <Copy className="h-3.5 w-3.5" /> Copiar
               </button>
             </div>
@@ -1027,42 +1027,42 @@ export function FalaTuView() {
 
           {/* Share Target (Android/Chrome) — só informativo: quem faz o
               trabalho é o manifest + SW; aqui é onde o usuário descobre. */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
-            <p className="text-sm text-zinc-200 font-medium">🤖 Compartilhar de outros apps (Android)</p>
-            <p className="text-xs text-zinc-500">
-              Instale o FalaTu (menu do navegador → <strong className="text-zinc-300">Adicionar à tela inicial</strong>) e o app passa a aparecer
-              no <strong className="text-zinc-300">Compartilhar</strong> de qualquer aplicativo — um áudio encaminhado do WhatsApp, uma foto,
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-2">
+            <p className="text-sm text-ft-text font-medium">🤖 Compartilhar de outros apps (Android)</p>
+            <p className="text-xs text-ft-text-faint">
+              Instale o FalaTu (menu do navegador → <strong className="text-ft-text">Adicionar à tela inicial</strong>) e o app passa a aparecer
+              no <strong className="text-ft-text">Compartilhar</strong> de qualquer aplicativo — um áudio encaminhado do WhatsApp, uma foto,
               um texto — e cai aqui como captura pendente. Sem configurar nada.
             </p>
           </div>
 
           {/* Tokens ativos (gestão da F8.4): rotular e revogar. */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
-            <p className="text-sm text-zinc-200 font-medium">Tokens de captura</p>
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-3">
+            <p className="text-sm text-ft-text font-medium">Tokens de captura</p>
             <div className="flex gap-2">
               <input value={tokLabel} onChange={(e) => setTokLabel(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && tokLabel.trim() && createToken(tokLabel)}
                 placeholder='Nome do plugue (ex.: "Zapier", "NFC do balcão")'
-                className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+                className="flex-1 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" />
               <button onClick={() => createToken(tokLabel)} disabled={tokBusy || !tokLabel.trim()}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-sm text-zinc-300 disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-3 py-2 text-sm text-ft-text disabled:opacity-50">
                 Criar
               </button>
             </div>
             {tokens.filter((t) => !t.revoked_at).length === 0 && (
-              <p className="text-xs text-zinc-500">Nenhum token ativo. Crie um pro seu primeiro plugue.</p>
+              <p className="text-xs text-ft-text-faint">Nenhum token ativo. Crie um pro seu primeiro plugue.</p>
             )}
             {tokens.filter((t) => !t.revoked_at).map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+              <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-ft-border bg-ft-bg/60 px-3 py-2">
                 <div className="min-w-0">
-                  <p className="text-sm text-zinc-200 truncate">{t.label}</p>
-                  <p className="text-[11px] text-zinc-500">
+                  <p className="text-sm text-ft-text truncate">{t.label}</p>
+                  <p className="text-[11px] text-ft-text-faint">
                     Criado em {String(t.created_at || '').slice(0, 10)}
                     {t.last_used_at ? ` · último uso ${String(t.last_used_at).slice(0, 10)}` : ' · nunca usado'}
                   </p>
                 </div>
                 <button onClick={() => revokeToken(t.id)} disabled={tokBusy} title="Revogar"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50 shrink-0">
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 text-ft-on-red hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50 shrink-0">
                   <Trash2 className="h-3.5 w-3.5" /> Revogar
                 </button>
               </div>
@@ -1073,20 +1073,20 @@ export function FalaTuView() {
 
       {tab === 'protocols' && (
         <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            Tarefas pré-autorizadas ativáveis por voz. O caso clássico: diga <strong className="text-zinc-200">"protocolo de segurança"</strong> em
-            qualquer canal e <strong className="text-zinc-200">seu telefone toca</strong> em alguns minutos — se precisar sair de uma situação
+          <p className="text-sm text-ft-text-muted">
+            Tarefas pré-autorizadas ativáveis por voz. O caso clássico: diga <strong className="text-ft-text">"protocolo de segurança"</strong> em
+            qualquer canal e <strong className="text-ft-text">seu telefone toca</strong> em alguns minutos — se precisar sair de uma situação
             desconfortável, "pede licença pra atender" e sai com elegância. A ligação vai <em>sempre e somente</em> pro seu número verificado.
           </p>
 
           {/* Opt-in da org (convenção nº 10) */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="rounded-xl border border-ft-border bg-ft-surface px-4 py-3 flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm text-zinc-200">Ativar Protocolos</p>
-              <p className="text-xs text-zinc-500">Liga o reconhecimento por voz e o agendamento de ligações nesta conta.</p>
+              <p className="text-sm text-ft-text">Ativar Protocolos</p>
+              <p className="text-xs text-ft-text-faint">Liga o reconhecimento por voz e o agendamento de ligações nesta conta.</p>
             </div>
             <button onClick={toggleProtoOrg} disabled={protoBusy || !protoSettings} role="switch" aria-checked={!!protoSettings?.orgEnabled}
-              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${protoSettings?.orgEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${protoSettings?.orgEnabled ? 'bg-emerald-600' : 'bg-ft-surface-3'} disabled:opacity-50`}>
               <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${protoSettings?.orgEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </button>
           </div>
@@ -1094,75 +1094,75 @@ export function FalaTuView() {
           {protoSettings?.orgEnabled && (
             <>
               {!protoSettings.telephonyConfigured && (
-                <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5">
+                <p className="text-xs text-ft-on-amber bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5">
                   ⚠️ O servidor ainda não tem o provider de voz configurado — a verificação e as ligações não vão funcionar até lá. Fale com o suporte.
                 </p>
               )}
 
               {/* Criar protocolo */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
-                <p className="text-sm text-zinc-200 font-medium">Novo protocolo</p>
+              <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-2">
+                <p className="text-sm text-ft-text font-medium">Novo protocolo</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input value={pName} onChange={(e) => setPName(e.target.value)} placeholder='Nome falado (ex.: "protocolo de segurança")'
-                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200 sm:col-span-1" />
+                    className="rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text sm:col-span-1" />
                   <input value={pPhone} onChange={(e) => setPPhone(e.target.value)} placeholder="+5511999998888" inputMode="tel"
-                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+                    className="rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" />
                   <div className="flex gap-2">
                     <input value={pDelay} onChange={(e) => setPDelay(e.target.value)} placeholder="5" inputMode="numeric"
-                      className="w-20 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" title="Minutos até a ligação" />
+                      className="w-20 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" title="Minutos até a ligação" />
                     <button onClick={createProto} disabled={protoBusy || !pName.trim()}
                       className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
                       {protoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />} Criar
                     </button>
                   </div>
                 </div>
-                <p className="text-[11px] text-zinc-500">Telefone em formato internacional. Minutos: 1 a 60 (padrão 5).</p>
+                <p className="text-[11px] text-ft-text-faint">Telefone em formato internacional. Minutos: 1 a 60 (padrão 5).</p>
               </div>
 
               {/* Lista de protocolos */}
               {protos.map((p) => (
-                <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                <div key={p.id} className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm text-zinc-200 truncate">
+                      <p className="text-sm text-ft-text truncate">
                         “{p.name}”
                         {p.phone_verified_at
-                          ? <span className="ml-2 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">verificado</span>
-                          : <span className="ml-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">número não verificado</span>}
+                          ? <span className="ml-2 text-[11px] text-ft-on-menta bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">verificado</span>
+                          : <span className="ml-2 text-[11px] text-ft-on-amber bg-amber-500/10 border border-amber-500/30 rounded-full px-2 py-0.5">número não verificado</span>}
                       </p>
-                      <p className="text-[11px] text-zinc-500">{p.phone_e164} · liga em {p.delay_minutes} min{Number(p.enabled) ? '' : ' · desligado'}</p>
+                      <p className="text-[11px] text-ft-text-faint">{p.phone_e164} · liga em {p.delay_minutes} min{Number(p.enabled) ? '' : ' · desligado'}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {p.phone_verified_at && !!Number(p.enabled) && (
                         <button onClick={() => protoCall(() => api(`/protocols/${p.id}/activate`, { method: 'POST' }), `🚨 Ativado — seu telefone toca em ${p.delay_minutes} min.`)}
                           disabled={protoBusy} title="Ativar agora (sem falar)"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50">
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 text-ft-on-red hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50">
                           <PhoneCall className="h-3.5 w-3.5" /> Ativar
                         </button>
                       )}
                       <button onClick={() => protoCall(() => api(`/protocols/${p.id}`, { method: 'POST', body: JSON.stringify({ enabled: !Number(p.enabled) }) }))}
                         disabled={protoBusy} role="switch" aria-checked={!!Number(p.enabled)}
-                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${Number(p.enabled) ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${Number(p.enabled) ? 'bg-emerald-600' : 'bg-ft-surface-3'} disabled:opacity-50`}>
                         <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${Number(p.enabled) ? 'translate-x-5' : 'translate-x-0.5'}`} />
                       </button>
                       <button onClick={() => protoCall(() => api(`/protocols/${p.id}/remove`, { method: 'POST' }), 'Protocolo removido.')}
                         disabled={protoBusy} title="Remover"
-                        className="text-zinc-500 hover:text-red-300 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>
+                        className="text-ft-text-faint hover:text-ft-on-red disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   </div>
                   {!p.phone_verified_at && (
                     verifyId === p.id ? (
                       <div className="flex gap-2">
                         <input value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} placeholder="Código de 6 dígitos" inputMode="numeric"
-                          className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-zinc-200" />
+                          className="flex-1 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" />
                         <button onClick={() => confirmVerify(p.id)} disabled={protoBusy || verifyCode.replace(/\D/g, '').length !== 6}
                           className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Confirmar</button>
                         <button onClick={() => requestVerify(p.id)} disabled={protoBusy}
-                          className="rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-xs text-zinc-300 disabled:opacity-50">Ligar de novo</button>
+                          className="rounded-lg border border-ft-border hover:bg-ft-surface-2 px-3 py-2 text-xs text-ft-text disabled:opacity-50">Ligar de novo</button>
                       </div>
                     ) : (
                       <button onClick={() => requestVerify(p.id)} disabled={protoBusy || !protoSettings.telephonyConfigured}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-3 py-2 text-xs text-zinc-300 disabled:opacity-50">
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-3 py-2 text-xs text-ft-text disabled:opacity-50">
                         <PhoneCall className="h-3.5 w-3.5" /> Verificar número (você recebe uma ligação com o código)
                       </button>
                     )
@@ -1172,19 +1172,19 @@ export function FalaTuView() {
 
               {/* Ativações recentes */}
               {protoActs.length > 0 && (
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm text-zinc-200 font-medium">Ativações recentes</p>
+                    <p className="text-sm text-ft-text font-medium">Ativações recentes</p>
                     {protoActs.some((a) => a.status === 'scheduled') && (
                       <button onClick={() => protoCall(() => api('/protocols/activations/cancel-scheduled', { method: 'POST' }), 'Ligações agendadas canceladas.')}
                         disabled={protoBusy}
-                        className="rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50">
+                        className="rounded-lg border border-red-500/30 text-ft-on-red hover:bg-red-500/10 px-2.5 py-1.5 text-xs disabled:opacity-50">
                         Cancelar agendadas
                       </button>
                     )}
                   </div>
                   {protoActs.map((a) => (
-                    <p key={a.id} className="text-xs text-zinc-400">
+                    <p key={a.id} className="text-xs text-ft-text-muted">
                       {a.status === 'scheduled' ? '⏳' : a.status === 'fired' ? '📞' : a.status === 'cancelled' ? '🚫' : '⚠️'}{' '}
                       “{a.protocol_name}” · {String(a.requested_at || '').replace('T', ' ').slice(0, 16)} ·{' '}
                       {a.status === 'scheduled' ? `liga às ${String(a.scheduled_for || '').replace('T', ' ').slice(11, 16)}` : a.status === 'fired' ? 'ligação feita' : a.status === 'cancelled' ? 'cancelado' : `falhou (${a.fail_reason || 'erro'})`}

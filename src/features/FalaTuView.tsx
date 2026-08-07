@@ -270,6 +270,11 @@ export function FalaTuView() {
   const [pushKey, setPushKey] = useState('');
   const [pushBusy, setPushBusy] = useState(false);
   const pushSupported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // F8.6 — porta e-mail do briefing (opt-in por usuário, destino = login).
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailAddr, setEmailAddr] = useState('');
+  const [emailChannelReady, setEmailChannelReady] = useState(true);
+  const [emailBusy, setEmailBusy] = useState(false);
   // F8.5 — aba Plugues: tokens de captura (F8.4) + receita do Atalho Siri.
   const [tokens, setTokens] = useState<any[]>([]);
   const [tokLabel, setTokLabel] = useState('');
@@ -303,6 +308,7 @@ export function FalaTuView() {
       api('/signals').then((d) => setSignals(Array.isArray(d) ? d : [])).catch(() => {});
       api('/briefing/whatsapp').then((d) => setWaEnabled(!!d?.enabled)).catch(() => {});
       api('/briefing/push').then((d) => { setPushSubscribed(!!d?.subscribed); setPushKey(d?.publicKey || ''); }).catch(() => {});
+      api('/briefing/email').then((d) => { setEmailEnabled(!!d?.enabled); setEmailAddr(d?.email || ''); setEmailChannelReady(!!d?.channelReady); }).catch(() => {});
     }
     if (tab === 'plugues') api('/capture-tokens').then((d) => setTokens(Array.isArray(d) ? d : [])).catch(() => {});
   }, [tab]);
@@ -583,6 +589,33 @@ export function FalaTuView() {
     finally { setPushBusy(false); }
   };
 
+  // F8.6 — porta e-mail: toggle simples (o opt-in vive no servidor) + envio
+  // manual de teste. Sem permissão de browser nem subscription — é a porta
+  // de menor atrito das três.
+  const toggleEmail = async () => {
+    setEmailBusy(true);
+    try {
+      const r = await api('/briefing/email', { method: 'POST', body: JSON.stringify({ enabled: !emailEnabled }) });
+      setEmailEnabled(!!r?.enabled);
+      toast.success(r?.enabled ? 'Resumo diário por e-mail ligado.' : 'Resumo diário por e-mail desligado.');
+    } catch (e: any) { toast.error(e.message); }
+    finally { setEmailBusy(false); }
+  };
+
+  const sendEmailNow = async () => {
+    setEmailBusy(true);
+    try {
+      const r = await api('/briefing/email/send-now', { method: 'POST' });
+      if (r?.sent) toast.success('Resumo enviado pro seu e-mail. 📬');
+      else toast.error(
+        r?.reason === 'no_email_channel' ? 'A organização não tem conta Google conectada pra enviar e-mail.'
+        : r?.reason === 'no_email' ? 'Sua conta não tem e-mail cadastrado.'
+        : r?.reason === 'no_briefing' ? 'Nada pra resumir hoje.'
+        : 'Não foi possível enviar agora.');
+    } catch (e: any) { toast.error(e.message); }
+    finally { setEmailBusy(false); }
+  };
+
   // F8.5 — gestão dos tokens de captura (F8.4) + receita do Atalho Siri.
   const ingestUrl = `${window.location.origin}/api/falatu-ingest/capture`;
   const copyText = async (value: string, what: string) => {
@@ -814,6 +847,28 @@ export function FalaTuView() {
               <button onClick={toggleWa} disabled={waBusy} role="switch" aria-checked={waEnabled}
                 className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${waEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${waEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+          </div>
+          {/* F8.6 — entrega por e-mail: terceira porta, a de menor atrito. */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-zinc-200">Resumo diário por e-mail</p>
+              <p className="text-xs text-zinc-500">
+                O briefing da manhã chega {emailAddr ? <>em <span className="text-zinc-300">{emailAddr}</span></> : 'no seu e-mail de login'} — sem mensageiro, sem notificação.
+                {emailEnabled && !emailChannelReady && <span className="text-amber-300"> Falta conectar a conta Google da organização (Configurações → Integrações) pra os envios saírem.</span>}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {emailEnabled && (
+                <button onClick={sendEmailNow} disabled={emailBusy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-50">
+                  {emailBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Enviar agora
+                </button>
+              )}
+              <button onClick={toggleEmail} disabled={emailBusy} role="switch" aria-checked={emailEnabled}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${emailEnabled ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${emailEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
               </button>
             </div>
           </div>

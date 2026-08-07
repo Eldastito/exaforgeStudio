@@ -244,7 +244,8 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 8.2 | MERGED | #811 |
 | 8.3 | MERGED | #812 |
 | 8.4 | MERGED | #810 |
-| 8.5 | In Progress | — |
+| 8.5 | MERGED | #813 |
+| 8.6 | In Progress | — |
 | 8.5 | Pending | — |
 | 8.6 | Pending | — |
 | 8.7 | Pending | — |
@@ -371,6 +372,16 @@ nº 12: sinais via `business_signals`; jobs via `JobQueue`).
 - **F8.6 — Briefing por e-mail.** Terceiro adapter de entrega do digest
   (molde ADR-144). Todo mundo tem e-mail; custo ~zero; nenhuma dependência de
   mensageiro ou push.
+  *Decisão na fatia (2026-08-07):* transporte = **Gmail da conexão Google da
+  org** (`GoogleOAuthService.gmailSend`, o mesmo caminho que a cobrança do
+  Scheduler já usa) — zero infra nova, zero segredo novo. Org sem conexão
+  Google fica com a porta "ligada mas sem canal" (`no_email_channel`; a UI
+  explica onde conectar); um remetente SMTP de plataforma, se um dia
+  existir, entra como fallback aditivo no `FalaTuEmailService` sem mudar
+  assinatura. Opt-in é POR USUÁRIO (`falatu_email_optins`) porque o destino
+  é o e-mail de login dele — não há destinatário arbitrário em rota nenhuma
+  (mesmo racional anti-abuso do F8.7). Dedupe próprio
+  (`falatu_email_deliveries`), independente das portas WA/push.
 
 - **F8.7 — Protocolos (tarefas pré-configuradas ativáveis por voz).** O
   usuário pré-configura na Config uma tarefa nomeada com ação pré-autorizada;

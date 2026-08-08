@@ -101,6 +101,14 @@ def main():
     if buf: db.executemany(ins_est, buf); db.commit()
     print(f"  Total Rio: {n} estabelecimentos ativos" if not a.incluir_inativas else f"  Total Rio: {n}")
 
+    # Índice em cnpj_basico ANTES da fase 3. Sem ele, cada UPDATE ... WHERE
+    # cnpj_basico=? faz uma varredura COMPLETA da tabela empresas (~1M linhas) →
+    # O(n²) sobre centenas de milhares de updates, o que transforma esta fase em
+    # DIAS. Com o índice, cada update vira lookup O(log n) e a fase leva minutos.
+    print("Índice em cnpj_basico (acelera a fase 3)…")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_emp_basico ON empresas(cnpj_basico)")
+    db.commit()
+
     print("3/4 Empresas (razão social/capital/porte)…")
     upd = "UPDATE empresas SET razao_social=?, natureza_juridica=?, capital_social=?, porte=? WHERE cnpj_basico=?"
     buf = []; n = 0

@@ -442,6 +442,7 @@ function OperacoesTab() {
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [indicators, setIndicators] = useState<Record<string, number> | null>(null);
   const [churn, setChurn] = useState<any[]>([]); // ADR-155 F4.2 — sinais churn_risk_high
+  const [kpis, setKpis] = useState<any[]>([]); // ADR-155 — KPIs A/B (F2.3/F3.2) + indicação (F6)
   const [loading, setLoading] = useState(true);
   const [gateError, setGateError] = useState<string | null>(null);
 
@@ -453,23 +454,26 @@ function OperacoesTab() {
       apiFetch('/api/runtime/operations/exceptions?limit=50'),
       apiFetch('/api/runtime/operations/indicators'),
       apiFetch('/api/runtime/operations/churn'),
-    ]).then(async ([oR, eR, iR, cR]) => {
+      apiFetch('/api/runtime/operations/kpis'),
+    ]).then(async ([oR, eR, iR, cR, kR]) => {
       // Runtime não habilitado (flag off) → 403 uniforme
       if (oR.status === 403) {
         const j = await oR.json().catch(() => ({}));
         setGateError(j?.error || 'Execution Runtime não está habilitado para esta organização.');
         return;
       }
-      const [o, e, i, c] = await Promise.all([
+      const [o, e, i, c, k] = await Promise.all([
         oR.json().catch(() => null),
         eR.json().catch(() => ({ exceptions: [] })),
         iR.json().catch(() => ({})),
         cR.json().catch(() => ({ signals: [] })),
+        kR.json().catch(() => ({ signals: [] })),
       ]);
       setOverview(o || null);
       setExceptions(Array.isArray(e?.exceptions) ? e.exceptions : []);
       setIndicators(i && typeof i === 'object' ? i : {});
       setChurn(Array.isArray(c?.signals) ? c.signals : []);
+      setKpis(Array.isArray(k?.signals) ? k.signals : []);
     }).catch(() => setGateError('Falha ao carregar o painel de Operações.'))
       .finally(() => setLoading(false));
   };
@@ -598,6 +602,19 @@ function OperacoesTab() {
           </div>
         )}
 
+        {/* Bloco 3c — KPIs de copy calibrada (A/B F2.3/F3.2) + indicação (F6).
+            Placar vivo, só leitura: mostra o que a copy calibrada está rendendo
+            vs o control. Só aparece se há KPI publicado. */}
+        {kpis.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Copy calibrada & indicação</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {kpis.map((s) => <React.Fragment key={s.id}><KpiCard signal={s} /></React.Fragment>)}
+            </div>
+            <p className="text-[11px] text-zinc-500 mt-2">Números derivados por consulta (medição, não estimativa). "Calibrada" é a copy afinada pelo grimoire; "Control" é a legada — o A/B só elege vencedor com amostra mínima.</p>
+          </div>
+        )}
+
         {/* Bloco 4 — Indicadores por status */}
         {indicators && Object.keys(indicators).length > 0 && (
           <div>
@@ -615,6 +632,76 @@ function OperacoesTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ADR-155 — card de KPI (A/B de copy ou programa de indicação). Só leitura.
+function KpiCard({ signal }: { signal: any }) {
+  const ev = signal?.evidence || {};
+  const type = signal?.signal_type;
+
+  if (type === 'referral_program_result') {
+    const conv = Number(ev.conversionRatePct || 0);
+    return (
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <div className="flex items-center gap-2 mb-2.5">
+          <Repeat2 className="h-4 w-4 text-indigo-400" />
+          <span className="text-sm font-semibold text-zinc-200">Programa de indicação</span>
+          <span className="ml-auto text-[11px] text-zinc-400">{conv}% de conversão</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <MiniStat label="Códigos" value={String(ev.codesIssued ?? 0)} />
+          <MiniStat label="Indicados" value={String(ev.referred ?? 0)} />
+          <MiniStat label="Converteram" value={String(ev.qualified ?? 0)} accent={Number(ev.qualified) > 0} />
+        </div>
+      </div>
+    );
+  }
+
+  // A/B da copy (cobrança ou recuperação) — mesmo shape de evidence.
+  const isCollection = type === 'collection_ab_result';
+  const variants: any[] = Array.isArray(ev.variants) ? ev.variants : [];
+  const control = variants.find((v) => v.variant === 'control');
+  const cal = variants.find((v) => v.variant === 'calibrated');
+  const winner = ev.winner as string | null;
+  const winnerLabel = winner === 'calibrated' ? 'Calibrada vencendo' : winner === 'control' ? 'Control vencendo' : winner === 'tie' ? 'Empate' : 'Amostra insuficiente';
+  const winnerColor = winner === 'calibrated' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+    : winner === 'control' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+    : 'border-zinc-700 bg-zinc-800/40 text-zinc-400';
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <div className="flex items-center gap-2 mb-2.5">
+        {isCollection ? <Zap className="h-4 w-4 text-indigo-400" /> : <Handshake className="h-4 w-4 text-indigo-400" />}
+        <span className="text-sm font-semibold text-zinc-200">A/B da copy — {isCollection ? 'Cobrança' : 'Recuperação'}</span>
+        <span className={`ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${winnerColor}`}>{winnerLabel}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <VariantCell label="Control" v={control} />
+        <VariantCell label="Calibrada" v={cal} highlight={winner === 'calibrated'} />
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2 text-center">
+      <div className={`text-lg font-semibold ${accent ? 'text-emerald-300' : 'text-zinc-100'}`}>{value}</div>
+      <div className="text-[10px] text-zinc-500">{label}</div>
+    </div>
+  );
+}
+
+function VariantCell({ label, v, highlight }: { label: string; v: any; highlight?: boolean }) {
+  const rate = v ? Number(v.recoveryRatePct || 0) : null;
+  return (
+    <div className={`rounded-lg border p-2.5 ${highlight ? 'border-emerald-600/40 bg-emerald-600/5' : 'border-zinc-800 bg-zinc-900/60'}`}>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-[11px] text-zinc-400">{label}</span>
+        <span className={`text-xl font-semibold ${highlight ? 'text-emerald-300' : 'text-zinc-100'}`}>{rate === null ? '—' : `${rate}%`}</span>
+      </div>
+      <div className="text-[10px] text-zinc-500">{v ? `${v.recovered}/${v.sent} · ${brl(Number(v.revenueCents || 0) / 100)}` : 'sem dados'}</div>
     </div>
   );
 }

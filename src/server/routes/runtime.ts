@@ -176,6 +176,18 @@ router.post("/operations/churn/:id/:action", (req: AuthRequest, res): any => {
   res.json(r);
 });
 
+// ADR-155 — KPIs de copy calibrada (A/B de cobrança F2.3 + recuperação F3.2) +
+// programa de indicação (F6). São sinais `info` upsertados por query (um por org
+// por tipo), publicados pelos *MeasurementService no Scheduler. SÓ LEITURA: um
+// KPI não se "resolve" (diferente do churn, que é advisory acionável) — a UI só
+// mostra o placar vivo pro dono acompanhar o que a copy calibrada está rendendo.
+router.get("/operations/kpis", (req: AuthRequest, res): any => {
+  const TYPES = new Set(["collection_ab_result", "sales_recovery_ab_result", "referral_program_result"]);
+  const signals = BusinessSignalService.list(req.organizationId!, { status: "open" })
+    .filter((s: any) => TYPES.has(s.signal_type));
+  res.json({ signals });
+});
+
 // ── Piloto F4a: Retail Closing ────────────────────────────────────────────
 
 // Seed idempotente do playbook `retail_daily_closing_v1` na org. Master admin

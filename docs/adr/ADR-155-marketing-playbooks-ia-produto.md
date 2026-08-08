@@ -153,6 +153,10 @@ Absorvida como **Fase 1** deste ADR — vira a **camada por-org do grimoire** (`
 
 `coreyhaines31/marketingskills` é **MIT** — adaptação de conteúdo para os prompts/docs do ZappFlow é permitida. Toda rubrica derivada em `docs/grimoire/copy/*.md` credita a origem no header. Os CLIs `tools/` (SaaS gringo) **não** são reusados — servem só como referência de formato.
 
+## Histórico (UI dos KPIs na aba Operações)
+
+- **2026-08-08** — **KPIs de copy calibrada + indicação visíveis na aba Operações**: os sinais `collection_ab_result` (F2.3), `sales_recovery_ab_result` (F3.2) e `referral_program_result` (F6) eram publicados em `business_signals` mas só líveis por query/API. Agora a aba Operações (ADR-152 F3.2, `ExecutiveView`) mostra o placar vivo: rota `GET /api/runtime/operations/kpis` (só leitura — um KPI não se "resolve", diferente do churn acionável) filtra os 3 tipos; um bloco novo "Copy calibrada & indicação" renderiza card de A/B (control × calibrada, taxa/volume/receita + badge de vencedor com amostra mínima) e card do programa de indicação (códigos/indicados/convertidos + % conversão). Gated pelo mesmo `runtimeGate` da aba; some quando não há KPI. Teste: filtro validado em `test-runtime-operations.ts` (+3 checagens: 3 tipos de KPI, não-KPI de fora, isolamento). `tsc` + `vite build` verdes.
+
 ## Histórico (wiring runtime do grimoire)
 
 - **2026-08-08** — **`promptForOrg` consumido em runtime (fecha o loop F1.4 na copy viva)**: até aqui o `GrimoireService.promptForOrg` (rubrica + lições do pós-mortem + contexto de marca, gated por `brand_voice`) era testado mas não consumido em produção. Agora:

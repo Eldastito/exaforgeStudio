@@ -150,6 +150,22 @@ async function main() {
   const ledB = OutcomeMeasurementService.ledger(orgB);
   check("ledger de orgB é zerado", ledB.items.length === 0 && ledB.totals.count === 0);
 
+  // ===== 16. ADR-155 — filtro de KPIs da rota /operations/kpis =====
+  // A rota faz `list({status:'open'}).filter(type ∈ KPI_TYPES)`. Publicamos os 3
+  // tipos de KPI + 1 não-KPI (churn) e replicamos o predicado exato da rota.
+  const { BusinessSignalService } = await import("../src/server/BusinessSignalService.js");
+  const KPI_TYPES = new Set(["collection_ab_result", "sales_recovery_ab_result", "referral_program_result"]);
+  const pubKpi = (type: string, domain: string) => BusinessSignalService.publish(orgA, { domain, signalType: type, severity: "info", basis: "fact", confidence: 1, sourceService: "test", evidence: {}, dedupeKey: `${type}:${orgA}` });
+  pubKpi("collection_ab_result", "collection");
+  pubKpi("sales_recovery_ab_result", "sales");
+  pubKpi("referral_program_result", "referrals");
+  pubKpi("churn_risk_high", "churn"); // não-KPI: NÃO deve entrar
+  const kpis = BusinessSignalService.list(orgA, { status: "open" }).filter((s: any) => KPI_TYPES.has(s.signal_type));
+  check("KPIs: rota devolve exatamente os 3 tipos de KPI", kpis.length === 3);
+  check("KPIs: churn_risk_high (não-KPI) fica de fora", !kpis.some((s: any) => s.signal_type === "churn_risk_high"));
+  const kpisB = BusinessSignalService.list(orgB, { status: "open" }).filter((s: any) => KPI_TYPES.has(s.signal_type));
+  check("KPIs: orgB não vê KPIs de orgA (isolamento)", kpisB.length === 0);
+
   // ===== Resultado =====
   console.log("\n=== ADR-152 Fatia 3.1 (Outcomes estendidos + RuntimeExceptionsService) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}`);

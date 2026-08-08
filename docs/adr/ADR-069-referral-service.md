@@ -63,3 +63,10 @@ A IA é o **único ponto de entrada em produção**: no `AIOrchestratorService` 
 - `activeCoupon` + `redeem`: FIFO, transição `active` → `used` com `used_order_id` preenchido.
 
 Enquanto esses testes não existirem, qualquer mudança em `ReferralService` ou nos gatilhos da IA (`referral_code_request` / `apply_referral_code` no `AIOrchestratorService.ts:305-306`) exige revisão manual dos 3 consumidores listados em `grep -rn ReferralService\. src/server`.
+
+## Evolução — ADR-155 F6 (2026-08-08)
+
+A Trilha B da **ADR-155** aplicou o tratamento "copy + medição" a este módulo (sem mudar as regras invioláveis acima):
+
+- **Copy do ASK** — o `referralText` do `AIOrchestratorService` passou a ser calibrado pelas rubricas do grimoire `intake/referral-timing.md` (pedir no pico de satisfação) + `compose/referral-ask.md` (valor dos dois lados, atrito zero). As guardas continuam: a IA **convida**, o sistema gera/valida o código; nunca pede dados do amigo (LGPD Art. 7).
+- **Medição** — `ReferralProgramMeasurementService` deriva por query (códigos, indicados, cupons welcome/reward, conversão) e publica o KPI `referral_program_result` em `business_signals` (sem contador mutável; convenção nº 12). Roda no `Scheduler.referralProgramMeasurementPass`, observador puro. Teste: `scripts/test-referral-program-measurement.ts`.

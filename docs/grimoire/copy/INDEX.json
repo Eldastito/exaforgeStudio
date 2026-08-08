@@ -23,6 +23,13 @@
       "guardrails": ["guardrails/lgpd-e-whatsapp.md"],
       "review": ["review/pre-send-checklist.md"],
       "glossary": ["glossary/tom-de-voz.md"]
+    },
+    "referrals": {
+      "intake": ["intake/referral-timing.md"],
+      "compose": ["compose/referral-ask.md"],
+      "guardrails": ["guardrails/lgpd-e-whatsapp.md"],
+      "review": ["review/pre-send-checklist.md"],
+      "glossary": ["glossary/tom-de-voz.md"]
     }
   }
 }

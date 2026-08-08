@@ -22,6 +22,7 @@ export interface ResearchResult {
   content: any;       // achados do mundo externo (JSON)
   sources: string[];
   confidence: number; // 0..1
+  costCents?: number; // custo da chamada (para o orçamento de pesquisa, DI-4.2); stub = 0
 }
 
 export interface ExternalResearchProvider {

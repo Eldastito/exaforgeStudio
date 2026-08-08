@@ -31,6 +31,7 @@
     "test:sales-recovery-ab-measurement": "tsx scripts/test-sales-recovery-ab-measurement.ts",
     "test:sales-recovery-grimoire-injection": "tsx scripts/test-sales-recovery-grimoire-injection.ts",
     "test:referral-program-measurement": "tsx scripts/test-referral-program-measurement.ts",
+    "test:ab-trend": "tsx scripts/test-ab-trend.ts",
     "grimoire:build": "tsx scripts/build-grimoire.ts",
     "test:admin-users": "tsx scripts/test-admin-users.ts",
     "test:instagram-send": "tsx scripts/test-instagram-send.ts",

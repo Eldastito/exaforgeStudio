@@ -3,6 +3,7 @@ import { apiFetch } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/button';
 import { toast } from '@/src/lib/toast';
 import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target, Activity, AlertTriangle, Clock, Zap, Handshake, Repeat2, UserX, MessageCircle } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useStore } from '@/src/store/useStore';
 
 type Msg = { role: 'user' | 'ai'; text: string };
@@ -613,6 +614,7 @@ function OperacoesTab() {
               {kpis.map((s) => <React.Fragment key={s.id}><KpiCard signal={s} /></React.Fragment>)}
             </div>
             <p className="text-[11px] text-zinc-500 mt-2">Números derivados por consulta (medição, não estimativa). "Calibrada" é a copy afinada pelo grimoire; "Control" é a legada — o A/B só elege vencedor com amostra mínima.</p>
+            <div className="mt-4"><KpiTrendChart /></div>
           </div>
         )}
 
@@ -681,6 +683,63 @@ function KpiCard({ signal }: { signal: any }) {
         <VariantCell label="Control" v={control} />
         <VariantCell label="Calibrada" v={cal} highlight={winner === 'calibrated'} />
       </div>
+    </div>
+  );
+}
+
+// ADR-155 — gráfico temporal do A/B (control × calibrada) por dia. Consome
+// /api/runtime/operations/kpi-trend. Snapshot diário, sem backfill: precisa de
+// ≥2 pontos pra desenhar uma linha.
+function KpiTrendChart() {
+  const [kind, setKind] = useState<'collection' | 'sales_recovery'>('collection');
+  const [data, setData] = useState<{ points: any[] } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setData(null);
+    apiFetch(`/api/runtime/operations/kpi-trend?kind=${kind}&days=30`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setData({ points: Array.isArray(d?.points) ? d.points : [] }); })
+      .catch(() => { if (alive) setData({ points: [] }); });
+    return () => { alive = false; };
+  }, [kind]);
+
+  const points = data?.points || [];
+  const chartRows = points.map((p) => ({ name: String(p.date).slice(5), control: p.controlRate, calibrada: p.calibratedRate }));
+  const tabBtn = (k: 'collection' | 'sales_recovery', label: string) => (
+    <button onClick={() => setKind(k)} className={`px-2.5 py-1 ${kind === k ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
+  );
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5 text-indigo-400" /> Evolução do A/B (taxa de recuperação)</span>
+        <div className="ml-auto inline-flex rounded-lg border border-zinc-800 overflow-hidden text-[11px]">
+          {tabBtn('collection', 'Cobrança')}
+          {tabBtn('sales_recovery', 'Recuperação')}
+        </div>
+      </div>
+      {data === null ? (
+        <div className="h-48 rounded-lg bg-zinc-900/40 border border-zinc-800 animate-pulse" />
+      ) : points.length < 2 ? (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-center">
+          <p className="text-sm text-zinc-500">Ainda sem histórico suficiente pra desenhar a evolução.</p>
+          <p className="text-[11px] text-zinc-600 mt-1">O gráfico acumula a partir do 1º snapshot diário — volte em alguns dias.</p>
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={chartRows} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+            <XAxis dataKey="name" tick={{ fill: '#71717a', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#71717a', fontSize: 10 }} axisLine={false} tickLine={false} unit="%" width={42} />
+            <Tooltip contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => `${v}%`} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Line type="monotone" dataKey="control" name="Control" stroke="#a1a1aa" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="calibrada" name="Calibrada" stroke="#34d399" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+      <p className="text-[11px] text-zinc-500 mt-1.5">Taxa de recuperação (%) por dia — control (legada) × calibrada (grimoire). Snapshot diário, sem backfill.</p>
     </div>
   );
 }

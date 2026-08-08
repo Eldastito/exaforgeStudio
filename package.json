@@ -338,6 +338,7 @@
     "test:decision-intelligence-di3": "tsx scripts/test-decision-intelligence-di3.ts",
     "test:decision-intelligence-di4": "tsx scripts/test-decision-intelligence-di4.ts",
     "test:decision-intelligence-di4-budget": "tsx scripts/test-decision-intelligence-di4-budget.ts",
+    "test:decision-intelligence-di4-evidence": "tsx scripts/test-decision-intelligence-di4-evidence.ts",
     "test:command-executor": "tsx scripts/test-command-executor.ts",
     "test:purchase-orders": "tsx scripts/test-purchase-orders.ts",
     "test:goods-receipt": "tsx scripts/test-goods-receipt.ts",

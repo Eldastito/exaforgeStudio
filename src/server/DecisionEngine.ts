@@ -1,7 +1,9 @@
+import db from "./db.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { EvidencePackageService } from "./EvidencePackageService.js";
 import { DecisionSimulatorService } from "./DecisionSimulatorService.js";
 import { DecisionRiskService, PredictedRisk } from "./DecisionRiskService.js";
+import { ResearchBrokerService } from "./ResearchBrokerService.js";
 
 /**
  * DecisionEngine — o "cérebro decisório" (DI-2, aditivo sobre ADR-135/136).
@@ -33,10 +35,19 @@ export interface DecisionInput {
   expectedValue?: number | null;         // retorno esperado (p/ cenários/advocate)
   premises?: Array<{ label: string; basis?: "fact" | "estimate"; confidence?: number; hasEvidence?: boolean }>;
   decisionId?: string | null;            // liga a uma decision_actions
+  // Evidência externa (DI-4.3) — nicho/tópico p/ puxar inteligência de mercado.
+  vertical?: string;                     // default: organization_settings.vertical
+  externalTopic?: string;                // default: decisionType
+  region?: string;
+  timeframe?: string;
 }
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const brl = (n: any) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
+/** Vertical configurada da org (para puxar inteligência de mercado do nicho). */
+function orgVertical(orgId: string): string | null {
+  try { return (db.prepare("SELECT vertical FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.vertical || null; } catch { return null; }
+}
 
 export class DecisionEngine {
   /**
@@ -68,15 +79,28 @@ export class DecisionEngine {
     const evidence = EvidencePackageService.build(orgId);
     const scenarios = DecisionSimulatorService.scenarios(orgId, { base: input.expectedValue ?? input.impactAmount ?? null });
 
+    // Evidência EXTERNA (DI-4.3): só quando o perfil do nível pede (L2 'cache' /
+    // L3+ 'yes'); read-only (nunca dispara pesquisa — o broker não chama provider).
+    const wantExternal = level.analysis.externalResearch !== "no";
+    let external: any = { available: false, reason: "not_requested" };
+    if (wantExternal) {
+      const vertical = input.vertical || orgVertical(orgId);
+      const topic = input.externalTopic || input.decisionType || null;
+      external = (vertical && topic)
+        ? ResearchBrokerService.resolve(orgId, { vertical, topic, region: input.region, timeframe: input.timeframe })
+        : { available: false, reason: "no_vertical_or_topic" };
+    }
+
     const out: any = {
       level: level.level, levelLabel: level.label, analysisProfile: level.analysis,
       applied, skipped: false,
-      evidence: { subject: evidence.subject, confidence: evidence.confidence, freshness: evidence.freshness, sources: evidence.sources },
+      evidence: { subject: evidence.subject, confidence: evidence.confidence, freshness: evidence.freshness, sources: evidence.sources, externalEvidence: evidence.externalEvidence },
+      external,
       scenarios,
     };
     if (run.premortem) out.premortem = { risks: this.premortem(input, evidence) };
     if (run.redTeam) out.redTeam = { challenges: this.redTeam(input, evidence) };
-    if (run.advocate) out.advocate = this.advocate(input, evidence, scenarios);
+    if (run.advocate) out.advocate = this.advocate(input, evidence, scenarios, external);
 
     out.recommendation = this.synthesize(level, out);
 
@@ -176,7 +200,7 @@ export class DecisionEngine {
   }
 
   /** Advocate: sustenta a decisão — tese + evidências favoráveis + upside. */
-  private static advocate(input: DecisionInput, evidence: any, scenarios: any): any {
+  private static advocate(input: DecisionInput, evidence: any, scenarios: any, external?: any): any {
     const fin = evidence?.internalEvidence?.finance;
     const finOk = fin && fin.available !== false;
     const support: string[] = [];
@@ -184,6 +208,7 @@ export class DecisionEngine {
     if (finOk && fin?.dre?.margemPct != null) support.push(`Margem atual de ${fin.dre.margemPct}%.`);
     if (scenarios?.ok) support.push(`Cenário base projeta ${brl(scenarios.base.value)} (upside até ${brl(scenarios.aggressive.value)}).`);
     if (evidence?.confidence != null) support.push(`Confiança das evidências: ${Math.round(evidence.confidence * 100)}%.`);
+    if (external?.available) support.push(`Inteligência de mercado do nicho disponível${external.contextualization?.context?.summary ? `: ${external.contextualization.context.summary}` : ""}.`);
     return {
       thesis: `"${input.title}" tende a valer se o retorno esperado se confirmar e a execução for acompanhada.`,
       support,

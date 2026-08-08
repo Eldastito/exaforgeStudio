@@ -8,6 +8,7 @@ import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
 import { FalaTuBriefingTaskService } from "../FalaTuBriefingTaskService.js";
 import { FalaTuBriefingDigestService } from "../FalaTuBriefingDigestService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
+import { FalatuRefundService, FalatuRefundError } from "../FalatuRefundService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -329,6 +330,24 @@ router.post("/briefing/whatsapp/send-now", async (req: AuthRequest, res): Promis
     const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
     res.json(await FalaTuBriefingDigestService.sendNow(orgId, actorId(req), { send }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ADR-154 F2.2 Fatia E — garantia de 7 dias com reembolso AUTOMÁTICO via ASAAS.
+// GET expõe se ainda dá tempo (a UI mostra/esconde o botão + dias restantes);
+// POST aciona o estorno + cancelamento. Self-serve: age SEMPRE sobre a própria
+// org do JWT (req.organizationId), nunca sobre outra.
+router.get("/refund/eligibility", (req: AuthRequest, res): any => {
+  try { res.json(FalatuRefundService.checkEligibility(req.organizationId!)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post("/refund", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    res.json(await FalatuRefundService.requestRefund(req.organizationId!, actorId(req)));
+  } catch (e: any) {
+    if (e instanceof FalatuRefundError) return res.status(e.httpStatus).json({ error: e.code, message: e.message });
+    res.status(500).json({ error: "internal_error", message: e.message });
+  }
 });
 
 export default router;

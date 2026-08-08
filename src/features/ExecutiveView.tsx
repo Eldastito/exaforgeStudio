@@ -6,7 +6,7 @@ import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, Tre
 import { useStore } from '@/src/store/useStore';
 
 type Msg = { role: 'user' | 'ai'; text: string };
-type Tab = 'conversar' | 'plano' | 'funciona' | 'operacoes' | 'recuperacao';
+type Tab = 'conversar' | 'decidir' | 'plano' | 'funciona' | 'operacoes' | 'recuperacao';
 
 const DOMAIN_LABEL: Record<string, string> = {
   finance: 'Finanças', production: 'Produção', procurement: 'Compras', inventory: 'Estoque',
@@ -40,13 +40,14 @@ export function ExecutiveView() {
         <p className="text-sm text-zinc-400 mt-1">Pergunte qualquer coisa sobre o seu negócio, ou acompanhe o plano de ação — tudo com dados reais do sistema, nada inventado.</p>
         <div className="flex gap-2 mt-4">
           <TabButton active={tab === 'conversar'} onClick={() => setTab('conversar')} icon={<MessageSquare className="h-4 w-4" />} label="Conversar" />
+          <TabButton active={tab === 'decidir'} onClick={() => setTab('decidir')} icon={<Target className="h-4 w-4" />} label="Analisar decisão" />
           <TabButton active={tab === 'plano'} onClick={() => setTab('plano')} icon={<ListChecks className="h-4 w-4" />} label="Plano de Ação" />
           <TabButton active={tab === 'funciona'} onClick={() => setTab('funciona')} icon={<TrendingUp className="h-4 w-4" />} label="O que funciona" />
           {showOperacoes && <TabButton active={tab === 'operacoes'} onClick={() => setTab('operacoes')} icon={<Activity className="h-4 w-4" />} label="Operações" />}
           {showOperacoes && <TabButton active={tab === 'recuperacao'} onClick={() => setTab('recuperacao')} icon={<Handshake className="h-4 w-4" />} label="Recuperação" />}
         </div>
       </div>
-      {tab === 'conversar' ? <ConversarTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : tab === 'recuperacao' ? <RecuperacaoTab /> : <FuncionaTab />}
+      {tab === 'conversar' ? <ConversarTab /> : tab === 'decidir' ? <DecidirTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : tab === 'recuperacao' ? <RecuperacaoTab /> : <FuncionaTab />}
     </div>
   );
 }
@@ -1026,5 +1027,174 @@ function ConfigChip({ label, on }: { label: string; on: boolean }) {
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${on ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : 'text-zinc-500 border-zinc-700'}`}>
       {on ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />} {label}
     </span>
+  );
+}
+
+// ===== Aba: Analisar decisão (DI-UI-3) — Pre-Mortem/Red Team/Advocate =====
+// O empresário descreve uma decisão e recebe a análise protegida: nível de
+// impacto L0–L4 (DI-1), cenários, riscos previstos (Pre-Mortem), desafios de
+// premissa (Red Team), a defesa (Advocate) e uma recomendação advisória. Consome
+// POST /api/decision-intelligence/analyze. O gate real de execução segue no RBAC.
+const DECISION_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'purchase', label: 'Compra / estoque' }, { key: 'campaign', label: 'Campanha / marketing' },
+  { key: 'hire', label: 'Contratação' }, { key: 'investment', label: 'Investimento' },
+  { key: 'expansion', label: 'Expansão / nova unidade' }, { key: 'generic', label: 'Outra' },
+];
+const brlv = (n: any) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const LEVEL_CLS: Record<number, string> = {
+  0: 'text-zinc-300 border-zinc-600 bg-zinc-700/20', 1: 'text-sky-300 border-sky-500/40 bg-sky-500/10',
+  2: 'text-amber-300 border-amber-500/40 bg-amber-500/10', 3: 'text-orange-300 border-orange-500/40 bg-orange-500/10',
+  4: 'text-red-300 border-red-500/40 bg-red-500/10',
+};
+const STANCE_UI: Record<string, { label: string; cls: string }> = {
+  proceed: { label: 'Prosseguir', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' },
+  proceed_with_caution: { label: 'Prosseguir com cautela', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' },
+  hold_for_human: { label: 'Segurar — decisão do dono', cls: 'text-red-300 border-red-500/40 bg-red-500/10' },
+};
+
+function DecidirTab() {
+  const [form, setForm] = useState<any>({ title: '', decisionType: 'purchase', impactAmount: '', expectedValue: '', externalTopic: '', premises: '' });
+  const [loading, setLoading] = useState(false);
+  const [out, setOut] = useState<any | null>(null);
+  const setF = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const analisar = async () => {
+    if (!form.title.trim()) { toast.error('Descreva a decisão.'); return; }
+    setLoading(true); setOut(null);
+    try {
+      const premises = String(form.premises).split('\n').map((s: string) => s.trim()).filter(Boolean).map((label: string) => ({ label, basis: 'estimate' }));
+      const body: any = {
+        title: form.title.trim(), decisionType: form.decisionType,
+        impactAmount: form.impactAmount ? Number(String(form.impactAmount).replace(',', '.')) : null, impactUnit: 'BRL',
+        expectedValue: form.expectedValue ? Number(String(form.expectedValue).replace(',', '.')) : null,
+        externalTopic: form.externalTopic.trim() || undefined, premises, mode: 'auto',
+      };
+      const r = await apiFetch('/api/decision-intelligence/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Falha na análise.');
+      setOut(d);
+    } catch (e: any) { toast.error(String(e?.message || e)); } finally { setLoading(false); }
+  };
+
+  const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none';
+  const levelN = out?.level ? Number(String(out.level).replace('L', '')) : null;
+  const stance = out?.recommendation?.stance ? STANCE_UI[out.recommendation.stance] : null;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-3xl space-y-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <p className="mb-3 text-sm text-zinc-300">Descreva uma decisão e eu analiso os riscos, os cenários e recomendo — antes de você gastar. Ex.: <span className="text-zinc-400">"comprar R$ 180 mil da nova coleção"</span>.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[11px] uppercase text-zinc-500">A decisão *</label>
+              <input className={inputCls} placeholder="ex.: comprar a coleção de inverno" value={form.title} onChange={(e) => setF('title', e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase text-zinc-500">Tipo</label>
+              <select className={inputCls} value={form.decisionType} onChange={(e) => setF('decisionType', e.target.value)}>
+                {DECISION_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase text-zinc-500">Valor (R$)</label>
+              <input className={inputCls} inputMode="decimal" placeholder="ex.: 180000" value={form.impactAmount} onChange={(e) => setF('impactAmount', e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase text-zinc-500">Retorno esperado (R$, opcional)</label>
+              <input className={inputCls} inputMode="decimal" placeholder="ex.: 155000" value={form.expectedValue} onChange={(e) => setF('expectedValue', e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase text-zinc-500">Tópico de mercado (opcional)</label>
+              <input className={inputCls} placeholder="ex.: inverno" value={form.externalTopic} onChange={(e) => setF('externalTopic', e.target.value)} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[11px] uppercase text-zinc-500">Premissas (uma por linha, opcional)</label>
+              <textarea className={`${inputCls} min-h-[70px]`} placeholder={'ex.: crescimento de 20% no inverno\nfornecedor entrega no prazo'} value={form.premises} onChange={(e) => setF('premises', e.target.value)} />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button onClick={analisar} disabled={loading}>{loading ? <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Analisando…</> : <><Sparkles className="mr-2 h-4 w-4" /> Analisar decisão</>}</Button>
+          </div>
+        </div>
+
+        {out && (
+          <div className="space-y-3">
+            {/* Nível + recomendação */}
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {levelN != null && <span className={`rounded-full border px-2.5 py-0.5 text-[12px] font-medium ${LEVEL_CLS[levelN]}`}>{out.level} · {out.levelLabel}</span>}
+                {stance && <span className={`rounded-full border px-2.5 py-0.5 text-[12px] font-medium ${stance.cls}`}>{stance.label}</span>}
+              </div>
+              {out.recommendation?.headline && <p className="mt-2 text-sm text-zinc-100">{out.recommendation.headline}</p>}
+              {out.recommendation?.why?.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[13px] text-zinc-400">
+                  {out.recommendation.why.map((w: string, i: number) => <li key={i} className="flex gap-2"><span className="text-zinc-600">•</span> {w}</li>)}
+                </ul>
+              )}
+              {out.skipped && <p className="mt-1 text-[12px] text-zinc-500">{out.reason}</p>}
+              <p className="mt-2 text-[11px] text-zinc-600">Recomendação advisória — a autorização final segue as permissões (RBAC).</p>
+            </div>
+
+            {/* Cenários */}
+            {out.scenarios?.ok && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                <div className="mb-2 text-sm font-medium text-zinc-200">Cenários</div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  {['conservative', 'base', 'aggressive'].map((k) => (
+                    <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
+                      <div className="text-[11px] uppercase text-zinc-500">{out.scenarios[k].label}</div>
+                      <div className="mt-0.5 font-semibold text-zinc-100 tabular-nums">{brlv(out.scenarios[k].value)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pre-Mortem */}
+            {out.premortem?.risks?.length > 0 && (
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-200"><AlertTriangle className="h-4 w-4" /> Pre-Mortem — o que pode dar errado</div>
+                <div className="space-y-2">
+                  {out.premortem.risks.map((rk: any, i: number) => (
+                    <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+                      <div className="flex items-center gap-2 text-[13px]">
+                        <span className="text-zinc-100">{rk.description}</span>
+                        {rk.probability && <span className="ml-auto rounded bg-zinc-700/40 px-1.5 py-0.5 text-[10px] uppercase text-zinc-300">{rk.probability}</span>}
+                      </div>
+                      {rk.mitigation && <div className="mt-1 text-[12px] text-zinc-400">Mitigação: {rk.mitigation}</div>}
+                      {(rk.leadingIndicator || rk.threshold) && <div className="mt-0.5 text-[11px] text-zinc-500">Monitorar: {rk.leadingIndicator}{rk.threshold ? ` (${rk.threshold})` : ''}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Red Team */}
+            {out.redTeam?.challenges?.length > 0 && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-200"><ShieldCheck className="h-4 w-4 text-red-300" /> Red Team — premissas a validar</div>
+                <ul className="space-y-1 text-[13px] text-zinc-400">
+                  {out.redTeam.challenges.map((c: any, i: number) => <li key={i} className="flex gap-2"><span className="text-zinc-600">•</span> <span><span className="text-zinc-300">{c.premise}:</span> {c.issue}</span></li>)}
+                </ul>
+              </div>
+            )}
+
+            {/* Advocate */}
+            {out.advocate && (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-emerald-200"><TrendingUp className="h-4 w-4" /> A favor</div>
+                <p className="text-[13px] text-zinc-200">{out.advocate.thesis}</p>
+                {out.advocate.support?.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-[13px] text-zinc-400">
+                    {out.advocate.support.map((s: string, i: number) => <li key={i} className="flex gap-2"><span className="text-zinc-600">•</span> {s}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

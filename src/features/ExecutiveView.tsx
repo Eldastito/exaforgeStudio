@@ -687,11 +687,13 @@ function KpiCard({ signal }: { signal: any }) {
   );
 }
 
-// ADR-155 — gráfico temporal do A/B (control × calibrada) por dia. Consome
+// ADR-155 — gráfico temporal por dia: A/B control × calibrada (cobrança/
+// recuperação) e conversão da indicação (uma linha). Consome
 // /api/runtime/operations/kpi-trend. Snapshot diário, sem backfill: precisa de
 // ≥2 pontos pra desenhar uma linha.
+type TrendKind = 'collection' | 'sales_recovery' | 'referral';
 function KpiTrendChart() {
-  const [kind, setKind] = useState<'collection' | 'sales_recovery'>('collection');
+  const [kind, setKind] = useState<TrendKind>('collection');
   const [data, setData] = useState<{ points: any[] } | null>(null);
 
   useEffect(() => {
@@ -705,18 +707,26 @@ function KpiTrendChart() {
   }, [kind]);
 
   const points = data?.points || [];
-  const chartRows = points.map((p) => ({ name: String(p.date).slice(5), control: p.controlRate, calibrada: p.calibratedRate }));
-  const tabBtn = (k: 'collection' | 'sales_recovery', label: string) => (
+  const isReferral = kind === 'referral';
+  const chartRows = points.map((p) => isReferral
+    ? { name: String(p.date).slice(5), conversao: p.conversionRate }
+    : { name: String(p.date).slice(5), control: p.controlRate, calibrada: p.calibratedRate });
+  const tabBtn = (k: TrendKind, label: string) => (
     <button onClick={() => setKind(k)} className={`px-2.5 py-1 ${kind === k ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
   );
+  const subtitle = isReferral ? 'Conversão da indicação' : 'Evolução do A/B (taxa de recuperação)';
+  const footnote = isReferral
+    ? 'Conversão (%) por dia — indicados que viraram compra paga. Snapshot diário, sem backfill.'
+    : 'Taxa de recuperação (%) por dia — control (legada) × calibrada (grimoire). Snapshot diário, sem backfill.';
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-3">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5 text-indigo-400" /> Evolução do A/B (taxa de recuperação)</span>
+        <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5 text-indigo-400" /> {subtitle}</span>
         <div className="ml-auto inline-flex rounded-lg border border-zinc-800 overflow-hidden text-[11px]">
           {tabBtn('collection', 'Cobrança')}
           {tabBtn('sales_recovery', 'Recuperação')}
+          {tabBtn('referral', 'Indicação')}
         </div>
       </div>
       {data === null ? (
@@ -734,12 +744,18 @@ function KpiTrendChart() {
             <YAxis tick={{ fill: '#71717a', fontSize: 10 }} axisLine={false} tickLine={false} unit="%" width={42} />
             <Tooltip contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => `${v}%`} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Line type="monotone" dataKey="control" name="Control" stroke="#a1a1aa" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="calibrada" name="Calibrada" stroke="#34d399" strokeWidth={2} dot={false} />
+            {isReferral ? (
+              <Line type="monotone" dataKey="conversao" name="Conversão" stroke="#818cf8" strokeWidth={2} dot={false} />
+            ) : (
+              <>
+                <Line type="monotone" dataKey="control" name="Control" stroke="#a1a1aa" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="calibrada" name="Calibrada" stroke="#34d399" strokeWidth={2} dot={false} />
+              </>
+            )}
           </LineChart>
         </ResponsiveContainer>
       )}
-      <p className="text-[11px] text-zinc-500 mt-1.5">Taxa de recuperação (%) por dia — control (legada) × calibrada (grimoire). Snapshot diário, sem backfill.</p>
+      <p className="text-[11px] text-zinc-500 mt-1.5">{footnote}</p>
     </div>
   );
 }

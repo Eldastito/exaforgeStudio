@@ -8033,6 +8033,59 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_evidence_cache_events_org
       ON evidence_cache_events(organization_id, created_at);
   `);
+  // Decision Intelligence DI-4.1 (ADR-156) — External Intelligence de vertical
+  // COMPARTILHADA e anonimizada.
+  //
+  // `vertical_intelligence` é a camada COMPARTILHADA: **NÃO tem organization_id**
+  // por design (RN-156-1). Guarda só pesquisa do mundo externo (mercado/
+  // tendências) por (vertical, topic, region, timeframe), dedup por `fingerprint`
+  // (UNIQUE). Escrita SÓ pelo admin master / scheduler (D5). `valid_until` = TTL/
+  // freshness. Zero dado por-org/pessoal (filtro de anonimização antes de gravar).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vertical_intelligence (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      vertical TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      region TEXT,
+      timeframe TEXT,
+      content_json TEXT NOT NULL,
+      sources_json TEXT,
+      confidence REAL,
+      provider TEXT,
+      created_by TEXT,
+      generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      valid_until DATETIME NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vertical_intelligence_fp
+      ON vertical_intelligence(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_vertical_intelligence_vertical
+      ON vertical_intelligence(vertical, valid_until);
+  `);
+  // `organization_contextualization` é a camada POR-ORG: isolada por
+  // organization_id (RN-156-1). Liga uma org a uma entrada compartilhada com o
+  // enquadramento específico dela. UNIQUE(org, fingerprint) → 1 contextualização
+  // viva por (org, pesquisa). NUNCA é escrita de volta no compartilhado.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS organization_contextualization (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      vertical_intelligence_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      vertical TEXT NOT NULL,
+      topic TEXT,
+      context_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_org_contextualization_key
+      ON organization_contextualization(organization_id, fingerprint);
+  `);
+  // Opt-in por org para CONSUMIR inteligência externa (convenção nº 10 / RN-156).
+  // Default 0: nenhuma org recebe até optar. NÃO habilita a org a DISPARAR
+  // pesquisa (isso é só do admin master, D5).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN external_intelligence_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

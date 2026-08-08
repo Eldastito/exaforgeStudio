@@ -1,6 +1,6 @@
 # ADR-156 — External Intelligence: inteligência de vertical compartilhada e anonimizada (aditivo sobre ADR-135/136/152; ADR de agregação exigido pela ADR-079 D4)
 
-- **Status:** Proposto — **Fase 0 (esta ADR)**. Nenhum código escrito; Fases DI-4.1..DI-4.4 **aguardando aprovação do dono** (é exceção deliberada à fronteira multi-tenant — precisa de revisão antes do código).
+- **Status:** **Aceito** (ADR mergeada, PR #847). Decisão de gatilho fixada no D5 (admin master / agendado; tenant read-only). **DI-4.1 em implementação**; DI-4.2..DI-4.4 a seguir.
 - **Data:** 2026-08-08
 - **Origem:** PRD "ZapFlow Decision Intelligence Fabric 2.0" (External Intelligence / Agent-Reach) + `docs/decision-intelligence/` (Fatia DI-4). Decisão do dono (2026-08-08): "compartilhado por vertical anonimizado (exige ADR nova antes do código)".
 - **Relacionadas:** **ADR-079 D4** (que adiou agregação cross-tenant "até haver ADR de agregação anonimizada" — **esta é essa ADR**), ADR-135 (Snapshot/Evidence), ADR-136 (Signals/Decision), ADR-152 (Runtime), ADR-056 (LGPD), ADR-130 (Governança de IA), ADR-153 (verticais/entitlements), ADR-154 (metering de IA). CLAUDE.md convenções nº 1 (isolamento), nº 6 (LGPD), nº 10 (opt-in), nº 12 (BusinessSignal).
@@ -44,14 +44,14 @@ O isolamento clássico (`WHERE organization_id = ?`) continua valendo para **tod
 
 `ExternalResearchProvider` (interface), modelado no padrão `TryOnProvider` já existente (registry + seleção por env). Implementações plugáveis (ex.: web-search, API de dados, provider próprio). **Nada de acoplar a plataforma a `AgentReachService` concreto** — o Decision Engine pede uma **capacidade** ("preciso de pesquisa externa?"), o broker resolve o provider. Trocar a tecnologia amanhã não toca o resto.
 
-### D5 — Research Broker (cache + dedup + freshness + budget) — reusa infra existente
+### D5 — Gatilho da pesquisa: ADMIN MASTER / agendado; tenant é consumidor READ-ONLY (decisão do dono, 2026-08-08)
 
-`ResearchBrokerService.resolve(orgId, { vertical, topic, region, timeframe })` na ordem (PRD §6/§25/§29):
-```
-L1 request cache → L2 organization_contextualization (fresca?) →
-L3 vertical_intelligence via fingerprint (fresca?) → provider (só no miss total)
-```
-O provider só é chamado se **todas** valerem: (a) miss total; (b) a org **optou** por inteligência externa; (c) **orçamento** permite (D6); (d) o Decision Engine julga que **informação externa pode mudar materialmente a decisão** (PRD §33) e o nível é **L3+** (perfil `externalResearch` do DI-1 = `yes`/`cache`; L0–L2 **não** disparam pesquisa live). Dedup por `fingerprint(vertical|topic|region|timeframe)` — "1 pesquisa, N contextualizações". Freshness por `valid_until` (janela por vertical, dias/semanas).
+**Quem dispara a pesquisa é o admin master (ou um agendamento por vertical), NUNCA a conta do tenant.** Este é o isolamento mais forte e o mais barato: as contas jamais acionam chamada externa nem contribuem qualquer dado para a camada compartilhada — são consumidoras puras. Assim, a query externa é montada **só** da taxonomia do nicho, sem chance de vazar dado de tenant, e o custo é 1 pesquisa por nicho (não picos por demanda de cada loja) — PRD §7/§29.
+
+- **Escrita (admin master / scheduler):** `VerticalIntelligenceService.runResearch(actorAdmin, { vertical, topic, region, timeframe }, provider?)` monta a query só de `(vertical, topic, region, timeframe)`, chama o `ExternalResearchProvider`, passa pelo **filtro de anonimização** (D2) e faz upsert em `vertical_intelligence` por `fingerprint` (dedup — "1 pesquisa, N contextualizações"). **Sem `organization_id` em lugar nenhum deste caminho.** Reusa a área **Admin Master** (ADR-090) + o **Scheduler** (ADR-074) para a cadência (ex.: semanal por vertical). Freshness por `valid_until`.
+- **Leitura (tenant, read-only):** `ResearchBrokerService.resolve(orgId, { vertical, topic, region, timeframe })` na ordem `L2 organization_contextualization (fresca?) → L3 vertical_intelligence via fingerprint (fresca?)`. Em hit L3, monta/atualiza a `organization_contextualization` da org (combinando o pacote do nicho com o enquadramento da org). **O broker do tenant NUNCA chama o provider** — se não há pesquisa fresca do nicho, devolve `{ available:false, reason:'no_fresh_vertical_intelligence' }`. Requer **opt-in** da org (`external_intelligence_enabled`). O consumo por uma decisão do `DecisionEngine` acontece só em **L3+** (perfil `externalResearch` do DI-1).
+
+> Nota: o modelo "por demanda" (a 1ª conta do nicho dispara o provider) fica **fora** desta ADR por decisão do dono — poderia voltar como fallback opcional numa fatia futura, sempre com opt-in + budget, mas não é o padrão.
 
 ### D6 — Sub-budgets de IA (movidos da DI-3, agora ativos)
 
@@ -63,7 +63,7 @@ O resultado do broker preenche o slot **`externalEvidence[]`** do Evidence Packa
 
 ### D8 — Fatiamento (cada fatia = 1 PR draft → CI verde → merge)
 
-- **DI-4.1** — schema (`vertical_intelligence` sem org; `organization_contextualization` por-org) + `ExternalResearchProvider` (interface + **provider stub determinístico**, sem chamada live) + `ResearchBrokerService` (cache/dedup/freshness) + **filtro de anonimização** + testes offline (inclui asserção "compartilhado nunca contém org/PII" e isolamento).
+- **DI-4.1** — schema (`vertical_intelligence` sem org; `organization_contextualization` por-org) + `ExternalResearchProvider` (interface + **provider stub determinístico**, sem chamada live) + **filtro de anonimização** + `VerticalIntelligenceService.runResearch` (escrita pelo **admin master**, D5) + `ResearchBrokerService.resolve` (leitura **read-only** do tenant, nunca chama provider) + testes offline (asserção "compartilhado nunca contém org/PII", dedup 2 orgs → 1 pesquisa, tenant não dispara provider, freshness, opt-in, isolamento).
 - **DI-4.2** — sub-budgets (D6) com enforcement no broker + sinais de quota.
 - **DI-4.3** — fio até o `externalEvidence[]` do Evidence Package + consumo pelo `DecisionEngine` só em L3+ (roteador DI-1).
 - **DI-4.4** (posterior, opt-in) — um provider real (web-search) atrás da interface, gated por env, com guardrails de chamada live + custo.

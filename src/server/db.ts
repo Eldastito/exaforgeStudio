@@ -7932,6 +7932,10 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_grimoire_lessons_rubric
       ON grimoire_lessons(organization_id, rubric_id, active);
   `);
+  // ADR-155 F4.1 — ChurnRiskDetector opt-in por org (convenção nº 10). Quando
+  // 1, o detector publica sinais churn_risk_high em business_signals (nunca
+  // tabela própria — convenção nº 12). Default 0: zero mudança pras orgs atuais.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN churn_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

@@ -27,6 +27,7 @@ import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { PlanFitSignalPublisher } from "./PlanFitSignalPublisher.js";
+import { ChurnRiskDetectorService } from "./ChurnRiskDetectorService.js";
 import { AiQuotaSignalService } from "./AiQuotaSignalService.js";
 import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 import { FalaTuService } from "./FalaTuService.js";
@@ -747,6 +748,7 @@ export class Scheduler {
     // `business_signals` domain='plan' quando org está ≥80% de qualquer limite.
     // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
     try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
+    try { this.churnRiskPass(); } catch (e: any) { console.error('[Scheduler] churn-risk detector F4.1 falhou', e?.message); }
     try { this.aiQuotaPass(); } catch (e: any) { console.error('[Scheduler] ai-quota sinais F1.3 falhou', e?.message); }
     // ADR-153 F7.7 — expira cooldowns vencidos (dismissed → expired) no ledger
     // de upgrade_recommendations. Cleanup lazy até então; agora automático.
@@ -770,6 +772,23 @@ export class Scheduler {
       }
     } catch (e) {
       console.error('[Scheduler] plan-fit falhou', e);
+    }
+  }
+
+  /**
+   * ADR-155 F4.1 — detector de risco de churn do cliente. Pra cada org opt-in
+   * (`churn_detector_enabled=1`), pontua os contatos (fatura vencida + silêncio
+   * + ticket frio) e publica `churn_risk_high` em business_signals (sweep resolve
+   * quem saiu do risco). Advisory: sugere retenção, humano decide (RN-014).
+   */
+  static churnRiskPass() {
+    try {
+      const r = ChurnRiskDetectorService.runAll();
+      if (r.published > 0 || r.resolved > 0) {
+        console.log(`[Scheduler] churn-risk: ${r.orgs} orgs, ${r.published} sinais publicados, ${r.resolved} resolvidos.`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] churn-risk falhou', e);
     }
   }
 

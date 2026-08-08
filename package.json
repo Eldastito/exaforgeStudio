@@ -23,6 +23,7 @@
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",
     "test:grimoire-brand-voice": "tsx scripts/test-grimoire-brand-voice.ts",
     "test:grimoire-postmortem": "tsx scripts/test-grimoire-postmortem.ts",
+    "test:churn-risk-detector": "tsx scripts/test-churn-risk-detector.ts",
     "test:collection-copy": "tsx scripts/test-collection-copy.ts",
     "test:collection-decline": "tsx scripts/test-collection-decline.ts",
     "test:collection-ab-measurement": "tsx scripts/test-collection-ab-measurement.ts",

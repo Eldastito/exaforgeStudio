@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "descricao": "Roteamento just-in-time do grimoire de copy: (modulo, estagio) -> rubricas. Consumido pelo GrimoireService (ADR-155 F1.2). Editar aqui ao adicionar/remover rubrica.",
+  "estagios": ["intake", "compose", "guardrails", "review", "glossary"],
+  "modulos": {
+    "cobranca": {
+      "intake": ["intake/churn-risk-scoring.md"],
+      "compose": ["compose/dunning-cadence.md", "compose/sequence-timing.md"],
+      "guardrails": ["guardrails/lgpd-e-whatsapp.md"],
+      "review": ["review/pre-send-checklist.md"],
+      "glossary": ["glossary/tom-de-voz.md"]
+    },
+    "recuperacao": {
+      "intake": ["intake/churn-risk-scoring.md"],
+      "compose": ["compose/sequence-timing.md"],
+      "guardrails": ["guardrails/lgpd-e-whatsapp.md"],
+      "review": ["review/pre-send-checklist.md"],
+      "glossary": ["glossary/tom-de-voz.md"]
+    },
+    "falatu": {
+      "intake": ["intake/churn-risk-scoring.md"],
+      "compose": ["compose/save-offer-ladder.md"],
+      "guardrails": ["guardrails/lgpd-e-whatsapp.md"],
+      "review": ["review/pre-send-checklist.md"],
+      "glossary": ["glossary/tom-de-voz.md"]
+    }
+  }
+}

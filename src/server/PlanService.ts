@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { ConsumptionService } from "./ConsumptionService.js";
 import { AddonService } from "./AddonService.js";
+import { isFalatuPlanId } from "./falatuPlans.js";
 
 /**
  * Gestão de planos e billing.
@@ -198,6 +199,14 @@ export class PlanService {
     }
     if (org.billing_status === 'blocked' || org.billing_status === 'cancelled' || org.billing_status === 'suspended') {
       return { allowed: false, reason: 'billing_blocked' };
+    }
+    // ADR-154 F2.2 Fatia C — o B2C do FalaTu NÃO tem grace de inadimplência:
+    // "garantia de 7 dias" = pagou-usou / não-pagou-travou. Assinatura em atraso
+    // (past_due) trava a IA na hora. O B2B mantém o grace do dunning
+    // (past_due segue liberado lá — régua ADR-091), por isso o gate é escopado
+    // aos planos falatu_*. Fecha o vazamento de OpenAI de quem parou de pagar.
+    if (org.billing_status === 'past_due' && isFalatuPlanId(org.plan_id)) {
+      return { allowed: false, reason: 'billing_past_due' };
     }
 
     // Limite mensal de IA pelo plano + pacotes extras / recompra automática

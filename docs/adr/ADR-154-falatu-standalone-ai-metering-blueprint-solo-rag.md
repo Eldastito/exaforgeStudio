@@ -550,9 +550,15 @@ caminho crítico (*escolhe → paga → ativa → bloqueia se não pagar*) foi f
   gateway não cria conta grátis órfã), 1 email = 1 conta, rollback da org se o
   gateway falhar. **Garantia de 7 dias** (paga na hora, sem trial): `trial_days:0`,
   `guarantee_days:7` nos planos — o reembolso em si é a Fatia D.
-- **Fatia C — Enforcement** *(pendente)*. Paywall quando `past_due`/`suspended`
-  (fecha também o vazamento de OpenAI das contas Solo grátis) + cota de IA por
-  plano.
+- **Fatia C — Enforcement** *(esta fatia)*. O "cadeado": `PlanService.aiAllowed`
+  agora trava `past_due` **pra planos `falatu_*`** (B2C não tem grace: garantia =
+  pagou-usou / não-pagou-travou; o B2B mantém o grace do dunning). A cota de IA
+  por plano já valia de fábrica — `ConsumptionService.baseLimit` lê o
+  `ai_monthly_limit` do registro do plano e a captura do FalaTu conta no
+  `ai_interactions_log`, então o teto do `falatu_solo`/`pro`/`familia` é
+  aplicado. O `capture` propaga o bloqueio com a mensagem de paywall certa
+  (`billing_past_due` → "regularize o pagamento"). Fecha o vazamento de OpenAI
+  de quem parou de pagar.
 - **Fatia D — Legal** *(pendente)*. Termos + Privacidade (LGPD, controlador) +
   Cancelamento (CDC Art. 49) + aceite no cadastro. Textos exigem revisão
   jurídica.

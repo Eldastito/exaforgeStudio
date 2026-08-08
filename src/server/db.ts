@@ -8039,6 +8039,13 @@ const initDb = () => {
   // rubrica compose/sales-recovery.md. Opt-in por org; a atribuição/rollout do
   // A/B e a medição são a F3.2.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_copy_variant TEXT DEFAULT 'control'`); } catch(e){}
+  // ADR-155 F3.2 — carimba no touch a variante de copy usada no envio, pra a
+  // medição do A/B (SalesRecoveryAbMeasurementService) correlacionar variante ×
+  // recuperação real (sales_recovery_attributions). Espelha o
+  // collection_followup_attempts.variant (F2.1/F2.3). Aditivo à tabela viva
+  // sales_recovery_touches ⇒ ALTER no fim (touches legados ficam 'control',
+  // coerente com o default da F3.1).
+  try { db.exec(`ALTER TABLE sales_recovery_touches ADD COLUMN variant TEXT DEFAULT 'control'`); } catch(e){}
 };
 
 initDb();

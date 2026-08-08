@@ -28,6 +28,7 @@
     "test:collection-decline": "tsx scripts/test-collection-decline.ts",
     "test:collection-ab-measurement": "tsx scripts/test-collection-ab-measurement.ts",
     "test:sales-recovery-copy": "tsx scripts/test-sales-recovery-copy.ts",
+    "test:sales-recovery-ab-measurement": "tsx scripts/test-sales-recovery-ab-measurement.ts",
     "grimoire:build": "tsx scripts/build-grimoire.ts",
     "test:admin-users": "tsx scripts/test-admin-users.ts",
     "test:instagram-send": "tsx scripts/test-instagram-send.ts",

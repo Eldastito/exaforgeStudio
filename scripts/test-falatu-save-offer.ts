@@ -41,12 +41,12 @@ async function main() {
   const falatuRoutes = (await import("../src/server/routes/falatu.js")).default;
 
   // Org FalaTu com aceite AGORA → dentro da garantia (eligible true por relógio real).
-  function seedFalatu(orgId: string) {
+  function seedFalatu(orgId: string, planId = "falatu_solo") {
     db.prepare(`
       INSERT INTO organization_settings
         (id, organization_id, business_name, vertical, status, onboarding_status, plan_id, billing_status, default_landing_view, falatu_enabled, falatu_terms_version, falatu_terms_accepted_at)
-      VALUES (?, ?, ?, 'servicos', 'active', 'completed', 'falatu_solo', 'active', 'falatu', 1, '2026-08-08', CURRENT_TIMESTAMP)
-    `).run(randomUUID(), orgId, "Org " + orgId);
+      VALUES (?, ?, ?, 'servicos', 'active', 'completed', ?, 'active', 'falatu', 1, '2026-08-08', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), orgId, "Org " + orgId, planId);
   }
   // Org B2B (plano não-FalaTu): eligibility volta not_falatu_plan, mas a oferta ainda funciona.
   function seedB2B(orgId: string) {
@@ -58,6 +58,9 @@ async function main() {
   }
   const pendingCount = (orgId: string) => (db.prepare(`SELECT COUNT(*) c FROM falatu_cancellation_intents WHERE organization_id = ? AND outcome = 'pending'`).get(orgId) as any).c;
   const rowOf = (orgId: string) => db.prepare(`SELECT * FROM falatu_cancellation_intents WHERE organization_id = ? ORDER BY created_at DESC LIMIT 1`).get(orgId) as any;
+  const billingOf = (orgId: string) => (db.prepare(`SELECT billing_status FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.billing_status;
+  const planOf = (orgId: string) => (db.prepare(`SELECT plan_id FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.plan_id;
+  const acceptedSignal = (orgId: string) => db.prepare(`SELECT * FROM business_signals WHERE organization_id = ? AND signal_type = 'save_offer_accepted'`).get(orgId) as any;
 
   // ===== 1. Mapa motivo → degrau do ladder (puro) =====
   check("preço → downgrade", FalatuSaveOfferService.offerForReason("preco").type === "downgrade");
@@ -106,7 +109,40 @@ async function main() {
   check("resolve idempotente (nada pending → ok=false)", FalatuSaveOfferService.resolve("org_a", "retained").ok === false);
   check("resolve de uma org não toca outra", pendingCount("org_b2b") === 1);
 
-  // ===== 8. Rota POST /save-offer/intent =====
+  // ===== 8. F5.2 — downgradeTargetFor deriva o tier abaixo do catálogo =====
+  seedFalatu("org_pro", "falatu_pro");
+  seedFalatu("org_fam", "falatu_familia");
+  check("downgrade de familia → pro", FalatuSaveOfferService.downgradeTargetFor("org_fam")?.id === "falatu_pro");
+  check("downgrade de pro → solo", FalatuSaveOfferService.downgradeTargetFor("org_pro")?.id === "falatu_solo");
+  check("downgrade de solo → null (menor tier)", FalatuSaveOfferService.downgradeTargetFor("org_c") === null);
+  check("downgrade de org não-FalaTu → null", FalatuSaveOfferService.downgradeTargetFor("org_b2b") === null);
+
+  // ===== 9. F5.2 — acceptOffer governado (G-153-3: registra, NÃO muda billing) =====
+  check("accept sem pending → no_pending_intent", FalatuSaveOfferService.acceptOffer("org_pro").reason === "no_pending_intent");
+  FalatuSaveOfferService.captureIntent("org_pro", "u", { reason: "preco" }); // → downgrade
+  const acc = FalatuSaveOfferService.acceptOffer("org_pro", "u");
+  check("accept retém a intenção", acc.ok === true && acc.outcome === "retained" && pendingCount("org_pro") === 0);
+  check("handoff = downgrade pro tier abaixo", acc.handoff?.action === "downgrade" && acc.handoff?.targetPlanId === "falatu_solo");
+  check("accept NÃO muda o billing (G-153-3)", billingOf("org_pro") === "active");
+  check("accept NÃO muda o plano (billing é do humano)", planOf("org_pro") === "falatu_pro");
+  check("garantia intacta após aceitar", acc.eligibility?.eligible === true);
+  check("accept traz note de transparência", /garantia/i.test(acc.note || ""));
+  check("publica sinal save_offer_accepted (handoff)", (() => { const s = acceptedSignal("org_pro"); return !!s && s.domain === "churn" && s.severity === "attention"; })());
+
+  // ===== 10. F5.2 — pause / roadmap / support / none =====
+  seedFalatu("org_pause");
+  FalatuSaveOfferService.captureIntent("org_pause", "u", { reason: "pouco_uso" }); // → pause
+  check("accept de pouco_uso → pause 1 mês", (() => { const a = FalatuSaveOfferService.acceptOffer("org_pause", "u"); return a.handoff?.action === "pause" && a.handoff?.months === 1; })());
+  seedFalatu("org_road");
+  FalatuSaveOfferService.captureIntent("org_road", "u", { reason: "faltou_feature" }); // → roadmap
+  check("accept de roadmap → follow-up sem cobrança (info)", (() => { const a = FalatuSaveOfferService.acceptOffer("org_road", "u"); return a.handoff?.action === "roadmap_followup" && acceptedSignal("org_road")?.severity === "info"; })());
+  seedFalatu("org_outro");
+  FalatuSaveOfferService.captureIntent("org_outro", "u", { reason: "outro" }); // → none
+  check("accept de 'outro' (sem oferta) → no_offer", FalatuSaveOfferService.acceptOffer("org_outro", "u").reason === "no_offer");
+  check("intenção 'outro' segue pending (vai pro reembolso)", pendingCount("org_outro") === 1);
+  check("accept de uma org não resolve outra", pendingCount("org_b2b") === 1);
+
+  // ===== 11. Rota POST /save-offer/intent + /save-offer/accept =====
   const app = express();
   app.use(express.json());
   app.use((req: any, _res, next) => { req.user = { userId: "user_r", email: "r@teste.com" }; req.organizationId = "org_route"; next(); });
@@ -129,6 +165,10 @@ async function main() {
   check("POST 200 traz eligibility (garantia acessível)", !!ok.json.eligibility && typeof ok.json.eligibility.eligible === "boolean");
   const bad = await call("POST", "/api/falatu/save-offer/intent", { reason: "sei_la" });
   check("POST motivo inválido → 400", bad.status === 400);
+  const accRoute = await call("POST", "/api/falatu/save-offer/accept");
+  check("POST accept → 200 retido com handoff + note", accRoute.status === 200 && accRoute.json.outcome === "retained" && !!accRoute.json.handoff && !!accRoute.json.note);
+  const accEmpty = await call("POST", "/api/falatu/save-offer/accept");
+  check("POST accept sem pending → 400", accEmpty.status === 400);
   await new Promise<void>((r) => server.close(() => r()));
 
   console.log("");

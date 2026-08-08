@@ -367,4 +367,16 @@ router.post("/save-offer/intent", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ADR-155 F5.2 — o cliente ACEITOU a save offer. Governado pelo G-153-3 (ADR-153):
+// aceitar não muda a cobrança sozinho — o service registra a retenção, calcula o
+// alvo do downgrade e publica o handoff pro operador finalizar em Cobrança. A
+// garantia de 7 dias segue intocada. Sem pending/oferta → 400 (nada a aceitar).
+router.post("/save-offer/accept", (req: AuthRequest, res): any => {
+  try {
+    const result = FalatuSaveOfferService.acceptOffer(req.organizationId!, actorId(req));
+    if (!result.ok) return res.status(400).json({ error: result.reason });
+    res.json(result);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

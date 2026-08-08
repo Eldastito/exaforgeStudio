@@ -110,7 +110,7 @@ export class EvidencePackageService {
       dataQuality: dq,
       internalEvidence: snap?.domains || {},
       topPriorities: snap?.topPriorities || [],
-      externalEvidence: [],
+      externalEvidence: collectExternalEvidence(orgId),
       historicalEvidence: [],
       sources: collectSources(snap?.domains),
     };
@@ -130,6 +130,28 @@ export class EvidencePackageService {
         updated_at = CURRENT_TIMESTAMP
     `).run(pkg.id, orgId, pkg.subject, pkg.vertical, JSON.stringify(pkg), pkg.confidence, pkg.generatedAt, pkg.expiresAt);
   }
+}
+
+/**
+ * Evidência EXTERNA do slot `externalEvidence[]` (DI-4.3): as contextualizações
+ * de vertical FRESCAS que a org já tem (read-only, sem disparar pesquisa). Vazio
+ * se a org não optou / não tem inteligência de nicho curada. Nunca traz dado de
+ * outra org (isolado por organization_id).
+ */
+function collectExternalEvidence(orgId: string): any[] {
+  try {
+    const rows = db.prepare(`
+      SELECT c.fingerprint, c.vertical, c.topic, c.context_json, v.confidence AS vi_confidence, v.valid_until AS vi_valid_until
+      FROM organization_contextualization c
+      JOIN vertical_intelligence v ON v.id = c.vertical_intelligence_id
+      WHERE c.organization_id = ? AND v.valid_until > CURRENT_TIMESTAMP
+      ORDER BY v.valid_until DESC LIMIT 50
+    `).all(orgId) as any[];
+    return rows.map((r) => {
+      let ctx: any = {}; try { ctx = JSON.parse(r.context_json); } catch { /* */ }
+      return { source: "vertical_intelligence", vertical: r.vertical, topic: r.topic, fingerprint: r.fingerprint, summary: ctx?.summary ?? null, confidence: r.vi_confidence, validUntil: r.vi_valid_until };
+    });
+  } catch { return []; }
 }
 
 /** Coleta os `source` (nível 0 e 1) dos domínios do snapshot, únicos e ordenados. */

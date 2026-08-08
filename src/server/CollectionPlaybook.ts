@@ -5,6 +5,7 @@ import { ConfirmationEngine } from "./ConfirmationEngine.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { AsaasService } from "./AsaasService.js";
 import { ProcessRuntimeService } from "./ProcessRuntimeService.js";
+import { CollectionCopy } from "./CollectionCopy.js";
 import type { PlaybookDefinition } from "./PlaybookEngine.js";
 
 /**
@@ -141,13 +142,16 @@ const CollectionSendReminderHandler: CommandHandler = {
     // PIX já existe mas o cliente não recebeu — auditamos e retornamos
     // erro classificado. O `sweepTimeouts` (F2.3) fecha a confirmação
     // no deadline mesmo assim, sinalizando na aba Operações (F3.2).
-    const message = String(p.messageTemplate || defaultMessage(amount, p.dueDate, p.description)).trim();
+    // F2.1 — copy centralizada no CollectionCopy (variante A/B por-org; default
+    // 'control' = texto atual). messageTemplate explícito no payload ainda vence.
+    const variant = CollectionCopy.variantFor(orgId);
+    const message = String(p.messageTemplate || CollectionCopy.reminder(variant, { amount, dueDate: p.dueDate, description: p.description })).trim();
     let messageId: string | undefined;
     try {
       messageId = await MessageProviderService.sendMessage(String(p.channelId), String(p.phone), message);
     } catch (e: any) { throwHandler("external_unavailable", `Falha ao enviar WhatsApp: ${e?.message || e}`); }
 
-    try { logAuthEvent(orgId, "runtime", null, "RUNTIME_COLLECTION_SENT", { receivableId: p.receivableId, phone: p.phone, amount, paymentId, messageId: messageId || null }); } catch { /* noop */ }
+    try { logAuthEvent(orgId, "runtime", null, "RUNTIME_COLLECTION_SENT", { receivableId: p.receivableId, phone: p.phone, amount, paymentId, messageId: messageId || null, variant }); } catch { /* noop */ }
 
     return {
       summary: `Cobrança enviada (R$ ${amount.toFixed(2)} → ${p.phone})`,
@@ -251,12 +255,6 @@ function defaultConfirmationDeadline(dueDate?: string | null): string {
   const deadline = new Date(base);
   deadline.setDate(deadline.getDate() + 30);
   return deadline.toISOString();
-}
-
-function defaultMessage(amount: number, dueDate: string, description?: string): string {
-  const dueBR = String(dueDate || "").split("-").reverse().join("/");
-  const item = description ? `\nReferente a: ${description}` : "";
-  return `Olá! 👋\n\nLembrando do valor de R$ ${amount.toFixed(2).replace(".", ",")} ${dueBR ? `com vencimento em ${dueBR}` : "em aberto"}.${item}\n\nPra facilitar, gerei o PIX pra você — o link/QR chega em seguida.\n\nQualquer coisa é só responder por aqui. 🙏`;
 }
 
 /**

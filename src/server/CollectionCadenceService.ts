@@ -2,6 +2,7 @@ import db from "./db.js";
 import { randomUUID } from "crypto";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
+import { CollectionCopy } from "./CollectionCopy.js";
 import { logAuthEvent } from "./auditLog.js";
 
 /**
@@ -186,14 +187,17 @@ export class CollectionCadenceService {
     // retry no próximo tick (G-4b.3-10).
     const id = randomUUID();
     const templateKey = attempt === 2 ? "firm" : "default_notice";
+    // F2.1 — variante A/B da copy (control|calibrated), por-org. Registrada na
+    // linha do attempt pra a F2.3 correlacionar variante × revenue recuperado.
+    const variant = CollectionCopy.variantFor(row.orgId);
     try {
-      db.prepare(`INSERT INTO collection_followup_attempts (id, organization_id, action_id, attempt_number, template_key) VALUES (?, ?, ?, ?, ?)`)
-        .run(id, row.orgId, row.actionId, attempt, templateKey);
+      db.prepare(`INSERT INTO collection_followup_attempts (id, organization_id, action_id, attempt_number, template_key, variant) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(id, row.orgId, row.actionId, attempt, templateKey, variant);
     } catch (e: any) {
       if (e?.code === "SQLITE_CONSTRAINT_UNIQUE") return false;
       console.error("[Cobrança F4b.3] INSERT attempt falhou", e); return false;
     }
-    const msg = attempt === 2 ? this.messageFirm(row) : this.messageDefaultNotice(row);
+    const msg = attempt === 2 ? CollectionCopy.firm(variant, row) : CollectionCopy.notice(variant, row);
     let messageId: string | undefined;
     try { messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg); }
     catch (e: any) {
@@ -216,7 +220,7 @@ export class CollectionCadenceService {
     try {
       logAuthEvent(row.orgId, null, row.contactId, "RUNTIME_COLLECTION_FOLLOWUP_SENT", {
         attempt, actionId: row.actionId, receivableId: row.receivableId,
-        messageId: messageId || null, templateKey,
+        messageId: messageId || null, templateKey, variant,
       });
     } catch { /* noop */ }
 
@@ -238,20 +242,6 @@ export class CollectionCadenceService {
       } catch { /* noop */ }
     }
     return true;
-  }
-
-  // ── Templates (PT-BR, tom cordial + CDC-friendly) ──────────────────────
-
-  private static messageFirm(row: DueRow): string {
-    const dueBR = String(row.dueDate).split("-").reverse().join("/");
-    const valor = row.amount.toFixed(2).replace(".", ",");
-    return `Olá! 🙋\n\nSobre a cobrança de R$ ${valor} que venceu em ${dueBR}: notei que ainda não foi paga.\n\nSe puder acertar via o PIX que enviei antes, resolve rapidinho. Se preferir combinar de outro jeito (parcelar, mudar a data, ou algum problema), é só responder aqui — a gente vê o que dá. 🙏`;
-  }
-
-  private static messageDefaultNotice(row: DueRow): string {
-    const dueBR = String(row.dueDate).split("-").reverse().join("/");
-    const valor = row.amount.toFixed(2).replace(".", ",");
-    return `Olá 🙋\n\nPrecisamos combinar sobre a cobrança de R$ ${valor} vencida em ${dueBR}. Se não conseguirmos resolver nos próximos dias, vamos precisar informar as agências de proteção ao crédito.\n\nAinda dá tempo — responda aqui e a gente encontra um jeito juntos. 🙏`;
   }
 }
 

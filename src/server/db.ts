@@ -8017,6 +8017,22 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_falatu_cancel_intents_org
       ON falatu_cancellation_intents(organization_id, outcome, created_at);
   `);
+  // Decision Intelligence DI-3 — log append-only de acertos/erros do cache do
+  // Evidence Layer (DI-1). Existe para o `cache_hit_rate` ser DERIVADO por query
+  // (COUNT) — não um contador mutável (anti-padrão do CLAUDE.md). hit=1 acerto,
+  // hit=0 recomputou. Só grava quando o cache está ligado (opt-in). Isolado por
+  // organization_id. Volume baixo (chamadas de dashboard/Diretor), sem TTL.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS evidence_cache_events (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      hit INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_cache_events_org
+      ON evidence_cache_events(organization_id, created_at);
+  `);
   // ADR-155 F3.1 — A/B da copy de Recuperação Comercial. Espelha o
   // collection_copy_variant (F2.1): 'control' (default) = copy legada
   // byte-idêntica ⇒ zero mudança em prod; 'calibrated' = copy afinada pela

@@ -31,14 +31,22 @@ Sem UI/menu novo. Backward-compat 100% (campos aditivos + cache opt-in).
 - **Rotas:** `POST /api/decision-intelligence/analyze`, `GET /api/decision-intelligence/risks`, `POST /api/decision-intelligence/risks/:id/resolve`.
 - **Teste:** `npm run test:decision-intelligence-di2` (26 checks). Migração aditiva (`decision_risks`).
 
-## Fatia DI-3 — Loop fechado `[ ]`
+## Fatia DI-3 — Loop fechado `[x]` ENTREGUE
 
-- Métricas de decisão (`prediction_accuracy`, `financial_loss_avoided`, `cache_hit_rate`) aditivas sobre `action_outcomes` + `AiUsageDashboardService`; card no Diretor IA / Central de Saúde (aba, sem tela nova — ADR-152 D8).
-- Sub-budgets de IA (research/deep_analysis/external_api) aditivos sobre `AiQuotaSignalService`/`PlanService`.
+- **`DecisionMetricsService.summary(orgId, {days})`** (`src/server/DecisionMetricsService.ts`) — métricas do ciclo Decidir→Executar→Monitorar→Aprender, **determinísticas e derivadas por query** (RN-004, sem contador mutável), agregando o que já foi medido:
+  - **valor protegido** (PRD §36, argumento comercial): prejuízo evitado + custo evitado (+ receita recuperada), de `action_outcomes` (colunas ADR-152 F3.1).
+  - **acurácia de previsão**: esperado × realizado (`action_outcomes`).
+  - **materialização de risco**: dos `decision_risks` (DI-2), quantos materializaram.
+  - **aceitação de recomendações**: `decision_actions` (created_by ai|rule) aceitas vs rejeitadas.
+  - **cache hit-rate** do Evidence Layer: log append-only `evidence_cache_events` (gravado no `EvidencePackageService.build` quando o cache está ligado), derivado por COUNT.
+- **Rota:** `GET /api/decision-intelligence/metrics?days=` (alimenta o card do Diretor IA / Central de Saúde — aba, sem tela nova, ADR-152 D8).
+- **Teste:** `npm run test:decision-intelligence-di3` (16 checks). Migração aditiva (`evidence_cache_events`).
+- **Sub-budgets de IA `[-]` MOVIDOS PARA DI-4:** research/deep_analysis/external_api só passam a ter gasto real quando a External Intelligence existir; construir o orçamento agora seria infraestrutura inerte (frugalidade, PRD §43). Entram junto da DI-4. Hoje o gasto de IA segue metrado e limitado por `PlanService.aiAllowed` + `ai_monthly_limit_cents`.
 
 ## Fatia DI-4 — External Intelligence `[-]` ADIADA
 
 - `ExternalResearchProvider` + Research Broker + cache por vertical (dedup por fingerprint, freshness). **Bloqueada** pela ADR-079 D4 (compartilhamento cross-tenant exige ADR próprio de isolamento/LGPD). Reabrir só com decisão explícita do dono.
+- **Sub-budgets de IA** (research/deep_analysis/external_api + prioridade) entram aqui, quando houver gasto externo/research real para orçar (movidos da DI-3).
 
 ## Fora de escopo (frugalidade, PRD §43)
 

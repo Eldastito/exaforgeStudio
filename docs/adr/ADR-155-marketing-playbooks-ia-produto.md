@@ -1,6 +1,6 @@
 # ADR-155 — Marketing Playbooks → IA de Produto do ZappFlow (Trilha B)
 
-- **Status:** RASCUNHO — levantamento + plano fatiado. **Nenhuma fatia implementada.** ⏸️ **PAUSADO em 2026-08-08** (marcador "paramos aqui" — ver seção *Histórico*). Retomada aguarda decisão do dono da plataforma sobre qual fase priorizar.
+- **Status:** RASCUNHO — levantamento + plano fatiado. **Nenhuma fatia implementada.** A **Fase 1 foi redesenhada com o padrão grimoire** (padrão 4 do `docs/patterns/agentic-pipeline-lessons.md`) e está pronta pra implementar (F1.1). Demais fases aguardam priorização do dono da plataforma.
 - **Data:** 2026-08-08
 - **Origem:** análise do repositório público `coreyhaines31/marketingskills` (licença MIT, v2.10.0 — ~49 *Agent Skills* de marketing em markdown, padrão agentskills.io, do Corey Haines) a pedido do dono da plataforma ("analise esse repositório e identifique como ele pode ajudar o nosso projeto"). A análise separou o valor em **3 trilhas**; este ADR executa a **Trilha B** (maior alavancagem) e documenta A e C como anexos.
 - **Relacionadas:**
@@ -10,6 +10,7 @@
   - **ADR-154** (FalaTu Standalone + reembolso) — o `churn-prevention` (cancel flow + save offers) é o roteiro pra evoluir o cancelamento/reembolso self-service (hoje "hard cancel + refund") pra reter antes de devolver.
   - **ADR-130** (Governança de IA) — toda copy gerada por IA neste ADR continua passando pelos guardrails de governança; benchmark gringo não entra sem tradução.
   - **ADR-151** (FalaTu núcleo) — a memória/RAG (F5) é o molde do "doc de contexto canônico" da Trilha C.
+  - **`docs/patterns/agentic-pipeline-lessons.md`** (estudo do img2threejs) — a **Fase 1 aplica o padrão 4 (grimoire / progressive-disclosure)**: conhecimento roteado por estágio, carregado just-in-time, cada rubrica um contrato com lições pós-mortem acumuladas.
 
 ## Contexto
 
@@ -40,14 +41,31 @@ A análise separou o valor em três trilhas:
 
 **6 fases, ordenadas por dependência.** Cada fase se fatia em 1..N PRs draft → CI verde → merge → próxima (fluxo padrão do repo). Nada reescreve módulo: tudo é **aditivo** (novo template, novo detector, novo campo de flag) e **medível** (A/B via `business_signals`, nunca "achismo"). A Fase 1 é o habilitador (Trilha C); as demais consomem.
 
-### Fase 1 — Base de playbooks versionada + doc de contexto canônico (habilitador / Trilha C)
+### Fase 1 — Grimoire de copy operacional + roteamento just-in-time (habilitador / Trilha C)
 
-Nada de novo em runtime. Cria a **fonte da verdade de copy** que as fases seguintes consomem:
+Nada de novo em runtime de negócio. Cria a **fonte da verdade de copy** que as fases seguintes consomem — mas, aplicando o **padrão 4 do `docs/patterns/agentic-pipeline-lessons.md` (grimoire / progressive-disclosure)**, NÃO como uma pasta flat de playbooks lidos "tudo de uma vez", e sim como um **grimoire roteado por estágio de decisão, carregado just-in-time** no ponto exato em que o redator compõe. A diferença é o que corta token e alucinação: o redator recebe a rubrica **certa** no momento certo, não o dump inteiro.
 
-- **`docs/playbooks/*.md`** — os frameworks relevantes (dunning cadence, save-offer ladder, health-score weights, sequence timing) **destilados e traduzidos pra PT-BR/WhatsApp/LGPD**, com atribuição ao `marketingskills` (MIT). NÃO é cópia literal — é adaptação ao contexto brasileiro (PIX/boleto, tom, opt-out LGPD, regras de template do WhatsApp).
-- **Doc de contexto canônico por org** — formaliza o padrão `product-marketing.md`: um bloco de contexto de negócio (tom de voz, proposta de valor, restrições) que os redatores de IA (Cobrança/Recuperação/FalaTu) leem **antes** de compor. Reusa a superfície de memória do FalaTu (ADR-151 F5 / ADR-154 F5) — não inventa tabela nova; é um registro por org em `organization_settings` (`brand_voice_context TEXT`, opt-in).
+**Estrutura do grimoire (`docs/grimoire/copy/`)** — organizado por ESTÁGIO da decisão de composição (como o `grimoire/` do img2threejs espelha os estágios do pipeline), não por tópico:
 
-**Fatias:** F1.1 destilar os 4 playbooks-núcleo em `docs/playbooks/` (PT-BR); F1.2 `brand_voice_context` + injeção no prompt dos redatores (flag `brand_voice_enabled` default off).
+- `intake/` — classificar a situação ANTES de escrever: estágio da cadência, soft vs hard decline, 1º contato vs follow-up, risco/temperatura do cliente.
+- `compose/` — as rubricas de composição por tipo de mensagem: dunning D0/D3/D7/D10, save-offer ladder, recuperação comercial, briefing.
+- `guardrails/` — regras duras transversais: opt-out LGPD, template/opt-in do WhatsApp, "não culpar", não prometer o que não pode.
+- `review/` — rubrica de auto-crítica antes de enviar (checklist aplicado pelo próprio redator ou por um gate — liga nos padrões 2/8: julgamento subordinado + evidência).
+- `glossary/` — vocabulário controlado + tom de voz base do produto.
+
+**Cada arquivo é um CONTRATO de decisão**, não texto solto — template fixo: **`Quando aplicar` / `Deve conter` / `Nunca fazer` / `Exemplos (PT-BR)` / `Lições (post-mortem)`**. Destila os 4 núcleos (dunning cadence, save-offer ladder, health-score weights, sequence timing) traduzidos pra PT-BR/WhatsApp/LGPD, com atribuição ao `marketingskills` (MIT). Adaptação ao contexto brasileiro (PIX/boleto, tom, opt-out), nunca cópia literal.
+
+**Roteamento just-in-time (o coração do padrão)** — um índice `docs/grimoire/copy/INDEX.json` mapeia `(módulo, estágio)` → arquivo(s) de rubrica. Um `GrimoireService.load(orgId, module, stage)` carrega **só** a rubrica roteada (+ suas `Lições`) e injeta no prompt como bloco `<rubrica>` — **progressive disclosure**: o redator NUNCA recebe o grimoire inteiro (economia de token = padrão 6). Cada ponto de composição no código chama o service com o estágio — o análogo executável do "MUST read X before Y" do img2threejs.
+
+**Contexto canônico por org (a camada por-org do grimoire)** — o grimoire tem 2 camadas: **global** (as rubricas versionadas no repo, revisáveis/diffáveis) + **por-org** (`organization_settings.brand_voice_context TEXT`, opt-in — tom de voz, proposta de valor, restrições da marca daquela org). O prompt do redator = rubrica global roteada **+** contexto da org. Reusa a superfície da ADR-151 F5 / ADR-154 F5 — não inventa tabela.
+
+**Acúmulo de lições pós-mortem (memória institucional)** — quando o A/B (Fase 2/3) ou um `business_signal` marca uma cadência ruim, a lição vira uma linha datada na seção `Lições` da rubrica correspondente. O grimoire **acumula falhas conhecidas como regras** (como o img2threejs faz: "as regras que custaram um pass errado"), e o `GrimoireService` sempre injeta as `Lições` junto — o erro de ontem vira guardrail de amanhã.
+
+**Fatias:**
+- **F1.1** — esqueleto do grimoire (`docs/grimoire/copy/` com a taxonomia por estágio + template de contrato + `INDEX.json` de roteamento) + destilar os 4 núcleos em rubricas PT-BR com atribuição MIT. Sem runtime ainda.
+- **F1.2** — `GrimoireService.load(orgId, module, stage)`: loader + roteamento just-in-time. Pra não depender de `fs` frágil no bundle (esbuild `--packages=external`), um passo de build compila `docs/grimoire/copy/**` num módulo TS versionado (ex.: `src/server/grimoire/compiled.ts`) que o service importa — determinístico, embarcado, diffável. Teste prova que carrega **só** a rubrica roteada (não o dump) e **isola por módulo** (não vaza rubrica de outro módulo/tenant).
+- **F1.3** — `brand_voice_context` por org (camada por-org, aditivo em `organization_settings`) + injeção combinada (rubrica global + contexto org) no prompt dos redatores; flag `brand_voice_enabled` default off.
+- **F1.4** — canal de pós-mortem: quando A/B ou `business_signal` marca cadência ruim, registra `Lição` datada na rubrica e o `GrimoireService` passa a injetá-la. (Depende de F2/F3 existirem pra ter o que medir — pode vir depois delas.)
 
 ### Fase 2 — Tune-up da cadência + copy de Cobrança
 
@@ -103,7 +121,7 @@ A incorporação dos playbooks **nunca**:
 4. **Usa contador mutável** — score de churn e saldo de retenção são **derivados por query** (RN-004).
 5. **Bloqueia a garantia de 7 dias com save offer** — dentro da janela o reembolso é direito (CDC Art. 49 / ADR-154 RN-E); oferta é opcional, recusa vai direto ao estorno.
 6. **Gera copy fora da governança** — todo texto que a IA compõe passa por ADR-130; A/B é medido, não "achado".
-7. **Copia conteúdo MIT literal** — os playbooks são **adaptados** ao contexto ZappFlow com atribuição em `docs/playbooks/`, não colados.
+7. **Copia conteúdo MIT literal** — as rubricas do grimoire são **adaptadas** ao contexto ZappFlow com atribuição em `docs/grimoire/copy/`, não coladas.
 
 ## Retrocompatibilidade
 
@@ -114,7 +132,7 @@ A incorporação dos playbooks **nunca**:
 - **Risco: "marketing gringo" descolado da realidade BR.** → Mitigação: Fase 1 traduz *antes* de qualquer runtime; nada entra sem passar por PT-BR/WhatsApp/LGPD.
 - **Risco: over-automação de outbound irritar cliente.** → Mitigação: RN-155 §2 amarra tudo nos gates de consentimento existentes; A/B mede reação, não só conversão.
 - **Risco: save offer virar dark pattern na garantia.** → Mitigação: RN-155 §5 (reembolso é direito na janela) + teste.
-- **Risco: dependência de update externo se instalar o plugin vivo (Trilha A).** → Mitigação: Trilha B **não** depende do plugin em runtime — os playbooks viram `docs/` internos, versionados no próprio repo.
+- **Risco: dependência de update externo se instalar o plugin vivo (Trilha A).** → Mitigação: Trilha B **não** depende do plugin em runtime — o conhecimento vira o grimoire interno (`docs/grimoire/copy/`), versionado no próprio repo.
 
 ---
 
@@ -124,12 +142,13 @@ Instalar o `marketingskills` como plugin do Claude Code (`/plugin`) dá ao time 
 
 ## Anexo C — Trilha C (padrão `product-marketing.md`)
 
-Absorvida como **Fase 1** deste ADR (doc de contexto canônico por org). Registrada aqui como origem conceitual: a ideia de "um contexto de negócio que todo redator de IA lê antes de compor" vem da foundation skill do repo.
+Absorvida como **Fase 1** deste ADR — vira a **camada por-org do grimoire** (`brand_voice_context`). Registrada aqui como origem conceitual: a ideia de "um contexto de negócio que todo redator de IA lê antes de compor" vem da foundation skill do `marketingskills` e converge com o padrão grimoire do img2threejs (conhecimento lido just-in-time antes de agir).
 
 ## Licença & atribuição
 
-`coreyhaines31/marketingskills` é **MIT** — adaptação de conteúdo para os prompts/docs do ZappFlow é permitida. Todo `docs/playbooks/*.md` derivado credita a origem no header. Os CLIs `tools/` (SaaS gringo) **não** são reusados — servem só como referência de formato.
+`coreyhaines31/marketingskills` é **MIT** — adaptação de conteúdo para os prompts/docs do ZappFlow é permitida. Toda rubrica derivada em `docs/grimoire/copy/*.md` credita a origem no header. Os CLIs `tools/` (SaaS gringo) **não** são reusados — servem só como referência de formato.
 
 ## Histórico
 
-- **2026-08-08** — ADR criado (levantamento + plano fatiado da Trilha B). **⏸️ Trabalho pausado aqui a pedido do dono da plataforma** para priorizar a análise e instalação da ferramenta `code-review-graph` (`tirth8205/code-review-graph`) no projeto. Nenhuma fatia deste ADR foi iniciada. Retomar por F1.1 quando repriorizado.
+- **2026-08-08** — ADR criado (levantamento + plano fatiado da Trilha B). Trabalho pausado a pedido do dono da plataforma para priorizar a análise e instalação da ferramenta `code-review-graph` (`tirth8205/code-review-graph`) no projeto.
+- **2026-08-08** — **Fase 1 redesenhada** para adotar o **padrão 4 (grimoire / progressive-disclosure)** do `docs/patterns/agentic-pipeline-lessons.md` (estudo do img2threejs): de "pasta flat de playbooks + blob de contexto" para um **grimoire roteado por estágio de decisão**, carregado just-in-time por um `GrimoireService`, com cada rubrica em formato de contrato (`Quando/Deve/Nunca/Exemplos/Lições`), 2 camadas (global versionada + `brand_voice_context` por org) e acúmulo de lições pós-mortem. Fatias reescritas: F1.1 esqueleto+rubricas, F1.2 loader+roteamento, F1.3 camada por-org, F1.4 canal de pós-mortem. Continua **não implementada** — F1.1 é o ponto de partida.

@@ -5,7 +5,7 @@ import { FalatuAuth } from './FalatuAuth';
 import { FalaTuView } from '@/src/features/FalaTuView';
 import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
 import { useFalatuTheme, type FalatuTheme } from './useFalatuTheme';
-import { RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft, Sun, Moon } from 'lucide-react';
+import { RefreshCw, LogOut, Loader2, MessageCircle, X, ArrowLeft, Sun, Moon, Settings, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 // Botão de alternância claro/escuro — reusado no header (Shell) e na tela de
 // auth. Sol quando está escuro (vai clarear), Lua quando está claro.
@@ -70,8 +70,9 @@ function applyFalatuDocumentBrand() {
 type WaStatus = { kind: string; connected: boolean; hasQr: boolean } | null;
 type Access = 'checking' | 'solo' | 'shared' | 'denied';
 
-function Shell({ email, onLogout, theme, onToggleTheme, children }: {
-  email?: string; onLogout: () => void; theme: FalatuTheme; onToggleTheme: () => void; children: React.ReactNode;
+function Shell({ email, onLogout, theme, onToggleTheme, onOpenAccount, children }: {
+  email?: string; onLogout: () => void; theme: FalatuTheme; onToggleTheme: () => void;
+  onOpenAccount?: () => void; children: React.ReactNode;
 }) {
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-ft-bg)' }}>
@@ -82,6 +83,15 @@ function Shell({ email, onLogout, theme, onToggleTheme, children }: {
         <FalatuLogo size={28} withWordmark />
         <div className="flex items-center gap-2 sm:gap-3">
           {email && <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-ft-text-muted)' }}>{email}</span>}
+          {/* F2.2 E.2 — entrada da tela "Conta" (garantia + reembolso). Só o solo
+              a recebe (o onOpenAccount vem undefined pra suíte/checando/negado). */}
+          {onOpenAccount && (
+            <button type="button" onClick={onOpenAccount}
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-[var(--color-ft-text-muted)] hover:text-[var(--color-ft-text)] hover:bg-ft-surface-2 transition-colors"
+              title="Conta e garantia" aria-label="Conta e garantia">
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <button onClick={onLogout}
             className="flex items-center gap-1.5 text-sm text-[var(--color-ft-text-muted)] hover:text-[var(--color-ft-text)]" title="Sair">
@@ -238,11 +248,197 @@ function FalatuNoAccess({ email, onLogout }: { email?: string; onLogout: () => v
   );
 }
 
+// ADR-154 F2.2 Fatia E.2 — UI do reembolso da garantia de 7 dias: a face
+// visível dos endpoints da Fatia E. NENHUM comportamento de backend muda aqui.
+//
+// Lê GET /api/falatu/refund/eligibility pra mostrar quantos dias ainda restam
+// e, DENTRO da janela, oferece o botão que dispara POST /api/falatu/refund
+// (estorna no ASAAS + cancela a conta).
+//
+// Money-critical também no front: o reembolso é irreversível (cancela a conta
+// e devolve o dinheiro), então exige confirmação explícita em DOIS passos e o
+// botão trava enquanto o POST está em voo. O backend já é idempotente (RN-E3),
+// mas a trava evita o duplo-clique virar UX confusa antes mesmo de sair da tela.
+type RefundEligibility = {
+  eligible: boolean;
+  reason: string;     // 'ok' | 'not_falatu_plan' | 'already_refunded' | 'guarantee_expired' | 'guarantee_window_unknown'
+  windowDays: number;
+  daysLeft: number;
+  deadline: string | null;
+};
+
+function formatBRL(n: number): string {
+  try { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n); }
+  catch { return `R$ ${n.toFixed(2)}`; }
+}
+
+// O backend devolve só o código do motivo; a mensagem amigável mora aqui.
+const REFUND_REASON_TEXT: Record<string, string> = {
+  guarantee_expired: 'O prazo de garantia já passou. Você ainda pode cancelar pelo suporte.',
+  already_refunded: 'Seu reembolso já foi processado e a conta está cancelada.',
+  guarantee_window_unknown: 'Não conseguimos verificar o prazo da sua garantia. Fale com o suporte.',
+  not_falatu_plan: 'O reembolso automático vale só para assinaturas do Fala Tu.',
+};
+
+function FalatuAccount({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const [elig, setElig] = useState<RefundEligibility | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [done, setDone] = useState<{ refundedTotal: number } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError('');
+    try {
+      const r = await fetch('/api/falatu/refund/eligibility', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Não foi possível checar sua garantia.');
+      setElig(d as RefundEligibility);
+    } catch (e: any) {
+      setLoadError(e.message || 'Falha ao carregar.');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const submitRefund = useCallback(async () => {
+    setSubmitting(true); setSubmitError('');
+    try {
+      const r = await fetch('/api/falatu/refund', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      // O backend responde { error, message } com o httpStatus do FalatuRefundError.
+      if (!r.ok) throw new Error(d.message || d.error || 'Não foi possível concluir o reembolso.');
+      setDone({ refundedTotal: Number(d.refundedTotal || 0) });
+    } catch (e: any) {
+      setSubmitError(e.message || 'Falha no reembolso.');
+      setConfirming(false); // volta pro estado "Quero meu reembolso" pra permitir novo ciclo
+    } finally {
+      setSubmitting(false);
+    }
+  }, [token]);
+
+  return (
+    <div className="flex-1 flex items-start justify-center px-4 py-8 overflow-auto">
+      <div className="w-full max-w-md">
+        <button type="button" onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1 text-sm text-ft-text-muted hover:text-ft-text">
+          <ArrowLeft className="w-4 h-4" /> Voltar pro app
+        </button>
+
+        <h2 className="text-lg font-semibold text-ft-text mb-1">Conta</h2>
+        <p className="text-sm text-ft-text-muted mb-5">Sua assinatura e a garantia de 7 dias.</p>
+
+        {done ? (
+          // Estado terminal: reembolso concluído nesta sessão. A conta já está
+          // cancelada no backend; o acesso à IA para pelo enforcement da Fatia C.
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-5 text-center">
+            <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-ft-menta" />
+            <h3 className="text-base font-semibold text-ft-text mb-1">Reembolso concluído</h3>
+            <p className="text-sm text-ft-text-muted mb-4">
+              {done.refundedTotal > 0
+                ? `Devolvemos ${formatBRL(done.refundedTotal)} e cancelamos sua assinatura.`
+                : 'Sua assinatura foi cancelada. Não havia pagamento confirmado para devolver.'}
+              {' '}O acesso encerra ao sair.
+            </p>
+            <button onClick={onLogout}
+              className="w-full rounded-md text-white text-sm py-2.5 font-medium hover:brightness-110"
+              style={{ background: 'var(--color-ft-cobalto)' }}>
+              Sair
+            </button>
+          </div>
+        ) : loading ? (
+          <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-ft-cobalto)' }} /></div>
+        ) : loadError ? (
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-5">
+            <p className="text-sm text-ft-text-muted mb-3">{loadError}</p>
+            <button onClick={() => void load()} className="text-sm text-ft-menta hover:brightness-110 inline-flex items-center gap-1">
+              <RefreshCw className="w-3 h-3" /> Tentar de novo
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-5">
+            <div className="flex items-center gap-2 mb-2">
+              <ShieldCheck className="w-5 h-5 text-ft-menta" />
+              <h3 className="text-base font-semibold text-ft-text">Garantia de {elig?.windowDays ?? 7} dias</h3>
+            </div>
+
+            {elig?.eligible ? (
+              <>
+                <p className="text-sm text-ft-text-muted mb-1">
+                  Não gostou? Você tem direito de arrependimento (CDC Art. 49): devolvemos o valor pago e cancelamos a conta.
+                </p>
+                <p className="text-sm text-ft-text mb-4">
+                  {elig.daysLeft === 1 ? 'Resta 1 dia' : `Restam ${elig.daysLeft} dias`}
+                  {elig.deadline ? ` — até ${new Date(elig.deadline).toLocaleDateString('pt-BR')}.` : '.'}
+                </p>
+
+                {submitError && (
+                  <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-ft-on-amber text-sm">{submitError}</div>
+                )}
+
+                {!confirming ? (
+                  <button onClick={() => { setSubmitError(''); setConfirming(true); }}
+                    className="w-full rounded-md text-white text-sm py-2.5 font-medium hover:brightness-110"
+                    style={{ background: 'var(--color-ft-cobalto)' }}>
+                    Quero meu reembolso
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                    <div className="flex items-start gap-2 mb-3">
+                      <AlertTriangle className="w-4 h-4 text-ft-on-amber shrink-0 mt-0.5" />
+                      <p className="text-sm text-ft-on-amber">
+                        Isto <b>cancela sua conta do Fala Tu</b> e devolve o valor pago. Não dá pra desfazer.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => void submitRefund()} disabled={submitting}
+                        className="flex-1 rounded-md text-white text-sm py-2.5 font-medium hover:brightness-110 disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
+                        style={{ background: 'var(--color-ft-cobalto)' }}>
+                        {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {submitting ? 'Processando…' : 'Confirmar reembolso'}
+                      </button>
+                      <button onClick={() => setConfirming(false)} disabled={submitting}
+                        className="rounded-md border border-ft-border hover:border-ft-border-strong text-ft-text text-sm px-4 py-2.5 font-medium disabled:opacity-60">
+                        Agora não
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-ft-text-muted mb-3">
+                  {REFUND_REASON_TEXT[elig?.reason || ''] || 'Sua conta não está na janela de garantia.'}
+                </p>
+                <a href="/fala-tu/cancelamento.html" target="_blank" rel="noreferrer"
+                  className="text-sm text-ft-menta hover:brightness-110">
+                  Ver política de cancelamento
+                </a>
+                {elig?.reason === 'already_refunded' && (
+                  <button onClick={onLogout}
+                    className="mt-4 w-full rounded-md border border-ft-border hover:border-ft-border-strong text-ft-text text-sm py-2.5 font-medium">
+                    Sair
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function FalatuApp() {
   const { user, token, loading, logout } = useAuth();
   const [wa, setWa] = useState<WaStatus>(null);
   const [access, setAccess] = useState<Access>('checking');
   const [showConnect, setShowConnect] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   // F9.2 — tema claro/escuro (aplica a classe no <html>; escolha persiste).
   const { theme, toggle } = useFalatuTheme();
@@ -317,8 +513,19 @@ export function FalatuApp() {
     );
   }
 
+  // F2.2 E.2 — tela "Conta" (garantia + reembolso). Só o solo chega aqui: o
+  // botão que a abre só é renderizado quando access === 'solo'.
+  if (showAccount) {
+    return (
+      <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}>
+        <FalatuAccount token={token} onBack={() => setShowAccount(false)} onLogout={logout} />
+      </Shell>
+    );
+  }
+
   return (
-    <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}>
+    <Shell email={user.email} onLogout={logout} theme={theme} onToggleTheme={toggle}
+      onOpenAccount={access === 'solo' ? () => setShowAccount(true) : undefined}>
       {access === 'solo' && !wa?.connected && !bannerDismissed && (
         <WhatsAppOptInBanner onConnect={() => setShowConnect(true)} onDismiss={() => setBannerDismissed(true)} />
       )}

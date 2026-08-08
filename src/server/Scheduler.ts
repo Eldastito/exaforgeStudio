@@ -523,6 +523,19 @@ export class Scheduler {
         console.info(`[Runtime F4c.4] atribuição de revenue: ${r.orgsScanned} org(s), ${r.attributed} atribuída(s), ${r.skipped} skip.`);
       }
     } catch (e: any) { console.error("[Runtime F4c.4] attribution pass falhou", e?.message); }
+
+    // ADR-155 F3.2 — logo APÓS a atribuição (dados frescos), mede o A/B da copy
+    // de recuperação (KPI vivo em business_signals) e roda o pós-mortem F1.4
+    // sobre a rubrica sales-recovery. Espelha o que a collectionCadencePass faz
+    // pra cobrança. Best-effort — nunca derruba o tick.
+    try {
+      const { SalesRecoveryAbMeasurementService } = await import("./SalesRecoveryAbMeasurementService.js");
+      SalesRecoveryAbMeasurementService.publishAll();
+    } catch (e: any) { console.error("[Runtime F3.2] medição A/B de recuperação falhou", e?.message); }
+    try {
+      const { GrimoirePostmortemService } = await import("./GrimoirePostmortemService.js");
+      await GrimoirePostmortemService.runAllSalesRecovery();
+    } catch (e: any) { console.error("[Runtime F3.2] pós-mortem de recuperação falhou", e?.message); }
   }
 
   /**

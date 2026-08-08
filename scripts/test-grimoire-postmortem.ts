@@ -40,6 +40,16 @@ async function main() {
     db.prepare(`INSERT INTO collection_followup_attempts (id, organization_id, action_id, attempt_number, template_key, variant, decline_type) VALUES (?, ?, ?, 2, 'firm', ?, 'soft')`)
       .run(randomUUID(), orgId, actionId, variant);
   };
+  // ADR-155 F3.2 — um ticket tocado (variante carimbada) + recuperado ou não.
+  const mkTicketR = (orgId: string, variant: string, recovered: boolean) => {
+    const ticketId = randomUUID(); const touchId = randomUUID();
+    db.prepare(`INSERT INTO sales_recovery_touches (id, organization_id, ticket_id, contact_id, phone, channel_id, variant) VALUES (?, ?, ?, ?, '5511', 'ch1', ?)`)
+      .run(touchId, orgId, ticketId, randomUUID(), variant);
+    if (recovered) {
+      db.prepare(`INSERT INTO sales_recovery_attributions (id, organization_id, ticket_id, touch_id, action_id, stage_change_at, ticket_value, revenue_recovered, source, basis) VALUES (?, ?, ?, ?, ?, '2026-08-08 10:00:00', 100, 100, 'orders', 'fact')`)
+        .run(randomUUID(), orgId, ticketId, touchId, randomUUID());
+    }
+  };
   const activeLessons = (orgId: string) => db.prepare(`SELECT COUNT(*) AS n FROM grimoire_lessons WHERE organization_id = ? AND active = 1`).get(orgId) as any;
 
   // ===== 1. tabela existe =====
@@ -95,6 +105,27 @@ async function main() {
   // ===== 8. runAll agrega =====
   const all = await GrimoirePostmortemService.runAll();
   check("runAll retorna orgs/recorded/retired", typeof all.orgs === "number" && all.orgs >= 2);
+
+  // ===== 9. pós-mortem de RECUPERAÇÃO (F3.2): mesmo loop na rubrica sales-recovery =====
+  const orgR = mkOrg(true);
+  for (let i = 0; i < 6; i++) mkTicketR(orgR, "control", i < 4);      // control 66.7%
+  for (let i = 0; i < 6; i++) mkTicketR(orgR, "calibrated", i < 2);   // calibrated 33.3% (pior)
+  const rR = await GrimoirePostmortemService.runSalesRecoveryAb(orgR);
+  check("recuperação: calibrada perdendo → recorded", rR.recorded === true && rR.retired === false);
+  check("orgR tem 1 lição ativa", Number(activeLessons(orgR).n) === 1);
+  const pR = await GrimoireService.promptForOrg(orgR, "recuperacao", ["compose"]);
+  check("orgR: lição injetada na rubrica sales-recovery", pR.includes("<licoes>") && pR.includes('id="sales-recovery"') && pR.includes("pior que o baseline"));
+
+  // RETIRE: calibrada ganhando → aposenta a lição de recuperação.
+  const orgR2 = mkOrg(true);
+  await GrimoireService.recordLesson(orgR2, "sales-recovery", { lesson: "lição antiga", source: "sales_recovery_ab_result", dedupeKey: "ab:sales-recovery:calibrated-underperform" });
+  for (let i = 0; i < 6; i++) mkTicketR(orgR2, "control", i < 2);     // control 33.3%
+  for (let i = 0; i < 6; i++) mkTicketR(orgR2, "calibrated", i < 4);  // calibrated 66.7% (melhor)
+  const rR2 = await GrimoirePostmortemService.runSalesRecoveryAb(orgR2);
+  check("recuperação: calibrada ganhando → retired", rR2.retired === true && rR2.recorded === false);
+  check("orgR2: 0 lições ativas após aposentar", Number(activeLessons(orgR2).n) === 0);
+  const allR = await GrimoirePostmortemService.runAllSalesRecovery();
+  check("runAllSalesRecovery agrega orgs", typeof allR.orgs === "number" && allR.orgs >= 2);
 
   // ===== resultado =====
   console.log("\n=== Grimoire pós-mortem — F1.4 ===");

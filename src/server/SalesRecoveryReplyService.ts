@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { classify, type SalesReplyIntent } from "./SalesRecoveryReplyClassifier.js";
+import { SalesRecoveryCopy } from "./SalesRecoveryCopy.js";
 
 /**
  * Reply router de recuperação comercial (ADR-152 F4c.2).
@@ -271,9 +272,16 @@ export class SalesRecoveryReplyService {
       throw new Error("recordTouch: params obrigatórios ausentes");
     }
     const id = randomUUID();
-    db.prepare(`INSERT INTO sales_recovery_touches (id, organization_id, ticket_id, contact_id, phone, channel_id, proposed_signal_id, approved_by, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    // ADR-155 F3.2 — carimba a variante de copy da org (control|calibrated) no
+    // touch, congelando o que a medição do A/B vai correlacionar. Determinística
+    // por-org (variantFor lê o setting), então recomputar aqui = o que a F3.1
+    // usou no envio; se a org virar o A/B entre gerar e aprovar (edge raro), o
+    // KPI se auto-corrige na amostra. Best-effort — nunca derruba o registro.
+    let variant = "control";
+    try { variant = SalesRecoveryCopy.variantFor(orgId); } catch { /* default control */ }
+    db.prepare(`INSERT INTO sales_recovery_touches (id, organization_id, ticket_id, contact_id, phone, channel_id, proposed_signal_id, approved_by, message_id, variant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, orgId, opts.ticketId, opts.contactId, opts.phone, opts.channelId,
-           opts.proposedSignalId || null, opts.approvedBy || null, opts.messageId || null);
+           opts.proposedSignalId || null, opts.approvedBy || null, opts.messageId || null, variant);
     return { id };
   }
 }

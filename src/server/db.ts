@@ -8086,6 +8086,19 @@ const initDb = () => {
   // Default 0: nenhuma org recebe até optar. NÃO habilita a org a DISPARAR
   // pesquisa (isso é só do admin master, D5).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN external_intelligence_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-155 F3.1 — A/B da copy de Recuperação Comercial. Espelha o
+  // collection_copy_variant (F2.1): 'control' (default) = copy legada
+  // byte-idêntica ⇒ zero mudança em prod; 'calibrated' = copy afinada pela
+  // rubrica compose/sales-recovery.md. Opt-in por org; a atribuição/rollout do
+  // A/B e a medição são a F3.2.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_copy_variant TEXT DEFAULT 'control'`); } catch(e){}
+  // ADR-155 F3.2 — carimba no touch a variante de copy usada no envio, pra a
+  // medição do A/B (SalesRecoveryAbMeasurementService) correlacionar variante ×
+  // recuperação real (sales_recovery_attributions). Espelha o
+  // collection_followup_attempts.variant (F2.1/F2.3). Aditivo à tabela viva
+  // sales_recovery_touches ⇒ ALTER no fim (touches legados ficam 'control',
+  // coerente com o default da F3.1).
+  try { db.exec(`ALTER TABLE sales_recovery_touches ADD COLUMN variant TEXT DEFAULT 'control'`); } catch(e){}
 };
 
 initDb();

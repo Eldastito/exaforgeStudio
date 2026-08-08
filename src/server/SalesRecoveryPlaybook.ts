@@ -106,6 +106,7 @@ const SalesRecoveryProposeHandler: CommandHandler = {
     let gen: { text: string; source: "llm" | "template" };
     try {
       gen = await SalesRecoveryMessageGenerator.generate({
+        orgId, // ADR-155 F3.1 — escolhe a variante de copy (control|calibrated) da org.
         contactName: p.contactName || null,
         stage: String(ticket.stage),
         daysStalled: Number(p.daysStalled || 0),

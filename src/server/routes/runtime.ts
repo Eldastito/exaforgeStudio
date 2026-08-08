@@ -8,6 +8,7 @@ import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { RetailClosingPlaybookService } from "../RetailClosingPlaybook.js";
 import { CollectionPlaybookService } from "../CollectionPlaybook.js";
 import { SalesRecoveryPlaybookService } from "../SalesRecoveryPlaybook.js";
+import { BusinessSignalService } from "../BusinessSignalService.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -156,6 +157,23 @@ router.get("/operations/ledger", (req: AuthRequest, res): any => {
   const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
   const limit = req.query.limit ? Number(req.query.limit) : undefined;
   res.json(OutcomeMeasurementService.ledger(req.organizationId!, { domain, limit }));
+});
+
+// ADR-155 F4.2 — clientes em risco de churn (sinais abertos do ChurnRiskDetector
+// F4.1). Advisory (RN-014): o card mostra score + explicabilidade; o humano
+// decide acknowledge (vou cuidar) ou dismiss (não é risco).
+router.get("/operations/churn", (req: AuthRequest, res): any => {
+  const signals = BusinessSignalService.list(req.organizationId!, { status: "open", domain: "churn" })
+    .filter((s: any) => s.signal_type === "churn_risk_high");
+  res.json({ signals });
+});
+router.post("/operations/churn/:id/:action", (req: AuthRequest, res): any => {
+  const { id, action } = req.params;
+  if (action !== "acknowledge" && action !== "dismiss") return res.status(400).json({ error: "ação inválida (acknowledge|dismiss)." });
+  const r = action === "acknowledge"
+    ? BusinessSignalService.acknowledge(req.organizationId!, id)
+    : BusinessSignalService.dismiss(req.organizationId!, id);
+  res.json(r);
 });
 
 // ── Piloto F4a: Retail Closing ────────────────────────────────────────────

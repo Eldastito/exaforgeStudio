@@ -441,6 +441,7 @@ function OperacoesTab() {
   const [overview, setOverview] = useState<any | null>(null);
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [indicators, setIndicators] = useState<Record<string, number> | null>(null);
+  const [churn, setChurn] = useState<any[]>([]); // ADR-155 F4.2 — sinais churn_risk_high
   const [loading, setLoading] = useState(true);
   const [gateError, setGateError] = useState<string | null>(null);
 
@@ -451,25 +452,35 @@ function OperacoesTab() {
       apiFetch('/api/runtime/operations/overview'),
       apiFetch('/api/runtime/operations/exceptions?limit=50'),
       apiFetch('/api/runtime/operations/indicators'),
-    ]).then(async ([oR, eR, iR]) => {
+      apiFetch('/api/runtime/operations/churn'),
+    ]).then(async ([oR, eR, iR, cR]) => {
       // Runtime não habilitado (flag off) → 403 uniforme
       if (oR.status === 403) {
         const j = await oR.json().catch(() => ({}));
         setGateError(j?.error || 'Execution Runtime não está habilitado para esta organização.');
         return;
       }
-      const [o, e, i] = await Promise.all([
+      const [o, e, i, c] = await Promise.all([
         oR.json().catch(() => null),
         eR.json().catch(() => ({ exceptions: [] })),
         iR.json().catch(() => ({})),
+        cR.json().catch(() => ({ signals: [] })),
       ]);
       setOverview(o || null);
       setExceptions(Array.isArray(e?.exceptions) ? e.exceptions : []);
       setIndicators(i && typeof i === 'object' ? i : {});
+      setChurn(Array.isArray(c?.signals) ? c.signals : []);
     }).catch(() => setGateError('Falha ao carregar o painel de Operações.'))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
+
+  // F4.2 — RN-014: o detector sugere; o humano decide (acknowledge = "vou cuidar",
+  // dismiss = "não é risco"). Nunca age sozinho (não cancela, não dá desconto).
+  const actOnChurn = async (id: string, action: 'acknowledge' | 'dismiss') => {
+    try { await apiFetch(`/api/runtime/operations/churn/${id}/${action}`, { method: 'POST' }); } catch { /* best-effort */ }
+    load();
+  };
 
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><RefreshCw className="h-5 w-5 animate-spin mr-2" /> Carregando Operações…</div>;
 
@@ -551,6 +562,41 @@ function OperacoesTab() {
             </div>
           )}
         </div>
+
+        {/* Bloco 3b — Clientes em risco de churn (ADR-155 F4.2). Advisory: o
+            detector sugere, o humano decide. Só aparece se há sinal aberto. */}
+        {churn.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5"><UserX className="h-3.5 w-3.5" /> Clientes em risco de churn ({churn.length})</h3>
+            <div className="space-y-2">
+              {churn.map((s) => {
+                const ev = s.evidence || {};
+                const score = Number(ev.score || 0);
+                const factors: string[] = Array.isArray(ev.factors) ? ev.factors : [];
+                const alto = s.severity === 'risk';
+                return (
+                  <div key={s.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${alto ? 'border-rose-500/40 bg-rose-500/10 text-rose-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'}`}>{score}/100 · {alto ? 'alto' : 'atenção'}</span>
+                      <span className="text-sm font-medium text-zinc-200">{ev.contactName || 'Cliente'}</span>
+                      {Number(s.impact_amount) > 0 && <span className="text-[11px] text-zinc-500">R$ {brl(Number(s.impact_amount)).replace('R$', '').trim()} em aberto</span>}
+                    </div>
+                    {factors.length > 0 && (
+                      <ul className="mt-1.5 text-xs text-zinc-400 list-disc pl-4 space-y-0.5">
+                        {factors.map((f, i) => <li key={i}>{f}</li>)}
+                      </ul>
+                    )}
+                    <div className="mt-2 flex items-center gap-2">
+                      <button onClick={() => actOnChurn(s.id, 'acknowledge')} className="inline-flex items-center gap-1 rounded-lg border border-emerald-600/40 bg-emerald-600/10 px-2.5 py-1 text-xs text-emerald-300 hover:bg-emerald-600/20"><CheckCircle2 className="h-3.5 w-3.5" /> Vou cuidar</button>
+                      <button onClick={() => actOnChurn(s.id, 'dismiss')} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/40 px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800"><XCircle className="h-3.5 w-3.5" /> Não é risco</button>
+                    </div>
+                    {ev.nota && <p className="text-[10px] text-zinc-600 mt-1.5 italic">{ev.nota}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Bloco 4 — Indicadores por status */}
         {indicators && Object.keys(indicators).length > 0 && (

@@ -20,6 +20,8 @@
     "lint": "tsc --noEmit",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
+    "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",
+    "grimoire:build": "tsx scripts/build-grimoire.ts",
     "test:admin-users": "tsx scripts/test-admin-users.ts",
     "test:instagram-send": "tsx scripts/test-instagram-send.ts",
     "test:backup-scheduler": "tsx scripts/test-backup-scheduler.ts",

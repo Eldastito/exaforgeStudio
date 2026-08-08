@@ -1,6 +1,6 @@
 # ADR-156 — External Intelligence: inteligência de vertical compartilhada e anonimizada (aditivo sobre ADR-135/136/152; ADR de agregação exigido pela ADR-079 D4)
 
-- **Status:** **Aceito** (ADR mergeada, PR #847). Decisão de gatilho fixada no D5 (admin master / agendado; tenant read-only). **DI-4.1 em implementação**; DI-4.2..DI-4.4 a seguir.
+- **Status:** **FECHADO** (2026-08-08) — DI-4.1..DI-4.5 entregues (PRs #847 em diante), todas as fatias em produção com CI verde. Gatilho fixado no D5 (admin master / agendado; tenant read-only); provider **manual** (DI-4.4), lembrete **semanal** no Scheduler (DI-4.5). Plano/status detalhado em `docs/decision-intelligence/PLANO-E-FATIAS.md`.
 - **Data:** 2026-08-08
 - **Origem:** PRD "ZapFlow Decision Intelligence Fabric 2.0" (External Intelligence / Agent-Reach) + `docs/decision-intelligence/` (Fatia DI-4). Decisão do dono (2026-08-08): "compartilhado por vertical anonimizado (exige ADR nova antes do código)".
 - **Relacionadas:** **ADR-079 D4** (que adiou agregação cross-tenant "até haver ADR de agregação anonimizada" — **esta é essa ADR**), ADR-135 (Snapshot/Evidence), ADR-136 (Signals/Decision), ADR-152 (Runtime), ADR-056 (LGPD), ADR-130 (Governança de IA), ADR-153 (verticais/entitlements), ADR-154 (metering de IA). CLAUDE.md convenções nº 1 (isolamento), nº 6 (LGPD), nº 10 (opt-in), nº 12 (BusinessSignal).
@@ -71,6 +71,7 @@ O resultado do broker preenche o slot **`externalEvidence[]`** do Evidence Packa
 - **DI-4.2** — sub-budgets (D6) com enforcement no broker + sinais de quota.
 - **DI-4.3** — fio até o `externalEvidence[]` do Evidence Package + consumo pelo `DecisionEngine` só em L3+ (roteador DI-1).
 - **DI-4.4 — provider MANUAL (decisão do dono, 2026-08-08):** o admin master **cola** a pesquisa do nicho (`runManual`), sem rede externa — o caminho mais seguro (nenhuma chamada live). Passa pelo **mesmo filtro de anonimização** (RN-156-3); custo zero (não toca no orçamento da DI-4.2). A interface `ExternalResearchProvider` fica pronta para um provider web-search real no futuro, mas **não** foi plugada rede nesta versão.
+- **DI-4.5 — lembrete SEMANAL (decisão do dono, 2026-08-08):** coerente com o provider manual, o Scheduler (ADR-074) roda 1×/semana `VerticalIntelligenceReminderService.maybeWeeklySweep()`, detecta os nichos **com contas consumindo** cuja inteligência vence/venceu e publica um **lembrete** no `business_signals` (domain `platform`, convenção nº 12) para o admin re-colar — **nunca roda pesquisa sozinho** nem sobrescreve o conteúdo colado. Auto-resolve quando re-colado (chave por episódio de vencimento); toggle liga/desliga (`platform_settings`, ligado por padrão); rotas master `GET/PUT /research-refresh-due` + banner no painel `NicheIntelligenceView`.
 
 ---
 
@@ -78,7 +79,7 @@ O resultado do broker preenche o slot **`externalEvidence[]`** do Evidence Packa
 
 **Positivas:** custo/latência de pesquisa caem (1 pesquisa por vertical, N contextualizações); a plataforma ganha visão externa sem virar refém de um projeto; o isolamento de dado privado **permanece intacto** (a camada compartilhada é não-pessoal por construção); LGPD coberta por legítimo interesse + anonimização + opt-in.
 
-**Trade-offs / riscos aceitos:** existe um plano de dados **compartilhado** novo — mitigado por (a) separação física das duas camadas, (b) filtro de anonimização testado, (c) query derivada só da vertical, (d) varredura do `SecurityAuditService`. A qualidade da anonimização depende do filtro — por isso é testável e conservador (na dúvida, exclui). Provider real fica para DI-4.4 com gate próprio.
+**Trade-offs / riscos aceitos:** existe um plano de dados **compartilhado** novo — mitigado por (a) separação física das duas camadas, (b) filtro de anonimização testado, (c) query derivada só da vertical, (d) varredura do `SecurityAuditService`. A qualidade da anonimização depende do filtro — por isso é testável e conservador (na dúvida, exclui). O provider entregue é **manual** (DI-4.4, o dono cola a pesquisa); um provider web-search real fica como extensão futura, plugando `ExternalResearchProvider` com o gate de orçamento (DI-4.2) já pronto.
 
 **Escopo:** supersede a adiada **ADR-079 D4 apenas para inteligência externa de mercado**. A `prospect_learning_memory` **continua por-tenant** — não é objeto desta ADR.
 

@@ -21,6 +21,16 @@ import db from "./db.js";
 
 export type CollectionVariant = "control" | "calibrated";
 
+/**
+ * Tipo de decline (ADR-155 F2.2): `soft` = pagamento ainda recuperável (o PIX
+ * que enviamos segue válido → re-nudge). `hard` = já faz dias, a via provavelmente
+ * venceu → em vez de insistir no mesmo link, a copy oferece uma 2ª via atualizada
+ * (o cliente responde e o fluxo de resend do reply router — F4b.3 — manda o link
+ * novo; nada de prometer o que não existe). Só a variante `calibrated` ramifica;
+ * `control` ignora (mantém a copy legada byte-idêntica).
+ */
+export type DeclineType = "soft" | "hard";
+
 const brDate = (d?: string | null): string => String(d || "").split("-").reverse().join("/");
 const brMoney = (a: number): string => Number(a).toFixed(2).replace(".", ",");
 
@@ -44,21 +54,35 @@ export class CollectionCopy {
     return `Olá! 👋\n\nLembrando do valor de R$ ${valor} ${dueBR ? `com vencimento em ${dueBR}` : "em aberto"}.${item}\n\nPra facilitar, gerei o PIX pra você — o link/QR chega em seguida.\n\nQualquer coisa é só responder por aqui. 🙏`;
   }
 
-  /** T2 / D+N2 — 2ª tentativa, mais firme (sem culpar). template_key='firm'. */
-  static firm(variant: CollectionVariant, p: { amount: number; dueDate: string }): string {
+  /**
+   * T2 / D+N2 — 2ª tentativa, mais firme (sem culpar). template_key='firm'.
+   * `decline` (F2.2) ramifica só no `calibrated`: soft = re-nudge do PIX;
+   * hard = oferece 2ª via atualizada. `control` ignora (byte-idêntico ao legado).
+   */
+  static firm(variant: CollectionVariant, p: { amount: number; dueDate: string }, decline: DeclineType = "soft"): string {
     const valor = brMoney(p.amount);
     const dueBR = brDate(p.dueDate);
     if (variant === "calibrated") {
+      if (decline === "hard") {
+        return `Oi! 🙋 Sobre a cobrança de R$ ${valor} que venceu em ${dueBR}: já faz alguns dias e o PIX anterior pode ter expirado.\n\nSe quiser, me responde aqui que eu te mando uma via atualizada na hora. Se preferir parcelar ou mudar a data, também dá — é só falar. 🙏`;
+      }
       return `Oi! 🙋 Sobre a cobrança de R$ ${valor} que venceu em ${dueBR}: ainda consta em aberto por aqui.\n\nPra resolver rapidinho, é só pagar pelo PIX que te enviei. Se precisar parcelar, mudar a data ou tiver rolado algum problema, me conta que a gente ajeita junto. 🙏`;
     }
     return `Olá! 🙋\n\nSobre a cobrança de R$ ${valor} que venceu em ${dueBR}: notei que ainda não foi paga.\n\nSe puder acertar via o PIX que enviei antes, resolve rapidinho. Se preferir combinar de outro jeito (parcelar, mudar a data, ou algum problema), é só responder aqui — a gente vê o que dá. 🙏`;
   }
 
-  /** T3 / D+N3 — aviso informativo de proteção ao crédito (CDC). template_key='default_notice'. */
-  static notice(variant: CollectionVariant, p: { amount: number; dueDate: string }): string {
+  /**
+   * T3 / D+N3 — aviso informativo de proteção ao crédito (CDC). template_key='default_notice'.
+   * `decline` (F2.2) ramifica só no `calibrated`; ambas as ramificações mantêm o
+   * informativo CDC ("proteção ao crédito"). `control` ignora (byte-idêntico).
+   */
+  static notice(variant: CollectionVariant, p: { amount: number; dueDate: string }, decline: DeclineType = "soft"): string {
     const valor = brMoney(p.amount);
     const dueBR = brDate(p.dueDate);
     if (variant === "calibrated") {
+      if (decline === "hard") {
+        return `Oi 🙋 A cobrança de R$ ${valor} (vencida em ${dueBR}) segue em aberto e a via anterior pode já ter expirado — me responde aqui que te mando uma atualizada. Se não conseguirmos resolver nos próximos dias, vamos precisar informar os órgãos de proteção ao crédito.\n\nAinda dá tempo de evitar isso — é só responder. 🙏`;
+      }
       return `Oi 🙋 Precisamos resolver a cobrança de R$ ${valor}, vencida em ${dueBR}. Se não conseguirmos acertar nos próximos dias, vamos precisar informar os órgãos de proteção ao crédito.\n\nAinda dá tempo de evitar isso — responda aqui e a gente encontra uma saída juntos. 🙏`;
     }
     return `Olá 🙋\n\nPrecisamos combinar sobre a cobrança de R$ ${valor} vencida em ${dueBR}. Se não conseguirmos resolver nos próximos dias, vamos precisar informar as agências de proteção ao crédito.\n\nAinda dá tempo — responda aqui e a gente encontra um jeito juntos. 🙏`;

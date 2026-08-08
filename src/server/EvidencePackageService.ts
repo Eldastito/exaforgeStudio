@@ -67,12 +67,17 @@ export class EvidencePackageService {
 
     if (enabled && !opts.force) {
       const cached = this.get(orgId, subject);
-      if (cached && cached.freshness === "fresh") return { ...cached, cacheHit: true };
+      if (cached && cached.freshness === "fresh") { this.recordCacheEvent(orgId, subject, 1); return { ...cached, cacheHit: true }; }
     }
 
     const pkg = this.compose(orgId, subject, period, opts.ttlMinutes ?? DEFAULT_TTL_MIN);
-    if (enabled) this.persist(orgId, pkg);
+    if (enabled) { this.persist(orgId, pkg); this.recordCacheEvent(orgId, subject, 0); }
     return { ...pkg, cacheHit: false };
+  }
+
+  /** Log append-only de hit/miss (DI-3) — insumo do cache_hit_rate. Best-effort. */
+  private static recordCacheEvent(orgId: string, subject: string, hit: 0 | 1): void {
+    try { db.prepare("INSERT INTO evidence_cache_events (id, organization_id, subject, hit) VALUES (?, ?, ?, ?)").run(randomUUID(), orgId, subject, hit); } catch { /* nunca derruba o build */ }
   }
 
   /** Lê o pacote persistido (ou null). Recalcula `freshness` contra o relógio. */

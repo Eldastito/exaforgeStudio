@@ -462,6 +462,12 @@ export class Scheduler {
         console.info(`[Runtime F4b.3] cadência de cobrança: ${r.orgsScanned} org(s), ${r.sent} enviada(s), ${r.skipped} skip.`);
       }
     } catch (e: any) { console.error("[Runtime F4b.3] cadência falhou", e?.message); }
+    // F2.3 — mede o A/B da copy (variante/decline × recuperação) e publica o
+    // KPI vivo em business_signals. Upsert idempotente; barato; best-effort.
+    try {
+      const { CollectionAbMeasurementService } = await import("./CollectionAbMeasurementService.js");
+      CollectionAbMeasurementService.publishAll();
+    } catch (e: any) { console.error("[Cobrança F2.3] medição A/B falhou", e?.message); }
   }
 
   /**

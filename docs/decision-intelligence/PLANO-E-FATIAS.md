@@ -58,7 +58,8 @@ Princípio de segurança (ADR-156 D1/D2): a camada compartilhada guarda **só pe
 ## Camada de UI (aditiva, sem inflar o menu do lojista — PRD §31)
 
 - **DI-UI-1 `[x]` ENTREGUE** — painel **master admin** "Inteligência de Nicho" (`src/features/NicheIntelligenceView.tsx`, viewMode `niche_intel`, gated por `isMasterAdmin` no Sidebar). O admin **cola** a pesquisa do nicho (DI-4.4), ajusta o **orçamento de pesquisa** (DI-4.2) e vê as pesquisas publicadas (fresca/expirada). NÃO é menu do lojista — as contas só consomem read-only. Consome as rotas `GET/PUT /research-budget`, `POST /vertical-intelligence/manual`, `GET /vertical-intelligence`.
-- **DI-UI-2 `[ ]`** — card "valor protegido" + métricas de decisão (DI-3) no Diretor IA / Central de Saúde (consome `GET /metrics`); e, opcionalmente, painel de análise de decisão (DI-2) e prioridades L0–L4 (DI-1).
+- **DI-UI-2 `[x]` ENTREGUE** — card **"Valor protegido pelo ZapFlow"** + métricas de decisão (DI-3) na **Central de Saúde** (`HealthCenterView`, decisão do dono), consumindo `GET /api/decision-intelligence/metrics`: valor protegido (prejuízo + custo evitado), receita recuperada, acurácia de previsão, aceitação de recomendações, riscos previstos. Só aparece quando há algo medido (sem card vazio em org nova). Card aditivo, sem menu novo.
+- **DI-UI-3 `[ ]` (opcional)** — painel de análise de decisão (DI-2) e prioridades L0–L4 (DI-1) no Diretor IA, se desejado.
 
 ## Fora de escopo (frugalidade, PRD §43)
 

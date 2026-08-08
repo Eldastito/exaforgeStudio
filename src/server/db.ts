@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { applyPlanGrade } from './plansGrade.js';
+import { applyFalatuPlans } from './falatuPlans.js';
 
 // DATA_DIR permite apontar o banco para um volume persistente (ex.: /data no
 // Coolify), evitando perda de dados a cada redeploy. Sem ela, usa o cwd.
@@ -959,6 +960,13 @@ const initDb = () => {
     db.prepare(`INSERT OR IGNORE INTO plans (id, name, price, features) VALUES (?, ?, ?, ?)`)
       .run('cortesia', 'Cortesia', 0, JSON.stringify({ ai_monthly_limit: 0, contacts_limit: 0, channels_limit: 0, users_limit: 0, trial_days: 0 }));
   } catch (e) { /* noop */ }
+
+  // ADR-154 F2.2 (Fatia A) — catálogo comercial B2C do FalaTu (Solo/Pro/Família,
+  // R$19/29/49). Ids `falatu_*` ficam fora do seletor B2B (PlanService filtra) e
+  // não colidem com o DELETE de planos legados do applyPlanGrade. Idempotente.
+  try {
+    applyFalatuPlans(db);
+  } catch (e) { console.error('[DB] Falha ao aplicar o catálogo FalaTu', e); }
 
   // Convites de NOVA EMPRESA (cortesia): diferente de user_invitations (que adiciona
   // alguém à MESMA org). Aqui o token cria uma empresa NOVA com plano+módulos já

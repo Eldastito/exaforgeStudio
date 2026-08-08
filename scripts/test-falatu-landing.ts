@@ -39,6 +39,16 @@ check("esqueleto com 3 planos", (html.match(/class="plano-card/g) || []).length 
 check("card Pro em destaque + badge", html.includes("plano-card destaque") && html.includes("Mais popular"));
 check("cada plano tem botão de checkout (data-plan)", (html.match(/data-plan="/g) || []).length === 3);
 
+// F2.2 Fatia B — os botões dos planos levam pro checkout (não mais href="#").
+check("página de checkout existe", fs.existsSync(path.join(dir, "checkout.html")));
+check("botão Solo linka pro checkout do plano certo", html.includes("/fala-tu/checkout.html?plan=falatu_solo"));
+check("botões Pro e Família linkam pro checkout", html.includes("plan=falatu_pro") && html.includes("plan=falatu_familia"));
+if (fs.existsSync(path.join(dir, "checkout.html"))) {
+  const co = fs.readFileSync(path.join(dir, "checkout.html"), "utf8");
+  check("checkout POSTa em /api/public/falatu/checkout", co.includes("/api/public/falatu/checkout"));
+  check("checkout redireciona pro checkoutUrl do gateway", co.includes("checkoutUrl") && co.includes("location.href"));
+}
+
 // Vídeo EXTRAÍDO pro arquivo (não pode ter voltado a ser base64 no HTML — o
 // motivo de existir esta fatia é não commitar ~14MB de base64 no git).
 check("HTML referencia /fala-tu/hero.mp4", (html.match(/\/fala-tu\/hero\.mp4/g) || []).length >= 1);

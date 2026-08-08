@@ -227,7 +227,7 @@ A IA/módulo Solo do FalaTu **nunca**:
 | 1.3 | MERGED | #793 |
 | 2.1 | MERGED | #795 |
 | 2.1b | In Progress | — |
-| 2.2 | Pending | — |
+| 2.2 | In Progress (Fatia A: catálogo) | — |
 | 3.1 | Pending | — |
 | 3.2 | Pending | — |
 | 3.3 | Pending | — |
@@ -525,3 +525,34 @@ Asaas — gap nº 1 pra faturar, hoje "recommended/faltando" no readiness).
   cópias). Visão: `extractStructuredFromImage`/`extractInvoiceItems` ganham
   `detail` (default "auto"); o caminho FalaTu pede `"high"` pra não
   sub-amostrar texto/rótulo pequeno.
+
+## Monetização B2C — F2.2 fatiada (decidido 2026-08-08)
+
+Levantamento confirmou: o gateway Asaas é real, mas ligado só ao B2B; **não há
+trilho de venda self-serve do FalaTu** (planos, checkout, enforcement). O
+caminho crítico (*escolhe → paga → ativa → bloqueia se não pagar*) foi fatiado:
+
+- **Fatia A — Catálogo** *(esta fatia)*. `src/server/falatuPlans.ts`: os 3
+  planos B2C **Solo/Pro/Família (R$19/29/49)** como registros reais em `plans`,
+  ids `falatu_*` (fora do `DELETE` de legados do `applyPlanGrade` e do seletor
+  B2B — `PlanService.listPlans` filtra; `listFalatuPlans` expõe). Seed
+  idempotente + rota pública `GET /api/public/falatu/plans`. **Preços
+  definitivos; `features` (cota de IA, trial, recursos por tier) são
+  PLACEHOLDER** — o dono define depois editando `FALATU_PLANS`.
+- **Fatia B — Checkout self-serve** *(esta fatia)*. `FalatuCheckoutService.start`
+  + `POST /api/public/falatu/checkout`: cria a org+dono já com `plan_id` (nasce
+  `trialing`) e a assinatura recorrente no Asaas (reusa `AsaasService.subscribe`),
+  devolve o link de pagamento. O **webhook existente** (`AsaasService.handleWebhook`)
+  promove pra `active` quando o pagamento confirma — zero código novo de ativação.
+  Página `public/fala-tu/checkout.html` (form → POST → redireciona pro Asaas; a
+  gente nunca toca dado de cartão) + os botões `data-plan` da landing agora
+  levam pra ela. Guardrails: só planos `falatu_*`, Asaas obrigatório (sem
+  gateway não cria conta grátis órfã), 1 email = 1 conta, rollback da org se o
+  gateway falhar. **Garantia de 7 dias** (paga na hora, sem trial): `trial_days:0`,
+  `guarantee_days:7` nos planos — o reembolso em si é a Fatia D.
+- **Fatia C — Enforcement** *(pendente)*. Paywall quando `past_due`/`suspended`
+  (fecha também o vazamento de OpenAI das contas Solo grátis) + cota de IA por
+  plano.
+- **Fatia D — Legal** *(pendente)*. Termos + Privacidade (LGPD, controlador) +
+  Cancelamento (CDC Art. 49) + aceite no cadastro. Textos exigem revisão
+  jurídica.

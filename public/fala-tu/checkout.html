@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#050913" />
+<title>Fala Tu — Assinar</title>
+<meta name="robots" content="noindex" />
+<style>
+:root{--blue:#3157E6;--coral:#FF6B4A;--mint:#16B88A;--dark:#050913;--muted:#68758B;--line:rgba(255,255,255,.10)}
+*{box-sizing:border-box}
+body{margin:0;min-height:100svh;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;color:#fff;background:radial-gradient(130% 90% at 50% -10%,rgba(49,87,230,.20),transparent 60%),var(--dark);display:flex;align-items:center;justify-content:center;padding:clamp(18px,4vw,48px)}
+a{color:inherit}
+.card{width:100%;max-width:440px;background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:22px;padding:clamp(22px,4vw,34px)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:850;font-size:15px;color:#e8edf6;margin-bottom:18px}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--coral)}
+h1{font-size:clamp(22px,4vw,28px);line-height:1.1;letter-spacing:-.02em;margin:0 0 4px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+.plan{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:rgba(255,107,74,.06);margin-bottom:20px}
+.plan .nome{font-weight:850}
+.plan .preco{font-size:26px;font-weight:850}
+.plan .preco span{font-size:13px;color:var(--muted);font-weight:600}
+label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:12px 0 6px}
+input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:#fff;font-size:15px}
+input:focus{outline:2px solid rgba(49,87,230,.6);outline-offset:1px}
+.row{display:flex;gap:10px}.row>div{flex:1}
+.btn{width:100%;margin-top:22px;padding:15px;border-radius:14px;border:0;font-size:16px;font-weight:850;color:#fff;background:linear-gradient(135deg,var(--coral),#ff8f63);cursor:pointer}
+.btn:disabled{opacity:.6;cursor:progress}
+.msg{margin-top:14px;font-size:13px;padding:11px 13px;border-radius:11px;display:none}
+.msg.err{display:block;background:rgba(255,80,80,.12);border:1px solid rgba(255,80,80,.35);color:#ffb4b4}
+.fine{color:var(--muted);font-size:12px;margin-top:16px;line-height:1.5}
+.pay{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-top:14px}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand"><span class="dot"></span> Fala Tu</div>
+  <h1>Assine e comece agora</h1>
+  <p class="sub">Sua cabeça pode voltar a ser lugar de pensar.</p>
+
+  <div class="plan">
+    <span class="nome" id="plan-name">—</span>
+    <span class="preco">R$ <span id="plan-price">—</span><span>/mês</span></span>
+  </div>
+
+  <form id="form" autocomplete="on" novalidate>
+    <label for="name">Nome</label>
+    <input id="name" name="name" required autocomplete="name" />
+    <label for="email">E-mail</label>
+    <input id="email" name="email" type="email" required autocomplete="email" />
+    <div class="row">
+      <div>
+        <label for="cpf">CPF</label>
+        <input id="cpf" name="cpf" inputmode="numeric" required autocomplete="off" placeholder="000.000.000-00" />
+      </div>
+      <div>
+        <label for="phone">Celular</label>
+        <input id="phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="(11) 90000-0000" />
+      </div>
+    </div>
+    <label for="password">Senha (mín. 8, com letras e números)</label>
+    <input id="password" name="password" type="password" required autocomplete="new-password" />
+
+    <button class="btn" id="submit" type="submit">Ir para o pagamento →</button>
+    <div class="msg err" id="msg"></div>
+    <div class="pay">🔒 Pagamento seguro via Asaas (Pix, cartão ou boleto)</div>
+    <p class="fine">Cobrança mensal. Garantia de 7 dias — se não curtir, devolvemos. Ao assinar você concorda com os Termos e a Política de Privacidade.</p>
+  </form>
+</main>
+
+<script>
+  // Plano vem por ?plan=falatu_solo|falatu_pro|falatu_familia (default solo).
+  var params = new URLSearchParams(location.search);
+  var planId = params.get('plan') || 'falatu_solo';
+  var nameEl = document.getElementById('plan-name');
+  var priceEl = document.getElementById('plan-price');
+  var msg = document.getElementById('msg');
+  var btn = document.getElementById('submit');
+
+  // Busca o catálogo real pra mostrar nome/preço (sem hardcode).
+  fetch('/api/public/falatu/plans').then(function(r){return r.json();}).then(function(d){
+    var p = (d.plans || []).find(function(x){return x.id === planId;}) || (d.plans || [])[0];
+    if (p){ planId = p.id; nameEl.textContent = p.name; priceEl.textContent = String(p.price); }
+  }).catch(function(){});
+
+  function showErr(t){ msg.textContent = t; msg.classList.add('err'); }
+
+  document.getElementById('form').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    msg.textContent = ''; btn.disabled = true; btn.textContent = 'Processando…';
+    var body = {
+      name: document.getElementById('name').value.trim(),
+      email: document.getElementById('email').value.trim(),
+      cpf: document.getElementById('cpf').value,
+      phone: document.getElementById('phone').value,
+      password: document.getElementById('password').value,
+      planId: planId,
+    };
+    fetch('/api/public/falatu/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+      .then(function(res){
+        if (res.ok && res.j.checkoutUrl){ location.href = res.j.checkoutUrl; return; }
+        var m = res.j && res.j.message ? res.j.message : 'Não foi possível iniciar a assinatura. Tente de novo.';
+        if (res.j && res.j.error === 'email_in_use') m = 'Este e-mail já tem conta. Faça login no app.';
+        showErr(m); btn.disabled = false; btn.textContent = 'Ir para o pagamento →';
+      })
+      .catch(function(){ showErr('Falha de conexão. Tente de novo.'); btn.disabled = false; btn.textContent = 'Ir para o pagamento →'; });
+  });
+</script>
+</body>
+</html>

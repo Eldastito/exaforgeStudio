@@ -88,6 +88,7 @@ import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
 import comigoPublicRoutes from "./src/server/routes/comigoPublic.js";
 import subscriptionPublicRoutes from "./src/server/routes/subscriptionPublic.js";
 import fashionPublicRoutes from "./src/server/routes/fashionPublic.js";
+import falatuPublicRoutes from "./src/server/routes/falatuPublic.js";
 import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
@@ -433,6 +434,8 @@ async function startServer() {
   // Comigo Mesa/QR PÚBLICO (autoatendimento sem login, ADR-119). Antes do mount
   // genérico /api/public por especificidade.
   app.use("/api/public/comigo", comigoPublicRoutes);
+  // ADR-154 F2.2 (Fatia A) — catálogo público dos planos do FalaTu (read-only).
+  app.use("/api/public/falatu", falatuPublicRoutes);
 
   // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
   // autenticado para que /api/public/* nunca exija JWT.

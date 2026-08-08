@@ -29,9 +29,24 @@ export type Plan = {
 };
 
 export class PlanService {
-  /** Lista todos os planos disponíveis (ordenados pelo preço). */
+  /**
+   * Lista os planos do catálogo B2B (ZappFlow), ordenados pelo preço. Exclui o
+   * catálogo B2C do FalaTu (`falatu_*`), que tem seletor/checkout próprios
+   * (ADR-154 F2.2) — assim o seletor de planos B2B não mistura os dois.
+   */
   static listPlans(): Plan[] {
-    const rows = db.prepare(`SELECT * FROM plans ORDER BY price ASC`).all() as any[];
+    const rows = db.prepare(`SELECT * FROM plans WHERE id NOT LIKE 'falatu_%' ORDER BY price ASC`).all() as any[];
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      price: r.price || 0,
+      features: this.parseFeatures(r.features),
+    }));
+  }
+
+  /** Catálogo comercial B2C do FalaTu (Solo/Pro/Família), ordenado pelo preço. */
+  static listFalatuPlans(): Plan[] {
+    const rows = db.prepare(`SELECT * FROM plans WHERE id LIKE 'falatu_%' ORDER BY price ASC`).all() as any[];
     return rows.map(r => ({
       id: r.id,
       name: r.name,

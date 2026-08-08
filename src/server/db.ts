@@ -7997,6 +7997,26 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_decision_risks_decision
       ON decision_risks(organization_id, decision_id, status);
   `);
+  // ADR-155 F5.1 — save offers no cancel/refund do FalaTu. Registra a INTENÇÃO de
+  // cancelamento com o motivo capturado e o degrau do ladder ofertado (grimoire
+  // save-offer-ladder). outcome: pending → retained (aceitou a oferta) | refunded
+  // | cancelled. A garantia de 7 dias (CDC Art. 49) NUNCA é bloqueada por isto —
+  // a oferta é opt-out, não fricção (RN-E da ADR-154). Insumo da medição F5.3.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS falatu_cancellation_intents (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT,
+      reason TEXT NOT NULL,
+      free_text TEXT,
+      offered_type TEXT,
+      outcome TEXT NOT NULL DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      resolved_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_falatu_cancel_intents_org
+      ON falatu_cancellation_intents(organization_id, outcome, created_at);
+  `);
 };
 
 initDb();

@@ -9,6 +9,7 @@ import { FalaTuBriefingTaskService } from "../FalaTuBriefingTaskService.js";
 import { FalaTuBriefingDigestService } from "../FalaTuBriefingDigestService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { FalatuRefundService, FalatuRefundError } from "../FalatuRefundService.js";
+import { FalatuSaveOfferService, CANCELLATION_REASONS } from "../FalatuSaveOfferService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -348,6 +349,34 @@ router.post("/refund", async (req: AuthRequest, res): Promise<any> => {
     if (e instanceof FalatuRefundError) return res.status(e.httpStatus).json({ error: e.code, message: e.message });
     res.status(500).json({ error: "internal_error", message: e.message });
   }
+});
+
+// ADR-155 F5.1 — save offer antes do cancelamento. A UI abre o fluxo de saída,
+// o usuário escolhe o MOTIVO, e devolvemos o degrau certo do ladder (grimoire
+// save-offer-ladder) + SEMPRE a elegibilidade do reembolso: a garantia de 7 dias
+// segue acessível (RN-E), a oferta é opt-out. A rota valida só a FORMA do motivo;
+// o mapa e o dedupe da intenção ficam no service.
+router.post("/save-offer/intent", (req: AuthRequest, res): any => {
+  const reason = String(req.body?.reason || "");
+  if (!FalatuSaveOfferService.isReason(reason)) {
+    return res.status(400).json({ error: "reason inválido", allowed: FalatuSaveOfferService as any && ["preco", "pouco_uso", "faltou_feature", "problema_tecnico", "outro"] });
+  }
+  const freeText = req.body?.freeText != null ? String(req.body.freeText) : null;
+  try {
+    res.json(FalatuSaveOfferService.captureIntent(req.organizationId!, actorId(req), { reason, freeText }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ADR-155 F5.2 — o cliente ACEITOU a save offer. Governado pelo G-153-3 (ADR-153):
+// aceitar não muda a cobrança sozinho — o service registra a retenção, calcula o
+// alvo do downgrade e publica o handoff pro operador finalizar em Cobrança. A
+// garantia de 7 dias segue intocada. Sem pending/oferta → 400 (nada a aceitar).
+router.post("/save-offer/accept", (req: AuthRequest, res): any => {
+  try {
+    const result = FalatuSaveOfferService.acceptOffer(req.organizationId!, actorId(req));
+    if (!result.ok) return res.status(400).json({ error: result.reason });
+    res.json(result);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

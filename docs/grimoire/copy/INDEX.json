@@ -12,7 +12,7 @@
     },
     "recuperacao": {
       "intake": ["intake/churn-risk-scoring.md"],
-      "compose": ["compose/sequence-timing.md"],
+      "compose": ["compose/sales-recovery.md", "compose/sequence-timing.md"],
       "guardrails": ["guardrails/lgpd-e-whatsapp.md"],
       "review": ["review/pre-send-checklist.md"],
       "glossary": ["glossary/tom-de-voz.md"]

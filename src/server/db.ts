@@ -8017,6 +8017,12 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_falatu_cancel_intents_org
       ON falatu_cancellation_intents(organization_id, outcome, created_at);
   `);
+  // ADR-155 F3.1 — A/B da copy de Recuperação Comercial. Espelha o
+  // collection_copy_variant (F2.1): 'control' (default) = copy legada
+  // byte-idêntica ⇒ zero mudança em prod; 'calibrated' = copy afinada pela
+  // rubrica compose/sales-recovery.md. Opt-in por org; a atribuição/rollout do
+  // A/B e a medição são a F3.2.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_copy_variant TEXT DEFAULT 'control'`); } catch(e){}
 };
 
 initDb();

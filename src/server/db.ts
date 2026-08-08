@@ -7908,6 +7908,30 @@ const initDb = () => {
   // qual ramo foi usado em cada follow-up (insumo do A/B da F2.3).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_hard_decline_days INTEGER DEFAULT 7`); } catch(e){}
   try { db.exec(`ALTER TABLE collection_followup_attempts ADD COLUMN decline_type TEXT`); } catch(e){}
+  // ADR-155 F1.4 — lições pós-mortem do grimoire (padrão 4: "o erro de ontem vira
+  // regra de amanhã"). São DADOS dinâmicos por-org (não markdown estático): um
+  // sinal ruim (ex.: A/B da copy de cobrança com a variante calibrada perdendo)
+  // grava uma lição na rubrica correspondente (rubric_id), que o GrimoireService
+  // passa a injetar como bloco <licoes> junto da rubrica. active=0 aposenta a
+  // lição quando a condição some. dedupe_key evita duplicar a mesma lição.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS grimoire_lessons (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      rubric_id TEXT NOT NULL,
+      lesson TEXT NOT NULL,
+      source TEXT,
+      evidence_json TEXT,
+      dedupe_key TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_grimoire_lessons_dedupe
+      ON grimoire_lessons(organization_id, rubric_id, dedupe_key);
+    CREATE INDEX IF NOT EXISTS idx_grimoire_lessons_rubric
+      ON grimoire_lessons(organization_id, rubric_id, active);
+  `);
 };
 
 initDb();

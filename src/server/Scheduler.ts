@@ -468,6 +468,12 @@ export class Scheduler {
       const { CollectionAbMeasurementService } = await import("./CollectionAbMeasurementService.js");
       CollectionAbMeasurementService.publishAll();
     } catch (e: any) { console.error("[Cobrança F2.3] medição A/B falhou", e?.message); }
+    // F1.4 — pós-mortem: se o A/B mostra a calibrada perdendo, grava uma Lição
+    // na rubrica do grimoire (e aposenta quando volta a ganhar). Best-effort.
+    try {
+      const { GrimoirePostmortemService } = await import("./GrimoirePostmortemService.js");
+      await GrimoirePostmortemService.runAll();
+    } catch (e: any) { console.error("[Grimoire F1.4] pós-mortem falhou", e?.message); }
   }
 
   /**

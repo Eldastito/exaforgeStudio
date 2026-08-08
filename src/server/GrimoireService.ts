@@ -83,7 +83,13 @@ export class GrimoireService {
   }
 
   private static render(r: GrimoireRubric): string {
-    return `<rubrica id="${r.id}" estagio="${r.estagio}">\n${r.corpo}\n</rubrica>`;
+    return this.renderWithLessons(r, []);
+  }
+
+  /** Renderiza a rubrica + (F1.4) bloco <licoes> quando há lições pós-mortem. Sem lições ⇒ byte-idêntico a render(). */
+  private static renderWithLessons(r: GrimoireRubric, lessons: string[]): string {
+    const licoes = lessons.length ? `\n<licoes>\n${lessons.map((l) => `- ${l}`).join("\n")}\n</licoes>` : "";
+    return `<rubrica id="${r.id}" estagio="${r.estagio}">\n${r.corpo}${licoes}\n</rubrica>`;
   }
 
   // ===== F1.3 — camada por-org (brand voice) =====
@@ -120,8 +126,59 @@ export class GrimoireService {
   static async promptForOrg(orgId: string, module: string, stages: GrimoireStage[]): Promise<string> {
     const bv = await this.getBrandVoice(orgId);
     if (!bv.enabled) return "";
-    const rubricas = this.promptFor(orgId, module, stages);
+    // Rubricas roteadas (dedupe por id, preservando ordem) + F1.4 lições da org.
+    const seen = new Set<string>();
+    const rubrics: GrimoireRubric[] = [];
+    for (const s of stages) for (const r of this.load(orgId, module, s).rubrics) {
+      if (!seen.has(r.id)) { seen.add(r.id); rubrics.push(r); }
+    }
+    const lessons = await this.lessonsFor(orgId, rubrics.map((r) => r.id));
+    const blocks = rubrics.map((r) => this.renderWithLessons(r, lessons.get(r.id) || []));
     const marca = bv.context && bv.context.trim() ? `<contexto_marca>\n${bv.context.trim()}\n</contexto_marca>` : "";
-    return [rubricas, marca].filter(Boolean).join("\n\n");
+    return [...blocks, marca].filter(Boolean).join("\n\n");
+  }
+
+  // ===== F1.4 — lições pós-mortem (memória institucional do grimoire) =====
+  // O erro medido (ex.: A/B da copy) vira uma regra datada na rubrica, injetada
+  // dali pra frente. Dados dinâmicos por-org na tabela grimoire_lessons.
+
+  /** Lições ATIVAS por rubrica (datadas). Isolado por org. Vazio se não houver. */
+  static async lessonsFor(orgId: string, rubricIds: string[]): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    if (!rubricIds.length) return out;
+    const db = (await import("./db.js")).default;
+    const ph = rubricIds.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT rubric_id AS rubricId, lesson, DATE(updated_at) AS d
+         FROM grimoire_lessons
+        WHERE organization_id = ? AND active = 1 AND rubric_id IN (${ph})
+        ORDER BY updated_at ASC`
+    ).all(orgId, ...rubricIds) as any[];
+    for (const r of rows) {
+      const arr = out.get(String(r.rubricId)) || [];
+      arr.push(`${r.d}: ${r.lesson}`);
+      out.set(String(r.rubricId), arr);
+    }
+    return out;
+  }
+
+  /** Grava (ou reativa) uma lição na rubrica. Idempotente por (org, rubric, dedupeKey). */
+  static async recordLesson(orgId: string, rubricId: string, opts: { lesson: string; source?: string; dedupeKey: string; evidence?: unknown }): Promise<void> {
+    const db = (await import("./db.js")).default;
+    const ev = opts.evidence !== undefined ? JSON.stringify(opts.evidence) : null;
+    const existing = db.prepare(`SELECT id FROM grimoire_lessons WHERE organization_id = ? AND rubric_id = ? AND dedupe_key = ?`).get(orgId, rubricId, opts.dedupeKey) as any;
+    if (existing) {
+      db.prepare(`UPDATE grimoire_lessons SET lesson = ?, source = ?, evidence_json = ?, active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(opts.lesson, opts.source || null, ev, existing.id);
+      return;
+    }
+    const { randomUUID } = await import("crypto");
+    db.prepare(`INSERT INTO grimoire_lessons (id, organization_id, rubric_id, lesson, source, evidence_json, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(randomUUID(), orgId, rubricId, opts.lesson, opts.source || null, ev, opts.dedupeKey);
+  }
+
+  /** Aposenta uma lição (active=0) quando a condição que a gerou some. */
+  static async retireLesson(orgId: string, rubricId: string, dedupeKey: string): Promise<void> {
+    const db = (await import("./db.js")).default;
+    db.prepare(`UPDATE grimoire_lessons SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND rubric_id = ? AND dedupe_key = ?`).run(orgId, rubricId, dedupeKey);
   }
 }

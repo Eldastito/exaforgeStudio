@@ -1,6 +1,6 @@
 # ADR-155 — Marketing Playbooks → IA de Produto do ZappFlow (Trilha B)
 
-- **Status:** EM PROGRESSO. **Fase 1 (F1.1–F1.3)** implementada: grimoire (`docs/grimoire/copy/` + 4 rubricas), `GrimoireService.load` (roteamento just-in-time, compilado no build), camada por-org (`brand_voice_context` + `promptForOrg` gated). **Fase 2 FECHADA (F2.1–F2.3)** — `CollectionCopy` (fonte única) com A/B `control`|`calibrated` por-org (rubrica `dunning-cadence`) + retry **soft/hard decline** + **medição do A/B** (`CollectionAbMeasurementService`: variante/decline × recuperação real → `business_signal collection_ab_result`). Pendente só a **F1.4** (pós-mortem — agora **desbloqueada**: já há A/B medido pra virar `Lição` na rubrica). Demais fases aguardam priorização do dono da plataforma.
+- **Status:** EM PROGRESSO. **Fase 1 (F1.1–F1.3)** implementada: grimoire (`docs/grimoire/copy/` + 4 rubricas), `GrimoireService.load` (roteamento just-in-time, compilado no build), camada por-org (`brand_voice_context` + `promptForOrg` gated). **Fase 1 e Fase 2 FECHADAS.** O ciclo completo **grimoire → copy → medição → aprendizado** está em produção: rubricas roteadas just-in-time (F1.1–F1.2) + camada por-org (F1.3) + copy de cobrança calibrada com A/B e soft/hard decline (F2.1–F2.2) + medição do A/B em `business_signals` (F2.3) + **pós-mortem que reinjeta a lição no grimoire (F1.4)**. **Demais fases (F3 Recuperação, F4 ChurnDetector, F5 Save offers, F6 Referrals) aguardam priorização do dono da plataforma.**
 - **Data:** 2026-08-08
 - **Origem:** análise do repositório público `coreyhaines31/marketingskills` (licença MIT, v2.10.0 — ~49 *Agent Skills* de marketing em markdown, padrão agentskills.io, do Corey Haines) a pedido do dono da plataforma ("analise esse repositório e identifique como ele pode ajudar o nosso projeto"). A análise separou o valor em **3 trilhas**; este ADR executa a **Trilha B** (maior alavancagem) e documenta A e C como anexos.
 - **Relacionadas:**
@@ -147,6 +147,10 @@ Absorvida como **Fase 1** deste ADR — vira a **camada por-org do grimoire** (`
 ## Licença & atribuição
 
 `coreyhaines31/marketingskills` é **MIT** — adaptação de conteúdo para os prompts/docs do ZappFlow é permitida. Toda rubrica derivada em `docs/grimoire/copy/*.md` credita a origem no header. Os CLIs `tools/` (SaaS gringo) **não** são reusados — servem só como referência de formato.
+
+## Histórico (Fase 1 — conclusão)
+
+- **2026-08-08** — **F1.4 implementada (Fase 1 FECHADA)**: canal de pós-mortem — o erro medido vira regra no grimoire. Nova tabela `grimoire_lessons` (dados dinâmicos por-org: `rubric_id`, `lesson`, `dedupe_key`, `active`; lições são DADOS, não markdown estático). `GrimoireService` ganha `recordLesson`/`retireLesson`/`lessonsFor` (db via import dinâmico) e injeta o bloco `<licoes>` datado junto da rubrica no `promptForOrg` (sem lições ⇒ byte-idêntico ao F1.3). `src/server/GrimoirePostmortemService.ts` lê o A/B (F2.3): quando a variante calibrada perde pro control (amostra ≥ 5), grava uma `Lição` na rubrica `dunning-cadence`; quando volta a empatar/ganhar, aposenta (active=0). Wired no `Scheduler.collectionCadencePass` após a medição F2.3. Teste `scripts/test-grimoire-postmortem.ts` (`npm run test:grimoire-postmortem`, 17 checagens): record/retire, injeção `<licoes>` datada, gating pelo brand voice, dedupe/upsert, isolamento multi-tenant. `tsc` + `vite build` + regressão (grimoire-copy 156, grimoire-service 23, grimoire-brand-voice 16, collection-ab-measurement 21, cobranca-cadencia-multitentativa 38) verdes. **Fecha o ciclo virtuoso: A/B ruim → lição na rubrica → grimoire injeta → próxima copy afina.**
 
 ## Histórico (Fase 2)
 

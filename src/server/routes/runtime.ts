@@ -188,6 +188,15 @@ router.get("/operations/kpis", (req: AuthRequest, res): any => {
   res.json({ signals });
 });
 
+// ADR-155 — série temporal do A/B (control × calibrada) pro gráfico da aba
+// Operações. `kind` = collection | sales_recovery. Só leitura (snapshots).
+router.get("/operations/kpi-trend", async (req: AuthRequest, res): Promise<any> => {
+  const kind = req.query.kind === "sales_recovery" ? "sales_recovery" : "collection";
+  const days = req.query.days ? Number(req.query.days) : 30;
+  const { AbTrendService } = await import("../AbTrendService.js");
+  res.json(AbTrendService.series(req.organizationId!, kind, { days }));
+});
+
 // ── Piloto F4a: Retail Closing ────────────────────────────────────────────
 
 // Seed idempotente do playbook `retail_daily_closing_v1` na org. Master admin

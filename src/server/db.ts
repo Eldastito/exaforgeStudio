@@ -8128,6 +8128,29 @@ const initDb = () => {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  // ADR-155 — snapshot diário do A/B (control × calibrada) por org/tipo, pra o
+  // GRÁFICO TEMPORAL na aba Operações. A taxa cumulativa de um dia passado NÃO é
+  // derivável do estado atual (precisaria das contagens daquele dia), então o
+  // histórico é gravado (append-only, 1 linha por org/kind/dia via upsert) — não
+  // é contador mutável (RN-004), é log de fato histórico (padrão do ai_usage_ledger).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ab_trend_snapshots (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      kind TEXT NOT NULL,               -- 'collection' | 'sales_recovery'
+      captured_on TEXT NOT NULL,        -- YYYY-MM-DD
+      control_rate REAL DEFAULT 0,
+      control_sent INTEGER DEFAULT 0,
+      calibrated_rate REAL DEFAULT 0,
+      calibrated_sent INTEGER DEFAULT 0,
+      winner TEXT,                      -- control | calibrated | tie | null
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ab_trend_snap_dedupe
+      ON ab_trend_snapshots(organization_id, kind, captured_on);
+    CREATE INDEX IF NOT EXISTS idx_ab_trend_snap_org
+      ON ab_trend_snapshots(organization_id, kind, captured_on DESC);
+  `);
 };
 
 initDb();

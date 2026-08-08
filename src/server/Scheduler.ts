@@ -553,6 +553,18 @@ export class Scheduler {
   }
 
   /**
+   * ADR-155 — grava o snapshot diário do A/B (control × calibrada) de cobrança e
+   * recuperação, alimentando o gráfico temporal da aba Operações. Upsert por
+   * org/kind/dia (rodar várias vezes no mesmo dia não duplica). Best-effort.
+   */
+  static async abTrendSnapshotPass() {
+    try {
+      const { AbTrendService } = await import("./AbTrendService.js");
+      AbTrendService.captureAll();
+    } catch (e: any) { console.error("[Runtime] snapshot temporal do A/B falhou", e?.message); }
+  }
+
+  /**
    * ADR-152 Fatia 4c.3 — cadência multi-tentativa de recuperação.
    * Varre touches aprovados há N dias SEM reply do cliente e PROPÕE
    * 2ª/3ª msg (via SalesRecoveryPlaybookService.proposeForTicket com
@@ -771,6 +783,8 @@ export class Scheduler {
     await this.salesRecoveryAttributionPass().catch(e => console.error('[Scheduler] attribution F4c.4 falhou', e));
     // ADR-155 F6 — medição do programa de indicação (KPI vivo em business_signals).
     await this.referralProgramMeasurementPass().catch(e => console.error('[Scheduler] medição do programa de indicação F6 falhou', e));
+    // ADR-155 — snapshot diário do A/B (control × calibrada) pro gráfico temporal.
+    try { this.abTrendSnapshotPass(); } catch (e: any) { console.error('[Scheduler] snapshot temporal do A/B falhou', e?.message); }
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     // ADR-153 F7.1 — detector de plan-fit (near_limit_*). Publica sinais em

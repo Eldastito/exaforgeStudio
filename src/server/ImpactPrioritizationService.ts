@@ -94,6 +94,37 @@ const DUE_HINT: Record<string, string> = { critical: "hoje", risk: "esta semana"
 // Responsável sugerido por domínio (perfil, não pessoa).
 const OWNER_HINT: Record<string, string> = { finance: "owner", procurement: "admin", inventory: "admin", sales: "admin", retail_ops: "admin", education: "coordenacao", tasks: "admin" };
 
+// ── Decision Intelligence DI-1 (aditivo sobre ADR-135/136 — ver
+// docs/decision-intelligence/). Classificação de impacto L0–L4 + perfil de
+// análise recomendado. DETERMINÍSTICO (sem LLM), derivado só do que o sinal já
+// carrega (severidade, impacto BRL, override). É o ROTEADOR DE PROFUNDIDADE que
+// a DI-2 (estratégias premortem/red_team/advocate) vai consultar — NÃO é o gate
+// de execução: autonomia/RBAC continuam em ApprovalPolicyService/agent_policies
+// (PRD §35: o Decision Gate CONSULTA o RBAC, não o substitui). Por isso
+// `analysis.humanApprovalRequired` é ADVISÓRIO, não uma autorização.
+const LEVEL_LABEL = ["operacional", "baixo impacto", "impacto moderado", "alto impacto", "crítico"];
+// Severidade → nível implícito.
+const SEV_LEVEL: Record<string, number> = { critical: 3, risk: 2, attention: 1, info: 0 };
+// Valor financeiro (BRL) → nível implícito. Dinheiro sozinho chega no MÁXIMO a
+// L3 ("alto"); L4 ("crítico") exige severidade crítica combinada (ou override
+// de segurança/compliance) — porque irreversibilidade/risco jurídico ainda não
+// são medidos aqui (entram na DI-2). Ordem decrescente; primeiro match vence.
+const BRL_LEVEL: Array<[number, number]> = [[100000, 3], [20000, 3], [5000, 2], [500, 1]];
+
+// Perfil de análise por nível (PRD §16: quanto menor o impacto, menos IA).
+function analysisFor(n: number): any {
+  return {
+    aiDepth: ["minimal", "light", "normal", "deep", "deep"][n],
+    externalResearch: n >= 3 ? "yes" : n === 2 ? "cache" : "no",
+    premortem: n >= 3,
+    premortemOptional: n === 2,       // §16: opcional no L2
+    redTeam: n >= 3,
+    advocate: n >= 3,
+    deepAnalysis: n >= 3,             // §34: análise profunda só do L3 pra cima
+    humanApprovalRequired: n >= 4,    // §35 L4 — ADVISÓRIO (gate real é o RBAC)
+  };
+}
+
 const clamp01 = (n: number) => Math.max(0, Math.min(1, Number(n) || 0));
 const round4 = (n: number) => Math.round((Number(n) || 0) * 10000) / 10000;
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -102,6 +133,25 @@ export class ImpactPrioritizationService {
   /** Ação recomendada para um tipo de sinal (rótulo + action_type), com default. */
   static actionFor(signalType: string): { actionType: string; label: string } {
     return ACTION_MAP[signalType] || { actionType: "create_task", label: "Registrar e acompanhar" };
+  }
+
+  /**
+   * Classifica o impacto em L0–L4 + o perfil de análise recomendado (DI-1).
+   * Determinístico e reutilizável pela DI-2. `override` = evento crítico de
+   * segurança/compliance (vai direto pra L4).
+   */
+  static levelFor(input: { severity?: string; impactAmount?: number | null; impactUnit?: string | null; override?: boolean }): { level: string; n: number; label: string; analysis: any } {
+    const sev = SEV_LEVEL[String(input.severity || "info")] ?? 0;
+    let fin = 0;
+    if (input.impactUnit === "BRL" && input.impactAmount != null) {
+      const amt = Math.abs(Number(input.impactAmount) || 0);
+      for (const [thr, lvl] of BRL_LEVEL) { if (amt >= thr) { fin = lvl; break; } }
+    }
+    let n = Math.max(sev, fin);
+    if (input.override) n = 4;                    // segurança/compliance crítico
+    else if (sev >= 3 && fin >= 3) n = 4;         // crítico + alto valor = crítico
+    n = Math.max(0, Math.min(4, n));
+    return { level: `L${n}`, n, label: LEVEL_LABEL[n], analysis: analysisFor(n) };
   }
 
   /**
@@ -189,12 +239,18 @@ export class ImpactPrioritizationService {
     }
 
     const evidence = safeParse(s.evidence_json);
+    // DI-1: nível de impacto L0–L4 + perfil de análise (roteador de profundidade).
+    const cls = ImpactPrioritizationService.levelFor({ severity, impactAmount: s.impact_amount, impactUnit: s.impact_unit, override });
     return {
       signalId: s.id,
       domain: s.domain,
       signalType: s.signal_type,
       override,
       score,
+      impactLevel: cls.level,
+      impactLevelN: cls.n,
+      impactLevelLabel: cls.label,
+      analysis: cls.analysis,
       components: {
         normalizedImpact: round4(normalizedImpact),
         urgency: round4(urgency),

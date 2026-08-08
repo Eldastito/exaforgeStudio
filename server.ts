@@ -73,6 +73,7 @@ import gestorRoutes from "./src/server/routes/gestor.js";
 import peopleRoutes from "./src/server/routes/people.js";
 import productionRoutes from "./src/server/routes/production.js";
 import signalsRoutes from "./src/server/routes/signals.js";
+import decisionIntelligenceRoutes from "./src/server/routes/decisionIntelligence.js";
 import recommendationsRoutes from "./src/server/routes/recommendations.js";
 import actionsRoutes from "./src/server/routes/actions.js";
 import insightsRoutes from "./src/server/routes/insights.js";
@@ -595,6 +596,7 @@ async function startServer() {
   protectedApi.use("/executive", executiveRoutes);
   protectedApi.use("/business", businessRoutes);
   protectedApi.use("/signals", signalsRoutes);
+  protectedApi.use("/decision-intelligence", decisionIntelligenceRoutes);
   // ADR-153 F7.3 — recomendações de upgrade + cooldown (LGPD §14 / PRD §15).
   protectedApi.use("/billing/recommendations", recommendationsRoutes);
   protectedApi.use("/actions", actionsRoutes);

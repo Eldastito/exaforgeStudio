@@ -7936,6 +7936,32 @@ const initDb = () => {
   // 1, o detector publica sinais churn_risk_high em business_signals (nunca
   // tabela própria — convenção nº 12). Default 0: zero mudança pras orgs atuais.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN churn_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // Decision Intelligence DI-1 (aditivo sobre ADR-135/136 — ver
+  // docs/decision-intelligence/). Evidence Package v1: CACHE opt-in por org
+  // (convenção nº 10). Off (default) = zero mudança (build computa fresco e não
+  // persiste). On = reusa o pacote enquanto fresco (janela L2 "Organization
+  // Intelligence", PRD §25). É cache DERIVADO do Business Snapshot V2.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN evidence_layer_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // evidence_packages: 1 pacote vivo por (org, subject). package_json guarda o
+  // pacote canônico (interno + slots externo/histórico vazios na v1). expires_at
+  // define o TTL/freshness. UNIQUE(org, subject) → upsert, nunca duplica.
+  // Isolado por organization_id (convenção nº 1).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS evidence_packages (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      vertical TEXT,
+      package_json TEXT NOT NULL,
+      confidence REAL,
+      generated_at DATETIME NOT NULL,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_packages_subject
+      ON evidence_packages(organization_id, subject);
+  `);
 };
 
 initDb();

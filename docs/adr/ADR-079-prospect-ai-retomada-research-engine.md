@@ -65,6 +65,8 @@ O `gosom/google-maps-scraper` **não é embutido nem vendido**. Aproveitamos del
 
 O `scope: global` da `prospect_learning_memory` do PRD **fica fora do MVP**. Agregação entre tenants cruza a fronteira de isolamento que é critério de aceite do próprio PRD; se um dia entrar, será anonimizada e com ADR próprio.
 
+> **Atualização (2026-08-08):** a "ADR de agregação anonimizada" prevista aqui foi escrita — **`ADR-156`** (External Intelligence de vertical compartilhada). Ela supersede esta D4 **apenas para inteligência externa de mercado** (dado do mundo externo, não-pessoal, sem `organization_id`). A `prospect_learning_memory` **continua estritamente por-tenant** — não é objeto da ADR-156.
+
 ### D5. Sem flag nova, sem event bus
 
 - Gating continua por `ModuleService` (`enabled_modules` + planos). O módulo permanece **opt-in por organização** (regra do ADR-077) até o fim da Fase C; GA/reativação de default é decisão futura, org a org.

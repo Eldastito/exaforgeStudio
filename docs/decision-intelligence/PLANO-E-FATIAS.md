@@ -43,10 +43,17 @@ Sem UI/menu novo. Backward-compat 100% (campos aditivos + cache opt-in).
 - **Teste:** `npm run test:decision-intelligence-di3` (16 checks). Migração aditiva (`evidence_cache_events`).
 - **Sub-budgets de IA `[-]` MOVIDOS PARA DI-4:** research/deep_analysis/external_api só passam a ter gasto real quando a External Intelligence existir; construir o orçamento agora seria infraestrutura inerte (frugalidade, PRD §43). Entram junto da DI-4. Hoje o gasto de IA segue metrado e limitado por `PlanService.aiAllowed` + `ai_monthly_limit_cents`.
 
-## Fatia DI-4 — External Intelligence `[-]` ADIADA
+## Fatia DI-4 — External Intelligence `[~]` DESTRAVADA (ADR-156, aguardando aprovação)
 
-- `ExternalResearchProvider` + Research Broker + cache por vertical (dedup por fingerprint, freshness). **Bloqueada** pela ADR-079 D4 (compartilhamento cross-tenant exige ADR próprio de isolamento/LGPD). Reabrir só com decisão explícita do dono.
-- **Sub-budgets de IA** (research/deep_analysis/external_api + prioridade) entram aqui, quando houver gasto externo/research real para orçar (movidos da DI-3).
+Decisão do dono (2026-08-08): **compartilhado por vertical anonimizado, com ADR nova antes do código**. A ADR foi escrita: **`docs/adr/ADR-156-external-intelligence-vertical-compartilhada.md`** (é a "ADR de agregação anonimizada" que a ADR-079 D4 exigia). **Nenhum código até o dono aprovar a ADR.**
+
+Sub-fatias (ver ADR-156 D8):
+- **DI-4.1** — schema `vertical_intelligence` (compartilhada, sem `organization_id`) + `organization_contextualization` (por-org) + `ExternalResearchProvider` (interface + **stub determinístico**, sem chamada live) + `ResearchBrokerService` (cache/dedup por fingerprint/freshness) + **filtro de anonimização** + testes offline.
+- **DI-4.2** — sub-budgets de IA (research/external_api) com enforcement no broker (movidos da DI-3).
+- **DI-4.3** — fio até o slot `externalEvidence[]` do Evidence Package + consumo pelo `DecisionEngine` só em L3+.
+- **DI-4.4** (posterior, opt-in) — provider real (web-search) atrás da interface, gated por env.
+
+Princípio de segurança (ADR-156 D1/D2): a camada compartilhada guarda **só pesquisa do mundo externo** (mercado/tendências), **zero** dado por-org/pessoal; o isolamento por `organization_id` permanece intacto para todo dado privado.
 
 ## Fora de escopo (frugalidade, PRD §43)
 

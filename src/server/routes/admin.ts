@@ -10,6 +10,7 @@ import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { BlueprintSeeder } from "../BlueprintSeeder.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
+import { FalatuSaveOfferService } from "../FalatuSaveOfferService.js";
 import { ProductionReadinessService } from "../ProductionReadinessService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -650,6 +651,16 @@ router.get("/upgrade-recommendations", (req: AuthRequest, res): any => {
 router.get("/upgrade-recommendations/summary", (_req: AuthRequest, res): any => {
   try {
     res.json(UpgradeRecommendationService.summaryAcrossOrgs());
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ADR-155 F5.3 — medição de retenção das save offers (retidos vs reembolsados),
+// CROSS-ORG (só o dono da plataforma). Derivado por query sobre o outcome das
+// intenções (RN-004). `byOffer` diz qual degrau do ladder retém melhor. Gateado
+// pelo `requireMasterAdmin` do mount de /api/admin.
+router.get("/falatu/save-offer-retention", (_req: AuthRequest, res): any => {
+  try {
+    res.json(FalatuSaveOfferService.retentionSummary());
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

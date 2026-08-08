@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown } from 'lucide-react';
+import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown, ShieldCheck } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
@@ -23,6 +23,7 @@ export function HealthCenterView() {
   const setViewMode = useStore((s) => s.setViewMode);
 
   const [idx, setIdx] = useState<any | null>(null);
+  const [metrics, setMetrics] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'tutor' | 'gestor'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('healthMode') === 'gestor' ? 'gestor' : 'tutor'));
   const setModePersist = (m: 'tutor' | 'gestor') => { setMode(m); try { localStorage.setItem('healthMode', m); } catch { /* noop */ } };
@@ -30,6 +31,8 @@ export function HealthCenterView() {
     setLoading(true);
     apiFetch('/api/health-center').then((r) => r.json()).then((x: any) => setD(x)).catch(() => {}).finally(() => setLoading(false));
     apiFetch('/api/health-center/survival-index').then((r) => r.json()).then((x: any) => { if (typeof x?.score === 'number') setIdx(x); }).catch(() => {});
+    // Métricas do loop fechado (DI-3): valor protegido + acurácia + aceitação.
+    apiFetch('/api/decision-intelligence/metrics').then((r) => r.json()).then((x: any) => setMetrics(x)).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -132,6 +135,41 @@ export function HealthCenterView() {
             </div>
           );
         })()}
+
+        {/* Valor protegido + métricas de decisão (DI-3). Só aparece quando há
+            algo medido — evita card vazio em org nova. */}
+        {metrics && (metrics.valueProtected?.protectedTotal > 0 || metrics.valueProtected?.generatedTotal > 0 || metrics.riskMaterialization?.total > 0 || metrics.recommendationAcceptance?.rate != null) && (
+          <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck className="w-4 h-4 text-emerald-300" />
+              <span className="text-sm font-medium text-zinc-100">Valor protegido pelo ZapFlow</span>
+              <span className="text-[11px] text-zinc-500">· últimos 12 meses</span>
+            </div>
+            <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+              <div>
+                <div className="text-2xl font-bold text-emerald-300 tabular-nums">{brl(metrics.valueProtected?.protectedTotal)}</div>
+                <div className="text-[11px] text-zinc-500">prejuízo + custo evitado</div>
+              </div>
+              {metrics.valueProtected?.generatedTotal > 0 && (
+                <div>
+                  <div className="text-lg font-semibold text-zinc-100 tabular-nums">{brl(metrics.valueProtected.generatedTotal)}</div>
+                  <div className="text-[11px] text-zinc-500">receita recuperada</div>
+                </div>
+              )}
+              <div className="grid grid-cols-3 gap-4 text-[13px] ml-auto">
+                {metrics.predictionAccuracy?.score != null && (
+                  <div><div className="text-[10px] uppercase tracking-wide text-zinc-500">Acurácia</div><div className="text-zinc-100 font-semibold">{Math.round(metrics.predictionAccuracy.score * 100)}%</div></div>
+                )}
+                {metrics.recommendationAcceptance?.rate != null && (
+                  <div><div className="text-[10px] uppercase tracking-wide text-zinc-500">Aceitação</div><div className="text-zinc-100 font-semibold">{Math.round(metrics.recommendationAcceptance.rate * 100)}%</div></div>
+                )}
+                {metrics.riskMaterialization?.total > 0 && (
+                  <div><div className="text-[10px] uppercase tracking-wide text-zinc-500">Riscos previstos</div><div className="text-zinc-100 font-semibold tabular-nums">{metrics.riskMaterialization.total}</div></div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Narrativa do Diretor (modo Tutor) */}
         {mode === 'tutor' && d?.narrative && (

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
-import { Brain, RefreshCcw, Loader2, Save, DollarSign, Layers, Plus } from 'lucide-react';
+import { Brain, RefreshCcw, Loader2, Save, DollarSign, Layers, Plus, AlertTriangle, BellRing, BellOff } from 'lucide-react';
 
 /**
  * NicheIntelligenceView (ADR-156, DI-UI-1) — painel MASTER ADMIN da External
@@ -33,6 +33,15 @@ export function NicheIntelligenceView() {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<any>({ ...EMPTY_FORM });
   const [submitting, setSubmitting] = useState(false);
+  const [due, setDue] = useState<any[]>([]);
+  const [reminderOn, setReminderOn] = useState(true);
+
+  const loadDue = () => apiFetch('/api/decision-intelligence/research-refresh-due').then((r) => r.json()).then((d) => { setDue(Array.isArray(d?.due) ? d.due : []); setReminderOn(d?.enabled !== false); }).catch(() => {});
+  const toggleReminder = () => {
+    const next = !reminderOn;
+    apiFetch('/api/decision-intelligence/research-refresh-due', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) })
+      .then((r) => r.json()).then((d) => { setReminderOn(d?.enabled !== false); toast.success(next ? 'Lembrete semanal ligado.' : 'Lembrete semanal desligado.'); }).catch(() => toast.error('Falha ao alterar o lembrete.'));
+  };
 
   const loadBudget = () => apiFetch('/api/decision-intelligence/research-budget').then((r) => r.json()).then(setBudget).catch(() => {});
   const loadItems = () => {
@@ -42,7 +51,7 @@ export function NicheIntelligenceView() {
       .catch(() => setItems([])).finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadBudget(); }, []);
+  useEffect(() => { loadBudget(); loadDue(); }, []);
   useEffect(() => { loadItems(); }, [filterVertical]);
 
   const saveBudget = () => {
@@ -87,6 +96,28 @@ export function NicheIntelligenceView() {
           <p className="text-xs text-zinc-400">Pesquisa de mercado por vertical, compartilhada e anonimizada entre as contas do nicho. Você cola a pesquisa 1× e todas reaproveitam.</p>
         </div>
       </header>
+
+      {/* Lembrete semanal + nichos a atualizar (DI-4.5) */}
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-medium text-zinc-200">Lembrete semanal por nicho</div>
+          <button onClick={toggleReminder} className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${reminderOn ? 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+            {reminderOn ? <BellRing className="h-4 w-4" /> : <BellOff className="h-4 w-4" />} {reminderOn ? 'Ligado' : 'Desligado'}
+          </button>
+        </div>
+        {due.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+            <div className="mb-1 flex items-center gap-2 text-[13px] font-medium text-amber-200"><AlertTriangle className="h-4 w-4" /> {due.length} nicho(s) precisam de atualização</div>
+            <div className="flex flex-wrap gap-1.5">
+              {due.map((d) => (
+                <span key={d.id} className={`rounded px-2 py-0.5 text-[11px] ${d.expired ? 'bg-red-500/15 text-red-300' : 'bg-amber-500/15 text-amber-200'}`}>{verticalLabel(d.vertical)} · {d.topic}{d.expired ? ' (vencida)' : ''}</span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-[12px] text-zinc-500">Toda semana eu aviso aqui (e no seu inbox de sinais) os nichos com pesquisa vencendo, para você re-colar. Não rodo pesquisa sozinho — o conteúdo é sempre seu.</p>
+        )}
+      </section>
 
       {/* Orçamento de pesquisa (plataforma) */}
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">

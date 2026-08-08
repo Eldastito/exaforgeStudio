@@ -50,6 +50,7 @@ import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
+import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
 import { BackupService } from "./BackupService.js";
 
@@ -715,6 +716,9 @@ export class Scheduler {
     await PurchaseRequisitionService.pass().catch(e => console.error('[Scheduler] reposição falhou', e));
     await QuoteService.passFollowupAndExpire(this.io).catch(e => console.error('[Scheduler] follow-up de orçamento falhou', e));
     try { LgpdService.retentionPass(); } catch (e) { console.error('[Scheduler] retenção LGPD falhou', e); }
+    // DI-4.5 (ADR-156): lembrete SEMANAL de atualização das pesquisas de nicho
+    // vencendo (provider manual — só avisa o admin, nunca roda pesquisa sozinho).
+    try { VerticalIntelligenceReminderService.maybeWeeklySweep(); } catch (e) { console.error('[Scheduler] lembrete de inteligência de nicho falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

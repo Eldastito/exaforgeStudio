@@ -8,6 +8,7 @@ import { DecisionMetricsService } from "../DecisionMetricsService.js";
 import { VerticalIntelligenceService } from "../VerticalIntelligenceService.js";
 import { ResearchBrokerService } from "../ResearchBrokerService.js";
 import { ResearchBudgetService } from "../ResearchBudgetService.js";
+import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceReminderService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -109,6 +110,20 @@ router.post("/vertical-intelligence/manual", requireMasterAdmin, (req: AuthReque
   } catch (e: any) {
     res.status(400).json({ error: String(e?.message || e) });
   }
+});
+
+// GET /api/decision-intelligence/research-refresh-due — nichos vencendo/vencidos
+// (com consumidores) + estado do lembrete semanal. SÓ admin master (DI-4.5).
+router.get("/research-refresh-due", requireMasterAdmin, (_req: AuthRequest, res): any => {
+  res.json({ due: VerticalIntelligenceReminderService.dueNiches(), enabled: VerticalIntelligenceReminderService.isEnabled(), lastRun: VerticalIntelligenceReminderService.lastRun() });
+});
+
+// PUT /api/decision-intelligence/research-refresh-due — liga/desliga o lembrete
+// semanal. Body: { enabled }. SÓ admin master.
+router.put("/research-refresh-due", requireMasterAdmin, (req: AuthRequest, res): any => {
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) é obrigatório." });
+  VerticalIntelligenceReminderService.setEnabled(req.body.enabled);
+  res.json({ enabled: VerticalIntelligenceReminderService.isEnabled() });
 });
 
 // GET /api/decision-intelligence/vertical-intelligence?vertical= — SÓ admin master.

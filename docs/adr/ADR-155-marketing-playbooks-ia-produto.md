@@ -1,6 +1,6 @@
 # ADR-155 — Marketing Playbooks → IA de Produto do ZappFlow (Trilha B)
 
-- **Status:** EM PROGRESSO — Fase 1 com o padrão grimoire (padrão 4 do `docs/patterns/agentic-pipeline-lessons.md`). **F1.1 + F1.2 + F1.3 implementadas**: esqueleto `docs/grimoire/copy/` + 4 rubricas-núcleo; `GrimoireService.load` (roteamento just-in-time, grimoire compilado no build, isolamento por módulo); camada por-org `brand_voice_context`/`brand_voice_enabled` + `promptForOrg` (injeção combinada gated pela flag). **Falta da Fase 1: F1.4** (canal de pós-mortem — depende de F2/F3). A **adoção por-redator** da injeção acontece em **F2/F3** (tune-up da copy). Demais fases aguardam priorização do dono da plataforma.
+- **Status:** EM PROGRESSO. **Fase 1 (F1.1–F1.3)** implementada: grimoire (`docs/grimoire/copy/` + 4 rubricas), `GrimoireService.load` (roteamento just-in-time, compilado no build), camada por-org (`brand_voice_context` + `promptForOrg` gated). **Fase 2: F2.1 implementada** — `CollectionCopy` (fonte única da copy de cobrança) com A/B `control`|`calibrated` por-org, calibrada pela rubrica `dunning-cadence`; wired em `CollectionPlaybook` (T1) e `CollectionCadenceService` (T2/T3), variante registrada por follow-up. Próxima: **F2.2** (soft vs hard decline). Pendente da Fase 1: **F1.4** (pós-mortem — depende de F2/F3). Demais fases aguardam priorização do dono da plataforma.
 - **Data:** 2026-08-08
 - **Origem:** análise do repositório público `coreyhaines31/marketingskills` (licença MIT, v2.10.0 — ~49 *Agent Skills* de marketing em markdown, padrão agentskills.io, do Corey Haines) a pedido do dono da plataforma ("analise esse repositório e identifique como ele pode ajudar o nosso projeto"). A análise separou o valor em **3 trilhas**; este ADR executa a **Trilha B** (maior alavancagem) e documenta A e C como anexos.
 - **Relacionadas:**
@@ -147,6 +147,10 @@ Absorvida como **Fase 1** deste ADR — vira a **camada por-org do grimoire** (`
 ## Licença & atribuição
 
 `coreyhaines31/marketingskills` é **MIT** — adaptação de conteúdo para os prompts/docs do ZappFlow é permitida. Toda rubrica derivada em `docs/grimoire/copy/*.md` credita a origem no header. Os CLIs `tools/` (SaaS gringo) **não** são reusados — servem só como referência de formato.
+
+## Histórico (Fase 2)
+
+- **2026-08-08** — **F2.1 implementada** (tune-up da copy de Cobrança): novo `src/server/CollectionCopy.ts` — fonte única dos 3 estágios (reminder/firm/notice) em 2 variantes A/B: `control` (copy atual **byte-idêntica** ⇒ zero mudança em prod) e `calibrated` (afinada pela rubrica `docs/grimoire/copy/compose/dunning-cadence.md` — CTA único, tom escalando sem culpar, valor+vencimento, aviso final mantendo o informativo CDC "proteção ao crédito"). Aditivos em DB: `organization_settings.collection_copy_variant` (default `'control'`) + `collection_followup_attempts.variant` (registra a variante enviada, insumo da medição A/B da F2.3). Wired em `CollectionPlaybook` (T1) e `CollectionCadenceService` (T2/T3), com a variante escolhida por-org e gravada no follow-up + audit. Teste `scripts/test-collection-copy.ts` (`npm run test:collection-copy`, 22 checagens) pina o `control` byte-idêntico e valida o `calibrated`. Regressão verde: `cobranca-cadencia-multitentativa` (38), `pilot-runtime` (55), `piloto-cobranca` (38), `cobranca-promise-recheck` (33), `cobranca-intent-classifier` (35), `retail-cobranca` (10). Não muda canal/timing; só a copy (guardrail F2). **A calibração soft vs hard decline é F2.2; a atribuição/medição do A/B é F2.3.**
 
 ## Histórico
 

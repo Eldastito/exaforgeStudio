@@ -7894,6 +7894,13 @@ const initDb = () => {
   // mudança em prod); 1 => rubrica global + <contexto_marca> desta org.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN brand_voice_context TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN brand_voice_enabled INTEGER NOT NULL DEFAULT 0`); } catch(e){}
+  // ADR-155 F2.1 — A/B da copy de cobrança. collection_copy_variant escolhe a
+  // variante (control|calibrated) que o CollectionCopy usa; 'control' (default
+  // de toda org) = copy atual byte-idêntica ⇒ zero mudança em prod. A coluna
+  // `variant` em collection_followup_attempts REGISTRA qual variante foi enviada
+  // em cada follow-up, pra a medição A/B da F2.3 correlacionar com revenue.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_copy_variant TEXT DEFAULT 'control'`); } catch(e){}
+  try { db.exec(`ALTER TABLE collection_followup_attempts ADD COLUMN variant TEXT`); } catch(e){}
 };
 
 initDb();

@@ -8151,6 +8151,12 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_ab_trend_snap_org
       ON ab_trend_snapshots(organization_id, kind, captured_on DESC);
   `);
+  // ADR-155 — snapshot também da CONVERSÃO da indicação (kind='referral'), que é
+  // uma linha só (não control×calibrada). Aditivo à tabela viva ab_trend_snapshots
+  // ⇒ ALTER no fim; pros kinds de A/B esses campos ficam 0.
+  try { db.exec(`ALTER TABLE ab_trend_snapshots ADD COLUMN referred INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE ab_trend_snapshots ADD COLUMN qualified INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE ab_trend_snapshots ADD COLUMN conversion_rate REAL DEFAULT 0`); } catch(e){}
 };
 
 initDb();

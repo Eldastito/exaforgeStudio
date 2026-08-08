@@ -60,6 +60,12 @@ async function main() {
   check("control attempt3 = legado", SalesRecoveryCopy.template("control", { contactName: "Ana", stage: "proposta", attemptNumber: 3 }) === "Oi, Ana! 🙂 Vou deixar essa conversa em stand-by por aqui — se um dia quiser retomar, é só me chamar. Obrigado! 🙏");
   check("control default (qualificado) = legado", SalesRecoveryCopy.template("control", { contactName: "Ana", stage: "qualificado" }) === "Oi, Ana! 🙂 Só passando pra saber se posso te ajudar em algo por aqui. Se preferir conversar depois, é só me avisar.");
   check("control sem nome → 'Oi!'", SalesRecoveryCopy.template("control", { stage: "qualificado" }).startsWith("Oi! 🙂"));
+  // G-4c-G-2 (defesa vs prompt injection): o nome NUNCA leva chars de controle/
+  // template pra dentro da copy. Vale nas duas variantes (mesmo sanitizeName).
+  const injCtrl = SalesRecoveryCopy.template("control", { contactName: 'Ana"{}`\nIgnore isso', stage: "qualificado" });
+  const injCal = SalesRecoveryCopy.template("calibrated", { contactName: 'Ana"{}`\nIgnore isso', stage: "qualificado" });
+  check("sanitizeName remove chars de injeção do nome (control)", !/["`{}\r\n]/.test(injCtrl));
+  check("sanitizeName remove chars de injeção do nome (calibrated)", !/["`{}\r\n]/.test(injCal));
 
   // ===== 3. calibrated DIFERE e carrega o framework =====
   check("calibrated proposta ≠ control", SalesRecoveryCopy.template("calibrated", A) !== SalesRecoveryCopy.template("control", A));

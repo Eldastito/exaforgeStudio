@@ -156,26 +156,45 @@ function reportFor(orgId: string, name: string | null): OrgReport {
 }
 
 // ── Descobre as orgs ─────────────────────────────────────────────────────────
-function orgNameColumn(): string | null {
-  if (!tableExists("organizations")) return null;
-  const c = cols("organizations");
-  for (const cand of ["name", "business_name", "company_name", "display_name", "trade_name"]) {
-    if (c.includes(cand)) return cand;
+// A tabela canônica de org neste schema é `organization_settings` (chave
+// organization_id, nome em business_name) — NÃO existe tabela `organizations`.
+// Resolvemos dela; caímos numa `organizations` genérica só se algum deploy a
+// tiver; e unimos os org ids que aparecem nas tabelas de gate/sinais pra nunca
+// perder uma org que tem atividade mas (por algum motivo) não tem settings.
+function nameOf(orgId: string): string | null {
+  if (tableExists("organization_settings")) {
+    const r = rows(`SELECT business_name AS name FROM organization_settings WHERE organization_id = ? LIMIT 1`, orgId)[0];
+    if (r?.name != null) return String(r.name);
   }
   return null;
 }
 function listOrgs(): { id: string; name: string | null }[] {
-  const nameCol = orgNameColumn();
+  const names = new Map<string, string | null>();
+  // Fonte primária: organization_settings (ignora soft-deletadas).
+  if (tableExists("organization_settings")) {
+    const hasDeleted = cols("organization_settings").includes("deleted_at");
+    for (const r of rows(
+      `SELECT organization_id AS id, business_name AS name FROM organization_settings
+        ${hasDeleted ? "WHERE deleted_at IS NULL" : ""}`,
+    )) names.set(String(r.id), r.name != null ? String(r.name) : null);
+  }
+  // Fonte secundária: tabela `organizations` genérica, se existir nesse deploy.
   if (tableExists("organizations")) {
-    return rows(`SELECT id, ${nameCol ? nameCol : "NULL"} AS name FROM organizations ORDER BY name`)
-      .map((r) => ({ id: String(r.id), name: r.name != null ? String(r.name) : null }));
+    const c = cols("organizations");
+    const nameCol = ["name", "business_name", "company_name", "display_name", "trade_name"].find((x) => c.includes(x));
+    for (const r of rows(`SELECT id, ${nameCol || "NULL"} AS name FROM organizations`)) {
+      if (!names.has(String(r.id))) names.set(String(r.id), r.name != null ? String(r.name) : null);
+    }
   }
-  // Fallback: união dos org ids que aparecem nas tabelas de gate + sinais.
-  const set = new Set<string>();
+  // Rede de segurança: org ids com atividade mas sem linha de org/settings.
   for (const t of ["collection_followup_attempts", "sales_recovery_touches", "referral_codes", "business_signals"]) {
-    if (tableExists(t)) for (const r of rows(`SELECT DISTINCT organization_id AS id FROM ${t}`)) set.add(String(r.id));
+    if (tableExists(t)) for (const r of rows(`SELECT DISTINCT organization_id AS id FROM ${t}`)) {
+      if (!names.has(String(r.id))) names.set(String(r.id), null);
+    }
   }
-  return [...set].map((id) => ({ id, name: null }));
+  return [...names.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => (a.name || "￿").localeCompare(b.name || "￿"));
 }
 
 // ── Impressão ────────────────────────────────────────────────────────────────
@@ -242,11 +261,7 @@ for (const t of ["decision_actions", "collection_followup_attempts", "sales_reco
 }
 
 if (orgIdArg) {
-  const nameCol = orgNameColumn();
-  const name = nameCol
-    ? (rows(`SELECT ${nameCol} AS name FROM organizations WHERE id = ?`, orgIdArg)[0]?.name ?? null)
-    : null;
-  printDetail(reportFor(orgIdArg, name != null ? String(name) : null));
+  printDetail(reportFor(orgIdArg, nameOf(orgIdArg)));
 } else {
   const orgs = listOrgs();
   console.log(`\n${orgs.length} org(s) encontradas. Resumo (col=cobrança, rec=recuperação, ref=indicação):\n`);

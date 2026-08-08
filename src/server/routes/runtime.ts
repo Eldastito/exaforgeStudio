@@ -191,7 +191,8 @@ router.get("/operations/kpis", (req: AuthRequest, res): any => {
 // ADR-155 — série temporal do A/B (control × calibrada) pro gráfico da aba
 // Operações. `kind` = collection | sales_recovery. Só leitura (snapshots).
 router.get("/operations/kpi-trend", async (req: AuthRequest, res): Promise<any> => {
-  const kind = req.query.kind === "sales_recovery" ? "sales_recovery" : "collection";
+  const raw = String(req.query.kind || "collection");
+  const kind = (raw === "sales_recovery" || raw === "referral") ? raw : "collection";
   const days = req.query.days ? Number(req.query.days) : 30;
   const { AbTrendService } = await import("../AbTrendService.js");
   res.json(AbTrendService.series(req.organizationId!, kind, { days }));

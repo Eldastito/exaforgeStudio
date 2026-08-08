@@ -86,6 +86,16 @@ async function main() {
   check("série recuperação tem 1 ponto (só hoje)", serieR.points.length === 1);
   check("série recuperação winner calibrated no ponto", serieR.points[0].winner === "calibrated");
 
+  // ===== 4b. indicação (referral) — conversão em uma linha =====
+  const orgR = mkOrg();
+  for (let i = 0; i < 4; i++) db.prepare(`INSERT INTO referral_codes (id, organization_id, contact_id, code) VALUES (?, ?, ?, ?)`).run(randomUUID(), orgR, randomUUID(), randomUUID().slice(0, 6).toUpperCase());
+  for (let i = 0; i < 4; i++) db.prepare(`INSERT INTO contacts (id, organization_id, channel_id, name, identifier, referred_by_contact_id) VALUES (?, ?, 'ch1', 'Ind', ?, ?)`).run(randomUUID(), orgR, randomUUID(), randomUUID());
+  for (let i = 0; i < 2; i++) db.prepare(`INSERT INTO coupons (id, organization_id, owner_contact_id, kind, discount_percent, status) VALUES (?, ?, ?, 'referral_reward', 10, 'active')`).run(randomUUID(), orgR, randomUUID()); // 2 qualified / 4 referred → 50%
+  check("capture indicação → captured", AbTrendService.capture(orgR, "referral").captured === true);
+  const serieI = AbTrendService.series(orgR, "referral", { days: 30 });
+  check("série indicação tem 1 ponto", serieI.points.length === 1);
+  check("ponto indicação: conversão 50 / referred 4 / qualified 2", serieI.points[0].conversionRate === 50 && serieI.points[0].referred === 4 && serieI.points[0].qualified === 2);
+
   // ===== 5. skip sem dado + isolamento =====
   check("capture sem dado (orgB) → captured false", AbTrendService.capture(orgB, "collection").captured === false);
   check("série orgB vazia (isolamento)", AbTrendService.series(orgB, "collection").points.length === 0);
@@ -93,7 +103,7 @@ async function main() {
 
   // ===== 6. captureAll agrega os dois kinds =====
   const all = AbTrendService.captureAll();
-  check("captureAll cobre cobrança e recuperação de orgA", all.collection >= 1 && all.sales_recovery >= 1);
+  check("captureAll cobre os 3 kinds (cobrança + recuperação + indicação)", all.collection >= 1 && all.sales_recovery >= 1 && all.referral >= 1);
 
   console.log("\n=== A/B trend (gráfico temporal) — ADR-155 ===");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}`);

@@ -7887,6 +7887,13 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_falatu_protocol_act_due
       ON falatu_protocol_activations(status, scheduled_for);
   `);
+  // ADR-155 F1.3 — camada por-org do grimoire de copy. brand_voice_context é o
+  // texto livre de voz/marca da org que o redator injeta JUNTO da rubrica
+  // global roteada. brand_voice_enabled é o opt-in (convenção nº 10): 0 (default
+  // de toda org existente) => GrimoireService.promptForOrg NÃO injeta nada (zero
+  // mudança em prod); 1 => rubrica global + <contexto_marca> desta org.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN brand_voice_context TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN brand_voice_enabled INTEGER NOT NULL DEFAULT 0`); } catch(e){}
 };
 
 initDb();

@@ -85,4 +85,43 @@ export class GrimoireService {
   private static render(r: GrimoireRubric): string {
     return `<rubrica id="${r.id}" estagio="${r.estagio}">\n${r.corpo}\n</rubrica>`;
   }
+
+  // ===== F1.3 — camada por-org (brand voice) =====
+  // db é importado dinamicamente (convenção nº 11) pra manter as partes puras
+  // acima (F1.2: routes/load/promptFor) livres de DB e sem custo de init no load.
+
+  /** Voz/marca por org: flag opt-in + texto de contexto. Isolamento por organization_id. */
+  static async getBrandVoice(orgId: string): Promise<{ enabled: boolean; context: string | null }> {
+    const db = (await import("./db.js")).default;
+    const row = db
+      .prepare(`SELECT brand_voice_enabled AS enabled, brand_voice_context AS context FROM organization_settings WHERE organization_id = ?`)
+      .get(orgId) as { enabled?: number; context?: string | null } | undefined;
+    return { enabled: !!(row && row.enabled), context: (row && row.context) ?? null };
+  }
+
+  /** Atualiza voz/marca da org (patch parcial). Só toca os campos passados. */
+  static async setBrandVoice(orgId: string, patch: { enabled?: boolean; context?: string | null }): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (patch.enabled !== undefined) { sets.push("brand_voice_enabled = ?"); vals.push(patch.enabled ? 1 : 0); }
+    if (patch.context !== undefined) { sets.push("brand_voice_context = ?"); vals.push(patch.context); }
+    if (!sets.length) return;
+    vals.push(orgId);
+    const db = (await import("./db.js")).default;
+    db.prepare(`UPDATE organization_settings SET ${sets.join(", ")} WHERE organization_id = ?`).run(...(vals as any[]));
+  }
+
+  /**
+   * Injeção COMBINADA por org (o que os redatores de F2/F3 chamam): rubrica(s)
+   * global(is) roteada(s) + <contexto_marca> da org. GATED pela flag: se
+   * brand_voice_enabled=0 (default), retorna "" — o redator não injeta NADA
+   * (zero mudança em prod). Só quando a org opta é que o grimoire entra no prompt.
+   */
+  static async promptForOrg(orgId: string, module: string, stages: GrimoireStage[]): Promise<string> {
+    const bv = await this.getBrandVoice(orgId);
+    if (!bv.enabled) return "";
+    const rubricas = this.promptFor(orgId, module, stages);
+    const marca = bv.context && bv.context.trim() ? `<contexto_marca>\n${bv.context.trim()}\n</contexto_marca>` : "";
+    return [rubricas, marca].filter(Boolean).join("\n\n");
+  }
 }

@@ -1,0 +1,32 @@
+# Exclusões do code-review-graph (tirth8205/code-review-graph).
+# Objetivo: parsear só o código-fonte de verdade (src/ apps/ scripts/ tools/)
+# e não gastar tempo/ruído com gerados, vendorizados ou dados de runtime.
+# A maioria já é gitignorada (não aparece no checkout do CI), mas ficam aqui
+# explícitos pra valer também no uso local (`code-review-graph build/serve`).
+
+# Dependências e saídas de build
+node_modules/
+dist/
+build/
+coverage/
+
+# Estáticos servidos (não é lógica a revisar)
+public/
+
+# Bancos SQLite / dados de runtime
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+media/
+
+# Minificados / sourcemaps / lockfiles
+*.min.js
+*.map
+package-lock.json
+
+# Ambiente / temporários
+.env*
+scratchpad/
+*.log

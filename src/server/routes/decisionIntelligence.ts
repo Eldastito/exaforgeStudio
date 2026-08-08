@@ -1,10 +1,12 @@
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireMasterAdmin } from "../middleware/auth.js";
 import { EvidencePackageService } from "../EvidencePackageService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { DecisionEngine } from "../DecisionEngine.js";
 import { DecisionRiskService } from "../DecisionRiskService.js";
 import { DecisionMetricsService } from "../DecisionMetricsService.js";
+import { VerticalIntelligenceService } from "../VerticalIntelligenceService.js";
+import { ResearchBrokerService } from "../ResearchBrokerService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -69,6 +71,46 @@ router.post("/risks/:id/resolve", (req: AuthRequest, res): any => {
   const out = DecisionRiskService.resolve(orgId, req.params.id);
   if (!out.ok) return res.status(404).json({ error: "Risco não encontrado ou já resolvido." });
   res.json(out);
+});
+
+// ── External Intelligence (ADR-156, DI-4.1) ──────────────────────────────────
+
+// POST /api/decision-intelligence/vertical-intelligence/run — SÓ admin master
+// (D5). Roda a pesquisa do nicho e grava no compartilhado. Body: { vertical,
+// topic, region?, timeframe?, ttlDays?, provider? }.
+router.post("/vertical-intelligence/run", requireMasterAdmin, async (req: AuthRequest, res): Promise<any> => {
+  const b = req.body || {};
+  if (!b.vertical || !b.topic) return res.status(400).json({ error: "vertical e topic são obrigatórios." });
+  try {
+    const out = await VerticalIntelligenceService.runResearch(
+      { userId: req.user?.userId, organizationId: req.organizationId },
+      { vertical: b.vertical, topic: b.topic, region: b.region, timeframe: b.timeframe, ttlDays: b.ttlDays },
+      { providerName: typeof b.provider === "string" ? b.provider : undefined },
+    );
+    res.json({ verticalIntelligence: out });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
+});
+
+// GET /api/decision-intelligence/vertical-intelligence?vertical= — SÓ admin master.
+router.get("/vertical-intelligence", requireMasterAdmin, (req: AuthRequest, res): any => {
+  const vertical = typeof req.query?.vertical === "string" ? req.query.vertical : undefined;
+  res.json({ items: VerticalIntelligenceService.list({ vertical }) });
+});
+
+// GET /api/decision-intelligence/external-evidence?vertical=&topic=&region=&timeframe=
+// — leitura do TENANT (read-only; nunca dispara pesquisa). Requer opt-in.
+router.get("/external-evidence", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const q = req.query || {};
+  res.json(ResearchBrokerService.resolve(orgId, {
+    vertical: typeof q.vertical === "string" ? q.vertical : "",
+    topic: typeof q.topic === "string" ? q.topic : "",
+    region: typeof q.region === "string" ? q.region : undefined,
+    timeframe: typeof q.timeframe === "string" ? q.timeframe : undefined,
+  }));
 });
 
 // GET /api/decision-intelligence/metrics?days= — métricas do loop fechado

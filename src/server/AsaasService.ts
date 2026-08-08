@@ -104,6 +104,21 @@ export class AsaasService {
     try { return await this._req("GET", `/payments/${paymentId}`); } catch (e) { console.error("[ASAAS] Falha ao consultar pagamento:", e); return null; }
   }
 
+  /**
+   * Estorna (refund) um pagamento no ASAAS — POST /payments/{id}/refund. Sem
+   * `value` = estorno integral. Money-critical: NÃO engole erro (best-effort
+   * seria perigoso aqui) — LANÇA se o ASAAS recusar, pra que o chamador
+   * (FalatuRefundService) aborte sem cancelar a assinatura por engano. Retorna
+   * o pagamento já com status REFUNDED / REFUND_REQUESTED.
+   */
+  static async refundPayment(paymentId: string, opts?: { value?: number; description?: string }): Promise<any | null> {
+    if (!this.isConfigured() || !paymentId) return null;
+    const body: any = {};
+    if (opts?.value != null) body.value = opts.value;
+    if (opts?.description) body.description = opts.description;
+    return await this._req("POST", `/payments/${paymentId}/refund`, Object.keys(body).length ? body : undefined);
+  }
+
   private static safeEqual(a: string, b: string): boolean {
     const ba = Buffer.from(String(a || "")); const bb = Buffer.from(String(b || ""));
     if (ba.length !== bb.length || ba.length === 0) return false;
@@ -163,8 +178,14 @@ export class AsaasService {
       PlanService.setBillingStatus(orgId, "past_due");
       billing = "past_due";
     } else if (/PAYMENT_REFUNDED/i.test(eventType)) {
-      PlanService.setBillingStatus(orgId, "suspended");
-      billing = "suspended";
+      // Se a org já está 'cancelled' (ex.: garantia de 7 dias self-serve — o
+      // FalatuRefundService estorna E cancela a assinatura ANTES do ASAAS
+      // devolver este webhook), o estorno é o desfecho ESPERADO: mantém o
+      // terminal 'cancelled', não rebaixa pra 'suspended' (que sugere volta).
+      // Estorno "de fora" (dispute/chargeback numa conta ativa) segue suspenso.
+      const cur = String(this.settings(orgId).billing_status || "");
+      if (cur === "cancelled") { billing = "cancelled"; }
+      else { PlanService.setBillingStatus(orgId, "suspended"); billing = "suspended"; }
     }
 
     // ADR-152 F2.3 — ponte pro Execution Runtime. Se o payment.id casar com

@@ -575,7 +575,25 @@ caminho crítico (*escolhe → paga → ativa → bloqueia se não pagar*) foi f
   DPO, foro, contato) — **exigem revisão de um advogado e preenchimento** antes
   de valerem como definitivos. Teste `test:falatu-legal` (30 checagens).
 
-Com A+B+C+D a monetização B2C está completa no código. Pendências **de
-operação** (fora de código): (1) o dono configura `ASAAS_API_KEY` +
-`ASAAS_WEBHOOK_TOKEN` no ambiente; (2) revisão jurídica + preenchimento dos
-placeholders dos 3 documentos legais.
+- **Fatia E — Reembolso automático** *(esta fatia)*. Executa a garantia de 7
+  dias da Fatia B/D via ASAAS, sem intervenção humana. `AsaasService.refundPayment`
+  (POST `/payments/{id}/refund`, money-critical: LANÇA se o gateway recusar) +
+  `FalatuRefundService`: `checkEligibility` (janela = `guarantee_days` do plano,
+  ancorada em `falatu_terms_accepted_at`) e `requestRefund` (estorna os
+  pagamentos PAGOS → cancela a assinatura → marca `cancelled` → audita
+  `FALATU_REFUND_ISSUED`). Endpoints self-serve autenticados em `routes/falatu.ts`
+  (agem sempre sobre a própria org do JWT): `GET /api/falatu/refund/eligibility`
+  (a UI mostra/esconde o botão + dias restantes) e `POST /api/falatu/refund`.
+  Guardrails (RN-E): só planos `falatu_*` (não estorna B2B); idempotente
+  (2ª chamada → `already_refunded`); fora da janela → `guarantee_expired`
+  (cancelamento simples, sem devolução); estorna ANTES de cancelar (RN-E5) e
+  ABORTA sem cancelar se algum estorno falhar (RN-E4). O webhook `PAYMENT_REFUNDED`
+  foi reconciliado: org já `cancelled` **preserva** o terminal (não rebaixa pra
+  `suspended`). Teste `test:falatu-refund` (24 checagens). Falta só a UI do botão
+  no app standalone (E.2, aditivo — os endpoints já existem).
+
+Com A+B+C+D+E a monetização B2C está completa no código (catálogo → checkout →
+cadeado → legal/consentimento → reembolso automático). Pendências **de operação**
+(fora de código): (1) o dono configura `ASAAS_API_KEY` + `ASAAS_WEBHOOK_TOKEN` no
+ambiente; (2) revisão jurídica + preenchimento dos placeholders dos 3 documentos
+legais.

@@ -23,11 +23,13 @@ Sem UI/menu novo. Backward-compat 100% (campos aditivos + cache opt-in).
 - **Teste:** `npm run test:decision-intelligence-di1` (25 checks — níveis L0–L4, cache hit/miss/force, freshness, confidence, sources, isolamento por org). CI: auto-derivado do `package.json` (ci-shard).
 - **Arquivos:** `src/server/db.ts` (flag + tabela), `src/server/ImpactPrioritizationService.ts`, `src/server/EvidencePackageService.ts`, `src/server/routes/decisionIntelligence.ts`, `server.ts` (mount), `scripts/test-decision-intelligence-di1.ts`, `package.json`.
 
-## Fatia DI-2 — O cérebro decisório `[ ]`
+## Fatia DI-2 — O cérebro decisório `[x]` ENTREGUE
 
-- `DecisionEngine.analyze({ mode: premortem | red_team | advocate })` como **estratégias** (não agentes residentes) sobre o Evidence Package. Roteadas pelo `analysis` do DI-1 (só L3+ dispara profundo).
-- **Uma** tabela nova `decision_risks` (ligada a `decision_actions`) onde o Pre-Mortem grava riscos previstos; cada risco vira condição monitorável que **publica em `business_signals`** (convenção nº 12 — nunca tabela de alerta própria).
-- Banda de cenários (conservador/base/agressivo) — aditivo sobre `DecisionSimulatorService` (hoje ponto único).
+- **`DecisionEngine.analyze({ mode })`** (`src/server/DecisionEngine.ts`) — estratégias **Pre-Mortem / Red Team / Advocate** como **modos** (não agentes residentes, não tabelas próprias — PRD §13/§37), determinísticas (zero-token, rodam em CI sem chave de IA) sobre o Evidence Package (DI-1). Roteadas pelo nível de impacto: **L0/L1 não disparam análise profunda** (critério §8); `mode` explícito força uma estratégia. Síntese com postura advisória (proceed / proceed_with_caution / hold_for_human) — o gate real segue no RBAC/ApprovalPolicy (§35).
+- **`decision_risks`** + **`DecisionRiskService`** (`src/server/DecisionRiskService.ts`) — o Pre-Mortem grava riscos previstos (probabilidade, indicador líder, limiar, mitigação) ligados opcionalmente a `decision_actions`; cada risco monitorável **publica em `business_signals`** (domain `decision`), reusando o ledger/alertas existente — nunca tabela de alerta própria (convenção nº 12). Ciclo predicted→materialized→resolved (resolve fecha o sinal via `resolveByDedupe`). Idempotente por `dedupe_key`, best-effort na publicação (convenção nº 7).
+- **Banda de cenários** conservador/base/agressivo — `DecisionSimulatorService.scenarios(...)` (aditivo; o simulador clássico dá 1 número).
+- **Rotas:** `POST /api/decision-intelligence/analyze`, `GET /api/decision-intelligence/risks`, `POST /api/decision-intelligence/risks/:id/resolve`.
+- **Teste:** `npm run test:decision-intelligence-di2` (26 checks). Migração aditiva (`decision_risks`).
 
 ## Fatia DI-3 — Loop fechado `[ ]`
 

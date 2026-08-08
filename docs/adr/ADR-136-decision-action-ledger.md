@@ -4,7 +4,7 @@
 - **Data:** 2026-07
 - **Origem:** PRD "ZappFlow Enterprise Intelligence" (Epic 2). Hoje cada módulo mede valor e reage de forma diferente; falta um **contrato comum** para publicar um sinal, priorizar por impacto e transformar em ação medida. Esta ADR abre essa camada, começando pelo **ledger de sinais** (read/write, sem execução) sobre a fundação do Snapshot V2 (ADR-135).
 - **Relacionadas:** ADR-135 (Snapshot V2/adapters), ADR-126 (Central de Saúde), ADR-085 (Impact Ledger), ADR-130 (Governança de IA). PRD §7.1, §24.
-- **Extensões (aditivas, não abrem ADR paralela):** **Decision Intelligence** — incremento sobre esta ADR + ADR-135, documentado em `docs/decision-intelligence/`. DI-1 (entregue): classificação de impacto **L0–L4** + perfil de análise no `ImpactPrioritizationService` (C3) e **Evidence Package v1** (cache opt-in sobre o Snapshot V2). Próximas fatias (DI-2..DI-4) em `docs/decision-intelligence/PLANO-E-FATIAS.md`.
+- **Extensões (aditivas, não abrem ADR paralela):** **Decision Intelligence** — incremento sobre esta ADR + ADR-135, documentado em `docs/decision-intelligence/`. **DI-1** (entregue): classificação de impacto **L0–L4** + perfil de análise no `ImpactPrioritizationService` (C3) e **Evidence Package v1** (cache opt-in sobre o Snapshot V2). **DI-2** (entregue): `DecisionEngine` com estratégias **Pre-Mortem/Red Team/Advocate** (modos, não agentes) + `decision_risks`/`DecisionRiskService` (riscos previstos que publicam em `business_signals`, convenção nº 12) + banda de cenários no `DecisionSimulatorService`. Próximas (DI-3 métricas/loop, DI-4 external adiada) em `docs/decision-intelligence/PLANO-E-FATIAS.md`.
 
 ## Decisões
 

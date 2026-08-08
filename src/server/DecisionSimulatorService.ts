@@ -206,6 +206,32 @@ export class DecisionSimulatorService {
       veredito,
     };
   }
+
+  /**
+   * Banda de cenários conservador/base/agressivo (ADR-133 aditivo, DI-2). O
+   * simulador clássico dá 1 número; aqui devolvemos 3 projeções de um VALOR
+   * esperado (receita/retorno da decisão), para o Decision Engine mostrar a
+   * dispersão em vez de um ponto único. Determinístico e honesto: são frações
+   * declaradas do `base`, NÃO uma previsão fina (isso exigiria modelo de
+   * demanda — fora do escopo). `base` = valor esperado informado; senão cai pra
+   * receita móvel de 30d. Frações default 0.75×/1.0×/1.15× (ajustáveis).
+   */
+  static scenarios(orgId: string, input: { base?: number | null; conservativePct?: number; aggressivePct?: number } = {}): any {
+    const base = input.base != null && Number(input.base) > 0 ? Number(input.base) : this.revenue30(orgId);
+    const consFrac = input.conservativePct != null ? Number(input.conservativePct) : 0.75;
+    const aggrFrac = input.aggressivePct != null ? Number(input.aggressivePct) : 1.15;
+    const conservative = round2(base * consFrac);
+    const aggressive = round2(base * aggrFrac);
+    return {
+      ok: base > 0,
+      base: { label: "Base", value: round2(base), frac: 1 },
+      conservative: { label: "Conservador", value: conservative, frac: round2(consFrac) },
+      aggressive: { label: "Agressivo", value: aggressive, frac: round2(aggrFrac) },
+      spread: round2(aggressive - conservative),
+      method: input.base != null ? "valor_esperado_informado" : "proxy_receita_30d",
+      note: "Banda declarada (frações do base) — não é previsão fina de demanda.",
+    };
+  }
 }
 
 function brl(n: any): string { return `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`; }

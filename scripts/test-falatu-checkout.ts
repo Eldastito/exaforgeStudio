@@ -57,7 +57,7 @@ async function main() {
 
   // ===== 1. Checkout happy path =====
   const r = await FalatuCheckoutService.start({
-    name: "Maria", email: "maria@teste.com", phone: "11999990000", cpf: "390.533.447-05", password: "senha123", planId: "falatu_solo",
+    name: "Maria", email: "maria@teste.com", phone: "11999990000", cpf: "390.533.447-05", password: "senha123", planId: "falatu_solo", acceptedTerms: true,
   });
   check("start devolve organizationId", !!r.organizationId);
   check("start devolve checkoutUrl do Asaas", r.checkoutUrl === "https://asaas.test/i/pay_test");
@@ -78,12 +78,15 @@ async function main() {
   // ===== 3. Guardrails =====
   let code = "";
   const tryStart = async (input: any, deps?: any) => { try { await FalatuCheckoutService.start(input, deps); return ""; } catch (e: any) { return e.code || "throw"; } };
-  code = await tryStart({ name: "X", email: "x@t.com", cpf: "39053344705", password: "senha123", planId: "growth" });
+  code = await tryStart({ name: "X", email: "x@t.com", cpf: "39053344705", password: "senha123", planId: "growth", acceptedTerms: true });
   check("plano B2B (growth) rejeitado → invalid_plan", code === "invalid_plan");
-  code = await tryStart({ name: "X", email: "x@t.com", cpf: "39053344705", password: "senha123", planId: "falatu_pro" }, { asaasConfigured: () => false });
+  code = await tryStart({ name: "X", email: "x@t.com", cpf: "39053344705", password: "senha123", planId: "falatu_pro", acceptedTerms: true }, { asaasConfigured: () => false });
   check("sem gateway → billing_not_configured", code === "billing_not_configured");
-  code = await tryStart({ name: "Maria", email: "maria@teste.com", cpf: "39053344705", password: "senha123", planId: "falatu_pro" });
+  code = await tryStart({ name: "Maria", email: "maria@teste.com", cpf: "39053344705", password: "senha123", planId: "falatu_pro", acceptedTerms: true });
   check("email repetido → email_in_use", code === "email_in_use");
+  // aceite obrigatório (Fatia D): sem acceptedTerms → terms_not_accepted
+  code = await tryStart({ name: "Z", email: "z@t.com", cpf: "39053344705", password: "senha123", planId: "falatu_solo" });
+  check("sem aceite dos termos → terms_not_accepted", code === "terms_not_accepted");
   code = await tryStart({ name: "Y", email: "y@t.com", cpf: "123", password: "senha123", planId: "falatu_solo" });
   check("CPF inválido → invalid_cpf", code === "invalid_cpf");
   code = await tryStart({ name: "Y", email: "y2@t.com", cpf: "39053344705", password: "curta", planId: "falatu_solo" });
@@ -97,7 +100,7 @@ async function main() {
   await new Promise<void>((res) => server.listen(0, res));
   const port = (server.address() as any).port;
   const resp: any = await new Promise((resolve, reject) => {
-    const body = JSON.stringify({ name: "João", email: "joao@teste.com", phone: "11988887777", cpf: "39053344705", password: "senha123", planId: "falatu_familia" });
+    const body = JSON.stringify({ name: "João", email: "joao@teste.com", phone: "11988887777", cpf: "39053344705", password: "senha123", planId: "falatu_familia", acceptedTerms: true });
     const req = http.request({ port, path: "/api/public/falatu/checkout", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
       const chunks: Buffer[] = []; res.on("data", (c) => chunks.push(c));
       res.on("end", () => { try { resolve({ status: res.statusCode, json: JSON.parse(Buffer.concat(chunks).toString()) }); } catch (e) { reject(e); } });

@@ -25,8 +25,8 @@ router.get("/plans", (_req, res): any => {
 // POST /api/public/falatu/checkout → { organizationId, checkoutUrl }.
 router.post("/checkout", async (req, res): Promise<any> => {
   try {
-    const { name, email, phone, cpf, password, planId } = req.body || {};
-    const out = await FalatuCheckoutService.start({ name, email, phone, cpf, password, planId });
+    const { name, email, phone, cpf, password, planId, acceptedTerms } = req.body || {};
+    const out = await FalatuCheckoutService.start({ name, email, phone, cpf, password, planId, acceptedTerms });
     return res.json(out);
   } catch (error: any) {
     if (error instanceof FalatuCheckoutError) {

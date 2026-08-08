@@ -550,9 +550,32 @@ caminho crítico (*escolhe → paga → ativa → bloqueia se não pagar*) foi f
   gateway não cria conta grátis órfã), 1 email = 1 conta, rollback da org se o
   gateway falhar. **Garantia de 7 dias** (paga na hora, sem trial): `trial_days:0`,
   `guarantee_days:7` nos planos — o reembolso em si é a Fatia D.
-- **Fatia C — Enforcement** *(pendente)*. Paywall quando `past_due`/`suspended`
-  (fecha também o vazamento de OpenAI das contas Solo grátis) + cota de IA por
-  plano.
-- **Fatia D — Legal** *(pendente)*. Termos + Privacidade (LGPD, controlador) +
-  Cancelamento (CDC Art. 49) + aceite no cadastro. Textos exigem revisão
-  jurídica.
+- **Fatia C — Enforcement** *(esta fatia)*. O "cadeado": `PlanService.aiAllowed`
+  agora trava `past_due` **pra planos `falatu_*`** (B2C não tem grace: garantia =
+  pagou-usou / não-pagou-travou; o B2B mantém o grace do dunning). A cota de IA
+  por plano já valia de fábrica — `ConsumptionService.baseLimit` lê o
+  `ai_monthly_limit` do registro do plano e a captura do FalaTu conta no
+  `ai_interactions_log`, então o teto do `falatu_solo`/`pro`/`familia` é
+  aplicado. O `capture` propaga o bloqueio com a mensagem de paywall certa
+  (`billing_past_due` → "regularize o pagamento"). Fecha o vazamento de OpenAI
+  de quem parou de pagar.
+- **Fatia D — Legal** *(esta fatia)*. Três páginas servidas em `/fala-tu/`:
+  `termos.html` (Termos de Uso), `privacidade.html` (Política de Privacidade
+  LGPD — controlador, bases legais art. 7º, direitos art. 18, compartilhamento
+  com Asaas + provedor de IA e **transferência internacional** art. 33) e
+  `cancelamento.html` (direito de arrependimento de **7 dias**, CDC Art. 49 —
+  casa com o `guarantee_days:7` da Fatia B). **Aceite obrigatório no checkout**:
+  checkbox em `checkout.html` linkando as 3 páginas; `FalatuCheckoutService.start`
+  exige `acceptedTerms === true` (senão `terms_not_accepted`) e **grava a prova
+  de consentimento** — `organization_settings.falatu_terms_version` +
+  `falatu_terms_accepted_at` (aditivos) + evento de auditoria
+  `FALATU_TERMS_ACCEPTED` com a versão aceita (`FALATU_TERMS_VERSION`). Links no
+  rodapé da landing. **Os textos são MODELOS-BASE** claramente marcados
+  (`<!-- ⚠️ MODELO … -->`), com campos `[ENTRE COLCHETES]` (razão social, CNPJ,
+  DPO, foro, contato) — **exigem revisão de um advogado e preenchimento** antes
+  de valerem como definitivos. Teste `test:falatu-legal` (30 checagens).
+
+Com A+B+C+D a monetização B2C está completa no código. Pendências **de
+operação** (fora de código): (1) o dono configura `ASAAS_API_KEY` +
+`ASAAS_WEBHOOK_TOKEN` no ambiente; (2) revisão jurídica + preenchimento dos
+placeholders dos 3 documentos legais.

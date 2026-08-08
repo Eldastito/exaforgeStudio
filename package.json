@@ -368,6 +368,8 @@
     "test:falatu-landing": "tsx scripts/test-falatu-landing.ts",
     "test:falatu-plans": "tsx scripts/test-falatu-plans.ts",
     "test:falatu-checkout": "tsx scripts/test-falatu-checkout.ts",
+    "test:falatu-enforcement": "tsx scripts/test-falatu-enforcement.ts",
+    "test:falatu-legal": "tsx scripts/test-falatu-legal.ts",
     "test:falatu-memoria": "tsx scripts/test-falatu-memoria.ts",
     "test:falatu-briefing-digest": "tsx scripts/test-falatu-briefing-digest.ts",
     "test:runtime-process-fabric": "tsx scripts/test-runtime-process-fabric.ts",

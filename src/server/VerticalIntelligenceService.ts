@@ -3,6 +3,7 @@ import { randomUUID, createHash } from "crypto";
 import { getResearchProvider, ExternalResearchProvider } from "./ExternalResearchProvider.js";
 import { sanitizeForShared } from "./researchAnonymize.js";
 import { ResearchBudgetService } from "./ResearchBudgetService.js";
+import { logAuthEvent } from "./auditLog.js";
 
 /**
  * VerticalIntelligenceService (ADR-156, DI-4.1) — a ESCRITA da camada
@@ -59,13 +60,56 @@ export class VerticalIntelligenceService {
     // Registra o custo da chamada no ledger de plataforma (derivação do gasto).
     ResearchBudgetService.record({ fingerprint: researchFingerprint(vertical, topic, region || undefined, timeframe || undefined), vertical, topic, provider: provider.name, costCents: Number(result?.costCents) || 0 });
 
-    // Anonimização ANTES de persistir no compartilhado (RN-156-3).
-    const safeContent = sanitizeForShared(result?.content ?? {}, []);
-    const sources = Array.isArray(result?.sources) ? result.sources : [];
-    const confidence = Math.max(0, Math.min(1, Number(result?.confidence) || 0));
+    // Persiste no compartilhado (anonimiza + dedup + audita).
+    return this.persistShared(actor, {
+      vertical, topic, region, timeframe,
+      content: result?.content ?? {},
+      sources: Array.isArray(result?.sources) ? result.sources : [],
+      confidence: Number(result?.confidence) || 0,
+      provider: provider.name, ttlDays: input.ttlDays,
+    });
+  }
 
-    const fingerprint = researchFingerprint(vertical, topic, region || undefined, timeframe || undefined);
-    const ttlDays = Math.max(1, Math.min(365, Number(input.ttlDays) || DEFAULT_TTL_DAYS));
+  /**
+   * Provider MANUAL (DI-4.4) — o admin master COLA a pesquisa do nicho, SEM rede
+   * externa. Passa pelo MESMO filtro de anonimização (RN-156-3) antes de gravar;
+   * custo zero (não chama provider), logo não toca no orçamento. É a opção mais
+   * segura: nenhuma chamada live, o admin cura o texto.
+   */
+  static runManual(
+    actor: { userId?: string | null; organizationId?: string | null } | null,
+    input: { vertical: string; topic: string; region?: string; timeframe?: string; summary: string; drivers?: string[]; sources?: string[]; confidence?: number; ttlDays?: number },
+  ): any {
+    const vertical = String(input?.vertical || "").trim();
+    const topic = String(input?.topic || "").trim();
+    const summary = String(input?.summary || "").trim();
+    if (!vertical || !topic) throw new Error("vertical e topic são obrigatórios.");
+    if (!summary) throw new Error("summary (o texto da pesquisa) é obrigatório.");
+    const content = { summary, drivers: Array.isArray(input.drivers) ? input.drivers.map((d) => String(d)) : [], generatedBy: "manual" };
+    return this.persistShared(actor, {
+      vertical, topic,
+      region: input.region ? String(input.region).trim() : null,
+      timeframe: input.timeframe ? String(input.timeframe).trim() : null,
+      content,
+      sources: Array.isArray(input.sources) ? input.sources.map((s) => String(s)) : [],
+      confidence: input.confidence != null ? Number(input.confidence) : 0.6,
+      provider: "manual", ttlDays: input.ttlDays,
+    });
+  }
+
+  /** Grava (upsert) uma entrada no compartilhado: anonimiza + dedup + audita. */
+  private static persistShared(
+    actor: { userId?: string | null; organizationId?: string | null } | null,
+    p: { vertical: string; topic: string; region?: string | null; timeframe?: string | null; content: any; sources: string[]; confidence: number; provider: string; ttlDays?: number },
+  ): any {
+    const region = p.region ?? null;
+    const timeframe = p.timeframe ?? null;
+    // Anonimização ANTES de persistir no compartilhado (RN-156-3) — vale também
+    // para o texto colado pelo admin no provider manual.
+    const safeContent = sanitizeForShared(p.content ?? {}, []);
+    const confidence = Math.max(0, Math.min(1, Number(p.confidence) || 0));
+    const fingerprint = researchFingerprint(p.vertical, p.topic, region || undefined, timeframe || undefined);
+    const ttlDays = Math.max(1, Math.min(365, Number(p.ttlDays) || DEFAULT_TTL_DAYS));
 
     const existing = db.prepare("SELECT id FROM vertical_intelligence WHERE fingerprint = ?").get(fingerprint) as any;
     const id = existing?.id || randomUUID();
@@ -76,12 +120,9 @@ export class VerticalIntelligenceService {
         content_json=excluded.content_json, sources_json=excluded.sources_json, confidence=excluded.confidence,
         provider=excluded.provider, created_by=excluded.created_by, generated_at=CURRENT_TIMESTAMP,
         valid_until=excluded.valid_until, updated_at=CURRENT_TIMESTAMP
-    `).run(id, fingerprint, vertical, topic, region, timeframe, JSON.stringify(safeContent), JSON.stringify(sources), confidence, provider.name, actor?.userId || "admin", `+${ttlDays} days`);
+    `).run(id, fingerprint, p.vertical, p.topic, region, timeframe, JSON.stringify(safeContent), JSON.stringify(p.sources), confidence, p.provider, actor?.userId || "admin", `+${ttlDays} days`);
 
-    try {
-      const { logAuthEvent } = await import("./auditLog.js");
-      logAuthEvent(actor?.organizationId || null, actor?.userId || null, null, "VERTICAL_INTELLIGENCE_RUN", { vertical, topic, region, timeframe, fingerprint, provider: provider.name });
-    } catch { /* auditoria best-effort */ }
+    try { logAuthEvent(actor?.organizationId || null, actor?.userId || null, null, "VERTICAL_INTELLIGENCE_RUN", { vertical: p.vertical, topic: p.topic, region, timeframe, fingerprint, provider: p.provider }); } catch { /* auditoria best-effort */ }
 
     return this.getByFingerprint(fingerprint);
   }

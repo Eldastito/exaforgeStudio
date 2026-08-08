@@ -70,7 +70,7 @@ O resultado do broker preenche o slot **`externalEvidence[]`** do Evidence Packa
 - **DI-4.1** — schema (`vertical_intelligence` sem org; `organization_contextualization` por-org) + `ExternalResearchProvider` (interface + **provider stub determinístico**, sem chamada live) + **filtro de anonimização** + `VerticalIntelligenceService.runResearch` (escrita pelo **admin master**, D5) + `ResearchBrokerService.resolve` (leitura **read-only** do tenant, nunca chama provider) + testes offline (asserção "compartilhado nunca contém org/PII", dedup 2 orgs → 1 pesquisa, tenant não dispara provider, freshness, opt-in, isolamento).
 - **DI-4.2** — sub-budgets (D6) com enforcement no broker + sinais de quota.
 - **DI-4.3** — fio até o `externalEvidence[]` do Evidence Package + consumo pelo `DecisionEngine` só em L3+ (roteador DI-1).
-- **DI-4.4** (posterior, opt-in) — um provider real (web-search) atrás da interface, gated por env, com guardrails de chamada live + custo.
+- **DI-4.4 — provider MANUAL (decisão do dono, 2026-08-08):** o admin master **cola** a pesquisa do nicho (`runManual`), sem rede externa — o caminho mais seguro (nenhuma chamada live). Passa pelo **mesmo filtro de anonimização** (RN-156-3); custo zero (não toca no orçamento da DI-4.2). A interface `ExternalResearchProvider` fica pronta para um provider web-search real no futuro, mas **não** foi plugada rede nesta versão.
 
 ---
 

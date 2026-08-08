@@ -94,6 +94,23 @@ router.post("/vertical-intelligence/run", requireMasterAdmin, async (req: AuthRe
   }
 });
 
+// POST /api/decision-intelligence/vertical-intelligence/manual — SÓ admin master
+// (DI-4.4). O admin COLA a pesquisa do nicho (sem rede externa). Body: { vertical,
+// topic, region?, timeframe?, summary, drivers?, sources?, confidence?, ttlDays? }.
+router.post("/vertical-intelligence/manual", requireMasterAdmin, (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  if (!b.vertical || !b.topic || !b.summary) return res.status(400).json({ error: "vertical, topic e summary são obrigatórios." });
+  try {
+    const out = VerticalIntelligenceService.runManual(
+      { userId: req.user?.userId, organizationId: req.organizationId },
+      { vertical: b.vertical, topic: b.topic, region: b.region, timeframe: b.timeframe, summary: b.summary, drivers: b.drivers, sources: b.sources, confidence: b.confidence, ttlDays: b.ttlDays },
+    );
+    res.json({ verticalIntelligence: out });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
+});
+
 // GET /api/decision-intelligence/vertical-intelligence?vertical= — SÓ admin master.
 router.get("/vertical-intelligence", requireMasterAdmin, (req: AuthRequest, res): any => {
   const vertical = typeof req.query?.vertical === "string" ? req.query.vertical : undefined;

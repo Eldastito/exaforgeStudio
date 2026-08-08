@@ -71,6 +71,30 @@ export interface AcceptOfferResult {
 // Preço mensal por tier do catálogo FalaTu — fonte da verdade pro impacto do sinal.
 const PLAN_PRICE: Record<string, number> = Object.fromEntries(FALATU_PLANS.map((p) => [p.id, p.price]));
 
+/** Recorte de retenção (F5.3), derivado por query. `key` = degrau ou motivo. */
+export interface RetentionBreakdown {
+  key: string;
+  offered: number;
+  retained: number;
+  refunded: number;
+  cancelled: number;
+  pending: number;
+  retentionRatePct: number | null;
+}
+
+export interface RetentionMetrics {
+  scope: "org" | "platform";
+  total: number;
+  pending: number;
+  retained: number;
+  refunded: number;
+  cancelled: number;
+  resolved: number;
+  retentionRatePct: number | null;
+  byOffer: RetentionBreakdown[];
+  byReason: RetentionBreakdown[];
+}
+
 export class FalatuSaveOfferService {
   static isReason(r: string): r is CancellationReason {
     return (CANCELLATION_REASONS as readonly string[]).includes(r);
@@ -219,6 +243,71 @@ export class FalatuSaveOfferService {
       handoff,
       eligibility: FalatuRefundService.checkEligibility(orgId),
       note: "Retenção registrada. Nenhuma cobrança foi alterada — a pausa/downgrade é finalizada pelo operador em Cobrança; a garantia de 7 dias segue disponível.",
+    };
+  }
+
+  /**
+   * F5.3 — medição de retenção (retidos vs reembolsados), DERIVADA por query
+   * sobre `falatu_cancellation_intents.outcome` (RN-004: nunca contador mutável,
+   * nunca tabela própria). `retentionRatePct = retained / resolved` onde
+   * resolved = retained+refunded+cancelled; **null** quando ainda não há caso
+   * resolvido (honestidade sobre o que o número mede, padrão 5 — não força 0%).
+   * `byOffer` mostra qual degrau do ladder retém melhor (insumo pra afinar a
+   * oferta). `orgId=null` agrega CROSS-ORG (só master admin — a rota que expõe
+   * está sob requireMasterAdmin; toda rota self-serve passa o orgId do JWT).
+   */
+  static retentionMetrics(orgId: string): RetentionMetrics {
+    return this.aggregate(orgId);
+  }
+
+  static retentionSummary(): RetentionMetrics {
+    return this.aggregate(null);
+  }
+
+  private static aggregate(orgId: string | null): RetentionMetrics {
+    const where = orgId ? "WHERE organization_id = ?" : "";
+    const p: any[] = orgId ? [orgId] : [];
+    const rows = db.prepare(`SELECT COALESCE(offered_type,'none') AS offer, reason, outcome, COUNT(*) AS c FROM falatu_cancellation_intents ${where} GROUP BY offer, reason, outcome`).all(...p) as any[];
+
+    const zero = () => ({ offered: 0, pending: 0, retained: 0, refunded: 0, cancelled: 0 });
+    const totals = zero();
+    const byOfferMap = new Map<string, ReturnType<typeof zero>>();
+    const byReasonMap = new Map<string, ReturnType<typeof zero>>();
+    const bump = (b: ReturnType<typeof zero>, outcome: string, c: number) => {
+      b.offered += c;
+      if (outcome === "pending") b.pending += c;
+      else if (outcome === "retained") b.retained += c;
+      else if (outcome === "refunded") b.refunded += c;
+      else if (outcome === "cancelled") b.cancelled += c;
+    };
+    for (const r of rows) {
+      const c = Number(r.c) || 0;
+      bump(totals, r.outcome, c);
+      if (!byOfferMap.has(r.offer)) byOfferMap.set(r.offer, zero());
+      bump(byOfferMap.get(r.offer)!, r.outcome, c);
+      if (!byReasonMap.has(r.reason)) byReasonMap.set(r.reason, zero());
+      bump(byReasonMap.get(r.reason)!, r.outcome, c);
+    }
+
+    const rate = (b: ReturnType<typeof zero>): number | null => {
+      const resolved = b.retained + b.refunded + b.cancelled;
+      return resolved > 0 ? Math.round((b.retained / resolved) * 100) : null;
+    };
+    const shape = (key: string, b: ReturnType<typeof zero>) => ({
+      key, offered: b.offered, retained: b.retained, refunded: b.refunded, cancelled: b.cancelled, pending: b.pending, retentionRatePct: rate(b),
+    });
+
+    return {
+      scope: orgId ? "org" : "platform",
+      total: totals.offered,
+      pending: totals.pending,
+      retained: totals.retained,
+      refunded: totals.refunded,
+      cancelled: totals.cancelled,
+      resolved: totals.retained + totals.refunded + totals.cancelled,
+      retentionRatePct: rate(totals),
+      byOffer: [...byOfferMap.entries()].map(([k, b]) => shape(k, b)).sort((a, z) => z.offered - a.offered),
+      byReason: [...byReasonMap.entries()].map(([k, b]) => shape(k, b)).sort((a, z) => z.offered - a.offered),
     };
   }
 }

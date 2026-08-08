@@ -158,6 +158,12 @@ export class FalatuRefundService {
       refundedPaymentIds, refundedTotal, windowDays: elig.windowDays, daysLeftAtRequest: elig.daysLeft,
     });
 
+    // ADR-155 F5.3 — fecha o outcome da save offer: se havia uma intenção pending
+    // (o cliente viu a oferta e mesmo assim pediu reembolso), marca 'refunded' pra
+    // medição de retenção. Best-effort (convenção nº 7): NUNCA derruba o reembolso
+    // (money-critical). Import dinâmico quebra o ciclo com o service (convenção nº 11).
+    try { const m = await import("./FalatuSaveOfferService.js"); m.FalatuSaveOfferService.resolve(orgId, "refunded"); } catch { /* noop */ }
+
     return { organizationId: orgId, refundedPaymentIds, refundedTotal, billingStatus: "cancelled" };
   }
 }

@@ -171,6 +171,51 @@ async function main() {
   check("POST accept sem pending → 400", accEmpty.status === 400);
   await new Promise<void>((r) => server.close(() => r()));
 
+  // ===== 12. F5.3 — o reembolso fecha o outcome da intenção (best-effort) =====
+  const { FalatuRefundService } = await import("../src/server/FalatuRefundService.js");
+  const { PlanService } = await import("../src/server/PlanService.js");
+  seedFalatu("org_refund");
+  FalatuSaveOfferService.captureIntent("org_refund", "u", { reason: "preco" }); // pending
+  const refundDeps = {
+    nowMs: Date.now(), asaasConfigured: () => true,
+    listInvoices: async () => [{ id: "pay_r", status: "CONFIRMED", value: 19, dueDate: "2026-08-08", invoiceUrl: "" }],
+    refundPayment: async (id: string) => ({ id, status: "REFUNDED" }),
+    cancelSubscription: async (o: string) => { PlanService.setBillingStatus(o, "cancelled"); return true; },
+  };
+  await FalatuRefundService.requestRefund("org_refund", "u", refundDeps);
+  check("reembolso marca a intenção pending como refunded", rowOf("org_refund").outcome === "refunded");
+  // reembolso sem intenção nenhuma não quebra (best-effort)
+  seedFalatu("org_refund2");
+  const rf2 = await FalatuRefundService.requestRefund("org_refund2", "u", { ...refundDeps }).then(() => true).catch(() => false);
+  check("reembolso sem intenção segue funcionando (não throwa)", rf2 === true);
+
+  // ===== 13. F5.3 — retentionMetrics (por org) derivado por query =====
+  seedFalatu("org_m");
+  FalatuSaveOfferService.captureIntent("org_m", "u", { reason: "preco" });          // → downgrade, pending
+  FalatuSaveOfferService.acceptOffer("org_m", "u");                                  // → retained
+  FalatuSaveOfferService.captureIntent("org_m", "u", { reason: "pouco_uso" });       // novo pending
+  FalatuSaveOfferService.resolve("org_m", "refunded");                               // → refunded
+  FalatuSaveOfferService.captureIntent("org_m", "u", { reason: "faltou_feature" });  // pending
+  const m = FalatuSaveOfferService.retentionMetrics("org_m");
+  check("metrics: total 3", m.total === 3);
+  check("metrics: 1 retained / 1 refunded / 1 pending", m.retained === 1 && m.refunded === 1 && m.pending === 1);
+  check("metrics: resolved = 2", m.resolved === 2);
+  check("metrics: retentionRatePct = 50", m.retentionRatePct === 50);
+  check("metrics: byOffer separa o degrau retido", (() => { const dg = m.byOffer.find((o) => o.key === "downgrade"); return !!dg && dg.retained === 1 && dg.retentionRatePct === 100; })());
+  check("metrics: byReason cobre os 3 motivos", m.byReason.length === 3);
+
+  // rate honesto: sem caso resolvido → null (não força 0%)
+  seedFalatu("org_np2");
+  FalatuSaveOfferService.captureIntent("org_np2", "u", { reason: "outro" }); // pending, sem oferta
+  const mnp = FalatuSaveOfferService.retentionMetrics("org_np2");
+  check("metrics: sem resolvido → rate null (honesto)", mnp.retentionRatePct === null && mnp.resolved === 0);
+
+  // ===== 14. F5.3 — retentionSummary cross-org + isolamento =====
+  const sum = FalatuSaveOfferService.retentionSummary();
+  check("summary: scope platform", sum.scope === "platform");
+  check("summary: agrega várias orgs", sum.total >= 3 && sum.retained >= 1 && sum.refunded >= 2);
+  check("metrics por org não vaza (org_m fica em 3)", FalatuSaveOfferService.retentionMetrics("org_m").total === 3);
+
   console.log("");
   for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"} — ${x.name}`);
   console.log(failures === 0 ? "\nOK — 100% PASS" : `\nFALHOU — ${failures} checagem(ns)`);

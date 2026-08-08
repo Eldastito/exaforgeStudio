@@ -55,6 +55,7 @@ import { logAuthEvent } from "./auditLog.js";
 
 const DEFAULT_D2 = 3;
 const DEFAULT_D3 = 7;
+const DEFAULT_HARD_DECLINE_DAYS = 7; // F2.2 — a partir de D+7 a via é tratada como provavelmente expirada (hard)
 
 interface DueRow {
   orgId: string;
@@ -77,14 +78,15 @@ export class CollectionCadenceService {
     const rows = db.prepare(`
       SELECT organization_id AS orgId,
              COALESCE(collection_reminder_2_days_after_due, ?) AS d2,
-             COALESCE(collection_reminder_3_days_after_due, ?) AS d3
+             COALESCE(collection_reminder_3_days_after_due, ?) AS d3,
+             COALESCE(collection_hard_decline_days, ?) AS hardDeclineDays
         FROM organization_settings
        WHERE COALESCE(collection_cadence_enabled, 0) = 1
-    `).all(DEFAULT_D2, DEFAULT_D3) as any[];
+    `).all(DEFAULT_D2, DEFAULT_D3, DEFAULT_HARD_DECLINE_DAYS) as any[];
     let sent = 0, skipped = 0;
     for (const r of rows) {
       try {
-        const res = await this.runForOrg(r.orgId, { d2: Number(r.d2), d3: Number(r.d3) });
+        const res = await this.runForOrg(r.orgId, { d2: Number(r.d2), d3: Number(r.d3), hardDeclineDays: Number(r.hardDeclineDays) });
         sent += res.sent; skipped += res.skipped;
       } catch (e) { console.error("[Cobrança F4b.3] cadência falhou pra org", r.orgId, e); }
     }
@@ -95,9 +97,10 @@ export class CollectionCadenceService {
    * Roda a decisão pra UMA org. Exposto público pra testes e pro CLI de
    * simulação (`ric-simulate-collection-cadence`).
    */
-  static async runForOrg(orgId: string, opts: { d2?: number; d3?: number } = {}): Promise<OrgRunResult> {
+  static async runForOrg(orgId: string, opts: { d2?: number; d3?: number; hardDeclineDays?: number } = {}): Promise<OrgRunResult> {
     const d2 = Number(opts.d2 ?? DEFAULT_D2);
     const d3 = Number(opts.d3 ?? DEFAULT_D3);
+    const hardDeclineDays = Number(opts.hardDeclineDays ?? DEFAULT_HARD_DECLINE_DAYS);
     const dues = this.findDueCollections(orgId);
     let sent = 0, skipped = 0;
     for (const row of dues) {
@@ -107,10 +110,21 @@ export class CollectionCadenceService {
       if (this.customerReplied(orgId, row.actionId)) { skipped++; continue; }
       // G-4b.3-8: receivable fechado → pausa.
       if (row.receivableId && !this.receivableIsOpen(orgId, row.receivableId)) { skipped++; continue; }
-      const ok = await this.sendAttempt(row, attempt);
+      const ok = await this.sendAttempt(row, attempt, hardDeclineDays);
       if (ok) sent++; else skipped++;
     }
     return { sent, skipped };
+  }
+
+  /**
+   * F2.2 — classifica o decline por dias de atraso: >= hardDeclineDays ⇒ 'hard'
+   * (via provavelmente expirada, copy oferece 2ª via); senão 'soft' (re-nudge).
+   * Público e puro (dueDate + threshold) pra ser testável sem fixture.
+   */
+  static classifyDecline(dueDate: string, hardDeclineDays: number): "soft" | "hard" {
+    const dueMs = new Date(dueDate + "T00:00:00Z").getTime();
+    const daysPastDue = Math.floor((Date.now() - dueMs) / 86400_000);
+    return daysPastDue >= hardDeclineDays ? "hard" : "soft";
   }
 
   private static findDueCollections(orgId: string): DueRow[] {
@@ -179,7 +193,7 @@ export class CollectionCadenceService {
     return r?.status === "open";
   }
 
-  private static async sendAttempt(row: DueRow, attempt: 2 | 3): Promise<boolean> {
+  private static async sendAttempt(row: DueRow, attempt: 2 | 3, hardDeclineDays: number = DEFAULT_HARD_DECLINE_DAYS): Promise<boolean> {
     // Idempotência atômica: INSERT primeiro; se UNIQUE colide, outro
     // worker/tick pegou → skip. Só depois de reservar a linha
     // enviamos a mensagem — assim NUNCA há duplo envio se 2 ticks
@@ -187,17 +201,19 @@ export class CollectionCadenceService {
     // retry no próximo tick (G-4b.3-10).
     const id = randomUUID();
     const templateKey = attempt === 2 ? "firm" : "default_notice";
-    // F2.1 — variante A/B da copy (control|calibrated), por-org. Registrada na
-    // linha do attempt pra a F2.3 correlacionar variante × revenue recuperado.
+    // F2.1 — variante A/B da copy (control|calibrated), por-org. F2.2 — tipo de
+    // decline (soft|hard). Ambos registrados na linha do attempt pra a F2.3
+    // correlacionar variante/decline × revenue recuperado.
     const variant = CollectionCopy.variantFor(row.orgId);
+    const decline = CollectionCadenceService.classifyDecline(row.dueDate, hardDeclineDays);
     try {
-      db.prepare(`INSERT INTO collection_followup_attempts (id, organization_id, action_id, attempt_number, template_key, variant) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(id, row.orgId, row.actionId, attempt, templateKey, variant);
+      db.prepare(`INSERT INTO collection_followup_attempts (id, organization_id, action_id, attempt_number, template_key, variant, decline_type) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, row.orgId, row.actionId, attempt, templateKey, variant, decline);
     } catch (e: any) {
       if (e?.code === "SQLITE_CONSTRAINT_UNIQUE") return false;
       console.error("[Cobrança F4b.3] INSERT attempt falhou", e); return false;
     }
-    const msg = attempt === 2 ? CollectionCopy.firm(variant, row) : CollectionCopy.notice(variant, row);
+    const msg = attempt === 2 ? CollectionCopy.firm(variant, row, decline) : CollectionCopy.notice(variant, row, decline);
     let messageId: string | undefined;
     try { messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg); }
     catch (e: any) {
@@ -220,7 +236,7 @@ export class CollectionCadenceService {
     try {
       logAuthEvent(row.orgId, null, row.contactId, "RUNTIME_COLLECTION_FOLLOWUP_SENT", {
         attempt, actionId: row.actionId, receivableId: row.receivableId,
-        messageId: messageId || null, templateKey, variant,
+        messageId: messageId || null, templateKey, variant, declineType: decline,
       });
     } catch { /* noop */ }
 

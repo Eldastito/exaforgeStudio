@@ -7901,6 +7901,13 @@ const initDb = () => {
   // em cada follow-up, pra a medição A/B da F2.3 correlacionar com revenue.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_copy_variant TEXT DEFAULT 'control'`); } catch(e){}
   try { db.exec(`ALTER TABLE collection_followup_attempts ADD COLUMN variant TEXT`); } catch(e){}
+  // ADR-155 F2.2 — retry diferenciado soft/hard decline. collection_hard_decline
+  // _days é o limiar (dias após o vencimento) a partir do qual a via é tratada
+  // como provavelmente expirada (hard → copy oferece 2ª via); abaixo é soft
+  // (re-nudge do PIX). Só a variante calibrated ramifica. decline_type registra
+  // qual ramo foi usado em cada follow-up (insumo do A/B da F2.3).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_hard_decline_days INTEGER DEFAULT 7`); } catch(e){}
+  try { db.exec(`ALTER TABLE collection_followup_attempts ADD COLUMN decline_type TEXT`); } catch(e){}
 };
 
 initDb();

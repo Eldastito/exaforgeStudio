@@ -539,9 +539,17 @@ caminho crítico (*escolhe → paga → ativa → bloqueia se não pagar*) foi f
   idempotente + rota pública `GET /api/public/falatu/plans`. **Preços
   definitivos; `features` (cota de IA, trial, recursos por tier) são
   PLACEHOLDER** — o dono define depois editando `FALATU_PLANS`.
-- **Fatia B — Checkout self-serve** *(pendente)*. Rota "visitante escolhe →
-  Asaas subscribe → cria org `trialing` → webhook ativa" + ligar os botões
-  `data-plan` da landing.
+- **Fatia B — Checkout self-serve** *(esta fatia)*. `FalatuCheckoutService.start`
+  + `POST /api/public/falatu/checkout`: cria a org+dono já com `plan_id` (nasce
+  `trialing`) e a assinatura recorrente no Asaas (reusa `AsaasService.subscribe`),
+  devolve o link de pagamento. O **webhook existente** (`AsaasService.handleWebhook`)
+  promove pra `active` quando o pagamento confirma — zero código novo de ativação.
+  Página `public/fala-tu/checkout.html` (form → POST → redireciona pro Asaas; a
+  gente nunca toca dado de cartão) + os botões `data-plan` da landing agora
+  levam pra ela. Guardrails: só planos `falatu_*`, Asaas obrigatório (sem
+  gateway não cria conta grátis órfã), 1 email = 1 conta, rollback da org se o
+  gateway falhar. **Garantia de 7 dias** (paga na hora, sem trial): `trial_days:0`,
+  `guarantee_days:7` nos planos — o reembolso em si é a Fatia D.
 - **Fatia C — Enforcement** *(pendente)*. Paywall quando `past_due`/`suspended`
   (fecha também o vazamento de OpenAI das contas Solo grátis) + cota de IA por
   plano.

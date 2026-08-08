@@ -35,7 +35,8 @@ export type FalatuPlanRow = {
     audience: "falatu";        // discriminador do catálogo B2C (além do id)
     modules: string[];         // FalaTu é o núcleo; todos incluem "falatu"
     ai_monthly_limit: number;  // ⚠️ PLACEHOLDER — definir a cota real por tier
-    trial_days: number;        // ⚠️ PLACEHOLDER — definir o período de teste
+    trial_days: number;        // 0 = sem teste grátis (cobra na hora)
+    guarantee_days: number;    // garantia de reembolso (money-back / CDC Art.49)
     // ⚠️ DEFINIR: recursos por tier. Hoje memória/WhatsApp/protocolos são
     //    feature-flags do FalaTu (organization_settings.falatu_*_enabled), não
     //    módulos — a Fatia C (enforcement) vai amarrar esta lista aos flags.
@@ -47,17 +48,17 @@ export type FalatuPlanRow = {
 export const FALATU_PLANS: FalatuPlanRow[] = [
   {
     id: "falatu_solo", name: "Solo", price: 19,
-    features: { audience: "falatu", modules: ["falatu"], ai_monthly_limit: 100, trial_days: 7,
+    features: { audience: "falatu", modules: ["falatu"], ai_monthly_limit: 100, trial_days: 0, guarantee_days: 7,
       falatu_features: ["captura_voz_texto", "lembretes_tarefas", "briefing_diario"] },
   },
   {
     id: "falatu_pro", name: "Pro", price: 29,
-    features: { audience: "falatu", modules: ["falatu"], ai_monthly_limit: 300, trial_days: 7,
+    features: { audience: "falatu", modules: ["falatu"], ai_monthly_limit: 300, trial_days: 0, guarantee_days: 7,
       falatu_features: ["tudo_do_solo", "whatsapp", "compras_conferencia", "memoria_contexto", "briefing_email_push"] },
   },
   {
     id: "falatu_familia", name: "Família", price: 49,
-    features: { audience: "falatu", modules: ["falatu"], ai_monthly_limit: 600, trial_days: 7,
+    features: { audience: "falatu", modules: ["falatu"], ai_monthly_limit: 600, trial_days: 0, guarantee_days: 7,
       falatu_features: ["tudo_do_pro", "multiplos_perfis", "protocolos", "prioridade"] },
   },
 ];

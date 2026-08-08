@@ -1,0 +1,45 @@
+name: Code Review Graph
+
+# Review estrutural de risco em cada PR pra main (tirth8205/code-review-graph).
+# A ferramenta mapeia o codebase com tree-sitter, calcula o "blast radius" da
+# mudança (o que de fato é afetado) e posta um comentário sticky com score de
+# risco. Complementa o CI (que trava regressão): aqui é SINAL, não gate.
+#
+# Escolhas (ADR-155, análise da Trilha B):
+# - Só a Action (não .mcp.json comitado): auto-contida, instala o pacote Python
+#   no próprio runner, sem exigir nada no ambiente de dev de ninguém.
+# - Versão PINADA (@v2.3.7) — sem major flutuante, previsível e auditável.
+# - Sem merge-gate (fail-on-risk: none) — não trava o ritmo 1-PR-por-fatia;
+#   é aviso. Subir pra `high`/`critical` é decisão de produto depois.
+on:
+  pull_request:
+    branches: [main]
+
+# Cancela runs anteriores do mesmo PR quando chega push novo (mesmo padrão do CI).
+concurrency:
+  group: crg-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Menor privilégio: só ler o código e escrever o comentário sticky no PR.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Risk review
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # fetch-depth: 0 — a Action resolve o diff base (PR) e o grafo incremental
+      # a partir do histórico; sem o histórico completo o blast radius fica cego.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: tirth8205/code-review-graph@v2.3.7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment: 'true'
+          fail-on-risk: 'none'
+          python-version: '3.12'

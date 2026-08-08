@@ -4,6 +4,7 @@ import { EvidencePackageService } from "../EvidencePackageService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { DecisionEngine } from "../DecisionEngine.js";
 import { DecisionRiskService } from "../DecisionRiskService.js";
+import { DecisionMetricsService } from "../DecisionMetricsService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -68,6 +69,16 @@ router.post("/risks/:id/resolve", (req: AuthRequest, res): any => {
   const out = DecisionRiskService.resolve(orgId, req.params.id);
   if (!out.ok) return res.status(404).json({ error: "Risco não encontrado ou já resolvido." });
   res.json(out);
+});
+
+// GET /api/decision-intelligence/metrics?days= — métricas do loop fechado
+// (valor protegido, acurácia de previsão, materialização de risco, aceitação,
+// cache hit-rate). Alimenta o card do Diretor IA / Central de Saúde.
+router.get("/metrics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = typeof req.query?.days === "string" ? parseInt(req.query.days, 10) : undefined;
+  res.json(DecisionMetricsService.summary(orgId, { days: Number.isFinite(days as number) ? days : undefined }));
 });
 
 export default router;

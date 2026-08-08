@@ -30,8 +30,16 @@ import { isFalatuPlanId } from "./falatuPlans.js";
  *   (a org acabou de nascer, sem dado nenhum) — não deixa conta pendurada.
  */
 
+/**
+ * Versão dos documentos legais aceitos no checkout (Termos + Privacidade +
+ * Cancelamento). Bumpe a data quando o texto mudar — o aceito gravado guarda
+ * QUAL versão o cliente aceitou (prova de consentimento, LGPD/CDC).
+ */
+export const FALATU_TERMS_VERSION = "2026-08-08";
+
 export type FalatuCheckoutInput = {
   name: string; email: string; phone?: string; cpf: string; password: string; planId: string;
+  acceptedTerms?: boolean;
 };
 export type FalatuCheckoutResult = {
   organizationId: string; planId: string; planName: string; price: number; checkoutUrl: string;
@@ -68,6 +76,9 @@ export class FalatuCheckoutService {
     const pwErr = passwordPolicyError(input.password);
     if (pwErr) throw new FalatuCheckoutError("weak_password", 400, pwErr);
 
+    // Aceite obrigatório dos Termos + Privacidade (prova de consentimento — CDC/LGPD).
+    if (input?.acceptedTerms !== true) throw new FalatuCheckoutError("terms_not_accepted", 400, "É preciso aceitar os Termos de Uso e a Política de Privacidade.");
+
     // ---- plano precisa ser um plano B2C do FalaTu ----
     if (!isFalatuPlanId(planId)) throw new FalatuCheckoutError("invalid_plan", 400, "Plano inválido.");
     const plan = PlanService.listFalatuPlans().find((p) => p.id === planId);
@@ -90,9 +101,9 @@ export class FalatuCheckoutService {
     const orgId = "org_" + uuidv4().substring(0, 8);
     const bizName = `Assistente de ${name}`;
     db.prepare(`
-      INSERT INTO organization_settings (id, organization_id, business_name, phone, vertical, status, onboarding_status, plan_id, billing_status, default_landing_view)
-      VALUES (?, ?, ?, ?, ?, 'active', 'completed', ?, 'trialing', 'falatu')
-    `).run(uuidv4(), orgId, bizName, phone, bp.baseVertical, planId);
+      INSERT INTO organization_settings (id, organization_id, business_name, phone, vertical, status, onboarding_status, plan_id, billing_status, default_landing_view, falatu_terms_version, falatu_terms_accepted_at)
+      VALUES (?, ?, ?, ?, ?, 'active', 'completed', ?, 'trialing', 'falatu', ?, CURRENT_TIMESTAMP)
+    `).run(uuidv4(), orgId, bizName, phone, bp.baseVertical, planId, FALATU_TERMS_VERSION);
     try { db.prepare(`UPDATE organization_settings SET falatu_enabled = 1 WHERE organization_id = ?`).run(orgId); } catch { /* noop */ }
     VerticalBlueprintService.assignToOrganization(orgId, bp.id, "system-falatu-checkout");
     const userId = uuidv4();
@@ -117,6 +128,7 @@ export class FalatuCheckoutService {
       const invoices = await listInvoices(orgId);
       const checkoutUrl = invoices.find((i) => i.invoiceUrl)?.invoiceUrl || "";
 
+      logAuthEvent(orgId, userId, userId, "FALATU_TERMS_ACCEPTED", { email, termsVersion: FALATU_TERMS_VERSION });
       logAuthEvent(orgId, userId, userId, "FALATU_CHECKOUT_STARTED", { email, planId, price: plan.price, subscriptionId: sub.subscriptionId });
       return { organizationId: orgId, planId, planName: plan.name, price: plan.price, checkoutUrl };
     } catch (e: any) {

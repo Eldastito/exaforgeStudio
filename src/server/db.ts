@@ -7845,6 +7845,10 @@ const initDb = () => {
   //   cancelled|failed), nunca DELETE. provider_call_id rastreia o custo de
   //   telefonia (fora do ledger de IA).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_protocols_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-154 F2.2 Fatia D — aceite dos Termos/Privacidade no checkout B2C
+  // (prova de consentimento contratual + versão do documento aceita).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_terms_version TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_terms_accepted_at DATETIME`); } catch(e){}
   db.exec(`
     CREATE TABLE IF NOT EXISTS falatu_protocols (
       id TEXT PRIMARY KEY,

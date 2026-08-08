@@ -29,6 +29,9 @@ input:focus{outline:2px solid rgba(49,87,230,.6);outline-offset:1px}
 .msg{margin-top:14px;font-size:13px;padding:11px 13px;border-radius:11px;display:none}
 .msg.err{display:block;background:rgba(255,80,80,.12);border:1px solid rgba(255,80,80,.35);color:#ffb4b4}
 .fine{color:var(--muted);font-size:12px;margin-top:16px;line-height:1.5}
+.fine a,.accept a{color:#a9b6ff;text-decoration:underline}
+.accept{display:flex;gap:9px;align-items:flex-start;margin-top:18px;font-size:13px;color:#cdd6e6;cursor:pointer}
+.accept input{width:auto;margin-top:2px;accent-color:var(--coral);flex:0 0 auto}
 .pay{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-top:14px}
 </style>
 </head>
@@ -61,10 +64,15 @@ input:focus{outline:2px solid rgba(49,87,230,.6);outline-offset:1px}
     <label for="password">Senha (mín. 8, com letras e números)</label>
     <input id="password" name="password" type="password" required autocomplete="new-password" />
 
+    <label class="accept" for="accept">
+      <input id="accept" name="accept" type="checkbox" required />
+      <span>Li e aceito os <a href="/fala-tu/termos.html" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/fala-tu/privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span>
+    </label>
+
     <button class="btn" id="submit" type="submit">Ir para o pagamento →</button>
     <div class="msg err" id="msg"></div>
     <div class="pay">🔒 Pagamento seguro via Asaas (Pix, cartão ou boleto)</div>
-    <p class="fine">Cobrança mensal. Garantia de 7 dias — se não curtir, devolvemos. Ao assinar você concorda com os Termos e a Política de Privacidade.</p>
+    <p class="fine">Cobrança mensal. <a href="/fala-tu/cancelamento.html" target="_blank" rel="noopener">Garantia de 7 dias</a> — se não curtir, devolvemos. Cancele quando quiser.</p>
   </form>
 </main>
 
@@ -87,6 +95,7 @@ input:focus{outline:2px solid rgba(49,87,230,.6);outline-offset:1px}
 
   document.getElementById('form').addEventListener('submit', function(ev){
     ev.preventDefault();
+    if (!document.getElementById('accept').checked) { showErr('Aceite os Termos de Uso e a Política de Privacidade pra continuar.'); return; }
     msg.textContent = ''; btn.disabled = true; btn.textContent = 'Processando…';
     var body = {
       name: document.getElementById('name').value.trim(),
@@ -95,6 +104,7 @@ input:focus{outline:2px solid rgba(49,87,230,.6);outline-offset:1px}
       phone: document.getElementById('phone').value,
       password: document.getElementById('password').value,
       planId: planId,
+      acceptedTerms: document.getElementById('accept').checked,
     };
     fetch('/api/public/falatu/checkout', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

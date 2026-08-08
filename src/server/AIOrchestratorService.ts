@@ -339,9 +339,25 @@ export class AIOrchestratorService {
       try {
         const cfg = ReferralService.config(params.organizationId);
         if (cfg.enabled) {
-          referralText = `PROGRAMA DE INDICAÇÃO ATIVO: ao indicar um amigo, quem indica ganha ${cfg.rewardPercent}% de desconto na próxima compra e o indicado ganha ${cfg.welcomePercent}% na primeira.
+          // ADR-155 F6 — copy calibrada pelas rubricas do grimoire
+          // (intake/referral-timing + compose/referral-ask): pedir no PICO DE
+          // SATISFAÇÃO, enquadrar como generosidade (valor dos dois lados),
+          // atrito zero, CTA único — sem mexer nas guardas duras (o sistema
+          // gera/valida o código; a IA só convida).
+          referralText = `PROGRAMA DE INDICAÇÃO ATIVO (opt-in): quem indica ganha ${cfg.rewardPercent}% de desconto na próxima compra e o amigo indicado ganha ${cfg.welcomePercent}% na primeira.
+
+QUANDO OFERECER (pico de satisfação):
+- Convide a indicar SÓ num momento de satisfação clara: elogio, agradecimento, pedido recebido, recompra, ou quando o próprio cliente pergunta do programa.
+- NUNCA convide no meio de um problema (reclamação, atraso, cobrança, dúvida em aberto) — resolva primeiro. Não peça a frio nem repita pra quem já disse não ou já indicou.
+
+COMO CONVIDAR/ENTREGAR (dois lados, atrito zero):
+- Enquadre como generosidade: o amigo ganha ${cfg.welcomePercent}% na 1ª compra e você ganha ${cfg.rewardPercent}% na próxima — diga os dois valores.
+- Atrito zero: o amigo só precisa colar o código aqui na conversa, sem cadastro nem link. Uma ação clara só.
+
+REGRAS DURAS (o sistema executa, você só convida):
 - Se o cliente quiser indicar alguém ou pedir o próprio código ("quero indicar", "tem programa de indicação?", "me dá meu código"), defina "referral_code_request": true — o sistema gera/anexa o código. NÃO invente o código.
-- Se o cliente informar um código de indicação que recebeu, coloque-o em "apply_referral_code" — o sistema valida e aplica o desconto. NÃO prometa o desconto você mesmo; deixe o sistema confirmar.`;
+- Se o cliente informar um código de indicação que recebeu, coloque-o em "apply_referral_code" — o sistema valida e aplica o desconto. NÃO prometa o desconto você mesmo; deixe o sistema confirmar.
+- NUNCA peça nome ou telefone do amigo (quem chega é o indicado, colando o código — LGPD Art. 7). NUNCA use urgência falsa ("só hoje", "última chance").`;
         }
       } catch (e) { /* noop */ }
     }

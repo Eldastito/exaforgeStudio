@@ -539,6 +539,20 @@ export class Scheduler {
   }
 
   /**
+   * ADR-155 F6 — medição do programa de indicação (ADR-069). Deriva por query
+   * (códigos/indicados/recompensas) e publica o KPI `referral_program_result`
+   * em business_signals (upsert idempotente). Observador puro: não emite cupom
+   * nem muda estado do programa. Best-effort.
+   */
+  static async referralProgramMeasurementPass() {
+    try {
+      const { ReferralProgramMeasurementService } = await import("./ReferralProgramMeasurementService.js");
+      const r = ReferralProgramMeasurementService.publishAll();
+      if (r.published > 0) console.info(`[Runtime F6] indicação: ${r.orgs} org(s), ${r.published} KPI(s) publicado(s).`);
+    } catch (e: any) { console.error("[Runtime F6] medição do programa de indicação falhou", e?.message); }
+  }
+
+  /**
    * ADR-152 Fatia 4c.3 — cadência multi-tentativa de recuperação.
    * Varre touches aprovados há N dias SEM reply do cliente e PROPÕE
    * 2ª/3ª msg (via SalesRecoveryPlaybookService.proposeForTicket com
@@ -755,6 +769,8 @@ export class Scheduler {
     // pra atribuir revenue às ações do Runtime. Fica no fim da chain de
     // recuperação pra ver o estado final dos touches/tickets do tick.
     await this.salesRecoveryAttributionPass().catch(e => console.error('[Scheduler] attribution F4c.4 falhou', e));
+    // ADR-155 F6 — medição do programa de indicação (KPI vivo em business_signals).
+    await this.referralProgramMeasurementPass().catch(e => console.error('[Scheduler] medição do programa de indicação F6 falhou', e));
     try { this.clinicRetentionPass(); } catch (e: any) { console.error('[Scheduler] retenção LGPD clínica falhou', e?.message); }
     try { this.schoolCoordinationPass(); } catch (e: any) { console.error('[Scheduler] coordenação escolar falhou', e?.message); }
     // ADR-153 F7.1 — detector de plan-fit (near_limit_*). Publica sinais em

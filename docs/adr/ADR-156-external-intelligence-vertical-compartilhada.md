@@ -53,9 +53,13 @@ O isolamento clássico (`WHERE organization_id = ?`) continua valendo para **tod
 
 > Nota: o modelo "por demanda" (a 1ª conta do nicho dispara o provider) fica **fora** desta ADR por decisão do dono — poderia voltar como fallback opcional numa fatia futura, sempre com opt-in + budget, mas não é o padrão.
 
-### D6 — Sub-budgets de IA (movidos da DI-3, agora ativos)
+### D6 — Orçamento de pesquisa é de PLATAFORMA, não por-org (ajuste ao modelo admin-master do D5)
 
-Aditivos em `organization_settings`: `research_budget_cents`, `external_api_budget_cents` (+ prioridade). Enforcement **antes** de chamar o provider, reusando o metering existente (`ai_usage_log`, ADR-154) e o padrão de `AiQuotaSignalService` (alerta em 80%/100%). Sem gasto externo real, estes seriam infra inerte — por isso entram **aqui**, junto do primeiro consumo externo real.
+Como quem dispara a pesquisa é o **admin master** (D5), o gasto é **de plataforma** (uma pesquisa por nicho amortizada entre as contas), não por-tenant — logo o orçamento também é de plataforma, não em `organization_settings`. Concretamente (DI-4.2):
+- `research_usage_log` — ledger append-only do custo de cada chamada ao provider (`fingerprint`, `vertical`, `provider`, `cost_cents`), **sem `organization_id`** (é gasto de plataforma).
+- `platform_settings` (KV) — guarda `research_monthly_budget_cents` (0 = ilimitado), ajustável pelo admin master.
+- `ResearchBudgetService` — `status()` deriva o gasto do mês por `SUM(cost_cents)` (RN-004, sem contador mutável); `runResearch` **recusa antes de chamar o provider** se o orçamento já estourou (`budget_exceeded`), senão chama e registra o custo (o stub custa 0).
+- Este é o **guardrail que precede o provider real** (DI-4.4): entra agora, antes de existir gasto de verdade, para que a DI-4.4 não possa disparar custo sem teto. O consumo do tenant (broker read-only) **não gasta** (leitura de banco) — por isso não há budget por-org aqui.
 
 ### D7 — Integração sem novo menu (reusa Evidence + Signals)
 

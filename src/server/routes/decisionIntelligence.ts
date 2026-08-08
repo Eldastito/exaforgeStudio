@@ -7,6 +7,7 @@ import { DecisionRiskService } from "../DecisionRiskService.js";
 import { DecisionMetricsService } from "../DecisionMetricsService.js";
 import { VerticalIntelligenceService } from "../VerticalIntelligenceService.js";
 import { ResearchBrokerService } from "../ResearchBrokerService.js";
+import { ResearchBudgetService } from "../ResearchBudgetService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -97,6 +98,21 @@ router.post("/vertical-intelligence/run", requireMasterAdmin, async (req: AuthRe
 router.get("/vertical-intelligence", requireMasterAdmin, (req: AuthRequest, res): any => {
   const vertical = typeof req.query?.vertical === "string" ? req.query.vertical : undefined;
   res.json({ items: VerticalIntelligenceService.list({ vertical }) });
+});
+
+// GET /api/decision-intelligence/research-budget — situação do orçamento de
+// pesquisa de plataforma (DI-4.2). SÓ admin master.
+router.get("/research-budget", requireMasterAdmin, (_req: AuthRequest, res): any => {
+  res.json(ResearchBudgetService.status());
+});
+
+// PUT /api/decision-intelligence/research-budget — define o teto mensal em
+// centavos (0 = ilimitado). SÓ admin master. Body: { monthlyBudgetCents }.
+router.put("/research-budget", requireMasterAdmin, (req: AuthRequest, res): any => {
+  const cents = Number(req.body?.monthlyBudgetCents);
+  if (!Number.isFinite(cents) || cents < 0) return res.status(400).json({ error: "monthlyBudgetCents inválido." });
+  ResearchBudgetService.setBudgetCents(cents);
+  res.json(ResearchBudgetService.status());
 });
 
 // GET /api/decision-intelligence/external-evidence?vertical=&topic=&region=&timeframe=

@@ -2,6 +2,7 @@ import db from "./db.js";
 import { randomUUID, createHash } from "crypto";
 import { getResearchProvider, ExternalResearchProvider } from "./ExternalResearchProvider.js";
 import { sanitizeForShared } from "./researchAnonymize.js";
+import { ResearchBudgetService } from "./ResearchBudgetService.js";
 
 /**
  * VerticalIntelligenceService (ADR-156, DI-4.1) — a ESCRITA da camada
@@ -41,10 +42,22 @@ export class VerticalIntelligenceService {
     const region = input.region ? String(input.region).trim() : null;
     const timeframe = input.timeframe ? String(input.timeframe).trim() : null;
 
+    // Guardrail de orçamento de plataforma (DI-4.2): recusa ANTES de chamar o
+    // provider se o teto mensal já estourou (o stub custa 0 e nunca bloqueia).
+    if (!ResearchBudgetService.canSpend()) {
+      const st = ResearchBudgetService.status();
+      const err: any = new Error(`budget_exceeded: orçamento de pesquisa do mês esgotado (gasto ${st.spentCents}c / teto ${st.budgetCents}c).`);
+      err.code = "budget_exceeded";
+      throw err;
+    }
+
     // Query derivada SÓ da taxonomia do nicho (RN-156-2) — nunca de dado de tenant.
     const query = [vertical, topic, region, timeframe].filter(Boolean).join(" ");
     const provider = opts.provider || getResearchProvider(opts.providerName);
     const result = await provider.research({ vertical, topic, region: region || undefined, timeframe: timeframe || undefined, query });
+
+    // Registra o custo da chamada no ledger de plataforma (derivação do gasto).
+    ResearchBudgetService.record({ fingerprint: researchFingerprint(vertical, topic, region || undefined, timeframe || undefined), vertical, topic, provider: provider.name, costCents: Number(result?.costCents) || 0 });
 
     // Anonimização ANTES de persistir no compartilhado (RN-156-3).
     const safeContent = sanitizeForShared(result?.content ?? {}, []);

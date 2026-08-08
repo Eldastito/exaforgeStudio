@@ -49,7 +49,7 @@ Decisão do dono (2026-08-08): **compartilhado por vertical anonimizado, com ADR
 
 Sub-fatias (ver ADR-156 D8):
 - **DI-4.1 `[x]` ENTREGUE** — gatilho **admin master** (D5). `vertical_intelligence` (compartilhada, **sem `organization_id`**) + `organization_contextualization` (por-org) + `ExternalResearchProvider` (interface + **stub determinístico**) + `researchAnonymize` (filtro PII + `assertNoTenantData`) + `VerticalIntelligenceService.runResearch` (escrita admin) + `ResearchBrokerService.resolve` (leitura tenant **read-only**, nunca chama provider) + dedup por fingerprint + freshness + opt-in. Rotas: `POST /vertical-intelligence/run` (master), `GET /vertical-intelligence` (master), `GET /external-evidence` (tenant). Teste: `npm run test:decision-intelligence-di4` (17 checks — inclui "compartilhado nunca tem org/PII", "1 pesquisa N contextos", "tenant não dispara provider").
-- **DI-4.2** — sub-budgets de IA (research/external_api) com enforcement no broker (movidos da DI-3).
+- **DI-4.2 `[x]` ENTREGUE** — orçamento de pesquisa de **PLATAFORMA** (não por-org: quem dispara é o admin master). `research_usage_log` (append-only, sem org) + `platform_settings` (KV) + `ResearchBudgetService` (gasto do mês derivado por SUM; `status`/`canSpend`/`record`). `VerticalIntelligenceService.runResearch` **recusa antes de chamar o provider** quando o teto estoura (`budget_exceeded`). Rotas master: `GET/PUT /research-budget`. É o guardrail que precede o provider real (DI-4.4). Teste: `npm run test:decision-intelligence-di4-budget` (11 checks).
 - **DI-4.3** — fio até o slot `externalEvidence[]` do Evidence Package + consumo pelo `DecisionEngine` só em L3+.
 - **DI-4.4** (posterior, opt-in) — provider real (web-search) atrás da interface, gated por env.
 

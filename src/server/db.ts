@@ -8099,6 +8099,35 @@ const initDb = () => {
   // sales_recovery_touches ⇒ ALTER no fim (touches legados ficam 'control',
   // coerente com o default da F3.1).
   try { db.exec(`ALTER TABLE sales_recovery_touches ADD COLUMN variant TEXT DEFAULT 'control'`); } catch(e){}
+  // Decision Intelligence DI-4.2 (ADR-156 D6) — orçamento de pesquisa de
+  // PLATAFORMA (não por-org: quem dispara é o admin master).
+  //
+  // `research_usage_log`: ledger append-only do custo de cada chamada ao provider
+  // (SEM organization_id — é gasto de plataforma). O gasto do mês é DERIVADO por
+  // SUM(cost_cents) (RN-004, sem contador mutável).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS research_usage_log (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT,
+      vertical TEXT,
+      topic TEXT,
+      provider TEXT,
+      cost_cents INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_research_usage_log_created
+      ON research_usage_log(created_at);
+  `);
+  // `platform_settings`: KV de configuração de PLATAFORMA (fora do tenant).
+  // Guarda p.ex. research_monthly_budget_cents (0 = ilimitado). Ajustável só
+  // pelo admin master.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 };
 
 initDb();

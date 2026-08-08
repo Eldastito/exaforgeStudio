@@ -67,7 +67,20 @@ export async function generate(input: GenerateInput): Promise<GeneratedMessage> 
   const nome = sanitizeName(input.contactName);
   const stage = String(input.stage || "").slice(0, 40);
   const days = Math.max(0, Math.min(Math.trunc(input.daysStalled || 0), 365));
-  const system = SalesRecoveryCopy.systemPrompt(variant, attempt);
+  const baseSystem = SalesRecoveryCopy.systemPrompt(variant, attempt);
+  // ADR-155 — fecha o loop de aprendizado: injeta o bloco do grimoire (rubrica
+  // `sales-recovery` + as lições do pós-mortem F3.2 + contexto de marca) no
+  // prompt VIVO da geração. Gated por brand_voice (promptForOrg devolve "" se a
+  // flag está off ⇒ zero mudança pra quem não optou). Import dinâmico pra
+  // quebrar ciclo (convenção nº 11); best-effort — erro nunca derruba a geração.
+  let grimoire = "";
+  if (input.orgId) {
+    try {
+      const { GrimoireService } = await import("./GrimoireService.js");
+      grimoire = await GrimoireService.promptForOrg(input.orgId, "recuperacao", ["compose"]);
+    } catch { /* noop — segue com o prompt base */ }
+  }
+  const system = grimoire ? `${baseSystem}\n\n${grimoire}` : baseSystem;
   const userText = `Contexto do cliente:\n- nome: ${nome || "(desconhecido)"}\n- stage no funil: ${stage}\n- dias sem resposta: ${days}\n- tentativa: ${attempt} de 3\n\nEscreva a mensagem seguindo TODAS as regras.`;
 
   let raw = "";

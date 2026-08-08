@@ -84,6 +84,9 @@ export function Sidebar() {
                <NavItem icon={<BarChart3 />} label="Consumo de IA" active={viewMode === 'ai_usage'} onClick={() => setViewMode('ai_usage')} />
              )}
              {isMasterAdmin && (
+               <NavItem icon={<BrainCircuit />} label="Inteligência de Nicho" active={viewMode === 'niche_intel'} onClick={() => setViewMode('niche_intel')} />
+             )}
+             {isMasterAdmin && (
                <NavItem icon={<Gauge />} label="Prontidão de Produção" active={viewMode === 'production_readiness'} onClick={() => setViewMode('production_readiness')} />
              )}
              {isMasterAdmin && (

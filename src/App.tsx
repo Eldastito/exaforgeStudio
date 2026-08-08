@@ -35,6 +35,7 @@ import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { AiUsageDashboardView } from '@/src/features/AiUsageDashboardView';
+import { NicheIntelligenceView } from '@/src/features/NicheIntelligenceView';
 import { ProductionReadinessView } from '@/src/features/ProductionReadinessView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
 import { RetailFloorView } from '@/src/features/RetailFloorView';
@@ -318,6 +319,7 @@ export default function App() {
              {viewMode === 'escuta' && 'Escuta Ativa'}
              {viewMode === 'admin' && 'Admin Master'}
              {viewMode === 'ai_usage' && 'Consumo de IA'}
+             {viewMode === 'niche_intel' && 'Inteligência de Nicho'}
              {viewMode === 'production_readiness' && 'Prontidão de Produção'}
              {viewMode === 'retailops' && 'Operação da Rede'}
              {viewMode === 'retailfloor' && 'Atendimento de Loja'}
@@ -434,6 +436,7 @@ export default function App() {
           {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
           {viewMode === 'ai_usage' && <AiUsageDashboardView />}
+          {viewMode === 'niche_intel' && <NicheIntelligenceView />}
           {viewMode === 'production_readiness' && <ProductionReadinessView />}
           {viewMode === 'retailops' && <RetailOpsView />}
           {viewMode === 'retailfloor' && <RetailFloorView />}

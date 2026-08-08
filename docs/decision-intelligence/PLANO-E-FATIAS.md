@@ -55,6 +55,11 @@ Sub-fatias (ver ADR-156 D8):
 
 Princípio de segurança (ADR-156 D1/D2): a camada compartilhada guarda **só pesquisa do mundo externo** (mercado/tendências), **zero** dado por-org/pessoal; o isolamento por `organization_id` permanece intacto para todo dado privado.
 
+## Camada de UI (aditiva, sem inflar o menu do lojista — PRD §31)
+
+- **DI-UI-1 `[x]` ENTREGUE** — painel **master admin** "Inteligência de Nicho" (`src/features/NicheIntelligenceView.tsx`, viewMode `niche_intel`, gated por `isMasterAdmin` no Sidebar). O admin **cola** a pesquisa do nicho (DI-4.4), ajusta o **orçamento de pesquisa** (DI-4.2) e vê as pesquisas publicadas (fresca/expirada). NÃO é menu do lojista — as contas só consomem read-only. Consome as rotas `GET/PUT /research-budget`, `POST /vertical-intelligence/manual`, `GET /vertical-intelligence`.
+- **DI-UI-2 `[ ]`** — card "valor protegido" + métricas de decisão (DI-3) no Diretor IA / Central de Saúde (consome `GET /metrics`); e, opcionalmente, painel de análise de decisão (DI-2) e prioridades L0–L4 (DI-1).
+
 ## Fora de escopo (frugalidade, PRD §43)
 
 - **Tool Registry / capability dispatch** e **refactor de Unified Memory** (consolidar 8 tabelas de memória): alto custo/risco, ganho marginal incerto — adiados até necessidade concreta.

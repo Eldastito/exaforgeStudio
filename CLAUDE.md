@@ -18,6 +18,7 @@ Repositório monolítico (frontend React + backend Node/Express + SQLite via `be
 | **ADR-145** | **Clínica: Jornada de Tratamento multiespecialidade** | **FECHADO — 15 fatias (34–48) em produção** |
 | ADR-144 | Escola — conector família + resumo diário | em produção |
 | ADR-136 | Decision-Action Ledger (`business_signals`) | em produção — usado por Retail, Escola, Clínica (F47) |
+| **ADR-136/156** | **Decision Intelligence (consolidação transversal)** | **FECHADO — DI-1..DI-4.5 + UI + ADR-156. Aditivo sobre ADR-135/136/152; sem menu novo pro lojista** |
 | ADR-132 | Sinais finos | em produção |
 | ADR-081 | Conectores TISS (roadmap TISS XML/WS) | roadmap — molde documentado; aditivo à ADR-145 |
 | ADR-151 | FalaTu — captura multimodal "Fala → Faz → Confere" (porte do repo `Eldastito/FalaTu`) | Núcleo fechado (5 fatias) + F6 aditivo em produção: multi-tenant opt-in + WhatsApp no canal interno + compras com conferência + memória com desambiguação ativa ("qual Carlos?") + briefing diário proativo via `business_signals` + entrega do briefing por WhatsApp (digest, molde ADR-144) |
@@ -48,6 +49,22 @@ A IA operacional **nunca**:
 **Retrocompatibilidade 100%** — appointments legados sem episódio/ciclo/sessão continuam operando como consulta avulsa. Migração puramente aditiva.
 
 **Números:** 6 tabelas novas + 6 aditivos + 7 services novos + ~35 rotas + 13 scripts de teste (todos PASS 100% na CI matrix).
+
+## Decision Intelligence — consolidação transversal (fechado 2026-08-08)
+
+Origem: PRD "ZapFlow Decision Intelligence Fabric 2.0". A Fase 0 (análise comparativa, `docs/decision-intelligence/ANALISE-COMPARATIVA-PRD-vs-REPO.md`) provou que ~85% já existia — então a consolidação é **aditiva sobre ADR-135 (Snapshot/Evidence) + ADR-136 (Decision & Action Ledger) + ADR-152 (Runtime)**, **sem** abrir módulo/motor paralelo e **sem** duplicar alertas/tarefas/scheduler/memória. Plano e status em `docs/decision-intelligence/PLANO-E-FATIAS.md`.
+
+**Fatias entregues (todas determinísticas — rodam em CI sem chave de IA):**
+
+- **DI-1** — Classificação de impacto **L0–L4** + perfil de análise (roteador de profundidade) em `ImpactPrioritizationService.levelFor` (aditivo, campos extras no Pareto); **Evidence Package v1** (`EvidencePackageService`) — embrulha o Snapshot V2 num pacote cacheável (`evidence_packages`, opt-in `evidence_layer_enabled`) com freshness/confidence/sources.
+- **DI-2** — `DecisionEngine.analyze({ mode })`: **Pre-Mortem / Red Team / Advocate como MODOS** (não agentes, não motor novo — PRD §13/§37), + banda de cenários (`DecisionSimulatorService.scenarios`) + `decision_risks`/`DecisionRiskService` (riscos previstos publicam em `business_signals`, convenção nº 12). Síntese **advisória** — o gate real segue no RBAC/`ApprovalPolicyService` (RN §35).
+- **DI-3** — `DecisionMetricsService`: loop fechado com **valor protegido** (PRD §36), acurácia de previsão, materialização de risco, aceitação de recomendações e cache hit-rate (`evidence_cache_events`) — tudo **derivado por query** (RN-004).
+- **DI-4 (External Intelligence, ADR-156)** — inteligência de vertical **compartilhada e anonimizada**. Duas camadas fisicamente separadas: `vertical_intelligence` (COMPARTILHADA, **sem `organization_id`**, só pesquisa do mundo externo) vs `organization_contextualization` (POR-ORG, isolada). Escrita **só pelo admin master** (D5); tenant é **read-only** (`ResearchBrokerService`, nunca chama provider). Filtro de anonimização (`researchAnonymize`) barra PII/id de tenant antes de gravar. Provider **manual** (`runManual` — admin cola; `ExternalResearchProvider` fica pronto p/ web-search futuro). Orçamento de pesquisa de **plataforma** (`ResearchBudgetService`, `research_usage_log`). Lembrete **semanal** (`VerticalIntelligenceReminderService` no Scheduler → `business_signals`, nunca roda pesquisa sozinho).
+- **UI** — sem inflar o menu do lojista (PRD §31): painel master **"Inteligência de Nicho"** (`NicheIntelligenceView`), card **"Valor protegido"** na Central de Saúde e aba **"Analisar decisão"** no Diretor IA (`ExecutiveView`).
+
+**Guardrails duros (RN-156, no header dos services + testados):** camada compartilhada carrega **zero** dado por-org/pessoal; query externa deriva só de `(vertical, topic, region, timeframe)`; provider só no miss + opt-in + budget + L3+; ADR-156 supersede a ADR-079 D4 **apenas** para inteligência externa de mercado (`prospect_learning_memory` segue por-tenant).
+
+**Rotas:** `/api/decision-intelligence/*` (evidence, priorities, analyze, risks, metrics, vertical-intelligence[/manual/run], external-evidence, research-budget, research-refresh-due). Testes: `scripts/test-decision-intelligence-*.ts` (di1..di4-reminder).
 
 ## Convenções críticas (não regredir)
 

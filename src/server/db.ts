@@ -7962,6 +7962,41 @@ const initDb = () => {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_packages_subject
       ON evidence_packages(organization_id, subject);
   `);
+  // Decision Intelligence DI-2 — riscos previstos pelas estratégias Pre-Mortem/
+  // Red Team (aditivo sobre ADR-136). NÃO é tabela de alerta própria (convenção
+  // nº 12): cada risco monitorável PUBLICA em business_signals (domain
+  // 'decision'). Esta tabela guarda a PREVISÃO (probabilidade, indicador líder,
+  // limiar, mitigação) e o ciclo predicted→materialized→resolved, ligada
+  // opcionalmente a uma decision_actions (decision_id nullable). Isolado por
+  // organization_id (convenção nº 1). UNIQUE(org, dedupe_key) → não duplica.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS decision_risks (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      decision_id TEXT,
+      source TEXT NOT NULL DEFAULT 'premortem',
+      description TEXT NOT NULL,
+      probability TEXT,
+      severity TEXT,
+      impact_amount REAL,
+      impact_unit TEXT,
+      leading_indicator TEXT,
+      threshold TEXT,
+      mitigation TEXT,
+      status TEXT NOT NULL DEFAULT 'predicted',
+      dedupe_key TEXT NOT NULL,
+      signal_id TEXT,
+      predicted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      materialized_at DATETIME,
+      resolved_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_decision_risks_dedupe
+      ON decision_risks(organization_id, dedupe_key);
+    CREATE INDEX IF NOT EXISTS idx_decision_risks_decision
+      ON decision_risks(organization_id, decision_id, status);
+  `);
 };
 
 initDb();

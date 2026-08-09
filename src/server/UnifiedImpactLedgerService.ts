@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
 import { ComigoImpactService } from "./ComigoImpactService.js";
+import { RetailImpactService } from "./RetailImpactService.js";
 
 /**
  * UnifiedImpactLedgerService (ADR-158 F3 — Espinha Única / consolidação da
@@ -55,7 +56,8 @@ export class UnifiedImpactLedgerService {
   private static providers: Array<(orgId: string) => ImpactContribution[]> = [
     UnifiedImpactLedgerService.actionLedgerProvider,
     UnifiedImpactLedgerService.comigoProvider,
-    // F3.3: retailProvider · F3.4: ricProvider
+    UnifiedImpactLedgerService.retailProvider,
+    // F3.4: ricProvider
   ];
 
   /** Fonte 1 — outcomes atados a decisões (action_outcomes, ADR-136/152). */
@@ -90,6 +92,31 @@ export class UnifiedImpactLedgerService {
       value: s.provenBRL,
       basis: "fact",
       evidence: { sinceDays: s.sinceDays, ordersCount: s.ordersCount, baselineAt: s.baselineAt },
+    }];
+  }
+
+  /**
+   * Fonte 3 (F3.3) — Retail: valor COMPROVADO do mês (R$ efetivamente apurados
+   * via divergências de comissão + conciliação de fechamento). Mesma categoria
+   * `provenValue` (basis=fact) que o Comigo — as duas fontes SOMAM dentro da
+   * categoria (mesma unidade/semântica: dinheiro comprovado). Só contribui se a
+   * org é tenant de varejo (tem loja). O RetailImpact JÁ separa comprovado de
+   * atividade/estimativa (ADR-085 D4) — aqui entra só o comprovado (fato).
+   */
+  static retailProvider(orgId: string): ImpactContribution[] {
+    const hasRetail = db.prepare("SELECT 1 FROM retail_stores WHERE organization_id = ? LIMIT 1").get(orgId);
+    if (!hasRetail) return [];
+    const month = new Date().toISOString().slice(0, 7);
+    const m = RetailImpactService.monthly(orgId, month);
+    const proven = Number(m?.proven?.totalProvenBRL) || 0;
+    if (!proven) return [];
+    return [{
+      source: "retail",
+      category: "provenValue",
+      unit: "BRL",
+      value: proven,
+      basis: "fact",
+      evidence: { month, commissionDivergences: m.proven.commissionDivergences, systemReconciliation: m.proven.systemReconciliation },
     }];
   }
 

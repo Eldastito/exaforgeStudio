@@ -78,7 +78,30 @@ async function main() {
   check("provenValue é categoria SEPARADA de revenueRecovered (nunca somadas)", !ledC.categories.revenueRecovered && !!ledC.categories.provenValue);
   check("org sem Comigo (orgA) não tem provenValue", !led.categories.provenValue);
 
-  // ===== 5. Isolamento multi-tenant =====
+  // ===== 5. Provider Retail (F3.3): valor comprovado do mês, MESMA categoria =====
+  const month = new Date().toISOString().slice(0, 7);
+  const orgR = mkOrg();
+  const storeId = randomUUID();
+  db.prepare("INSERT INTO retail_stores (id, organization_id, name, active) VALUES (?, ?, 'Loja 1', 1)").run(storeId, orgR);
+  db.prepare("INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, system_total) VALUES (?, ?, ?, ?, 'approved', 1000, 850)")
+    .run(randomUUID(), orgR, storeId, `${month}-15`);
+  const ledR = L.build(orgR);
+  check("retail: provenValue = |1000-850| = 150", ledR.categories.provenValue?.total === 150);
+  check("retail: fonte 'retail', basis fact", ledR.categories.provenValue?.lines[0].source === "retail" && ledR.categories.provenValue?.lines[0].basis === "fact");
+  check("retail: fonte 'retail' listada", ledR.sources.includes("retail"));
+
+  // cross-fonte: a mesma org ganha Comigo (lucro 80) → provenValue SOMA dentro
+  // da categoria (150+80=230, 2 linhas) — o coração da unificação.
+  db.prepare("UPDATE organization_settings SET comigo_impact_baseline_at = ? WHERE organization_id = ?").run("2020-01-01T00:00:00.000Z", orgR);
+  const oid2 = randomUUID();
+  db.prepare("INSERT INTO comigo_orders (id, organization_id, status, total) VALUES (?, ?, 'paid', 200)").run(oid2, orgR);
+  db.prepare("INSERT INTO comigo_order_items (id, order_id, name, qty, unit_price, unit_cost_snapshot) VALUES (?, ?, 'Item', 2, 100, 60)").run(randomUUID(), oid2);
+  const ledR2 = L.build(orgR);
+  check("cross-fonte: provenValue soma comigo+retail (150+80=230)", ledR2.categories.provenValue?.total === 230);
+  check("cross-fonte: provenValue tem 2 linhas (comigo + retail)", ledR2.categories.provenValue?.lines.length === 2);
+  check("cross-fonte: ambas as fontes listadas", ledR2.sources.includes("retail") && ledR2.sources.includes("comigo"));
+
+  // ===== 6. Isolamento multi-tenant =====
   const orgB = mkOrg();
   const ledB = L.build(orgB);
   check("isolamento: org B tem ledger vazio", Object.keys(ledB.categories).length === 0 && ledB.sources.length === 0);

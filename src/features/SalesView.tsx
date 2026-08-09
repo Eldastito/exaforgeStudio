@@ -5,6 +5,7 @@ import { PaymentSettingsModal } from '@/src/features/PaymentSettingsModal';
 import { EmptyState } from '@/src/components/EmptyState';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { toast } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type OrderItem = { id: string; name_snapshot: string; quantity: number; unit_price: number; line_total: number };
 type Order = {
@@ -45,6 +46,7 @@ const PERIODS: { id: string; label: string }[] = [
 
 export function SalesView() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const ordersPage = useVisibleLimit(orders); // teto de linhas visíveis + "ver mais"
   const [summary, setSummary] = useState<{ byStatus: any[]; revenue: number }>({ byStatus: [], revenue: 0 });
   const [filter, setFilter] = useState('todos');
   const [period, setPeriod] = useState('month');
@@ -313,7 +315,7 @@ export function SalesView() {
         )
       ) : (
         <div className="space-y-3">
-          {orders.map(o => {
+          {ordersPage.visible.map(o => {
             const st = STATUS[o.status] || { label: o.status, color: 'bg-zinc-700/10 text-zinc-400 border-zinc-700/30' };
             const transitions = TRANSITIONS[o.status] || [];
             return (
@@ -366,6 +368,7 @@ export function SalesView() {
               </div>
             );
           })}
+          <ShowMore page={ordersPage} noun="pedidos" />
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, ArrowLeft, RefreshCcw, Loader2, DollarSign, Layers, Cpu, UsersRound } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { apiFetch } from '@/src/lib/api';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 /**
  * AiUsageDashboardView (ADR-154 Fatia 1.2) — tela master admin de gastos de
@@ -38,6 +39,7 @@ const AiTooltip: React.FC<any> = ({ active, payload, label }) => {
 export function AiUsageDashboardView() {
   const [days, setDays] = useState<number>(30);
   const [rows, setRows] = useState<any[] | null>(null);
+  const rowsPage = useVisibleLimit(rows ?? []);
   const [drilldownId, setDrilldownId] = useState<string | null>(null);
   const [drilldown, setDrilldown] = useState<any | null>(null);
   const [loadingDrill, setLoadingDrill] = useState(false);
@@ -79,7 +81,7 @@ export function AiUsageDashboardView() {
   }, [rows]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="flex-1 overflow-y-auto p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <BarChart3 className="w-6 h-6 text-emerald-400" />
@@ -145,7 +147,7 @@ export function AiUsageDashboardView() {
               {rows && rows.length === 0 && (
                 <tr><td colSpan={8} className="p-6 text-center text-zinc-500 text-sm">Nenhuma org com consumo na janela.</td></tr>
               )}
-              {rows?.map((r: any) => (
+              {rowsPage.visible.map((r: any) => (
                 <tr key={r.organizationId} className="border-t border-zinc-800/50 hover:bg-zinc-900/60">
                   <td className="py-2.5 px-4">
                     <div className="text-zinc-100">{r.businessName || <span className="text-zinc-500 italic">sem nome</span>}</div>
@@ -169,6 +171,7 @@ export function AiUsageDashboardView() {
               ))}
             </tbody>
           </table>
+          <ShowMore page={rowsPage} noun="organizações" />
         </div>
       </div>
 

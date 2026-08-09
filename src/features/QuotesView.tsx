@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/button';
 import { FileText, Check, X as XIcon, Clock } from 'lucide-react';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type Quote = {
   id: string; status: 'sent' | 'viewed' | 'accepted' | 'declined' | 'expired';
@@ -41,6 +42,7 @@ export function QuotesView() {
   const decline = async (id: string) => { await apiFetch(`/api/quotes/${id}/decline`, { method: 'POST' }); load(); };
 
   const visible = filter ? quotes.filter(q => q.status === filter) : quotes;
+  const page = useVisibleLimit(visible, { resetKey: filter }); // reseta o teto ao trocar de filtro
   const counts = {
     sent: quotes.filter(q => q.status === 'sent' || q.status === 'viewed').length,
     accepted: quotes.filter(q => q.status === 'accepted').length,
@@ -50,7 +52,7 @@ export function QuotesView() {
   const acceptRate = quotes.length ? Math.round((counts.accepted / quotes.length) * 100) : 0;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="flex-1 overflow-auto p-6 max-w-6xl mx-auto">
       <p className="zf-kicker mb-1">Cotação com Follow-up</p>
       <h2 className="zf-page-title flex items-center gap-2 mb-1">
         <FileText className="h-6 w-6" style={{ color: 'var(--color-flow)' }} /> Orçamentos
@@ -100,7 +102,7 @@ export function QuotesView() {
         <p className="text-sm text-zinc-500">Nenhum orçamento {filter ? `com status ${STATUS_LABEL[filter]?.label}` : 'ainda'}.</p>
       ) : (
         <div className="space-y-2">
-          {visible.map(q => {
+          {page.visible.map(q => {
             let items: any[] = [];
             try { items = JSON.parse(q.items_snapshot || '[]'); } catch {}
             const st = STATUS_LABEL[q.status];
@@ -138,6 +140,7 @@ export function QuotesView() {
           })}
         </div>
       )}
+      <ShowMore page={page} noun="orçamentos" />
     </div>
   );
 }

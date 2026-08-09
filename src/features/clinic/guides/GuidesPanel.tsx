@@ -41,6 +41,7 @@ import {
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type ContactLite = { id: string; name: string; identifier?: string | null };
 type ProfessionalLite = { id: string; name: string; active?: boolean | number };
@@ -132,6 +133,7 @@ export default function GuidesPanel() {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterType, setFilterType] = useState<string>('');
   const [guides, setGuides] = useState<Guide[]>([]);
+  const guidesPage = useVisibleLimit(guides);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState<{ mode: 'new' } | { mode: 'edit'; guide: Guide } | null>(null);
 
@@ -246,7 +248,7 @@ export default function GuidesPanel() {
         </div>
       ) : (
         <div className="space-y-2">
-          {guides.map(g => (
+          {guidesPage.visible.map((g: Guide) => (
             <GuideRow key={g.id}
               guide={g}
               contact={contactById.get(g.contactId) || null}
@@ -257,6 +259,7 @@ export default function GuidesPanel() {
               onEdit={() => setShowForm({ mode: 'edit', guide: g })}
             />
           ))}
+          <ShowMore page={guidesPage} noun="guias" />
         </div>
       )}
 

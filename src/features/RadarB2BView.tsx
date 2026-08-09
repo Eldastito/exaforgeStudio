@@ -5,6 +5,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
 import { RadarMap } from './RadarMap';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 // Sugestões fixas de CNAE (prefixo) — PRD T05.
 const CNAE_SUGGESTIONS = [
@@ -64,6 +65,10 @@ export function RadarB2BView() {
     arr.sort((a, b) => sortBy === 'dist' ? (a.distanciaKm ?? 1e9) - (b.distanciaKm ?? 1e9) : (b.capitalSocial || 0) - (a.capitalSocial || 0));
     return arr;
   }, [empresas, sortBy]);
+
+  // Tabela paginada (mapa segue mostrando todas). resetKey=empresas: volta ao
+  // teto a cada nova busca, mas não ao só reordenar.
+  const page = useVisibleLimit(sorted, { resetKey: empresas });
 
   const toggleSel = (cnpj: string) => setSelected(s => { const n = new Set(s); n.has(cnpj) ? n.delete(cnpj) : n.add(cnpj); return n; });
   const toggleAll = () => setSelected(s => s.size === sorted.length ? new Set() : new Set(sorted.map(e => e.cnpj)));
@@ -202,7 +207,7 @@ export function RadarB2BView() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(e => (
+                {page.visible.map(e => (
                   <tr key={e.cnpj} onClick={() => setFocusedCnpj(e.cnpj)}
                     className={`border-t border-zinc-800/60 cursor-pointer ${e.cnpj === focusedCnpj ? 'bg-amber-500/10' : selected.has(e.cnpj) ? 'bg-indigo-500/5' : 'hover:bg-zinc-800/30'}`}>
                     <td className="p-2" onClick={ev => ev.stopPropagation()}><input type="checkbox" checked={selected.has(e.cnpj)} onChange={() => toggleSel(e.cnpj)} className="accent-indigo-500" /></td>
@@ -220,6 +225,7 @@ export function RadarB2BView() {
               </tbody>
             </table>
           </div>
+          <ShowMore page={page} noun="empresas" />
           <p className="mt-3 text-xs text-zinc-500">Depois de importar, acompanhe o score e as hipóteses em <button onClick={() => setViewMode('prospect')} className="text-indigo-400 hover:underline">Prospect AI</button>.</p>
         </>
       )}

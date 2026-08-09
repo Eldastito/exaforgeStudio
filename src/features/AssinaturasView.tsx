@@ -7,6 +7,7 @@ import { useStore } from '@/src/store/useStore';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 const INP = 'w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500';
 const INTERVAL_LABEL: Record<string, string> = { monthly: 'mensal', weekly: 'semanal', yearly: 'anual' };
@@ -20,6 +21,7 @@ export function AssinaturasView() {
   const [plans, setPlans] = useState<any[]>([]);
   const [subs, setSubs] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const invoicesPage = useVisibleLimit(invoices);
   const [loading, setLoading] = useState(true);
   const [showPlan, setShowPlan] = useState(false);
   const [showSub, setShowSub] = useState(false);
@@ -97,7 +99,7 @@ export function AssinaturasView() {
       ) : tab === 'faturas' ? (
         invoices.length === 0 ? <EmptyState icon={<FileText className="w-6 h-6" />} title="Nenhuma fatura" description="As faturas aparecem aqui quando você cobra uma assinatura (ou na cobrança automática)." />
         : <div className="space-y-2">
-            {invoices.map(i => (
+            {invoicesPage.visible.map(i => (
               <div key={i.id} className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
                 <div>
                   <p className="text-sm text-zinc-100">{i.contact_name || 'Cliente'} · {i.plan_name || 'Plano'}</p>
@@ -111,6 +113,7 @@ export function AssinaturasView() {
                 </div>
               </div>
             ))}
+            <ShowMore page={invoicesPage} noun="faturas" />
           </div>
       ) : (
         subs.length === 0 ? <EmptyState icon={<RefreshCw className="w-6 h-6" />} title="Nenhuma assinatura" description="Crie um plano e atribua a um cliente para começar a cobrança recorrente." />

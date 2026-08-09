@@ -204,11 +204,15 @@ async function main() {
     confirmationDeadline: new Date(Date.now() - 3600_000).toISOString(),
   });
   const actionsBefore = db.prepare(`SELECT id FROM decision_actions WHERE organization_id = ? AND command_type = 'collection_send_reminder'`).all(orgA) as any[];
+  const beforeIds = new Set(actionsBefore.map((a: any) => a.id));
   const beforeCount = actionsBefore.length;
   await ProcessRuntimeService.runToCompletion(orgA, instTimeout.id, { actor: "u-runner" });
-  const actsTimeoutAll = db.prepare(`SELECT id, created_at FROM decision_actions WHERE organization_id = ? AND command_type = 'collection_send_reminder' ORDER BY created_at ASC`).all(orgA) as any[];
+  const actsTimeoutAll = db.prepare(`SELECT id, created_at FROM decision_actions WHERE organization_id = ? AND command_type = 'collection_send_reminder'`).all(orgA) as any[];
   check("nova DecisionAction criada pra instTimeout", actsTimeoutAll.length === beforeCount + 1);
-  const actionTimeout: string = actsTimeoutAll[actsTimeoutAll.length - 1]?.id;
+  // A ação nova é identificada por EXCLUSÃO de ids (determinístico) — não por
+  // "última por created_at": created_at tem granularidade de segundo e duas
+  // ações no mesmo segundo tornam o ORDER BY um desempate arbitrário (flake).
+  const actionTimeout: string = (actsTimeoutAll.find((a: any) => !beforeIds.has(a.id)) as any)?.id;
   const confT_before = confirmationOf(orgA, actionTimeout);
   check("setup timeout: confirmação criada com deadline vencido", confT_before?.status === "pending");
   Scheduler.confirmationTimeoutPass();

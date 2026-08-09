@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { BusinessManifestoService } from "./BusinessManifestoService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /**
  * Radar de Manipulação — Tier 2 (Simon Sinek, "Comece pelo Porquê", ADR-050).
@@ -152,7 +153,11 @@ export const ManipulationRadarService = {
             AND created_at >= datetime('now', '-1 days')
           ORDER BY created_at DESC LIMIT 1`
       ).get(input.organizationId, source, normKey) as any;
-      if (existing) return this.rowTo(existing);
+      if (existing) {
+        const alert = this.rowTo(existing);
+        this.publishManipulationSignal(alert);
+        return alert;
+      }
 
       const suggestion = buildSuggestion(input.organizationId, tactics);
       const id = randomUUID();
@@ -160,11 +165,45 @@ export const ManipulationRadarService = {
         `INSERT INTO manipulation_alerts (id, organization_id, message_source, message_ref, sample_text, tactics_json, severity, suggestion, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`
       ).run(id, input.organizationId, source, input.ref || null, sample, JSON.stringify(tactics), severity, suggestion);
-      return this.rowTo(db.prepare(`SELECT * FROM manipulation_alerts WHERE id = ?`).get(id) as any);
+      const alert = this.rowTo(db.prepare(`SELECT * FROM manipulation_alerts WHERE id = ?`).get(id) as any);
+      this.publishManipulationSignal(alert);
+      return alert;
     } catch (e) {
       console.error("[ManipulationRadar] scan falhou:", e);
       return null;
     }
+  },
+
+  /**
+   * ADR-158 F2.3 — projeta o alerta de manipulação no contrato unificado
+   * (`business_signals`, domain='reputation'), DERIVADO da mesma análise e com
+   * dedupe_key='manipulation:<id>' (1 sinal por alerta; `manipulation_alerts`
+   * vira projeção, sem divergir). Opt-in (flag `radar_signals_unified_enabled`)
+   * + best-effort (nunca derruba o scan de outbound). Léxico heurístico →
+   * basis='estimate' (nunca vender hipótese como fato). Severidade low/medium/
+   * high → info/attention/risk. subject_type='message'.
+   */
+  publishManipulationSignal(alert: ManipulationAlert) {
+    try {
+      const flag = db.prepare(`SELECT radar_signals_unified_enabled AS enabled FROM organization_settings WHERE organization_id = ?`).get(alert.organizationId) as any;
+      if (!flag || Number(flag.enabled) !== 1) return;
+      const sevMap: Record<ManipulationSeverity, string> = { low: "info", medium: "attention", high: "risk" };
+      const confMap: Record<ManipulationSeverity, number> = { low: 0.45, medium: 0.6, high: 0.75 };
+      BusinessSignalService.publish(alert.organizationId, {
+        domain: "reputation",
+        signalType: "manipulative_copy",
+        severity: sevMap[alert.severity] || "attention",
+        basis: "estimate",
+        confidence: confMap[alert.severity] ?? 0.6,
+        sourceService: "ManipulationRadarService",
+        sourceEntityType: "manipulation_alert",
+        sourceEntityId: alert.id,
+        subjectType: "message",
+        evidence: { tactics: alert.tactics, sample: alert.sampleText, source: alert.messageSource },
+        premises: { messageRef: alert.messageRef, suggestion: alert.suggestion },
+        dedupeKey: `manipulation:${alert.id}`,
+      });
+    } catch (e) { /* best-effort — a projeção nunca derruba o radar (convenção nº 7) */ }
   },
 
   list(orgId: string, opts: { status?: ManipulationStatus | "all"; limit?: number } = {}): ManipulationAlert[] {

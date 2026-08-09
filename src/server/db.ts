@@ -8184,6 +8184,31 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_vi_history_fp
       ON vertical_intelligence_history(fingerprint, version DESC);
   `);
+  // Decision Intelligence DI-5.4 (ADR-157 D1/D5) — AGENDA de nichos automatizados.
+  // Cada linha = 1 nicho que o Scheduler pesquisa sozinho na cadência
+  // `interval_days`. COMPARTILHADA (é plataforma, RN-157-1): **sem
+  // organization_id**. `last_run_at` marca o último disparo (dedup por intervalo).
+  // Um nicho com agenda ENABLED é mutuamente exclusivo com o lembrete manual da
+  // DI-4.5 (RN-157-4). Registrado só pelo admin master.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vertical_intelligence_schedule (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      vertical TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      region TEXT,
+      timeframe TEXT,
+      interval_days INTEGER NOT NULL DEFAULT 7,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_run_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vi_schedule_fp
+      ON vertical_intelligence_schedule(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_vi_schedule_enabled
+      ON vertical_intelligence_schedule(enabled, vertical);
+  `);
 };
 
 initDb();

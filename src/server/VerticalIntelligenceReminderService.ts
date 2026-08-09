@@ -54,10 +54,14 @@ export class VerticalIntelligenceReminderService {
   static dueNiches(graceDays: number = GRACE_DAYS): any[] {
     const consuming = this.consumingVerticals();
     if (!consuming.size) return [];
+    // Mútua exclusão (RN-157-4): nicho com AGENDA de automação ativa (DI-5.4) é
+    // pesquisado sozinho pelo Scheduler — não faz sentido lembrar o admin de
+    // "re-colar". Exclui esses fingerprints do lembrete manual.
     const rows = db.prepare(`SELECT id, fingerprint, vertical, topic, region, timeframe, valid_until,
         (valid_until <= CURRENT_TIMESTAMP) AS expired
       FROM vertical_intelligence
       WHERE valid_until <= datetime('now', ?)
+        AND fingerprint NOT IN (SELECT fingerprint FROM vertical_intelligence_schedule WHERE enabled = 1)
       ORDER BY valid_until ASC`).all(`+${Math.max(0, graceDays)} days`) as any[];
     return rows.filter((r) => consuming.has(r.vertical)).map((r) => ({ ...r, expired: !!r.expired }));
   }

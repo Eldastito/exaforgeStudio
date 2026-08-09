@@ -51,6 +51,7 @@ import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
+import { VerticalIntelligenceResearchService } from "./VerticalIntelligenceResearchService.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
 import { BackupService } from "./BackupService.js";
 
@@ -716,6 +717,11 @@ export class Scheduler {
     await PurchaseRequisitionService.pass().catch(e => console.error('[Scheduler] reposição falhou', e));
     await QuoteService.passFollowupAndExpire(this.io).catch(e => console.error('[Scheduler] follow-up de orçamento falhou', e));
     try { LgpdService.retentionPass(); } catch (e) { console.error('[Scheduler] retenção LGPD falhou', e); }
+    // DI-5.4 (ADR-157): pesquisa AUTÔNOMA dos nichos agendados (vencidos pelo
+    // intervalo, com consumidores, dentro do orçamento). Roda ANTES do lembrete
+    // pra que nichos automatizados já saiam da lista do lembrete (mútua exclusão
+    // RN-157-4). Só age em nichos que o admin master registrou.
+    await VerticalIntelligenceResearchService.maybeSweep().catch(e => console.error('[Scheduler] pesquisa autônoma de nicho falhou', e));
     // DI-4.5 (ADR-156): lembrete SEMANAL de atualização das pesquisas de nicho
     // vencendo (provider manual — só avisa o admin, nunca roda pesquisa sozinho).
     try { VerticalIntelligenceReminderService.maybeWeeklySweep(); } catch (e) { console.error('[Scheduler] lembrete de inteligência de nicho falhou', e); }

@@ -31,6 +31,7 @@ async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { OpportunityRadarService: R } = await import("../src/server/OpportunityRadarService.js");
   const { RecoveryRadarService: RR } = await import("../src/server/RecoveryRadarService.js");
+  const { ManipulationRadarService: MR } = await import("../src/server/ManipulationRadarService.js");
   const { BusinessSignalService: S } = await import("../src/server/BusinessSignalService.js");
 
   const mkOrg = (unified: boolean) => {
@@ -110,17 +111,43 @@ async function main() {
   const complaintSig = recSignals(onOrg).find((r) => r.signal_type === "complaint_detected");
   check("recovery heurístico (complaint) → basis='estimate'", complaintSig?.basis === "estimate");
 
-  // ===== 7. Isolamento multi-tenant =====
+  // ===== 7. ManipulationRadar → business_signals (F2.3) =====
+  const repSignals = (orgId: string) =>
+    db.prepare("SELECT * FROM business_signals WHERE organization_id = ? AND domain = 'reputation'").all(orgId) as any[];
+  // texto minúsculo de propósito: a dedupe do ManipulationRadar compara
+  // lower() do SQLite (ASCII-only) — maiúscula acentuada não casaria (bug
+  // pré-existente, fora do escopo desta fatia). discount+urgency+pressure → high.
+  const highManip = "só hoje 50% de desconto! você precisa aproveitar, não perca!";
+  // flag OFF: não projeta
+  MR.scan({ organizationId: offOrg, text: highManip, source: "campaign_copy", ref: "c-off" });
+  check("manipulation flag OFF: nenhum sinal", repSignals(offOrg).length === 0);
+  // flag ON: projeta 1 sinal (severidade high → risk)
+  const al = MR.scan({ organizationId: onOrg, text: highManip, source: "campaign_copy", ref: "camp-1" });
+  const reps = repSignals(onOrg);
+  check("manipulation flag ON: 1 sinal domain='reputation'", reps.length === 1);
+  check("manipulation: signal_type='manipulative_copy', subject_type='message'", reps[0]?.signal_type === "manipulative_copy" && reps[0]?.subject_type === "message");
+  check("manipulation: basis='estimate' (léxico), severity high→risk", reps[0]?.basis === "estimate" && reps[0]?.severity === "risk");
+  check("manipulation: dedupe_key = manipulation:<id>", reps[0]?.dedupe_key === `manipulation:${al?.id}`);
+  // dedupe: mesmo texto+source na janela → mesmo alerta, ainda 1 sinal
+  MR.scan({ organizationId: onOrg, text: highManip, source: "campaign_copy", ref: "camp-1" });
+  check("manipulation dedupe: segue com 1 sinal", repSignals(onOrg).length === 1);
+  // severidade low → info
+  MR.scan({ organizationId: onOrg, text: "Frete grátis para sua região.", source: "other" });
+  const lowSig = repSignals(onOrg).find((r) => r.severity === "info");
+  check("manipulation low → severity='info'", !!lowSig);
+
+  // ===== 8. Isolamento multi-tenant =====
   const other = mkOrg(true);
   check("isolamento: org B não vê sinais de oportunidade de A", oppSignals(other).length === 0);
   check("isolamento: org B não vê sinais de recovery de A", recSignals(other).length === 0);
+  check("isolamento: org B não vê sinais de reputation de A", repSignals(other).length === 0);
 
   console.log("\n=== TEST: Espinha Única F2 — detectores → business_signals (opportunity+recovery) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   if (failures > 0) { console.error(`\n❌ ${failures} FALHA(S).`); process.exit(1); }
-  console.log("\n✅ Radar Signals Unified (F2.1+F2.2) OK.");
+  console.log("\n✅ Radar Signals Unified (F2.1+F2.2+F2.3) OK.");
 }
 
 main().catch((e) => { console.error(e); try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} process.exit(1); });

@@ -70,7 +70,7 @@ Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process
 | **F1** | correlation_id + schema_version + herança sinal→decisão→outcome + `ExecutionTraceService` + rota trace + teste | **ENTREGUE** |
 | **F2.1** | Contrato ganha `subject_type`+`expires_at`; **OpportunityRadar** projeta em `business_signals` (domain=opportunity) sob flag `radar_signals_unified_enabled`; `disguised_opportunities` vira projeção | **ENTREGUE** |
 | **F2.2** | **RecoveryRadar** → `business_signals` (domain=recovery), mesma flag; `recovery_events` vira projeção; trigger factual→basis=fact, heurístico→estimate | **ENTREGUE** |
-| F2.3 | **ManipulationRadar** → `business_signals` (domain=reputation), mesma flag; `manipulation_alerts` vira projeção | planejada |
+| **F2.3** | **ManipulationRadar** → `business_signals` (domain=reputation), mesma flag; `manipulation_alerts` vira projeção; severidade low/med/high→info/attention/risk, basis=estimate | **ENTREGUE** — fecha a migração dos 3 detectores (F2 completa) |
 | F3 | Adaptadores Retail/Comigo/RIC → `action_outcomes` (+categorias faltantes) | planejada |
 | F4 | Auto-disparo genérico sinal→process_instance (flag + governado) | planejada |
 

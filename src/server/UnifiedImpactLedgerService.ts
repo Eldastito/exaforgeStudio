@@ -2,6 +2,7 @@ import db from "./db.js";
 import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
 import { ComigoImpactService } from "./ComigoImpactService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
+import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 
 /**
  * UnifiedImpactLedgerService (ADR-158 F3 — Espinha Única / consolidação da
@@ -57,7 +58,7 @@ export class UnifiedImpactLedgerService {
     UnifiedImpactLedgerService.actionLedgerProvider,
     UnifiedImpactLedgerService.comigoProvider,
     UnifiedImpactLedgerService.retailProvider,
-    // F3.4: ricProvider
+    UnifiedImpactLedgerService.ricProvider,
   ];
 
   /** Fonte 1 — outcomes atados a decisões (action_outcomes, ADR-136/152). */
@@ -118,6 +119,60 @@ export class UnifiedImpactLedgerService {
       basis: "fact",
       evidence: { month, commissionDivergences: m.proven.commissionDivergences, systemReconciliation: m.proven.systemReconciliation },
     }];
+  }
+
+  /**
+   * Fonte 4 (F3.4) — RIC (Revenue Intelligence Center, RevenueIntelligenceService):
+   * a recuperação de receita, o número-carro-chefe do produto. O RIC já separa
+   * na fonte dois conceitos com bases DIFERENTES (ADR-085 D4) — e aqui eles
+   * viram DUAS categorias próprias, nunca somadas entre si:
+   *
+   *  - `recoverableRevenue` (IRR) — receita ainda EM RISCO com alta chance de
+   *    recuperação. É ESTIMATIVA (`leads × probabilidade × ticket médio`), logo
+   *    basis=estimate. Categoria própria: potencial ≠ dinheiro realizado.
+   *  - `recoveredRevenue` (RRI, numerador) — receita EFETIVAMENTE recuperada:
+   *    pedidos PAGOS atribuídos a um fluxo do ZapFlow (nudge de abandono,
+   *    lembrete de PIX, cadência) na janela de atribuição. É FATO, basis=fact.
+   *
+   * Por que `recoveredRevenue` NÃO entra em `revenueRecovered` (fonte
+   * action_ledger): são duas contabilidades com base de medição distinta — o
+   * action_ledger conta outcomes ATADOS A DECISÕES; o RIC conta por ATRIBUIÇÃO
+   * de pedido pago. Somar as duas double-count-aria o mesmo dinheiro. Mantê-las
+   * em categorias separadas é a própria invariante ADR-085 D4 (só se soma dentro
+   * da MESMA base/interpretação). Cada uma segue rastreável à sua fonte.
+   *
+   * Guard: o RIC é módulo core (sem flag de opt-in), então o filtro é por VALOR
+   * (>0) — org sem atividade recuperável/recuperada não contribui. getSnapshot é
+   * read-only (RN-004): zero escrita. Best-effort — build() isola exceções.
+   */
+  static ricProvider(orgId: string): ImpactContribution[] {
+    const snap = RevenueIntelligenceService.getSnapshot(orgId, "month");
+    const m = snap?.money;
+    if (!m) return [];
+    const out: ImpactContribution[] = [];
+    const recoverable = Number(m.recoverable) || 0;
+    if (recoverable > 0) {
+      out.push({
+        source: "ric",
+        category: "recoverableRevenue",
+        unit: "BRL",
+        value: recoverable,
+        basis: "estimate",
+        evidence: { period: snap.period, formula: m.formula, ticket: m.ticket, rri: m.rri },
+      });
+    }
+    const recovered = Number(m.recovered) || 0;
+    if (recovered > 0) {
+      out.push({
+        source: "ric",
+        category: "recoveredRevenue",
+        unit: "BRL",
+        value: recovered,
+        basis: "fact",
+        evidence: { period: snap.period, attributionWindowDays: snap.attributionWindowDays, sources: snap.recoveredSources },
+      });
+    }
+    return out;
   }
 
   /** Monta o ledger unificado da org (derivado, read-only). */

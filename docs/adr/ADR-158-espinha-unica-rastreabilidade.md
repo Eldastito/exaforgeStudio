@@ -74,7 +74,7 @@ Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process
 | **F3.1** | `UnifiedImpactLedgerService` (DERIVADO, read-only) + rota `/impact-ledger` + 1ª fonte `action_ledger`; categorias sempre separadas | **ENTREGUE** |
 | **F3.2** | Provider **Comigo** (lucro comprovado como categoria `provenValue`, basis=fact; só contribui se a org usa Comigo) | **ENTREGUE** |
 | **F3.3** | Provider **Retail** (valor comprovado do mês → `provenValue`, basis=fact; soma na MESMA categoria que o Comigo) | **ENTREGUE** |
-| F3.4 | Provider **RIC** (receita recuperável/recuperada) | planejada |
+| **F3.4** | Provider **RIC** — **fecha a Fatia 3**: duas categorias próprias `recoverableRevenue` (IRR, basis=estimate) e `recoveredRevenue` (RRI, basis=fact), ambas separadas de `revenueRecovered` (base de medição distinta — nunca somadas) | **ENTREGUE** |
 | F4 | Auto-disparo genérico sinal→process_instance (flag + governado) | planejada |
 
 **Refino do D5 (F3.1):** a unificação de impacto é feita na **LEITURA** (ledger derivado por providers), **não** escrevendo agregados de domínio em `action_outcomes`. Motivo: a convenção nº 2 proíbe rebuild de tabela e `action_outcomes.action_id` é `NOT NULL` (não comporta impacto não-atado a decisão sem reconstruir); e a RN-004 manda derivar por query em vez de duplicar. Assim: zero escrita nova, zero migração, zero divergência (nada é copiado). Invariante ADR-085 D4 preservada — categorias nunca somadas entre si. F3.2–F3.4 apenas registram novos providers.

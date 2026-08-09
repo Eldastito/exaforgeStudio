@@ -1,12 +1,12 @@
 /**
- * TEST — Espinha Única F3.1 (ADR-158 D5): Impact Ledger UNIFICADO (derivado).
+ * TEST — Espinha Única F3.1–F3.4 (ADR-158 D5): Impact Ledger UNIFICADO (derivado).
  *
  * Prova, determinístico e sem IA:
- *   - reúne os outcomes atados a decisões (fonte 'action_ledger') no ledger
+ *   - reúne as 4 fontes (action_ledger, Comigo, Retail, RIC) no ledger
  *     unificado, por CATEGORIA;
  *   - agrega DENTRO da categoria (mesma unidade) e NUNCA entre categorias
  *     (sem total geral inflado — ADR-085 D4 / PRD §32);
- *   - unidades corretas (BRL vs minutes);
+ *   - unidades corretas (BRL vs minutes) e basis correto (fact vs estimate);
  *   - isolamento multi-tenant.
  *
  * Uso: npm run test:impact-ledger-unified
@@ -101,17 +101,38 @@ async function main() {
   check("cross-fonte: provenValue tem 2 linhas (comigo + retail)", ledR2.categories.provenValue?.lines.length === 2);
   check("cross-fonte: ambas as fontes listadas", ledR2.sources.includes("retail") && ledR2.sources.includes("comigo"));
 
-  // ===== 6. Isolamento multi-tenant =====
+  // ===== 6. Provider RIC (F3.4): recuperável (estimativa) + recuperada (fato) =====
+  const { RevenueIntelligenceService: RIC } = await import("../src/server/RevenueIntelligenceService.js");
+  const orgI = mkOrg();
+  // Ticket fixo torna a estimativa determinística (senão puxaria o AOV histórico).
+  RIC.saveConfig(orgI, { custom_ticket_amount: 1000 });
+  // (a) recuperável (IRR): 1 orçamento 'sent' vencido (>72h) → 1 × prob_quote(0.50) × 1000 = 500 (ESTIMATE).
+  db.prepare("INSERT INTO quotes (id, organization_id, status, total_amount, sent_at) VALUES (?, ?, 'sent', 999, '2020-01-01 00:00:00')").run(randomUUID(), orgI);
+  // (b) recuperada (RRI): 1 pedido PAGO atribuído a lembrete de PIX → 300 (FACT).
+  db.prepare("INSERT INTO orders (id, organization_id, status, total_amount, pix_reminder_count, paid_at, created_at) VALUES (?, ?, 'pago', 300, 1, datetime('now'), datetime('now'))").run(randomUUID(), orgI);
+  const ledI = L.build(orgI);
+  check("ric: recoverableRevenue = 1×0.5×1000 = 500 (estimativa)", ledI.categories.recoverableRevenue?.total === 500);
+  check("ric: recoverableRevenue basis=estimate, fonte 'ric'", ledI.categories.recoverableRevenue?.lines[0].basis === "estimate" && ledI.categories.recoverableRevenue?.lines[0].source === "ric");
+  check("ric: recoveredRevenue = 300 (fato, pedido pago atribuído a fluxo)", ledI.categories.recoveredRevenue?.total === 300);
+  check("ric: recoveredRevenue basis=fact, unidade BRL", ledI.categories.recoveredRevenue?.lines[0].basis === "fact" && ledI.categories.recoveredRevenue?.unit === "BRL");
+  check("ric: fonte 'ric' listada", ledI.sources.includes("ric"));
+  // recoveredRevenue (RIC, por ATRIBUIÇÃO de pedido pago) é categoria SEPARADA de
+  // revenueRecovered (action_ledger, por OUTCOME de decisão): bases de medição
+  // distintas — somar double-count-aria o mesmo dinheiro (ADR-085 D4).
+  check("ric: recoveredRevenue ≠ revenueRecovered (categorias separadas, nunca somadas)", !ledI.categories.revenueRecovered && !!ledI.categories.recoveredRevenue);
+  check("org sem RIC (orgA) não tem categorias RIC", !led.categories.recoverableRevenue && !led.categories.recoveredRevenue);
+
+  // ===== 7. Isolamento multi-tenant =====
   const orgB = mkOrg();
   const ledB = L.build(orgB);
   check("isolamento: org B tem ledger vazio", Object.keys(ledB.categories).length === 0 && ledB.sources.length === 0);
 
-  console.log("\n=== TEST: Impact Ledger Unificado (ADR-158 F3.1) ===\n");
+  console.log("\n=== TEST: Impact Ledger Unificado (ADR-158 F3.1–F3.4) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   if (failures > 0) { console.error(`\n❌ ${failures} FALHA(S).`); process.exit(1); }
-  console.log("\n✅ Impact Ledger Unificado (F3.1) OK.");
+  console.log("\n✅ Impact Ledger Unificado (F3.1–F3.4) OK.");
 }
 
 main().catch((e) => { console.error(e); try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} process.exit(1); });

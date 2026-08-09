@@ -1,5 +1,5 @@
 /**
- * TEST — Espinha Única F2.1 (ADR-158 D4): OpportunityRadar projeta em
+ * TEST — Espinha Única F2 (ADR-158 D4): detectores projetam em
  * `business_signals` (opt-in), + contrato subject_type/expires_at.
  *
  * Prova, determinístico e sem IA:
@@ -30,6 +30,7 @@ function check(name: string, ok: boolean) { results.push({ name, ok }); if (!ok)
 async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { OpportunityRadarService: R } = await import("../src/server/OpportunityRadarService.js");
+  const { RecoveryRadarService: RR } = await import("../src/server/RecoveryRadarService.js");
   const { BusinessSignalService: S } = await import("../src/server/BusinessSignalService.js");
 
   const mkOrg = (unified: boolean) => {
@@ -88,16 +89,38 @@ async function main() {
   check("contrato: subject_type gravado", row.subject_type === "sku");
   check("contrato: expires_at gravado", String(row.expires_at).startsWith("2030-01-01"));
 
-  // ===== 6. Isolamento multi-tenant =====
+  // ===== 6. RecoveryRadar → business_signals (F2.2) =====
+  const recSignals = (orgId: string) =>
+    db.prepare("SELECT * FROM business_signals WHERE organization_id = ? AND domain = 'recovery'").all(orgId) as any[];
+  // flag OFF: não projeta
+  RR.detect({ organizationId: offOrg, contactId: "c-off", triggerType: "order_cancelled", context: { note: "x" } });
+  check("recovery flag OFF: nenhum sinal", recSignals(offOrg).length === 0);
+  // flag ON: projeta 1 sinal factual
+  const ev = RR.detect({ organizationId: onOrg, contactId: "c-1", triggerType: "order_cancelled", context: { note: "cancelou" } });
+  const recs = recSignals(onOrg);
+  check("recovery flag ON: 1 sinal domain='recovery'", recs.length === 1);
+  check("recovery: signal_type = trigger (order_cancelled)", recs[0]?.signal_type === "order_cancelled");
+  check("recovery: subject_type='contact', basis='fact', severity='risk'", recs[0]?.subject_type === "contact" && recs[0]?.basis === "fact" && recs[0]?.severity === "risk");
+  check("recovery: dedupe_key = recovery:<eventId>", recs[0]?.dedupe_key === `recovery:${ev?.id}`);
+  // dedupe: mesmo contato+trigger na janela → mesmo evento, ainda 1 sinal
+  RR.detect({ organizationId: onOrg, contactId: "c-1", triggerType: "order_cancelled", context: { note: "de novo" } });
+  check("recovery dedupe: segue com 1 sinal", recSignals(onOrg).length === 1);
+  // trigger heurístico → basis='estimate'
+  RR.detect({ organizationId: onOrg, contactId: "c-2", triggerType: "complaint_detected", context: { snippet: "produto ruim" } });
+  const complaintSig = recSignals(onOrg).find((r) => r.signal_type === "complaint_detected");
+  check("recovery heurístico (complaint) → basis='estimate'", complaintSig?.basis === "estimate");
+
+  // ===== 7. Isolamento multi-tenant =====
   const other = mkOrg(true);
   check("isolamento: org B não vê sinais de oportunidade de A", oppSignals(other).length === 0);
+  check("isolamento: org B não vê sinais de recovery de A", recSignals(other).length === 0);
 
-  console.log("\n=== TEST: Espinha Única F2.1 — OpportunityRadar → business_signals ===\n");
+  console.log("\n=== TEST: Espinha Única F2 — detectores → business_signals (opportunity+recovery) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   if (failures > 0) { console.error(`\n❌ ${failures} FALHA(S).`); process.exit(1); }
-  console.log("\n✅ Radar Signals Unified (F2.1) OK.");
+  console.log("\n✅ Radar Signals Unified (F2.1+F2.2) OK.");
 }
 
 main().catch((e) => { console.error(e); try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} process.exit(1); });

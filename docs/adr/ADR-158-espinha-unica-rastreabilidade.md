@@ -73,7 +73,7 @@ Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process
 | **F2.3** | **ManipulationRadar** → `business_signals` (domain=reputation), mesma flag; `manipulation_alerts` vira projeção; severidade low/med/high→info/attention/risk, basis=estimate | **ENTREGUE** — fecha a migração dos 3 detectores (F2 completa) |
 | **F3.1** | `UnifiedImpactLedgerService` (DERIVADO, read-only) + rota `/impact-ledger` + 1ª fonte `action_ledger`; categorias sempre separadas | **ENTREGUE** |
 | **F3.2** | Provider **Comigo** (lucro comprovado como categoria `provenValue`, basis=fact; só contribui se a org usa Comigo) | **ENTREGUE** |
-| F3.3 | Provider **Retail** (valor comprovado/capital parado) | planejada |
+| **F3.3** | Provider **Retail** (valor comprovado do mês → `provenValue`, basis=fact; soma na MESMA categoria que o Comigo) | **ENTREGUE** |
 | F3.4 | Provider **RIC** (receita recuperável/recuperada) | planejada |
 | F4 | Auto-disparo genérico sinal→process_instance (flag + governado) | planejada |
 

@@ -65,7 +65,20 @@ async function main() {
     !("total" in led) && !("grandTotal" in (led as any)));
   check("disclaimer de não-soma presente", typeof led.disclaimer === "string" && led.disclaimer.includes("nunca somadas"));
 
-  // ===== 4. Isolamento multi-tenant =====
+  // ===== 4. Provider Comigo (F3.2): lucro comprovado = categoria própria =====
+  const orgC = mkOrg();
+  db.prepare("UPDATE organization_settings SET comigo_impact_baseline_at = ? WHERE organization_id = ?").run("2020-01-01T00:00:00.000Z", orgC);
+  const oid = randomUUID();
+  db.prepare("INSERT INTO comigo_orders (id, organization_id, status, total) VALUES (?, ?, 'paid', 200)").run(oid, orgC);
+  db.prepare("INSERT INTO comigo_order_items (id, order_id, name, qty, unit_price, unit_cost_snapshot) VALUES (?, ?, 'Item', 2, 100, 60)").run(randomUUID(), oid);
+  const ledC = L.build(orgC);
+  check("comigo: provenValue = lucro comprovado (rev 200 - custo 120 = 80)", ledC.categories.provenValue?.total === 80);
+  check("comigo: unidade BRL, fonte 'comigo', basis fact", ledC.categories.provenValue?.unit === "BRL" && ledC.categories.provenValue?.lines[0].source === "comigo" && ledC.categories.provenValue?.lines[0].basis === "fact");
+  check("comigo: fonte 'comigo' listada", ledC.sources.includes("comigo"));
+  check("provenValue é categoria SEPARADA de revenueRecovered (nunca somadas)", !ledC.categories.revenueRecovered && !!ledC.categories.provenValue);
+  check("org sem Comigo (orgA) não tem provenValue", !led.categories.provenValue);
+
+  // ===== 5. Isolamento multi-tenant =====
   const orgB = mkOrg();
   const ledB = L.build(orgB);
   check("isolamento: org B tem ledger vazio", Object.keys(ledB.categories).length === 0 && ledB.sources.length === 0);

@@ -1,4 +1,6 @@
+import db from "./db.js";
 import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
+import { ComigoImpactService } from "./ComigoImpactService.js";
 
 /**
  * UnifiedImpactLedgerService (ADR-158 F3 — Espinha Única / consolidação da
@@ -52,7 +54,8 @@ export class UnifiedImpactLedgerService {
    */
   private static providers: Array<(orgId: string) => ImpactContribution[]> = [
     UnifiedImpactLedgerService.actionLedgerProvider,
-    // F3.2: comigoProvider · F3.3: retailProvider · F3.4: ricProvider
+    UnifiedImpactLedgerService.comigoProvider,
+    // F3.3: retailProvider · F3.4: ricProvider
   ];
 
   /** Fonte 1 — outcomes atados a decisões (action_outcomes, ADR-136/152). */
@@ -67,6 +70,27 @@ export class UnifiedImpactLedgerService {
     add("lossPrevented", "BRL", c.lossPrevented);
     add("timeSaved", "minutes", c.timeSavedMinutes);
     return out;
+  }
+
+  /**
+   * Fonte 2 (F3.2) — Comigo: lucro COMPROVADO desde o baseline (fato; dinheiro
+   * que já entrou/foi ganho). Categoria própria `provenValue` (≠ receita
+   * recuperada — nunca somadas). Só contribui se a org já usa Comigo (baseline
+   * capturado): guarda contra rodar/capturar baseline num ledger read-only.
+   */
+  static comigoProvider(orgId: string): ImpactContribution[] {
+    const row = db.prepare("SELECT comigo_impact_baseline_at FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    if (!row?.comigo_impact_baseline_at) return [];
+    const s = ComigoImpactService.summary(orgId);
+    if (!s || !s.provenBRL) return [];
+    return [{
+      source: "comigo",
+      category: "provenValue",
+      unit: "BRL",
+      value: s.provenBRL,
+      basis: "fact",
+      evidence: { sinceDays: s.sinceDays, ordersCount: s.ordersCount, baselineAt: s.baselineAt },
+    }];
   }
 
   /** Monta o ledger unificado da org (derivado, read-only). */

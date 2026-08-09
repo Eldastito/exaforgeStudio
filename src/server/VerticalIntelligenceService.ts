@@ -62,7 +62,7 @@ export class VerticalIntelligenceService {
     ResearchBudgetService.record({ fingerprint: researchFingerprint(vertical, topic, region || undefined, timeframe || undefined), vertical, topic, provider: provider.name, costCents: Number(result?.costCents) || 0 });
 
     // Persiste no compartilhado (anonimiza + dedup + audita).
-    return this.persistShared(actor, {
+    return this.publish(actor, {
       vertical, topic, region, timeframe,
       content: result?.content ?? {},
       sources: Array.isArray(result?.sources) ? result.sources : [],
@@ -87,7 +87,7 @@ export class VerticalIntelligenceService {
     if (!vertical || !topic) throw new Error("vertical e topic são obrigatórios.");
     if (!summary) throw new Error("summary (o texto da pesquisa) é obrigatório.");
     const content = { summary, drivers: Array.isArray(input.drivers) ? input.drivers.map((d) => String(d)) : [], generatedBy: "manual" };
-    return this.persistShared(actor, {
+    return this.publish(actor, {
       vertical, topic,
       region: input.region ? String(input.region).trim() : null,
       timeframe: input.timeframe ? String(input.timeframe).trim() : null,
@@ -98,8 +98,13 @@ export class VerticalIntelligenceService {
     });
   }
 
-  /** Grava (upsert) uma entrada no compartilhado: anonimiza + dedup + audita. */
-  private static persistShared(
+  /**
+   * Publica (upsert) uma entrada CURADA no compartilhado: anonimiza (RN-157-1,
+   * sempre DEPOIS da curadoria) + dedup + versiona no histórico (DI-5.2) + audita.
+   * Público desde a DI-5.3 para o `ResearchCuratorService.curate` publicar um
+   * pacote já aprovado sem reimplementar anonimização/versionamento.
+   */
+  static publish(
     actor: { userId?: string | null; organizationId?: string | null } | null,
     p: { vertical: string; topic: string; region?: string | null; timeframe?: string | null; content: any; sources: string[]; confidence: number; provider: string; ttlDays?: number },
   ): any {

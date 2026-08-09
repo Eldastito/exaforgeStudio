@@ -1,6 +1,6 @@
 # ADR-158 — Espinha Única: rastreabilidade ponta-a-ponta + consolidação das pontas do ciclo (aditivo sobre ADR-135/136/152)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZapFlow Execution Intelligence (ZEI). **F1 entregue** (correlationId + schema_version + ExecutionTraceService). F2..F4 planejadas.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZapFlow Execution Intelligence (ZEI). **F1–F4 entregues**: F1 (correlationId + schema_version + ExecutionTraceService), F2 (consolidação da percepção — 3 radares em `business_signals`), F3 (consolidação do impacto — Impact Ledger unificado, 4 fontes), F4 (auto-disparo genérico sinal→process_instance). Espinha ponta-a-ponta fechada.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` + `ZAPFLOW — ESTADO FINAL ESPERADO`; auditoria de partida em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md`.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger / `business_signals`), ADR-135 (Snapshot/Evidence), ADR-152 (Runtime), ADR-085 D4 (separação de categorias de impacto). CLAUDE.md convenções nº 1 (isolamento), nº 2 (CREATE-then-ALTER), nº 4 (derivação por query), nº 12 (BusinessSignal).
@@ -50,9 +50,13 @@ Migrar detectores fora-do-contrato (`OpportunityRadar`→`opportunities`, `Recov
 
 Retail/Comigo/RIC passam a **emitir em `action_outcomes`** via adaptadores (sem 2ª contabilidade), reusando `evidence_json` para rastreabilidade. Categorias faltantes do PRD (receita incremental, retenção, inadimplência recuperada, risco mitigado) entram como colunas aditivas — **nunca somadas entre si** (ADR-085 D4).
 
-### D6 — Auto-disparo sinal→processo (F4 — PLANEJADA)
+### D6 — Auto-disparo sinal→processo (F4 — ENTREGUE)
 
-Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process_instance` correspondente automaticamente — fechando o elo hoje manual — sob feature flag e governado pelo Autonomy Contract (ADR-159).
+Roteador genérico (`SignalProcessRouterService`) que, para sinais de domínio/tipo mapeados (`TRIGGER_MAP`), inicia a `process_instance` correspondente automaticamente — fechando o elo hoje manual — sob feature flag e governado pelo choke-point existente.
+
+**Desenho de segurança:** auto-INICIAR um processo **não é efeito externo** — a instância nasce em `detected` (porta de entrada da FSM); se/como avança até uma ação externa segue 100% governado pelo `CommandExecutorService` (G1/G2/G3 + `agent_policies`), que a F4 **não toca** (RN-159-4: sem engine de governança paralelo, já que a ADR-159 ainda é proposta). A F4 automatiza só o **roteamento** sinal→processo, nunca a **execução**. Opt-in **duplo** (`signal_auto_trigger_enabled` em cima de `execution_runtime_enabled`, ambos default 0). Idempotência em 2 camadas: sinal roteado vira `acknowledged` (sai da varredura de `open`; dedupe não reabre) + `startForSubject` dedupa por subject vivo. Best-effort: mapeamento sem definição ativa vira `skipped`, não derruba o pass.
+
+**Números F4:** 1 service novo (`SignalProcessRouterService`) + 1 flag aditiva + 1 pass no Scheduler + 3 rotas (preview/run/signal) + 1 suíte (`test:signal-auto-trigger`, 29 checks). 0 breaking changes.
 
 ---
 
@@ -75,7 +79,7 @@ Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process
 | **F3.2** | Provider **Comigo** (lucro comprovado como categoria `provenValue`, basis=fact; só contribui se a org usa Comigo) | **ENTREGUE** |
 | **F3.3** | Provider **Retail** (valor comprovado do mês → `provenValue`, basis=fact; soma na MESMA categoria que o Comigo) | **ENTREGUE** |
 | **F3.4** | Provider **RIC** — **fecha a Fatia 3**: duas categorias próprias `recoverableRevenue` (IRR, basis=estimate) e `recoveredRevenue` (RRI, basis=fact), ambas separadas de `revenueRecovered` (base de medição distinta — nunca somadas) | **ENTREGUE** |
-| F4 | Auto-disparo genérico sinal→process_instance (flag + governado) | planejada |
+| **F4** | **Auto-disparo genérico sinal→process_instance** — `SignalProcessRouterService` roteia sinais MAPEADOS (`domain:signal_type` → processType) pra iniciar a `process_instance` correspondente, fechando o elo hoje manual. Opt-in DUPLO (`signal_auto_trigger_enabled` + `execution_runtime_enabled`); pass no Scheduler + rotas de preview/kick; auto-INICIAR ≠ efeito externo (nasce em `detected`, ação externa segue governada pelo CommandExecutor) | **ENTREGUE** |
 
 **Refino do D5 (F3.1):** a unificação de impacto é feita na **LEITURA** (ledger derivado por providers), **não** escrevendo agregados de domínio em `action_outcomes`. Motivo: a convenção nº 2 proíbe rebuild de tabela e `action_outcomes.action_id` é `NOT NULL` (não comporta impacto não-atado a decisão sem reconstruir); e a RN-004 manda derivar por query em vez de duplicar. Assim: zero escrita nova, zero migração, zero divergência (nada é copiado). Invariante ADR-085 D4 preservada — categorias nunca somadas entre si. F3.2–F3.4 apenas registram novos providers.
 

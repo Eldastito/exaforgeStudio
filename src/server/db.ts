@@ -8239,6 +8239,13 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE business_signals ADD COLUMN expires_at DATETIME`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_expires ON business_signals(organization_id, expires_at)`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_signals_unified_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-158 F4 (D6) — auto-disparo genérico sinal→process_instance. Opt-in
+  // (convenção nº 10) EM CIMA de `execution_runtime_enabled` (cascade): o
+  // SignalProcessRouterService só roteia sinais mapeados pra processo quando as
+  // DUAS flags estão ligadas. Auto-INICIAR não é efeito externo — a instância
+  // nasce em `detected` e qualquer ação externa segue governada pelo
+  // CommandExecutor (RN-159-4). Aditivo PURO: legado fica 0. NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN signal_auto_trigger_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

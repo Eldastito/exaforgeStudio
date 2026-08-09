@@ -9,6 +9,7 @@ import { VerticalIntelligenceService } from "../VerticalIntelligenceService.js";
 import { ResearchBrokerService } from "../ResearchBrokerService.js";
 import { ResearchBudgetService } from "../ResearchBudgetService.js";
 import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceReminderService.js";
+import { ExecutionTraceService } from "../ExecutionTraceService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -55,6 +56,15 @@ router.post("/analyze", (req: AuthRequest, res): any => {
     decisionId: b.decisionId ?? null,
   }, { mode: typeof b.mode === "string" ? b.mode : undefined, persist: b.persist === true });
   res.json(out);
+});
+
+// GET /api/decision-intelligence/trace/:correlationId — rastreabilidade ponta-a-
+// ponta (ADR-158 §50): o fio sinal → decisão → outcome de um correlationId.
+// Read-only, isolado por org. Responde "por que o ZapFlow fez isso?".
+router.get("/trace/:correlationId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ExecutionTraceService.trace(orgId, req.params.correlationId));
 });
 
 // GET /api/decision-intelligence/risks?decisionId=&status= — riscos previstos.

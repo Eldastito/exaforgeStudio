@@ -9,6 +9,7 @@ import { VerticalIntelligenceService } from "../VerticalIntelligenceService.js";
 import { ResearchBrokerService } from "../ResearchBrokerService.js";
 import { ResearchBudgetService } from "../ResearchBudgetService.js";
 import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceReminderService.js";
+import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -127,9 +128,68 @@ router.put("/research-refresh-due", requireMasterAdmin, (req: AuthRequest, res):
 });
 
 // GET /api/decision-intelligence/vertical-intelligence?vertical= — SÓ admin master.
+// DI-5.5: cada item vem enriquecido com a TENDÊNCIA (delta da última versão vs a
+// anterior — cresceu/retraiu/novo/saiu) e com a flag `automated` (o nicho está
+// sob pesquisa automática?).
 router.get("/vertical-intelligence", requireMasterAdmin, (req: AuthRequest, res): any => {
   const vertical = typeof req.query?.vertical === "string" ? req.query.vertical : undefined;
-  res.json({ items: VerticalIntelligenceService.list({ vertical }) });
+  const items = VerticalIntelligenceService.list({ vertical }).map((it: any) => ({
+    ...it,
+    delta: VerticalIntelligenceService.latestDelta(it.fingerprint),
+    automated: VerticalIntelligenceResearchService.isAutomated(it.fingerprint),
+  }));
+  res.json({ items });
+});
+
+// GET /api/decision-intelligence/vertical-intelligence/history?fingerprint= — histórico
+// versionado de um nicho (com o delta de cada versão). SÓ admin master (DI-5.2/5.5).
+router.get("/vertical-intelligence/history", requireMasterAdmin, (req: AuthRequest, res): any => {
+  const fingerprint = typeof req.query?.fingerprint === "string" ? req.query.fingerprint : "";
+  if (!fingerprint) return res.status(400).json({ error: "fingerprint é obrigatório." });
+  res.json({ history: VerticalIntelligenceService.history(fingerprint) });
+});
+
+// ── Automação de pesquisa (ADR-157, DI-5.4/5.5) — SÓ admin master ────────────
+
+// GET /api/decision-intelligence/research-schedule — agenda de nichos + estado do
+// toggle global da automação.
+router.get("/research-schedule", requireMasterAdmin, (_req: AuthRequest, res): any => {
+  res.json({ items: VerticalIntelligenceResearchService.list(), enabled: VerticalIntelligenceResearchService.isEnabled() });
+});
+
+// PUT /api/decision-intelligence/research-schedule — liga/desliga a automação
+// GLOBAL. Body: { enabled }.
+router.put("/research-schedule", requireMasterAdmin, (req: AuthRequest, res): any => {
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) é obrigatório." });
+  VerticalIntelligenceResearchService.setEnabled(req.body.enabled);
+  res.json({ enabled: VerticalIntelligenceResearchService.isEnabled() });
+});
+
+// POST /api/decision-intelligence/research-schedule — registra/atualiza um nicho na
+// agenda. Body: { vertical, topic, region?, timeframe?, intervalDays?, enabled? }.
+router.post("/research-schedule/niche", requireMasterAdmin, (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  if (!b.vertical || !b.topic) return res.status(400).json({ error: "vertical e topic são obrigatórios." });
+  try {
+    res.json({ schedule: VerticalIntelligenceResearchService.upsert({ vertical: b.vertical, topic: b.topic, region: b.region, timeframe: b.timeframe, intervalDays: b.intervalDays, enabled: b.enabled }) });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
+});
+
+// PUT /api/decision-intelligence/research-schedule/niche/:fingerprint — liga/desliga
+// a automação de UM nicho. Body: { enabled }.
+router.put("/research-schedule/niche/:fingerprint", requireMasterAdmin, (req: AuthRequest, res): any => {
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) é obrigatório." });
+  VerticalIntelligenceResearchService.setNicheEnabled(req.params.fingerprint, req.body.enabled);
+  res.json({ schedule: VerticalIntelligenceResearchService.get(req.params.fingerprint) });
+});
+
+// DELETE /api/decision-intelligence/research-schedule/niche/:fingerprint — remove
+// o nicho da agenda (volta ao manual + lembrete).
+router.delete("/research-schedule/niche/:fingerprint", requireMasterAdmin, (req: AuthRequest, res): any => {
+  VerticalIntelligenceResearchService.remove(req.params.fingerprint);
+  res.json({ ok: true });
 });
 
 // GET /api/decision-intelligence/research-budget — situação do orçamento de

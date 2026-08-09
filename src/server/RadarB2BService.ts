@@ -92,6 +92,14 @@ export class RadarB2BService {
     const r = this.radar();
     if (!r) return { ok: false, error: "Base do Radar B2B não instalada. Rode o ETL (tools/radar_etl)." };
 
+    // A busca por raio depende da cep_geo (Passo 3 do ETL / CNEFE). Se a base
+    // principal está instalada mas a geolocalização ainda não, devolvemos uma
+    // mensagem clara em vez de deixar o SELECT estourar "no such table: cep_geo"
+    // (que viraria um 500 cru na tela). Estado intermediário legítimo — o ETL
+    // é fatiado em T01 (empresas) e T02 (cep_geo).
+    const hasGeo = ((r.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='cep_geo'`).get() as any)?.n || 0) > 0;
+    if (!hasGeo) return { ok: false, error: "Geolocalização não instalada. Rode o Passo 3 do ETL (build_cep_geo.py com o CNEFE) para habilitar a busca por raio." };
+
     const radiusKm = Math.min(50, Math.max(0.1, Number(p.radiusKm) || 2));
     const limit = Math.min(500, Math.max(1, Number(p.limit) || 200));
 

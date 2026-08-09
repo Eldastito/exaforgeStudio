@@ -4,6 +4,7 @@ import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
+import { RadarMap } from './RadarMap';
 
 // Sugestões fixas de CNAE (prefixo) — PRD T05.
 const CNAE_SUGGESTIONS = [
@@ -35,6 +36,8 @@ export function RadarB2BView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'dist' | 'capital'>('dist');
   const [importing, setImporting] = useState(false);
+  const [focusedCnpj, setFocusedCnpj] = useState<string | null>(null); // sincroniza mapa ↔ lista
+  const [mapRadius, setMapRadius] = useState(2); // raio da ÚLTIMA busca (o slider pode mudar depois)
 
   useEffect(() => { apiFetch('/api/radar-b2b/status').then(r => r.json()).then(setStatus).catch(() => setStatus({ instalado: false } as any)); }, []);
 
@@ -42,7 +45,7 @@ export function RadarB2BView() {
 
   const search = async () => {
     if (!address.trim()) { toast.error('Informe um endereço ou CEP.'); return; }
-    setLoading(true); setSelected(new Set());
+    setLoading(true); setSelected(new Set()); setFocusedCnpj(null);
     try {
       const isCep = /^\d{5}-?\d{3}$/.test(address.trim());
       const body: any = { radiusKm, cnaePrefix: cnaePrefix || undefined, porte: porte.length ? porte : undefined, comTelefone, capitalMin: capitalMin ? Number(capitalMin) : undefined };
@@ -50,7 +53,7 @@ export function RadarB2BView() {
       const r = await apiFetch('/api/radar-b2b/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { toast.error(d.error || 'Falha na busca.'); return; }
-      setPonto(d.ponto); setResumo(d.resumo); setEmpresas(d.empresas || []);
+      setPonto(d.ponto); setResumo(d.resumo); setEmpresas(d.empresas || []); setMapRadius(radiusKm);
       if (!d.empresas?.length) toast.error('Nenhuma empresa encontrada com esses filtros.');
     } catch { toast.error('Falha na busca.'); }
     finally { setLoading(false); }
@@ -168,6 +171,14 @@ export function RadarB2BView() {
         <div className="mb-4 text-xs text-zinc-400">Top segmentos: {resumo.topCnaes.map((c: any) => `${c.descricao || c.cnae} (${c.count})`).join(' · ')}</div>
       )}
 
+      {/* Mapa (Fatia 2) — ponto/raio + empresas. Sincroniza com a lista: clicar
+          num marcador destaca a linha e vice-versa. */}
+      {ponto && (
+        <div className="mb-4 h-[440px] rounded-xl border border-zinc-800 overflow-hidden relative z-0">
+          <RadarMap center={ponto} radiusKm={mapRadius} empresas={sorted} focusedCnpj={focusedCnpj} onFocus={setFocusedCnpj} />
+        </div>
+      )}
+
       {/* Tabela + importar */}
       {sorted.length > 0 && (
         <>
@@ -192,8 +203,9 @@ export function RadarB2BView() {
               </thead>
               <tbody>
                 {sorted.map(e => (
-                  <tr key={e.cnpj} className={`border-t border-zinc-800/60 ${selected.has(e.cnpj) ? 'bg-indigo-500/5' : ''}`}>
-                    <td className="p-2"><input type="checkbox" checked={selected.has(e.cnpj)} onChange={() => toggleSel(e.cnpj)} className="accent-indigo-500" /></td>
+                  <tr key={e.cnpj} onClick={() => setFocusedCnpj(e.cnpj)}
+                    className={`border-t border-zinc-800/60 cursor-pointer ${e.cnpj === focusedCnpj ? 'bg-amber-500/10' : selected.has(e.cnpj) ? 'bg-indigo-500/5' : 'hover:bg-zinc-800/30'}`}>
+                    <td className="p-2" onClick={ev => ev.stopPropagation()}><input type="checkbox" checked={selected.has(e.cnpj)} onChange={() => toggleSel(e.cnpj)} className="accent-indigo-500" /></td>
                     <td className="p-2 text-zinc-100">{e.razaoSocial}{e.nomeFantasia && <span className="block text-[11px] text-zinc-500">{e.nomeFantasia}</span>}</td>
                     <td className="p-2 text-zinc-300 text-xs">{e.cnaeDescricao || e.cnae}</td>
                     <td className="p-2 text-zinc-300">{e.porteLabel}</td>

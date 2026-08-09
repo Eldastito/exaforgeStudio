@@ -39,8 +39,19 @@ export function RadarB2BView() {
   const [importing, setImporting] = useState(false);
   const [focusedCnpj, setFocusedCnpj] = useState<string | null>(null); // sincroniza mapa ↔ lista
   const [mapRadius, setMapRadius] = useState(2); // raio da ÚLTIMA busca (o slider pode mudar depois)
+  const [fiber, setFiber] = useState<any>(null); // overlay de fibra (Fatia 3)
+  const [fiberMeta, setFiberMeta] = useState<{ instalado: boolean; features: number; dataBase: string | null; erro?: string } | null>(null);
+  const [showFiber, setShowFiber] = useState(true);
 
   useEffect(() => { apiFetch('/api/radar-b2b/status').then(r => r.json()).then(setStatus).catch(() => setStatus({ instalado: false } as any)); }, []);
+  // Overlay de fibra: carregado uma vez (traçado estático). Falha silenciosa —
+  // o overlay é opcional e não pode quebrar a busca.
+  useEffect(() => {
+    apiFetch('/api/radar-b2b/fiber').then(r => r.json()).then(d => {
+      setFiberMeta(d);
+      if (d?.instalado && d.geojson) setFiber(d.geojson);
+    }).catch(() => {});
+  }, []);
 
   const togglePorte = (v: string) => setPorte(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v]);
 
@@ -177,10 +188,26 @@ export function RadarB2BView() {
       )}
 
       {/* Mapa (Fatia 2) — ponto/raio + empresas. Sincroniza com a lista: clicar
-          num marcador destaca a linha e vice-versa. */}
+          num marcador destaca a linha e vice-versa. Overlay de fibra (Fatia 3)
+          sobreposto como camada própria, com legenda + toggle. */}
       {ponto && (
-        <div className="mb-4 h-[440px] rounded-xl border border-zinc-800 overflow-hidden relative z-0">
-          <RadarMap center={ponto} radiusKm={mapRadius} empresas={sorted} focusedCnpj={focusedCnpj} onFocus={setFocusedCnpj} />
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2 text-xs">
+            <div className="flex items-center gap-2 text-zinc-400">
+              <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4 h-[3px] rounded" style={{ background: '#22d3ee' }} /> Rede de fibra</span>
+              {fiberMeta?.instalado
+                ? <span className="text-zinc-500">{fiberMeta.features} trecho(s){fiberMeta.dataBase ? ` · base ${fiberMeta.dataBase}` : ''}</span>
+                : <span className="text-zinc-600" title={fiberMeta?.erro || undefined}>overlay não instalado</span>}
+            </div>
+            {fiberMeta?.instalado && (
+              <label className="flex items-center gap-1.5 text-zinc-300 cursor-pointer">
+                <input type="checkbox" checked={showFiber} onChange={e => setShowFiber(e.target.checked)} className="accent-cyan-500" /> Mostrar fibra
+              </label>
+            )}
+          </div>
+          <div className="h-[440px] rounded-xl border border-zinc-800 overflow-hidden relative z-0">
+            <RadarMap center={ponto} radiusKm={mapRadius} empresas={sorted} focusedCnpj={focusedCnpj} onFocus={setFocusedCnpj} fiber={fiber} showFiber={showFiber} />
+          </div>
         </div>
       )}
 

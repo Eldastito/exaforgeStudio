@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { BusinessManifestoService } from "./BusinessManifestoService.js";
 import { RecognitionNotesService } from "./RecognitionNotesService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /**
  * Radar de Recuperação — Tier 2 (Disney, ADR-047).
@@ -96,6 +97,7 @@ export const RecoveryRadarService = {
         db.prepare(
           `UPDATE recovery_events SET trigger_context_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
         ).run(JSON.stringify(input.context || {}), existing.id);
+        this.publishRecoverySignal(input, existing.id);
         return this.rowToEvent(db.prepare(`SELECT * FROM recovery_events WHERE id = ?`).get(existing.id) as any);
       }
 
@@ -117,11 +119,43 @@ export const RecoveryRadarService = {
         id, input.organizationId, input.contactId || null, input.ticketId || null,
         input.orderId || null, input.triggerType, JSON.stringify(input.context || {}), playbookText,
       );
+      this.publishRecoverySignal(input, id);
       return this.rowToEvent(db.prepare(`SELECT * FROM recovery_events WHERE id = ?`).get(id) as any);
     } catch (e) {
       console.error("[RecoveryRadar] detect falhou:", e);
       return null;
     }
+  },
+
+  /**
+   * ADR-158 F2.2 — projeta o recovery_event no contrato unificado
+   * (`business_signals`, domain='recovery'), DERIVADO da mesma detecção e com
+   * dedupe_key='recovery:<id>' (1 sinal por evento; `recovery_events` vira
+   * projeção, sem divergir). Opt-in (flag `radar_signals_unified_enabled`) e
+   * best-effort (nunca derruba o detect). Trigger factual (cancelamento/PIX/
+   * entrega) → basis='fact'; heurístico (reclamação/demora) → 'estimate'
+   * (proteção anti-alucinação: nunca vender hipótese como fato).
+   */
+  publishRecoverySignal(input: DetectInput, eventId: string) {
+    try {
+      const flag = db.prepare(`SELECT radar_signals_unified_enabled AS enabled FROM organization_settings WHERE organization_id = ?`).get(input.organizationId) as any;
+      if (!flag || Number(flag.enabled) !== 1) return;
+      const isFact = input.triggerType === "order_cancelled" || input.triggerType === "pix_expired" || input.triggerType === "delivery_delayed";
+      BusinessSignalService.publish(input.organizationId, {
+        domain: "recovery",
+        signalType: input.triggerType,
+        severity: "risk",
+        basis: isFact ? "fact" : "estimate",
+        confidence: isFact ? 0.9 : 0.6,
+        sourceService: "RecoveryRadarService",
+        sourceEntityType: "recovery_event",
+        sourceEntityId: eventId,
+        subjectType: "contact",
+        evidence: { trigger: this.labelFor(input.triggerType), context: input.context || {} },
+        premises: { ticketId: input.ticketId || null, orderId: input.orderId || null },
+        dedupeKey: `recovery:${eventId}`,
+      });
+    } catch (e) { /* best-effort — a projeção nunca derruba o radar (convenção nº 7) */ }
   },
 
   /**

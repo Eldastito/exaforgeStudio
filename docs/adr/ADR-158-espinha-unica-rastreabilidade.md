@@ -71,8 +71,13 @@ Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process
 | **F2.1** | Contrato ganha `subject_type`+`expires_at`; **OpportunityRadar** projeta em `business_signals` (domain=opportunity) sob flag `radar_signals_unified_enabled`; `disguised_opportunities` vira projeção | **ENTREGUE** |
 | **F2.2** | **RecoveryRadar** → `business_signals` (domain=recovery), mesma flag; `recovery_events` vira projeção; trigger factual→basis=fact, heurístico→estimate | **ENTREGUE** |
 | **F2.3** | **ManipulationRadar** → `business_signals` (domain=reputation), mesma flag; `manipulation_alerts` vira projeção; severidade low/med/high→info/attention/risk, basis=estimate | **ENTREGUE** — fecha a migração dos 3 detectores (F2 completa) |
-| F3 | Adaptadores Retail/Comigo/RIC → `action_outcomes` (+categorias faltantes) | planejada |
+| **F3.1** | `UnifiedImpactLedgerService` (DERIVADO, read-only) + rota `/impact-ledger` + 1ª fonte `action_ledger`; categorias sempre separadas | **ENTREGUE** |
+| F3.2 | Provider **Comigo** (lucro comprovado) no ledger unificado | planejada |
+| F3.3 | Provider **Retail** (valor comprovado/capital parado) | planejada |
+| F3.4 | Provider **RIC** (receita recuperável/recuperada) | planejada |
 | F4 | Auto-disparo genérico sinal→process_instance (flag + governado) | planejada |
+
+**Refino do D5 (F3.1):** a unificação de impacto é feita na **LEITURA** (ledger derivado por providers), **não** escrevendo agregados de domínio em `action_outcomes`. Motivo: a convenção nº 2 proíbe rebuild de tabela e `action_outcomes.action_id` é `NOT NULL` (não comporta impacto não-atado a decisão sem reconstruir); e a RN-004 manda derivar por query em vez de duplicar. Assim: zero escrita nova, zero migração, zero divergência (nada é copiado). Invariante ADR-085 D4 preservada — categorias nunca somadas entre si. F3.2–F3.4 apenas registram novos providers.
 
 **F2.1 (entregue) — desenho de não-regressão:** a publicação é **opt-in** (flag `radar_signals_unified_enabled`, default 0) e **best-effort** (nunca derruba o scan). O sinal é DERIVADO da mesma computação do `upsert` (dedupe_key `opportunity:<id>` = 1 sinal por oportunidade), então `disguised_opportunities` e `business_signals` **não divergem** — a tabela antiga segue intacta para os consumidores atuais (rota da UI, `SalesStalledDealDetector`), agora como projeção. Categorias heurísticas por palavra-chave → `basis='estimate'`. Números: 2 colunas aditivas no contrato + 1 flag + 1 índice + 1 método (`publishOpportunitySignal`) + 1 suíte (`test:radar-signals-unified`, 17 checks). 0 breaking changes.
 

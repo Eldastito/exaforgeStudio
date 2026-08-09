@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { DecisionActionService } from "../DecisionActionService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { CommandExecutorService } from "../CommandExecutorService.js";
+import { PermissionService } from "../PermissionService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -49,11 +50,16 @@ router.post("/:id/approve", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const a = DecisionActionService.get(orgId, req.params.id);
   if (!a) return res.status(404).json({ error: "Ação não encontrada." });
-  // RBAC: perfil exigido pela política; na ausência, owner/admin aprovam.
-  const role = req.user?.role;
-  const required = a.approval_role;
-  const ok = required ? (role === required || role === "owner") : ["owner", "admin"].includes(role);
-  if (!ok) return res.status(403).json({ error: `Aprovação exige perfil ${required || "gestor (owner/admin)"}.` });
+  // ADR-159 F1 (D2): RBAC GRANULAR (perfil/permissão de módulo), não mais o
+  // claim legado `req.user.role`. Aprovar exige permissão no módulo `execucao`:
+  //  - política comum → write (dono/gerente têm; operador não) = mesmo conjunto
+  //    do antigo owner/admin, agora honrando perfis customizados;
+  //  - política que NOMEIA papel (role/two_step) → nível gestor (full);
+  //  - `approval_role='owner'` → especificamente o DONO (preserva change_price).
+  const needFull = !!a.approval_role;
+  const permitted = PermissionService.can(orgId, req.user, "execucao", needFull ? "delete" : "write")
+    && (a.approval_role !== "owner" || PermissionService.isOwner(orgId, req.user));
+  if (!permitted) return res.status(403).json({ error: `Aprovação exige permissão de execução${a.approval_role ? ` (perfil ${a.approval_role})` : ""}.` });
   try {
     res.json(DecisionActionService.approve(orgId, req.params.id, actor(req), { reason: req.body?.reason }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
@@ -63,7 +69,8 @@ router.post("/:id/approve", (req: AuthRequest, res): any => {
 router.post("/:id/reject", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores rejeitam." });
+  // ADR-159 F1 (D2): RBAC granular (módulo `execucao`), não o claim legado.
+  if (!PermissionService.can(orgId, req.user, "execucao", "write")) return res.status(403).json({ error: "Rejeição exige permissão de execução." });
   try {
     res.json(DecisionActionService.reject(orgId, req.params.id, actor(req), { reason: req.body?.reason }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }

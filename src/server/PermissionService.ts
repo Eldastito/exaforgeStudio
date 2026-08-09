@@ -227,6 +227,21 @@ export class PermissionService {
     return this.resolveProfileId(orgId, user) != null;
   }
 
+  /**
+   * O usuário é o DONO da org? Resolvido pela CAMADA DE PERMISSÃO (system_key do
+   * perfil no banco), com fallback pro papel legado do banco/claim — nunca
+   * confiando só no claim cru. Usado por gates que exigem especificamente o dono
+   * (ex.: aprovação de ação com `approval_role='owner'`, ADR-159 F1/D2).
+   */
+  static isOwner(orgId: string, user: any): boolean {
+    const profileId = this.resolveProfileId(orgId, user);
+    if (profileId) {
+      const prof = db.prepare(`SELECT system_key FROM role_profiles WHERE id = ? AND organization_id = ?`).get(profileId, orgId) as any;
+      return prof?.system_key === "owner";
+    }
+    return String(user?.role || "") === "owner";
+  }
+
   /** Módulo RBAC de um 1º segmento de rota, ou null (segmento não gateado). */
   static moduleForSegment(segment?: string | null): string | null {
     if (!segment) return null;

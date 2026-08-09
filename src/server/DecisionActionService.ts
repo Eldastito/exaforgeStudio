@@ -84,12 +84,25 @@ export class DecisionActionService {
    * passa a 'approved'. RBAC de perfil é validado na rota.
    */
   static approve(orgId: string, id: string, actorId: string | undefined, opts: { reason?: string } = {}): any {
+    // ADR-159 F1 (D2 — segurança): identidade OBRIGATÓRIA. Sem user_id não há
+    // aprovação. Fecha o bypass em que aprovadores sem id colapsavam num só
+    // (o antigo COUNT(DISTINCT COALESCE(...,'?')) contava N nulos como 1),
+    // deixando 1 ator sozinho "satisfazer" um two_step.
+    if (!actorId) throw new Error("Aprovação exige um usuário identificado (RN-159 D2).");
     const a = db.prepare("SELECT status, approval_policy, approval_role FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) throw new Error("Ação não encontrada.");
     if (a.status !== "awaiting_approval") throw new Error(`Ação não está aguardando aprovação (${a.status}).`);
-    db.prepare("INSERT INTO action_approvals (id, organization_id, action_id, required_role, approver_user_id, decision, reason) VALUES (?, ?, ?, ?, ?, 'approved', ?)")
-      .run(randomUUID(), orgId, id, a.approval_role || null, actorId || null, opts.reason || null);
-    const distinct = (db.prepare("SELECT COUNT(DISTINCT COALESCE(approver_user_id,'?')) n FROM action_approvals WHERE action_id = ? AND organization_id = ? AND decision = 'approved'").get(id, orgId) as any).n;
+    try {
+      db.prepare("INSERT INTO action_approvals (id, organization_id, action_id, required_role, approver_user_id, decision, reason) VALUES (?, ?, ?, ?, ?, 'approved', ?)")
+        .run(randomUUID(), orgId, id, a.approval_role || null, actorId, opts.reason || null);
+    } catch (e: any) {
+      // O mesmo usuário aprovar 2× é IDEMPOTENTE (não conta de novo): o UNIQUE
+      // parcial barra a 2ª linha 'approved'. Tratamos como no-op e seguimos pra
+      // recontagem (que permanece a mesma). Qualquer outro erro sobe.
+      if (String(e?.code) !== "SQLITE_CONSTRAINT_UNIQUE") throw e;
+    }
+    // Conta só aprovadores DISTINTOS e NÃO-NULOS — nunca COALESCE (RN-159 D2).
+    const distinct = (db.prepare("SELECT COUNT(DISTINCT approver_user_id) n FROM action_approvals WHERE action_id = ? AND organization_id = ? AND decision = 'approved' AND approver_user_id IS NOT NULL").get(id, orgId) as any).n;
     const need = ApprovalPolicyService.requiredApprovals(a.approval_policy as ApprovalPolicy);
     if (distinct >= need) {
       db.prepare("UPDATE decision_actions SET status = 'approved', approved_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(id, orgId);
@@ -98,11 +111,13 @@ export class DecisionActionService {
   }
 
   static reject(orgId: string, id: string, actorId: string | undefined, opts: { reason?: string } = {}): any {
+    // ADR-159 F1 (D2): decisão de aprovação/rejeição sempre com identidade.
+    if (!actorId) throw new Error("Rejeição exige um usuário identificado (RN-159 D2).");
     const a = db.prepare("SELECT status FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) throw new Error("Ação não encontrada.");
     if (!["awaiting_approval", "approved"].includes(a.status)) throw new Error(`Ação não pode ser rejeitada (${a.status}).`);
     db.prepare("INSERT INTO action_approvals (id, organization_id, action_id, approver_user_id, decision, reason) VALUES (?, ?, ?, ?, 'rejected', ?)")
-      .run(randomUUID(), orgId, id, actorId || null, opts.reason || null);
+      .run(randomUUID(), orgId, id, actorId, opts.reason || null);
     db.prepare("UPDATE decision_actions SET status = 'rejected' WHERE id = ? AND organization_id = ?").run(id, orgId);
     return this.get(orgId, id);
   }

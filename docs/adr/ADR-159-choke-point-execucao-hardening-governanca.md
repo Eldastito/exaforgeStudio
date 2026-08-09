@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **PROPOSTA** — Onda 0 do programa ZEI (trilha paralela à ADR-158). Nenhuma fatia implementada ainda; este documento fixa o desenho antes do código.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — correção do two-step + aprovação via RBAC granular) ENTREGUE**; F2..F6 planejadas.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -33,6 +33,11 @@ Todo efeito externo (mensagem, cobrança, escrita em sistema de terceiro) passa 
 - Two-step passa a exigir **2 aprovadores com `user_id` não-nulo e distintos** (rejeita aprovação sem identidade); nunca colapsar via `COALESCE`.
 - Aprovação valida **RBAC granular** (perfil/permissão de módulo), não `users.role` legado.
 
+**F1 — ENTREGUE (2026-08-09).** Concretização:
+- `DecisionActionService.approve` agora **rejeita `actorId` nulo** e conta `COUNT(DISTINCT approver_user_id) … WHERE approver_user_id IS NOT NULL` (fim do `COALESCE(…, '?')` que colapsava nulos num só). Índice **UNIQUE parcial** `action_approvals(action_id, approver_user_id) WHERE decision='approved' AND approver_user_id IS NOT NULL` fecha o double-vote no storage; re-voto do mesmo usuário é idempotente (catch de `SQLITE_CONSTRAINT_UNIQUE`). `reject` idem exige identidade.
+- Rotas `POST /actions/:id/{approve,reject}` trocam o claim legado `req.user.role` por **`PermissionService.can(orgId, user, "execucao", write|delete)`** (perfil vence o claim cru; fallback legado preserva owner/admin). Política que nomeia papel → nível gestor (`full`); `approval_role='owner'` → `PermissionService.isOwner` (preserva o caso owner-only do `change_price`). Conjuntos de autorização do parque legado inalterados.
+- **Números:** 1 índice aditivo + guard de identidade em approve/reject + count corrigido + `PermissionService.isOwner` + RBAC granular em 2 rotas + 1 suíte (`test:two-step-approval-security`, 28 checks). 0 breaking changes.
+
 ### D3 — RBAC deixa de ser silenciosamente opt-in
 
 Caminho de migração para **default-deny** em ações sensíveis quando não há perfil resolvido (em vez de passar livre). Faseado e observável para não quebrar orgs legadas (feature flag + relatório de impacto antes de virar a chave).
@@ -62,7 +67,7 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 
 | Fatia | Escopo | Prioridade |
 | --- | --- | --- |
-| F1 | D2 — correção do two-step + aprovação via RBAC granular | **alta (segurança)** |
+| **F1** | D2 — correção do two-step + aprovação via RBAC granular | **ENTREGUE (segurança)** |
 | F2 | D1 — choke-point único (reencaminhar CollectionCadence + handlers) | alta |
 | F3 | D4 — bandas valor→papel + estado "escalonar" | média |
 | F4 | D3 — RBAC default-deny faseado | média |

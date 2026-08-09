@@ -802,6 +802,9 @@ export class Scheduler {
     // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
     try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
     try { this.churnRiskPass(); } catch (e: any) { console.error('[Scheduler] churn-risk detector F4.1 falhou', e?.message); }
+    // ADR-158 F4 — auto-disparo sinal→processo. DEPOIS dos detectores (churn/
+    // cobrança) pra rotear os sinais recém-publicados neste tick. Opt-in duplo.
+    await this.signalAutoTriggerPass().catch(e => console.error('[Scheduler] auto-disparo sinal→processo F4 falhou', e));
     try { this.aiQuotaPass(); } catch (e: any) { console.error('[Scheduler] ai-quota sinais F1.3 falhou', e?.message); }
     // ADR-153 F7.7 — expira cooldowns vencidos (dismissed → expired) no ledger
     // de upgrade_recommendations. Cleanup lazy até então; agora automático.
@@ -843,6 +846,35 @@ export class Scheduler {
     } catch (e) {
       console.error('[Scheduler] churn-risk falhou', e);
     }
+  }
+
+  /**
+   * ADR-158 F4 (D6) — auto-disparo genérico sinal→process_instance. Pra cada org
+   * opt-in DUPLO (`signal_auto_trigger_enabled=1` + `execution_runtime_enabled=1`)
+   * roteia os sinais ABERTOS e MAPEADOS pra iniciar o processo correspondente
+   * (fecha o elo hoje manual). Fica DEPOIS dos detectores (churn/cobrança) pra
+   * rotear os sinais recém-publicados no mesmo tick. Auto-INICIAR não é efeito
+   * externo (instância nasce em `detected`); qualquer ação externa segue
+   * governada pelo CommandExecutor. Best-effort: erro numa org não trava as
+   * outras. Import dinâmico pra quebrar ciclo.
+   */
+  static async signalAutoTriggerPass() {
+    try {
+      const rows = db.prepare(`
+        SELECT organization_id AS orgId FROM organization_settings
+         WHERE COALESCE(signal_auto_trigger_enabled,0) = 1 AND COALESCE(execution_runtime_enabled,0) = 1
+      `).all() as any[];
+      if (!rows.length) return;
+      const { SignalProcessRouterService } = await import("./SignalProcessRouterService.js");
+      let totalTriggered = 0;
+      for (const r of rows) {
+        try {
+          const res = SignalProcessRouterService.routeOrg(r.orgId, { actor: "scheduler" });
+          totalTriggered += res.triggered.length;
+        } catch (e) { console.error("[Runtime F4] auto-trigger falhou pra org", r.orgId, e); }
+      }
+      if (totalTriggered > 0) console.info(`[Runtime F4] auto-disparo sinal→processo: ${rows.length} org(s), ${totalTriggered} processo(s) iniciado(s).`);
+    } catch (e: any) { console.error("[Runtime F4] signalAutoTriggerPass falhou", e?.message); }
   }
 
   /**

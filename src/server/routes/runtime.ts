@@ -9,6 +9,7 @@ import { RetailClosingPlaybookService } from "../RetailClosingPlaybook.js";
 import { CollectionPlaybookService } from "../CollectionPlaybook.js";
 import { SalesRecoveryPlaybookService } from "../SalesRecoveryPlaybook.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
+import { SignalProcessRouterService } from "../SignalProcessRouterService.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -174,6 +175,25 @@ router.post("/operations/churn/:id/:action", (req: AuthRequest, res): any => {
     ? BusinessSignalService.acknowledge(req.organizationId!, id)
     : BusinessSignalService.dismiss(req.organizationId!, id);
   res.json(r);
+});
+
+// ADR-158 F4 — auto-disparo sinal→processo. PREVIEW (dryRun) mostra o que
+// dispararia AGORA independ? da flag — pro operador conferir o mapeamento antes
+// de ligar. `flagEnabled` diz se o disparo real (o pass do Scheduler / o POST
+// abaixo) está mesmo ativo pra org.
+router.get("/auto-trigger/preview", (req: AuthRequest, res): any => {
+  res.json(SignalProcessRouterService.routeOrg(req.organizationId!, { dryRun: true }));
+});
+// Dispara o roteamento em lote AGORA (kick manual do mesmo pass do Scheduler).
+// Respeita o opt-in duplo: sem a flag, é no-op (`flagEnabled:false`, nada
+// disparado). Auto-INICIAR não é efeito externo — instância nasce em `detected`.
+router.post("/auto-trigger/run", (req: AuthRequest, res): any => {
+  const limit = req.body?.limit != null ? Number(req.body.limit) : undefined;
+  res.json(SignalProcessRouterService.routeOrg(req.organizationId!, { actor: actorId(req), limit }));
+});
+// Roteia UM sinal específico (por id). Mesmo opt-in e garantias do lote.
+router.post("/auto-trigger/signal/:id", (req: AuthRequest, res): any => {
+  res.json(SignalProcessRouterService.routeSignal(req.organizationId!, req.params.id, { actor: actorId(req) }));
 });
 
 // ADR-155 — KPIs de copy calibrada (A/B de cobrança F2.3 + recuperação F3.2) +

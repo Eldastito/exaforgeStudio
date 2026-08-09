@@ -339,6 +339,7 @@
     "test:execution-trace": "tsx scripts/test-execution-trace.ts",
     "test:radar-signals-unified": "tsx scripts/test-radar-signals-unified.ts",
     "test:impact-ledger-unified": "tsx scripts/test-impact-ledger-unified.ts",
+    "test:signal-auto-trigger": "tsx scripts/test-signal-auto-trigger.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

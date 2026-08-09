@@ -8253,6 +8253,13 @@ const initDb = () => {
   // cheio não barraria os nulos de qualquer forma; por isso o WHERE explícito.
   // Aditivo PURO: linhas legadas seguem válidas. NÃO reordenar.
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_approvals_unique_approver ON action_approvals(action_id, approver_user_id) WHERE decision = 'approved' AND approver_user_id IS NOT NULL`); } catch(e){}
+  // ADR-159 F2 (D1 — choke-point) — RN-159-3: todo efeito externo auditado COM
+  // correlationId. O `action_execution_log` (o audit do choke-point) ganha
+  // `correlation_id` (fio do ciclo ADR-158), populado a partir de
+  // `decision_actions.correlation_id` em cada tentativa (execute/prepare/rejeição).
+  // Aditivo PURO: linhas legadas ficam NULL. NÃO reordenar.
+  try { db.exec(`ALTER TABLE action_execution_log ADD COLUMN correlation_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_action_execution_log_corr ON action_execution_log(organization_id, correlation_id)`); } catch(e){}
 };
 
 initDb();

@@ -110,9 +110,14 @@ export class RadarB2BService {
       `SELECT cep, lat, lon FROM cep_geo WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`
     ).all(p.lat - dLat, p.lat + dLat, p.lon - dLon, p.lon + dLon) as any[];
     const cepDist = new Map<string, number>();
+    // Coordenada do CEP (média do CNEFE) — anexada a cada empresa pra plotar no
+    // mapa (Radar B2B mapa, Fatia 1). Todas as empresas de um mesmo CEP herdam a
+    // coordenada do CEP; é a granularidade da base pública (não há lat/lon por
+    // estabelecimento na RFB).
+    const cepCoord = new Map<string, { lat: number; lon: number }>();
     for (const c of cepRows) {
       const dist = haversineKm(p.lat, p.lon, c.lat, c.lon);
-      if (dist <= radiusKm) cepDist.set(String(c.cep), dist);
+      if (dist <= radiusKm) { cepDist.set(String(c.cep), dist); cepCoord.set(String(c.cep), { lat: c.lat, lon: c.lon }); }
     }
     if (cepDist.size === 0) return { ok: true, empresas: [], resumo: this.emptyResumo() };
 
@@ -150,6 +155,7 @@ export class RadarB2BService {
       const socios = (r.prepare(
         `SELECT nome, qualificacao, faixa_etaria FROM socios WHERE cnpj_basico = ? LIMIT 5`
       ).all(String(e.cnpj_basico)) as any[]).map(s => ({ nome: s.nome, qualificacao: s.qualificacao, faixaEtaria: s.faixa_etaria }));
+      const coord = cepCoord.get(String(e.cep));
       return {
         cnpj: e.cnpj, razaoSocial: e.razao_social, nomeFantasia: e.nome_fantasia || null,
         cnae: e.cnae, cnaeDescricao: cnaeDesc, porte: e.porte, porteLabel: PORTE_LABEL[e.porte] || "—",
@@ -157,6 +163,9 @@ export class RadarB2BService {
         telefone1: e.telefone1 || null, telefone2: e.telefone2 || null, email: e.email || null,
         dataInicio: e.data_inicio || null,
         distanciaKm: e.distanciaKm != null ? Math.round(e.distanciaKm * 100) / 100 : null,
+        // Coordenada pro mapa (herda do CEP). null se, por algum motivo, o CEP não
+        // estiver na cep_geo — o front simplesmente não plota esse ponto.
+        lat: coord?.lat ?? null, lon: coord?.lon ?? null,
         socios,
       };
     });

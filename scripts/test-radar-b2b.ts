@@ -76,6 +76,7 @@ async function main() {
   check("2.7 porPorte ME = 2", res.porPorte.ME === 2);
   check("2.8 CNAE tem descrição (join cnaes)", emp[0].cnaeDescricao === "Padaria e confeitaria");
   check("2.9 sócios sem CPF (só nome/qualif/faixa)", Array.isArray(emp[0].socios) && emp[0].socios[0]?.nome === "João Silva" && !("cpf" in (emp[0].socios[0] || {})));
+  check("2.10 empresa retorna lat/lon do CEP (pro mapa)", emp[0].lat === -22.9680 && emp[0].lon === -43.1790);
 
   // 3. filtros
   check("3.1 filtro comTelefone reduz para 1", (RadarB2BService.search({ ...CENTER, radiusKm: 1, comTelefone: true }) as any).empresas.length === 1);

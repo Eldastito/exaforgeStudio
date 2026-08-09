@@ -104,6 +104,18 @@ async function main() {
   check("5.1 reimport pula duplicadas", imp2.created === 0 && imp2.skipped === 2);
   check("5.2 segue com 2 contas", (db.prepare(`SELECT COUNT(*) AS n FROM prospect_accounts WHERE organization_id = ?`).get(orgId) as any).n === 2);
 
+  // 6. Geolocalização ausente (base instalada mas cep_geo ainda não — estado
+  //    intermediário do ETL T01→T02): search não pode estourar "no such table:
+  //    cep_geo"; tem que devolver ok:false com aviso apontando o Passo 3.
+  {
+    const w = new Database(radarPath);
+    w.exec("DROP TABLE cep_geo");
+    w.close();
+    const noGeo = RadarB2BService.search({ ...CENTER, radiusKm: 1 });
+    check("6.1 sem cep_geo, search retorna ok:false (não estoura 500)", noGeo.ok === false);
+    check("6.2 mensagem aponta a geolocalização/Passo 3", noGeo.ok === false && /geolocaliza|cep_geo|build_cep_geo/i.test((noGeo as any).error));
+  }
+
   console.log("\n=== test:radar-b2b ===");
   for (const x of results) console.log(`${x.ok ? "✅" : "❌"} ${x.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

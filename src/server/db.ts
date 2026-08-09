@@ -8157,6 +8157,33 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE ab_trend_snapshots ADD COLUMN referred INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE ab_trend_snapshots ADD COLUMN qualified INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE ab_trend_snapshots ADD COLUMN conversion_rate REAL DEFAULT 0`); } catch(e){}
+  // Decision Intelligence DI-5.2 (ADR-157 D4) — base LONGITUDINAL da inteligência
+  // de nicho. `vertical_intelligence` guarda só a "cabeça" (versão fresca); este
+  // histórico versiona cada publicação por `fingerprint` para virar MEMÓRIA de
+  // mercado: a cada nova pesquisa, o `delta_json` registra o que mudou vs a
+  // versão anterior (novo/saiu/cresceu/retraiu + tendência de confiança).
+  // COMPARTILHADA (RN-157-1): **sem organization_id**, sem PII (grava o mesmo
+  // conteúdo já anonimizado do head). Append-only (nunca DELETE — espírito da
+  // convenção nº 9); UNIQUE(fingerprint, version) impede versão duplicada.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vertical_intelligence_history (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      vertical TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      content_json TEXT NOT NULL,
+      sources_json TEXT,
+      confidence REAL,
+      delta_json TEXT,
+      provider TEXT,
+      generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vi_history_fp_version
+      ON vertical_intelligence_history(fingerprint, version);
+    CREATE INDEX IF NOT EXISTS idx_vi_history_fp
+      ON vertical_intelligence_history(fingerprint, version DESC);
+  `);
 };
 
 initDb();

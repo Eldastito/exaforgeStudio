@@ -3,6 +3,7 @@ import { randomUUID, createHash } from "crypto";
 import { getResearchProvider, ExternalResearchProvider } from "./ExternalResearchProvider.js";
 import { sanitizeForShared } from "./researchAnonymize.js";
 import { ResearchBudgetService } from "./ResearchBudgetService.js";
+import { ResearchCuratorService } from "./ResearchCuratorService.js";
 import { logAuthEvent } from "./auditLog.js";
 
 /**
@@ -111,8 +112,30 @@ export class VerticalIntelligenceService {
     const fingerprint = researchFingerprint(p.vertical, p.topic, region || undefined, timeframe || undefined);
     const ttlDays = Math.max(1, Math.min(365, Number(p.ttlDays) || DEFAULT_TTL_DAYS));
 
-    const existing = db.prepare("SELECT id FROM vertical_intelligence WHERE fingerprint = ?").get(fingerprint) as any;
+    const existing = db.prepare("SELECT id, content_json, confidence FROM vertical_intelligence WHERE fingerprint = ?").get(fingerprint) as any;
     const id = existing?.id || randomUUID();
+
+    // DI-5.2 — versiona no histórico ANTES de sobrescrever o head: o conteúdo que
+    // estava no head é a "versão anterior" para o delta. safeContent (já
+    // anonimizado) é o que vai tanto pro head quanto pro histórico (RN-157-1: o
+    // histórico compartilhado nunca guarda PII). A confiança do head mora na
+    // coluna `confidence` (não no content), então é injetada no content pro delta.
+    // Best-effort: um erro aqui nunca pode travar a publicação (convenção nº 7).
+    try {
+      const prevContent = existing?.content_json
+        ? { ...safeParse(existing.content_json), confidence: Number(existing.confidence) || 0 }
+        : null;
+      const delta = ResearchCuratorService.computeDelta(
+        prevContent,
+        { ...safeContent, confidence },
+      );
+      const nextVersion = (db.prepare("SELECT COALESCE(MAX(version),0) v FROM vertical_intelligence_history WHERE fingerprint = ?").get(fingerprint) as any).v + 1;
+      db.prepare(`
+        INSERT INTO vertical_intelligence_history (id, fingerprint, vertical, topic, version, content_json, sources_json, confidence, delta_json, provider, generated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).run(randomUUID(), fingerprint, p.vertical, p.topic, nextVersion, JSON.stringify(safeContent), JSON.stringify(p.sources), confidence, JSON.stringify(delta), p.provider);
+    } catch (e) { /* histórico best-effort; não trava o publish */ }
+
     db.prepare(`
       INSERT INTO vertical_intelligence (id, fingerprint, vertical, topic, region, timeframe, content_json, sources_json, confidence, provider, created_by, generated_at, valid_until, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, datetime('now', ?), CURRENT_TIMESTAMP)
@@ -148,6 +171,32 @@ export class VerticalIntelligenceService {
     sql += " ORDER BY generated_at DESC LIMIT 200";
     return (db.prepare(sql).all(...params) as any[]).map(hydrate);
   }
+
+  /**
+   * DI-5.2 — histórico versionado de um nicho (mais recente 1º). Cada linha traz
+   * o `delta` já parseado (o que mudou vs a versão anterior). Compartilhado, sem
+   * org. `limit` limita a leitura (default 50).
+   */
+  static history(fingerprint: string, limit = 50): any[] {
+    const n = Math.max(1, Math.min(500, Number(limit) || 50));
+    const rows = db.prepare("SELECT * FROM vertical_intelligence_history WHERE fingerprint = ? ORDER BY version DESC LIMIT ?").all(fingerprint, n) as any[];
+    return rows.map(hydrateHistory);
+  }
+
+  /** DI-5.2 — o delta da versão mais recente do nicho (ou null se só há a 1ª/nenhuma). */
+  static latestDelta(fingerprint: string): any | null {
+    const row = db.prepare("SELECT delta_json FROM vertical_intelligence_history WHERE fingerprint = ? ORDER BY version DESC LIMIT 1").get(fingerprint) as any;
+    return row?.delta_json ? safeParse(row.delta_json) : null;
+  }
+}
+
+function hydrateHistory(row: any): any {
+  return {
+    ...row,
+    content: safeParse(row.content_json),
+    sources: row.sources_json ? safeParse(row.sources_json) : [],
+    delta: row.delta_json ? safeParse(row.delta_json) : null,
+  };
 }
 
 function hydrate(row: any): any {

@@ -340,6 +340,7 @@
     "test:radar-signals-unified": "tsx scripts/test-radar-signals-unified.ts",
     "test:impact-ledger-unified": "tsx scripts/test-impact-ledger-unified.ts",
     "test:signal-auto-trigger": "tsx scripts/test-signal-auto-trigger.ts",
+    "test:two-step-approval-security": "tsx scripts/test-two-step-approval-security.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

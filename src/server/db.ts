@@ -8246,6 +8246,13 @@ const initDb = () => {
   // nasce em `detected` e qualquer ação externa segue governada pelo
   // CommandExecutor (RN-159-4). Aditivo PURO: legado fica 0. NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN signal_auto_trigger_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-159 F1 (D2 — segurança) — two-step de verdade. UNIQUE PARCIAL: um mesmo
+  // usuário não pode ter duas linhas 'approved' pra mesma ação (fecha o double-
+  // vote no nível de storage). NULL é excluído do índice (o service já rejeita
+  // aprovação sem identidade) — e como NULLs são distintos no SQLite, um índice
+  // cheio não barraria os nulos de qualquer forma; por isso o WHERE explícito.
+  // Aditivo PURO: linhas legadas seguem válidas. NÃO reordenar.
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_approvals_unique_approver ON action_approvals(action_id, approver_user_id) WHERE decision = 'approved' AND approver_user_id IS NOT NULL`); } catch(e){}
 };
 
 initDb();

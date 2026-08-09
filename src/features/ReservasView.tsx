@@ -8,6 +8,7 @@ import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { SmartImportModal } from '@/src/components/SmartImportModal';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 const INP = 'w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500';
 
@@ -29,6 +30,7 @@ export function ReservasView() {
   const { contacts } = useStore();
   const [resources, setResources] = useState<Resource[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const reservationsPage = useVisibleLimit(reservations);
   const [loading, setLoading] = useState(true);
   const [showRes, setShowRes] = useState(false);
   const [showResource, setShowResource] = useState(false);
@@ -108,7 +110,7 @@ export function ReservasView() {
           description="Crie um recurso reservável e registre a primeira reserva. A disponibilidade é checada automaticamente." />
       ) : (
         <div className="space-y-3">
-          {reservations.map(r => (
+          {reservationsPage.visible.map(r => (
             <div key={r.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
               <div>
                 <h3 className="font-semibold text-zinc-100">{r.resource_name || 'Recurso'} {r.units > 1 && <span className="text-zinc-400 text-sm">× {r.units}</span>}</h3>
@@ -144,6 +146,7 @@ export function ReservasView() {
               </div>
             </div>
           ))}
+          <ShowMore page={reservationsPage} noun="reservas" />
         </div>
       )}
 

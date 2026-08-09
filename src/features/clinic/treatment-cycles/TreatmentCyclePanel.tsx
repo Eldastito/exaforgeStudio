@@ -31,6 +31,7 @@ import {
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type ContactLite = { id: string; name: string; identifier?: string | null };
 type Specialty = { id: string; name: string; color?: string | null; defaultCycleSessions: number };
@@ -359,6 +360,7 @@ function RenewalQueueSection({ queue, signals, loading, onRenewed, onJump }: {
 }) {
   const [runningSweep, setRunningSweep] = useState(false);
   const [renewingId, setRenewingId] = useState<string | null>(null);
+  const queuePage = useVisibleLimit(queue);
 
   const runSweep = async () => {
     setRunningSweep(true);
@@ -404,7 +406,7 @@ function RenewalQueueSection({ queue, signals, loading, onRenewed, onJump }: {
         </div>
       ) : (
         <div className="space-y-2">
-          {queue.map(item => (
+          {queuePage.visible.map(item => (
             <React.Fragment key={item.cycle.id}>
               <QueueRow item={item}
                 signalForCycle={signals.find(s => s.source_entity_id === item.cycle.id) || null}
@@ -413,6 +415,7 @@ function RenewalQueueSection({ queue, signals, loading, onRenewed, onJump }: {
                 onJump={() => onJump(item)} />
             </React.Fragment>
           ))}
+          <ShowMore page={queuePage} noun="ciclos" />
         </div>
       )}
     </div>

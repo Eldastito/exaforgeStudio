@@ -37,7 +37,7 @@ export function EventsView() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="flex-1 overflow-auto p-6 max-w-7xl mx-auto">
       <p className="zf-kicker mb-1">Pipeline Consultivo</p>
       <h2 className="zf-page-title flex items-center gap-2 mb-1">
         <CalendarRange className="h-6 w-6" style={{ color: 'var(--color-flow)' }} /> Eventos & Grupos

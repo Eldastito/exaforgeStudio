@@ -4,6 +4,7 @@ import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { SmartImportModal } from '@/src/components/SmartImportModal';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type Icp = { id: string; name: string; vertical?: string; criteria?: any; created_at: string };
 type Campaign = { id: string; name: string; icp_id?: string; icp_name?: string; objective: string; status: string; created_at: string; discovery_enabled?: number; discovery_address?: string; discovery_radius_km?: number; discovery_categories?: string; discovery_last_run?: string; discovery_source?: string; discovery_autodraft?: number };
@@ -76,6 +77,7 @@ export function ProspectView() {
   const [icps, setIcps] = useState<Icp[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const accountsPage = useVisibleLimit(accounts);
   const [loading, setLoading] = useState(true);
   const [newIcp, setNewIcp] = useState(false);
   const [newCamp, setNewCamp] = useState(false);
@@ -265,7 +267,7 @@ export function ProspectView() {
                 <tr><th className="py-2 pr-3 font-medium">Empresa</th><th className="py-2 pr-3 font-medium">Domínio</th><th className="py-2 pr-3 font-medium">Local</th><th className="py-2 pr-3 font-medium">Contatos</th><th className="py-2 font-medium">Status</th></tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/50">
-                {accounts.map(a => (
+                {accountsPage.visible.map(a => (
                   <tr key={a.id} onClick={() => setDetailId(a.id)} className="cursor-pointer hover:bg-zinc-800/20">
                     <td className="py-2 pr-3 text-zinc-200">{a.display_name}</td>
                     <td className="py-2 pr-3 text-zinc-500">{a.domain || '—'}</td>
@@ -276,6 +278,7 @@ export function ProspectView() {
                 ))}
               </tbody>
             </table>
+            <ShowMore page={accountsPage} noun="contas" />
           </div>
         )}
       </div>

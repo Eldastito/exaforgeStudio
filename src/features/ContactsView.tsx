@@ -5,6 +5,7 @@ import { Skeleton } from '@/src/components/ui/Skeleton';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type Contact = {
   id: string; name?: string; identifier: string; profile_pic_url?: string;
@@ -87,6 +88,7 @@ export function ContactsView() {
 
   const filtered = contacts.filter(c =>
     !q || (c.name || '').toLowerCase().includes(q.toLowerCase()) || (c.identifier || '').includes(q));
+  const contactsPage = useVisibleLimit(filtered);
 
   const brl = (v?: number) => `R$ ${Number(v || 0).toFixed(2)}`;
   const daysAgo = (d?: string) => d ? `${Math.floor((Date.now() - new Date(d).getTime()) / 86400000)}d` : '—';
@@ -164,7 +166,7 @@ export function ContactsView() {
               description="Assim que alguém mandar mensagem nos seus canais, o contato entra aqui automaticamente — com temperatura do lead, lead score e histórico de compra."
             />
           )
-        ) : filtered.map(c => {
+        ) : contactsPage.visible.map(c => {
           const t = TEMP[c.lead_temperature || 'frio'] || TEMP.frio;
           return (
             <div key={c.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors">
@@ -295,6 +297,7 @@ export function ContactsView() {
             </div>
           );
         })}
+        <ShowMore page={contactsPage} noun="contatos" className="col-span-full" />
       </div>
     </div>
   );

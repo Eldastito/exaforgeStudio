@@ -3,6 +3,7 @@ import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 type Brand = { palette: string[]; tone: string; style: string; summary: string };
 type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
@@ -75,6 +76,7 @@ export function StudioView() {
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
 
   const [creations, setCreations] = useState<Creation[]>([]);
+  const creationsPage = useVisibleLimit(creations);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
   const [ig, setIg] = useState<{ connected: boolean; username?: string }>({ connected: false });
   const [igAnalyzing, setIgAnalyzing] = useState(false);
@@ -385,7 +387,7 @@ export function StudioView() {
         <div className="mt-6">
           <h3 className="text-sm font-medium text-zinc-300 mb-3">Minhas criações</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {creations.map(c => {
+            {creationsPage.visible.map(c => {
               const isVideo = c.kind === 'video' || (c.media_url || '').endsWith('.mp4');
               if (c.status === 'processing' || !c.media_url) {
                 return (
@@ -410,6 +412,7 @@ export function StudioView() {
                 </div>
               );
             })}
+            <ShowMore page={creationsPage} noun="criações" className="col-span-full" />
           </div>
         </div>
       )}

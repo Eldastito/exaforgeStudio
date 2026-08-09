@@ -757,7 +757,7 @@ export function FalaTuView() {
   ] as const;
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-4">
+    <div className="flex-1 overflow-y-auto p-4 md:p-6 max-w-3xl mx-auto space-y-4">
       {/* Input da foto da nota (Fatia 4) fica fora das abas: o clique vem de
           qualquer lista aberta via checkListIdRef. */}
       <input ref={checkFileRef} type="file" accept="image/*" className="hidden" onChange={onCheckImage} />

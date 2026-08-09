@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 import { Brain, RefreshCcw, Loader2, Save, DollarSign, Layers, Plus, AlertTriangle, BellRing, BellOff } from 'lucide-react';
 
 /**
@@ -29,6 +30,7 @@ export function NicheIntelligenceView() {
   const [budgetInput, setBudgetInput] = useState('');
   const [savingBudget, setSavingBudget] = useState(false);
   const [items, setItems] = useState<any[]>([]);
+  const itemsPage = useVisibleLimit(items);
   const [filterVertical, setFilterVertical] = useState('');
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<any>({ ...EMPTY_FORM });
@@ -88,7 +90,7 @@ export function NicheIntelligenceView() {
   const inputCls = 'w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-indigo-500 focus:outline-none';
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4">
+    <div className="flex-1 overflow-y-auto mx-auto max-w-5xl space-y-6 p-4">
       <header className="flex items-center gap-3">
         <Brain className="h-6 w-6 text-indigo-400" />
         <div>
@@ -209,7 +211,7 @@ export function NicheIntelligenceView() {
           <div className="py-6 text-center text-sm text-zinc-500">Nenhuma pesquisa publicada ainda.</div>
         ) : (
           <div className="space-y-2">
-            {items.map((it) => (
+            {itemsPage.visible.map((it) => (
               <div key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="rounded bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-300">{verticalLabel(it.vertical)}</span>
@@ -226,6 +228,7 @@ export function NicheIntelligenceView() {
                 </div>
               </div>
             ))}
+            <ShowMore page={itemsPage} noun="pesquisas" />
           </div>
         )}
       </section>

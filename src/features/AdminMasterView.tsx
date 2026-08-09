@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal, TrendingUp, CheckCircle2, Clock, XCircle, Layers, Plus, ArrowRight, Minus } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 export function AdminMasterView() {
   const [organizations, setOrganizations] = useState<any[]>([]);
+  const orgsPage = useVisibleLimit(organizations);
   const [plans, setPlans] = useState<any[]>([]);
   const [overview, setOverview] = useState<any>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -194,7 +196,7 @@ export function AdminMasterView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {organizations.map(org => (
+              {orgsPage.visible.map(org => (
                 <tr key={org.organization_id} className="hover:bg-zinc-900/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="font-medium text-zinc-100">{org.business_name || 'Sem Nome'}</div>
@@ -313,9 +315,10 @@ export function AdminMasterView() {
               )}
             </tbody>
           </table>
+          <ShowMore page={orgsPage} noun="empresas" />
         </div>
       </div>
-      
+
       {/* Global Notifications Panel */}
       <div className="mt-8 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
         <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-4">
@@ -1286,6 +1289,7 @@ function OverviewCard({ icon, label, value, sub }: { icon: React.ReactNode; labe
 
 function AuditLogsPanel() {
   const [logs, setLogs] = useState<any[]>([]);
+  const logsPage = useVisibleLimit(logs);
   useEffect(() => {
      fetch('/api/audit')
        .then(res => res.json())
@@ -1310,7 +1314,7 @@ function AuditLogsPanel() {
                 </tr>
              </thead>
              <tbody>
-                {logs.map(log => (
+                {logsPage.visible.map(log => (
                    <tr key={log.id} className="border-b border-zinc-800/50">
                       <td className="py-3 font-mono text-xs">{new Date(log.created_at).toLocaleString()}</td>
                       <td className="py-3 text-zinc-200">{log.event_type}</td>
@@ -1320,6 +1324,7 @@ function AuditLogsPanel() {
                 ))}
              </tbody>
           </table>
+          <ShowMore page={logsPage} noun="registros" />
        </div>
     </div>
   );

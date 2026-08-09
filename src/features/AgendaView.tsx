@@ -6,9 +6,11 @@ import { ptBR } from 'date-fns/locale';
 import { useStore } from '@/src/store/useStore';
 import { EmptyState } from '@/src/components/EmptyState';
 import { apiFetch } from '@/src/lib/api';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 export function AgendaView() {
   const [appointments, setAppointments] = useState<any[]>([]);
+  const appointmentsPage = useVisibleLimit(appointments);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', scheduled_start: '', contact_id: '', customer_email: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -240,7 +242,7 @@ export function AgendaView() {
             description="Quando a IA marcar um horário com um cliente pelo WhatsApp (ou você criar manualmente), ele aparece aqui. Ative os lembretes automáticos para reduzir faltas."
           />
         ) : (
-          appointments.map(a => (
+          appointmentsPage.visible.map(a => (
             <div key={a.id} className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 flex align-middle justify-between">
               <div>
                  <h3 className="font-semibold text-zinc-100">{a.title}</h3>
@@ -274,6 +276,7 @@ export function AgendaView() {
             </div>
           ))
         )}
+        <ShowMore page={appointmentsPage} noun="agendamentos" />
       </div>
 
       {showModal && (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 // Painel do consultor (Radar — Fase 3, ADR-014). Cross-tenant DE PROPÓSITO —
 // mostra sessões de TODAS as organizações. Segurança real é 100% no backend
@@ -39,6 +40,7 @@ async function api(path: string, opts: RequestInit = {}) {
 
 export function RadarConsultantView() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const sessionsPage = useVisibleLimit(sessions);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [detail, setDetail] = useState<any | null>(null);
@@ -199,7 +201,7 @@ export function RadarConsultantView() {
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 text-sm text-white/50">Nenhum diagnóstico encontrado.</div>
         ) : (
           <div className="space-y-2">
-            {sessions.map((s) => {
+            {sessionsPage.visible.map((s) => {
               const st = STATUS_LABEL[s.status] || { label: s.status, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' };
               return (
                 <button
@@ -218,6 +220,7 @@ export function RadarConsultantView() {
                 </button>
               );
             })}
+            <ShowMore page={sessionsPage} noun="diagnósticos" />
           </div>
         )}
       </div>

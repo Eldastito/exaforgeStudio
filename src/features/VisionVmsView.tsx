@@ -4,6 +4,7 @@ import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { EmptyState } from '@/src/components/EmptyState';
+import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 
 // Tipos espelham o schema real de apps/vision-cloud/db.ts — ver
 // docs/PRD-VISION-VMS-RECONCILIACAO.md para o estado de cada peça
@@ -84,6 +85,7 @@ export function VisionVmsView() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [events, setEvents] = useState<VisionEvent[]>([]);
+  const eventsPage = useVisibleLimit(events);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [roles, setRoles] = useState<RoleAssignment[]>([]);
   const [rolesForbidden, setRolesForbidden] = useState(false);
@@ -278,7 +280,7 @@ export function VisionVmsView() {
               <Section title="Event Inbox">
                 {events.length === 0 ? (
                   <EmptyState icon={<AlertTriangle className="w-6 h-6" />} title="Nenhum evento ainda" description="Eventos técnicos (ex.: gateway offline) aparecem aqui automaticamente." />
-                ) : events.map(ev => (
+                ) : (<>{eventsPage.visible.map((ev: VisionEvent) => (
                   <Row key={ev.id}>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-zinc-100 truncate">{ev.event_type.replaceAll('_', ' ')}</p>
@@ -297,7 +299,7 @@ export function VisionVmsView() {
                       )}
                     </div>
                   </Row>
-                ))}
+                ))}<ShowMore page={eventsPage} noun="eventos" /></>)}
               </Section>
             )}
 

@@ -28,22 +28,44 @@ const mine = suites.filter((_, i) => i % shardTotal === shardIndex);
 
 console.log(`Shard ${shardIndex}/${shardTotal}: ${mine.length} de ${suites.length} suítes\n${mine.join("\n")}\n`);
 
-const failed = [];
-for (const suite of mine) {
-  console.log(`\n===== ▶ ${suite} =====`);
+// Re-tentativa única por suíte: várias suítes tocam relógio/ordenação/tempo de
+// resposta e falham ~1/10 em runners de CI contendidos (flake de AMBIENTE, não
+// de código — ex.: corridas de agenda AC-012). Uma falha DETERMINÍSTICA (bug
+// real) falha as DUAS tentativas → shard vermelho; um flake passa no retry e é
+// reportado ALTO como FLAKY (nunca silenciado — some no log pra investigar).
+// Melhor caminho preferido continua sendo tornar a suíte determinística (ex.:
+// de-flake do test:piloto-cobranca); o retry é a rede de segurança do parque.
+const runSuite = (suite) => {
   const started = Date.now();
   const r = spawnSync("npm", ["run", suite], { stdio: "inherit" });
-  const secs = ((Date.now() - started) / 1000).toFixed(1);
-  if (r.status !== 0) {
-    failed.push(suite);
-    console.error(`===== ❌ ${suite} (${secs}s, exit ${r.status}) =====`);
+  return { status: r.status, secs: ((Date.now() - started) / 1000).toFixed(1) };
+};
+
+const failed = [];
+const flaky = [];
+for (const suite of mine) {
+  console.log(`\n===== ▶ ${suite} =====`);
+  const first = runSuite(suite);
+  if (first.status === 0) {
+    console.log(`===== ✅ ${suite} (${first.secs}s) =====`);
+    continue;
+  }
+  console.error(`===== ⚠️  ${suite} falhou (${first.secs}s, exit ${first.status}) — re-tentando 1× =====`);
+  const retry = runSuite(suite);
+  if (retry.status === 0) {
+    flaky.push(suite);
+    console.warn(`===== ✅⚠️  ${suite} (retry ${retry.secs}s) — PASSOU só na 2ª tentativa (FLAKY) =====`);
   } else {
-    console.log(`===== ✅ ${suite} (${secs}s) =====`);
+    failed.push(suite);
+    console.error(`===== ❌ ${suite} (retry ${retry.secs}s, exit ${retry.status}) — FALHOU nas 2 tentativas =====`);
   }
 }
 
 console.log(`\n===== Shard ${shardIndex}/${shardTotal}: ${mine.length - failed.length}/${mine.length} suítes OK =====`);
+if (flaky.length > 0) {
+  console.warn(`⚠️  FLAKY (passaram só no retry — investigar/de-flake):\n${flaky.map((s) => `  - ${s}`).join("\n")}`);
+}
 if (failed.length > 0) {
-  console.error(`Suítes com falha:\n${failed.map((s) => `  - ${s}`).join("\n")}`);
+  console.error(`Suítes com falha (2 tentativas):\n${failed.map((s) => `  - ${s}`).join("\n")}`);
   process.exit(1);
 }

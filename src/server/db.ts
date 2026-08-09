@@ -8209,6 +8209,23 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_vi_schedule_enabled
       ON vertical_intelligence_schedule(enabled, vertical);
   `);
+
+  // ADR-158 (Espinha Única / Onda 0 F1) — RASTREABILIDADE ponta-a-ponta do ciclo
+  // universal. `correlation_id` amarra sinal → decisão → outcome num único fio
+  // (PRD 0 §50: "Por que o ZapFlow fez isso?"). Aditivo PURO e reversível: linhas
+  // legadas ficam com correlation_id NULL (só não aparecem no trace) e o fluxo
+  // pré-existente não muda. `schema_version` versiona o contrato de cada registro
+  // para evoluções futuras sem quebrar leitores antigos. Índice por (org,
+  // correlation_id) pra o trace ser barato. NÃO reordenar — append no fim.
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN correlation_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN correlation_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1`); } catch(e){}
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN correlation_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_corr ON business_signals(organization_id, correlation_id)`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_decision_actions_corr ON decision_actions(organization_id, correlation_id)`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_action_outcomes_corr ON action_outcomes(organization_id, correlation_id)`); } catch(e){}
 };
 
 initDb();

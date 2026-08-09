@@ -28,6 +28,11 @@ export interface SignalInput {
   evidence: any;
   premises?: any;
   dedupeKey: string;
+  // ADR-158 (Espinha Única) — fio de rastreabilidade do ciclo universal. Quando
+  // omitido, o sinal ENRAÍZA a própria cadeia (correlation_id = id do sinal) e a
+  // decisão/outcome derivados herdam esse id. Republicar (dedupe) NUNCA troca o
+  // correlation_id — a identidade da cadeia é estável.
+  correlationId?: string | null;
 }
 
 export class BusinessSignalService {
@@ -36,7 +41,7 @@ export class BusinessSignalService {
    * existe, atualiza severidade/confiança/impacto/evidência e o detected_at,
    * SEM reabrir um sinal já resolvido/dispensado nem duplicar a linha.
    */
-  static publish(orgId: string, s: SignalInput): { id: string; deduped: boolean } {
+  static publish(orgId: string, s: SignalInput): { id: string; deduped: boolean; correlationId: string } {
     if (!s?.domain || !s?.signalType || !s?.dedupeKey) throw new Error("Sinal exige domain, signalType e dedupeKey.");
     if (!SEVERITIES.includes(s.severity)) throw new Error("Severidade inválida.");
     if (!BASES.includes(s.basis)) throw new Error("basis deve ser fact|estimate.");
@@ -45,17 +50,20 @@ export class BusinessSignalService {
     const premises = s.premises != null ? JSON.stringify(s.premises) : null;
     const impact = s.impactAmount != null ? Number(s.impactAmount) : null;
 
-    const existing = db.prepare("SELECT id FROM business_signals WHERE organization_id = ? AND dedupe_key = ?").get(orgId, s.dedupeKey) as any;
+    const existing = db.prepare("SELECT id, correlation_id FROM business_signals WHERE organization_id = ? AND dedupe_key = ?").get(orgId, s.dedupeKey) as any;
     if (existing) {
+      // Dedupe: NUNCA reescreve correlation_id — a cadeia mantém sua identidade.
       db.prepare(`UPDATE business_signals SET domain=?, signal_type=?, severity=?, basis=?, confidence=?, impact_amount=?, impact_unit=?, source_service=?, source_entity_type=?, source_entity_id=?, evidence_json=?, premises_json=?, detected_at=CURRENT_TIMESTAMP WHERE id=?`)
         .run(s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, existing.id);
-      return { id: existing.id, deduped: true };
+      return { id: existing.id, deduped: true, correlationId: existing.correlation_id || existing.id };
     }
     const id = randomUUID();
-    db.prepare(`INSERT INTO business_signals (id, organization_id, domain, signal_type, severity, basis, confidence, impact_amount, impact_unit, occurred_at, source_service, source_entity_type, source_entity_id, evidence_json, premises_json, dedupe_key, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`)
-      .run(id, orgId, s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.occurredAt || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.dedupeKey);
-    return { id, deduped: false };
+    // Sinal sem correlationId informado enraíza a própria cadeia (= seu id).
+    const correlationId = s.correlationId || id;
+    db.prepare(`INSERT INTO business_signals (id, organization_id, domain, signal_type, severity, basis, confidence, impact_amount, impact_unit, occurred_at, source_service, source_entity_type, source_entity_id, evidence_json, premises_json, dedupe_key, status, correlation_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`)
+      .run(id, orgId, s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.occurredAt || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.dedupeKey, correlationId);
+    return { id, deduped: false, correlationId };
   }
 
   /** Lista sinais (isolado por org), com filtros opcionais de status/domínio. */

@@ -29,6 +29,10 @@ export interface ProposeInput {
   commandPayload?: any;
   baseline?: any;
   createdBy?: string;
+  // ADR-158 (Espinha Única) — fio de rastreabilidade. Se omitido: herda o
+  // correlation_id do sinal de origem (quando há signalId); senão, enraíza uma
+  // cadeia nova (decisão sem sinal precedente). Nunca fica sem fio.
+  correlationId?: string | null;
 }
 
 export class DecisionActionService {
@@ -38,14 +42,21 @@ export class DecisionActionService {
     // Política 'none' já nasce aprovada (pronta para concluir); as demais aguardam aprovação.
     const status = pol.policy === "none" ? "approved" : "awaiting_approval";
     const id = randomUUID();
+    // ADR-158 — resolve o fio: explícito > herdado do sinal > raiz nova.
+    let correlationId = input.correlationId || null;
+    if (!correlationId && input.signalId) {
+      const sig = db.prepare("SELECT correlation_id FROM business_signals WHERE id = ? AND organization_id = ?").get(input.signalId, orgId) as any;
+      correlationId = sig?.correlation_id || null;
+    }
+    if (!correlationId) correlationId = randomUUID();
     db.prepare(`INSERT INTO decision_actions
-      (id, organization_id, signal_id, domain, action_type, title, description, priority_score, expected_impact, impact_unit, basis, confidence, status, approval_policy, approval_role, assigned_to, due_at, command_type, command_payload_json, baseline_json, created_by, approved_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (id, organization_id, signal_id, domain, action_type, title, description, priority_score, expected_impact, impact_unit, basis, confidence, status, approval_policy, approval_role, assigned_to, due_at, command_type, command_payload_json, baseline_json, created_by, approved_at, correlation_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, orgId, input.signalId || null, input.domain, input.actionType, String(input.title).trim(), input.description || null,
         Number(input.priorityScore) || 0, input.expectedImpact != null ? Number(input.expectedImpact) : null, input.impactUnit || null,
         input.basis || "estimate", input.confidence != null ? Number(input.confidence) : 0.7, status, pol.policy, pol.requiredRole,
         input.assignedTo || null, input.dueAt || null, input.commandType || null, input.commandPayload != null ? JSON.stringify(input.commandPayload) : null,
-        input.baseline != null ? JSON.stringify(input.baseline) : null, input.createdBy || "rule", status === "approved" ? new Date().toISOString() : null);
+        input.baseline != null ? JSON.stringify(input.baseline) : null, input.createdBy || "rule", status === "approved" ? new Date().toISOString() : null, correlationId);
     return this.get(orgId, id);
   }
 

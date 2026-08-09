@@ -39,15 +39,16 @@ export class OutcomeMeasurementService {
    * cargo de quem chama (ex.: `complete` só transita uma vez).
    */
   static record(orgId: string, actionId: string, input: RecordOutcomeInput = {}): any {
-    const action = db.prepare("SELECT id FROM decision_actions WHERE id = ? AND organization_id = ?").get(actionId, orgId) as any;
+    // ADR-158 — o outcome herda o fio da ação (fecha o trace sinal→decisão→outcome).
+    const action = db.prepare("SELECT id, correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?").get(actionId, orgId) as any;
     if (!action) throw new Error("Ação não encontrada para medir outcome.");
     const basis = input.basis === "fact" ? "fact" : "estimate";
     const method: Method = (METHODS as readonly string[]).includes(input.measurementMethod as any) ? (input.measurementMethod as Method) : "manual";
     const id = randomUUID();
     db.prepare(`INSERT INTO action_outcomes
       (id, organization_id, action_id, expected_value, realized_value, basis, measurement_method, attribution_window_days, evidence_json,
-       time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+       time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented, correlation_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, orgId, actionId,
         input.expectedValue != null ? round2(input.expectedValue) : null,
         input.realizedValue != null ? round2(input.realizedValue) : null,
@@ -57,7 +58,8 @@ export class OutcomeMeasurementService {
         input.timeSavedMinutes != null ? Math.trunc(Number(input.timeSavedMinutes)) : null,
         input.costAvoided != null ? round2(input.costAvoided) : null,
         input.revenueRecovered != null ? round2(input.revenueRecovered) : null,
-        input.lossPrevented != null ? round2(input.lossPrevented) : null);
+        input.lossPrevented != null ? round2(input.lossPrevented) : null,
+        action.correlation_id || null);
     return this.get(orgId, id);
   }
 

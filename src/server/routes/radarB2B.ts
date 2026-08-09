@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RadarB2BService } from "../RadarB2BService.js";
+import { RadarFiberService } from "../RadarFiberService.js";
 import { ProspectDiscoveryService } from "../ProspectDiscoveryService.js";
 
 // Radar B2B — rotas (PRD Radar B2B, T04). Montadas em protectedApi (auth + org
@@ -13,6 +14,18 @@ const managerOnly = requireRole("owner", "admin");
 router.get("/status", (_req: AuthRequest, res): any => {
   try { res.json(RadarB2BService.status()); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/radar-b2b/fiber — overlay do traçado de fibra (Fatia 3). Leitura
+// aberta ao usuário autenticado (mesmo padrão do /status). Devolve o GeoJSON
+// só quando instalado; senão instalado:false pra a tela mostrar a orientação.
+router.get("/fiber", (_req: AuthRequest, res): any => {
+  try {
+    const meta = RadarFiberService.status();
+    res.json({ ...meta, geojson: meta.instalado ? RadarFiberService.geojson() : null });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/radar-b2b/search — { address?|cep?|lat?+lon?, radiusKm, filtros… }

@@ -30,7 +30,15 @@ interface Props {
   empresas: RadarMapEmpresa[];
   focusedCnpj: string | null;
   onFocus: (cnpj: string) => void;
+  // Overlay de fibra (Fatia 3). GeoJSON do traçado da rede do provedor, servido
+  // por /api/radar-b2b/fiber. Fica numa camada separada (não é limpa quando as
+  // empresas são redesenhadas) e sob os marcadores (overlayPane < markerPane),
+  // então os pontos das empresas seguem clicáveis por cima da fibra.
+  fiber?: any | null;
+  showFiber?: boolean;
 }
+
+const FIBER_COLOR = '#22d3ee';
 
 const escapeHtml = (s: string) =>
   String(s || '').replace(/[&<>"']/g, (c) => (({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]));
@@ -52,10 +60,11 @@ const centerIcon = L.divIcon({
   iconAnchor: [7, 14],
 });
 
-export function RadarMap({ center, radiusKm, empresas, focusedCnpj, onFocus }: Props) {
+export function RadarMap({ center, radiusKm, empresas, focusedCnpj, onFocus, fiber, showFiber = true }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
+  const fiberLayerRef = useRef<L.GeoJSON | null>(null);
   const markersRef = useRef<Record<string, L.Marker>>({});
   // onFocus via ref pra o handler de clique não recriar o mapa a cada render.
   const onFocusRef = useRef(onFocus);
@@ -77,9 +86,47 @@ export function RadarMap({ center, radiusKm, empresas, focusedCnpj, onFocus }: P
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
+      fiberLayerRef.current = null;
       markersRef.current = {};
     };
   }, []);
+
+  // Overlay de fibra: reconstrói a camada quando o GeoJSON muda. Não entra no
+  // redraw das empresas de propósito — o traçado é fixo e não deve piscar a cada
+  // busca. Fica no overlayPane (abaixo dos marcadores) por padrão do Leaflet.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (fiberLayerRef.current) { map.removeLayer(fiberLayerRef.current); fiberLayerRef.current = null; }
+    if (!fiber || !fiber.features?.length) return;
+    const layer = L.geoJSON(fiber, {
+      style: (feat: any) => ({
+        color: feat?.properties?.color || FIBER_COLOR,
+        weight: 3,
+        opacity: 0.85,
+        fillColor: feat?.properties?.color || FIBER_COLOR,
+        fillOpacity: 0.12,
+      }),
+      pointToLayer: (feat: any, latlng: any) =>
+        L.circleMarker(latlng, { radius: 4, color: feat?.properties?.color || FIBER_COLOR, weight: 2, fillColor: '#0891b2', fillOpacity: 0.9 }),
+      onEachFeature: (feat: any, lyr: any) => {
+        const n = feat?.properties?.name;
+        if (n) lyr.bindPopup(`<b>Rede de fibra</b><br>${escapeHtml(String(n))}`);
+      },
+    });
+    fiberLayerRef.current = layer;
+    if (showFiber) layer.addTo(map);
+    // showFiber é aplicado aqui na criação e no efeito de toggle abaixo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fiber]);
+
+  // Toggle mostrar/esconder fibra sem reconstruir a camada.
+  useEffect(() => {
+    const map = mapRef.current, layer = fiberLayerRef.current;
+    if (!map || !layer) return;
+    if (showFiber) { if (!map.hasLayer(layer)) layer.addTo(map); }
+    else if (map.hasLayer(layer)) map.removeLayer(layer);
+  }, [showFiber, fiber]);
 
   // Redesenha ponto/raio/empresas quando os dados mudam.
   useEffect(() => {

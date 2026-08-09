@@ -12,6 +12,25 @@ da Receita Federal (município do Rio), com filtros e importação para o Prospe
 - [ ] 3 cenários testados **no mesmo dia** (bairros onde o cliente tem rede;
       sugestão: **Barra da Tijuca, Centro, Tijuca**).
 - [ ] Internet OK (o geocode do endereço central usa ViaCEP/Nominatim).
+- [ ] (Opcional) **Overlay de fibra** instalado — ver seção abaixo. Sem ele o
+      mapa funciona igual, só não mostra o traçado da rede.
+
+## Overlay de fibra (opcional — mapa Fatia 3)
+
+Sobrepõe o **traçado da própria rede do provedor** no mapa da busca, pra ver
+quais empresas caem em cima / perto da fibra. É opt-in por presença de arquivo,
+no mesmo espírito da base `radar_rio.db`:
+
+1. Peça ao cliente a exportação da rede. Aceitamos **KML** (Google Earth / QGIS /
+   OSS de telecom — o mais comum) ou **GeoJSON** já pronto.
+2. Coloque o arquivo em `data/radar_fibra.kml` (ou `.geojson`), ou aponte
+   `RADAR_FIBER_PATH=/caminho/arquivo`.
+3. Recarregue o Radar B2B: a legenda mostra "**N trecho(s)**" e o traçado aparece
+   em ciano, com toggle **"Mostrar fibra"**. Se o arquivo estiver ilegível, a
+   legenda mostra "overlay não instalado" (o resto do Radar segue normal).
+
+> Só geometria da rede do provedor — não é dado de cliente. A camada é de
+> plataforma (sem `organization_id`), read-only, igual à base pública da RFB.
 
 ## Roteiro (≈10 min)
 

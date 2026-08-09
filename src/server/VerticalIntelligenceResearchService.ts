@@ -71,6 +71,11 @@ export class VerticalIntelligenceResearchService {
   static remove(fingerprint: string): void {
     db.prepare("DELETE FROM vertical_intelligence_schedule WHERE fingerprint = ?").run(fingerprint);
   }
+  /** Esse nicho está sob automação ATIVA? (usado pra enriquecer a UI/lembrete.) */
+  static isAutomated(fingerprint: string): boolean {
+    const row = db.prepare("SELECT enabled FROM vertical_intelligence_schedule WHERE fingerprint = ?").get(fingerprint) as any;
+    return !!(row && row.enabled);
+  }
   private static markRan(fingerprint: string): void {
     db.prepare("UPDATE vertical_intelligence_schedule SET last_run_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?").run(fingerprint);
   }

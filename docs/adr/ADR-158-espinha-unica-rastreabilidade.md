@@ -68,8 +68,12 @@ Roteador genérico que, para sinais de domínio/tipo mapeados, inicia a `process
 | Fatia | Escopo | Status |
 | --- | --- | --- |
 | **F1** | correlation_id + schema_version + herança sinal→decisão→outcome + `ExecutionTraceService` + rota trace + teste | **ENTREGUE** |
-| F2 | Migração dos detectores fora-do-contrato → `business_signals` (+subject_type/expires_at) | planejada |
+| **F2.1** | Contrato ganha `subject_type`+`expires_at`; **OpportunityRadar** projeta em `business_signals` (domain=opportunity) sob flag `radar_signals_unified_enabled`; `disguised_opportunities` vira projeção | **ENTREGUE** |
+| F2.2 | **RecoveryRadar** → `business_signals` (domain=recovery), mesma flag; `recovery_events` vira projeção | planejada |
+| F2.3 | **ManipulationRadar** → `business_signals` (domain=reputation), mesma flag; `manipulation_alerts` vira projeção | planejada |
 | F3 | Adaptadores Retail/Comigo/RIC → `action_outcomes` (+categorias faltantes) | planejada |
 | F4 | Auto-disparo genérico sinal→process_instance (flag + governado) | planejada |
+
+**F2.1 (entregue) — desenho de não-regressão:** a publicação é **opt-in** (flag `radar_signals_unified_enabled`, default 0) e **best-effort** (nunca derruba o scan). O sinal é DERIVADO da mesma computação do `upsert` (dedupe_key `opportunity:<id>` = 1 sinal por oportunidade), então `disguised_opportunities` e `business_signals` **não divergem** — a tabela antiga segue intacta para os consumidores atuais (rota da UI, `SalesStalledDealDetector`), agora como projeção. Categorias heurísticas por palavra-chave → `basis='estimate'`. Números: 2 colunas aditivas no contrato + 1 flag + 1 índice + 1 método (`publishOpportunitySignal`) + 1 suíte (`test:radar-signals-unified`, 17 checks). 0 breaking changes.
 
 **Números F1:** 6 colunas aditivas + 3 índices + 1 service novo (`ExecutionTraceService`) + 1 rota read-only + 1 suíte de teste (`test:execution-trace`, 19 checks). 0 breaking changes.

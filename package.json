@@ -336,6 +336,7 @@
     "test:decision-actions": "tsx scripts/test-decision-actions.ts",
     "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts",
     "test:execution-trace": "tsx scripts/test-execution-trace.ts",
+    "test:radar-signals-unified": "tsx scripts/test-radar-signals-unified.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

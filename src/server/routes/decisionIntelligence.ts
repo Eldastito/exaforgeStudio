@@ -10,6 +10,7 @@ import { ResearchBrokerService } from "../ResearchBrokerService.js";
 import { ResearchBudgetService } from "../ResearchBudgetService.js";
 import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceReminderService.js";
 import { ExecutionTraceService } from "../ExecutionTraceService.js";
+import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
 /**
@@ -66,6 +67,15 @@ router.get("/trace/:correlationId", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(ExecutionTraceService.trace(orgId, req.params.correlationId));
+});
+
+// GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO
+// (ADR-158 F3): "quanto o ZapFlow produziu?" reunindo as fontes de impacto,
+// derivado e read-only, com categorias SEMPRE separadas (nunca somadas).
+router.get("/impact-ledger", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(UnifiedImpactLedgerService.build(orgId));
 });
 
 // GET /api/decision-intelligence/risks?decisionId=&status= — riscos previstos.

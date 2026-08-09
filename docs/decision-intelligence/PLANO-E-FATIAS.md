@@ -1,10 +1,12 @@
 # Decision Intelligence — Plano e Fatias (aditivo sobre ADR-135/136)
 
-**Contexto:** consolidação proposta no PRD "ZapFlow Decision Intelligence Fabric 2.0". A análise comparativa (`ANALISE-COMPARATIVA-PRD-vs-REPO.md`) concluiu que ~85% já existe; este incremento constrói **só os slivers genuinamente novos**, como **extensão aditiva da ADR-136 (Decision & Action Ledger) + ADR-135 (Enterprise Intelligence Kernel)** — **sem** abrir ADR/módulo paralelo (decisão do dono: "estender ADR-136/152", 2026-08-08) e **sem** duplicar alertas/tarefas/scheduler/memória existentes.
+> **STATUS: FECHADO (2026-08-08).** Todas as fatias — DI-1, DI-2, DI-3, DI-4.1..DI-4.5 e a camada de UI (DI-UI-1..3) — estão **ENTREGUES e em produção** (CI verde, PRs mergeados). A governança da External Intelligence foi formalizada na **`ADR-156` (FECHADO)**, que supersede a ADR-079 D4 apenas para inteligência externa de mercado. Nada em aberto neste plano; itens "Fora de escopo" seguem adiados por frugalidade.
+
+**Contexto:** consolidação proposta no PRD "ZapFlow Decision Intelligence Fabric 2.0". A análise comparativa (`ANALISE-COMPARATIVA-PRD-vs-REPO.md`) concluiu que ~85% já existe; este incremento constrói **só os slivers genuinamente novos**, como **extensão aditiva da ADR-136 (Decision & Action Ledger) + ADR-135 (Enterprise Intelligence Kernel)** — **sem** abrir módulo/motor paralelo e **sem** duplicar alertas/tarefas/scheduler/memória existentes.
 
 **Decisões do dono (2026-08-08):**
-- Governança: **estender ADR-136/152** (não abrir ADR-156).
-- External Intelligence: **adiada** (DI-4). Mantém a restrição da ADR-079 D4 (cache cross-tenant exige ADR próprio).
+- Governança do núcleo decisório: **estender ADR-136/152** (sem motor paralelo) — mantido.
+- External Intelligence: **destravada com ADR própria**. A restrição da ADR-079 D4 (cache cross-tenant exige ADR de agregação anonimizada) foi satisfeita pela **ADR-156**, escrita, aprovada e **FECHADA**. A camada compartilhada `vertical_intelligence` guarda só pesquisa do mundo externo, sem `organization_id`.
 
 **Legenda:** `[x]` entregue · `[~]` em andamento · `[ ]` planejado · `[-]` adiado.
 
@@ -43,9 +45,9 @@ Sem UI/menu novo. Backward-compat 100% (campos aditivos + cache opt-in).
 - **Teste:** `npm run test:decision-intelligence-di3` (16 checks). Migração aditiva (`evidence_cache_events`).
 - **Sub-budgets de IA `[-]` MOVIDOS PARA DI-4:** research/deep_analysis/external_api só passam a ter gasto real quando a External Intelligence existir; construir o orçamento agora seria infraestrutura inerte (frugalidade, PRD §43). Entram junto da DI-4. Hoje o gasto de IA segue metrado e limitado por `PlanService.aiAllowed` + `ai_monthly_limit_cents`.
 
-## Fatia DI-4 — External Intelligence `[~]` DESTRAVADA (ADR-156, aguardando aprovação)
+## Fatia DI-4 — External Intelligence `[x]` ENTREGUE (ADR-156 FECHADO)
 
-Decisão do dono (2026-08-08): **compartilhado por vertical anonimizado, com ADR nova antes do código**. A ADR foi escrita: **`docs/adr/ADR-156-external-intelligence-vertical-compartilhada.md`** (é a "ADR de agregação anonimizada" que a ADR-079 D4 exigia). **Nenhum código até o dono aprovar a ADR.**
+Decisão do dono (2026-08-08): **compartilhado por vertical anonimizado, com ADR nova antes do código**. A ADR foi escrita, aprovada e fechada: **`docs/adr/ADR-156-external-intelligence-vertical-compartilhada.md`** (é a "ADR de agregação anonimizada" que a ADR-079 D4 exigia). Todas as sub-fatias abaixo estão em produção.
 
 Sub-fatias (ver ADR-156 D8):
 - **DI-4.1 `[x]` ENTREGUE** — gatilho **admin master** (D5). `vertical_intelligence` (compartilhada, **sem `organization_id`**) + `organization_contextualization` (por-org) + `ExternalResearchProvider` (interface + **stub determinístico**) + `researchAnonymize` (filtro PII + `assertNoTenantData`) + `VerticalIntelligenceService.runResearch` (escrita admin) + `ResearchBrokerService.resolve` (leitura tenant **read-only**, nunca chama provider) + dedup por fingerprint + freshness + opt-in. Rotas: `POST /vertical-intelligence/run` (master), `GET /vertical-intelligence` (master), `GET /external-evidence` (tenant). Teste: `npm run test:decision-intelligence-di4` (17 checks — inclui "compartilhado nunca tem org/PII", "1 pesquisa N contextos", "tenant não dispara provider").

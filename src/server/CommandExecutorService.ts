@@ -148,8 +148,8 @@ export class CommandExecutorService {
     // Comando sem handler registrado → recusa AUDITADA (nada roda).
     if (!handler) {
       const logId = randomUUID();
-      db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status, error_code, finished_at) VALUES (?, ?, ?, ?, '(nenhum)', 'prepare', ?, 'failed', 'no_handler', CURRENT_TIMESTAMP)")
-        .run(logId, orgId, actionId, attempt, action.command_payload_json || null);
+      db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status, error_code, finished_at, correlation_id) VALUES (?, ?, ?, ?, '(nenhum)', 'prepare', ?, 'failed', 'no_handler', CURRENT_TIMESTAMP, ?)")
+        .run(logId, orgId, actionId, attempt, action.command_payload_json || null, action.correlation_id || null);
       throw new Error(`Comando não registrado: ${commandType}.`);
     }
 
@@ -158,8 +158,8 @@ export class CommandExecutorService {
     const pol = ApprovalPolicyService.resolve(orgId, { domain: action.domain, actionType: action.action_type, expectedImpact: action.expected_impact });
 
     const logId = randomUUID();
-    db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status) VALUES (?, ?, ?, ?, ?, 'prepare', ?, 'executing')")
-      .run(logId, orgId, actionId, attempt, handler.key, action.command_payload_json || null);
+    db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status, correlation_id) VALUES (?, ?, ?, ?, ?, 'prepare', ?, 'executing', ?)")
+      .run(logId, orgId, actionId, attempt, handler.key, action.command_payload_json || null, action.correlation_id || null);
 
     try {
       const result = handler.prepare(orgId, action);
@@ -181,7 +181,9 @@ export class CommandExecutorService {
    * antes de rodar; qualquer falha AUDITADA em `action_execution_log` com
    * `error_code` explícito (`policy_missing | autonomy_below_execute |
    * execution_mode_blocked | action_not_approved | action_terminal |
-   * no_handler`). Nesta fatia (2.2) o efeito é NO-OP; a 2.3 pluga o real.
+   * action_already_executed | no_handler`). Toda tentativa carrega o
+   * `correlation_id` da ação (ADR-159 F2/RN-159-3). O efeito real vem dos
+   * handlers registrados (RuntimeCommandHandlers/CollectionPlaybook).
    */
   static async execute(orgId: string, actionId: string): Promise<any> {
     const action = db.prepare("SELECT * FROM decision_actions WHERE id = ? AND organization_id = ?").get(actionId, orgId) as any;
@@ -196,7 +198,7 @@ export class CommandExecutorService {
     // Handler não registrado — auditado antes das guardas de política (mesma
     // regra do prepare) porque é falha estrutural, não decisão de política.
     if (!handler) {
-      this.logRejected(orgId, actionId, attempt, "(nenhum)", "no_handler", `Comando não registrado: ${commandType}`, action.command_payload_json);
+      this.logRejected(orgId, actionId, attempt, "(nenhum)", "no_handler", `Comando não registrado: ${commandType}`, action.command_payload_json, action.correlation_id);
       throw new Error(`Comando não registrado: ${commandType}.`);
     }
 
@@ -207,7 +209,22 @@ export class CommandExecutorService {
       const terminal = ["done", "rejected", "cancelled"].includes(action.status);
       const code = terminal ? "action_terminal" : "action_not_approved";
       const msg = terminal ? `Ação já finalizada (${action.status}) — não reprocessa.` : `Ação não aprovada (${action.status}) — não executa.`;
-      this.logRejected(orgId, actionId, attempt, handler.key, code, msg, action.command_payload_json);
+      this.logRejected(orgId, actionId, attempt, handler.key, code, msg, action.command_payload_json, action.correlation_id);
+      throw new Error(msg);
+    }
+
+    // ── Idempotência REAL do efeito externo (ADR-159 F2/D1). No sucesso, o
+    //    execute grava `executed_at` mas mantém o status 'approved' (a ação só
+    //    vira terminal no complete/outcome C2b) — e `executed_at` também é setado
+    //    pelo `prepare`. Logo NENHUM dos dois serve de trava: um 2º execute
+    //    reprocessaria o handler e DUPLICARIA o efeito (2 PIX, 2 WhatsApp). O
+    //    sinal correto é uma tentativa de EXECUTE já concluída com sucesso
+    //    (mode='execute' AND status='done'). Retry pós-FALHA segue liberado
+    //    (status='failed' não bloqueia); prepare (mode='prepare') não bloqueia.
+    const priorDone = db.prepare("SELECT id FROM action_execution_log WHERE action_id = ? AND organization_id = ? AND mode = 'execute' AND status = 'done' LIMIT 1").get(actionId, orgId);
+    if (priorDone) {
+      const msg = "Efeito externo já executado com sucesso — não reprocessa (idempotência).";
+      this.logRejected(orgId, actionId, attempt, handler.key, "action_already_executed", msg, action.command_payload_json, action.correlation_id);
       throw new Error(msg);
     }
 
@@ -216,23 +233,24 @@ export class CommandExecutorService {
       .get(orgId, action.domain, action.action_type) as any;
     const policyOk = cfg && Number(cfg.active);
     if (!policyOk) {
-      this.logRejected(orgId, actionId, attempt, handler.key, "policy_missing", `Política inexistente/inativa para ${action.domain}/${action.action_type} — cadastre agent_policies antes de executar.`, action.command_payload_json);
+      this.logRejected(orgId, actionId, attempt, handler.key, "policy_missing", `Política inexistente/inativa para ${action.domain}/${action.action_type} — cadastre agent_policies antes de executar.`, action.command_payload_json, action.correlation_id);
       throw new Error(`Sem política ativa para ${action.domain}/${action.action_type}.`);
     }
     if (cfg.autonomy_level !== "execute") {
-      this.logRejected(orgId, actionId, attempt, handler.key, "autonomy_below_execute", `autonomy_level='${cfg.autonomy_level}' — 'execute' obrigatório pra rodar efeito.`, action.command_payload_json);
+      this.logRejected(orgId, actionId, attempt, handler.key, "autonomy_below_execute", `autonomy_level='${cfg.autonomy_level}' — 'execute' obrigatório pra rodar efeito.`, action.command_payload_json, action.correlation_id);
       throw new Error(`Autonomia insuficiente: ${cfg.autonomy_level} (precisa de 'execute').`);
     }
     const modeLevel = EXECUTION_MODE_LEVELS[cfg.execution_mode as string] ?? EXECUTION_MODE_LEVELS.assisted;
     if (modeLevel < EXECUTION_MODE_LEVELS.approved_execution) {
-      this.logRejected(orgId, actionId, attempt, handler.key, "execution_mode_blocked", `execution_mode='${cfg.execution_mode || "assisted"}' bloqueia efeito externo — precisa de 'approved_execution' ou 'autonomous'.`, action.command_payload_json);
+      this.logRejected(orgId, actionId, attempt, handler.key, "execution_mode_blocked", `execution_mode='${cfg.execution_mode || "assisted"}' bloqueia efeito externo — precisa de 'approved_execution' ou 'autonomous'.`, action.command_payload_json, action.correlation_id);
       throw new Error(`Modo de execução bloqueia efeito externo (${cfg.execution_mode || "assisted"}).`);
     }
 
-    // Guardas passaram — audita a tentativa como 'executing' e chama o handler.
+    // Guardas passaram — audita a tentativa como 'executing' (com correlationId,
+    // RN-159-3) e chama o handler.
     const logId = randomUUID();
-    db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status) VALUES (?, ?, ?, ?, ?, 'execute', ?, 'executing')")
-      .run(logId, orgId, actionId, attempt, handler.key, action.command_payload_json || null);
+    db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status, correlation_id) VALUES (?, ?, ?, ?, ?, 'execute', ?, 'executing', ?)")
+      .run(logId, orgId, actionId, attempt, handler.key, action.command_payload_json || null, action.correlation_id || null);
 
     try {
       const result = handler.execute
@@ -252,11 +270,11 @@ export class CommandExecutorService {
     }
   }
 
-  /** Registra uma tentativa recusada por guarda de política/estado (auditoria explícita). */
-  private static logRejected(orgId: string, actionId: string, attempt: number, handlerKey: string, errorCode: string, message: string, requestJson: string | null): void {
+  /** Registra uma tentativa recusada por guarda de política/estado (auditoria explícita, com correlationId — RN-159-3). */
+  private static logRejected(orgId: string, actionId: string, attempt: number, handlerKey: string, errorCode: string, message: string, requestJson: string | null, correlationId?: string | null): void {
     try {
-      db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status, error_code, response_json, finished_at) VALUES (?, ?, ?, ?, ?, 'execute', ?, 'failed', ?, ?, CURRENT_TIMESTAMP)")
-        .run(randomUUID(), orgId, actionId, attempt, handlerKey, requestJson || null, errorCode, JSON.stringify({ message }));
+      db.prepare("INSERT INTO action_execution_log (id, organization_id, action_id, attempt, handler, mode, request_json, status, error_code, response_json, finished_at, correlation_id) VALUES (?, ?, ?, ?, ?, 'execute', ?, 'failed', ?, ?, CURRENT_TIMESTAMP, ?)")
+        .run(randomUUID(), orgId, actionId, attempt, handlerKey, requestJson || null, errorCode, JSON.stringify({ message }), correlationId || null);
     } catch (e) { /* auditoria é aditiva; nunca bloqueia o retorno de erro */ }
   }
 

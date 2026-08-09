@@ -113,24 +113,36 @@ export class LlmResearchProvider implements ExternalResearchProvider {
     } catch {
       return fallback(); // falha de IA nunca derruba o passe (convenção nº 7)
     }
-    const parsed = safeParse(raw) || {};
-    const scope = [q.vertical, q.topic, q.region, q.timeframe].filter(Boolean).join(" · ");
-    const content = {
-      summary: typeof parsed.summary === "string" ? parsed.summary : "",
-      drivers: Array.isArray(parsed.drivers) ? parsed.drivers.map((d: any) => String(d)).slice(0, 12) : [],
-      scope,
-      generatedBy: "llm",
-    };
-    // Pacote vazio/incoerente do modelo → stub (o gate de qualidade forte é o
-    // curador da DI-5.3; aqui só evitamos publicar um pacote sem conteúdo).
-    if (!content.summary && content.drivers.length === 0) return fallback();
-    return {
-      content,
-      sources: Array.isArray(parsed.sources) ? parsed.sources.map((s: any) => String(s)).slice(0, 12) : [],
-      confidence: clamp01(parsed.confidence),
-      costCents: LLM_RESEARCH_COST_CENTS,
-    };
+    // Transformação pura e testável (parseLlmResearch) separada do IO acima:
+    // pacote vazio/incoerente do modelo → stub (null); o gate de qualidade forte
+    // é o curador da DI-5.3.
+    return parseLlmResearch(raw, q) ?? fallback();
   }
+}
+
+/**
+ * Transforma a resposta CRUA do modelo (string JSON) no `ResearchResult`
+ * canônico — função PURA, sem rede/IO, para ser testável direto (sem chave de
+ * IA). Retorna `null` quando o pacote é vazio/incoerente (o chamador cai no
+ * stub). `content` deriva só da taxonomia do nicho (RN-157-1); a anonimização
+ * final segue no `persistShared`.
+ */
+export function parseLlmResearch(raw: string, q: ResearchQuery): ResearchResult | null {
+  const parsed = safeParse(raw) || {};
+  const scope = [q.vertical, q.topic, q.region, q.timeframe].filter(Boolean).join(" · ");
+  const content = {
+    summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    drivers: Array.isArray(parsed.drivers) ? parsed.drivers.map((d: any) => String(d)).slice(0, 12) : [],
+    scope,
+    generatedBy: "llm",
+  };
+  if (!content.summary && content.drivers.length === 0) return null;
+  return {
+    content,
+    sources: Array.isArray(parsed.sources) ? parsed.sources.map((s: any) => String(s)).slice(0, 12) : [],
+    confidence: clamp01(parsed.confidence),
+    costCents: LLM_RESEARCH_COST_CENTS,
+  };
 }
 
 const REGISTRY: Record<string, ExternalResearchProvider> = {

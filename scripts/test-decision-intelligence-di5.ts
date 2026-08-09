@@ -36,7 +36,7 @@ async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { VerticalIntelligenceService: VIS } = await import("../src/server/VerticalIntelligenceService.js");
   const { ResearchBudgetService: Budget } = await import("../src/server/ResearchBudgetService.js");
-  const { getResearchProvider, LlmResearchProvider } = await import("../src/server/ExternalResearchProvider.js");
+  const { getResearchProvider, LlmResearchProvider, parseLlmResearch } = await import("../src/server/ExternalResearchProvider.js");
   const { containsPII } = await import("../src/server/researchAnonymize.js");
 
   // ===================== Seleção de provider =====================
@@ -55,6 +55,26 @@ async function main() {
   check("confidence normalizada em [0,1]", typeof res.confidence === "number" && res.confidence >= 0 && res.confidence <= 1);
   check("conteúdo sem PII (RN-157-1)", !containsPII(JSON.stringify(res.content)));
   check("escopo deriva só da taxonomia do nicho", typeof res.content?.scope === "string" && res.content.scope.includes("moda") && res.content.scope.includes("inverno") && res.content.scope.includes("brasil"));
+
+  // ===================== Caminho ONLINE: parseLlmResearch (função pura, sem chave) =====================
+  const q2 = { vertical: "food", topic: "delivery", region: "sp", timeframe: "2026", query: "food delivery sp 2026" };
+  const good = parseLlmResearch(JSON.stringify({ summary: "Delivery em alta.", drivers: ["apps", "conveniência"], sources: ["Panorama 2026"], confidence: 0.8 }), q2);
+  check("parseLlmResearch: JSON válido vira pacote 'llm'", !!good && good!.content.generatedBy === "llm" && good!.content.summary.includes("alta"));
+  check("parseLlmResearch: drivers/sources mapeados", good!.content.drivers.length === 2 && good!.sources.length === 1);
+  check("parseLlmResearch: escopo só da taxonomia", good!.content.scope === "food · delivery · sp · 2026");
+  check("parseLlmResearch: confidence acima de 1 é clampada", (parseLlmResearch(JSON.stringify({ summary: "x", confidence: 5 }), q2))!.confidence === 1);
+  check("parseLlmResearch: confidence negativa vira 0", (parseLlmResearch(JSON.stringify({ summary: "x", confidence: -3 }), q2))!.confidence === 0);
+  check("parseLlmResearch: JSON malformado → null (cai no stub)", parseLlmResearch("{isto não é json", q2) === null);
+  check("parseLlmResearch: pacote vazio (sem summary/drivers) → null", parseLlmResearch(JSON.stringify({ summary: "", drivers: [] }), q2) === null);
+  check("parseLlmResearch: pacote com custo configurado (>=0)", typeof good!.costCents === "number" && good!.costCents >= 0);
+
+  // ===================== Anonimização no pipeline (mesmo com o modelo devolvendo PII) =====================
+  // Simula um provider "llm-like" que devolve PII no conteúdo; o persistShared
+  // (runResearch) tem de remover antes de gravar no compartilhado (RN-157-1).
+  Budget.setBudgetCents(0);
+  const piiProvider = { name: "llm", research: () => ({ content: { summary: "Fale com joao@acme.com, CPF 123.456.789-00.", drivers: [], generatedBy: "llm" }, sources: [], confidence: 0.5, costCents: 0 }) };
+  const stored = await VIS.runResearch({ userId: "admin1" }, { vertical: "food", topic: "pii" }, { provider: piiProvider as any });
+  check("anonimização remove PII do conteúdo do modelo antes de gravar", !containsPII(JSON.stringify(stored.content)));
 
   // ===================== Custo real: registro no research_usage_log =====================
   Budget.setBudgetCents(0); // ilimitado (só pra exercitar o registro sem bloquear)

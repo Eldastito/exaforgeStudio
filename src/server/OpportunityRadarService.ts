@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { RecoveryRadarService } from "./RecoveryRadarService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /**
  * Radar de Oportunidades Disfarçadas — Tier 2 (Carlos Domingos, ADR-046).
@@ -276,6 +277,7 @@ export const OpportunityRadarService = {
     ).get(organizationId, input.category, input.title) as any;
 
     const evJson = JSON.stringify(input.sampleEvidences || []);
+    let oppId: string;
     if (existing) {
       db.prepare(
         `UPDATE disguised_opportunities SET
@@ -283,15 +285,49 @@ export const OpportunityRadarService = {
             last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?`
       ).run(input.description, input.suggestedAction, input.evidenceCount, evJson, existing.id);
-      return existing.id;
+      oppId = existing.id;
+    } else {
+      oppId = randomUUID();
+      db.prepare(
+        `INSERT INTO disguised_opportunities
+           (id, organization_id, category, title, description, suggested_action, evidence_count, sample_evidences_json, first_seen_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+      ).run(oppId, organizationId, input.category, input.title, input.description, input.suggestedAction, input.evidenceCount, evJson);
     }
-    const id = randomUUID();
-    db.prepare(
-      `INSERT INTO disguised_opportunities
-         (id, organization_id, category, title, description, suggested_action, evidence_count, sample_evidences_json, first_seen_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(id, organizationId, input.category, input.title, input.description, input.suggestedAction, input.evidenceCount, evJson);
-    return id;
+    // ADR-158 F2 — a oportunidade também vira um sinal no contrato unificado
+    // (`business_signals`, domain='opportunity'), DERIVADO da mesma computação e
+    // com dedupe_key = opportunity:<id> (1 sinal por oportunidade, sem divergir da
+    // `disguised_opportunities`, que passa a ser projeção). Opt-in por org (flag)
+    // e best-effort: nunca derruba o scan. Fatos heurísticos por palavra-chave →
+    // basis='estimate'. RN-158-F2: sem tabela de alerta nova (convenção nº 12).
+    this.publishOpportunitySignal(organizationId, oppId, input);
+    return oppId;
+  },
+
+  /** Projeta a oportunidade em `business_signals` quando a org opta pela unificação. */
+  publishOpportunitySignal(
+    organizationId: string,
+    oppId: string,
+    input: { category: OpportunityCategory; title: string; description: string; suggestedAction: string; evidenceCount: number; sampleEvidences: any[] },
+  ) {
+    try {
+      const flag = db.prepare(`SELECT radar_signals_unified_enabled AS enabled FROM organization_settings WHERE organization_id = ?`).get(organizationId) as any;
+      if (!flag || Number(flag.enabled) !== 1) return;
+      BusinessSignalService.publish(organizationId, {
+        domain: "opportunity",
+        signalType: input.category,
+        severity: "attention",
+        basis: "estimate",
+        confidence: 0.6,
+        sourceService: "OpportunityRadarService",
+        sourceEntityType: "disguised_opportunity",
+        sourceEntityId: oppId,
+        subjectType: "opportunity",
+        evidence: { title: input.title, suggestedAction: input.suggestedAction, samples: (input.sampleEvidences || []).slice(0, 5) },
+        premises: { evidenceCount: input.evidenceCount, description: input.description },
+        dedupeKey: `opportunity:${oppId}`,
+      });
+    } catch (e) { /* best-effort — a projeção nunca derruba o radar (convenção nº 7) */ }
   },
 
   list(orgId: string, opts: { status?: OpportunityStatus | "all"; category?: OpportunityCategory; limit?: number } = {}): Opportunity[] {

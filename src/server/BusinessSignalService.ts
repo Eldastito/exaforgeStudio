@@ -33,6 +33,11 @@ export interface SignalInput {
   // decisão/outcome derivados herdam esse id. Republicar (dedupe) NUNCA troca o
   // correlation_id — a identidade da cadeia é estável.
   correlationId?: string | null;
+  // ADR-158 F2 — `subjectType`: o "sobre o quê" de 1ª classe (sku|contact|order|
+  // opportunity|...). `expiresAt`: TTL opcional (ISO) — sinais que deixam de valer
+  // sozinhos. Ambos aditivos; omitidos ficam NULL (comportamento pré-F2).
+  subjectType?: string | null;
+  expiresAt?: string | null;
 }
 
 export class BusinessSignalService {
@@ -50,19 +55,21 @@ export class BusinessSignalService {
     const premises = s.premises != null ? JSON.stringify(s.premises) : null;
     const impact = s.impactAmount != null ? Number(s.impactAmount) : null;
 
+    const expiresAt = s.expiresAt || null;
     const existing = db.prepare("SELECT id, correlation_id FROM business_signals WHERE organization_id = ? AND dedupe_key = ?").get(orgId, s.dedupeKey) as any;
     if (existing) {
       // Dedupe: NUNCA reescreve correlation_id — a cadeia mantém sua identidade.
-      db.prepare(`UPDATE business_signals SET domain=?, signal_type=?, severity=?, basis=?, confidence=?, impact_amount=?, impact_unit=?, source_service=?, source_entity_type=?, source_entity_id=?, evidence_json=?, premises_json=?, detected_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, existing.id);
+      // subject_type/expires_at são atualizados (re-detecção renova o TTL).
+      db.prepare(`UPDATE business_signals SET domain=?, signal_type=?, severity=?, basis=?, confidence=?, impact_amount=?, impact_unit=?, source_service=?, source_entity_type=?, source_entity_id=?, evidence_json=?, premises_json=?, subject_type=?, expires_at=?, detected_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.subjectType || null, expiresAt, existing.id);
       return { id: existing.id, deduped: true, correlationId: existing.correlation_id || existing.id };
     }
     const id = randomUUID();
     // Sinal sem correlationId informado enraíza a própria cadeia (= seu id).
     const correlationId = s.correlationId || id;
-    db.prepare(`INSERT INTO business_signals (id, organization_id, domain, signal_type, severity, basis, confidence, impact_amount, impact_unit, occurred_at, source_service, source_entity_type, source_entity_id, evidence_json, premises_json, dedupe_key, status, correlation_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`)
-      .run(id, orgId, s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.occurredAt || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.dedupeKey, correlationId);
+    db.prepare(`INSERT INTO business_signals (id, organization_id, domain, signal_type, severity, basis, confidence, impact_amount, impact_unit, occurred_at, source_service, source_entity_type, source_entity_id, evidence_json, premises_json, dedupe_key, status, correlation_id, subject_type, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
+      .run(id, orgId, s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.occurredAt || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.dedupeKey, correlationId, s.subjectType || null, expiresAt);
     return { id, deduped: false, correlationId };
   }
 

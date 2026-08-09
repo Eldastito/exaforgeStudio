@@ -8226,6 +8226,19 @@ const initDb = () => {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_corr ON business_signals(organization_id, correlation_id)`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_decision_actions_corr ON decision_actions(organization_id, correlation_id)`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_action_outcomes_corr ON action_outcomes(organization_id, correlation_id)`); } catch(e){}
+
+  // ADR-158 F2 (Espinha Única — unificação da PERCEPÇÃO) — o contrato de sinal
+  // ganha `subject_type` de 1ª classe (o "sobre o quê" — sku/contato/oportunidade)
+  // e `expires_at` (TTL: sinais que perdem validade sozinhos). Aditivos PUROS:
+  // linhas legadas ficam NULL. `radar_signals_unified_enabled` (opt-in, convenção
+  // nº 10) liga a publicação dos detectores fora-do-contrato (Opportunity/Recovery/
+  // Manipulation) em `business_signals`, aposentando as tabelas de alerta paralelas
+  // sem quebrar consumidores (a tabela antiga vira PROJEÇÃO — escrita na mesma
+  // computação). NÃO reordenar — append no fim.
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN subject_type TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN expires_at DATETIME`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_expires ON business_signals(organization_id, expires_at)`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_signals_unified_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

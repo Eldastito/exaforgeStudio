@@ -11,6 +11,8 @@ import { MessageProviderService } from "../MessageProviderService.js";
 import { FalatuRefundService, FalatuRefundError } from "../FalatuRefundService.js";
 import { FalatuSaveOfferService, CANCELLATION_REASONS } from "../FalatuSaveOfferService.js";
 import { ContextEngineService as FalaTuContextEngine } from "../ContextEngineService.js";
+import { FalaTuReportService } from "../FalaTuReportService.js";
+import { ArtifactService } from "../ArtifactService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -184,6 +186,29 @@ router.post("/signals/sweep", (req: AuthRequest, res): any => {
 // explicabilidade (§49). É a fundação de qualquer business-query do Fala Tu.
 router.get("/context", (req: AuthRequest, res): any => {
   res.json(FalaTuContextEngine.buildForUser(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 2.2 (CA6) — "me manda o resumo": gera o Resumo Executivo como
+// ARTEFATO (PDF), já filtrado pro papel do usuário, e devolve o LINK assinado
+// (nunca o binário inline nem o path interno). Determinístico.
+router.post("/reports/summary", async (req: AuthRequest, res): Promise<any> => {
+  const correlationId = typeof req.body?.correlationId === "string" ? req.body.correlationId : null;
+  try { res.json(await FalaTuReportService.executiveSummary(req.organizationId!, req.user, correlationId)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Aba "Arquivos" do Fala Tu (§60): lista os artefatos da org (ou só os meus).
+router.get("/artifacts", (req: AuthRequest, res): any => {
+  const createdBy = req.query.mine === "1" || req.query.mine === "true" ? actorId(req) : undefined;
+  const kind = typeof req.query.kind === "string" ? req.query.kind : undefined;
+  res.json(ArtifactService.list(req.organizationId!, { createdBy, kind, limit: Number(req.query.limit) || 50 }));
+});
+
+// Emite a URL assinada de um artefato (pra reentregar no chat).
+router.get("/artifacts/:id/link", (req: AuthRequest, res): any => {
+  const url = ArtifactService.signedUrl(req.organizationId!, req.params.id);
+  if (!url) return res.status(404).json({ error: "Artefato não encontrado." });
+  res.json({ url });
 });
 
 // ADR-160 F5/F6/F7 — porta I/O: estado/controle dos bridges (opt-in que faz o

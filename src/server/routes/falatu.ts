@@ -15,6 +15,7 @@ import { FalaTuReportService } from "../FalaTuReportService.js";
 import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";
+import { FalaTuApprovalService } from "../FalaTuApprovalService.js";
 import { MAX_BYTES as FALATU_FILE_MAX } from "../ClinicAttachmentService.js";
 import multer from "multer";
 
@@ -201,6 +202,21 @@ router.get("/context", (req: AuthRequest, res): any => {
 // AÇÃO e filtrada pro papel do usuário. Não é fonte de alertas nova (CA15).
 router.get("/smart-inbox", (req: AuthRequest, res): any => {
   res.json(SmartInboxService.build(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 4 (§24-25, §54, §66) — Approval Center: aprovar/rejeitar DENTRO do
+// Fala Tu. Motor canônico (decision_actions/ApprovalPolicy); esta rota só
+// apresenta + delega. A decisão exige actionId EXPLÍCITO + enum (nunca texto livre).
+router.get("/approvals", (req: AuthRequest, res): any => {
+  res.json(FalaTuApprovalService.pending(req.organizationId!, req.user));
+});
+
+router.post("/approvals/:actionId", (req: AuthRequest, res): any => {
+  const decision = req.body?.decision;
+  if (decision !== "approve" && decision !== "reject") return res.status(400).json({ error: "decision deve ser 'approve' ou 'reject'." });
+  const reason = typeof req.body?.reason === "string" ? req.body.reason : null;
+  try { res.json(FalaTuApprovalService.decide(req.organizationId!, req.user, req.params.actionId, decision, reason)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // PRD 1 Fase 2.2 (CA6) — "me manda o resumo": gera o Resumo Executivo como

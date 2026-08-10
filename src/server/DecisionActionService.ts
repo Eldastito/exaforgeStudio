@@ -2,6 +2,7 @@ import db from "./db.js";
 import { randomUUID } from "crypto";
 import { ApprovalPolicyService, ApprovalPolicy } from "./ApprovalPolicyService.js";
 import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
+import { PermissionService } from "./PermissionService.js";
 
 /**
  * DecisionActionService (ADR-136, Epic 2 — C2).
@@ -81,6 +82,22 @@ export class DecisionActionService {
     a.outcomes = OutcomeMeasurementService.forAction(orgId, id);
     a.command_payload = a.command_payload_json ? safeParse(a.command_payload_json) : null;
     return a;
+  }
+
+  // ADR-159 F1 (D2) — porta ÚNICA da autorização de aprovar/rejeitar (RBAC no
+  // módulo `execucao`), extraída da rota core pra ser reusada por qualquer
+  // superfície (rota /api/actions E o Approval Center do Fala Tu) — nenhuma
+  // pode virar bypass de permissão (§30/CA13). Aprovar: `write` (política comum)
+  // ou `full`/`delete` quando a política NOMEIA papel; `approval_role='owner'`
+  // exige o DONO. Rejeitar: `write`.
+  static canApprove(orgId: string, user: any, action: { approval_role?: string | null }): boolean {
+    const needFull = !!action?.approval_role;
+    return PermissionService.can(orgId, user, "execucao", needFull ? "delete" : "write")
+      && (action?.approval_role !== "owner" || PermissionService.isOwner(orgId, user));
+  }
+
+  static canReject(orgId: string, user: any): boolean {
+    return PermissionService.can(orgId, user, "execucao", "write");
   }
 
   static list(orgId: string, opts: { status?: string; domain?: string } = {}): any[] {

@@ -648,6 +648,26 @@ export class Scheduler {
     }
   }
 
+  // PRD 1 Fase 8 (§42-47) — alerta proativo event-driven: pra cada usuário
+  // inscrito em push de uma org opt-in, checa a Smart Inbox e avisa AGORA o que
+  // é urgente (dedup + quiet hours dentro do service). Fala primeiro.
+  static async falatuProactiveAlertPass() {
+    let subs: any[] = [];
+    try {
+      subs = db.prepare(`SELECT DISTINCT s.organization_id AS orgId, s.user_id AS userId
+        FROM falatu_push_subscriptions s
+        JOIN organization_settings o ON o.organization_id = s.organization_id
+        WHERE s.revoked_at IS NULL AND COALESCE(o.falatu_proactive_alerts_enabled,0) = 1`).all() as any[];
+    } catch { return; }
+    if (!subs.length) return;
+    const now = new Date();
+    const { FalaTuProactiveService } = await import("./FalaTuProactiveService.js");
+    for (const s of subs) {
+      try { await FalaTuProactiveService.deliver(s.orgId, { userId: s.userId }, { now }); }
+      catch (e) { console.error("[FalaTu] alerta proativo falhou", s.orgId, s.userId, e); }
+    }
+  }
+
   /**
    * ADR-154 F8.6 — entrega do briefing por e-mail. Terceira porta, dedupe
    * próprio; só varre orgs com alguém de opt-in ligado. O transporte (Gmail
@@ -764,6 +784,7 @@ export class Scheduler {
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));
+    await this.falatuProactiveAlertPass().catch(e => console.error('[Scheduler] alerta proativo FalaTu falhou', e));
     await this.falatuEmailDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por e-mail falhou', e));
     try { this.confirmationTimeoutPass(); } catch (e: any) { console.error('[Scheduler] sweep de timeouts de Confirmation falhou', e?.message); }
     // ADR-152 F4b.3 — cadência multi-tentativa de cobrança (T2/T3). Opt-in

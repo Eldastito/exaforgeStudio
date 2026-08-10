@@ -344,6 +344,7 @@
     "test:anomaly-registry": "tsx scripts/test-anomaly-registry.ts",
     "test:detector-migration": "tsx scripts/test-detector-migration.ts",
     "test:goal-aware-priority": "tsx scripts/test-goal-aware-priority.ts",
+    "test:signal-investigation": "tsx scripts/test-signal-investigation.ts",
     "test:decision-actions": "tsx scripts/test-decision-actions.ts",
     "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts",
     "test:execution-trace": "tsx scripts/test-execution-trace.ts",

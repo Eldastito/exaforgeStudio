@@ -43,9 +43,14 @@ router.get("/correlations", (req: AuthRequest, res): any => {
 
 // PRD 2 F6.1 — GET /api/signals/:id/investigate — causas-candidatas determinísticas
 // (evidência a favor/contra + confiança), sem IA. "Por que provavelmente acontece?"
-router.get("/:id/investigate", (req: AuthRequest, res): any => {
+router.get("/:id/investigate", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  // F6.2 — ?deep=1 tenta a síntese por IA (gated por nível de impacto §83);
+  // sem a flag (ou fora do gate) devolve só a leitura determinística (F6.1).
+  if (req.query?.deep === "1" || req.query?.deep === "true") {
+    return res.json(await SignalInvestigationService.investigateDeep(orgId, req.params.id));
+  }
   res.json(SignalInvestigationService.investigate(orgId, req.params.id));
 });
 

@@ -13,6 +13,8 @@
  * confiança — o sistema mostra a incerteza, não a esconde.
  */
 import db from "./db.js";
+import { isAIConfigured, chat } from "./llm.js";
+import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 
 interface CauseTemplate {
   cause: string;
@@ -89,5 +91,45 @@ export class SignalInvestigationService {
       : "Correlações insuficientes pra apontar uma causa provável — apenas candidatas.";
 
     return { signalId, found: true, aiUsed: false, headline, candidateCauses, contextSignalCount: ctx.length, note: null, investigatedAt: new Date(now).toISOString() };
+  }
+
+  /**
+   * F6.2 (§81-83) — investigação PROFUNDA: sobre as causas-candidatas
+   * determinísticas (F6.1), o LLM SINTETIZA a explicação — mas só quando o nível
+   * de impacto justifica (analysisFor.deepAnalysis = L3+, reusa a DI-1) e a IA
+   * está disponível. IA NUNCA é o loop principal (§81): o determinístico é o
+   * default; o LLM é opt-in por impacto e apenas COMPÕE (não recalcula, §22).
+   * `synthesize` é INJETÁVEL (roda em CI sem chave). Fail-safe: sem gate/sem IA/
+   * erro → devolve só o determinístico (aiUsed false).
+   */
+  static async investigateDeep(orgId: string, signalId: string, opts: { synthesize?: (payload: any) => Promise<string | null>; now?: number; force?: boolean } = {}): Promise<any> {
+    const base = this.investigate(orgId, signalId, { now: opts.now });
+    if (!base.found) return { ...base, synthesis: null, aiGate: "not_found", impactLevel: null };
+
+    const sig = db.prepare(`SELECT severity, impact_amount, impact_unit FROM business_signals WHERE id = ? AND organization_id = ?`).get(signalId, orgId) as any;
+    const lvl = ImpactPrioritizationService.levelFor({ severity: sig?.severity, impactAmount: sig?.impact_amount, impactUnit: sig?.impact_unit });
+    const deepWarranted = opts.force || !!lvl.analysis?.deepAnalysis; // §83 — só L3+
+
+    if (!base.candidateCauses.length) return { ...base, synthesis: null, aiGate: "no_causes", impactLevel: lvl.level };
+    if (!deepWarranted) return { ...base, synthesis: null, aiGate: "below_threshold", impactLevel: lvl.level };
+
+    const payload = { signalId, headline: base.headline, candidateCauses: base.candidateCauses, impactLevel: lvl.level };
+    const synth = opts.synthesize || SignalInvestigationService.defaultSynthesize;
+    let synthesis: string | null = null;
+    try { synthesis = await synth(payload); } catch { synthesis = null; }
+
+    return { ...base, synthesis: synthesis || null, aiUsed: !!synthesis, aiGate: synthesis ? "synthesized" : "ai_unavailable", impactLevel: lvl.level };
+  }
+
+  // Sintetizador padrão (§83): só chama o LLM se a IA está configurada; do
+  // contrário devolve null (CI sem chave → sem síntese, sem quebrar). O LLM
+  // COMPÕE sobre os fatos dados; nunca inventa causa nem afirma causalidade (§13).
+  private static async defaultSynthesize(payload: any): Promise<string | null> {
+    if (!isAIConfigured()) return null;
+    const causes = (payload.candidateCauses || []).slice(0, 4)
+      .map((c: any, i: number) => `${i + 1}. ${c.cause} (confiança ${Math.round(c.confidence * 100)}%; a favor: ${c.supportingEvidence.map((e: any) => e.type).join(", ") || "—"}; contra: ${c.contradictingEvidence.map((e: any) => e.type).join(", ") || "—"})`).join("\n");
+    const prompt = `Causas-candidatas já calculadas (determinísticas) para um sinal empresarial:\n${causes}\n\nSintetize, em 2-3 frases e em português, a explicação MAIS PROVÁVEL, citando a evidência. Use "provável"/"indica"; NUNCA afirme causalidade nem invente causas fora da lista.`;
+    const system = "Você sintetiza uma explicação a partir de causas-candidatas JÁ calculadas por regras determinísticas. Nunca invente causas novas, nunca afirme causalidade comprovada, sempre trate como correlação/probabilidade.";
+    return await chat(prompt, { system, temperature: 0.3 });
   }
 }

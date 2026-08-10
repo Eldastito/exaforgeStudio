@@ -95,6 +95,7 @@ import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
 import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
+import { artifactsRoutes, artifactsPublicRoutes } from "./src/server/routes/artifacts.js";
 import radarConsultantRoutes from "./src/server/routes/radarConsultant.js";
 import falatuRoutes from "./src/server/routes/falatu.js";
 import runtimeRoutes from "./src/server/routes/runtime.js";
@@ -450,6 +451,9 @@ async function startServer() {
   // Fase 2/ADR-012). Mesmo motivo de registro cedo: nunca deve exigir JWT.
   app.use("/api/public/radar", radarPublicRoutes);
   app.use("/api/public/clinic", clinicPublicRoutes);
+  // PRD 1 Fase 2 — download de artefato por URL assinada (sem sessão; segurança
+  // é o HMAC + tenant + expiração). Antes do protectedApi (público de propósito).
+  app.use("/api/public/artifacts", artifactsPublicRoutes);
 
   // LISTA DE PLANOS é PÚBLICA: a tela de cadastro/"começar grátis" precisa
   // carregar os planos SEM login. Registrada antes do protectedApi (senão a
@@ -531,6 +535,7 @@ async function startServer() {
   protectedApi.use("/campaigns", campaignsRoutes);
   protectedApi.use("/payments", paymentsRoutes);
   protectedApi.use("/appointments", appointmentsRoutes);
+  protectedApi.use("/artifacts", artifactsRoutes);
   protectedApi.use("/integrations", integrationsRoutes);
   protectedApi.use("/import", importRoutes);
   protectedApi.use("/meta-debug", metaDebugRoutes);

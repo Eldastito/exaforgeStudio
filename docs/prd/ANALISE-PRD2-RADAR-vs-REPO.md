@@ -52,7 +52,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | `basis` aceitar **`hypothesis`** | Hoje `BASES=["fact","estimate"]` bloqueia no `publish` (`:52`). §12/§13 exigem 3 valores | F2 |
 | Coluna dedicada **`subject_id`** | Só existe `subject_type`; hoje usa-se `source_entity_id` (source-scoped, não subject) | F2 |
 | **Freshness / staleness** | `confidence` é estática; TTL só filtra na leitura; sem `expired`/decay (§78-79) | F2 |
-| **Enforcement de TTL** | `expires_at` no schema mas **nenhum writer popula** e **nenhum sweep** aplica (inerte) | F2 |
+| **Enforcement de TTL** | `expires_at` no schema mas **nenhum writer popula** e **nenhum sweep** aplica (inerte). **Bug confirmado na F2.1:** o filtro `expires_at > datetime('now')` compara ISO (`…T…Z`) com o formato espaçado do SQLite → `'T' > ' '` lexicograficamente, então expiry PASSADO nunca filtra. F2.2 normaliza (usa `datetime(expires_at)`) | F2 |
 | **Recorrência/reopen** | Republish nunca reabre resolvido (§55). Recorrência precisa de novo ciclo com histórico | F2 |
 | **`process_instances.correlation_id`** | Furo da espinha — processo iniciado pelo router fica **fora** do trace (§75) | F2/F8 |
 | **Goal-relevance no score** | `ImpactPrioritizationService` não consome `BusinessGoalService.progress` (§31) | F5 |

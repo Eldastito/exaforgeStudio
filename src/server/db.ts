@@ -8274,6 +8274,11 @@ const initDb = () => {
   // computação). NÃO reordenar — append no fim.
   try { db.exec(`ALTER TABLE business_signals ADD COLUMN subject_type TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE business_signals ADD COLUMN expires_at DATETIME`); } catch(e){}
+  // PRD 2 F2.1 — `subject_id`: o "sobre qual" de 1ª classe (sku-123, contactId,
+  // opportunityId). Antes só existia subject_type (a CLASSE); o id ficava em
+  // source_entity_id (source-scoped). Aditivo; sinais antigos ficam NULL.
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN subject_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_subject ON business_signals (organization_id, subject_type, subject_id)`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_expires ON business_signals(organization_id, expires_at)`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_signals_unified_enabled INTEGER DEFAULT 0`); } catch(e){}
   // ADR-158 F4 (D6) — auto-disparo genérico sinal→process_instance. Opt-in

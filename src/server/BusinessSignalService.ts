@@ -11,7 +11,10 @@ import { randomUUID } from "crypto";
  */
 
 const SEVERITIES = ["info", "attention", "risk", "critical"];
-const BASES = ["fact", "estimate"];
+// PRD 2 F2.1 (§12-13, CA3) — o Radar não pode confundir DADO com INTERPRETAÇÃO.
+// `hypothesis` é a explicação ainda não comprovada ("a causa provável é X"),
+// distinta de `estimate` (cálculo sobre evidência) e `fact` (comprovado).
+const BASES = ["fact", "estimate", "hypothesis"];
 
 export interface SignalInput {
   domain: string;
@@ -37,6 +40,9 @@ export interface SignalInput {
   // opportunity|...). `expiresAt`: TTL opcional (ISO) — sinais que deixam de valer
   // sozinhos. Ambos aditivos; omitidos ficam NULL (comportamento pré-F2).
   subjectType?: string | null;
+  // PRD 2 F2.1 — `subjectId`: o id da entidade concreta (sku-123, contactId…),
+  // par do subjectType. Aditivo; omitido fica NULL.
+  subjectId?: string | null;
   expiresAt?: string | null;
 }
 
@@ -49,7 +55,7 @@ export class BusinessSignalService {
   static publish(orgId: string, s: SignalInput): { id: string; deduped: boolean; correlationId: string } {
     if (!s?.domain || !s?.signalType || !s?.dedupeKey) throw new Error("Sinal exige domain, signalType e dedupeKey.");
     if (!SEVERITIES.includes(s.severity)) throw new Error("Severidade inválida.");
-    if (!BASES.includes(s.basis)) throw new Error("basis deve ser fact|estimate.");
+    if (!BASES.includes(s.basis)) throw new Error("basis deve ser fact|estimate|hypothesis.");
     const confidence = Math.max(0, Math.min(1, Number(s.confidence)));
     const evidence = JSON.stringify(s.evidence ?? {});
     const premises = s.premises != null ? JSON.stringify(s.premises) : null;
@@ -60,16 +66,16 @@ export class BusinessSignalService {
     if (existing) {
       // Dedupe: NUNCA reescreve correlation_id — a cadeia mantém sua identidade.
       // subject_type/expires_at são atualizados (re-detecção renova o TTL).
-      db.prepare(`UPDATE business_signals SET domain=?, signal_type=?, severity=?, basis=?, confidence=?, impact_amount=?, impact_unit=?, source_service=?, source_entity_type=?, source_entity_id=?, evidence_json=?, premises_json=?, subject_type=?, expires_at=?, detected_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.subjectType || null, expiresAt, existing.id);
+      db.prepare(`UPDATE business_signals SET domain=?, signal_type=?, severity=?, basis=?, confidence=?, impact_amount=?, impact_unit=?, source_service=?, source_entity_type=?, source_entity_id=?, evidence_json=?, premises_json=?, subject_type=?, subject_id=?, expires_at=?, detected_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.subjectType || null, s.subjectId || null, expiresAt, existing.id);
       return { id: existing.id, deduped: true, correlationId: existing.correlation_id || existing.id };
     }
     const id = randomUUID();
     // Sinal sem correlationId informado enraíza a própria cadeia (= seu id).
     const correlationId = s.correlationId || id;
-    db.prepare(`INSERT INTO business_signals (id, organization_id, domain, signal_type, severity, basis, confidence, impact_amount, impact_unit, occurred_at, source_service, source_entity_type, source_entity_id, evidence_json, premises_json, dedupe_key, status, correlation_id, subject_type, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
-      .run(id, orgId, s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.occurredAt || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.dedupeKey, correlationId, s.subjectType || null, expiresAt);
+    db.prepare(`INSERT INTO business_signals (id, organization_id, domain, signal_type, severity, basis, confidence, impact_amount, impact_unit, occurred_at, source_service, source_entity_type, source_entity_id, evidence_json, premises_json, dedupe_key, status, correlation_id, subject_type, subject_id, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`)
+      .run(id, orgId, s.domain, s.signalType, s.severity, s.basis, confidence, impact, s.impactUnit || null, s.occurredAt || null, s.sourceService, s.sourceEntityType || null, s.sourceEntityId || null, evidence, premises, s.dedupeKey, correlationId, s.subjectType || null, s.subjectId || null, expiresAt);
     return { id, deduped: false, correlationId };
   }
 
@@ -102,7 +108,7 @@ export class BusinessSignalService {
     total: number;
     bySeverity: Record<string, number>;
     byDomain: Record<string, number>;
-    items: Array<{ source: string; id: string; domain: string; type: string; severity: string; summary: string; impactAmount: number | null; impactUnit: string | null; detectedAt: string | null; correlationId: string | null; subjectType: string | null; status: string }>;
+    items: Array<{ source: string; id: string; domain: string; type: string; severity: string; summary: string; basis: string | null; impactAmount: number | null; impactUnit: string | null; detectedAt: string | null; correlationId: string | null; subjectType: string | null; subjectId: string | null; status: string }>;
   } {
     const limit = Number(opts.limit) > 0 ? Number(opts.limit) : 200;
     // Escala única: aceita o vocabulário dos sinais (info/attention/risk/critical)
@@ -119,8 +125,8 @@ export class BusinessSignalService {
     ).all(orgId) as any[]) {
       items.push({
         source: "signal", id: r.id, domain: r.domain, type: r.signal_type, severity: norm(r.severity),
-        summary: shortSummary(r.signal_type, r.evidence_json), impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
-        detectedAt: r.detected_at ?? null, correlationId: r.correlation_id ?? null, subjectType: r.subject_type ?? null, status: r.status,
+        summary: shortSummary(r.signal_type, r.evidence_json), basis: r.basis ?? null, impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
+        detectedAt: r.detected_at ?? null, correlationId: r.correlation_id ?? null, subjectType: r.subject_type ?? null, subjectId: r.subject_id ?? null, status: r.status,
         _rank: rank(r.severity), _at: r.detected_at || "",
       });
     }
@@ -131,8 +137,8 @@ export class BusinessSignalService {
       const bumped = r.status === "materialized" && norm(r.severity) === "risk" ? "critical" : (r.status === "materialized" && norm(r.severity) === "attention" ? "risk" : norm(r.severity));
       items.push({
         source: "risk", id: r.id, domain: "decision", type: `risk:${r.source || "premortem"}`, severity: bumped,
-        summary: String(r.description || "").slice(0, 200), impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
-        detectedAt: r.predicted_at ?? null, correlationId: null, subjectType: r.decision_id ? "decision" : null, status: r.status,
+        summary: String(r.description || "").slice(0, 200), basis: "estimate", impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
+        detectedAt: r.predicted_at ?? null, correlationId: null, subjectType: r.decision_id ? "decision" : null, subjectId: r.decision_id ?? null, status: r.status,
         _rank: rank(bumped), _at: r.predicted_at || "",
       });
     }

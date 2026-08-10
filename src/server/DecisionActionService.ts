@@ -39,8 +39,22 @@ export class DecisionActionService {
   static propose(orgId: string, input: ProposeInput): any {
     if (!input?.domain || !input?.actionType || !String(input?.title || "").trim()) throw new Error("Ação exige domain, actionType e title.");
     const pol = ApprovalPolicyService.resolve(orgId, { domain: input.domain, actionType: input.actionType, expectedImpact: input.expectedImpact });
+    let policy = pol.policy;
+    let requiredRole = pol.requiredRole;
+    // ADR-159 F3 (D4) — Autonomy Contract: quando o dono configurou BANDAS
+    // valor→papel (enforced), o estado resolvido MANDA sobre a política base:
+    //   deny → bloqueia a proposta (financeiro/destrutivo fora de faixa);
+    //   allow → auto (policy 'none' — o efeito externo ainda passa pelos guardas
+    //           do executor); require_approval/escalate → exige aprovação do
+    //           papel da banda (escalonar = papel sênior). Sem bandas: inalterado.
+    const contract = ApprovalPolicyService.resolveContract(orgId, { domain: input.domain, actionType: input.actionType, amount: input.expectedImpact });
+    if (contract.enforced) {
+      if (contract.state === "deny") throw new Error(`Ação bloqueada pela política de autonomia: ${contract.reason}.`);
+      if (contract.state === "allow") { policy = "none"; requiredRole = null; }
+      else { policy = "role"; requiredRole = contract.requiredRole || requiredRole; } // require_approval | escalate
+    }
     // Política 'none' já nasce aprovada (pronta para concluir); as demais aguardam aprovação.
-    const status = pol.policy === "none" ? "approved" : "awaiting_approval";
+    const status = policy === "none" ? "approved" : "awaiting_approval";
     const id = randomUUID();
     // ADR-158 — resolve o fio: explícito > herdado do sinal > raiz nova.
     let correlationId = input.correlationId || null;
@@ -54,7 +68,7 @@ export class DecisionActionService {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, orgId, input.signalId || null, input.domain, input.actionType, String(input.title).trim(), input.description || null,
         Number(input.priorityScore) || 0, input.expectedImpact != null ? Number(input.expectedImpact) : null, input.impactUnit || null,
-        input.basis || "estimate", input.confidence != null ? Number(input.confidence) : 0.7, status, pol.policy, pol.requiredRole,
+        input.basis || "estimate", input.confidence != null ? Number(input.confidence) : 0.7, status, policy, requiredRole,
         input.assignedTo || null, input.dueAt || null, input.commandType || null, input.commandPayload != null ? JSON.stringify(input.commandPayload) : null,
         input.baseline != null ? JSON.stringify(input.baseline) : null, input.createdBy || "rule", status === "approved" ? new Date().toISOString() : null, correlationId);
     return this.get(orgId, id);

@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; F3..F6 planejadas.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; F4..F6 planejadas.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -63,6 +63,8 @@ Caminho de migração para **default-deny** em ações sensíveis quando não h�
 
 `agent_policies` ganha faixas parametrizadas (ex.: desconto 0-5% automático / 5-10% gerente / >10% proprietário; compra até R$2k automática / R$2k-5k gerente / >R$5k diretor). Os **4 estados** do Autonomy Contract passam a existir de fato: **permitido / requer aprovação / bloqueado / escalonar**. Ações financeiras/destrutivas: **default deny** (PRD 0 §49).
 
+**F3 — ENTREGUE (2026-08-10).** `ApprovalPolicyService.resolveContract(orgId, {domain, actionType, amount})` devolve um dos 4 estados (`allow`/`require_approval`/`escalate`/`deny`) por precedência: (1) **bandas valor→papel** em `agent_policies.config_json.bands` (`setBands` grava; a 1ª banda cujo teto `upTo` cobre o valor decide, `null`=teto final) — `enforced=true`; (2) **ponte legada** `max_auto_amount`/`approval_role` (advisória); (3) sem política → **default-deny** p/ financeiro/destrutivo (RN-159-1, advisório) senão `require_approval`. `DecisionActionService.propose` **impõe** o contrato **só quando há bandas** (opt-in): `deny` bloqueia a proposta, `allow` auto-aprova (policy `none` — o efeito externo ainda passa pelos guardas do executor), `require_approval`/`escalate` exigem aprovação do papel da banda (escalonar = papel sênior). Sem bandas: `propose` inalterado (0 regressão). O default-deny geral (todas as financeiras sem política) fica pro D3/F4 sob flag + relatório de impacto. **Números:** 2 métodos novos (`resolveContract`+`setBands`) no `ApprovalPolicyService` + enforcement por bandas no `propose` + 1 suíte (`test:autonomy-contract`, 18 checks). 0 breaking changes.
+
 ### D5 — Progressive autonomy por evidência
 
 `DecisionMetrics` + `action_outcomes` alimentam uma **proposta** de elevação de autonomia ("aprovou 97% em 90 dias, 0 reversões → liberar execução automática até R$500?"). A IA **nunca** eleva a própria autonomia silenciosamente (PRD 0 §42) — só **propõe**; o humano confirma; a mudança é auditada.
@@ -91,7 +93,7 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 | **F2.4** | D1 — reroute do `SalesRecoveryPlaybook.approve` (WhatsApp, guard-heavy) via `sendGovernedMessage`; guards LGPD + side-effects intactos | **ENTREGUE** |
 | **F2.5** | D1 — reroute do `ProspectExecution` (2 sinks) + handler `gmail_send` novo + generalização do helper (`dispatchGoverned`) | **ENTREGUE — fecha os reroutes do D1** |
 | F2.6? | D1 (polimento) — `AsaasService.createPixCharge` público; rate-limit no ponto único | média |
-| F3 | D4 — bandas valor→papel + estado "escalonar" | média |
+| **F3** | D4 — Autonomy Contract: bandas valor→papel (`config_json.bands`) + 4 estados (`resolveContract`) + enforcement por bandas no `propose` (opt-in) | **ENTREGUE** |
 | F4 | D3 — RBAC default-deny faseado | média |
 | F5 | D5 — progressive autonomy (proposta por evidência) | média |
 | F6 | D6 — step-up MFA + detecção de anomalia | posterior |

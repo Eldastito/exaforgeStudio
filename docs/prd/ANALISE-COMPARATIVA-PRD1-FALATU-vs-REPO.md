@@ -137,7 +137,30 @@ Rotas `GET /api/falatu/execution-status` + `GET /api/falatu/thread/:correlationI
 
 ### Fase 8 — Proactive Delivery — ENTREGUE (2026-08-10, §42-47)
 
-O Fala Tu fala PRIMEIRO. O briefing diário (ADR-151 F6) já cobria o "resumo da manhã"; esta fatia adiciona o **alerta event-driven** (§43): quando algo urgente aparece, avisa AGORA. `FalaTuProactiveService` — fonte = Smart Inbox (Fase 3, não varredura nova, CA15); seleciona só o URGENTE (aprovações pendentes + riscos críticos); guardrails duros: **quiet hours** (§45, janela 7–22h SP), **dedup por (usuário, item)** em `falatu_proactive_deliveries` (§44, alerta uma vez, marca só após envio), **1 push agregado** (nunca 1 por sinal), **opt-in por org** (`falatu_proactive_alerts_enabled`, §46). Herda o escopo por papel da Smart Inbox (vendedor nunca é alertado de risco financeiro). Scheduler: `falatuProactiveAlertPass` (fan-out sobre usuários inscritos em push de orgs opt-in). Suíte `test:falatu-proactive` (10 checks). **Restante do PRD 1:** Fase 7 chat interno (deferido, §80) · Fase 9 zero-training UX.
+O Fala Tu fala PRIMEIRO. O briefing diário (ADR-151 F6) já cobria o "resumo da manhã"; esta fatia adiciona o **alerta event-driven** (§43): quando algo urgente aparece, avisa AGORA. `FalaTuProactiveService` — fonte = Smart Inbox (Fase 3, não varredura nova, CA15); seleciona só o URGENTE (aprovações pendentes + riscos críticos); guardrails duros: **quiet hours** (§45, janela 7–22h SP), **dedup por (usuário, item)** em `falatu_proactive_deliveries` (§44, alerta uma vez, marca só após envio), **1 push agregado** (nunca 1 por sinal), **opt-in por org** (`falatu_proactive_alerts_enabled`, §46). Herda o escopo por papel da Smart Inbox (vendedor nunca é alertado de risco financeiro). Scheduler: `falatuProactiveAlertPass` (fan-out sobre usuários inscritos em push de orgs opt-in). Suíte `test:falatu-proactive` (10 checks).
+
+### Fase 9 — Zero-training UX — ENTREGUE (2026-08-10, fecha o PRD 1)
+
+`FalaTuHomeService.home(orgId, user)` — a "home" do Fala Tu: ao abrir, TUDO num payload só, sem navegar nem aprender. Pura composição (CA15): saudação pela hora (SP) + resumo (contagens da Smart Inbox) + highlights ranqueados (aprovação+risco+oportunidade por score) + aprovações acionáveis (F4) + execução ativa (F6) + `proactiveEnabled` (F8) — tudo no escopo do papel (a home do vendedor não vaza finanças). Rota `GET /api/falatu/home`. Suíte `test:falatu-home` (11 checks).
+
+---
+
+## PRD 1 — FECHADO (2026-08-10)
+
+12 marcos, todos mergeados com CI verde e 0 breaking changes. Ciclo completo de comunicação bidirecional do Fala Tu, sempre por papel:
+
+| Marco | PR | O quê |
+| --- | --- | --- |
+| Fundação | #907 | Envelope canônico + correlação (espinha ADR-158) |
+| Segurança P1 | #908 | Contexto por papel + redação (`ContextProjectionService`) |
+| Fase 2.1–2.4 + RBAC | #909–#913 | Artefatos: gera (PDF/XLSX) · recebe (intake magic-byte) · entrega (link assinado) · RBAC por classificação |
+| Fase 3 | #914 | Smart Inbox (composição signals+ações+runtime por categoria de ação) |
+| Fase 4 | #915 | Approval Center (aprovar no chat, actionId explícito, porta RBAC única) |
+| Fase 6 | #916 | Threads + Execution Status (linha do tempo por correlation_id) |
+| Fase 8 | #917 | Proactive Delivery (o Fala Tu fala primeiro; dedup + quiet hours) |
+| Fase 9 | (esta) | Zero-training UX (home agregadora) |
+
+**Deferido:** Fase 7 chat interno (§80 — PRD futuro). **Padrão transversal:** cada fatia é composição sobre engines canônicos (ADR-135/136/152/158), 0 tabela de alertas nova (CA15), escopo por papel herdado da Segurança P1, testes determinísticos (rodam em CI sem chave de IA).
 
 ---
 

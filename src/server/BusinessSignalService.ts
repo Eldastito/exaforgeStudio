@@ -121,7 +121,10 @@ export class BusinessSignalService {
     const items: any[] = [];
     // Fonte 1 — sinais abertos e não expirados (respeita o TTL da F2).
     for (const r of db.prepare(
-      `SELECT * FROM business_signals WHERE organization_id = ? AND status = 'open' AND (expires_at IS NULL OR expires_at > datetime('now'))`
+      // PRD 2 F2.2 — `datetime(expires_at)` normaliza o ISO gravado (…T…Z) pro
+      // formato do SQLite antes de comparar. Sem isso, `'T' > ' '` fazia expiry
+      // PASSADO nunca filtrar (TTL inerte). Agora o TTL vale de fato.
+      `SELECT * FROM business_signals WHERE organization_id = ? AND status = 'open' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`
     ).all(orgId) as any[]) {
       items.push({
         source: "signal", id: r.id, domain: r.domain, type: r.signal_type, severity: norm(r.severity),
@@ -166,6 +169,19 @@ export class BusinessSignalService {
   static resolveByDedupe(orgId: string, dedupeKey: string): { ok: boolean } {
     const r = db.prepare("UPDATE business_signals SET status = 'resolved' WHERE organization_id = ? AND dedupe_key = ? AND status = 'open'").run(orgId, dedupeKey);
     return { ok: r.changes > 0 };
+  }
+
+  /**
+   * PRD 2 F2.2 (§52-53) — enforcement do TTL: marca como `expired` os sinais
+   * ABERTOS cujo `expires_at` já passou (o `attention()` já os filtra na leitura;
+   * este sweep faz o STATUS refletir a realidade, pra list/queries/observabilidade).
+   * `datetime(expires_at)` normaliza o ISO. Idempotente; isolado por org.
+   */
+  static expireStale(orgId: string, now = Date.now()): { expired: number } {
+    const r = db.prepare(
+      "UPDATE business_signals SET status = 'expired' WHERE organization_id = ? AND status = 'open' AND expires_at IS NOT NULL AND datetime(expires_at) <= datetime(?)"
+    ).run(orgId, new Date(now).toISOString());
+    return { expired: r.changes };
   }
 }
 

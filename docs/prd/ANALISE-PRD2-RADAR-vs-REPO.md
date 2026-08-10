@@ -52,7 +52,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | `basis` aceitar **`hypothesis`** | Hoje `BASES=["fact","estimate"]` bloqueia no `publish` (`:52`). §12/§13 exigem 3 valores | F2 |
 | Coluna dedicada **`subject_id`** | Só existe `subject_type`; hoje usa-se `source_entity_id` (source-scoped, não subject) | F2 |
 | **Freshness / staleness** | `confidence` é estática; TTL só filtra na leitura; sem `expired`/decay (§78-79) | F2 |
-| **Enforcement de TTL** | `expires_at` no schema mas **nenhum writer popula** e **nenhum sweep** aplica (inerte). **Bug confirmado na F2.1:** o filtro `expires_at > datetime('now')` compara ISO (`…T…Z`) com o formato espaçado do SQLite → `'T' > ' '` lexicograficamente, então expiry PASSADO nunca filtra. F2.2 normaliza (usa `datetime(expires_at)`) | F2 |
+| ~~**Enforcement de TTL**~~ | ✅ **F2.2 ENTREGUE** — filtro corrigido (`datetime(expires_at)`) + sweep `expireStale`→`expired` (Scheduler `signalTtlSweepPass`, antes do auto-trigger). `test:signal-ttl` (9 checks) | ~~F2~~ ✅ |
 | **Recorrência/reopen** | Republish nunca reabre resolvido (§55). Recorrência precisa de novo ciclo com histórico | F2 |
 | **`process_instances.correlation_id`** | Furo da espinha — processo iniciado pelo router fica **fora** do trace (§75) | F2/F8 |
 | **Goal-relevance no score** | `ImpactPrioritizationService` não consome `BusinessGoalService.progress` (§31) | F5 |
@@ -100,7 +100,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA12 sinal→processo | ✅ router (2 maps) | F8 expande |
 | CA13 auto-trigger não bypassa policy | ✅ choke-point garante | não regredir |
 | CA14 correlationId no ciclo | 🟡 furo em `process_instances` | F2/F8 |
-| CA15 TTL/dedupe/cooldown anti-storm | 🟡 dedupe sim; TTL inerte; cooldown só PlanFit | F2 + F4 |
+| CA15 TTL/dedupe/cooldown anti-storm | 🟡 dedupe sim; **TTL agora vale (F2.2 ✅)**; cooldown só PlanFit | F4 (cooldown genérico) |
 | CA16 detector isolado não derruba | ✅ best-effort em cada pass | reforçar em F12 |
 | CA17 custo de IA mensurado | ✅ `ai_usage_log` + budgets | F12 (per-detector) |
 | CA18 tenant isolation | ✅ toda query filtra org | testar em cada fatia |

@@ -5934,7 +5934,7 @@ const initDb = () => {
         evidence_json TEXT NOT NULL,
         premises_json TEXT,
         dedupe_key TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'open',  -- open|acknowledged|resolved|dismissed
+        status TEXT NOT NULL DEFAULT 'open',  -- open|acknowledged|resolved|dismissed|expired (PRD2 F2.2)
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(organization_id, dedupe_key)
       );

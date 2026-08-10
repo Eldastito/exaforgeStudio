@@ -176,6 +176,26 @@ router.post("/signals/sweep", (req: AuthRequest, res): any => {
 
 // ── Entrega do briefing por WhatsApp (Fatia 6): consome os sinais acima ──
 
+// ADR-160 F5/F6/F7 — porta I/O: estado/controle dos bridges (opt-in que faz o
+// Fala Tu escrever no domínio CANÔNICO ao confirmar — tasks→TaskService,
+// events→agenda, lists('shopping')→requisição de compra — além dos silos).
+// Ligar/desligar é do gestor; leitura p/ qualquer papel.
+router.get("/bridge", (req: AuthRequest, res): any => {
+  res.json(FalaTuService.bridgeState(req.organizationId!));
+});
+
+router.put("/bridge", (req: AuthRequest, res): any => {
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem alterar." });
+  const hasTasks = typeof req.body?.tasks === "boolean";
+  const hasEvents = typeof req.body?.events === "boolean";
+  const hasLists = typeof req.body?.lists === "boolean";
+  if (!hasTasks && !hasEvents && !hasLists) return res.status(400).json({ error: "Informe tasks, events e/ou lists (boolean)." });
+  if (hasTasks) FalaTuService.setTaskBridge(req.organizationId!, req.body.tasks);
+  if (hasEvents) FalaTuService.setEventBridge(req.organizationId!, req.body.events);
+  if (hasLists) FalaTuService.setListBridge(req.organizationId!, req.body.lists);
+  res.json(FalaTuService.bridgeState(req.organizationId!));
+});
+
 // Estado da porta de canal (opt-in de envio proativo, separado da flag do módulo).
 router.get("/briefing/whatsapp", (req: AuthRequest, res): any => {
   res.json({ enabled: FalaTuBriefingDigestService.waEnabled(req.organizationId!) });

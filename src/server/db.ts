@@ -8328,6 +8328,36 @@ const initDb = () => {
       UNIQUE(organization_id, metric)
     );
   `);
+
+  // ADR-160 F5 (Onda A) — Fala Tu vira PORTA I/O: ao confirmar um item de intent
+  // TASK, sob opt-in `falatu_bridge_tasks_enabled`, o Fala Tu ESPELHA a tarefa no
+  // domínio CANÔNICO (`TaskService`/`tasks`) em vez de viver só no silo paralelo
+  // `falatu_tasks` (estado-final §3.B/§4.2). `bridged_task_id` registra o vínculo
+  // (silo→canônico). Aditivo/reversível: flag default 0 = comportamento de hoje
+  // (só silo, 0 regressão); silo `falatu_tasks` preservado. NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_tasks_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_tasks ADD COLUMN bridged_task_id TEXT`); } catch(e){}
+
+  // ADR-160 F6 (Onda A) — porta I/O, 2ª fatia: EVENT vira agendamento CANÔNICO.
+  // Diferente do bridge de tarefas (F5), a agenda é contact-anchored (appointments.
+  // contact_id é NOT NULL) — então o espelho SÓ acontece quando o humano vincula um
+  // contato REAL na confirmação e o evento tem data+hora (RN-151: nunca inventa
+  // contato/horário). Sem isso, fica só no silo `falatu_events` (lembrete pessoal).
+  // `bridged_appointment_id` registra o vínculo silo→canônico. Flag default 0 =
+  // comportamento de hoje (0 regressão). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_events_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_events ADD COLUMN bridged_appointment_id TEXT`); } catch(e){}
+
+  // ADR-160 F7 (Onda A) — porta I/O, 3ª fatia: LISTA de COMPRAS vira requisição
+  // de compra CANÔNICA. É a fatia mais seletiva das três: só listas do tipo
+  // 'shopping' têm equivalente canônico (as outras — general/meeting/trip — não
+  // são domínio de negócio e ficam só no silo). E dentro da lista, só os itens
+  // que CASAM com um produto do catálogo (product_service_id é NOT NULL; nunca
+  // inventa produto — RN-151) viram linhas da requisição (draft, humano aprova
+  // depois). `bridged_requisition_id` registra o vínculo silo→canônico. Flag
+  // default 0 = comportamento de hoje (0 regressão). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_lists_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_lists ADD COLUMN bridged_requisition_id TEXT`); } catch(e){}
 };
 
 initDb();

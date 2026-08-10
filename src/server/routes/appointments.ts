@@ -1,6 +1,5 @@
 import { Router } from "express";
 import db from "../db.js";
-import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
@@ -78,28 +77,21 @@ router.post("/", (req: AuthRequest, res) => {
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
 
     const { ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end, customer_email } = req.body;
-  const id = uuidv4();
 
   try {
-    // Se o fim não veio, calcula a partir da duração configurada da agenda.
-    let endIso = scheduled_end;
-    if (!endIso && scheduled_start) {
-      const startMs = AppointmentService.ms(scheduled_start);
-      if (startMs != null) {
-        const slotMin = AppointmentService.config(orgId).slotMin;
-        endIso = new Date(startMs + slotMin * 60000).toISOString();
-      }
-    }
-    db.prepare(`
-      INSERT INTO appointments (id, organization_id, ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, orgId, ticket_id, contact_id, product_service_id, title, description || '', scheduled_start, endIso);
+    // ADR-160 F6: a criação canônica (record + validação + audit) vive em
+    // AppointmentService.create — porta única do domínio agenda. A borda (esta
+    // rota) mantém os efeitos EXTERNOS: e-mail do contato + sync do Calendar.
+    const appt = AppointmentService.create(orgId, {
+      contactId: contact_id, title, description,
+      scheduledStart: scheduled_start, scheduledEnd: scheduled_end,
+      ticketId: ticket_id, productServiceId: product_service_id,
+    }, userId);
+    const id = appt.id;
     // Guarda o e-mail informado no contato (para a confirmação por e-mail).
     if (customer_email && contact_id) {
       try { db.prepare("UPDATE contacts SET email = ? WHERE id = ? AND organization_id = ?").run(String(customer_email).trim(), contact_id, orgId); } catch (e) { /* noop */ }
     }
-
-    logAuthEvent(orgId, userId, id, 'APPOINTMENT_CREATED', { ticket_id });
 
     // Sincroniza com o Google Calendar + confirmação por e-mail (best-effort).
     GoogleOAuthService.syncAppointment(orgId, id).catch(() => {});

@@ -22,6 +22,7 @@ Repositório monolítico (frontend React + backend Node/Express + SQLite via `be
 | ADR-132 | Sinais finos | em produção |
 | ADR-081 | Conectores TISS (roadmap TISS XML/WS) | roadmap — molde documentado; aditivo à ADR-145 |
 | ADR-151 | FalaTu — captura multimodal "Fala → Faz → Confere" (porte do repo `Eldastito/FalaTu`) | Núcleo fechado (5 fatias) + F6 aditivo em produção: multi-tenant opt-in + WhatsApp no canal interno + compras com conferência + memória com desambiguação ativa ("qual Carlos?") + briefing diário proativo via `business_signals` + entrega do briefing por WhatsApp (digest, molde ADR-144) |
+| **ADR-160** | **Onda A — Percepção & Contexto (ZapFlow Execution Intelligence)** | **EM ANDAMENTO — aditivo sobre a Onda 0 (ADR-158 espinha única + ADR-159 governança). F1–F4 em produção (leitura transversal de atenção · snapshot como leitura default · convergir Context+V2 · metas + distância à meta). Thread porta I/O (D5) FECHADO — 5 fatias F5–F9: Fala Tu vira porta pro domínio canônico (F5 tarefas→`TaskService` · F6 eventos→agenda `AppointmentService` com contato · F7 listas de compras→requisição `PurchaseRequisitionService` casada ao catálogo · F8 paridade de canal WhatsApp · F9 dedup de RAG em `vectorSimilarity`). Todos opt-in por flag, reversíveis, atômicos com o silo, nunca inventam (RN-151); silos preservados em dual-write** |
 
 ## ADR-145 — CLÍNICA JORNADA DE TRATAMENTO (fechado 2026-08-01)
 

@@ -142,7 +142,14 @@ export class FalaTuWhatsAppService {
         const created = r.kind === "note"
           ? "Guardei como *nota* na sua memória."
           : `Criei a *${INTENT_LABEL[(pending.intent as FalaTuIntent) || "NOTE"] || r.kind}*: ${pending.summary || pending.transcription || pending.content}`;
-        return { handled: true, reply: `✅ Confere! ${created}` };
+        // ADR-160 F8 — porta I/O observável no WhatsApp: quando o choke-point
+        // espelhou no domínio canônico, o operador vê o desfecho (mesma
+        // materialização do painel — paridade de canal).
+        const bridged: string[] = [];
+        if (r.bridgedTaskId) bridged.push("📋 também entrou no seu quadro de tarefas");
+        if (r.bridgedRequisitionId) bridged.push("🛒 itens do catálogo entraram na *requisição de compras* (rascunho — aprove no painel)");
+        const tail = bridged.length ? `\n${bridged.join("\n")}.` : "";
+        return { handled: true, reply: `✅ Confere! ${created}${tail}` };
       } catch (e: any) {
         return { handled: true, reply: `Não consegui confirmar: ${e.message}` };
       }

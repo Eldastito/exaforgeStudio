@@ -121,7 +121,11 @@ A **Fase 1 de fundação** — evolução aditiva do envelope + wiring de correl
 - `BusinessSignalService.attention` → **RISCO** (critical/risk) / **OPORTUNIDADE** (tipo heurístico) / **INFORMAÇÃO**;
 - `ProcessRuntimeService.listInstances` → **EM EXECUÇÃO** (in-flight) / **RESOLVIDO** (completed nas últimas 48h).
 
-Score = severidade + impacto (log) + prazo/SLA + `priority_score` (já calculado pelo ImpactPrioritization) — aprovação bloqueada no topo. Escopo por papel reusa `DOMAIN_MODULE` + `PermissionService` (vendedor não vê risco financeiro nem decisão de compras). Rota `GET /api/falatu/smart-inbox`. Suíte `test:smart-inbox` (12 checks). **Próxima:** Fase 4 Approval Center (UX conversacional sobre `decision_actions`/`ApprovalPolicyService` + gramática `actionId`).
+Score = severidade + impacto (log) + prazo/SLA + `priority_score` (já calculado pelo ImpactPrioritization) — aprovação bloqueada no topo. Escopo por papel reusa `DOMAIN_MODULE` + `PermissionService` (vendedor não vê risco financeiro nem decisão de compras). Rota `GET /api/falatu/smart-inbox`. Suíte `test:smart-inbox` (12 checks).
+
+### Fase 4 — Approval Center — ENTREGUE (2026-08-10, §24-25, §54, §66)
+
+Aprovar/rejeitar **dentro do Fala Tu**, com o MOTOR canônico (não reimplementa policy/ledger/RBAC — CA15). `FalaTuApprovalService` só **apresenta + delega**: `pending` (cards com o motivo §24 + flag `canApprove` por papel) e `decide(actionId, decision, reason)` — `actionId` **explícito** + `decision` enum, nunca texto livre (§25) → delega pra `DecisionActionService.approve/reject` (identidade obrigatória, two-step, audit, **idempotência §54** já garantidos). A autorização foi **extraída** pra `DecisionActionService.canApprove`/`canReject` — a **mesma porta** que a rota core `/api/actions` usa agora (dedup; Fala Tu **não** vira bypass de RBAC, §30/CA13). Rotas `GET/POST /api/falatu/approvals`. Suíte `test:falatu-approval` (15 checks); regressão inclui `two-step-approval-security`/`autonomy-contract` (refactor da rota core behavior-preserving). **Próxima:** Fase 6 threads/status de execução · Fase 8 proativo (briefings) — as fundações (`ProcessRuntimeService`, briefing/push) já existem.
 
 ---
 

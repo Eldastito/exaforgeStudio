@@ -87,6 +87,64 @@ export class BusinessSignalService {
     }));
   }
 
+  /**
+   * ADR-160 F1 (Onda A) — LEITURA TRANSVERSAL DE ATENÇÃO. Uma superfície ÚNICA
+   * "o que precisa de atenção agora" que funde, ranqueado por severidade:
+   *   - `business_signals` ABERTOS e NÃO EXPIRADOS (todos os domínios — a ADR-158
+   *     F2 já consolidou os detectores aqui; respeita o `expires_at`/TTL da F2);
+   *   - `decision_risks` (DI-2) ainda vivos (predicted|materialized, não resolved).
+   * DERIVADO por query (RN-004): zero tabela nova (RN-158-4). Isolado por org.
+   * Normaliza a severidade das 2 fontes numa escala única (critical>risk>
+   * attention>info) e devolve totais por severidade/domínio + itens ordenados.
+   */
+  static attention(orgId: string, opts: { limit?: number } = {}): {
+    generatedAt: string;
+    total: number;
+    bySeverity: Record<string, number>;
+    byDomain: Record<string, number>;
+    items: Array<{ source: string; id: string; domain: string; type: string; severity: string; summary: string; impactAmount: number | null; impactUnit: string | null; detectedAt: string | null; correlationId: string | null; subjectType: string | null; status: string }>;
+  } {
+    const limit = Number(opts.limit) > 0 ? Number(opts.limit) : 200;
+    // Escala única: aceita o vocabulário dos sinais (info/attention/risk/critical)
+    // E o de risco (low/medium/high) — mapeados pra a mesma normalizada.
+    const RANK: Record<string, number> = { critical: 0, high: 0, risk: 1, medium: 1, attention: 2, low: 2, info: 3 };
+    const NORM: Record<string, string> = { critical: "critical", high: "critical", risk: "risk", medium: "risk", attention: "attention", low: "attention", info: "info" };
+    const norm = (s: any) => NORM[String(s || "").toLowerCase()] || "attention";
+    const rank = (s: any) => RANK[String(s || "").toLowerCase()] ?? 2;
+
+    const items: any[] = [];
+    // Fonte 1 — sinais abertos e não expirados (respeita o TTL da F2).
+    for (const r of db.prepare(
+      `SELECT * FROM business_signals WHERE organization_id = ? AND status = 'open' AND (expires_at IS NULL OR expires_at > datetime('now'))`
+    ).all(orgId) as any[]) {
+      items.push({
+        source: "signal", id: r.id, domain: r.domain, type: r.signal_type, severity: norm(r.severity),
+        summary: shortSummary(r.signal_type, r.evidence_json), impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
+        detectedAt: r.detected_at ?? null, correlationId: r.correlation_id ?? null, subjectType: r.subject_type ?? null, status: r.status,
+        _rank: rank(r.severity), _at: r.detected_at || "",
+      });
+    }
+    // Fonte 2 — riscos previstos ainda vivos. `materialized` sobe um nível.
+    for (const r of db.prepare(
+      `SELECT * FROM decision_risks WHERE organization_id = ? AND status IN ('predicted','materialized') AND resolved_at IS NULL`
+    ).all(orgId) as any[]) {
+      const bumped = r.status === "materialized" && norm(r.severity) === "risk" ? "critical" : (r.status === "materialized" && norm(r.severity) === "attention" ? "risk" : norm(r.severity));
+      items.push({
+        source: "risk", id: r.id, domain: "decision", type: `risk:${r.source || "premortem"}`, severity: bumped,
+        summary: String(r.description || "").slice(0, 200), impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
+        detectedAt: r.predicted_at ?? null, correlationId: null, subjectType: r.decision_id ? "decision" : null, status: r.status,
+        _rank: rank(bumped), _at: r.predicted_at || "",
+      });
+    }
+
+    items.sort((a, b) => a._rank - b._rank || String(b._at).localeCompare(String(a._at)));
+    const bySeverity: Record<string, number> = { critical: 0, risk: 0, attention: 0, info: 0 };
+    const byDomain: Record<string, number> = {};
+    for (const it of items) { bySeverity[it.severity] = (bySeverity[it.severity] || 0) + 1; byDomain[it.domain] = (byDomain[it.domain] || 0) + 1; }
+    const trimmed = items.slice(0, limit).map(({ _rank, _at, ...rest }) => rest);
+    return { generatedAt: new Date().toISOString(), total: items.length, bySeverity, byDomain, items: trimmed };
+  }
+
   private static setStatus(orgId: string, id: string, status: string): { ok: boolean } {
     const r = db.prepare("UPDATE business_signals SET status = ? WHERE id = ? AND organization_id = ?").run(status, id, orgId);
     return { ok: r.changes > 0 };
@@ -106,5 +164,13 @@ export class BusinessSignalService {
 }
 
 function safeParse(s: string): any { try { return JSON.parse(s); } catch { return {}; } }
+
+/** Resumo curto e legível de um sinal pra a leitura de atenção (F1 Onda A). */
+function shortSummary(signalType: string, evidenceJson: string | null): string {
+  const ev = evidenceJson ? safeParse(evidenceJson) : {};
+  const cand = ev?.summary || ev?.title || ev?.label || ev?.contactName || ev?.nota;
+  const base = typeof cand === "string" && cand.trim() ? cand.trim() : String(signalType || "").replace(/_/g, " ");
+  return base.slice(0, 200);
+}
 
 export default BusinessSignalService;

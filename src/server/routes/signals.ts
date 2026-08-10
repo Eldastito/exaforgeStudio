@@ -17,6 +17,16 @@ router.get("/", (req: AuthRequest, res): any => {
   res.json({ signals: BusinessSignalService.list(orgId, { status, domain }) });
 });
 
+// ADR-160 F1 (Onda A) — GET /api/signals/attention — leitura TRANSVERSAL de
+// atenção: sinais abertos (não expirados) + riscos vivos, ranqueados por
+// severidade, num único feed (funde as pontas de percepção pra a UX invisível).
+router.get("/attention", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = req.query?.limit ? Number(req.query.limit) : undefined;
+  res.json(BusinessSignalService.attention(orgId, { limit }));
+});
+
 // POST /api/signals/refresh — deriva e publica os sinais financeiros (sob demanda, idempotente).
 router.post("/refresh", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

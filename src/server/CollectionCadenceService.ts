@@ -272,41 +272,22 @@ export class CollectionCadenceService {
   }
 
   /**
-   * ADR-159 F2.2 — envia o follow-up PELO choke-point único. Cunha uma AÇÃO de
-   * follow-up distinta (command_type `whatsapp_send`, reusa o handler governado
-   * existente), herda o correlationId da ação âncora (fio ADR-158) e roda
-   * `CommandExecutorService.execute` — que aplica G1/G2/G3, audita em
-   * `action_execution_log` (com correlationId, RN-159-3) e garante idempotência.
-   *
-   * Por que uma ação NOVA (e não reexecutar a âncora): a âncora (T1) já foi
-   * executada; o guard de idempotência da F2.1 (`action_already_executed`)
-   * recusaria reexecutá-la. Cada T2/T3 é um efeito próprio → ação própria.
-   *
-   * Política: seed idempotente de `agent_policies(collection, collection_followup,
-   * execute, approved_execution)`. Isso NÃO amplia autonomia — a cadência já
-   * envia autonomamente hoje (envio direto); a política só deixa o executor
-   * PERMITIR o que já acontece, agora auditado (RN-159-4: sem gate paralelo).
-   * Lança em qualquer falha (o caller reverte a reserva + publica sinal).
+   * ADR-159 F2.2 — envia o follow-up T2/T3 PELO choke-point único, delegando à
+   * costura compartilhada `CommandExecutorService.sendGovernedMessage` (mesma
+   * usada por promise/resend-pix na F2.3). Herda o correlationId da ação âncora
+   * (fio ADR-158). Ação NOVA por follow-up (não reexecuta a âncora T1, que o
+   * guard F2.1 `action_already_executed` recusaria). Lança em qualquer falha —
+   * o caller reverte a reserva + publica sinal.
    */
   private static async sendViaExecutor(row: DueRow, msg: string, attempt: 2 | 3): Promise<string | undefined> {
-    const { DecisionActionService } = await import("./DecisionActionService.js");
     const { CommandExecutorService } = await import("./CommandExecutorService.js");
-    const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = 'collection' AND action_type = 'collection_followup'`).get(row.orgId) as any;
-    if (!pol) {
-      db.prepare(`INSERT INTO agent_policies (id, organization_id, domain, action_type, autonomy_level, execution_mode, active) VALUES (?, ?, 'collection', 'collection_followup', 'execute', 'approved_execution', 1)`).run(randomUUID(), row.orgId);
-    }
     const anchor = db.prepare(`SELECT correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?`).get(row.actionId, row.orgId) as any;
-    const followup = DecisionActionService.propose(row.orgId, {
+    return CommandExecutorService.sendGovernedMessage(row.orgId, {
       domain: "collection", actionType: "collection_followup",
       title: `Follow-up de cobrança T${attempt}`,
-      commandType: "whatsapp_send",
-      commandPayload: { channelId: row.channelId, recipient: row.phone, message: msg },
-      correlationId: anchor?.correlation_id || null,
-      createdBy: "cadence-runtime",
+      channelId: row.channelId, recipient: row.phone, message: msg,
+      correlationId: anchor?.correlation_id || null, createdBy: "cadence-runtime",
     });
-    if (followup.status !== "approved") DecisionActionService.approve(row.orgId, followup.id, "cadence-runtime");
-    const res = await CommandExecutorService.execute(row.orgId, followup.id);
-    return res?.result?.externalRef || undefined;
   }
 }
 

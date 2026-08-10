@@ -300,6 +300,44 @@ export class CommandExecutorService {
   static registerHandler(handler: CommandHandler): void {
     for (const ct of handler.commandTypes) REGISTRY.set(ct, handler);
   }
+
+  /**
+   * ADR-159 F2.x (D1) — envia uma mensagem PELO choke-point (o oposto de um
+   * bypass direto a `MessageProviderService.sendMessage`). Costura ÚNICA
+   * reusada por todos os reroutes (cadência F2.2, promise/resend-pix F2.3, ...):
+   * cunha uma ação governada (`whatsapp_send`, reusa o handler existente),
+   * semeia a política idempotente da (domain, actionType), herda o correlationId
+   * da âncora (fio ADR-158) e chama `execute` — que aplica G1/G2/G3, audita em
+   * `action_execution_log` com correlationId (RN-159-3) e garante idempotência.
+   *
+   * Semear a política NÃO amplia autonomia: o caller já envia autonomamente hoje
+   * (bypass direto); a política só deixa o executor PERMITIR o que já acontece,
+   * agora auditado (RN-159-4: sem gate paralelo — reusa executor/agent_policies).
+   * Retorna o messageId (externalRef do handler); LANÇA em qualquer falha — o
+   * caller decide o rollback/sinal do seu próprio fluxo.
+   */
+  static async sendGovernedMessage(orgId: string, input: {
+    domain: string; actionType: string; title: string;
+    channelId: string; recipient: string; message: string;
+    correlationId?: string | null; createdBy?: string;
+  }): Promise<string | undefined> {
+    const { DecisionActionService } = await import("./DecisionActionService.js");
+    const actor = input.createdBy || "runtime";
+    const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ?`).get(orgId, input.domain, input.actionType) as any;
+    if (!pol) {
+      db.prepare(`INSERT INTO agent_policies (id, organization_id, domain, action_type, autonomy_level, execution_mode, active) VALUES (?, ?, ?, ?, 'execute', 'approved_execution', 1)`).run(randomUUID(), orgId, input.domain, input.actionType);
+    }
+    const action = DecisionActionService.propose(orgId, {
+      domain: input.domain, actionType: input.actionType, title: input.title,
+      commandType: "whatsapp_send",
+      commandPayload: { channelId: input.channelId, recipient: input.recipient, message: input.message },
+      correlationId: input.correlationId ?? null,
+      createdBy: actor,
+    });
+    if (action.status !== "approved") DecisionActionService.approve(orgId, action.id, actor);
+    const res = await this.execute(orgId, action.id);
+    return res?.result?.externalRef || undefined;
+  }
 }
 
 function safeParse(s: string): any { try { return JSON.parse(s); } catch { return null; } }

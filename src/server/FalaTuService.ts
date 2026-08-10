@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { TaskService } from "./TaskService.js";
+import { AppointmentService, TZ_OFFSET_MIN } from "./AppointmentService.js";
 
 /**
  * FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere".
@@ -384,7 +385,7 @@ export class FalaTuService {
     orgId: string,
     userId: string,
     inboxItemId: string,
-    overrides: { intent?: string; title?: string; eventDate?: string | null; eventTime?: string | null; listItems?: string[]; listType?: string; mentionResolutions?: Record<string, string> } = {}
+    overrides: { intent?: string; title?: string; eventDate?: string | null; eventTime?: string | null; listItems?: string[]; listType?: string; mentionResolutions?: Record<string, string>; contactId?: string | null } = {}
   ) {
     // Fatia 5: resoluções de menção enviadas junto da confirmação (a UI faz
     // tudo num clique) passam pelo MESMO validador do resolveMention — a
@@ -415,15 +416,21 @@ export class FalaTuService {
       ? (timeRe.test(overrides.eventTime || "") ? overrides.eventTime : null)
       : (entities?.eventTime || null);
 
-    // ADR-160 F5 — porta I/O: a org optou por espelhar a tarefa confirmada no
-    // domínio canônico? Lê a flag ANTES da transação (uma vez).
+    // ADR-160 F5/F6 — porta I/O: a org optou por espelhar tarefa/evento no
+    // domínio canônico? Lê as flags ANTES da transação (uma vez).
     const bridgeTasks = FalaTuService.isTaskBridgeEnabled(orgId);
+    const bridgeEvents = FalaTuService.isEventBridgeEnabled(orgId);
+    // F6: contato REAL vinculado pelo humano nesta confirmação (nunca inventado).
+    // Só vira agendamento canônico se existir NESTA org (senão, silo-only).
+    const rawContactId = typeof overrides.contactId === "string" ? overrides.contactId.trim() : "";
+    const eventContactId = rawContactId && db.prepare("SELECT id FROM contacts WHERE id = ? AND organization_id = ?").get(rawContactId, orgId) ? rawContactId : null;
 
     // ADR-154 F5.1: coleta IDs de entidades tocadas nesta confirmação pra
     // enfileirar embeddings DEPOIS da transação — nunca dentro (evita atrasar
     // commit por chamada de rede + queremos o embedding SÓ do que persistiu).
     const touchedEntityIds = new Set<string>();
     let bridgedTaskId: string | null = null;
+    let bridgedAppointmentId: string | null = null;
     const result = db.transaction(() => {
       let confirmedKind: string | null = null;
       let refId: string | null = null;
@@ -448,6 +455,18 @@ export class FalaTuService {
         db.prepare(`INSERT INTO falatu_events (id, organization_id, user_id, title, event_date, event_time, inbox_item_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
           .run(refId, orgId, userId, title, eventDate, eventTime, item.id);
         confirmedKind = "event";
+        // Porta I/O (F6): espelha na agenda CANÔNICA só quando há contato REAL
+        // vinculado + data + hora (appointments.contact_id é NOT NULL; nunca
+        // inventa — RN-151). Sem isso, fica lembrete pessoal no silo. Cria SÓ o
+        // registro (AppointmentService.create não dispara e-mail/Calendar — isso
+        // é da borda). Atômico com o silo (mesma tx; contato já validado acima).
+        if (bridgeEvents && eventContactId && eventDate && eventTime) {
+          const off = TZ_OFFSET_MIN, sign = off <= 0 ? "-" : "+", abs = Math.abs(off);
+          const tz = `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+          const appt = AppointmentService.create(orgId, { contactId: eventContactId, title, scheduledStart: `${eventDate}T${eventTime}:00${tz}` }, userId);
+          bridgedAppointmentId = appt?.id || null;
+          if (bridgedAppointmentId) db.prepare(`UPDATE falatu_events SET bridged_appointment_id = ? WHERE id = ?`).run(bridgedAppointmentId, refId);
+        }
       } else if (intent === "LIST") {
         refId = randomUUID();
         const listType = ["general", "shopping", "meeting", "trip"].includes(overrides.listType || "") ? overrides.listType : "general";
@@ -513,7 +532,7 @@ export class FalaTuService {
       return { confirmedKind, refId };
     })();
 
-    logAuthEvent(orgId, userId, null, "FALATU_CONFIRM", { inboxItemId: item.id, kind: result.confirmedKind, refId: result.refId, bridgedTaskId });
+    logAuthEvent(orgId, userId, null, "FALATU_CONFIRM", { inboxItemId: item.id, kind: result.confirmedKind, refId: result.refId, bridgedTaskId, bridgedAppointmentId });
 
     // ADR-154 F5.1: enfileira embeddings da memória (assíncrono, opt-in via
     // falatu_rag_enabled). Best-effort — SoloEmbeddingsService swallows erros
@@ -532,22 +551,37 @@ export class FalaTuService {
       }
     }).catch(() => { /* import falhou — não impacta confirm */ });
 
-    return { success: true, kind: result.confirmedKind, refId: result.refId, bridgedTaskId, item: FalaTuService.getInboxItem(orgId, userId, inboxItemId) };
+    return { success: true, kind: result.confirmedKind, refId: result.refId, bridgedTaskId, bridgedAppointmentId, item: FalaTuService.getInboxItem(orgId, userId, inboxItemId) };
   }
 
   /**
-   * ADR-160 F5 — PORTA I/O (bridge de tarefas). Estado/controle do opt-in que faz
-   * o Fala Tu escrever no domínio CANÔNICO (`TaskService`) ao confirmar um TASK,
-   * além do silo `falatu_tasks`. Default off = comportamento de hoje (0 regressão).
+   * ADR-160 F5/F6 — PORTA I/O. Estado/controle dos opt-ins que fazem o Fala Tu
+   * escrever no domínio CANÔNICO ao confirmar: TASK → `TaskService` (F5); EVENT →
+   * agenda via `AppointmentService` (F6, só com contato+data+hora). Além dos silos
+   * `falatu_tasks`/`falatu_events`. Default off = comportamento de hoje (0 regressão).
    */
   static isTaskBridgeEnabled(orgId: string): boolean {
     const row = db.prepare("SELECT falatu_bridge_tasks_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     return !!(row && Number(row.falatu_bridge_tasks_enabled));
   }
 
-  static setTaskBridge(orgId: string, enabled: boolean): { tasks: boolean } {
+  static isEventBridgeEnabled(orgId: string): boolean {
+    const row = db.prepare("SELECT falatu_bridge_events_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    return !!(row && Number(row.falatu_bridge_events_enabled));
+  }
+
+  static setTaskBridge(orgId: string, enabled: boolean): { tasks: boolean; events: boolean } {
     db.prepare("UPDATE organization_settings SET falatu_bridge_tasks_enabled = ? WHERE organization_id = ?").run(enabled ? 1 : 0, orgId);
-    return { tasks: FalaTuService.isTaskBridgeEnabled(orgId) };
+    return FalaTuService.bridgeState(orgId);
+  }
+
+  static setEventBridge(orgId: string, enabled: boolean): { tasks: boolean; events: boolean } {
+    db.prepare("UPDATE organization_settings SET falatu_bridge_events_enabled = ? WHERE organization_id = ?").run(enabled ? 1 : 0, orgId);
+    return FalaTuService.bridgeState(orgId);
+  }
+
+  static bridgeState(orgId: string): { tasks: boolean; events: boolean } {
+    return { tasks: FalaTuService.isTaskBridgeEnabled(orgId), events: FalaTuService.isEventBridgeEnabled(orgId) };
   }
 
   static discard(orgId: string, userId: string, inboxItemId: string) {

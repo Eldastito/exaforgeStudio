@@ -1,4 +1,6 @@
 import db from "./db.js";
+import { randomUUID } from "node:crypto";
+import { logAuthEvent } from "./auditLog.js";
 
 // Fuso de Brasília (sem horário de verão desde 2019) = UTC-3. A IA gera os
 // horários com offset -03:00; aqui usamos o mesmo offset fixo para a aritmética
@@ -89,6 +91,41 @@ export class AppointmentService {
     const norm = /(z|[+-]\d\d:?\d\d)$/i.test(v) ? v : v.replace(" ", "T") + "Z";
     const t = Date.parse(norm);
     return isNaN(t) ? null : t;
+  }
+
+  /**
+   * ADR-160 F6 — criação CANÔNICA de agendamento (o "record"), extraída da rota
+   * POST /appointments pra virar a PORTA ÚNICA do domínio agenda (reusada pela
+   * rota e pelo bridge do Fala Tu). Faz só o invariante de negócio: valida o
+   * contato (contact_id é NOT NULL — nunca inventa, RN-151), calcula o fim pela
+   * duração do slot quando não veio, insere e audita. Efeitos EXTERNOS (Google
+   * Calendar, e-mail de confirmação ao contato) NÃO moram aqui — são da borda
+   * (rota), pra que um bridge implícito NÃO dispare e-mail pro contato.
+   */
+  static create(orgId: string, input: {
+    contactId: string; title: string; description?: string | null;
+    scheduledStart: string; scheduledEnd?: string | null;
+    ticketId?: string | null; productServiceId?: string | null;
+  }, actorId?: string | null): any {
+    const title = String(input.title || "").trim();
+    if (!title) throw new Error("Informe um título para o agendamento.");
+    const contactId = String(input.contactId || "").trim();
+    if (!contactId) throw new Error("Agendamento exige um contato.");
+    const contact = db.prepare("SELECT id FROM contacts WHERE id = ? AND organization_id = ?").get(contactId, orgId);
+    if (!contact) throw new Error("Contato não encontrado nesta organização.");
+    const id = randomUUID();
+    // Fim = início + duração do slot, quando não informado (mesma regra da rota).
+    let endIso = input.scheduledEnd || null;
+    if (!endIso && input.scheduledStart) {
+      const startMs = AppointmentService.ms(input.scheduledStart);
+      if (startMs != null) endIso = new Date(startMs + AppointmentService.config(orgId).slotMin * 60000).toISOString();
+    }
+    db.prepare(`
+      INSERT INTO appointments (id, organization_id, ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, orgId, input.ticketId || null, contactId, input.productServiceId || null, title, input.description || '', input.scheduledStart, endIso);
+    logAuthEvent(orgId, actorId || null, id, 'APPOINTMENT_CREATED', { ticket_id: input.ticketId || null });
+    return db.prepare("SELECT * FROM appointments WHERE id = ? AND organization_id = ?").get(id, orgId);
   }
 
   // Agendamentos ATIVOS que se sobrepõem à janela [fromMs, toMs).

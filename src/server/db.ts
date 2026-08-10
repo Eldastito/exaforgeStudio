@@ -8337,6 +8337,16 @@ const initDb = () => {
   // (só silo, 0 regressão); silo `falatu_tasks` preservado. NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_tasks_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE falatu_tasks ADD COLUMN bridged_task_id TEXT`); } catch(e){}
+
+  // ADR-160 F6 (Onda A) — porta I/O, 2ª fatia: EVENT vira agendamento CANÔNICO.
+  // Diferente do bridge de tarefas (F5), a agenda é contact-anchored (appointments.
+  // contact_id é NOT NULL) — então o espelho SÓ acontece quando o humano vincula um
+  // contato REAL na confirmação e o evento tem data+hora (RN-151: nunca inventa
+  // contato/horário). Sem isso, fica só no silo `falatu_events` (lembrete pessoal).
+  // `bridged_appointment_id` registra o vínculo silo→canônico. Flag default 0 =
+  // comportamento de hoje (0 regressão). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_events_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_events ADD COLUMN bridged_appointment_id TEXT`); } catch(e){}
 };
 
 initDb();

@@ -176,17 +176,21 @@ router.post("/signals/sweep", (req: AuthRequest, res): any => {
 
 // ── Entrega do briefing por WhatsApp (Fatia 6): consome os sinais acima ──
 
-// ADR-160 F5 — porta I/O: estado/controle do bridge de tarefas (opt-in que faz
-// o Fala Tu escrever a tarefa confirmada no domínio CANÔNICO, além do silo).
-// Ligar/desligar é do gestor (owner/admin); leitura pra qualquer papel do módulo.
+// ADR-160 F5/F6 — porta I/O: estado/controle dos bridges (opt-in que faz o Fala
+// Tu escrever no domínio CANÔNICO ao confirmar — tasks→TaskService, events→agenda
+// — além dos silos). Ligar/desligar é do gestor; leitura p/ qualquer papel.
 router.get("/bridge", (req: AuthRequest, res): any => {
-  res.json({ tasks: FalaTuService.isTaskBridgeEnabled(req.organizationId!) });
+  res.json(FalaTuService.bridgeState(req.organizationId!));
 });
 
 router.put("/bridge", (req: AuthRequest, res): any => {
   if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem alterar." });
-  if (typeof req.body?.tasks !== "boolean") return res.status(400).json({ error: "tasks deve ser boolean." });
-  res.json(FalaTuService.setTaskBridge(req.organizationId!, req.body.tasks));
+  const hasTasks = typeof req.body?.tasks === "boolean";
+  const hasEvents = typeof req.body?.events === "boolean";
+  if (!hasTasks && !hasEvents) return res.status(400).json({ error: "Informe tasks e/ou events (boolean)." });
+  if (hasTasks) FalaTuService.setTaskBridge(req.organizationId!, req.body.tasks);
+  if (hasEvents) FalaTuService.setEventBridge(req.organizationId!, req.body.events);
+  res.json(FalaTuService.bridgeState(req.organizationId!));
 });
 
 // Estado da porta de canal (opt-in de envio proativo, separado da flag do módulo).

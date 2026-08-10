@@ -352,6 +352,7 @@
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",
     "test:security-anomaly": "tsx scripts/test-security-anomaly.ts",
     "test:signals-attention": "tsx scripts/test-signals-attention.ts",
+    "test:snapshot-read-default": "tsx scripts/test-snapshot-read-default.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

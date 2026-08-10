@@ -13,7 +13,7 @@ router.get("/snapshot", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = typeof req.query?.period === "string" && /^\d{4}-\d{2}$/.test(req.query.period) ? req.query.period : undefined;
-  res.json(BusinessSnapshotV2Service.build(orgId, period));
+  res.json(BusinessSnapshotV2Service.read(orgId, period)); // ADR-160 F2 — leitura cacheada (Evidence Layer) quando ligado
 });
 
 // GET /api/business/priorities — Pareto: até 3 prioridades globais e 3 por

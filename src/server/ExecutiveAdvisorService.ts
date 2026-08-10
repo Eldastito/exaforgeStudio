@@ -227,7 +227,7 @@ ${lines.join("\n")}`;
     try {
       const s = db.prepare("SELECT diretor_snapshot_v2 FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
       if (!s || !Number(s.diretor_snapshot_v2)) return "";
-      const snap = BusinessSnapshotV2Service.build(orgId);
+      const snap = BusinessSnapshotV2Service.read(orgId); // ADR-160 F2 — leitura cacheada quando o Evidence Layer está ligado
       return `\n\n=== PANORAMA EMPRESARIAL V2 (determinístico, por domínio) ===
 Use EXATAMENTE estes números (finanças, vendas, estoque, compras, operação, tarefas). NUNCA invente valores; se um campo faltar ou vier available:false, diga explicitamente que o dado não está disponível.
 DOMÍNIOS: ${JSON.stringify(snap.domains || {})}

@@ -36,6 +36,7 @@ const MIME_EXT: Record<string, string> = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "image/png": "png",
   "image/jpeg": "jpg",
+  "image/webp": "webp",
   "application/json": "json",
   "text/plain": "txt",
 };

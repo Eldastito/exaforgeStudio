@@ -13,6 +13,13 @@ import { FalatuSaveOfferService, CANCELLATION_REASONS } from "../FalatuSaveOffer
 import { ContextEngineService as FalaTuContextEngine } from "../ContextEngineService.js";
 import { FalaTuReportService } from "../FalaTuReportService.js";
 import { ArtifactService } from "../ArtifactService.js";
+import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
+import { MAX_BYTES as FALATU_FILE_MAX } from "../ClinicAttachmentService.js";
+import multer from "multer";
+
+// Intake de documentos (Fase 2.4): buffer em memória (o service escreve no disco
+// privado via ArtifactService); limite de tamanho é a validação primária.
+const falatuFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: FALATU_FILE_MAX } });
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -196,6 +203,16 @@ router.post("/reports/summary", async (req: AuthRequest, res): Promise<any> => {
   const format = req.body?.format === "xlsx" ? "xlsx" : "pdf"; // §65: "me manda em Excel"
   try { res.json(await FalaTuReportService.executiveSummary(req.organizationId!, req.user, { correlationId, format })); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PRD 1 Fase 2.4 (CA7, §17-18) — INTAKE: o Fala Tu recebe um documento
+// (multipart), valida por magic-byte, persiste como artefato e classifica.
+router.post("/files", falatuFileUpload.single("file"), (req: AuthRequest, res): any => {
+  const f = (req as any).file;
+  if (!f?.buffer) return res.status(400).json({ error: "Envie um arquivo no campo 'file'." });
+  const correlationId = typeof req.body?.correlationId === "string" ? req.body.correlationId : null;
+  try { res.json(FalaTuFileIntakeService.intake(req.organizationId!, actorId(req), { filename: f.originalname, buffer: f.buffer, correlationId })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // Aba "Arquivos" do Fala Tu (§60): lista os artefatos da org (ou só os meus).

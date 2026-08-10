@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { ApprovalPolicyService } from "./ApprovalPolicyService.js";
+import { BusinessGoalService } from "./BusinessGoalService.js";
 
 /**
  * ImpactPrioritizationService (ADR-136, Epic 2 — C3).
@@ -19,6 +20,15 @@ import { ApprovalPolicyService } from "./ApprovalPolicyService.js";
  */
 
 const WEIGHTS = { impact: 0.4, urgency: 0.2, confidence: 0.15, strategic: 0.15, actionability: 0.1 };
+
+// PRD 2 F5 (§30-31) — Goal-aware: um sinal que ameaça uma meta ATRASADA sobe na
+// prioridade. Boost MULTIPLICATIVO (0 sem meta atrasada → score idêntico ao
+// pré-F5, zero regressão). Mapa meta→domínios que a afetam.
+const GOAL_DOMAINS: Record<string, string[]> = {
+  revenue: ["sales", "retail_ops", "retail_floor", "churn", "finance"],
+  appointments: ["agenda", "clinic"],
+};
+const GOAL_BOOST = 0.5; // até +50% quando a meta está 100% abaixo do ritmo
 
 // Peso estratégico por domínio (0..1). Segurança/compliance no topo (podem
 // ultrapassar o financeiro via override abaixo).
@@ -173,10 +183,14 @@ export class ImpactPrioritizationService {
       if (amt > (maxByUnit[unit] || 0)) maxByUnit[unit] = amt;
     }
 
+    // F5 — relevância de meta por domínio (0 sem meta atrasada). Best-effort:
+    // qualquer falha ao ler metas NÃO derruba a priorização (fail-safe).
+    const goalGaps = this.goalGapsByDomain(orgId, (opts as any).asOf);
+
     // Agrupa "consequência do mesmo evento": por (domínio, tipo) fica o de maior score.
     const byGroup = new Map<string, any>();
     for (const s of signals) {
-      const scored = this.scoreSignal(orgId, s, maxByUnit);
+      const scored = this.scoreSignal(orgId, s, maxByUnit, goalGaps);
       const key = `${s.domain}:${s.signal_type}`;
       const prev = byGroup.get(key);
       if (!prev) { byGroup.set(key, { ...scored, groupedCount: 1 }); }
@@ -201,7 +215,28 @@ export class ImpactPrioritizationService {
   }
 
   /** Score determinístico de um sinal + a saída obrigatória do §9.3. */
-  private static scoreSignal(orgId: string, s: any, maxByUnit: Record<string, number>): any {
+  /**
+   * F5 (§30-31) — mapa domínio→{meta, gap} das metas ATRASADAS (paceStatus
+   * 'behind'). gap = quão abaixo do ritmo esperado (0..1). Best-effort.
+   */
+  private static goalGapsByDomain(orgId: string, asOf?: string): Map<string, { metric: string; label: string; gap: number }> {
+    const out = new Map<string, { metric: string; label: string; gap: number }>();
+    try {
+      const prog = BusinessGoalService.progress(orgId, asOf ? { asOf } : undefined);
+      for (const g of prog.goals) {
+        if (g.paceStatus !== "behind" || !(g.expectedByNow > 0)) continue;
+        const gap = clamp01((g.expectedByNow - g.current) / g.expectedByNow);
+        if (gap <= 0) continue;
+        for (const dom of GOAL_DOMAINS[g.metric] || []) {
+          const cur = out.get(dom);
+          if (!cur || gap > cur.gap) out.set(dom, { metric: g.metric, label: g.label, gap });
+        }
+      }
+    } catch { /* metas indisponíveis → sem boost (fail-safe) */ }
+    return out;
+  }
+
+  private static scoreSignal(orgId: string, s: any, maxByUnit: Record<string, number>, goalGaps?: Map<string, { metric: string; label: string; gap: number }>): any {
     const severity = String(s.severity || "info");
     const urgency = URGENCY[severity] ?? 0.15;
     const confidence = clamp01(s.confidence);
@@ -223,13 +258,16 @@ export class ImpactPrioritizationService {
     const override = (s.domain === "security" || s.domain === "compliance") && severity === "critical";
     const strategic = override ? 1.0 : strategicBase;
 
-    const score = round4(
+    const baseScore =
       normalizedImpact * WEIGHTS.impact +
       urgency * WEIGHTS.urgency +
       confidence * WEIGHTS.confidence +
       strategic * WEIGHTS.strategic +
-      actionability * WEIGHTS.actionability
-    );
+      actionability * WEIGHTS.actionability;
+    // F5 — boost de meta: sinal que ameaça uma meta atrasada sobe. 0 sem meta.
+    const goal = goalGaps?.get(s.domain) || null;
+    const goalRelevance = goal?.gap || 0;
+    const score = round4(baseScore * (1 + GOAL_BOOST * goalRelevance));
 
     // Aprovação necessária p/ a ação recomendada (reusa a política da C2a).
     let approval: any = null;
@@ -257,7 +295,10 @@ export class ImpactPrioritizationService {
         confidence: round4(confidence),
         strategicWeight: round4(strategic),
         actionability: round4(actionability),
+        goalRelevance: round4(goalRelevance),
       },
+      // F5 — qual meta este sinal ameaça (null se nenhuma atrasada no domínio).
+      affectedGoal: goal ? { metric: goal.metric, label: goal.label, gapPct: round2(goal.gap * 100) } : null,
       // Saída obrigatória (PRD §9.3):
       fact: s.signal_type,
       interpretation: interpret(s),

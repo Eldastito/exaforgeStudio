@@ -125,7 +125,15 @@ Score = severidade + impacto (log) + prazo/SLA + `priority_score` (já calculado
 
 ### Fase 4 — Approval Center — ENTREGUE (2026-08-10, §24-25, §54, §66)
 
-Aprovar/rejeitar **dentro do Fala Tu**, com o MOTOR canônico (não reimplementa policy/ledger/RBAC — CA15). `FalaTuApprovalService` só **apresenta + delega**: `pending` (cards com o motivo §24 + flag `canApprove` por papel) e `decide(actionId, decision, reason)` — `actionId` **explícito** + `decision` enum, nunca texto livre (§25) → delega pra `DecisionActionService.approve/reject` (identidade obrigatória, two-step, audit, **idempotência §54** já garantidos). A autorização foi **extraída** pra `DecisionActionService.canApprove`/`canReject` — a **mesma porta** que a rota core `/api/actions` usa agora (dedup; Fala Tu **não** vira bypass de RBAC, §30/CA13). Rotas `GET/POST /api/falatu/approvals`. Suíte `test:falatu-approval` (15 checks); regressão inclui `two-step-approval-security`/`autonomy-contract` (refactor da rota core behavior-preserving). **Próxima:** Fase 6 threads/status de execução · Fase 8 proativo (briefings) — as fundações (`ProcessRuntimeService`, briefing/push) já existem.
+Aprovar/rejeitar **dentro do Fala Tu**, com o MOTOR canônico (não reimplementa policy/ledger/RBAC — CA15). `FalaTuApprovalService` só **apresenta + delega**: `pending` (cards com o motivo §24 + flag `canApprove` por papel) e `decide(actionId, decision, reason)` — `actionId` **explícito** + `decision` enum, nunca texto livre (§25) → delega pra `DecisionActionService.approve/reject` (identidade obrigatória, two-step, audit, **idempotência §54** já garantidos). A autorização foi **extraída** pra `DecisionActionService.canApprove`/`canReject` — a **mesma porta** que a rota core `/api/actions` usa agora (dedup; Fala Tu **não** vira bypass de RBAC, §30/CA13). Rotas `GET/POST /api/falatu/approvals`. Suíte `test:falatu-approval` (15 checks); regressão inclui `two-step-approval-security`/`autonomy-contract` (refactor da rota core behavior-preserving).
+
+### Fase 6 — Threads + Execution Status — ENTREGUE (2026-08-10, §48-52, CA10/CA11)
+
+`FalaTuThreadService` — duas leituras compostas (nada persistido, CA15):
+- `executionStatus` (§48, CA10): "o que você está fazendo?" → agrega os processos ATIVOS do `ProcessRuntimeService` por tipo ("3 cobranças, 2 recuperações…");
+- `thread(correlationId)` (§51-52, CA11): "o que aconteceu com aquilo?" → linha do tempo do que compartilha o `correlation_id` (espinha ADR-158 que a **fundação** do PRD 1 estendeu ao inbox): **entrada → sinal → decisão → execução → resultado**. Execução amarrada via `decision_actions.process_instance_id` (process_instances não tem correlation_id) → herda o gate de domínio da ação. Filtrado por papel (reusa `ContextProjectionService.canSeeDomain`, agora exportado).
+
+Rotas `GET /api/falatu/execution-status` + `GET /api/falatu/thread/:correlationId`. Suíte `test:falatu-thread` (9 checks). **Restante do PRD 1:** Fase 8 proativo (briefings — fundação já existe) · Fase 7 chat interno (deferido) · Fase 9 zero-training UX.
 
 ---
 

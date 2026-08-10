@@ -16,6 +16,7 @@ import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";
 import { FalaTuApprovalService } from "../FalaTuApprovalService.js";
+import { FalaTuThreadService } from "../FalaTuThreadService.js";
 import { MAX_BYTES as FALATU_FILE_MAX } from "../ClinicAttachmentService.js";
 import multer from "multer";
 
@@ -209,6 +210,17 @@ router.get("/smart-inbox", (req: AuthRequest, res): any => {
 // apresenta + delega. A decisão exige actionId EXPLÍCITO + enum (nunca texto livre).
 router.get("/approvals", (req: AuthRequest, res): any => {
   res.json(FalaTuApprovalService.pending(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 6 (§48) — status de execução: "o que você está fazendo?".
+router.get("/execution-status", (req: AuthRequest, res): any => {
+  res.json(FalaTuThreadService.executionStatus(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 6 (§51-52) — thread: "o que aconteceu com aquilo?". Linha do tempo
+// do que compartilha o correlation_id (entrada→sinal→decisão→execução→resultado).
+router.get("/thread/:correlationId", (req: AuthRequest, res): any => {
+  res.json(FalaTuThreadService.thread(req.organizationId!, req.user, req.params.correlationId));
 });
 
 router.post("/approvals/:actionId", (req: AuthRequest, res): any => {

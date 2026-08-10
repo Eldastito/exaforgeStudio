@@ -133,7 +133,11 @@ Aprovar/rejeitar **dentro do Fala Tu**, com o MOTOR canônico (não reimplementa
 - `executionStatus` (§48, CA10): "o que você está fazendo?" → agrega os processos ATIVOS do `ProcessRuntimeService` por tipo ("3 cobranças, 2 recuperações…");
 - `thread(correlationId)` (§51-52, CA11): "o que aconteceu com aquilo?" → linha do tempo do que compartilha o `correlation_id` (espinha ADR-158 que a **fundação** do PRD 1 estendeu ao inbox): **entrada → sinal → decisão → execução → resultado**. Execução amarrada via `decision_actions.process_instance_id` (process_instances não tem correlation_id) → herda o gate de domínio da ação. Filtrado por papel (reusa `ContextProjectionService.canSeeDomain`, agora exportado).
 
-Rotas `GET /api/falatu/execution-status` + `GET /api/falatu/thread/:correlationId`. Suíte `test:falatu-thread` (9 checks). **Restante do PRD 1:** Fase 8 proativo (briefings — fundação já existe) · Fase 7 chat interno (deferido) · Fase 9 zero-training UX.
+Rotas `GET /api/falatu/execution-status` + `GET /api/falatu/thread/:correlationId`. Suíte `test:falatu-thread` (9 checks).
+
+### Fase 8 — Proactive Delivery — ENTREGUE (2026-08-10, §42-47)
+
+O Fala Tu fala PRIMEIRO. O briefing diário (ADR-151 F6) já cobria o "resumo da manhã"; esta fatia adiciona o **alerta event-driven** (§43): quando algo urgente aparece, avisa AGORA. `FalaTuProactiveService` — fonte = Smart Inbox (Fase 3, não varredura nova, CA15); seleciona só o URGENTE (aprovações pendentes + riscos críticos); guardrails duros: **quiet hours** (§45, janela 7–22h SP), **dedup por (usuário, item)** em `falatu_proactive_deliveries` (§44, alerta uma vez, marca só após envio), **1 push agregado** (nunca 1 por sinal), **opt-in por org** (`falatu_proactive_alerts_enabled`, §46). Herda o escopo por papel da Smart Inbox (vendedor nunca é alertado de risco financeiro). Scheduler: `falatuProactiveAlertPass` (fan-out sobre usuários inscritos em push de orgs opt-in). Suíte `test:falatu-proactive` (10 checks). **Restante do PRD 1:** Fase 7 chat interno (deferido, §80) · Fase 9 zero-training UX.
 
 ---
 

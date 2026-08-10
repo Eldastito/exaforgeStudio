@@ -7131,6 +7131,22 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar falatu_briefing_deliveries (ADR-151 F6)', e); }
 
+  // PRD 1 Fase 8 (§42-47) — entrega proativa event-driven: opt-in por org +
+  // dedup por (usuário, item) pra o alerta urgente disparar UMA vez (§44 não spam).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_proactive_alerts_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS falatu_proactive_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        item_key TEXT NOT NULL,                  -- {categoria}:{id} do item da Smart Inbox
+        delivered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, user_id, item_key)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar falatu_proactive_deliveries (PRD 1 Fase 8)', e); }
+
   // ADR-152 Fatia 1.1 — ZappFlow Execution Runtime (Process Fabric). O Runtime
   // é ADITIVO em cima do ADR-136 (decision_actions), não paralelo: `decision_
   // actions.process_instance_id` (nullable) amarra ação↔processo — ações

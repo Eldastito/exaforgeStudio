@@ -1,6 +1,6 @@
 # ADR-160 — Onda A do ZEI: percepção transversal + Context Engine (aditivo sobre ADR-135/136/152/158/159)
 
-- **Status:** **EM ANDAMENTO** — abre a **Onda A** do programa ZapFlow Execution Intelligence, sobre a base já consolidada pela Onda 0 (ADR-158 espinha única + ADR-159 governança, ambas fechadas em produção). **F1 (leitura transversal de atenção) ENTREGUE**; **F2 (snapshot como leitura default) ENTREGUE**; F3..F4 planejadas.
+- **Status:** **EM ANDAMENTO** — abre a **Onda A** do programa ZapFlow Execution Intelligence, sobre a base já consolidada pela Onda 0 (ADR-158 espinha única + ADR-159 governança, ambas fechadas em produção). **F1 (leitura transversal de atenção) ENTREGUE**; **F2 (snapshot como leitura default) ENTREGUE**; **F3 (convergir Context+V2) ENTREGUE**; F4 planejada.
 - **Data:** 2026-08-10
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` + `ZAPFLOW — ESTADO FINAL ESPERADO`; auditoria de partida `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §8 (sequência recomendada) e a matriz REUTILIZAR/ESTENDER/CRIAR §2.
 - **Relacionadas:** ADR-158 (espinha única — `business_signals`/`correlation_id`/`subject_type`/`expires_at`), ADR-159 (governança — Autonomy Contract **já entregue**, thread 4 da Onda A), ADR-135/136 (Snapshot/Evidence, Decision & Action Ledger). CLAUDE.md convenções nº 1 (isolamento), nº 2 (CREATE-then-ALTER), nº 4 (derivar por query), nº 12 (BusinessSignal — sem tabela de alerta nova).
@@ -31,9 +31,11 @@ Apontar os consumidores do snapshot (Diretor/Advisor) pro `EvidencePackageServic
 
 **F2 — ENTREGUE (2026-08-10).** `BusinessSnapshotV2Service.read(orgId, period)` é o novo caminho de leitura default: quando a org liga o Evidence Layer (`evidence_layer_enabled`, DI-1), serve o snapshot do **cache TTL'd** do `EvidencePackageService` (persistido); senão computa fresco — **comportamento idêntico ao de hoje** (flag default 0 → 0 regressão). A forma devolvida é a MESMA do `build()` (organization/period/dataQuality/domains/topPriorities), reconstruída **sem perda** do pacote (`internalEvidence`=domains), + `schemaVersion` (contrato) + `_cache` (freshness/cacheHit/generatedAt/expiresAt) aditivos. Os 2 consumidores diretos (`ExecutiveAdvisorService.snapshotBlockV2` e `GET /api/business/snapshot`) foram repontados de `.build` → `.read`. Ciclo ESM `BusinessSnapshotV2Service`↔`EvidencePackageService` resolvido por binding vivo (acesso só em tempo de chamada). **Números:** 1 método novo (`read`) + 2 consumidores repontados + 1 suíte (`test:snapshot-read-default`, 12 checks). 0 tabelas novas, 0 breaking changes.
 
-### D3 — Convergir Context(string) + V2 (F3 — PLANEJADA)
+### D3 — Convergir Context(string) + V2 (F3 — ENTREGUE)
 
 Unificar o `BusinessContextService.build` (texto) com o `BusinessSnapshotV2` (JSON) num contrato só, para o Advisor parar de concatenar duas representações.
+
+**F3 — ENTREGUE (2026-08-10).** `ContextEngineService` é o **contrato único**: `build(orgId)` funde a NARRATIVA (`BusinessContextService.build`) com o SNAPSHOT V2 por domínio (`BusinessSnapshotV2Service.read` — a leitura cacheada da F2, sob a flag `diretor_snapshot_v2`) num objeto só `{ narrative, snapshot, snapshotEnabled, sources, generatedAt, schemaVersion }`, com `sources` distinguindo cache vs fresco (herdado do `_cache` da F2). `render(orgId)` devolve **byte-a-byte** o texto que o `ExecutiveAdvisorService` colava antes (narrativa + bloco "PANORAMA EMPRESARIAL V2"), então `buildPanorama` passou a chamar o Context Engine **uma vez** em vez de conhecer os dois serviços e a ordem da colagem — o `snapshotBlockV2` privado foi removido. Fachada aditiva/reversível: `BusinessContextService` (usado também pelo Zapp orchestrator, narrativa pura) e a rota `/api/business/snapshot` seguem intactos. Contrato exposto read-only em `GET /api/business/context` p/ observabilidade. **Números:** 1 service novo (`ContextEngineService`, build+render) + 1 rota read-only + Advisor repontado (−`snapshotBlockV2`) + 1 suíte (`test:context-engine`, 14 checks, incl. equivalência byte-a-byte). 0 tabelas novas, 0 breaking changes.
 
 ### D4 — Modelo de objetivos/metas + distância à meta (F4 — PLANEJADA, CRIAR)
 
@@ -56,7 +58,7 @@ Net-new: metas por org (receita/atendimento/...) e a **distância à meta** deri
 | --- | --- | --- |
 | **F1** | D1 — leitura transversal de atenção (`BusinessSignalService.attention` + `GET /api/signals/attention`; funde sinais+riscos, ranqueada por severidade, TTL-aware) | **ENTREGUE** |
 | **F2** | D2 — snapshot como leitura default (`BusinessSnapshotV2Service.read` via `EvidencePackageService`; cache TTL'd quando ligado, fresco quando off) | **ENTREGUE** |
-| F3 | D3 — convergir Context(string)+V2 | planejada |
+| **F3** | D3 — convergir Context(string)+V2 (`ContextEngineService.build/render`; Advisor consome 1 contrato; `GET /api/business/context`) | **ENTREGUE** |
 | F4 | D4 — modelo de objetivos/metas + distância à meta (CRIAR) | planejada |
 | F5+ | Fala Tu → porta I/O (deferido; maior risco) | planejada |
 

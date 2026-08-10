@@ -1,8 +1,7 @@
 import { chat } from "./llm.js";
 import db from "./db.js";
-import { BusinessContextService } from "./BusinessContextService.js";
+import { ContextEngineService } from "./ContextEngineService.js";
 import { RevenueAuditService } from "./RevenueAuditService.js";
-import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { PatternMemoryService } from "./PatternMemoryService.js";
@@ -15,8 +14,9 @@ import { PlanService } from "./PlanService.js";
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
  *
  * O gestor pergunta em linguagem natural; o serviço monta o PANORAMA REAL do
- * negócio (BusinessContextService — números determinísticos, read-only) e a IA
- * APENAS narra e recomenda com base nele. Regra de ouro: nunca inventa número.
+ * negócio (ContextEngineService — contrato único que funde narrativa + snapshot
+ * V2, ADR-160 F3, read-only) e a IA APENAS narra e recomenda com base nele.
+ * Regra de ouro: nunca inventa número.
  */
 export class ExecutiveAdvisorService {
   private static readonly GUARDRAILS = `Você é o DIRETOR EXECUTIVO IA do negócio — um conselheiro de gestão direto e prático.
@@ -28,14 +28,17 @@ REGRAS:
 - Tom de conselheiro de confiança: honesto, sem enrolação, sem jargão.`;
 
   /**
-   * Panorama consumido pelo Diretor. Base = BusinessContextService (compatível).
-   * Sob feature-flag `diretor_snapshot_v2`, ANEXA o panorama V2 por DOMÍNIO
-   * (finanças, vendas, estoque, compras, operação, tarefas) — ADR-135, Epic 1.
-   * Desligada por padrão: organizações existentes não mudam de comportamento.
+   * Panorama consumido pelo Diretor. Base = Context Engine (ADR-160 F3): um
+   * contrato só que já funde a NARRATIVA (BusinessContextService) com o SNAPSHOT
+   * V2 por DOMÍNIO (finanças, vendas, estoque, compras, operação, tarefas —
+   * ADR-135, sob a flag `diretor_snapshot_v2`, cacheado pela F2). O Advisor não
+   * concatena mais duas representações: pede o texto unificado ao Context Engine
+   * e só ANEXA os blocos de OUTROS domínios (padrões/comissão/sinais/eficácia/
+   * plano). Flag desligada por padrão: organizações existentes não mudam.
    */
   static buildPanorama(orgId: string): string {
-    const base = BusinessContextService.build(orgId);
-    return base + this.snapshotBlockV2(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
+    const base = ContextEngineService.render(orgId);
+    return base + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
   }
 
   /**
@@ -220,19 +223,6 @@ ${lines.join("\n")}`;
       if (!patterns.length) return "";
       const lines = patterns.slice(0, 12).map((p: any) => `- [${p.pattern_type}] ${p.description || ""} (confiança ${Math.round(Number(p.confidence) * 100)}%, visto ${p.occurrences}x)`);
       return `\n\n=== PADRÕES APRENDIDOS DA LOJA (recorrência determinística; use como contexto, não invente número) ===\n${lines.join("\n")}`;
-    } catch { return ""; }
-  }
-
-  private static snapshotBlockV2(orgId: string): string {
-    try {
-      const s = db.prepare("SELECT diretor_snapshot_v2 FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
-      if (!s || !Number(s.diretor_snapshot_v2)) return "";
-      const snap = BusinessSnapshotV2Service.read(orgId); // ADR-160 F2 — leitura cacheada quando o Evidence Layer está ligado
-      return `\n\n=== PANORAMA EMPRESARIAL V2 (determinístico, por domínio) ===
-Use EXATAMENTE estes números (finanças, vendas, estoque, compras, operação, tarefas). NUNCA invente valores; se um campo faltar ou vier available:false, diga explicitamente que o dado não está disponível.
-DOMÍNIOS: ${JSON.stringify(snap.domains || {})}
-PRIORIDADES: ${JSON.stringify(snap.topPriorities || [])}
-QUALIDADE DOS DADOS: ${JSON.stringify(snap.dataQuality || {})}`;
     } catch { return ""; }
   }
 

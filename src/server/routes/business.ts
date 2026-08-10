@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSnapshotV2Service } from "../BusinessSnapshotV2Service.js";
+import { ContextEngineService } from "../ContextEngineService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import db from "../db.js";
 
@@ -14,6 +15,15 @@ router.get("/snapshot", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = typeof req.query?.period === "string" && /^\d{4}-\d{2}$/.test(req.query.period) ? req.query.period : undefined;
   res.json(BusinessSnapshotV2Service.read(orgId, period)); // ADR-160 F2 — leitura cacheada (Evidence Layer) quando ligado
+});
+
+// GET /api/business/context — contrato ÚNICO do Context Engine (ADR-160 F3):
+// narrativa + snapshot V2 (quando `diretor_snapshot_v2` ligada) + proveniência.
+// É a superfície que o Diretor IA consome; exposta read-only p/ observabilidade.
+router.get("/context", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ContextEngineService.build(orgId));
 });
 
 // GET /api/business/priorities — Pareto: até 3 prioridades globais e 3 por

@@ -9,6 +9,7 @@ import { ModuleService } from "./ModuleService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
 import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 import { PlanService } from "./PlanService.js";
+import { BusinessGoalService } from "./BusinessGoalService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -38,7 +39,26 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = ContextEngineService.render(orgId);
-    return base + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
+    return base + this.goalsBlock(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
+  }
+
+  /**
+   * METAS DO NEGÓCIO + DISTÂNCIA À META (ADR-160 F4): quando o dono define metas
+   * (receita/atendimentos/…), o Diretor passa a saber "quanto falta pra bater a
+   * meta" e o ritmo esperado — fatos derivados do snapshot/analytics (RN-004),
+   * nunca inventados. Bloco INERTE: sem meta definida, some (0 regressão).
+   */
+  static goalsBlock(orgId: string): string {
+    try {
+      const { goals } = BusinessGoalService.progress(orgId);
+      if (!goals.length) return "";
+      const fmt = (v: number, unit: string) => (unit === "BRL" ? `R$ ${Number(v).toFixed(2)}` : `${v}`);
+      const lines = goals.map((g) => {
+        const pace = g.reached ? "META BATIDA" : g.paceStatus === "on_track" ? "no ritmo" : "abaixo do ritmo";
+        return `- ${g.label}: meta ${fmt(g.target, g.unit)} · realizado ${fmt(g.current, g.unit)} (${g.attainmentPct}%) · falta ${fmt(g.remaining, g.unit)} · esperado até hoje ${fmt(g.expectedByNow, g.unit)} → ${pace}`;
+      });
+      return `\n\n=== METAS DO NEGÓCIO — distância à meta do mês (fatos derivados; NUNCA invente número) ===\n${lines.join("\n")}`;
+    } catch { return ""; }
   }
 
   /**

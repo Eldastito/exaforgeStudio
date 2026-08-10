@@ -354,6 +354,7 @@
     "test:signals-attention": "tsx scripts/test-signals-attention.ts",
     "test:snapshot-read-default": "tsx scripts/test-snapshot-read-default.ts",
     "test:context-engine": "tsx scripts/test-context-engine.ts",
+    "test:business-goals": "tsx scripts/test-business-goals.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

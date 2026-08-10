@@ -330,7 +330,27 @@ export class SalesRecoveryPlaybookService {
     if (!finalText) throw new Error("Mensagem vazia — nada a enviar.");
 
     let messageId: string | undefined;
-    try { messageId = await MessageProviderService.sendMessage(channelId, phone, finalText); }
+    // ADR-159 F2.4 — com a flag, o envio passa PELO choke-point (auditado +
+    // correlationId herdado da âncora evidence.actionId + guardas); sem ela,
+    // envio direto (0 regressão). O catch abaixo trata as duas vias igual — o
+    // executor LANÇA na falha, caindo no mesmo fluxo de sinal + kept_open.
+    const viaExecutor = Number((db.prepare(`SELECT COALESCE(sales_recovery_via_executor_enabled,0) AS v FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.v) === 1;
+    try {
+      if (viaExecutor) {
+        const { CommandExecutorService } = await import("./CommandExecutorService.js");
+        const anchorCorr = evidence.actionId
+          ? (db.prepare(`SELECT correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?`).get(evidence.actionId, orgId) as any)?.correlation_id
+          : null;
+        messageId = await CommandExecutorService.sendGovernedMessage(orgId, {
+          domain: "sales", actionType: "sales_recovery_send",
+          title: "Recuperação comercial — mensagem de reengajamento",
+          channelId, recipient: phone, message: finalText,
+          correlationId: anchorCorr || null, createdBy: input.actorId || "sales-recovery-runtime",
+        });
+      } else {
+        messageId = await MessageProviderService.sendMessage(channelId, phone, finalText);
+      }
+    }
     catch (e: any) {
       // Envio falhou — publica sinal fail (dedupe por signal_id) + mantém aberto.
       try {

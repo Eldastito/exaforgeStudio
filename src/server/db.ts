@@ -7256,6 +7256,11 @@ const initDb = () => {
   // com as ~30 rotas que já consomem a tabela (ADR-136 D5). Ação sem
   // process_instance_id continua sendo "ação avulsa" (comportamento atual).
   try { db.exec(`ALTER TABLE decision_actions ADD COLUMN process_instance_id TEXT`); } catch(e){}
+  // PRD 2 F2.3 (§75, CA14) — fecha o furo da espinha: o processo iniciado pelo
+  // router de sinais também carrega o correlation_id da cadeia (antes só
+  // signals/decision_actions/action_outcomes/action_execution_log tinham). Aditivo.
+  try { db.exec(`ALTER TABLE process_instances ADD COLUMN correlation_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_process_instances_corr ON process_instances (organization_id, correlation_id)`); } catch(e){}
   try { db.exec(`ALTER TABLE decision_actions ADD COLUMN subject_type TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE decision_actions ADD COLUMN subject_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE decision_actions ADD COLUMN deadline_at DATETIME`); } catch(e){}

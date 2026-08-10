@@ -60,11 +60,13 @@ export class FalaTuThreadService {
       events.push({ stage: "decisao", at: r.approved_at || r.created_at, source: "action", title: r.title, status: r.status, domain: r.domain });
       if (r.process_instance_id) procIds.push(r.process_instance_id);
     }
-    // Execução (dos processos das ações visíveis)
-    for (const pid of procIds) {
-      const p = db.prepare(`SELECT * FROM process_instances WHERE id = ? AND organization_id = ?`).get(pid, orgId) as any;
-      if (p) events.push({ stage: "execucao", at: p.started_at, source: "process", title: p.process_type, status: p.status });
-    }
+    // Execução: processos das ações visíveis (via FK) + os iniciados direto pelo
+    // router de sinais (via correlation_id, PRD 2 F2.3) — dedupados por id. Antes
+    // da F2.3 um processo sem decision_action ficava invisível no trace (§75).
+    const seenProc = new Set<string>();
+    const pushProc = (p: any) => { if (p && !seenProc.has(p.id)) { seenProc.add(p.id); events.push({ stage: "execucao", at: p.started_at, source: "process", title: p.process_type, status: p.status }); } };
+    for (const pid of procIds) pushProc(db.prepare(`SELECT * FROM process_instances WHERE id = ? AND organization_id = ?`).get(pid, orgId));
+    for (const p of db.prepare(`SELECT * FROM process_instances WHERE organization_id = ? AND correlation_id = ?`).all(orgId, cid) as any[]) pushProc(p);
     // Resultado
     for (const r of db.prepare(`SELECT o.*, a.domain AS a_domain, a.title AS a_title FROM action_outcomes o LEFT JOIN decision_actions a ON a.id = o.action_id WHERE o.organization_id = ? AND o.correlation_id = ?`).all(orgId, cid) as any[]) {
       if (see(r.a_domain)) events.push({ stage: "resultado", at: r.measured_at, source: "outcome", title: r.a_title || "Resultado", status: r.basis, domain: r.a_domain, detail: `esperado ${r.expected_value ?? "—"} → realizado ${r.realized_value ?? "—"}` });

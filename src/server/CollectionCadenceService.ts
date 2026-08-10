@@ -101,6 +101,8 @@ export class CollectionCadenceService {
     const d2 = Number(opts.d2 ?? DEFAULT_D2);
     const d3 = Number(opts.d3 ?? DEFAULT_D3);
     const hardDeclineDays = Number(opts.hardDeclineDays ?? DEFAULT_HARD_DECLINE_DAYS);
+    // ADR-159 F2.2 — opt-in por org: rotear o envio pelo choke-point (executor).
+    const viaExecutor = Number((db.prepare(`SELECT COALESCE(collection_cadence_via_executor_enabled,0) AS v FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.v) === 1;
     const dues = this.findDueCollections(orgId);
     let sent = 0, skipped = 0;
     for (const row of dues) {
@@ -110,7 +112,7 @@ export class CollectionCadenceService {
       if (this.customerReplied(orgId, row.actionId)) { skipped++; continue; }
       // G-4b.3-8: receivable fechado → pausa.
       if (row.receivableId && !this.receivableIsOpen(orgId, row.receivableId)) { skipped++; continue; }
-      const ok = await this.sendAttempt(row, attempt, hardDeclineDays);
+      const ok = await this.sendAttempt(row, attempt, hardDeclineDays, viaExecutor);
       if (ok) sent++; else skipped++;
     }
     return { sent, skipped };
@@ -193,7 +195,7 @@ export class CollectionCadenceService {
     return r?.status === "open";
   }
 
-  private static async sendAttempt(row: DueRow, attempt: 2 | 3, hardDeclineDays: number = DEFAULT_HARD_DECLINE_DAYS): Promise<boolean> {
+  private static async sendAttempt(row: DueRow, attempt: 2 | 3, hardDeclineDays: number = DEFAULT_HARD_DECLINE_DAYS, viaExecutor: boolean = false): Promise<boolean> {
     // Idempotência atômica: INSERT primeiro; se UNIQUE colide, outro
     // worker/tick pegou → skip. Só depois de reservar a linha
     // enviamos a mensagem — assim NUNCA há duplo envio se 2 ticks
@@ -215,7 +217,16 @@ export class CollectionCadenceService {
     }
     const msg = attempt === 2 ? CollectionCopy.firm(variant, row, decline) : CollectionCopy.notice(variant, row, decline);
     let messageId: string | undefined;
-    try { messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg); }
+    // ADR-159 F2.2 — com a flag, o envio passa PELO choke-point (executor):
+    // auditado em action_execution_log com correlationId + guardas G1/G2/G3.
+    // Sem a flag, envio DIRETO (comportamento pré-F2.2, 0 regressão). Em ambos
+    // os casos a linha de attempt já foi reservada acima (idempotência da
+    // cadência) e a falha reverte a reserva do mesmo jeito (G-4b.3-10).
+    try {
+      messageId = viaExecutor
+        ? await this.sendViaExecutor(row, msg, attempt)
+        : await MessageProviderService.sendMessage(row.channelId, row.phone, msg);
+    }
     catch (e: any) {
       // Envio falhou — reverte a reserva pra permitir retry.
       db.prepare(`DELETE FROM collection_followup_attempts WHERE id = ?`).run(id);
@@ -258,6 +269,44 @@ export class CollectionCadenceService {
       } catch { /* noop */ }
     }
     return true;
+  }
+
+  /**
+   * ADR-159 F2.2 — envia o follow-up PELO choke-point único. Cunha uma AÇÃO de
+   * follow-up distinta (command_type `whatsapp_send`, reusa o handler governado
+   * existente), herda o correlationId da ação âncora (fio ADR-158) e roda
+   * `CommandExecutorService.execute` — que aplica G1/G2/G3, audita em
+   * `action_execution_log` (com correlationId, RN-159-3) e garante idempotência.
+   *
+   * Por que uma ação NOVA (e não reexecutar a âncora): a âncora (T1) já foi
+   * executada; o guard de idempotência da F2.1 (`action_already_executed`)
+   * recusaria reexecutá-la. Cada T2/T3 é um efeito próprio → ação própria.
+   *
+   * Política: seed idempotente de `agent_policies(collection, collection_followup,
+   * execute, approved_execution)`. Isso NÃO amplia autonomia — a cadência já
+   * envia autonomamente hoje (envio direto); a política só deixa o executor
+   * PERMITIR o que já acontece, agora auditado (RN-159-4: sem gate paralelo).
+   * Lança em qualquer falha (o caller reverte a reserva + publica sinal).
+   */
+  private static async sendViaExecutor(row: DueRow, msg: string, attempt: 2 | 3): Promise<string | undefined> {
+    const { DecisionActionService } = await import("./DecisionActionService.js");
+    const { CommandExecutorService } = await import("./CommandExecutorService.js");
+    const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = 'collection' AND action_type = 'collection_followup'`).get(row.orgId) as any;
+    if (!pol) {
+      db.prepare(`INSERT INTO agent_policies (id, organization_id, domain, action_type, autonomy_level, execution_mode, active) VALUES (?, ?, 'collection', 'collection_followup', 'execute', 'approved_execution', 1)`).run(randomUUID(), row.orgId);
+    }
+    const anchor = db.prepare(`SELECT correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?`).get(row.actionId, row.orgId) as any;
+    const followup = DecisionActionService.propose(row.orgId, {
+      domain: "collection", actionType: "collection_followup",
+      title: `Follow-up de cobrança T${attempt}`,
+      commandType: "whatsapp_send",
+      commandPayload: { channelId: row.channelId, recipient: row.phone, message: msg },
+      correlationId: anchor?.correlation_id || null,
+      createdBy: "cadence-runtime",
+    });
+    if (followup.status !== "approved") DecisionActionService.approve(row.orgId, followup.id, "cadence-runtime");
+    const res = await CommandExecutorService.execute(row.orgId, followup.id);
+    return res?.result?.externalRef || undefined;
   }
 }
 

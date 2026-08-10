@@ -7134,6 +7134,9 @@ const initDb = () => {
   // PRD 1 Fase 8 (§42-47) — entrega proativa event-driven: opt-in por org +
   // dedup por (usuário, item) pra o alerta urgente disparar UMA vez (§44 não spam).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_proactive_alerts_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 2 F3.2 — opt-in: quando ligado, o attention() colapsa sinais correlatos
+  // (mesma situação) num item-situação único em vez de N sinais soltos.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_attention_correlate_enabled INTEGER DEFAULT 0`); } catch(e){}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS falatu_proactive_deliveries (

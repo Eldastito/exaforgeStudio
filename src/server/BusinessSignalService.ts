@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
+import { SignalCorrelationService } from "./SignalCorrelationService.js";
 
 /**
  * Ledger de Sinais Empresariais (ADR-136, Epic 2 — C1).
@@ -103,14 +104,18 @@ export class BusinessSignalService {
    * Normaliza a severidade das 2 fontes numa escala única (critical>risk>
    * attention>info) e devolve totais por severidade/domínio + itens ordenados.
    */
-  static attention(orgId: string, opts: { limit?: number } = {}): {
+  static attention(orgId: string, opts: { limit?: number; correlate?: boolean } = {}): {
     generatedAt: string;
     total: number;
     bySeverity: Record<string, number>;
     byDomain: Record<string, number>;
-    items: Array<{ source: string; id: string; domain: string; type: string; severity: string; summary: string; basis: string | null; impactAmount: number | null; impactUnit: string | null; detectedAt: string | null; correlationId: string | null; subjectType: string | null; subjectId: string | null; status: string }>;
+    items: Array<{ source: string; id: string; domain: string; type: string; severity: string; summary: string; basis: string | null; impactAmount: number | null; impactUnit: string | null; detectedAt: string | null; correlationId: string | null; subjectType: string | null; subjectId: string | null; status: string; evidenceCount?: number; signalIds?: string[]; domains?: string[] }>;
   } {
     const limit = Number(opts.limit) > 0 ? Number(opts.limit) : 200;
+    // PRD 2 F3.2 — colapsar situações correlatas é opt-in (param explícito OU flag
+    // por org). Default OFF → comportamento idêntico ao pré-F3.2 (0 regressão nos
+    // consumidores que já leem o feed). Import dinâmico quebra o ciclo potencial.
+    const correlate = opts.correlate ?? this.attentionCorrelateEnabled(orgId);
     // Escala única: aceita o vocabulário dos sinais (info/attention/risk/critical)
     // E o de risco (low/medium/high) — mapeados pra a mesma normalizada.
     const RANK: Record<string, number> = { critical: 0, high: 0, risk: 1, medium: 1, attention: 2, low: 2, info: 3 };
@@ -119,13 +124,29 @@ export class BusinessSignalService {
     const rank = (s: any) => RANK[String(s || "").toLowerCase()] ?? 2;
 
     const items: any[] = [];
-    // Fonte 1 — sinais abertos e não expirados (respeita o TTL da F2).
+    // F3.2 — situações (clusters de alta confiança). Os sinais colapsados viram
+    // UM item-situação; os demais seguem individuais. Nada de fonte nova (CA10).
+    const clusters = correlate ? this.correlationClusters(orgId) : [];
+    const collapsed = new Set<string>(clusters.flatMap((c: any) => c.signalIds));
+    for (const c of clusters) {
+      items.push({
+        source: "situation", id: c.key, domain: c.domains[0] || "multi", type: "situation", severity: norm(c.maxSeverity),
+        summary: `Situação: ${c.subjectType} ${c.subjectId} · ${c.evidenceCount} evidências (${c.domains.join(", ")})`,
+        basis: "fact", impactAmount: c.representativeImpact?.amount ?? null, impactUnit: c.representativeImpact?.unit ?? null,
+        detectedAt: c.lastDetectedAt ?? null, correlationId: c.correlationIds[0] ?? null, subjectType: c.subjectType, subjectId: c.subjectId, status: "open",
+        evidenceCount: c.evidenceCount, signalIds: c.signalIds, domains: c.domains,
+        _rank: rank(c.maxSeverity), _at: c.lastDetectedAt || "",
+      });
+    }
+    // Fonte 1 — sinais abertos e não expirados (respeita o TTL da F2), exceto os
+    // já colapsados numa situação.
     for (const r of db.prepare(
       // PRD 2 F2.2 — `datetime(expires_at)` normaliza o ISO gravado (…T…Z) pro
       // formato do SQLite antes de comparar. Sem isso, `'T' > ' '` fazia expiry
       // PASSADO nunca filtrar (TTL inerte). Agora o TTL vale de fato.
       `SELECT * FROM business_signals WHERE organization_id = ? AND status = 'open' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`
     ).all(orgId) as any[]) {
+      if (collapsed.has(r.id)) continue;
       items.push({
         source: "signal", id: r.id, domain: r.domain, type: r.signal_type, severity: norm(r.severity),
         summary: shortSummary(r.signal_type, r.evidence_json), basis: r.basis ?? null, impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,
@@ -152,6 +173,15 @@ export class BusinessSignalService {
     for (const it of items) { bySeverity[it.severity] = (bySeverity[it.severity] || 0) + 1; byDomain[it.domain] = (byDomain[it.domain] || 0) + 1; }
     const trimmed = items.slice(0, limit).map(({ _rank, _at, ...rest }) => rest);
     return { generatedAt: new Date().toISOString(), total: items.length, bySeverity, byDomain, items: trimmed };
+  }
+
+  private static attentionCorrelateEnabled(orgId: string): boolean {
+    const r = db.prepare(`SELECT COALESCE(radar_attention_correlate_enabled,0) e FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    return !!(r && r.e);
+  }
+
+  private static correlationClusters(orgId: string): any[] {
+    try { return SignalCorrelationService.clusters(orgId).clusters || []; } catch { return []; }
   }
 
   private static setStatus(orgId: string, id: string, status: string): { ok: boolean } {

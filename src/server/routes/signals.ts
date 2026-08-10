@@ -25,7 +25,9 @@ router.get("/attention", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = req.query?.limit ? Number(req.query.limit) : undefined;
-  res.json(BusinessSignalService.attention(orgId, { limit }));
+  // F3.2 — ?correlate=1 força o colapso de situações; omitido segue a flag da org.
+  const correlate = req.query?.correlate === "1" || req.query?.correlate === "true" ? true : undefined;
+  res.json(BusinessSignalService.attention(orgId, { limit, correlate }));
 });
 
 // PRD 2 F3.1 — GET /api/signals/correlations — situações: sinais abertos do

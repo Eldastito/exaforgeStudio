@@ -17,6 +17,7 @@ import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";
 import { FalaTuApprovalService } from "../FalaTuApprovalService.js";
 import { FalaTuThreadService } from "../FalaTuThreadService.js";
+import { FalaTuHomeService } from "../FalaTuHomeService.js";
 import { MAX_BYTES as FALATU_FILE_MAX } from "../ClinicAttachmentService.js";
 import multer from "multer";
 
@@ -196,6 +197,12 @@ router.post("/signals/sweep", (req: AuthRequest, res): any => {
 // explicabilidade (§49). É a fundação de qualquer business-query do Fala Tu.
 router.get("/context", (req: AuthRequest, res): any => {
   res.json(FalaTuContextEngine.buildForUser(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 9 (§zero-training) — home do Fala Tu: tudo que importa num payload
+// só ao abrir (saudação + resumo + highlights + aprovações + execução), no papel.
+router.get("/home", (req: AuthRequest, res): any => {
+  res.json(FalaTuHomeService.home(req.organizationId!, req.user));
 });
 
 // PRD 1 Fase 3 (§20-23, §60) — Smart Inbox: "O que precisa da minha atenção?".

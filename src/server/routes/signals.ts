@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalCorrelationService } from "../SignalCorrelationService.js";
+import { SignalInvestigationService } from "../SignalInvestigationService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import db from "../db.js";
@@ -38,6 +39,14 @@ router.get("/correlations", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const windowHours = req.query?.windowHours ? Number(req.query.windowHours) : undefined;
   res.json(SignalCorrelationService.clusters(orgId, { windowHours }));
+});
+
+// PRD 2 F6.1 — GET /api/signals/:id/investigate — causas-candidatas determinísticas
+// (evidência a favor/contra + confiança), sem IA. "Por que provavelmente acontece?"
+router.get("/:id/investigate", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SignalInvestigationService.investigate(orgId, req.params.id));
 });
 
 // POST /api/signals/refresh — deriva e publica os sinais financeiros (sob demanda, idempotente).

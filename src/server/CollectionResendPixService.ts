@@ -1,3 +1,4 @@
+import db from "./db.js";
 import { AsaasService } from "./AsaasService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
@@ -77,9 +78,25 @@ export class CollectionResendPixService {
     const parts = [valueStr, dueStr].filter(Boolean).join("");
     const msg = `Aqui está o PIX de novo 👇\n\n${url}${parts ? `\n\nValor: ${parts}` : ""}\n\nSe não conseguir abrir, me responde aqui que a gente resolve. 🙏`;
 
-    // (3) Enviar.
+    // (3) Enviar. ADR-159 F2.3 — com a flag da família cobrança, PELO choke-point
+    // (auditado + correlationId + guardas); sem ela, envio direto (0 regressão).
+    // Erro do executor cai no MESMO fail() — sendNow nunca lança (G-4b.3-A-4).
+    const viaExecutor = Number((db.prepare(`SELECT COALESCE(collection_cadence_via_executor_enabled,0) AS v FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.v) === 1;
     let messageId: string | undefined;
-    try { messageId = await MessageProviderService.sendMessage(opts.channelId, opts.phone, msg); }
+    try {
+      if (viaExecutor) {
+        const { CommandExecutorService } = await import("./CommandExecutorService.js");
+        const anchor = db.prepare(`SELECT correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?`).get(opts.actionId, orgId) as any;
+        messageId = await CommandExecutorService.sendGovernedMessage(orgId, {
+          domain: "collection", actionType: "collection_resend_pix",
+          title: "Reenvio de PIX ao cliente",
+          channelId: opts.channelId, recipient: opts.phone, message: msg,
+          correlationId: anchor?.correlation_id || null, createdBy: "resend-pix-runtime",
+        });
+      } else {
+        messageId = await MessageProviderService.sendMessage(opts.channelId, opts.phone, msg);
+      }
+    }
     catch (e: any) { return this.fail(orgId, opts.actionId, "sendMessage_error", e?.message); }
 
     // (4) Audit.

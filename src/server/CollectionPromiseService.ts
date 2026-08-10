@@ -259,7 +259,24 @@ export class CollectionPromiseService {
     const valorStr = row.amount != null ? `R$ ${row.amount.toFixed(2).replace(".", ",")}` : "o valor combinado";
     const msg = `Olá! 🙋\n\nA gente tinha combinado o pagamento de ${valorStr} pra ${promisedBR}. Deu pra acertar?\n\nSe já pagou, é só me mandar o comprovante que aviso o time. Se precisar de mais um tempinho, me diz aqui — a gente ajusta juntos. 🙏`;
     let messageId: string | undefined;
-    try { messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg); }
+    // ADR-159 F2.3 — com a flag da família cobrança, o envio passa PELO
+    // choke-point (auditado + correlationId + guardas); sem ela, envio direto
+    // (pré-F2.3, 0 regressão). Falha reverte igual (deixa PENDING pra retry).
+    const viaExecutor = Number((db.prepare(`SELECT COALESCE(collection_cadence_via_executor_enabled,0) AS v FROM organization_settings WHERE organization_id = ?`).get(row.orgId) as any)?.v) === 1;
+    try {
+      if (viaExecutor) {
+        const { CommandExecutorService } = await import("./CommandExecutorService.js");
+        const anchor = db.prepare(`SELECT correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?`).get(row.actionId, row.orgId) as any;
+        messageId = await CommandExecutorService.sendGovernedMessage(row.orgId, {
+          domain: "collection", actionType: "collection_promise_followup",
+          title: "Follow-up de promessa de pagamento quebrada",
+          channelId: row.channelId, recipient: row.phone, message: msg,
+          correlationId: anchor?.correlation_id || null, createdBy: "promise-runtime",
+        });
+      } else {
+        messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg);
+      }
+    }
     catch (e: any) {
       try {
         BusinessSignalService.publish(row.orgId, {

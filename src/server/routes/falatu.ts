@@ -14,6 +14,7 @@ import { ContextEngineService as FalaTuContextEngine } from "../ContextEngineSer
 import { FalaTuReportService } from "../FalaTuReportService.js";
 import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
+import { SmartInboxService } from "../SmartInboxService.js";
 import { MAX_BYTES as FALATU_FILE_MAX } from "../ClinicAttachmentService.js";
 import multer from "multer";
 
@@ -193,6 +194,13 @@ router.post("/signals/sweep", (req: AuthRequest, res): any => {
 // explicabilidade (§49). É a fundação de qualquer business-query do Fala Tu.
 router.get("/context", (req: AuthRequest, res): any => {
   res.json(FalaTuContextEngine.buildForUser(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 3 (§20-23, §60) — Smart Inbox: "O que precisa da minha atenção?".
+// Composição ranqueada de signals + decision_actions + runtime, por categoria de
+// AÇÃO e filtrada pro papel do usuário. Não é fonte de alertas nova (CA15).
+router.get("/smart-inbox", (req: AuthRequest, res): any => {
+  res.json(SmartInboxService.build(req.organizationId!, req.user));
 });
 
 // PRD 1 Fase 2.2 (CA6) — "me manda o resumo": gera o Resumo Executivo como

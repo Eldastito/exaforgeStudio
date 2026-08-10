@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { embed, chat } from "./llm.js";
 import db from "./db.js";
+import { topKBySimilarity } from "./vectorSimilarity.js";
 
 interface DocumentChunk {
   id: string;
@@ -131,22 +132,6 @@ export function deleteDocument(docId: string, orgId: string): boolean {
 /**
  * Similaridade por cosseno entre dois vetores.
  */
-function cosineSimilarity(A: number[], B: number[]): number {
-  let dotproduct = 0;
-  let mA = 0;
-  let mB = 0;
-  const len = Math.min(A.length, B.length);
-  for (let i = 0; i < len; i++) {
-    dotproduct += A[i] * B[i];
-    mA += A[i] * A[i];
-    mB += B[i] * B[i];
-  }
-  mA = Math.sqrt(mA);
-  mB = Math.sqrt(mB);
-  if (mA * mB === 0) return 0;
-  return dotproduct / (mA * mB);
-}
-
 /**
  * Busca os N chunks de contexto mais relevantes para uma organização.
  */
@@ -178,13 +163,10 @@ export async function searchContext(
     return true;
   });
 
-  const scoredDocs = relevantDocs.map((doc) => ({
-    text: doc.text,
-    score: cosineSimilarity(queryVec!, doc.embedding),
-  }));
-
-  scoredDocs.sort((a, b) => b.score - a.score);
-  return scoredDocs.slice(0, topK).map((doc) => doc.text);
+  // ADR-160 F9 — ranqueamento pelo primitivo ÚNICO (dedup de RAG). Os filtros de
+  // canal/área acima são específicos deste stack; a matemática da busca é a mesma
+  // da memória Fala Tu.
+  return topKBySimilarity(queryVec!, relevantDocs, (doc) => doc.embedding, topK).map((r) => r.item.text);
 }
 
 /**

@@ -50,6 +50,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { JobQueueService, JobQueueError } from "./JobQueueService.js";
 import { setUsageContext } from "./usageContext.js";
+import { cosineSimilarity, topKBySimilarity } from "./vectorSimilarity.js";
 
 export type EmbeddingSourceType = "entity" | "note";
 
@@ -262,23 +263,13 @@ export class FalaTuMemoryEmbeddingsService {
   }
 
   /**
-   * Similaridade cosseno. Vetores devem ter mesma dimensão. Retorna 0 se
-   * qualquer um dos vetores tiver norma zero (evita NaN — protege o sort).
-   * Faz o dot product e as normas num único loop (uma passada só) porque
-   * cada vetor tem 1536 dimensões e a busca roda em todos os embeddings do
-   * usuário na captura — o caminho crítico é sensível a alocação.
+   * ADR-160 F9 — delega pro primitivo ÚNICO de similaridade (dedup de RAG).
+   * Mantido como método estático porque é API pública (testes + F5.2 chamam
+   * `.cosine`); a matemática (single-pass, guardas de dim/norma) mora só em
+   * vectorSimilarity.ts.
    */
   static cosine(a: number[], b: number[]): number {
-    if (a.length !== b.length || a.length === 0) return 0;
-    let dot = 0, na = 0, nb = 0;
-    for (let i = 0; i < a.length; i++) {
-      const av = a[i], bv = b[i];
-      dot += av * bv;
-      na += av * av;
-      nb += bv * bv;
-    }
-    if (na === 0 || nb === 0) return 0;
-    return dot / (Math.sqrt(na) * Math.sqrt(nb));
+    return cosineSimilarity(a, b);
   }
 
   /**
@@ -314,14 +305,20 @@ export class FalaTuMemoryEmbeddingsService {
       const qvec = await this.embedQuery(q);
       if (!qvec || qvec.length === 0) return [];
 
-      const scored = rows.map((r) => ({
-        sourceType: r.source_type,
-        sourceId: r.source_id,
-        snippet: r.content_snippet,
-        score: this.cosine(qvec, this.deserializeEmbedding(Buffer.from(r.embedding))),
+      // ADR-160 F9 — ranqueamento pelo primitivo ÚNICO (dedup de RAG). A
+      // desserialização BLOB→vetor fica aqui (formato próprio deste store); o
+      // top-K é o mesmo do RAG canônico. Piso de 1 preserva o contrato anterior.
+      return topKBySimilarity(
+        qvec,
+        rows,
+        (r) => this.deserializeEmbedding(Buffer.from(r.embedding)),
+        Math.max(1, k),
+      ).map(({ item, score }) => ({
+        sourceType: item.source_type,
+        sourceId: item.source_id,
+        snippet: item.content_snippet,
+        score,
       }));
-      scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, Math.max(1, k));
     } catch (e) {
       console.error("[FalaTuMemoryEmbeddings] searchTopK falhou (best-effort — segue sem RAG):", e);
       return [];

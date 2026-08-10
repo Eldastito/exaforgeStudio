@@ -359,6 +359,7 @@
     "test:falatu-porta-events": "tsx scripts/test-falatu-porta-events.ts",
     "test:falatu-porta-lists": "tsx scripts/test-falatu-porta-lists.ts",
     "test:falatu-porta-whatsapp": "tsx scripts/test-falatu-porta-whatsapp.ts",
+    "test:falatu-porta-rag": "tsx scripts/test-falatu-porta-rag.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

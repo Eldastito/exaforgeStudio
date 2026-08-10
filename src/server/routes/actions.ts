@@ -4,6 +4,7 @@ import { DecisionActionService } from "../DecisionActionService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { CommandExecutorService } from "../CommandExecutorService.js";
 import { PermissionService } from "../PermissionService.js";
+import { StepUpMfaService } from "../StepUpMfaService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -126,6 +127,13 @@ router.post("/:id/execute", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem executar." });
+  // ADR-159 F6 (D6) — step-up MFA em ação crítica/financeira acima do limiar.
+  // Só a rota HUMANA passa aqui; os reroutes F2 chamam execute() direto (isentos).
+  const act = DecisionActionService.get(orgId, req.params.id);
+  if (act && StepUpMfaService.requiresStepUp(orgId, act)) {
+    try { StepUpMfaService.assertVerified(orgId, req.user?.userId, req.body?.mfaToken); }
+    catch (e: any) { return res.status(e?.code === "STEP_UP_LOCKED" ? 429 : 401).json({ error: e.message, mfaRequired: true, code: e?.code }); }
+  }
   try { res.json(await CommandExecutorService.execute(orgId, req.params.id)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });

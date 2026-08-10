@@ -104,9 +104,13 @@ A ordem de fases do PRD é boa; o único ajuste é **injetar a segurança de con
 - **Fase 4 (Smart Inbox):** estender `attention()` (ranking impacto/SLA) + compor categorias sobre signals/actions/runtime — **sem** fonte de alertas nova.
 - **Depois:** threads/status (reusar `ProcessRuntimeService`), proativo (reusar briefing/push), chat (fundação), zero-training.
 
-### Primeira fatia recomendada
+### Primeira fatia recomendada — **ENTREGUE (2026-08-10)**
 
-A **Fase 1 de fundação** — evolução aditiva do envelope + wiring de correlação no metering. Reversível, testável de forma determinística, não toca engine nenhum, e entrega o `correlation_id` em que todas as fases seguintes vão pendurar. Mantém o padrão fatia→PR→CI→merge de F5–F9. A projeção de contexto por papel + redação (P1) entra como a fatia de segurança seguinte, **antes** de qualquer business-query.
+A **Fase 1 de fundação** — evolução aditiva do envelope + wiring de correlação no metering. Reversível, testável de forma determinística, não toca engine nenhum, e entrega o `correlation_id` em que todas as fases seguintes vão pendurar. Mantém o padrão fatia→PR→CI→merge de F5–F9.
+
+**Entregue:** 4 colunas aditivas em `falatu_inbox_items` (`channel` · `input_type` · `attachments_json` · `correlation_id`), derivadas deterministicamente na captura (channel de `source`/explícito com fallback; input_type = superset do media_type; attachments = descritores factuais, RN-151; correlation_id inicia cadeia nova ou continua a thread do caller, §51). `correlation_id` propagado ao `usageContext` **antes** de qualquer IA → popula `ai_usage_log.request_id` (coluna existia e nunca era escrita), fechando o rastro de custo §41/§52. Suíte `test:falatu-envelope` (20 checks) + regressão de todas as `falatu-*` e `ai-usage-ledger` PASS. 0 tabelas novas, 0 breaking changes.
+
+**Próxima fatia:** projeção de contexto por papel + redação (P1) — a fatia de segurança, **antes** de qualquer business-query.
 
 ---
 

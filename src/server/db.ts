@@ -8358,6 +8358,23 @@ const initDb = () => {
   // default 0 = comportamento de hoje (0 regressão). NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_lists_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE falatu_lists ADD COLUMN bridged_requisition_id TEXT`); } catch(e){}
+
+  // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
+  // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas
+  // fecham os campos que faltavam pra rastrear "de onde veio → o que entendemos
+  // → o que fizemos" em QUALQUER canal, sem tabela nova:
+  //   channel         — canal canônico da entrada (falatu_web|whatsapp|share_target|api|...)
+  //   input_type      — tipo físico da entrada (text|audio|image|document|...)
+  //   attachments_json— descritores dos anexos enviados (fundação p/ artefatos, Fase 2)
+  //   correlation_id  — espinha de rastreabilidade (ADR-158); raiz da cadeia da
+  //                     interação, propagada ao metering (ai_usage_log.request_id)
+  //                     e reutilizável por sinais/ações do processo iniciado aqui.
+  // Aditivo/retrocompatível: itens legados ficam com NULL e seguem operando.
+  // NÃO reordenar.
+  try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN channel TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN input_type TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN attachments_json TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN correlation_id TEXT`); } catch(e){}
 };
 
 initDb();

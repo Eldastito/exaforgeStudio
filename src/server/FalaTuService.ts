@@ -93,7 +93,17 @@ export interface FalaTuCaptureInput {
   image?: { mimeType: string; data: string }; // base64
   source?: string;
   commandId?: string; // F8.2 — dedup de reenvio da fila offline (opcional)
+  // PRD 1 — envelope canônico: canal explícito (senão derivado de source) e
+  // correlação de thread (senão a captura inicia uma cadeia nova). Opcionais:
+  // callers legados não mudam.
+  channel?: string;
+  correlationId?: string;
 }
+
+// PRD 1 — canais canônicos da entrada (§10). `source='whatsapp'` mapeia direto;
+// o resto default 'falatu_web' (o caminho do operador já é canal-neutro).
+export const FALATU_CHANNELS = ["falatu_web", "falatu_pwa", "whatsapp", "share_target", "api"] as const;
+export type FalaTuChannel = (typeof FALATU_CHANNELS)[number];
 
 const INTENTS: FalaTuIntent[] = ["TASK", "EVENT", "LIST", "NOTE", "UNKNOWN"];
 
@@ -256,8 +266,12 @@ export class FalaTuService {
     // módulo). Sem isto, chamadas downstream em llm.ts caem no default
     // module='legacy' e o dashboard admin não consegue separar quanto o FalaTu
     // gastou vs. outros módulos. É o backfill best-effort do primeiro módulo.
+    // PRD 1 — correlação da interação: gerada ANTES de qualquer IA, pra que o
+    // embed do RAG + o interpret() já gravem `ai_usage_log.request_id` com ela.
+    // Caller pode continuar uma thread existente (§51); senão, inicia a cadeia.
+    const correlationId = input.correlationId?.trim() || randomUUID();
     const { setUsageContext } = await import("./usageContext.js");
-    setUsageContext({ orgId, userId, module: "falatu" });
+    setUsageContext({ orgId, userId, module: "falatu", correlationId });
     // ADR-154 F5.2 — RAG: se a org ligou `falatu_rag_enabled`, faz busca
     // top-K por similaridade cosseno na memória confirmada (F5.1) usando o
     // texto de entrada como query, e monta um bloco `<memoria_relevante>`
@@ -294,16 +308,28 @@ export class FalaTuService {
       if (proto) return { protocol: proto };
     }
     const mentions = FalaTuService.analyzeMentions(orgId, userId, extraction);
+    // PRD 1 — campos do envelope canônico (§9), derivados DETERMINISTICAMENTE:
+    //  - canal: whatsapp mapeia direto; senão o explícito do caller ou falatu_web;
+    //  - input_type: tipo físico da entrada (superset do media_type, marca 'text');
+    //  - attachments: descritores FACTUAIS do que foi enviado (RN-151 — não inventa;
+    //    binário ainda não é persistido, isso é a Fase 2). Texto → [].
+    const source = input.source === "whatsapp" ? "whatsapp" : "webapp";
+    const channel = source === "whatsapp" ? "whatsapp" : (FALATU_CHANNELS.includes(input.channel as FalaTuChannel) ? input.channel : "falatu_web");
+    const inputType = mediaType || "text";
+    const attachments: Array<{ type: string; mime: string | null }> = [];
+    if (input.image?.data) attachments.push({ type: "image", mime: input.image.mimeType || null });
+    if (input.audio?.data) attachments.push({ type: "audio", mime: input.audio.mimeType || null });
     try {
       db.prepare(`
-        INSERT INTO falatu_inbox_items (id, organization_id, user_id, source, content, media_type, transcription, summary, intent, entities_json, suggested_action, confidence, status, memory_json, client_command_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        INSERT INTO falatu_inbox_items (id, organization_id, user_id, source, content, media_type, transcription, summary, intent, entities_json, suggested_action, confidence, status, memory_json, client_command_id, channel, input_type, attachments_json, correlation_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
       `).run(
-        id, orgId, userId, input.source === "whatsapp" ? "whatsapp" : "webapp",
+        id, orgId, userId, source,
         input.text?.trim() || null, mediaType,
         extraction.transcription || null, extraction.summary || null, extraction.intent,
         JSON.stringify(extraction.entities), extraction.suggestedAction || null, extraction.confidence,
-        JSON.stringify({ mentions }), commandId
+        JSON.stringify({ mentions }), commandId,
+        channel, inputType, JSON.stringify(attachments), correlationId
       );
     } catch (e: any) {
       // Corrida de reenvio simultâneo (duas abas / flush duplo): o unique
@@ -321,7 +347,7 @@ export class FalaTuService {
       db.prepare(`INSERT INTO ai_interactions_log (id, organization_id, agent_used, input_prompt, output_response, confidence) VALUES (?, ?, 'falatu', ?, ?, ?)`)
         .run(randomUUID(), orgId, (input.text?.trim() || (mediaType ? `[${mediaType}]` : "")).slice(0, 500), extraction.summary || extraction.intent, extraction.confidence);
     } catch { /* noop */ }
-    logAuthEvent(orgId, userId, null, "FALATU_CAPTURE", { inboxItemId: id, intent: extraction.intent, mediaType, confidence: extraction.confidence, ragInjected: !!systemPreamble });
+    logAuthEvent(orgId, userId, null, "FALATU_CAPTURE", { inboxItemId: id, intent: extraction.intent, mediaType, confidence: extraction.confidence, ragInjected: !!systemPreamble, channel, inputType, correlationId });
     return FalaTuService.getInboxItem(orgId, userId, id);
   }
 

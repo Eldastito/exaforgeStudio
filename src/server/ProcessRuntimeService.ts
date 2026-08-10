@@ -102,6 +102,7 @@ export interface StartProcessInput {
   context?: any;
   deadlineAt?: string | null;
   createdBy?: string;
+  correlationId?: string | null;    // PRD 2 F2.3 — fio da espinha (ADR-158)
 }
 
 const AUTONOMY_LEVELS = new Set(["observe", "suggest", "prepare", "execute"]);
@@ -208,12 +209,12 @@ export class ProcessRuntimeService {
     const context = input.context ?? {};
     const first = firstStep(def.steps as PlaybookDefinition);
     db.prepare(`INSERT INTO process_instances
-      (id, organization_id, process_definition_id, process_type, subject_type, subject_id, status, priority, risk_level, expected_value, current_step, context_json, deadline_at, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, 'detected', ?, ?, ?, ?, ?, ?, ?)`).run(
+      (id, organization_id, process_definition_id, process_type, subject_type, subject_id, status, priority, risk_level, expected_value, current_step, context_json, deadline_at, created_by, correlation_id)
+      VALUES (?, ?, ?, ?, ?, ?, 'detected', ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, orgId, def.id, input.processType, input.subjectType || null, input.subjectId || null,
       Number(input.priority) || 0, input.riskLevel || null,
       input.expectedValue != null ? Number(input.expectedValue) : null,
-      first.id, JSON.stringify(context), input.deadlineAt || null, input.createdBy || actorId || null
+      first.id, JSON.stringify(context), input.deadlineAt || null, input.createdBy || actorId || null, input.correlationId || null
     );
     this.logTransition(orgId, id, null, "detected", actorId || "runtime", "instance_created", { processType: input.processType, definitionId: def.id, version: def.version, subjectType: input.subjectType || null, subjectId: input.subjectId || null });
     return this.getInstance(orgId, id);
@@ -225,11 +226,14 @@ export class ProcessRuntimeService {
    * pra decidir a política, prazo, etc.
    */
   static startFromSignal(orgId: string, signalId: string, input: Omit<StartProcessInput, "context"> & { context?: any }, actorId?: string): any {
-    const sig = db.prepare(`SELECT id, domain, signal_type, severity, evidence_json, impact_amount, impact_unit FROM business_signals WHERE id = ? AND organization_id = ?`).get(signalId, orgId) as any;
+    const sig = db.prepare(`SELECT id, domain, signal_type, severity, evidence_json, impact_amount, impact_unit, correlation_id FROM business_signals WHERE id = ? AND organization_id = ?`).get(signalId, orgId) as any;
     if (!sig) throw new Error("Sinal não encontrado.");
     const evidence = safeParse(sig.evidence_json);
     const context = { ...(input.context || {}), signal: { id: sig.id, domain: sig.domain, type: sig.signal_type, severity: sig.severity, impactAmount: sig.impact_amount, impactUnit: sig.impact_unit, evidence } };
-    return this.startForSubject(orgId, { ...input, context, expectedValue: input.expectedValue ?? sig.impact_amount ?? null }, actorId);
+    // F2.3 — o processo herda o correlation_id do sinal (ou enraíza no próprio id
+    // do sinal, mesma convenção do BusinessSignalService), fechando a espinha.
+    const correlationId = input.correlationId ?? sig.correlation_id ?? sig.id;
+    return this.startForSubject(orgId, { ...input, context, correlationId, expectedValue: input.expectedValue ?? sig.impact_amount ?? null }, actorId);
   }
 
   /**

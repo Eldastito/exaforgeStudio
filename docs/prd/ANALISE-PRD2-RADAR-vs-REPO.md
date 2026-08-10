@@ -54,7 +54,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **Freshness / staleness** | `confidence` é estática; TTL só filtra na leitura; sem `expired`/decay (§78-79) | F2 |
 | ~~**Enforcement de TTL**~~ | ✅ **F2.2 ENTREGUE** — filtro corrigido (`datetime(expires_at)`) + sweep `expireStale`→`expired` (Scheduler `signalTtlSweepPass`, antes do auto-trigger). `test:signal-ttl` (9 checks) | ~~F2~~ ✅ |
 | **Recorrência/reopen** | Republish nunca reabre resolvido (§55). Recorrência precisa de novo ciclo com histórico | F2 |
-| **`process_instances.correlation_id`** | Furo da espinha — processo iniciado pelo router fica **fora** do trace (§75) | F2/F8 |
+| ~~**`process_instances.correlation_id`**~~ | ✅ **F2.3 ENTREGUE** — coluna+índice; `startFromSignal` propaga o correlation do sinal; thread (F6) costura o processo do router. `test:signal-process-spine` (7 checks) | ~~F2~~ ✅ |
 | **Goal-relevance no score** | `ImpactPrioritizationService` não consome `BusinessGoalService.progress` (§31) | F5 |
 | SLA + reversibility no score | §38 lista fatores ausentes no score atual | F7 |
 | Expansão do TRIGGER_MAP | Só 2 mapeamentos; expandir **conservador** (playbook maduro + policy) (§41-42) | F8 |
@@ -99,7 +99,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA11 Fala Tu consome | ✅ Smart Inbox/Home consomem | não regredir |
 | CA12 sinal→processo | ✅ router (2 maps) | F8 expande |
 | CA13 auto-trigger não bypassa policy | ✅ choke-point garante | não regredir |
-| CA14 correlationId no ciclo | 🟡 furo em `process_instances` | F2/F8 |
+| CA14 correlationId no ciclo | ✅ **F2.3 fechou o furo em process_instances** | não regredir |
 | CA15 TTL/dedupe/cooldown anti-storm | 🟡 dedupe sim; **TTL agora vale (F2.2 ✅)**; cooldown só PlanFit | F4 (cooldown genérico) |
 | CA16 detector isolado não derruba | ✅ best-effort em cada pass | reforçar em F12 |
 | CA17 custo de IA mensurado | ✅ `ai_usage_log` + budgets | F12 (per-detector) |
@@ -112,7 +112,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | Fase | Escopo | Tipo | Fatias sugeridas |
 | --- | --- | --- | --- |
 | **F1** | Esta auditoria + matriz | doc | **1 PR (este)** |
-| **F2** | Signal Contract Hardening: `hypothesis`, `subject_id`, freshness, TTL-enforcement, `process_instances.correlation_id`, recorrência | ESTENDER | F2.1 basis+subject · F2.2 freshness/TTL sweep · F2.3 correlation_id no processo |
+| ~~**F2**~~ ✅ | Signal Contract Hardening — **FECHADA**: F2.1 basis+subject (#921) · F2.2 TTL enforcement (#922) · F2.3 correlation_id no processo | ESTENDER | ✅ |
 | **F3** | Correlation Engine (vendas/cobrança/estoque) | CRIAR | F3.1 primitivas (subject+janela+família) · F3.2 cluster derivado · F3.3 confiança (auto/possível/separado) |
 | **F4** | Anomaly framework + registry | CRIAR | F4.1 primitivas (baseline/deviation/min-sample/cooldown) · F4.2 registry+contrato · F4.3 1 detector piloto migrado |
 | **F5** | Goal-aware prioritization | ESTENDER | wire `BusinessGoalService.progress` → score |

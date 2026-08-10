@@ -93,7 +93,7 @@ export class TaskService {
     const title = String(input.title || "").trim();
     if (!title) throw new Error("Informe um título para a tarefa.");
     const priority = PRIORITIES.includes(String(input.priority)) ? input.priority : "media";
-    const source = ["manual", "ric", "ia", "vision", "radar"].includes(String(input.source)) ? input.source : "manual";
+    const source = ["manual", "ric", "ia", "vision", "radar", "falatu"].includes(String(input.source)) ? input.source : "manual";
     const id = randomUUID();
     const resultLabel = String(input.resultLabel || "").trim() || null;
     const resultBaseline = input.resultBaseline != null && input.resultBaseline !== undefined && String(input.resultBaseline) !== "" ? Number(input.resultBaseline) : null;

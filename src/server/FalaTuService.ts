@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { TaskService } from "./TaskService.js";
 
 /**
  * FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere".
@@ -414,10 +415,15 @@ export class FalaTuService {
       ? (timeRe.test(overrides.eventTime || "") ? overrides.eventTime : null)
       : (entities?.eventTime || null);
 
+    // ADR-160 F5 — porta I/O: a org optou por espelhar a tarefa confirmada no
+    // domínio canônico? Lê a flag ANTES da transação (uma vez).
+    const bridgeTasks = FalaTuService.isTaskBridgeEnabled(orgId);
+
     // ADR-154 F5.1: coleta IDs de entidades tocadas nesta confirmação pra
     // enfileirar embeddings DEPOIS da transação — nunca dentro (evita atrasar
     // commit por chamada de rede + queremos o embedding SÓ do que persistiu).
     const touchedEntityIds = new Set<string>();
+    let bridgedTaskId: string | null = null;
     const result = db.transaction(() => {
       let confirmedKind: string | null = null;
       let refId: string | null = null;
@@ -427,6 +433,16 @@ export class FalaTuService {
         db.prepare(`INSERT INTO falatu_tasks (id, organization_id, user_id, title, description, inbox_item_id) VALUES (?, ?, ?, ?, ?, ?)`)
           .run(refId, orgId, userId, title, item.transcription || item.content || null, item.id);
         confirmedKind = "task";
+        // Porta I/O: espelha no TaskService canônico (atômico — mesma tx; a
+        // criação é INSERT síncrono, sem assignee ⇒ sem notificação/rede aqui).
+        // `source:'falatu'` dá rastreabilidade; o vínculo silo→canônico fica em
+        // `bridged_task_id`. Falha aqui derruba a confirmação inteira (não deixa
+        // silo sem canônico quando a porta está ligada).
+        if (bridgeTasks) {
+          const canonical = TaskService.create(orgId, { title, description: item.transcription || item.content || undefined, source: "falatu" }, userId);
+          bridgedTaskId = canonical?.id || null;
+          if (bridgedTaskId) db.prepare(`UPDATE falatu_tasks SET bridged_task_id = ? WHERE id = ?`).run(bridgedTaskId, refId);
+        }
       } else if (intent === "EVENT") {
         refId = randomUUID();
         db.prepare(`INSERT INTO falatu_events (id, organization_id, user_id, title, event_date, event_time, inbox_item_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
@@ -497,7 +513,7 @@ export class FalaTuService {
       return { confirmedKind, refId };
     })();
 
-    logAuthEvent(orgId, userId, null, "FALATU_CONFIRM", { inboxItemId: item.id, kind: result.confirmedKind, refId: result.refId });
+    logAuthEvent(orgId, userId, null, "FALATU_CONFIRM", { inboxItemId: item.id, kind: result.confirmedKind, refId: result.refId, bridgedTaskId });
 
     // ADR-154 F5.1: enfileira embeddings da memória (assíncrono, opt-in via
     // falatu_rag_enabled). Best-effort — SoloEmbeddingsService swallows erros
@@ -516,7 +532,22 @@ export class FalaTuService {
       }
     }).catch(() => { /* import falhou — não impacta confirm */ });
 
-    return { success: true, kind: result.confirmedKind, refId: result.refId, item: FalaTuService.getInboxItem(orgId, userId, inboxItemId) };
+    return { success: true, kind: result.confirmedKind, refId: result.refId, bridgedTaskId, item: FalaTuService.getInboxItem(orgId, userId, inboxItemId) };
+  }
+
+  /**
+   * ADR-160 F5 — PORTA I/O (bridge de tarefas). Estado/controle do opt-in que faz
+   * o Fala Tu escrever no domínio CANÔNICO (`TaskService`) ao confirmar um TASK,
+   * além do silo `falatu_tasks`. Default off = comportamento de hoje (0 regressão).
+   */
+  static isTaskBridgeEnabled(orgId: string): boolean {
+    const row = db.prepare("SELECT falatu_bridge_tasks_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    return !!(row && Number(row.falatu_bridge_tasks_enabled));
+  }
+
+  static setTaskBridge(orgId: string, enabled: boolean): { tasks: boolean } {
+    db.prepare("UPDATE organization_settings SET falatu_bridge_tasks_enabled = ? WHERE organization_id = ?").run(enabled ? 1 : 0, orgId);
+    return { tasks: FalaTuService.isTaskBridgeEnabled(orgId) };
   }
 
   static discard(orgId: string, userId: string, inboxItemId: string) {

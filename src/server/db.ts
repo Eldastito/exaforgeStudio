@@ -8328,6 +8328,15 @@ const initDb = () => {
       UNIQUE(organization_id, metric)
     );
   `);
+
+  // ADR-160 F5 (Onda A) — Fala Tu vira PORTA I/O: ao confirmar um item de intent
+  // TASK, sob opt-in `falatu_bridge_tasks_enabled`, o Fala Tu ESPELHA a tarefa no
+  // domínio CANÔNICO (`TaskService`/`tasks`) em vez de viver só no silo paralelo
+  // `falatu_tasks` (estado-final §3.B/§4.2). `bridged_task_id` registra o vínculo
+  // (silo→canônico). Aditivo/reversível: flag default 0 = comportamento de hoje
+  // (só silo, 0 regressão); silo `falatu_tasks` preservado. NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_tasks_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_tasks ADD COLUMN bridged_task_id TEXT`); } catch(e){}
 };
 
 initDb();

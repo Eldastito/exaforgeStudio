@@ -19,6 +19,43 @@ export class ReportPdfService {
   }
 
   /**
+   * PRD 1 Fase 2.2 — renderizador GENÉRICO de PDF a partir de título + seções,
+   * devolvendo Buffer (mesmo padrão de `generateGovernancePdf`: coleta chunks, não
+   * depende de storage). Reusável por qualquer gerador que queira virar artefato
+   * canônico (ArtifactService) em vez de escrever no /media público. Não duplica
+   * a infra de pdfkit — mora aqui, junto do resto dos relatórios.
+   */
+  static renderSimplePdf(orgId: string, opts: { title: string; subtitle?: string; sections: Array<{ heading: string; lines: string[] }>; footer?: string }): Promise<Buffer> {
+    const biz = this.businessName(orgId);
+    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ size: "A4", margin: 48 });
+        const chunks: Buffer[] = [];
+        doc.on("data", (c: Buffer) => chunks.push(c));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+
+        doc.fillColor("#0f766e").font("Helvetica-Bold").fontSize(20).text(biz);
+        doc.fillColor("#111827").fontSize(15).text(opts.title);
+        if (opts.subtitle) doc.fillColor("#374151").font("Helvetica").fontSize(10).text(opts.subtitle);
+        doc.fillColor("#6b7280").font("Helvetica").fontSize(9).text(`Gerado em ${now}`);
+        doc.moveDown(0.8);
+
+        for (const sec of opts.sections || []) {
+          doc.fillColor("#111827").font("Helvetica-Bold").fontSize(11).text(sec.heading);
+          doc.font("Helvetica").fontSize(9.5).fillColor("#374151");
+          for (const line of sec.lines || []) doc.text(String(line));
+          doc.moveDown(0.5);
+        }
+        if (opts.footer) { doc.moveDown(0.4); doc.fillColor("#9ca3af").font("Helvetica").fontSize(8).text(opts.footer); }
+
+        doc.end();
+      } catch (e) { reject(e); }
+    });
+  }
+
+  /**
    * Cria um PDF com o RESUMO (análise da IA) + o PANORAMA do negócio (texto
    * cru do raio-x). Retorna a URL pública para download.
    */

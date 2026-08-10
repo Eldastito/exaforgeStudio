@@ -122,3 +122,16 @@ AnomalyDetectorRegistry.registerPack("radar_core", [
     subjectType: "funnel", recommendedProcessType: "sales_recovery_v1", verticals: ["retail", "moda", "servicos"],
   },
 ]);
+
+// F4.3 — o 1º detector REAL migrado (RetailFloorSignalPublisher.conversionDrop):
+// a DECISÃO passa a rodar por este contrato (threshold/método/direção declarados
+// aqui, não mais constantes inline). O detector publica o próprio sinal (contrato
+// específico preservado). A guarda de amostra (nº de atendimentos ≥20) é externa.
+AnomalyDetectorRegistry.registerPack("retail_floor", [
+  {
+    name: "retail_floor_conversion_drop", domain: "retail_floor", purpose: "Queda de conversão CONFIRMADA (pós-PDV) semana×semana por loja.",
+    metric: "confirmedConversionRate", method: "relative", direction: "drop", threshold: 0.2, minSample: 1,
+    cooldownMs: 0, ttlMs: 7 * 24 * HOUR, severity: "risk", basis: "fact", confidence: 0.8,
+    subjectType: "store", recommendedProcessType: null, verticals: ["retail", "moda"],
+  },
+]);

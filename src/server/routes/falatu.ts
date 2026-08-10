@@ -18,6 +18,7 @@ import { SmartInboxService } from "../SmartInboxService.js";
 import { FalaTuApprovalService } from "../FalaTuApprovalService.js";
 import { FalaTuThreadService } from "../FalaTuThreadService.js";
 import { FalaTuHomeService } from "../FalaTuHomeService.js";
+import { InternalChatService } from "../InternalChatService.js";
 import { MAX_BYTES as FALATU_FILE_MAX } from "../ClinicAttachmentService.js";
 import multer from "multer";
 
@@ -217,6 +218,25 @@ router.get("/smart-inbox", (req: AuthRequest, res): any => {
 // apresenta + delega. A decisão exige actionId EXPLÍCITO + enum (nunca texto livre).
 router.get("/approvals", (req: AuthRequest, res): any => {
   res.json(FalaTuApprovalService.pending(req.organizationId!, req.user));
+});
+
+// PRD 1 Fase 7 (§80) — chat interno FUNDAÇÃO-SÓ: notas de equipe ancoradas a um
+// caso. Não é Slack — é "deixa um recado pro colega SOBRE esta decisão".
+router.post("/messages", (req: AuthRequest, res): any => {
+  const body = typeof req.body?.body === "string" ? req.body.body : "";
+  const toUserId = typeof req.body?.toUserId === "string" ? req.body.toUserId : null;
+  const correlationId = typeof req.body?.correlationId === "string" ? req.body.correlationId : null;
+  try { res.json(InternalChatService.post(req.organizationId!, actorId(req), { toUserId, correlationId, body })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/messages", (req: AuthRequest, res): any => {
+  const unreadOnly = req.query.unread === "1" || req.query.unread === "true";
+  res.json(InternalChatService.inbox(req.organizationId!, actorId(req), { unreadOnly, limit: Number(req.query.limit) || 50 }));
+});
+
+router.post("/messages/:id/read", (req: AuthRequest, res): any => {
+  res.json(InternalChatService.markRead(req.organizationId!, actorId(req), req.params.id));
 });
 
 // PRD 1 Fase 6 (§48) — status de execução: "o que você está fazendo?".

@@ -369,6 +369,7 @@
     "test:falatu-thread": "tsx scripts/test-falatu-thread.ts",
     "test:falatu-proactive": "tsx scripts/test-falatu-proactive.ts",
     "test:falatu-home": "tsx scripts/test-falatu-home.ts",
+    "test:internal-chat": "tsx scripts/test-internal-chat.ts",
     "test:falatu-report": "tsx scripts/test-falatu-report.ts",
     "test:xlsx": "tsx scripts/test-xlsx.ts",
     "test:falatu-file-intake": "tsx scripts/test-falatu-file-intake.ts",

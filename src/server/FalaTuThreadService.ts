@@ -12,11 +12,12 @@
 import db from "./db.js";
 import { ProcessRuntimeService } from "./ProcessRuntimeService.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
+import { InternalChatService } from "./InternalChatService.js";
 
 const PROC_ACTIVE = new Set(["planned", "authorized", "queued", "executing", "waiting_external_response"]);
 
 export interface ThreadEvent {
-  stage: "entrada" | "sinal" | "decisao" | "execucao" | "resultado";
+  stage: "entrada" | "sinal" | "decisao" | "execucao" | "resultado" | "nota";
   at: string | null; source: string; title: string;
   status?: string | null; domain?: string | null; detail?: string | null;
 }
@@ -67,6 +68,11 @@ export class FalaTuThreadService {
     // Resultado
     for (const r of db.prepare(`SELECT o.*, a.domain AS a_domain, a.title AS a_title FROM action_outcomes o LEFT JOIN decision_actions a ON a.id = o.action_id WHERE o.organization_id = ? AND o.correlation_id = ?`).all(orgId, cid) as any[]) {
       if (see(r.a_domain)) events.push({ stage: "resultado", at: r.measured_at, source: "outcome", title: r.a_title || "Resultado", status: r.basis, domain: r.a_domain, detail: `esperado ${r.expected_value ?? "—"} → realizado ${r.realized_value ?? "—"}` });
+    }
+
+    // Notas internas (Fase 7) do caso que o usuário pode ver (autor/destinatário/broadcast).
+    for (const n of InternalChatService.forThread(orgId, userId, cid)) {
+      events.push({ stage: "nota", at: n.created_at, source: "note", title: n.body, detail: n.to_user_id ? "nota direcionada" : "nota do caso" });
     }
 
     events.sort((x, y) => (Date.parse(x.at || "") || 0) - (Date.parse(y.at || "") || 0));

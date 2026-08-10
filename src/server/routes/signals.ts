@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
+import { SignalCorrelationService } from "../SignalCorrelationService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import db from "../db.js";
@@ -25,6 +26,16 @@ router.get("/attention", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = req.query?.limit ? Number(req.query.limit) : undefined;
   res.json(BusinessSignalService.attention(orgId, { limit }));
+});
+
+// PRD 2 F3.1 — GET /api/signals/correlations — situações: sinais abertos do
+// MESMO sujeito agrupados (confiança alta), derivados sobre o ledger. Evidência
+// individual preservada (o cluster referencia os signalIds).
+router.get("/correlations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const windowHours = req.query?.windowHours ? Number(req.query.windowHours) : undefined;
+  res.json(SignalCorrelationService.clusters(orgId, { windowHours }));
 });
 
 // POST /api/signals/refresh — deriva e publica os sinais financeiros (sob demanda, idempotente).

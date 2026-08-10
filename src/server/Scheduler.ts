@@ -802,6 +802,8 @@ export class Scheduler {
     // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
     try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
     try { this.churnRiskPass(); } catch (e: any) { console.error('[Scheduler] churn-risk detector F4.1 falhou', e?.message); }
+    // ADR-159 F5 — progressive autonomy (propõe elevação por evidência; nunca aplica).
+    await this.progressiveAutonomyPass().catch(e => console.error('[Scheduler] progressive autonomy F5 falhou', e));
     // ADR-158 F4 — auto-disparo sinal→processo. DEPOIS dos detectores (churn/
     // cobrança) pra rotear os sinais recém-publicados neste tick. Opt-in duplo.
     await this.signalAutoTriggerPass().catch(e => console.error('[Scheduler] auto-disparo sinal→processo F4 falhou', e));
@@ -846,6 +848,20 @@ export class Scheduler {
     } catch (e) {
       console.error('[Scheduler] churn-risk falhou', e);
     }
+  }
+
+  /**
+   * ADR-159 F5 (D5) — progressive autonomy. Pra cada org opt-in
+   * (`progressive_autonomy_enabled=1`) varre o histórico e PROPÕE (nunca aplica)
+   * elevar a autonomia quando a evidência é forte. Só publica sinal pro dono
+   * confirmar. Best-effort. Import dinâmico pra quebrar ciclo.
+   */
+  static async progressiveAutonomyPass() {
+    try {
+      const { ProgressiveAutonomyService } = await import("./ProgressiveAutonomyService.js");
+      const r = ProgressiveAutonomyService.runAll();
+      if (r.proposed > 0) console.info(`[Autonomy F5] progressive autonomy: ${r.orgs} org(s), ${r.proposed} proposta(s) de elevação.`);
+    } catch (e: any) { console.error("[Autonomy F5] progressiveAutonomyPass falhou", e?.message); }
   }
 
   /**

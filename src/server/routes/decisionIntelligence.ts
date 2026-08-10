@@ -251,4 +251,22 @@ router.get("/metrics", (req: AuthRequest, res): any => {
   res.json(DecisionMetricsService.summary(orgId, { days: Number.isFinite(days as number) ? days : undefined }));
 });
 
+// ADR-159 F5 (D5) — progressive autonomy: propostas de elevação (a IA propõe; o
+// humano confirma). GET lista as abertas; POST /:id/accept aplica (exige motivo).
+router.get("/autonomy-proposals", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { ProgressiveAutonomyService } = await import("../ProgressiveAutonomyService.js");
+  res.json({ proposals: ProgressiveAutonomyService.listProposals(orgId) });
+});
+
+router.post("/autonomy-proposals/:id/accept", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { ProgressiveAutonomyService } = await import("../ProgressiveAutonomyService.js");
+  try {
+    res.json(ProgressiveAutonomyService.accept(orgId, req.params.id, { actorId: req.user?.userId, reason: req.body?.reason }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

@@ -56,15 +56,34 @@ export class SignalProcessRouterService {
     "churn:churn_risk_high": { processType: "sales_recovery_v1", riskLevel: "medium" },
     // Promessa de pagamento quebrada → inicia o processo de cobrança do recebível.
     "collection:promise_broken": { processType: "receivable_collection_v1", riskLevel: "high" },
+    // PRD 2 F8 (§72) — oportunidades paradas → Recuperação Comercial (playbook maduro).
+    "sales:stalled_opportunities": { processType: "sales_recovery_v1", riskLevel: "medium" },
   };
 
-  /** Domínios distintos presentes no mapa (pra varrer só o que interessa). */
-  private static mappedDomains(): string[] {
-    return [...new Set(Object.keys(this.TRIGGER_MAP).map((k) => k.split(":")[0]))];
+  // PRD 2 F8 (§41-42) — allowlist de processos MADUROS. Um sinal SEM mapeamento
+  // explícito pode rotear pelo `recommendedProcessType` que seu DETECTOR declarou
+  // (F4.2) — mas SOMENTE se o processo estiver aqui. Ampliar autonomia de forma
+  // segura = (a) adicionar linha no TRIGGER_MAP OU (b) marcar um processo como
+  // maduro aqui. Nunca "qualquer sinal → qualquer processo".
+  private static readonly MATURE_PROCESSES = new Set(["sales_recovery_v1", "receivable_collection_v1"]);
+
+  private static severityToRisk(severity: string): string {
+    const s = String(severity || "").toLowerCase();
+    return s === "critical" || s === "risk" ? "high" : s === "attention" ? "medium" : "low";
   }
 
-  private static ruleFor(domain: string, signalType: string): TriggerRule | null {
-    return this.TRIGGER_MAP[`${domain}:${signalType}`] || null;
+  /**
+   * Resolve a regra de roteamento de um sinal: (1) mapa EXPLÍCITO por
+   * domain:signal_type; senão (2) o `recommendedProcessType` que o detector
+   * declarou na evidência (F4.2), desde que seja um processo MADURO (allowlist).
+   */
+  private static resolveRule(sig: any): TriggerRule | null {
+    const explicit = this.TRIGGER_MAP[`${sig.domain}:${sig.signal_type}`];
+    if (explicit) return explicit;
+    let rp: string | null = null;
+    try { rp = (typeof sig.evidence === "object" ? sig.evidence : JSON.parse(sig.evidence_json || "{}"))?.recommendedProcessType || null; } catch { rp = null; }
+    if (rp && this.MATURE_PROCESSES.has(rp)) return { processType: rp, riskLevel: this.severityToRisk(sig.severity) };
+    return null;
   }
 
   /**
@@ -93,13 +112,14 @@ export class SignalProcessRouterService {
 
     const limit = Number(opts.limit) > 0 ? Number(opts.limit) : 100;
     let budget = limit;
-    for (const domain of this.mappedDomains()) {
-      if (budget <= 0) break;
-      const signals = BusinessSignalService.list(orgId, { status: "open", domain });
+    // F8 — varre TODOS os sinais abertos (o `resolveRule` decide: mapa explícito
+    // OU recommendedProcessType maduro). `list` já limita a 200 + ordena.
+    {
+      const signals = BusinessSignalService.list(orgId, { status: "open" });
       for (const sig of signals) {
         if (budget <= 0) break;
-        const rule = this.ruleFor(sig.domain, sig.signal_type);
-        if (!rule) continue; // sinal do domínio mas tipo não-mapeado: ignora
+        const rule = this.resolveRule(sig);
+        if (!rule) continue; // não-mapeado e sem processo maduro recomendado: ignora
         budget--;
         if (opts.dryRun) {
           out.previews.push({ signalId: sig.id, domain: sig.domain, signalType: sig.signal_type, processType: rule.processType });
@@ -137,7 +157,7 @@ export class SignalProcessRouterService {
     const sig = db.prepare(`SELECT * FROM business_signals WHERE id = ? AND organization_id = ?`).get(signalId, orgId) as any;
     if (!sig) { out.skipped.push({ signalId, signalType: "?", reason: "sinal não encontrado" }); return out; }
     if (sig.status !== "open") { out.skipped.push({ signalId, signalType: sig.signal_type, reason: `sinal não está aberto (${sig.status})` }); return out; }
-    const rule = this.ruleFor(sig.domain, sig.signal_type);
+    const rule = this.resolveRule(sig);
     if (!rule) { out.skipped.push({ signalId, signalType: sig.signal_type, reason: "sinal não mapeado" }); return out; }
     if (opts.dryRun) { out.previews.push({ signalId, domain: sig.domain, signalType: sig.signal_type, processType: rule.processType }); return out; }
     try {

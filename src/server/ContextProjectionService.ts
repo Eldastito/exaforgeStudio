@@ -70,6 +70,17 @@ export class ContextProjectionService {
   }
 
   /**
+   * O usuário pode ver itens de um domínio de negócio? Reusado pela Smart Inbox
+   * e pelas threads. Domínio sem malha sensível (operacional) → visível.
+   */
+  static canSeeDomain(orgId: string, user: any, domain: string | null | undefined): boolean {
+    if (!domain) return true;
+    const mod = DOMAIN_MODULE[domain];
+    if (!mod) return true;
+    return PermissionService.levelFor(orgId, user, mod) !== "none";
+  }
+
+  /**
    * Projeta o snapshot canônico pro escopo do usuário. Retorna a cópia projetada
    * + manifesto (o que caiu e o que foi redigido). Não muta o input.
    */

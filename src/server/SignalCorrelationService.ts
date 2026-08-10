@@ -44,15 +44,43 @@ export interface SignalCluster {
   lastDetectedAt: string | null;
 }
 
+// F3.3 — elo de confiança MÉDIA ("possivelmente relacionado", §18): o MESMO tipo
+// de sinal em SUJEITOS DISTINTOS na janela (um padrão — ex.: stockout em 3 SKUs).
+// NÃO colapsa automaticamente; é uma dica pra investigação.
+export interface SignalRelated {
+  key: string;
+  confidence: "medium";
+  domain: string;
+  signalType: string;
+  subjectType: string | null;
+  subjectIds: string[];
+  evidenceCount: number;             // sujeitos DISTINTOS
+  maxSeverity: string;
+  representativeImpact: { amount: number | null; unit: string | null };
+  signalIds: string[];
+  firstDetectedAt: string | null;
+  lastDetectedAt: string | null;
+}
+
+function repImpact(sigs: any[]): { amount: number | null; unit: string | null } {
+  let rep: { amount: number | null; unit: string | null } = { amount: null, unit: null };
+  for (const s of sigs) {
+    if (s.impact_amount == null) continue;
+    if (rep.amount == null || Math.abs(Number(s.impact_amount)) > Math.abs(rep.amount)) rep = { amount: Number(s.impact_amount), unit: s.impact_unit ?? null };
+  }
+  return rep;
+}
+
 export class SignalCorrelationService {
   /**
    * Clusters de confiança ALTA: sinais abertos do MESMO sujeito, na janela.
    * `minEvidence` (≥2) evita chamar 1 sinal solto de "situação".
    */
-  static clusters(orgId: string, opts: { windowHours?: number; minEvidence?: number; now?: number } = {}): { generatedAt: string; total: number; clusters: SignalCluster[] } {
+  static clusters(orgId: string, opts: { windowHours?: number; minEvidence?: number; minRelated?: number; now?: number } = {}): { generatedAt: string; total: number; clusters: SignalCluster[]; relatedTotal: number; related: SignalRelated[] } {
     const now = opts.now || Date.now();
     const windowMs = Math.max(1, opts.windowHours ?? 72) * 3600e3;
     const minEvidence = Math.max(2, opts.minEvidence ?? 2);
+    const minRelated = Math.max(2, opts.minRelated ?? 3); // padrão precisa de ≥3 sujeitos (§25)
 
     const rows = db.prepare(
       `SELECT id, domain, signal_type, severity, impact_amount, impact_unit, correlation_id, subject_type, subject_id, detected_at
@@ -80,11 +108,7 @@ export class SignalCorrelationService {
       if (inWindow.length < minEvidence) continue;
 
       // Impacto representativo: maior |amount| na unidade dominante (nunca soma).
-      let rep: { amount: number | null; unit: string | null } = { amount: null, unit: null };
-      for (const s of inWindow) {
-        if (s.impact_amount == null) continue;
-        if (rep.amount == null || Math.abs(Number(s.impact_amount)) > Math.abs(rep.amount)) rep = { amount: Number(s.impact_amount), unit: s.impact_unit ?? null };
-      }
+      const rep = repImpact(inWindow);
 
       const domains = [...new Set(inWindow.map((s) => s.domain))];
       const signalTypes = [...new Set(inWindow.map((s) => s.signal_type))];
@@ -102,6 +126,33 @@ export class SignalCorrelationService {
 
     // Ordena por severidade e depois por nº de evidências (situação mais "corroborada").
     clusters.sort((a, b) => (SEV_RANK[a.maxSeverity] ?? 3) - (SEV_RANK[b.maxSeverity] ?? 3) || b.evidenceCount - a.evidenceCount);
-    return { generatedAt: new Date(now).toISOString(), total: clusters.length, clusters };
+
+    // F3.3 — confiança MÉDIA: o MESMO (domain, signal_type) em SUJEITOS DISTINTOS
+    // na janela = "possivelmente relacionado" (um padrão). Elo fraco, NÃO colapsa
+    // (§18: só a alta agrupa automático). Exposto pra a UI investigar.
+    const fam = new Map<string, any[]>();
+    for (const r of rows) {
+      const key = `${r.domain}:${r.signal_type}`;
+      (fam.get(key) || fam.set(key, []).get(key)!).push(r);
+    }
+    const related: SignalRelated[] = [];
+    for (const [key, sigs] of fam) {
+      const latest = Math.max(...sigs.map((s) => Date.parse(s.detected_at || "") || 0), 0);
+      const inWindow = sigs.filter((s) => latest - (Date.parse(s.detected_at || "") || 0) <= windowMs);
+      const subjectIds = [...new Set(inWindow.map((s) => s.subject_id))];
+      if (subjectIds.length < minRelated) continue; // pattern precisa de ≥minRelated sujeitos DISTINTOS
+      const dets = inWindow.map((s) => s.detected_at).filter(Boolean).sort();
+      related.push({
+        key, confidence: "medium", domain: inWindow[0].domain, signalType: inWindow[0].signal_type,
+        subjectType: inWindow[0].subject_type ?? null, subjectIds,
+        evidenceCount: subjectIds.length,
+        maxSeverity: inWindow.map((s) => String(s.severity)).reduce((a, b) => sevMax(a, b), "info"),
+        representativeImpact: repImpact(inWindow), signalIds: inWindow.map((s) => s.id),
+        firstDetectedAt: dets[0] || null, lastDetectedAt: dets[dets.length - 1] || null,
+      });
+    }
+    related.sort((a, b) => (SEV_RANK[a.maxSeverity] ?? 3) - (SEV_RANK[b.maxSeverity] ?? 3) || b.evidenceCount - a.evidenceCount);
+
+    return { generatedAt: new Date(now).toISOString(), total: clusters.length, clusters, relatedTotal: related.length, related };
   }
 }

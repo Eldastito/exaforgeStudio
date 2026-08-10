@@ -8260,6 +8260,15 @@ const initDb = () => {
   // Aditivo PURO: linhas legadas ficam NULL. NÃO reordenar.
   try { db.exec(`ALTER TABLE action_execution_log ADD COLUMN correlation_id TEXT`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_action_execution_log_corr ON action_execution_log(organization_id, correlation_id)`); } catch(e){}
+  // ADR-159 F2.2 (D1) — reencaminha o envio T2/T3 da cadência de cobrança
+  // (hoje efeito externo DIRETO em CollectionCadenceService) PELO choke-point
+  // (CommandExecutorService.execute). Opt-in (convenção nº 10) EM CIMA de
+  // `collection_cadence_enabled`: com a flag, cada follow-up vira uma ação
+  // governada (whatsapp_send) auditada em action_execution_log com correlationId
+  // + guardas. Default 0 → orgs existentes seguem no envio direto (0 regressão).
+  // Rotear NÃO amplia autonomia (a cadência já envia autonomamente hoje) — só
+  // adiciona audit/idempotência/governança. NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_cadence_via_executor_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

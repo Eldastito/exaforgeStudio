@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point: idempotência real + correlationId no audit) ENTREGUE**; F2.2+ (reroutes dos bypasses) e F3..F6 planejadas.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence pelo executor, sob flag) ENTREGUE**; F2.3+ (demais reroutes) e F3..F6 planejadas.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -33,7 +33,9 @@ Todo efeito externo (mensagem, cobrança, escrita em sistema de terceiro) passa 
 - **RN-159-3 (correlationId no audit).** `action_execution_log` ganhou `correlation_id` (aditivo) populado de `decision_actions.correlation_id` em TODA tentativa (execute/prepare/rejeição) — o fio do ciclo ADR-158 agora atravessa também a ponta de execução.
 - **Números:** 1 coluna + 1 índice aditivos + guard de idempotência + correlationId em todas as INSERTs do log + 1 suíte (`test:choke-point-hardening`, 16 checks). 0 breaking changes.
 
-**Falta na F2 (reroutes — F2.2+):** reencaminhar os bypasses genuínos (`CollectionCadenceService` T2/T3, `CollectionPromiseService`, `CollectionResendPixService`, `SalesRecoveryPlaybook`, `ProspectExecutionService`) para o executor sob flag opt-in, reconciliando a idempotência própria de cada um; extrair `AsaasService.createPixCharge` público (hoje duplicado); rate-limit no ponto único.
+**F2.2 — ENTREGUE (2026-08-10) — reroute do CollectionCadence (headline bypass).** O envio T2/T3 da cadência de cobrança (hoje `MessageProviderService.sendMessage` DIRETO, fora do executor) passa a rodar PELO choke-point sob a flag opt-in `collection_cadence_via_executor_enabled` (default 0, em cima de `collection_cadence_enabled`). Com a flag, `sendAttempt` — depois de reservar a linha idempotente (`collection_followup_attempts`) — cunha uma **ação de follow-up distinta** (`command_type='whatsapp_send'`, reusa o handler governado existente), herda o `correlationId` da ação âncora, semeia a política idempotente (`agent_policies` collection/collection_followup, execute/approved_execution) e chama `CommandExecutorService.execute`. Ação NOVA (não reexecuta a âncora, que o guard F2.1 recusaria). Rotear **não amplia autonomia** — a cadência já envia autonomamente hoje; só adiciona audit (`action_execution_log` com correlationId)/idempotência/guardas. Flag OFF = envio direto de hoje (0 regressão). Falha reverte a reserva + publica sinal + retry no tick seguinte, igual ao pré-F2.2. **Números:** 1 flag aditiva + reroute em `CollectionCadenceService` (reuso do handler `whatsapp_send`) + 1 suíte (`test:collection-cadence-choke-point`, 19 checks). 0 breaking changes.
+
+**Falta na F2 (reroutes — F2.3+):** reencaminhar os demais bypasses (`CollectionPromiseService`, `CollectionResendPixService`, `SalesRecoveryPlaybook`, `ProspectExecutionService`) sob a mesma flag/padrão; extrair `AsaasService.createPixCharge` público (hoje duplicado); rate-limit no ponto único.
 
 ### D2 — Correção dos riscos de aprovação (prioridade de segurança)
 
@@ -76,7 +78,8 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 | --- | --- | --- |
 | **F1** | D2 — correção do two-step + aprovação via RBAC granular | **ENTREGUE (segurança)** |
 | **F2.1** | D1 — endurecimento do choke-point (idempotência real anti-duplo-efeito + correlationId no `action_execution_log`) | **ENTREGUE** |
-| F2.2+ | D1 — reencaminhar bypasses (CollectionCadence T2/T3 + handlers) sob flag; `AsaasService.createPixCharge` público; rate-limit | alta |
+| **F2.2** | D1 — reroute do `CollectionCadence` T2/T3 pelo executor (flag `collection_cadence_via_executor_enabled`; follow-up governado herda correlationId) | **ENTREGUE** |
+| F2.3+ | D1 — demais reroutes (CollectionPromise/ResendPix/SalesRecovery/ProspectExecution); `AsaasService.createPixCharge` público; rate-limit | alta |
 | F3 | D4 — bandas valor→papel + estado "escalonar" | média |
 | F4 | D3 — RBAC default-deny faseado | média |
 | F5 | D5 — progressive autonomy (proposta por evidência) | média |

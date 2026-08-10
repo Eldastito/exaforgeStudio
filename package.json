@@ -338,6 +338,7 @@
     "test:signal-ttl": "tsx scripts/test-signal-ttl.ts",
     "test:signal-process-spine": "tsx scripts/test-signal-process-spine.ts",
     "test:signal-correlation": "tsx scripts/test-signal-correlation.ts",
+    "test:attention-correlation": "tsx scripts/test-attention-correlation.ts",
     "test:decision-actions": "tsx scripts/test-decision-actions.ts",
     "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts",
     "test:execution-trace": "tsx scripts/test-execution-trace.ts",

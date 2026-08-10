@@ -829,6 +829,7 @@ export class Scheduler {
     await this.anomalyDetectorPass().catch(e => console.error('[Scheduler] anomaly detector F6 falhou', e));
     // ADR-158 F4 — auto-disparo sinal→processo. DEPOIS dos detectores (churn/
     // cobrança) pra rotear os sinais recém-publicados neste tick. Opt-in duplo.
+    await this.signalTtlSweepPass().catch(e => console.error('[Scheduler] TTL sweep de sinais F2.2 falhou', e));
     await this.signalAutoTriggerPass().catch(e => console.error('[Scheduler] auto-disparo sinal→processo F4 falhou', e));
     try { this.aiQuotaPass(); } catch (e: any) { console.error('[Scheduler] ai-quota sinais F1.3 falhou', e?.message); }
     // ADR-153 F7.7 — expira cooldowns vencidos (dismissed → expired) no ledger
@@ -911,6 +912,26 @@ export class Scheduler {
    * governada pelo CommandExecutor. Best-effort: erro numa org não trava as
    * outras. Import dinâmico pra quebrar ciclo.
    */
+  // PRD 2 F2.2 — enforcement do TTL: fecha (status='expired') os sinais abertos
+  // cujo expires_at passou, em toda org que tenha algum. Roda ANTES do auto-trigger
+  // pra um sinal expirado nunca iniciar processo. Best-effort, isolado por org.
+  static async signalTtlSweepPass() {
+    try {
+      const rows = db.prepare(`
+        SELECT DISTINCT organization_id AS orgId FROM business_signals
+         WHERE status = 'open' AND expires_at IS NOT NULL AND datetime(expires_at) <= datetime('now')
+      `).all() as any[];
+      if (!rows.length) return;
+      const { BusinessSignalService } = await import("./BusinessSignalService.js");
+      let total = 0;
+      for (const r of rows) {
+        try { total += BusinessSignalService.expireStale(r.orgId).expired; }
+        catch (e) { console.error("[Radar F2.2] TTL sweep falhou pra org", r.orgId, e); }
+      }
+      if (total > 0) console.info(`[Radar F2.2] TTL sweep: ${total} sinal(is) expirado(s) em ${rows.length} org(s).`);
+    } catch (e: any) { console.error("[Radar F2.2] signalTtlSweepPass falhou", e?.message); }
+  }
+
   static async signalAutoTriggerPass() {
     try {
       const rows = db.prepare(`

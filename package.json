@@ -335,6 +335,7 @@
     "test:business-snapshot": "tsx scripts/test-business-snapshot.ts",
     "test:business-signals": "tsx scripts/test-business-signals.ts",
     "test:signal-contract-hardening": "tsx scripts/test-signal-contract-hardening.ts",
+    "test:signal-ttl": "tsx scripts/test-signal-ttl.ts",
     "test:decision-actions": "tsx scripts/test-decision-actions.ts",
     "test:outcome-measurement": "tsx scripts/test-outcome-measurement.ts",
     "test:execution-trace": "tsx scripts/test-execution-trace.ts",

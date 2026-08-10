@@ -55,7 +55,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | ~~**Enforcement de TTL**~~ | ✅ **F2.2 ENTREGUE** — filtro corrigido (`datetime(expires_at)`) + sweep `expireStale`→`expired` (Scheduler `signalTtlSweepPass`, antes do auto-trigger). `test:signal-ttl` (9 checks) | ~~F2~~ ✅ |
 | **Recorrência/reopen** | Republish nunca reabre resolvido (§55). Recorrência precisa de novo ciclo com histórico | F2 |
 | ~~**`process_instances.correlation_id`**~~ | ✅ **F2.3 ENTREGUE** — coluna+índice; `startFromSignal` propaga o correlation do sinal; thread (F6) costura o processo do router. `test:signal-process-spine` (7 checks) | ~~F2~~ ✅ |
-| **Goal-relevance no score** | `ImpactPrioritizationService` não consome `BusinessGoalService.progress` (§31) | F5 |
+| ~~**Goal-relevance no score**~~ | ✅ **F5 ENTREGUE** — boost multiplicativo (0 sem meta atrasada) via `BusinessGoalService.progress`; `goalRelevance`+`affectedGoal` na saída. `test:goal-aware-priority` (8 checks) | ~~F5~~ ✅ |
 | SLA + reversibility no score | §38 lista fatores ausentes no score atual | F7 |
 | Expansão do TRIGGER_MAP | Só 2 mapeamentos; expandir **conservador** (playbook maduro + policy) (§41-42) | F8 |
 | `recommendedProcessType` no sinal | Não existe; routing é 100% map-driven (§40) | F8 (opcional) |
@@ -92,7 +92,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA4 correlação sem destruir evidência | ✅ **F3.1 alta + F3.2 surface + F3.3 média** — evidência sempre preservada | não regredir |
 | CA5 framework de anomalia | ✅ **F4.1+F4.2+F4.3** (primitivas+registry+1 detector migrado) | ✅ |
 | CA6 baseline | ✅ **primitiva em uso real (F4.3)** | ✅ |
-| CA7 goal-aware | 🟡 metas existem, não wired | F5 |
+| CA7 goal-aware | ✅ **F5 wired** (metas atrasadas boostam a prioridade) | ✅ |
 | CA8 impacto não inventado | ✅ `basis=estimate` + premises | reforçar em F6 |
 | CA9 sinais priorizados | ✅ `ImpactPrioritizationService` | F7 refina |
 | CA10 attention feed único | ✅ já é | não regredir |

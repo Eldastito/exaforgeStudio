@@ -8306,6 +8306,28 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN step_up_mfa_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN step_up_mfa_threshold_cents INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN anomaly_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-160 F4 (Onda A / D4) — modelo de objetivos/metas do negócio.
+  // Metas DEFINIDAS PELO DONO, por métrica (revenue/appointments/...), 1 meta
+  // vigente por métrica (UNIQUE org+metric, upsert). Guarda SÓ o alvo (intenção
+  // do dono) — a distância à meta (valor atual) é SEMPRE derivada por query do
+  // snapshot/analytics (RN-004), NUNCA um contador de progresso mutável aqui.
+  // Prior art avaliado (§54): `retail_store_quotas`/`retail_seller_quotas` são
+  // do varejo (loja/vendedor), assunto diferente de meta org-wide → tabela nova
+  // justificada. Inerte até o dono definir meta (tabela vazia = 0 regressão).
+  // NÃO reordenar (CREATE-then-ALTER estrito).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS business_goals (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      metric TEXT NOT NULL,
+      target_amount REAL NOT NULL,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(organization_id, metric)
+    );
+  `);
 };
 
 initDb();

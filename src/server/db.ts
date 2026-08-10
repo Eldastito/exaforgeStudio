@@ -8270,6 +8270,14 @@ const initDb = () => {
   // amplia autonomia (o dunning já envia autonomamente hoje) — só adiciona audit/
   // idempotência/governança. NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN collection_cadence_via_executor_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-159 F2.4 (D1) — reencaminha o envio de recuperação comercial
+  // (SalesRecoveryPlaybook.approve, hoje MessageProviderService.sendMessage
+  // direto) PELO choke-point via `CommandExecutorService.sendGovernedMessage`.
+  // Opt-in (convenção nº 10); default 0 = envio direto (0 regressão). Herda o
+  // correlationId da ação âncora (evidence.actionId, quando existe). Os guards
+  // (opt-out LGPD, ticket-state) e side-effects (touch/recordTouch/outcome/audit)
+  // ficam INTACTOS em volta — só o sink muda. NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_via_executor_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

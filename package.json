@@ -344,6 +344,7 @@
     "test:choke-point-hardening": "tsx scripts/test-choke-point-hardening.ts",
     "test:collection-cadence-choke-point": "tsx scripts/test-collection-cadence-choke-point.ts",
     "test:collection-family-choke-point": "tsx scripts/test-collection-family-choke-point.ts",
+    "test:sales-recovery-choke-point": "tsx scripts/test-sales-recovery-choke-point.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

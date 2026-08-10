@@ -54,6 +54,15 @@ export type RbacModule = (typeof RBAC_MODULES)[number];
 // legado, ligada só para contas validadas.
 export const FINANCE_MODULES = new Set(["financeiro", "saude_negocio", "empresa_proprietario"]);
 
+// ADR-159 F4 (D3) — módulos SENSÍVEIS para o default-deny faseado: dinheiro
+// (financeiro + pagamentos/cobrança/compras), administração (usuários/config) e
+// execução governada. Usuário SEM perfil só perde acesso a ESTES quando a org
+// liga `rbac_default_deny_enabled` — o resto segue no fallback legado.
+export const SENSITIVE_MODULES = new Set<string>([
+  ...FINANCE_MODULES,
+  "pagamentos", "cobranca", "compras", "usuarios", "configuracoes", "execucao",
+]);
+
 // 1º segmento da rota (/api/<seg>/...) → módulo RBAC. Espelha o
 // ModuleService.MODULE_BY_ROUTE, mas SÓ os segmentos cujo módulo é governado
 // pelo RBAC granular. Add-ons com gating próprio por papel (prospect/clinic/
@@ -210,8 +219,13 @@ export class PermissionService {
       const row = db.prepare(`SELECT level FROM role_permissions WHERE role_profile_id = ? AND module = ?`).get(profileId, module) as any;
       return (row?.level as Level) || "none";
     }
-    // Fallback legado: mapeia users.role para o template equivalente.
     const legacy = String(user?.role || "agent");
+    // ADR-159 F4 (D3) — default-deny FASEADO: org opt-in + módulo sensível +
+    // usuário SEM perfil resolvido → NEGA (em vez do fallback legado, que dava
+    // privilégio-por-omissão). O DONO nunca é negado (ele configura o sistema).
+    // Flag default 0 → comportamento pré-F4 preservado (0 regressão).
+    if (legacy !== "owner" && SENSITIVE_MODULES.has(module) && this.defaultDenyEnabled(orgId)) return "none";
+    // Fallback legado: mapeia users.role para o template equivalente.
     const spec = SYSTEM_PROFILES.find((s) => s.key === LEGACY_TO_SYSTEM[legacy]) || SYSTEM_PROFILES.find((s) => s.key === "atendente")!;
     return this.specLevel(spec, module);
   }
@@ -265,6 +279,54 @@ export class PermissionService {
   /** Liga/desliga o RBAC financeiro da organização. */
   static setFinanceRbac(orgId: string, enabled: boolean): void {
     db.prepare(`UPDATE organization_settings SET rbac_finance_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+  }
+
+  // ── ADR-159 F4 (D3) — RBAC default-deny faseado ──────────────────────────
+
+  /** O módulo é sensível ao default-deny (dinheiro/admin/execução/destrutivo)? */
+  static isSensitiveModule(module?: string | null): boolean {
+    return !!module && SENSITIVE_MODULES.has(module);
+  }
+
+  /** A org ligou o default-deny? (flag opt-in; default desligado = pré-F4). */
+  static defaultDenyEnabled(orgId?: string | null): boolean {
+    if (!orgId) return false;
+    try {
+      const r = db.prepare(`SELECT rbac_default_deny_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      return !!Number(r?.rbac_default_deny_enabled);
+    } catch { return false; }
+  }
+
+  /** Liga/desliga o default-deny da organização. */
+  static setDefaultDeny(orgId: string, enabled: boolean): void {
+    db.prepare(`UPDATE organization_settings SET rbac_default_deny_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+  }
+
+  /**
+   * RELATÓRIO DE IMPACTO do default-deny (observabilidade ANTES de virar a chave,
+   * D3). Quem PERDE acesso aos módulos sensíveis se a flag for ligada: usuários
+   * sem perfil resolvido e que não são o dono. Isolado por org.
+   */
+  static defaultDenyImpact(orgId: string): {
+    flagEnabled: boolean;
+    sensitiveModules: string[];
+    totalUsers: number;
+    usersWithoutProfile: number;
+    affectedUsers: number;
+    affected: Array<{ id: string; name: string | null; role: string | null }>;
+  } {
+    const users = db.prepare(`SELECT id, name, role, role_profile_id FROM users WHERE organization_id = ?`).all(orgId) as any[];
+    const noProfile = users.filter((u) => !u.role_profile_id);
+    // O dono nunca é negado — só conta quem realmente perderia acesso.
+    const affected = noProfile.filter((u) => String(u.role || "") !== "owner");
+    return {
+      flagEnabled: this.defaultDenyEnabled(orgId),
+      sensitiveModules: [...SENSITIVE_MODULES],
+      totalUsers: users.length,
+      usersWithoutProfile: noProfile.length,
+      affectedUsers: affected.length,
+      affected: affected.slice(0, 50).map((u) => ({ id: u.id, name: u.name ?? null, role: u.role ?? null })),
+    };
   }
 
   private static actionForMethod(method?: string): Action {

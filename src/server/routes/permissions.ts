@@ -60,6 +60,23 @@ router.put("/finance-rbac", requirePermission("usuarios", "write"), (req: AuthRe
   res.json({ ok: true, enabled });
 });
 
+// ADR-159 F4 (D3) — GET /api/permissions/default-deny — estado + RELATÓRIO DE
+// IMPACTO (quem perde acesso aos módulos sensíveis se a flag ligar). Observável
+// ANTES de virar a chave, pra o dono atribuir perfis primeiro.
+router.get("/default-deny", requirePermission("usuarios", "read"), (req: AuthRequest, res: Response): any => {
+  res.json(PermissionService.defaultDenyImpact(orgOf(req)));
+});
+
+// PUT /api/permissions/default-deny { enabled } — liga/desliga o default-deny.
+router.put("/default-deny", requirePermission("usuarios", "write"), (req: AuthRequest, res: Response): any => {
+  const orgId = orgOf(req);
+  const enabled = !!req.body?.enabled;
+  if (enabled) PermissionService.seedSystemProfiles(orgId); // perfis existem antes de endurecer
+  PermissionService.setDefaultDeny(orgId, enabled);
+  try { logAuthEvent(orgId, req.user?.userId, null, "RBAC_DEFAULT_DENY_TOGGLED", { enabled }); } catch { /* noop */ }
+  res.json({ ok: true, enabled });
+});
+
 // GET /api/permissions/profiles — lista de perfis com mapa de permissões + nº usuários.
 router.get("/profiles", requirePermission("usuarios", "read"), (req: AuthRequest, res: Response): any => {
   try { res.json({ profiles: PermissionService.listProfiles(orgOf(req)) }); }

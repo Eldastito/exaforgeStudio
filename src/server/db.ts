@@ -8375,6 +8375,34 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN input_type TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN attachments_json TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE falatu_inbox_items ADD COLUMN correlation_id TEXT`); } catch(e){}
+
+  // PRD 1 (Fala Tu) — Fase 2 (artefatos): tabela CANÔNICA de artefato (§15). Hoje
+  // cada módulo guardava anexo/PDF do seu jeito (clinical_encounter_attachments,
+  // /media/reports) sem um registro único com hash/expiry/classificação/permissão.
+  // Esta é a fonte de verdade dos artefatos entregáveis (relatório, export,
+  // recibo, documento) — arquivo no disco privado, metadados aqui. `correlation_id`
+  // liga o artefato à interação que o produziu (fundação PRD 1). `purged_at` é a
+  // retenção LGPD (soft). NÃO retornar path interno — só id + URL assinada.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      created_by TEXT,
+      kind TEXT NOT NULL,                              -- report|export|receipt|document|image|other
+      title TEXT,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      storage_key TEXT NOT NULL,                       -- {orgId}/{uuid}.{ext} sob private_media/artifacts
+      origin TEXT,                                     -- falatu|report|intake|...
+      classification TEXT NOT NULL DEFAULT 'internal', -- internal|sensitive|public
+      sha256 TEXT,
+      correlation_id TEXT,
+      expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      purged_at DATETIME
+    );
+  `);
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_artifacts_org ON artifacts (organization_id, created_at)`); } catch(e){}
 };
 
 initDb();

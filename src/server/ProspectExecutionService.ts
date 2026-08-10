@@ -51,22 +51,50 @@ export class ProspectExecutionService {
     let sentVia = "";
     let providerMessageId: string | null = null;
 
+    // ADR-159 F2.5 — com a flag, os 2 sinks passam PELO choke-point (auditado +
+    // guardas); sem ela, envio direto (0 regressão). Prospect não tem ação âncora
+    // nem correlationId — a ação governada enraíza uma cadeia nova (correlationId
+    // null). A ordenação "provedor confirma ANTES de status='sent'" é preservada:
+    // o executor LANÇA na falha, então setOutreachStatus só roda no sucesso.
+    const viaExecutor = Number((db.prepare(`SELECT COALESCE(prospect_via_executor_enabled,0) AS v FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.v) === 1;
+
     if (o.channel === "whatsapp") {
       const phone = onlyDigits(contact.phone);
       if (!phone) throw new Error("Contato sem telefone — não dá para enviar por WhatsApp.");
       const ch = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND provider IN (${WHATSAPP_PROVIDERS.map(() => "?").join(",")}) AND status = 'connected' ORDER BY created_at ASC LIMIT 1`)
         .get(orgId, ...WHATSAPP_PROVIDERS) as any;
       if (!ch) throw new Error("Nenhum canal de WhatsApp conectado. Conecte um canal em Configurações › Canais.");
-      // sendMessage agora devolve o id do provedor (wamid) como string.
-      const wamid = await MessageProviderService.sendMessage(ch.id, phone, o.body);
-      providerMessageId = (typeof wamid === "string" && wamid) ? wamid : null;
+      if (viaExecutor) {
+        const { CommandExecutorService } = await import("./CommandExecutorService.js");
+        providerMessageId = (await CommandExecutorService.sendGovernedMessage(orgId, {
+          domain: "prospect", actionType: "prospect_outreach_whatsapp",
+          title: "Prospecção — abordagem por WhatsApp",
+          channelId: ch.id, recipient: phone, message: o.body,
+          correlationId: null, createdBy: actorId || "prospect-runtime",
+        })) || null;
+      } else {
+        // sendMessage agora devolve o id do provedor (wamid) como string.
+        const wamid = await MessageProviderService.sendMessage(ch.id, phone, o.body);
+        providerMessageId = (typeof wamid === "string" && wamid) ? wamid : null;
+      }
       sentVia = "whatsapp";
     } else if (o.channel === "email") {
       const email = String(contact.email || "").trim();
       if (!email) throw new Error("Contato sem e-mail — não dá para enviar por e-mail.");
-      const r = await GoogleOAuthService.gmailSend(orgId, email, o.subject || "Contato comercial", o.body);
-      if ((r as any)?.error) throw new Error(`Falha no envio do e-mail: ${(r as any).error}`);
-      providerMessageId = String((r as any)?.id || "") || null;
+      if (viaExecutor) {
+        const { CommandExecutorService } = await import("./CommandExecutorService.js");
+        providerMessageId = (await CommandExecutorService.dispatchGoverned(orgId, {
+          domain: "prospect", actionType: "prospect_outreach_email",
+          title: "Prospecção — abordagem por e-mail",
+          commandType: "gmail_send",
+          commandPayload: { to: email, subject: o.subject || "Contato comercial", body: o.body },
+          correlationId: null, createdBy: actorId || "prospect-runtime",
+        })) || null;
+      } else {
+        const r = await GoogleOAuthService.gmailSend(orgId, email, o.subject || "Contato comercial", o.body);
+        if ((r as any)?.error) throw new Error(`Falha no envio do e-mail: ${(r as any).error}`);
+        providerMessageId = String((r as any)?.id || "") || null;
+      }
       sentVia = "email";
     } else {
       throw new Error("Canal manual (ligação/LinkedIn): execute fora do sistema e marque como enviada na fila.");

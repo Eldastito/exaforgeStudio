@@ -8278,6 +8278,12 @@ const initDb = () => {
   // (opt-out LGPD, ticket-state) e side-effects (touch/recordTouch/outcome/audit)
   // ficam INTACTOS em volta — só o sink muda. NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_recovery_via_executor_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-159 F2.5 (D1) — reencaminha os 2 sinks de prospecção
+  // (ProspectExecutionService.sendOutreach: WhatsApp + Gmail, hoje diretos) PELO
+  // choke-point. WhatsApp reusa `sendGovernedMessage`; e-mail usa o handler NOVO
+  // `gmail_send` via `dispatchGoverned`. Sem âncora → correlationId nova raiz.
+  // Opt-in (nº 10); default 0 = envio direto (0 regressão). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN prospect_via_executor_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

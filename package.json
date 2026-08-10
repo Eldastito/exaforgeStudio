@@ -364,6 +364,7 @@
     "test:falatu-context-projection": "tsx scripts/test-falatu-context-projection.ts",
     "test:artifacts": "tsx scripts/test-artifacts.ts",
     "test:falatu-report": "tsx scripts/test-falatu-report.ts",
+    "test:xlsx": "tsx scripts/test-xlsx.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

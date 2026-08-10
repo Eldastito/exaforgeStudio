@@ -361,6 +361,7 @@
     "test:falatu-porta-whatsapp": "tsx scripts/test-falatu-porta-whatsapp.ts",
     "test:falatu-porta-rag": "tsx scripts/test-falatu-porta-rag.ts",
     "test:falatu-envelope": "tsx scripts/test-falatu-envelope.ts",
+    "test:falatu-context-projection": "tsx scripts/test-falatu-context-projection.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

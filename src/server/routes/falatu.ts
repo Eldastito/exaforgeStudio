@@ -10,6 +10,7 @@ import { FalaTuBriefingDigestService } from "../FalaTuBriefingDigestService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { FalatuRefundService, FalatuRefundError } from "../FalatuRefundService.js";
 import { FalatuSaveOfferService, CANCELLATION_REASONS } from "../FalatuSaveOfferService.js";
+import { ContextEngineService as FalaTuContextEngine } from "../ContextEngineService.js";
 
 // FalaTu (ADR-151) — captura multimodal "Fala → Faz → Confere". Fatia 2: o
 // gate deixou de ser requireMasterAdmin e virou (a) flag opt-in da org
@@ -175,6 +176,15 @@ router.post("/signals/sweep", (req: AuthRequest, res): any => {
 });
 
 // ── Entrega do briefing por WhatsApp (Fatia 6): consome os sinais acima ──
+
+// PRD 1 (segurança, P1) — contexto empresarial FILTRADO POR PAPEL. Devolve o
+// contexto canônico já projetado pro que ESTE usuário pode ver (§30/§31, CA13):
+// domínios sem permissão caem, campos sensíveis são redigidos, e a narrativa
+// org-wide só vai pra visão ampla. O `_manifest` (dropped/redacted) alimenta a
+// explicabilidade (§49). É a fundação de qualquer business-query do Fala Tu.
+router.get("/context", (req: AuthRequest, res): any => {
+  res.json(FalaTuContextEngine.buildForUser(req.organizationId!, req.user));
+});
 
 // ADR-160 F5/F6/F7 — porta I/O: estado/controle dos bridges (opt-in que faz o
 // Fala Tu escrever no domínio CANÔNICO ao confirmar — tasks→TaskService,

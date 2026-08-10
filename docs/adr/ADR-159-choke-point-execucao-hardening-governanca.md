@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; F2.5 (Prospect + `gmail_send`) e F3..F6 planejadas.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; F3..F6 planejadas.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -39,7 +39,11 @@ Todo efeito externo (mensagem, cobrança, escrita em sistema de terceiro) passa 
 
 **F2.4 — ENTREGUE (2026-08-10) — reroute do SalesRecoveryPlaybook.** O envio da mensagem de recuperação comercial (`approve`, hoje `MessageProviderService.sendMessage` direto) passa PELO choke-point via `CommandExecutorService.sendGovernedMessage` sob a flag `sales_recovery_via_executor_enabled` (default 0 = envio direto, 0 regressão). Herda o correlationId da âncora `evidence.actionId` (quando existe). **Swap cirúrgico de uma linha** — os guards (opt-out LGPD Art.8 §5, ticket-state/funil) e side-effects (touch de `tickets.updated_at`, `recordTouch`, `OutcomeMeasurement`, audit) ficam INTACTOS em volta; o `catch` existente trata a exceção do executor idêntico ao envio direto (publica `sales_recovery_send_failed` + `kept_open`). **Números:** 1 flag aditiva + swap em `approve` + 1 suíte (`test:sales-recovery-choke-point`, 15 checks). 0 breaking changes.
 
-**Falta na F2 (reroutes — F2.5+):** `ProspectExecutionService` (sem âncora + 2 sinks, o de e-mail exige handler `gmail_send` novo — F2.5); extrair `AsaasService.createPixCharge` público (hoje duplicado); rate-limit no ponto único.
+**F2.5 — ENTREGUE (2026-08-10) — reroute do ProspectExecution (fecha os reroutes do D1).** `sendOutreach` tem DOIS sinks diretos (WhatsApp + Gmail) e nenhuma ação âncora. Sob a flag `prospect_via_executor_enabled` ambos passam PELO choke-point: WhatsApp via `sendGovernedMessage`; e-mail via `dispatchGoverned` + o **handler NOVO `gmail_send`** (embrulha `GoogleOAuthService.gmailSend`, payload `{to, subject, body}`, `externalRef=id`; erro `{error}` vira JobQueueError classificado). O helper foi **generalizado**: `dispatchGoverned(commandType, commandPayload)` é a costura genérica; `sendGovernedMessage` virou açúcar pra `whatsapp_send` (callers F2.2–F2.4 inalterados). Sem âncora → correlationId enraíza cadeia nova. A ordenação "provedor confirma ANTES de status='sent'" é preservada (executor lança na falha → status não avança). **Números:** 1 flag + 1 handler novo (`gmail_send`) + generalização do helper + reroute dos 2 sinks + 1 suíte (`test:prospect-choke-point`, 12 checks). 0 breaking changes.
+
+**D1 — reroutes dos bypasses nomeados na §Contexto: COMPLETOS** (CollectionCadence, CollectionPromise, ResendPix, SalesRecovery, ProspectExecution). Todos governados via o helper único `CommandExecutorService.dispatchGoverned`, sob flags opt-in, auditados com correlationId.
+
+**Falta no D1 (polimento):** extrair `AsaasService.createPixCharge` público (hoje duplicado em 2 handlers); rate-limit no ponto único (greenfield). Podem virar F2.6 ou entrar noutra onda.
 
 ### D2 — Correção dos riscos de aprovação (prioridade de segurança)
 
@@ -85,7 +89,8 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 | **F2.2** | D1 — reroute do `CollectionCadence` T2/T3 pelo executor (flag `collection_cadence_via_executor_enabled`; follow-up governado herda correlationId) | **ENTREGUE** |
 | **F2.3** | D1 — reroute da família cobrança (`CollectionPromise` + `ResendPix`) via helper compartilhado `CommandExecutorService.sendGovernedMessage`; refactor da cadência pra delegar | **ENTREGUE** |
 | **F2.4** | D1 — reroute do `SalesRecoveryPlaybook.approve` (WhatsApp, guard-heavy) via `sendGovernedMessage`; guards LGPD + side-effects intactos | **ENTREGUE** |
-| F2.5+ | D1 — `ProspectExecution` + handler `gmail_send` novo; `AsaasService.createPixCharge` público; rate-limit | alta |
+| **F2.5** | D1 — reroute do `ProspectExecution` (2 sinks) + handler `gmail_send` novo + generalização do helper (`dispatchGoverned`) | **ENTREGUE — fecha os reroutes do D1** |
+| F2.6? | D1 (polimento) — `AsaasService.createPixCharge` público; rate-limit no ponto único | média |
 | F3 | D4 — bandas valor→papel + estado "escalonar" | média |
 | F4 | D3 — RBAC default-deny faseado | média |
 | F5 | D5 — progressive autonomy (proposta por evidência) | média |

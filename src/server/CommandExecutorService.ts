@@ -302,23 +302,24 @@ export class CommandExecutorService {
   }
 
   /**
-   * ADR-159 F2.x (D1) — envia uma mensagem PELO choke-point (o oposto de um
-   * bypass direto a `MessageProviderService.sendMessage`). Costura ÚNICA
-   * reusada por todos os reroutes (cadência F2.2, promise/resend-pix F2.3, ...):
-   * cunha uma ação governada (`whatsapp_send`, reusa o handler existente),
-   * semeia a política idempotente da (domain, actionType), herda o correlationId
-   * da âncora (fio ADR-158) e chama `execute` — que aplica G1/G2/G3, audita em
-   * `action_execution_log` com correlationId (RN-159-3) e garante idempotência.
+   * ADR-159 F2.x (D1) — dispara um efeito externo PELO choke-point (o oposto de
+   * um bypass direto ao provider). Costura ÚNICA e GENÉRICA reusada por todos os
+   * reroutes (cobrança F2.2/F2.3, recuperação F2.4, prospecção F2.5 — whatsapp OU
+   * gmail): cunha uma ação governada do `commandType` dado (reusa o handler
+   * registrado), semeia a política idempotente da (domain, actionType), herda o
+   * correlationId da âncora (fio ADR-158, quando o caller o passa) e chama
+   * `execute` — que aplica G1/G2/G3, audita em `action_execution_log` com
+   * correlationId (RN-159-3) e garante idempotência.
    *
    * Semear a política NÃO amplia autonomia: o caller já envia autonomamente hoje
    * (bypass direto); a política só deixa o executor PERMITIR o que já acontece,
    * agora auditado (RN-159-4: sem gate paralelo — reusa executor/agent_policies).
-   * Retorna o messageId (externalRef do handler); LANÇA em qualquer falha — o
-   * caller decide o rollback/sinal do seu próprio fluxo.
+   * Retorna o externalRef do handler (id do provedor); LANÇA em qualquer falha —
+   * o caller decide o rollback/sinal do seu próprio fluxo.
    */
-  static async sendGovernedMessage(orgId: string, input: {
+  static async dispatchGoverned(orgId: string, input: {
     domain: string; actionType: string; title: string;
-    channelId: string; recipient: string; message: string;
+    commandType: string; commandPayload: any;
     correlationId?: string | null; createdBy?: string;
   }): Promise<string | undefined> {
     const { DecisionActionService } = await import("./DecisionActionService.js");
@@ -329,14 +330,32 @@ export class CommandExecutorService {
     }
     const action = DecisionActionService.propose(orgId, {
       domain: input.domain, actionType: input.actionType, title: input.title,
-      commandType: "whatsapp_send",
-      commandPayload: { channelId: input.channelId, recipient: input.recipient, message: input.message },
+      commandType: input.commandType,
+      commandPayload: input.commandPayload,
       correlationId: input.correlationId ?? null,
       createdBy: actor,
     });
     if (action.status !== "approved") DecisionActionService.approve(orgId, action.id, actor);
     const res = await this.execute(orgId, action.id);
     return res?.result?.externalRef || undefined;
+  }
+
+  /**
+   * Açúcar para o caso mais comum (mensagem WhatsApp) — delega a
+   * `dispatchGoverned` com o handler `whatsapp_send`. Usado pelos reroutes de
+   * cobrança (F2.2/F2.3) e recuperação comercial (F2.4).
+   */
+  static async sendGovernedMessage(orgId: string, input: {
+    domain: string; actionType: string; title: string;
+    channelId: string; recipient: string; message: string;
+    correlationId?: string | null; createdBy?: string;
+  }): Promise<string | undefined> {
+    return this.dispatchGoverned(orgId, {
+      domain: input.domain, actionType: input.actionType, title: input.title,
+      commandType: "whatsapp_send",
+      commandPayload: { channelId: input.channelId, recipient: input.recipient, message: input.message },
+      correlationId: input.correlationId, createdBy: input.createdBy,
+    });
   }
 }
 

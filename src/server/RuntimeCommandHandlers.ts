@@ -3,6 +3,7 @@ import { CommandExecutorService, type CommandHandler, type ExecutedResult } from
 import { ConfirmationEngine } from "./ConfirmationEngine.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { AsaasService } from "./AsaasService.js";
+import { GoogleOAuthService } from "./GoogleOAuthService.js";
 
 /**
  * RuntimeCommandHandlers — handlers CONCRETOS do Execution Runtime
@@ -163,10 +164,40 @@ const AlterdataFetchCommandHandler: CommandHandler = {
   },
 };
 
+// ── 4) Gmail Send — e-mail pela conta Google conectada (ADR-159 F2.5) ────────
+//
+// Payload esperado: { to, subject?, body }. Reusa `GoogleOAuthService.gmailSend`
+// (o mesmo sink do envio direto), agora atrás do choke-point. SEM `expect` —
+// e-mail não exige confirmação de entrega aqui. Erro { error } do gmailSend
+// vira JobQueueError classificado (conta não conectada → permission).
+const GmailSendCommandHandler: CommandHandler = {
+  key: "GmailSendCommandHandler",
+  commandTypes: ["gmail_send"],
+  prepare(_orgId, action) {
+    const p = payloadOf(action);
+    return { summary: `E-mail preparado: ${p.to || "(sem destino)"}`, artifact: { kind: "email_draft", to: p.to || null, subject: p.subject || null, body: p.body || action.description || action.title } };
+  },
+  async execute(orgId, action): Promise<ExecutedResult> {
+    const p = payloadOf(action);
+    if (!p.to) throwHandler("non_retryable", "gmail_send exige 'to' no command_payload.");
+    const subject = String(p.subject || action.title || "Contato comercial");
+    const body = String(p.body || action.description || action.title || "").trim();
+    if (!body) throwHandler("non_retryable", "gmail_send exige 'body' (ou action.description/title) não-vazio.");
+    const r = await GoogleOAuthService.gmailSend(orgId, String(p.to), subject, body);
+    if ((r as any)?.error) {
+      const err = String((r as any).error);
+      throwHandler(/não conectada|not connected|conta google/i.test(err) ? "permission" : "external_unavailable", `Gmail falhou: ${err}`);
+    }
+    const messageId = String((r as any)?.id || "") || null;
+    return { summary: `E-mail enviado (${p.to})`, artifact: { kind: "email_sent", to: p.to, subject, messageId }, effect: "email_sent", externalRef: messageId };
+  },
+};
+
 // ── Registro (auto no import — server.ts precisa fazer `import "./RuntimeCommandHandlers.js"`) ──
 CommandExecutorService.registerHandler(WhatsAppSendCommandHandler);
 CommandExecutorService.registerHandler(AsaasPixChargeCommandHandler);
 CommandExecutorService.registerHandler(AlterdataFetchCommandHandler);
+CommandExecutorService.registerHandler(GmailSendCommandHandler);
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 

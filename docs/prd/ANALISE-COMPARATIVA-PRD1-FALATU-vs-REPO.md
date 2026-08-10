@@ -110,7 +110,9 @@ A **Fase 1 de fundação** — evolução aditiva do envelope + wiring de correl
 
 **Entregue:** 4 colunas aditivas em `falatu_inbox_items` (`channel` · `input_type` · `attachments_json` · `correlation_id`), derivadas deterministicamente na captura (channel de `source`/explícito com fallback; input_type = superset do media_type; attachments = descritores factuais, RN-151; correlation_id inicia cadeia nova ou continua a thread do caller, §51). `correlation_id` propagado ao `usageContext` **antes** de qualquer IA → popula `ai_usage_log.request_id` (coluna existia e nunca era escrita), fechando o rastro de custo §41/§52. Suíte `test:falatu-envelope` (20 checks) + regressão de todas as `falatu-*` e `ai-usage-ledger` PASS. 0 tabelas novas, 0 breaking changes.
 
-**Próxima fatia:** projeção de contexto por papel + redação (P1) — a fatia de segurança, **antes** de qualquer business-query.
+**Fatia de segurança (P1) — ENTREGUE (2026-08-10).** `ContextProjectionService` projeta o contexto canônico pro escopo do usuário ANTES de qualquer entrega a modelo (§30/§31, CA13), **reusando `PermissionService`** (nenhum RBAC novo): mapa domínio→módulo **fail-closed** (domínio sem permissão CAI), **redação** de campos sensíveis (custo/margem/lucro/salário/comissão/CPF) quando o viewer não tem `full`, e narrativa org-wide só pra visão ampla. `ContextEngineService.buildForUser(orgId, user)` + rota `GET /api/falatu/context` entregam o contexto projetado + manifesto (dropped/redacted) pra explicabilidade (§49). Owner = no-op (vê tudo). Suíte `test:falatu-context-projection` (20 checks) + regressão de 8 suítes RBAC + context/snapshot/executive PASS. É a **fundação obrigatória** de qualquer business-query do Fala Tu.
+
+**Próxima fatia:** artefatos (Fase 2) — tabela canônica + util de assinatura HMAC compartilhado + intake de documentos + XLSX.
 
 ---
 

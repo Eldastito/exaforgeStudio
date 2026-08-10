@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { BusinessContextService } from "./BusinessContextService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
+import { ContextProjectionService } from "./ContextProjectionService.js";
 
 /**
  * Context Engine (ADR-160 D3 / Onda A F3) — CONTRATO ÚNICO de contexto do negócio.
@@ -71,6 +72,53 @@ export class ContextEngineService {
    * são preservados exatamente). É o único ponto que o Advisor precisa chamar
    * para obter narrativa + snapshot unificados.
    */
+  /**
+   * PRD 1 (segurança, P1) — variante FILTRADA POR PAPEL do contexto. Constrói o
+   * canônico e projeta pro que ESTE usuário pode ver (§30/§31, CA13), ANTES de
+   * qualquer entrega a modelo. A narrativa (texto org-wide, não role-safe) só vai
+   * pra visão ampla; papel restrito recebe só o snapshot projetado + o manifesto
+   * do que foi ocultado (explainability, §49). REUSA `ContextProjectionService`
+   * (que reusa `PermissionService`) — nenhum RBAC novo. Owner = no-op (vê tudo).
+   */
+  static buildForUser(orgId: string, user: any): {
+    narrative: string | null;
+    narrativeOmitted: boolean;
+    snapshot: any | null;
+    snapshotEnabled: boolean;
+    roleScoped: true;
+    droppedDomains: string[];
+    redactedPaths: string[];
+    sources: string[];
+    generatedAt: string;
+    schemaVersion: number;
+  } {
+    const base = this.build(orgId);
+    let snapshot = base.snapshot;
+    let droppedDomains: string[] = [];
+    let redactedPaths: string[] = [];
+    if (base.snapshot) {
+      const r = ContextProjectionService.projectSnapshot(orgId, user, base.snapshot);
+      snapshot = r.snapshot;
+      droppedDomains = r.manifest.droppedDomains;
+      redactedPaths = r.manifest.redactedPaths;
+    }
+    // Fail-closed também com snapshot desligado: sem visão ampla, a narrativa
+    // org-wide não é entregue (evita vazar finanças pelo texto livre).
+    const narrativeSafe = ContextProjectionService.hasFullBusinessVisibility(orgId, user);
+    return {
+      narrative: narrativeSafe ? base.narrative : null,
+      narrativeOmitted: !narrativeSafe,
+      snapshot,
+      snapshotEnabled: base.snapshotEnabled,
+      roleScoped: true,
+      droppedDomains,
+      redactedPaths,
+      sources: base.sources,
+      generatedAt: base.generatedAt,
+      schemaVersion: base.schemaVersion,
+    };
+  }
+
   static render(orgId: string): string {
     const ctx = this.build(orgId);
     let out = ctx.narrative;

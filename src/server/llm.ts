@@ -70,7 +70,7 @@ function recordUsage(
   latencyMs?: number,
 ): void {
   try {
-    const { orgId, userId, module } = currentUsageContext();
+    const { orgId, userId, module, correlationId } = currentUsageContext();
     if (!orgId) return; // sem org no contexto: não atribui (ex.: jobs internos)
     const p = priceFor(model);
     const costUsd = costUsdOverride != null
@@ -85,12 +85,15 @@ function recordUsage(
       `INSERT INTO ai_usage_log (
          id, organization_id, user_id, model, kind, module, operation,
          input_tokens, output_tokens, total_tokens,
-         cost_usd, cost_brl, cost_cents, latency_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         cost_usd, cost_brl, cost_cents, latency_ms, request_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       randomUUID(), orgId, userId || null, model, kind, module || "legacy", kind,
       inputTokens, outputTokens, inputTokens + outputTokens,
       costUsd, costBrl, costCents, Math.max(0, Math.round(latencyMs || 0)),
+      // PRD 1 — correlação: liga cada chamada de IA à interação que a originou
+      // (coluna existia mas nunca era populada). Fecha o rastro de custo (§41/§52).
+      correlationId || null,
     );
   } catch { /* medição nunca pode quebrar o atendimento */ }
 }

@@ -19,26 +19,33 @@ interface UsageContext {
   orgId: string | null;
   userId: string | null;
   module: string; // 'legacy' se o call site não migrou
+  // PRD 1 (Fala Tu) — correlação: id da INTERAÇÃO/cadeia que originou a chamada
+  // de IA, propagado até `ai_usage_log.request_id`. Fecha o rastro "de onde veio
+  // → quanto custou" (§41/§52). Opcional: ausente/null quando o call site não
+  // correlaciona (literais antigos de UsageContext seguem válidos).
+  correlationId?: string | null;
 }
 
 export const usageContext = new AsyncLocalStorage<UsageContext>();
 
 /** Define a org do fluxo atual (vale para os awaits seguintes deste contexto). */
 export function setUsageOrg(orgId: string | null): void {
-  try { usageContext.enterWith({ orgId: orgId || null, userId: null, module: "legacy" }); } catch { /* noop */ }
+  try { usageContext.enterWith({ orgId: orgId || null, userId: null, module: "legacy", correlationId: null }); } catch { /* noop */ }
 }
 
 /**
- * Define contexto completo (org + usuário + módulo). Preferir sobre setUsageOrg
- * quando a call site souber quem é o usuário e qual módulo está chamando IA —
- * é isso que popula o ledger com atribuição granular.
+ * Define contexto completo (org + usuário + módulo + correlação). Preferir sobre
+ * setUsageOrg quando a call site souber quem é o usuário, qual módulo está
+ * chamando IA e (PRD 1) qual interação originou a chamada — é isso que popula o
+ * ledger com atribuição granular e correlacionada.
  */
-export function setUsageContext(ctx: { orgId?: string | null; userId?: string | null; module?: string }): void {
+export function setUsageContext(ctx: { orgId?: string | null; userId?: string | null; module?: string; correlationId?: string | null }): void {
   try {
     usageContext.enterWith({
       orgId: ctx.orgId || null,
       userId: ctx.userId || null,
       module: (ctx.module || "legacy").toLowerCase(),
+      correlationId: ctx.correlationId || null,
     });
   } catch { /* noop */ }
 }
@@ -48,8 +55,8 @@ export function currentOrgId(): string | null {
   return usageContext.getStore()?.orgId || null;
 }
 
-/** Contexto completo (org + usuário + módulo). Sempre retorna algo (defaults). */
+/** Contexto completo (org + usuário + módulo + correlação). Sempre retorna algo (defaults). */
 export function currentUsageContext(): UsageContext {
   const s = usageContext.getStore();
-  return { orgId: s?.orgId || null, userId: s?.userId || null, module: s?.module || "legacy" };
+  return { orgId: s?.orgId || null, userId: s?.userId || null, module: s?.module || "legacy", correlationId: s?.correlationId || null };
 }

@@ -16,6 +16,8 @@ const SEVERITIES = ["info", "attention", "risk", "critical"];
 // `hypothesis` é a explicação ainda não comprovada ("a causa provável é X"),
 // distinta de `estimate` (cálculo sobre evidência) e `fact` (comprovado).
 const BASES = ["fact", "estimate", "hypothesis"];
+// PRD 2 F11 (§65) — motivos de descarte. `incorrect` = falso-positivo (métrica-chave CA19).
+const DISMISS_REASONS = new Set(["expected", "irrelevant", "incorrect", "duplicate", "already_resolved"]);
 
 export interface SignalInput {
   domain: string;
@@ -189,7 +191,13 @@ export class BusinessSignalService {
     return { ok: r.changes > 0 };
   }
   static acknowledge(orgId: string, id: string) { return this.setStatus(orgId, id, "acknowledged"); }
-  static dismiss(orgId: string, id: string) { return this.setStatus(orgId, id, "dismissed"); }
+  // PRD 2 F11 (§65) — `reason` opcional; só grava se for um motivo conhecido
+  // (senão fica NULL). O status vira 'dismissed' de qualquer forma (retrocompat).
+  static dismiss(orgId: string, id: string, reason?: string | null) {
+    const r = DISMISS_REASONS.has(String(reason || "")) ? String(reason) : null;
+    const res = db.prepare("UPDATE business_signals SET status = 'dismissed', dismiss_reason = ? WHERE id = ? AND organization_id = ?").run(r, id, orgId);
+    return { ok: res.changes > 0 };
+  }
   static resolve(orgId: string, id: string) { return this.setStatus(orgId, id, "resolved"); }
 
   /**

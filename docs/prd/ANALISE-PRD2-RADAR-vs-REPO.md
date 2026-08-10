@@ -69,7 +69,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **Detector registry** (contrato §67 + defaults por vertical §89-90) | ✅ **F4.2 ENTREGUE** — `AnomalyDetectorRegistry` (contrato + packs + byVertical + evaluate). `test:anomaly-registry` (13 checks) | ✅ |
 | **Correlation Engine** (N sinais → 1 situação, multi-evidência) | Inexistente. Só há dedupe (mesmo evento). §16-20 pedem correlação (evento≠evento). **F3.1 ENTREGUE:** `SignalCorrelationService.clusters` — confiança ALTA (mesmo `(subject_type,subject_id)`, multi-domínio, janela), derivado, evidência preservada. `test:signal-correlation` (10 checks). **F3.2 ENTREGUE:** `attention()` colapsa a situação (opt-in flag/param, evidenceCount+signalIds), `test:attention-correlation` (9 checks). **F3.3 ENTREGUE:** confiança MÉDIA (padrão do mesmo signal_type em sujeitos distintos, `related[]`, não colapsa), `test:signal-related` (9 checks). **Fase 3 FECHADA** | F3 |
 | **Investigation pipeline** (causa-candidata + supporting/contradicting evidence + confidence) | `analysisFor` roteia profundidade mas não havia geração de causa. **F6.1 ENTREGUE:** `SignalInvestigationService.investigate` — causas-candidatas determinísticas (evidência a favor/contra + confiança, basis hypothesis, nunca vira fato §13), sem IA. `test:signal-investigation` (11 checks). **F6.2 ENTREGUE:** `investigateDeep` — gate de LLM por nível de impacto (L3+, reusa DI-1), sintetizador injetável, IA nunca é loop principal (§81-83), `test:signal-investigation-deep` (10 checks). **Fase 6 FECHADA** | ✅ |
-| **Feedback & calibration** (dismiss reason + false-positive rate por detector) | §63-66 métricas de qualidade ausentes | F11 |
+| ~~**Feedback & calibration**~~ | ✅ **F11 ENTREGUE** — `dismiss(reason)` (§65) + `SignalCalibrationService.detectorMetrics` (false-positive/dismissal rate + calibração por detector, §66). `test:signal-calibration` (8 checks) | ~~F11~~ ✅ |
 | **External signal contract** (molde p/ Reclame AQUI / External Intelligence) | §10C/§48-51 — só o **contrato**, não os conectores | F10 |
 | **Radar health / métricas** (§94-98) | Observabilidade admin dos detectores | F12 |
 
@@ -104,7 +104,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA16 detector isolado não derruba | ✅ best-effort em cada pass | reforçar em F12 |
 | CA17 custo de IA mensurado | ✅ `ai_usage_log` + budgets | F12 (per-detector) |
 | CA18 tenant isolation | ✅ toda query filtra org | testar em cada fatia |
-| CA19 false-positive metrics | ❌ ausente | F11 |
+| CA19 false-positive metrics | ✅ **F11** (por detector, derivado por query) | ✅ |
 | CA20 2 ciclos reais fecham | 🟡 cobrança/recovery têm runtime | F8 beachhead (§71) |
 
 ## Mapa de fases → fatias pequenas (§100 — nada de big bang)

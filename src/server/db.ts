@@ -8286,6 +8286,9 @@ const initDb = () => {
   // opportunityId). Antes só existia subject_type (a CLASSE); o id ficava em
   // source_entity_id (source-scoped). Aditivo; sinais antigos ficam NULL.
   try { db.exec(`ALTER TABLE business_signals ADD COLUMN subject_id TEXT`); } catch(e){}
+  // PRD 2 F11 (§65) — motivo do descarte: expected|irrelevant|incorrect|duplicate|
+  // already_resolved. Alimenta a calibração/false-positive rate por detector (§66).
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN dismiss_reason TEXT`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_subject ON business_signals (organization_id, subject_type, subject_id)`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_business_signals_expires ON business_signals(organization_id, expires_at)`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_signals_unified_enabled INTEGER DEFAULT 0`); } catch(e){}

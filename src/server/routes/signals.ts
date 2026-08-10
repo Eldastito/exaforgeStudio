@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalCorrelationService } from "../SignalCorrelationService.js";
 import { SignalInvestigationService } from "../SignalInvestigationService.js";
+import { SignalCalibrationService } from "../SignalCalibrationService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import db from "../db.js";
@@ -39,6 +40,15 @@ router.get("/correlations", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const windowHours = req.query?.windowHours ? Number(req.query.windowHours) : undefined;
   res.json(SignalCorrelationService.clusters(orgId, { windowHours }));
+});
+
+// PRD 2 F11 (§66/CA19) — GET /api/signals/calibration — qualidade do Radar por
+// detector (false-positive rate, dismissal rate, calibração). UI admin (§94).
+router.get("/calibration", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = req.query?.days !== undefined ? Number(req.query.days) : undefined;
+  res.json(SignalCalibrationService.detectorMetrics(orgId, { days }));
 });
 
 // PRD 2 F6.1 — GET /api/signals/:id/investigate — causas-candidatas determinísticas
@@ -78,7 +88,9 @@ router.post("/:id/dismiss", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const signalId = req.params.id;
-  const out = BusinessSignalService.dismiss(orgId, signalId);
+  // F11 (§65) — motivo opcional do descarte (expected|irrelevant|incorrect|duplicate|already_resolved).
+  const reason = typeof req.body?.reason === "string" ? req.body.reason : null;
+  const out = BusinessSignalService.dismiss(orgId, signalId, reason);
   if (!out.ok) return res.status(404).json({ error: "Sinal não encontrado." });
 
   // Best-effort: checa se é sinal 'plan' e aplica cooldown na recomendação

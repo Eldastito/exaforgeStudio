@@ -804,6 +804,8 @@ export class Scheduler {
     try { this.churnRiskPass(); } catch (e: any) { console.error('[Scheduler] churn-risk detector F4.1 falhou', e?.message); }
     // ADR-159 F5 — progressive autonomy (propõe elevação por evidência; nunca aplica).
     await this.progressiveAutonomyPass().catch(e => console.error('[Scheduler] progressive autonomy F5 falhou', e));
+    // ADR-159 F6 — detector de anomalia (rajada de execuções falhas → business_signals).
+    await this.anomalyDetectorPass().catch(e => console.error('[Scheduler] anomaly detector F6 falhou', e));
     // ADR-158 F4 — auto-disparo sinal→processo. DEPOIS dos detectores (churn/
     // cobrança) pra rotear os sinais recém-publicados neste tick. Opt-in duplo.
     await this.signalAutoTriggerPass().catch(e => console.error('[Scheduler] auto-disparo sinal→processo F4 falhou', e));
@@ -862,6 +864,20 @@ export class Scheduler {
       const r = ProgressiveAutonomyService.runAll();
       if (r.proposed > 0) console.info(`[Autonomy F5] progressive autonomy: ${r.orgs} org(s), ${r.proposed} proposta(s) de elevação.`);
     } catch (e: any) { console.error("[Autonomy F5] progressiveAutonomyPass falhou", e?.message); }
+  }
+
+  /**
+   * ADR-159 F6 (D6) — detector de anomalia. Pra cada org opt-in
+   * (`anomaly_detector_enabled=1`) varre execuções governadas falhas por janela e
+   * publica/resolve `security/anomalous_behavior` em business_signals. Advisory.
+   * Best-effort. Import dinâmico pra quebrar ciclo.
+   */
+  static async anomalyDetectorPass() {
+    try {
+      const { SecurityAnomalyDetectorService } = await import("./SecurityAnomalyDetectorService.js");
+      const r = SecurityAnomalyDetectorService.runAll();
+      if (r.published > 0 || r.resolved > 0) console.info(`[Security F6] anomalia: ${r.orgs} org(s), ${r.published} publicada(s), ${r.resolved} resolvida(s).`);
+    } catch (e: any) { console.error("[Security F6] anomalyDetectorPass falhou", e?.message); }
   }
 
   /**

@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; **F4 (D3 — RBAC default-deny faseado, opt-in) ENTREGUE**; **F5 (D5 — progressive autonomy: propõe elevação por evidência) ENTREGUE**; F6 planejada.
+- **Status:** **FECHADO (2026-08-10)** — D1–D6 completos. — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; **F4 (D3 — RBAC default-deny faseado, opt-in) ENTREGUE**; **F5 (D5 — progressive autonomy) ENTREGUE**; **F6 (D6 — step-up MFA + detector de anomalia) ENTREGUE — ADR-159 COMPLETA (D1–D6)**.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -77,6 +77,17 @@ Caminho de migração para **default-deny** em ações sensíveis quando não h�
 
 MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; detector de comportamento anômalo publica em `business_signals` (convenção nº 12), sem tabela própria.
 
+**F6 — ENTREGUE (2026-08-10) — fecha a ADR-159 (D1–D6 completos).** Duas partes, opt-in por org:
+- **Step-up MFA** (`StepUpMfaService`): a rota HUMANA `POST /actions/:id/execute` exige um **TOTP fresco** (reusa `TOTPService.verify` sobre `users.mfa_secret` — o 2º fator real do login, não o PIN de clínica/varejo) antes de executar uma ação **financeira/destrutiva** (`ApprovalPolicyService.isFinancialOrDestructive`, fonte única) **acima** de `step_up_mfa_threshold_cents`. Os fluxos de SISTEMA (reroutes F2: `dispatchGoverned`/cadence/scheduler) chamam `execute` DIRETO, sem passar pela rota — **estruturalmente isentos** (step-up nunca trava envio automático). Lockout Fase 28 (5×/15min) por (org,user) em cima do `TOTPService.verify` (que é puro); erros com `code` estável (`STEP_UP_LOCKED`→429, `STEP_UP_INVALID`/`STEP_UP_ENROLL_REQUIRED`→401) auditados em `auth_audit_logs`. Flag `step_up_mfa_enabled`.
+- **Detector de anomalia** (`SecurityAnomalyDetectorService`): DERIVADO por query (RN-004) — rajada de execuções governadas FALHAS (`action_execution_log` mode='execute' status='failed') numa janela ≥ limiar → publica `security/anomalous_behavior` (basis=fact, breakdown por `error_code`, severidade escalando) em `business_signals` (nº 12, sem tabela própria); **sweep** resolve quando a org normaliza. Flag `anomaly_detector_enabled` + `anomalyDetectorPass` no Scheduler.
+- **Números:** 2 flags + 1 (`_threshold_cents`) + 2 services novos + gate na rota execute + `isFinancialOrDestructive` exportado + 1 Scheduler pass + 2 suítes (`test:step-up-mfa` 12 checks, `test:security-anomaly` 11 checks). 0 breaking changes.
+
+---
+
+## Fechamento (2026-08-10)
+
+**ADR-159 COMPLETA — D1 a D6 entregues (F1..F6).** Choke-point único + idempotência + correlationId (D1); two-step corrigido + RBAC granular na aprovação (D2); RBAC default-deny faseado (D3); Autonomy Contract com bandas valor→papel + 4 estados (D4); progressive autonomy que só propõe (D5); step-up MFA + detector de anomalia (D6). Todo o hardening de governança da Onda 0 do ZEI está em produção, aditivo e opt-in, sobre `agent_policies`/`ApprovalPolicyService`/`CommandExecutor`/`PermissionService` — sem engine paralelo (RN-159-4).
+
 ---
 
 ## Guardrails (RN-159)
@@ -100,6 +111,6 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 | **F3** | D4 — Autonomy Contract: bandas valor→papel (`config_json.bands`) + 4 estados (`resolveContract`) + enforcement por bandas no `propose` (opt-in) | **ENTREGUE** |
 | **F4** | D3 — RBAC default-deny faseado (flag `rbac_default_deny_enabled` + `SENSITIVE_MODULES` + relatório `defaultDenyImpact`; dono nunca negado) | **ENTREGUE** |
 | **F5** | D5 — progressive autonomy: `ProgressiveAutonomyService` propõe elevação por evidência derivada (nunca aplica); `accept` humano aplica banda F3 + audita | **ENTREGUE** |
-| F6 | D6 — step-up MFA + detecção de anomalia | posterior |
+| **F6** | D6 — step-up MFA (reusa TOTP; só rota humana; lockout) + detector de anomalia (execuções falhas → `security/anomalous_behavior`) | **ENTREGUE — fecha a ADR-159** |
 
 > Nota: a F1 (correção do two-step) é um risco de segurança concreto e independente do resto — pode ser destacada e priorizada isoladamente.

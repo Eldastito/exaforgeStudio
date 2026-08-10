@@ -83,6 +83,14 @@ export class ApprovalPolicyService {
   }
 
   /**
+   * A ação é financeira/destrutiva? Fonte ÚNICA da definição de "crítico"
+   * (reusada pelo default-deny do resolveContract e pelo step-up MFA da F6).
+   */
+  static isFinancialOrDestructive(domain: string, actionType: string): boolean {
+    return FINANCIAL_OR_DESTRUCTIVE.has(actionType) || domain === "finance";
+  }
+
+  /**
    * ADR-159 F3 (D4) — resolve o ESTADO do Autonomy Contract para (domínio, tipo,
    * valor). Ordem de precedência:
    *   1) BANDAS valor→papel (`config_json.bands`) — o modelo D4 de 1ª classe.

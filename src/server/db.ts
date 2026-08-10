@@ -8296,6 +8296,16 @@ const initDb = () => {
   // evidência é forte (alta aprovação + 0 reversões). Opt-in (nº 10, default 0).
   // NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN progressive_autonomy_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-159 F6 (D6) — step-up MFA + detector de anomalia.
+  //  - `step_up_mfa_enabled` (opt-in): exige um TOTP fresco pra EXECUTAR ação
+  //    financeira/destrutiva acima de `step_up_mfa_threshold_cents` (só no ponto
+  //    HUMANO POST /actions/:id/execute; os fluxos de sistema F2 não passam lá).
+  //  - `anomaly_detector_enabled` (opt-in): varre execuções falhas por janela e
+  //    publica `security/anomalous_behavior` em business_signals (nº 12).
+  // Default 0 = comportamento pré-F6 (0 regressão). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN step_up_mfa_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN step_up_mfa_threshold_cents INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN anomaly_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

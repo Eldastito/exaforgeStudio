@@ -349,6 +349,8 @@
     "test:autonomy-contract": "tsx scripts/test-autonomy-contract.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
+    "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",
+    "test:security-anomaly": "tsx scripts/test-security-anomaly.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

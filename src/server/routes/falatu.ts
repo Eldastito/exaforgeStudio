@@ -215,16 +215,17 @@ router.post("/files", falatuFileUpload.single("file"), (req: AuthRequest, res): 
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-// Aba "Arquivos" do Fala Tu (§60): lista os artefatos da org (ou só os meus).
+// Aba "Arquivos" do Fala Tu (§60): lista os artefatos que o usuário PODE ver
+// (sensíveis de outros ficam ocultos — gated por classificação).
 router.get("/artifacts", (req: AuthRequest, res): any => {
   const createdBy = req.query.mine === "1" || req.query.mine === "true" ? actorId(req) : undefined;
   const kind = typeof req.query.kind === "string" ? req.query.kind : undefined;
-  res.json(ArtifactService.list(req.organizationId!, { createdBy, kind, limit: Number(req.query.limit) || 50 }));
+  res.json(ArtifactService.listForUser(req.organizationId!, req.user, { createdBy, kind, limit: Number(req.query.limit) || 50 }));
 });
 
-// Emite a URL assinada de um artefato (pra reentregar no chat).
+// Emite a URL assinada de um artefato (pra reentregar no chat) — gated.
 router.get("/artifacts/:id/link", (req: AuthRequest, res): any => {
-  const url = ArtifactService.signedUrl(req.organizationId!, req.params.id);
+  const url = ArtifactService.signedUrlForUser(req.organizationId!, req.user, req.params.id);
   if (!url) return res.status(404).json({ error: "Artefato não encontrado." });
   res.json({ url });
 });

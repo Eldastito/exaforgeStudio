@@ -17,19 +17,21 @@ export const artifactsRoutes = Router();
 artifactsRoutes.get("/", (req: AuthRequest, res): any => {
   const createdBy = req.query.mine === "1" || req.query.mine === "true" ? actorId(req) : undefined;
   const kind = typeof req.query.kind === "string" ? req.query.kind : undefined;
-  res.json(ArtifactService.list(req.organizationId!, { createdBy, kind, limit: Number(req.query.limit) || 50 }));
+  // Gated por classificação: artefatos sensíveis de outros só aparecem p/ quem pode.
+  res.json(ArtifactService.listForUser(req.organizationId!, req.user, { createdBy, kind, limit: Number(req.query.limit) || 50 }));
 });
 
 artifactsRoutes.get("/:id", (req: AuthRequest, res): any => {
-  const a = ArtifactService.get(req.organizationId!, req.params.id);
-  if (!a) return res.status(404).json({ error: "Artefato não encontrado." });
+  const a = ArtifactService.getForUser(req.organizationId!, req.user, req.params.id);
+  if (!a) return res.status(404).json({ error: "Artefato não encontrado." }); // 404 (não 403) não revela existência
   const { storageKey, ...pub } = a; // não vaza o path interno
   res.json(pub);
 });
 
-// Emite a URL assinada temporária pra entrega (ex.: link no Fala Tu).
+// Emite a URL assinada temporária pra entrega (ex.: link no Fala Tu). Gated:
+// quem não pode acessar não minta o link (o download público é bearer).
 artifactsRoutes.get("/:id/link", (req: AuthRequest, res): any => {
-  const url = ArtifactService.signedUrl(req.organizationId!, req.params.id);
+  const url = ArtifactService.signedUrlForUser(req.organizationId!, req.user, req.params.id);
   if (!url) return res.status(404).json({ error: "Artefato não encontrado." });
   res.json({ url });
 });

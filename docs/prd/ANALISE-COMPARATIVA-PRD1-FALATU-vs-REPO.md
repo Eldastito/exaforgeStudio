@@ -160,7 +160,7 @@ O Fala Tu fala PRIMEIRO. O briefing diário (ADR-151 F6) já cobria o "resumo da
 | Fase 8 | #917 | Proactive Delivery (o Fala Tu fala primeiro; dedup + quiet hours) |
 | Fase 9 | (esta) | Zero-training UX (home agregadora) |
 
-**Deferido:** Fase 7 chat interno (§80 — PRD futuro). **Padrão transversal:** cada fatia é composição sobre engines canônicos (ADR-135/136/152/158), 0 tabela de alertas nova (CA15), escopo por papel herdado da Segurança P1, testes determinísticos (rodam em CI sem chave de IA).
+**Fase 7 — chat interno (fundação-só) — ENTREGUE (2026-08-10):** o item antes deferido, agora feito no escopo certo do §80 (**não** clone de Slack). `InternalChatService` — NOTAS de equipe ancoradas a um CASO (`correlation_id`): "deixa um recado pro colega SOBRE esta decisão". Superfícies: `post` (direcionada ou nota-do-caso) · `inbox` (só as endereçadas a mim + não-lidas) · `markRead` (só o destinatário) · `forThread` (visibilidade autor/destinatário/broadcast). A thread da Fase 6 costura o estágio `nota`. Tabela `internal_messages` (aditiva). Rotas `POST/GET /api/falatu/messages` + `/:id/read`. Suíte `test:internal-chat` (12 checks). **Padrão transversal:** cada fatia é composição sobre engines canônicos (ADR-135/136/152/158), 0 tabela de alertas nova (CA15), escopo por papel herdado da Segurança P1, testes determinísticos (rodam em CI sem chave de IA). **PRD 1 100% entregue — roadmap inteiro (Fases 1–9), nada deferido.**
 
 ---
 

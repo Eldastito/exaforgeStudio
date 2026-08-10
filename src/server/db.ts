@@ -7147,6 +7147,27 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar falatu_proactive_deliveries (PRD 1 Fase 8)', e); }
 
+  // PRD 1 Fase 7 (§80) — chat interno FUNDAÇÃO-SÓ: NÃO é um clone de Slack. São
+  // NOTAS de equipe ancoradas a um CASO (correlation_id) — "deixa um recado pro
+  // colega SOBRE esta decisão/aprovação". O valor é operar o ZapFlow, não bate-
+  // papo. to_user_id NULL = nota do caso (visível a quem vê o caso).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS internal_messages (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        from_user_id TEXT NOT NULL,
+        to_user_id TEXT,                         -- NULL = nota do caso (broadcast p/ quem vê o caso)
+        correlation_id TEXT,                     -- o caso a que a nota se ancora (espinha ADR-158)
+        body TEXT NOT NULL,
+        read_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_internal_messages_inbox ON internal_messages (organization_id, to_user_id, created_at);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_internal_messages_thread ON internal_messages (organization_id, correlation_id);`);
+  } catch(e){ console.error('[DB] Falha ao criar internal_messages (PRD 1 Fase 7)', e); }
+
   // ADR-152 Fatia 1.1 — ZappFlow Execution Runtime (Process Fabric). O Runtime
   // é ADITIVO em cima do ADR-136 (decision_actions), não paralelo: `decision_
   // actions.process_instance_id` (nullable) amarra ação↔processo — ações

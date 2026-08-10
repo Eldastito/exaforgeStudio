@@ -52,6 +52,19 @@ import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
  */
 
 export type FalaTuIntent = "TASK" | "EVENT" | "LIST" | "NOTE" | "UNKNOWN";
+export type FalaTuListType = "general" | "shopping" | "meeting" | "trip";
+export const FALATU_LIST_TYPES: FalaTuListType[] = ["general", "shopping", "meeting", "trip"];
+
+// ADR-160 F8 — classificador DETERMINÍSTICO de tipo de lista (regra de código,
+// zero IA → roda em CI sem chave). Só distingue COMPRAS do resto: é o único tipo
+// com equivalente canônico (requisição de compra, F7). Cues de compra/reposição
+// no negócio. Não "inventa" (RN-151): interpreta as palavras que o humano disse,
+// como a própria classificação de intent já faz — e o bridge que ele destrava é
+// opt-in, cria só rascunho e só com itens do catálogo.
+const FALATU_SHOPPING_RE = /\b(compr[ao]s?|comprar|mercado|feira|supermercado|hortifruti|atacad[aã]o|farm[aá]cia|repor|reposi[çc][aã]o|estoque|insumos?|materia(l|is)|encomend|abastec|list[ao] de compras?)\b/i;
+export function classifyFalaTuListType(text: string): FalaTuListType {
+  return FALATU_SHOPPING_RE.test(String(text || "")) ? "shopping" : "general";
+}
 
 export interface FalaTuExtraction {
   transcription: string;
@@ -64,6 +77,11 @@ export interface FalaTuExtraction {
     listItems: string[];
     eventDate: string | null; // YYYY-MM-DD, SÓ se explícita na entrada
     eventTime: string | null; // HH:MM, idem
+    // ADR-160 F8 — tipo da lista classificado DETERMINISTICAMENTE na captura
+    // (regra de código, não IA) e PERSISTIDO, pra o choke-point (confirm) tratar
+    // lista de compras igual em QUALQUER canal (web e WhatsApp). Opcional: só
+    // preenchido quando intent === LIST.
+    listType?: FalaTuListType;
   };
   confidence: number; // 0..1
   suggestedAction: string;
@@ -258,6 +276,13 @@ export class FalaTuService {
       console.error("[FalaTu] RAG preamble falhou (best-effort — segue sem memória):", e);
     }
     const extraction = await FalaTuService.interpret(input, systemPreamble ? { systemPreamble } : {});
+    // F8 — persiste o tipo de lista classificado na captura (regra determinística),
+    // pra que o choke-point (confirm) trate compras igual em qualquer canal. A base
+    // é o texto que o humano disse (transcrição/conteúdo/itens), não os overrides.
+    if (extraction.intent === "LIST") {
+      const basis = [extraction.transcription, extraction.summary, input.text, ...(extraction.entities?.listItems || [])].filter(Boolean).join(" ");
+      extraction.entities.listType = classifyFalaTuListType(basis);
+    }
     const id = randomUUID();
     const mediaType = input.image?.data ? "image" : input.audio?.data ? "audio" : null;
     // F8.7 — Protocolos por ÁUDIO: agora que existe transcrição, aplica a
@@ -475,7 +500,12 @@ export class FalaTuService {
         }
       } else if (intent === "LIST") {
         refId = randomUUID();
-        const listType = ["general", "shopping", "meeting", "trip"].includes(overrides.listType || "") ? overrides.listType : "general";
+        // F8 — o tipo vem do humano (override do painel) OU, sem ele, da
+        // classificação DETERMINÍSTICA persistida na captura (paridade de canal:
+        // WhatsApp confirma com overrides vazios e mesmo assim reconhece compras).
+        const listType = FALATU_LIST_TYPES.includes((overrides.listType || "") as FalaTuListType)
+          ? overrides.listType
+          : (FALATU_LIST_TYPES.includes((entities?.listType || "") as FalaTuListType) ? entities!.listType! : "general");
         db.prepare(`INSERT INTO falatu_lists (id, organization_id, user_id, title, list_type, inbox_item_id) VALUES (?, ?, ?, ?, ?, ?)`)
           .run(refId, orgId, userId, title, listType, item.id);
         // RN-151: itens vêm da extração ou do humano — nunca fabricados.

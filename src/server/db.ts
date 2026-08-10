@@ -8284,6 +8284,13 @@ const initDb = () => {
   // `gmail_send` via `dispatchGoverned`. Sem âncora → correlationId nova raiz.
   // Opt-in (nº 10); default 0 = envio direto (0 regressão). NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN prospect_via_executor_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-159 F4 (D3) — RBAC default-deny FASEADO. Com a flag, usuários SEM perfil
+  // resolvido são NEGADOS em módulos sensíveis (financeiro/admin/execução/destrutivo)
+  // em vez de cair no fallback do papel legado (privilégio-por-omissão). O DONO
+  // nunca é negado. Opt-in por org (nº 10, default 0 = comportamento pré-F4);
+  // `PermissionService.defaultDenyImpact` dá o relatório de impacto ANTES de virar
+  // a chave (quem perde acesso). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN rbac_default_deny_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

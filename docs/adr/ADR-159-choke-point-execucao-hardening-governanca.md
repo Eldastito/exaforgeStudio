@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; F4..F6 planejadas.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; **F4 (D3 — RBAC default-deny faseado, opt-in) ENTREGUE**; F5..F6 planejadas.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -59,6 +59,8 @@ Todo efeito externo (mensagem, cobrança, escrita em sistema de terceiro) passa 
 
 Caminho de migração para **default-deny** em ações sensíveis quando não há perfil resolvido (em vez de passar livre). Faseado e observável para não quebrar orgs legadas (feature flag + relatório de impacto antes de virar a chave).
 
+**F4 — ENTREGUE (2026-08-10).** Flag opt-in `rbac_default_deny_enabled` (default 0). Com ela, `PermissionService.levelFor` **nega** (nível `none`) um usuário SEM perfil resolvido nos **módulos sensíveis** (`SENSITIVE_MODULES` = financeiros + `pagamentos`/`cobranca`/`compras`/`usuarios`/`configuracoes`/`execucao`) — fim do privilégio-por-omissão do fallback legado. O **DONO nunca é negado** (`role='owner'` bypass — ele configura o sistema); módulos **não-sensíveis** e usuários **com perfil** seguem inalterados. Observabilidade: `PermissionService.defaultDenyImpact(orgId)` lista quem perde acesso (usuários sem perfil e não-dono) ANTES de virar a chave; rotas `GET/PUT /api/permissions/default-deny` (report + toggle, gated por `usuarios`). Default 0 → 0 regressão (suítes rbac-granular/enforcement/finance intactas). Amarra a F1/F3: com a flag, um admin legado sem perfil deixa de poder aprovar (`can(execucao, write)` nega). **Números:** 1 flag + `SENSITIVE_MODULES` + default-deny no `levelFor` + `defaultDenyEnabled`/`setDefaultDeny`/`isSensitiveModule`/`defaultDenyImpact` + 2 rotas + 1 suíte (`test:rbac-default-deny`, 16 checks). 0 breaking changes.
+
 ### D4 — Políticas contextuais com bandas valor→papel + estado "escalonar"
 
 `agent_policies` ganha faixas parametrizadas (ex.: desconto 0-5% automático / 5-10% gerente / >10% proprietário; compra até R$2k automática / R$2k-5k gerente / >R$5k diretor). Os **4 estados** do Autonomy Contract passam a existir de fato: **permitido / requer aprovação / bloqueado / escalonar**. Ações financeiras/destrutivas: **default deny** (PRD 0 §49).
@@ -94,7 +96,7 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 | **F2.5** | D1 — reroute do `ProspectExecution` (2 sinks) + handler `gmail_send` novo + generalização do helper (`dispatchGoverned`) | **ENTREGUE — fecha os reroutes do D1** |
 | F2.6? | D1 (polimento) — `AsaasService.createPixCharge` público; rate-limit no ponto único | média |
 | **F3** | D4 — Autonomy Contract: bandas valor→papel (`config_json.bands`) + 4 estados (`resolveContract`) + enforcement por bandas no `propose` (opt-in) | **ENTREGUE** |
-| F4 | D3 — RBAC default-deny faseado | média |
+| **F4** | D3 — RBAC default-deny faseado (flag `rbac_default_deny_enabled` + `SENSITIVE_MODULES` + relatório `defaultDenyImpact`; dono nunca negado) | **ENTREGUE** |
 | F5 | D5 — progressive autonomy (proposta por evidência) | média |
 | F6 | D6 — step-up MFA + detecção de anomalia | posterior |
 

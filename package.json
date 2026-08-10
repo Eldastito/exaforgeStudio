@@ -347,6 +347,7 @@
     "test:sales-recovery-choke-point": "tsx scripts/test-sales-recovery-choke-point.ts",
     "test:prospect-choke-point": "tsx scripts/test-prospect-choke-point.ts",
     "test:autonomy-contract": "tsx scripts/test-autonomy-contract.ts",
+    "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:impact-prioritization": "tsx scripts/test-impact-prioritization.ts",
     "test:decision-intelligence-di1": "tsx scripts/test-decision-intelligence-di1.ts",
     "test:decision-intelligence-di2": "tsx scripts/test-decision-intelligence-di2.ts",

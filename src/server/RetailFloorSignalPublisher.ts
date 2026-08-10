@@ -32,11 +32,13 @@
  */
 import db from "./db.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
+import { AnomalyDetectorRegistry } from "./AnomalyDetectorRegistry.js";
 
 const ALL_BUSY_MIN = 15;        // min de "todo mundo atendendo" pra sinalizar
 const LONG_SERVICE_MIN = 45;    // duração de atendimento considerada longa
 const DROP_MIN_SAMPLE = 20;     // atendimentos mínimos por janela de 7d
-const DROP_RATIO = 0.2;         // queda relativa mínima (20%)
+// (queda relativa mínima agora vive no contrato do detector: F4.3 →
+//  AnomalyDetectorRegistry "retail_floor_conversion_drop".threshold)
 
 const day = (offset: number, from?: string) => {
   const d = from ? new Date(`${from}T00:00:00Z`) : new Date();
@@ -218,9 +220,14 @@ export class RetailFloorSignalPublisher {
     };
     const cur = rate(day(-6, date), date);
     const prev = rate(day(-13, date), day(-7, date));
-    if (cur.total < DROP_MIN_SAMPLE || prev.total < DROP_MIN_SAMPLE) return 0;
+    if (cur.total < DROP_MIN_SAMPLE || prev.total < DROP_MIN_SAMPLE) return 0; // guarda de amostra (§25)
     const curRate = cur.confirmed / cur.total, prevRate = prev.confirmed / prev.total;
-    if (prevRate <= 0 || (prevRate - curRate) / prevRate < DROP_RATIO) return 0;
+    if (prevRate <= 0) return 0;
+    // PRD 2 F4.3 — a DECISÃO de anomalia agora roda pelo framework (registry →
+    // primitiva F4.1): queda relativa ≥ threshold do contrato. Mesmo resultado do
+    // `(prevRate-curRate)/prevRate < DROP_RATIO` inline; o sinal publicado abaixo
+    // segue idêntico (contrato específico preservado).
+    if (!AnomalyDetectorRegistry.evaluate("retail_floor_conversion_drop", { current: curRate, baseline: prevRate }).fires) return 0;
     BusinessSignalService.publish(orgId, {
       domain: "retail_floor", signalType: "retail_floor_conversion_drop",
       severity: "risk", basis: "fact", confidence: 0.8,

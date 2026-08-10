@@ -57,8 +57,8 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | ~~**`process_instances.correlation_id`**~~ | ✅ **F2.3 ENTREGUE** — coluna+índice; `startFromSignal` propaga o correlation do sinal; thread (F6) costura o processo do router. `test:signal-process-spine` (7 checks) | ~~F2~~ ✅ |
 | ~~**Goal-relevance no score**~~ | ✅ **F5 ENTREGUE** — boost multiplicativo (0 sem meta atrasada) via `BusinessGoalService.progress`; `goalRelevance`+`affectedGoal` na saída. `test:goal-aware-priority` (8 checks) | ~~F5~~ ✅ |
 | SLA + reversibility no score | §38 lista fatores ausentes no score atual | F7 |
-| Expansão do TRIGGER_MAP | Só 2 mapeamentos; expandir **conservador** (playbook maduro + policy) (§41-42) | F8 |
-| `recommendedProcessType` no sinal | Não existe; routing é 100% map-driven (§40) | F8 (opcional) |
+| ~~Expansão do TRIGGER_MAP~~ | ✅ **F8 ENTREGUE** — +mapa explícito (stalled_opportunities→sales_recovery) + mecanismo recommendedProcessType com allowlist de processos maduros. `test:signal-routing-expansion` (9 checks) | ~~F8~~ ✅ |
+| ~~`recommendedProcessType` no sinal~~ | ✅ **F8** — o detector declara (F4.2) e o router honra se o processo for maduro (allowlist) | ✅ |
 | Budget por-detector / max-investigations-dia | Só há ceiling por-org + budget de plataforma (§84) | F12 |
 
 ### 🆕 CRIAR (justificado — capacidade genuinamente ausente)
@@ -97,7 +97,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA9 sinais priorizados | ✅ `ImpactPrioritizationService` | F7 refina |
 | CA10 attention feed único | ✅ já é | não regredir |
 | CA11 Fala Tu consome | ✅ Smart Inbox/Home consomem | não regredir |
-| CA12 sinal→processo | ✅ router (2 maps) | F8 expande |
+| CA12 sinal→processo | ✅ router (mapa explícito + recommendedProcessType maduro, F8) | ✅ |
 | CA13 auto-trigger não bypassa policy | ✅ choke-point garante | não regredir |
 | CA14 correlationId no ciclo | ✅ **F2.3 fechou o furo em process_instances** | não regredir |
 | CA15 TTL/dedupe/cooldown anti-storm | 🟡 dedupe sim; **TTL agora vale (F2.2 ✅)**; cooldown só PlanFit | F4 (cooldown genérico) |

@@ -363,6 +363,7 @@
     "test:falatu-envelope": "tsx scripts/test-falatu-envelope.ts",
     "test:falatu-context-projection": "tsx scripts/test-falatu-context-projection.ts",
     "test:artifacts": "tsx scripts/test-artifacts.ts",
+    "test:artifact-rbac": "tsx scripts/test-artifact-rbac.ts",
     "test:falatu-report": "tsx scripts/test-falatu-report.ts",
     "test:xlsx": "tsx scripts/test-xlsx.ts",
     "test:falatu-file-intake": "tsx scripts/test-falatu-file-intake.ts",

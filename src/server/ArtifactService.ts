@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { logAuthEvent } from "./auditLog.js";
 import { signKey, verifyKey, DEFAULT_SIGNED_TTL_MS } from "./fileSigning.js";
+import { ContextProjectionService } from "./ContextProjectionService.js";
 
 const ARTIFACTS_DIR = path.join(process.env.DATA_DIR || process.cwd(), "private_media", "artifacts");
 try { fs.mkdirSync(ARTIFACTS_DIR, { recursive: true }); } catch { /* noop */ }
@@ -128,5 +129,36 @@ export class ArtifactService {
   static resolveSigned(orgId: string, id: string, exp: string, sig: string, now = Date.now()): { buffer: Buffer; mime: string; filename: string } | null {
     if (!verifyKey(SCOPE, `${orgId}/${id}`, exp, sig, now)) return null;
     return this.read(orgId, id, now);
+  }
+
+  // ── RBAC por CLASSIFICAÇÃO (fecho de segurança da Fase 2) ──
+  // O download público é bearer (a URL assinada JÁ é a credencial). A porta de
+  // controle é a EMISSÃO/LISTAGEM: quem pode MINTAR o link ou VER o artefato.
+  //   public/internal → qualquer membro da org (comportamento atual);
+  //   sensitive       → só o CRIADOR ou quem tem visão ampla do negócio
+  //                     (owner/gerente — reusa `hasFullBusinessVisibility`,
+  //                     nenhum RBAC novo). Fail-closed: sem user → nega sensível.
+  static canAccess(orgId: string, user: any, artifact: { createdBy?: string | null; classification?: string } | null): boolean {
+    if (!artifact) return false;
+    if (artifact.classification !== "sensitive") return true;
+    const uid = user?.userId || user?.id || null;
+    if (uid && artifact.createdBy && artifact.createdBy === uid) return true; // criador
+    return ContextProjectionService.hasFullBusinessVisibility(orgId, user);
+  }
+
+  /** get() gated por classificação — null se o usuário não pode ver. */
+  static getForUser(orgId: string, user: any, id: string): any {
+    const a = this.get(orgId, id);
+    return a && this.canAccess(orgId, user, a) ? a : null;
+  }
+
+  /** list() já filtrado pro que o usuário pode ver. */
+  static listForUser(orgId: string, user: any, opts: { createdBy?: string | null; kind?: string | null; limit?: number } = {}): any[] {
+    return this.list(orgId, opts).filter((a) => this.canAccess(orgId, user, a));
+  }
+
+  /** Minta a URL assinada só se o usuário pode acessar o artefato. */
+  static signedUrlForUser(orgId: string, user: any, id: string, ttlMs = DEFAULT_SIGNED_TTL_MS, now = Date.now()): string | null {
+    return this.getForUser(orgId, user, id) ? this.signedUrl(orgId, id, ttlMs, now) : null;
   }
 }

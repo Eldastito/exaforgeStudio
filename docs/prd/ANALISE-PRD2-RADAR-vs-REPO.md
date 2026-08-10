@@ -65,7 +65,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 
 | Item | Por quê | Fase PRD |
 | --- | --- | --- |
-| **Anomaly framework genérico** (baseline + deviation + min-sample + cooldown + TTL) como primitiva reutilizável | Hoje é código inline repetido (`ConsumptionSignalPublisher` ×1.5, `RetailFloor.conversionDrop` 20%/min20). §22/§25/§26 | F4 |
+| **Anomaly framework genérico** (baseline + deviation + min-sample + cooldown + TTL) como primitiva reutilizável | Hoje é código inline repetido. §22/§25/§26. **F4.1 ENTREGUE:** `anomalyPrimitives` (mean/stdDev/percentile/evaluateAnomaly/cooldown/ttl, puro, sem IA), `test:anomaly-primitives` (17 checks). Falta F4.2 (registry+contrato) + F4.3 (detector piloto migrado) | F4 |
 | **Detector registry** (contrato §67 + defaults por vertical §89-90) | Detectores hardcoded importados no Scheduler; sem registry | F4 |
 | **Correlation Engine** (N sinais → 1 situação, multi-evidência) | Inexistente. Só há dedupe (mesmo evento). §16-20 pedem correlação (evento≠evento). **F3.1 ENTREGUE:** `SignalCorrelationService.clusters` — confiança ALTA (mesmo `(subject_type,subject_id)`, multi-domínio, janela), derivado, evidência preservada. `test:signal-correlation` (10 checks). **F3.2 ENTREGUE:** `attention()` colapsa a situação (opt-in flag/param, evidenceCount+signalIds), `test:attention-correlation` (9 checks). **F3.3 ENTREGUE:** confiança MÉDIA (padrão do mesmo signal_type em sujeitos distintos, `related[]`, não colapsa), `test:signal-related` (9 checks). **Fase 3 FECHADA** | F3 |
 | **Investigation pipeline** (causa-candidata + supporting/contradicting evidence + confidence) | `analysisFor` roteia profundidade mas não há geração de causa com evidência a favor/contra (§32-34) | F6 |
@@ -90,8 +90,8 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA2 contrato normalizado (H/D/E) | 🟡 parcial | F9 (human) + F10 (external) |
 | CA3 fato×estimativa distinguível | 🟡 falta `hypothesis` | F2 |
 | CA4 correlação sem destruir evidência | ✅ **F3.1 alta + F3.2 surface + F3.3 média** — evidência sempre preservada | não regredir |
-| CA5 framework de anomalia | ❌ inline-repetido | F4 |
-| CA6 baseline | 🟡 2 casos inline | F4 |
+| CA5 framework de anomalia | 🟡 **F4.1 primitivas ✅**; falta registry (F4.2) | F4 |
+| CA6 baseline | 🟡 **primitiva F4.1 ✅**; migrar detectores | F4.3 |
 | CA7 goal-aware | 🟡 metas existem, não wired | F5 |
 | CA8 impacto não inventado | ✅ `basis=estimate` + premises | reforçar em F6 |
 | CA9 sinais priorizados | ✅ `ImpactPrioritizationService` | F7 refina |

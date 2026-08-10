@@ -8291,6 +8291,11 @@ const initDb = () => {
   // `PermissionService.defaultDenyImpact` dá o relatório de impacto ANTES de virar
   // a chave (quem perde acesso). NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN rbac_default_deny_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-159 F5 (D5) — progressive autonomy. Com a flag, o ProgressiveAutonomy
+  // Service varre o histórico e PROPÕE (nunca aplica) elevar a autonomia quando a
+  // evidência é forte (alta aprovação + 0 reversões). Opt-in (nº 10, default 0).
+  // NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN progressive_autonomy_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

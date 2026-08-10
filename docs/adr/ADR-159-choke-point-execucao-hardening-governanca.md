@@ -1,6 +1,6 @@
 # ADR-159 — Choke-point único de execução externa + hardening de governança e Autonomy Contract (evolui ADR-136/152; RBAC ADR-138)
 
-- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; **F4 (D3 — RBAC default-deny faseado, opt-in) ENTREGUE**; F5..F6 planejadas.
+- **Status:** **EM ANDAMENTO** — Onda 0 do programa ZEI (trilha paralela à ADR-158). **F1 (D2 — two-step + RBAC granular) ENTREGUE**; **F2.1 (D1 — endurecimento do choke-point) ENTREGUE**; **F2.2 (D1 — reroute do CollectionCadence) ENTREGUE**; **F2.3 (D1 — família cobrança: promise + resend-pix) ENTREGUE**; **F2.4 (D1 — SalesRecovery) ENTREGUE**; **F2.5 (D1 — Prospect + handler `gmail_send`) ENTREGUE — reroutes do D1 COMPLETOS**; **F3 (D4 — Autonomy Contract: bandas valor→papel + 4 estados) ENTREGUE**; **F4 (D3 — RBAC default-deny faseado, opt-in) ENTREGUE**; **F5 (D5 — progressive autonomy: propõe elevação por evidência) ENTREGUE**; F6 planejada.
 - **Data:** 2026-08-09
 - **Origem:** `PRD 0 — ZapFlow Execution Intelligence` (§16-19, §29-32, §49) + `ZAPFLOW — ESTADO FINAL ESPERADO` (§16-19, §52, §64-66); auditoria em `docs/prd/ANALISE-ESTADO-FINAL-vs-REPO.md` §4-5.
 - **Relacionadas:** ADR-136 (Decision & Action Ledger, `agent_policies`), ADR-152 (Runtime, CommandExecutor), ADR-138 (RBAC financeiro), ADR-130 (Governança de IA), ADR-056 (LGPD). CLAUDE.md convenções nº 1, nº 7, nº 8, nº 10.
@@ -71,6 +71,8 @@ Caminho de migração para **default-deny** em ações sensíveis quando não h�
 
 `DecisionMetrics` + `action_outcomes` alimentam uma **proposta** de elevação de autonomia ("aprovou 97% em 90 dias, 0 reversões → liberar execução automática até R$500?"). A IA **nunca** eleva a própria autonomia silenciosamente (PRD 0 §42) — só **propõe**; o humano confirma; a mudança é auditada.
 
+**F5 — ENTREGUE (2026-08-10).** `ProgressiveAutonomyService` deriva por `(domain, actionType)` de `decision_actions` (`created_by IN ('ai','rule')`, janela 90d, tudo por query — RN-004): taxa de aprovação + reversões (`status='cancelled' AND approved_at IS NOT NULL`). Quando ≥10 decididas, ≥90% aprovação, **0 reversões** e o **p90 dos valores aprovados > teto de auto atual**, `evaluate` **publica** um sinal `governance/autonomy_raise_proposed` (convenção nº 12, dedupe por `autonomy:raise:${domain}:${actionType}`) com a evidência derivada + a nota "só propõe". **Nunca aplica.** `accept(orgId, signalId, {actorId, reason})` é o humano confirmando — exige identidade + motivo (`human_decision_required`), aplica uma **banda F3** (`setBands`: allow até o teto, require_approval acima), audita (`AUTONOMY_RAISE_APPLIED`) e resolve o sinal. Aplicar libera **auto-APROVAÇÃO** até o teto — a execução externa segue governada pelo executor (G1/G2). Flag opt-in `progressive_autonomy_enabled` + `progressiveAutonomyPass` no Scheduler + rotas `GET/POST /api/decision-intelligence/autonomy-proposals[/:id/accept]`. **Números:** 1 service novo + 1 flag + 1 Scheduler pass + 2 rotas + 1 suíte (`test:progressive-autonomy`, 18 checks). 0 breaking changes.
+
 ### D6 — Step-up MFA + detecção de anomalia (posterior)
 
 MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; detector de comportamento anômalo publica em `business_signals` (convenção nº 12), sem tabela própria.
@@ -97,7 +99,7 @@ MFA (TOTP já existe) exigido em ações críticas/financeiras acima de limiar; 
 | F2.6? | D1 (polimento) — `AsaasService.createPixCharge` público; rate-limit no ponto único | média |
 | **F3** | D4 — Autonomy Contract: bandas valor→papel (`config_json.bands`) + 4 estados (`resolveContract`) + enforcement por bandas no `propose` (opt-in) | **ENTREGUE** |
 | **F4** | D3 — RBAC default-deny faseado (flag `rbac_default_deny_enabled` + `SENSITIVE_MODULES` + relatório `defaultDenyImpact`; dono nunca negado) | **ENTREGUE** |
-| F5 | D5 — progressive autonomy (proposta por evidência) | média |
+| **F5** | D5 — progressive autonomy: `ProgressiveAutonomyService` propõe elevação por evidência derivada (nunca aplica); `accept` humano aplica banda F3 + audita | **ENTREGUE** |
 | F6 | D6 — step-up MFA + detecção de anomalia | posterior |
 
 > Nota: a F1 (correção do two-step) é um risco de segurança concreto e independente do resto — pode ser destacada e priorizada isoladamente.

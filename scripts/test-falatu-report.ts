@@ -55,7 +55,7 @@ async function main() {
   const vendedor = userFor(orgA, "vendedor");
 
   // ===== 1. Owner: gera artefato PDF + link assinado =====
-  const rOwner = await FR.executiveSummary(orgA, owner, "corr-report-1");
+  const rOwner = await FR.executiveSummary(orgA, owner, { correlationId: "corr-report-1" });
   check("1.1 devolve artefato report PDF com tamanho", rOwner.artifact.kind === "report" && rOwner.artifact.mimeType === "application/pdf" && rOwner.artifact.sizeBytes > 100);
   check("1.2 devolve URL assinada pública (não o binário/path)", typeof rOwner.url === "string" && rOwner.url!.startsWith(`/api/public/artifacts/${orgA}/${rOwner.artifact.id}`));
   const stored = AS.get(orgA, rOwner.artifact.id);
@@ -69,7 +69,7 @@ async function main() {
   check("2.2 conteúdo é um PDF válido (%PDF)", !!file && file.buffer.slice(0, 4).toString() === "%PDF");
 
   // ===== 3. Herda a projeção por papel (segurança P1) =====
-  const rVend = await FR.executiveSummary(orgA, vendedor, "corr-report-2");
+  const rVend = await FR.executiveSummary(orgA, vendedor, { correlationId: "corr-report-2" });
   check("3.1 vendedor: relatório omite finance (droppedDomains)", rVend.droppedDomains.includes("finance") && rVend.droppedDomains.includes("procurement"));
   check("3.2 vendedor: ainda gera um PDF válido", (() => { const qq = new URLSearchParams(rVend.url!.split("?")[1]); const f = AS.resolveSigned(orgA, rVend.artifact.id, qq.get("exp")!, qq.get("sig")!); return !!f && f.buffer.slice(0, 4).toString() === "%PDF"; })());
 

@@ -193,7 +193,8 @@ router.get("/context", (req: AuthRequest, res): any => {
 // (nunca o binário inline nem o path interno). Determinístico.
 router.post("/reports/summary", async (req: AuthRequest, res): Promise<any> => {
   const correlationId = typeof req.body?.correlationId === "string" ? req.body.correlationId : null;
-  try { res.json(await FalaTuReportService.executiveSummary(req.organizationId!, req.user, correlationId)); }
+  const format = req.body?.format === "xlsx" ? "xlsx" : "pdf"; // §65: "me manda em Excel"
+  try { res.json(await FalaTuReportService.executiveSummary(req.organizationId!, req.user, { correlationId, format })); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

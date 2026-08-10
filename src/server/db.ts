@@ -8347,6 +8347,17 @@ const initDb = () => {
   // comportamento de hoje (0 regressão). NÃO reordenar.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_events_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE falatu_events ADD COLUMN bridged_appointment_id TEXT`); } catch(e){}
+
+  // ADR-160 F7 (Onda A) — porta I/O, 3ª fatia: LISTA de COMPRAS vira requisição
+  // de compra CANÔNICA. É a fatia mais seletiva das três: só listas do tipo
+  // 'shopping' têm equivalente canônico (as outras — general/meeting/trip — não
+  // são domínio de negócio e ficam só no silo). E dentro da lista, só os itens
+  // que CASAM com um produto do catálogo (product_service_id é NOT NULL; nunca
+  // inventa produto — RN-151) viram linhas da requisição (draft, humano aprova
+  // depois). `bridged_requisition_id` registra o vínculo silo→canônico. Flag
+  // default 0 = comportamento de hoje (0 regressão). NÃO reordenar.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_lists_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE falatu_lists ADD COLUMN bridged_requisition_id TEXT`); } catch(e){}
 };
 
 initDb();

@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
-import { FailureClass, ReliabilityResult, ReliabilityStatus, retryPolicyFor } from "./skillosModel.js";
+import { FailureClass, ReliabilityResult, ReliabilityStatus, GroundingStatus, GroundedClaim, retryPolicyFor, checkGrounding } from "./skillosModel.js";
+import type { EvidenceReference } from "./contextModel.js";
 import { computeBackoffSeconds } from "./JobQueueService.js";
 
 /**
@@ -57,6 +58,16 @@ export interface AiRunSpec {
   validate?: (output: any) => boolean | { valid: boolean; errors?: string[] };
   /** Classifica um erro na taxonomia AI-FAIL (§17). Default: heurística. */
   classifyError?: (err: any) => FailureClass;
+  /**
+   * §19 grounding (opt-in): as afirmações da saída + a evidência disponível. O
+   * Kernel roda o gate e grava `grounding_status`. `blockOnUnsupported` → uma
+   * afirmação sem suporte vira falha de grounding (AI-FAIL-3 → fallback).
+   */
+  ground?: {
+    claims: GroundedClaim[] | ((output: any) => GroundedClaim[]);
+    evidence: EvidenceReference[];
+    blockOnUnsupported?: boolean;
+  };
 }
 
 export interface AiRunOutcome {
@@ -83,16 +94,27 @@ export class AiReliabilityKernel {
         const res = await invoke();
         usage = res?.usage;
         // §18 validação de saída.
+        let validationStatus: "valid" | "invalid" | "skipped" = "skipped";
         if (spec.validate) {
           const v = normalizeValidation(spec.validate(res?.output));
           if (!v.valid) {
             // AI-FAIL-2 (format): retry CORRETIVO até o teto; senão, falha.
             if (attempt < maxAttempts) { retryCount++; continue; }
-            return this.finish(runId, orgId, spec, usage, { status: "failed", validationStatus: "invalid", failureClass: "format", retryCount, fallbackUsed: false }, res?.output);
+            return this.finish(runId, orgId, spec, usage, { status: "failed", validationStatus: "invalid", failureClass: "format", retryCount, fallbackUsed: false, groundingStatus: "skipped" }, res?.output);
           }
-          return this.finish(runId, orgId, spec, usage, { status: retryCount > 0 ? "retried" : "ok", validationStatus: "valid", failureClass: null, retryCount, fallbackUsed: false }, res?.output);
+          validationStatus = "valid";
         }
-        return this.finish(runId, orgId, spec, usage, { status: retryCount > 0 ? "retried" : "ok", validationStatus: "skipped", failureClass: null, retryCount, fallbackUsed: false }, res?.output);
+        // §19 grounding (opt-in): fato/estimativa sem evidência que exista → unsupported.
+        let groundingStatus: GroundingStatus = "skipped";
+        if (spec.ground) {
+          const claims = typeof spec.ground.claims === "function" ? spec.ground.claims(res?.output) : (spec.ground.claims || []);
+          groundingStatus = checkGrounding(claims, spec.ground.evidence || []).status;
+          if (groundingStatus === "unsupported" && spec.ground.blockOnUnsupported) {
+            // AI-FAIL-3: afirmação sem suporte não segue como verdade (P6) → fallback.
+            return this.finish(runId, orgId, spec, usage, { status: "fallback", validationStatus, failureClass: "grounding", retryCount, fallbackUsed: true, groundingStatus }, res?.output);
+          }
+        }
+        return this.finish(runId, orgId, spec, usage, { status: retryCount > 0 ? "retried" : "ok", validationStatus, failureClass: null, retryCount, fallbackUsed: false, groundingStatus }, res?.output);
       } catch (err: any) {
         const fc = (spec.classifyError && spec.classifyError(err)) || this.defaultClassify(err);
         const policy = retryPolicyFor(fc);
@@ -100,7 +122,7 @@ export class AiReliabilityKernel {
         if (retriable && attempt < maxAttempts) { retryCount++; continue; }
         // policy 'fallback' sinaliza ao caller trocar de skill (a cadeia é do Resolver F3).
         const status: ReliabilityStatus = policy === "fallback" ? "fallback" : "failed";
-        return this.finish(runId, orgId, spec, usage, { status, validationStatus: "skipped", failureClass: fc, retryCount, fallbackUsed: policy === "fallback", error: String(err?.message || err) }, null);
+        return this.finish(runId, orgId, spec, usage, { status, validationStatus: "skipped", failureClass: fc, retryCount, fallbackUsed: policy === "fallback", groundingStatus: "skipped", error: String(err?.message || err) }, null);
       }
     }
   }
@@ -131,7 +153,7 @@ export class AiReliabilityKernel {
 
   private static finish(
     runId: string, orgId: string, spec: AiRunSpec, usage: AiInvokeUsage | undefined,
-    r: { status: ReliabilityStatus; validationStatus: "valid" | "invalid" | "skipped"; failureClass: FailureClass | null; retryCount: number; fallbackUsed: boolean; error?: string },
+    r: { status: ReliabilityStatus; validationStatus: "valid" | "invalid" | "skipped"; failureClass: FailureClass | null; retryCount: number; fallbackUsed: boolean; groundingStatus: GroundingStatus; error?: string },
     output: any,
   ): AiRunOutcome {
     const provider = usage?.provider ?? spec.provider ?? null;
@@ -139,7 +161,7 @@ export class AiReliabilityKernel {
     const reliability: ReliabilityResult = {
       status: r.status,
       validationStatus: r.validationStatus,
-      groundingStatus: "skipped",         // grounding é F6
+      groundingStatus: r.groundingStatus,   // §19 (F6) — real quando o caller passa `ground`
       confidence: spec.confidence ?? null,
       retryCount: r.retryCount,
       fallbackUsed: r.fallbackUsed,
@@ -159,7 +181,7 @@ export class AiReliabilityKernel {
           usage?.inputTokens ?? 0, usage?.outputTokens ?? 0, usage?.totalTokens ?? ((usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)),
           usage?.costUsd ?? 0, costBrl ?? 0, costBrl != null ? Math.round(costBrl * 100) : 0, usage?.latencyMs ?? 0, runId,
           runId, spec.skillId ?? null, spec.capabilityId ?? null, spec.promptVersion ?? null, spec.contextHash ?? null, spec.contextProfile ?? null,
-          provider, r.validationStatus, "skipped", spec.confidence ?? null, r.failureClass, r.retryCount, r.fallbackUsed ? 1 : 0, r.status, spec.correlationId ?? null,
+          provider, r.validationStatus, r.groundingStatus, spec.confidence ?? null, r.failureClass, r.retryCount, r.fallbackUsed ? 1 : 0, r.status, spec.correlationId ?? null,
         );
     } catch (e) { /* AI Run é aditiva — nunca bloqueia (RN-KER-1) */ }
     return { runId, output, reliability };

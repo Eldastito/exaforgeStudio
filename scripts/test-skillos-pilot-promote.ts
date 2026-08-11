@@ -16,6 +16,9 @@
  *     quem estava no balde menor continua; a 100% é universal), one-time por-percentual
  *     (marker), só sobe (preserva operador com canário maior), pula skill em `shadow`
  *     (percentual não se aplica); os degraus compõem em sequência com markers independentes.
+ *   - avançar o estágio pilot → approved_execution (§68): sobe o teto de execution_mode
+ *     (ADR-159), preserva o canário, one-time por-estágio (marker), só avança (nunca
+ *     rebaixa — skill já em broader é preservada).
  *
  * Uso: npm run test:skillos-pilot-promote
  */
@@ -145,7 +148,27 @@ async function main() {
   const re100 = SEED.raisePilotsCanary(100);
   check("8.5 re-rodar 50 e 100 é no-op (não estreita nem duplica)", re50.alreadyApplied === true && re100.alreadyApplied === true && skills.every((id) => RO.get(id).canaryPercent === 100));
 
-  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário 25%→50%→100%) ===\n");
+  // ═══════════════ 9. avanço de estágio: pilot → approved_execution (§68) ═══════════════
+  // Estado controlado: os 3 em pilot@100; sem marker de estágio approved_execution.
+  db.prepare(`DELETE FROM skillos_platform_markers WHERE marker = 'pilots_stage_approved_execution_v1'`).run();
+  for (const id of skills) { RO.setStage(id, "pilot"); RO.setCanaryPercent(id, 100); }
+  const a1 = SEED.advancePilotsToStage("approved_execution");
+  check("9.1 avançou os 3 pra approved_execution", a1.advanced.length === 3 && a1.alreadyApplied === false && a1.stage === "approved_execution");
+  check("9.2 estágio approved_execution + canário 100% PRESERVADO", skills.every((id) => { const s = RO.get(id); return s.stage === "approved_execution" && s.canaryPercent === 100; }));
+  // execution_mode sobe pro teto approved_execution (efeito só após aprovação).
+  const decAE = RO.isLiveForOrg(ref, "org_qualquer");
+  check("9.3 execução em modo approved_execution (teto ADR-159)", decAE.live === true && decAE.executionMode === "approved_execution");
+  // one-time por-estágio: 2ª chamada é no-op.
+  const a2 = SEED.advancePilotsToStage("approved_execution");
+  check("9.4 2ª chamada: alreadyApplied, nada avançado", a2.alreadyApplied === true && a2.advanced.length === 0);
+  // só AVANÇA (nunca rebaixa): skill já em broader é preservada; e não re-dispara após rollback.
+  db.prepare(`DELETE FROM skillos_platform_markers WHERE marker = 'pilots_stage_approved_execution_v1'`).run();
+  RO.setStage("collection-intent-classifier-v1", "broader"); // operador já subiu além do alvo
+  RO.setStage(ref, "pilot");
+  const a3 = SEED.advancePilotsToStage("approved_execution");
+  check("9.5 skill em broader preservada (nunca rebaixa); a de pilot avança", a3.skipped.includes("collection-intent-classifier-v1") && a3.advanced.includes(ref) && RO.get("collection-intent-classifier-v1").stage === "broader");
+
+  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário 25%→50%→100%→approved_execution) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

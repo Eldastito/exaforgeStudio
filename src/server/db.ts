@@ -8755,7 +8755,8 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar tabela skillos_platform_markers', e); }
 
   // PRD 4 — Onboarding dos 3 pilotos §61 (Collection Intent Classifier, Sales Recovery
-  // Message, Signal Investigation) + PROMOÇÃO §68 pra `pilot` e CANÁRIO @100% (10→25→50→100).
+  // Message, Signal Investigation) + PROMOÇÃO §68 pra `pilot`, CANÁRIO @100% (10→25→50→100)
+  // e AVANÇO de estágio pra `approved_execution`.
   // `seedPilots` semeia definições + estágio inicial `shadow` (não-clobber, RN-RO-5);
   // `promotePilotsToPilot`/`raisePilotsCanary` aplicam as decisões do operador de subir a
   // esteira/cohort — cada uma UMA vez (marker), sem brigar com rollback. Import dinâmico
@@ -8765,7 +8766,7 @@ const initDb = () => {
     const hasSkillos = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skillos_capabilities'").get();
     if (hasSkillos) {
       import("./SkillOsPilotSeeder.js").then((m) => {
-        try { m.SkillOsPilotSeeder.seedPilots(); m.SkillOsPilotSeeder.promotePilotsToPilot(10); m.SkillOsPilotSeeder.raisePilotsCanary(25); m.SkillOsPilotSeeder.raisePilotsCanary(50); m.SkillOsPilotSeeder.raisePilotsCanary(100); }
+        try { m.SkillOsPilotSeeder.seedPilots(); m.SkillOsPilotSeeder.promotePilotsToPilot(10); m.SkillOsPilotSeeder.raisePilotsCanary(25); m.SkillOsPilotSeeder.raisePilotsCanary(50); m.SkillOsPilotSeeder.raisePilotsCanary(100); m.SkillOsPilotSeeder.advancePilotsToStage("approved_execution"); }
         catch (e) { console.error('[DB] Seed/promoção dos pilotos SkillOS falhou', e); }
       }).catch((e) => { console.error('[DB] Falha ao importar SkillOsPilotSeeder', e); });
     }

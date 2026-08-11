@@ -8,6 +8,7 @@ import { SkillOsPlannerService } from "../SkillOsPlannerService.js";
 import { SkillOsEvalService } from "../SkillOsEvalService.js";
 import { SkillOsRolloutService } from "../SkillOsRolloutService.js";
 import { SkillOsPilotSeeder } from "../SkillOsPilotSeeder.js";
+import { ROLLOUT_STAGES, RolloutStage } from "../skillosModel.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -189,6 +190,17 @@ router.post("/raise-pilots-canary", requireRole("owner", "admin"), (req: AuthReq
   const percent = raw == null ? 25 : Number(raw);
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) return res.status(400).json({ error: "percent inválido (0..100)" });
   try { res.json(SkillOsPilotSeeder.raisePilotsCanary(percent)); }
+  catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/skillos/advance-pilots-stage { stage } — avança o ESTÁGIO §68 dos 3 pilotos
+// (ex.: `approved_execution`). Sobe o teto de execution_mode; one-time por-estágio
+// (marker), só avança (nunca rebaixa), preserva canário. Também roda no boot.
+router.post("/advance-pilots-stage", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const stage = (req.body || {}).stage;
+  if (!ROLLOUT_STAGES.includes(stage)) return res.status(400).json({ error: `stage inválido (${ROLLOUT_STAGES.join("|")})` });
+  try { res.json(SkillOsPilotSeeder.advancePilotsToStage(stage as RolloutStage)); }
   catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
 });
 

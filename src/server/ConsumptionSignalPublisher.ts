@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { ConsumptionLedgerService } from "./ConsumptionLedgerService.js";
+import { AnomalyDetectorRegistry } from "./AnomalyDetectorRegistry.js";
 
 /**
  * ConsumptionSignalPublisher — CONTROLER (PRD-E-007, Fatia 2b, §20.1).
@@ -24,7 +25,9 @@ const COVERAGE_WINDOW = 30;   // janela p/ a média diária da cobertura
 const PROTECTION_DAYS = 10;   // cobertura abaixo disso → sinal
 const RECENT_DAYS = 7;        // janela "recente" p/ o pico de consumo
 const BASELINE_DAYS = 30;     // janela de base (antes da recente)
-const ABOVE_FACTOR = 1.5;     // recente > base × isso → acima do padrão
+// PRD 2 F4.3+ — o fator do pico (recente > base × 1.5 ⟺ +50%) virou o `threshold`
+// do detector "consumo_acima_padrao" no AnomalyDetectorRegistry; a DECISÃO roda
+// pela primitiva (evaluateAnomaly), não mais por constante inline aqui.
 const DEAD_STOCK_DAYS = 90;   // sem saída nesse período + saldo > 0 → parado
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -75,7 +78,10 @@ export class ConsumptionSignalPublisher {
       const baseNet = ConsumptionLedgerService.netConsumption(orgId, p.id, { from: daysBefore(baseTo, BASELINE_DAYS - 1), to: baseTo });
       const recentRate = recentNet / RECENT_DAYS;
       const baseRate = baseNet / BASELINE_DAYS;
-      if (recentNet > 0 && baseRate > 0 && recentRate > baseRate * ABOVE_FACTOR) {
+      // Decisão via registry (F4.3+): guardas de massa externas; o "quão acima"
+      // é o threshold do detector. `.fires` usa `>=` (o inline era `>`) — no fio
+      // exato de 1.5× o registry passa a disparar; o contrato é canônico agora.
+      if (recentNet > 0 && baseRate > 0 && AnomalyDetectorRegistry.evaluate("consumo_acima_padrao", { current: recentRate, baseline: baseRate }).fires) {
         pub({
           signalType: "consumo_acima_padrao", severity: "attention", confidence: 1, sourceEntityId: p.id,
           impactAmount: round2(recentNet), impactUnit: unit,

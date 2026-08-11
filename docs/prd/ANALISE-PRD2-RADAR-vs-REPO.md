@@ -9,6 +9,7 @@
 > F2 contract hardening · F3 correlação · F4 anomalia · F5 goal-aware · F6 investigação ·
 > F7 SLA/reversibilidade · F8 roteamento · F9 sinal humano · F10 sinal externo ·
 > F11 calibração · F12 production readiness (health + budget por-detector + runbook).
+> **Decisão arquitetural consolidada em `docs/adr/ADR-161-radar-empresarial-percepcao-transversal.md`** (esta matriz permanece como a auditoria de partida da Fase 1, §99).
 
 ## Sumário executivo
 

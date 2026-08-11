@@ -12,10 +12,10 @@
  *   - só avança de shadow: skill que o operador já subiu além de `pilot` é preservada
  *     (nunca rebaixa, nunca mexe no canário dela);
  *   - o seed (onboarding) NÃO clobbera o estágio corrente em re-runs (RN-RO-5);
- *   - subir o canário 10% → 25% → 50% (§68): amplia o cohort (só ADICIONA orgs — quem
- *     estava no balde menor continua), one-time por-percentual (marker), só sobe (preserva
- *     operador com canário maior), pula skill em `shadow` (percentual não se aplica); os
- *     degraus compõem em sequência com markers independentes.
+ *   - subir o canário 10% → 25% → 50% → 100% (§68): amplia o cohort (só ADICIONA orgs —
+ *     quem estava no balde menor continua; a 100% é universal), one-time por-percentual
+ *     (marker), só sobe (preserva operador com canário maior), pula skill em `shadow`
+ *     (percentual não se aplica); os degraus compõem em sequência com markers independentes.
  *
  * Uso: npm run test:skillos-pilot-promote
  */
@@ -124,24 +124,28 @@ async function main() {
   check("7.6 só sobe (skill @50% preservada), pula shadow, sobe a de 10%", c3.raised.length === 1 && c3.raised.includes(ref) && c3.skipped.includes("collection-intent-classifier-v1") && c3.skipped.includes("sales-recovery-message-v1"));
   check("7.7 canário @50% do operador intacto; shadow intocado", RO.get("collection-intent-classifier-v1").canaryPercent === 50 && RO.get("sales-recovery-message-v1").stage === "shadow");
 
-  // ═══════════════ 8. degraus compõem: 10 → 25 → 50 (markers independentes) ═══════════════
+  // ═══════════════ 8. degraus compõem: 10 → 25 → 50 → 100 (markers independentes) ═══════════════
   db.prepare(`DELETE FROM skillos_platform_markers`).run();
   for (const id of skills) RO.setStage(id, "shadow");
   const step10 = SEED.promotePilotsToPilot(10);
   const step25 = SEED.raisePilotsCanary(25);
   const step50 = SEED.raisePilotsCanary(50);
-  check("8.1 sequência 10→25→50 aplica cada degrau uma vez", step10.promoted.length === 3 && step25.raised.length === 3 && step50.raised.length === 3);
-  check("8.2 estado final: os 3 em pilot @ 50%", skills.every((id) => { const s = RO.get(id); return s.stage === "pilot" && s.canaryPercent === 50; }));
-  check("8.3 markers dos 3 degraus coexistem (independentes)", (() => {
+  const step100 = SEED.raisePilotsCanary(100);
+  check("8.1 sequência 10→25→50→100 aplica cada degrau uma vez", step10.promoted.length === 3 && step25.raised.length === 3 && step50.raised.length === 3 && step100.raised.length === 3);
+  check("8.2 estado final: os 3 em pilot @ 100%", skills.every((id) => { const s = RO.get(id); return s.stage === "pilot" && s.canaryPercent === 100; }));
+  check("8.3 markers dos 4 degraus coexistem (independentes)", (() => {
     const has = (mk: string) => !!db.prepare(`SELECT 1 FROM skillos_platform_markers WHERE marker = ?`).get(mk);
-    return has("pilots_pilot10_v1") && has("pilots_canary_25_v1") && has("pilots_canary_50_v1");
+    return has("pilots_pilot10_v1") && has("pilots_canary_25_v1") && has("pilots_canary_50_v1") && has("pilots_canary_100_v1");
   })());
+  // @100% o cohort é UNIVERSAL: org que estava fora do balde de 50% agora é live.
+  const { outside: out50 } = await findOrgs((org) => inCanaryCohort(ref, org, 50));
+  check("8.4 @100% cohort universal (org fora do de 50% vira live)", !!out50 && RO.isLiveForOrg(ref, out50).live === true && RO.isLiveForOrg(ref, out50).executionMode === "assisted");
   // re-rodar qualquer degrau é no-op (cada marker já aplicado).
-  const re25 = SEED.raisePilotsCanary(25);
   const re50 = SEED.raisePilotsCanary(50);
-  check("8.4 re-rodar 25 e 50 é no-op (não estreita nem duplica)", re25.alreadyApplied === true && re50.alreadyApplied === true && skills.every((id) => RO.get(id).canaryPercent === 50));
+  const re100 = SEED.raisePilotsCanary(100);
+  check("8.5 re-rodar 50 e 100 é no-op (não estreita nem duplica)", re50.alreadyApplied === true && re100.alreadyApplied === true && skills.every((id) => RO.get(id).canaryPercent === 100));
 
-  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário 25%→50%) ===\n");
+  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário 25%→50%→100%) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

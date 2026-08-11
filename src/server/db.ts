@@ -8478,6 +8478,63 @@ const initDb = () => {
   // barulhento (storm) podia consumir toda a verba de IA sozinho. Override
   // opcional por org (>0 vale; 0/NULL → default embutido). Aditivo; default 0.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_detector_daily_budget INTEGER DEFAULT 0`); } catch(e){}
+
+  // PRD 3 F4 (§14) — BusinessGoal RICO. Aditivos sobre `business_goals` (que na
+  // ADR-160 F4 guardava só metric→target). São METADADOS do objetivo (intenção do
+  // dono) — o realizado segue derivado por query (RN-004, nunca contador aqui):
+  //   title    — rótulo humano ("Bater R$100k em agosto");
+  //   baseline — ponto de partida (de onde se mede o avanço; NULL = de 0);
+  //   deadline — prazo-alvo YYYY-MM-DD (NULL = ritmo mensal default);
+  //   priority — low|medium|high|critical (ordena a atenção; NULL = sem);
+  //   owner    — responsável (user id ou nome livre);
+  //   status   — active|achieved|paused|abandoned (ciclo de vida; DEFAULT active
+  //              → linhas antigas viram 'active' na migração, 0 regressão).
+  // Aditivo/opt-in: nenhum campo obrigatório; `set()` preserva os não informados.
+  // NÃO reordenar (CREATE-then-ALTER estrito, convenção nº2).
+  try { db.exec(`ALTER TABLE business_goals ADD COLUMN title TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_goals ADD COLUMN baseline REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_goals ADD COLUMN deadline TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_goals ADD COLUMN priority TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_goals ADD COLUMN owner TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`); } catch(e){}
+
+  // PRD 3 F4 (§15) — BusinessConstraint de 1ª classe. Até aqui as restrições do
+  // negócio viviam soltas (`organization_settings.negotiator_max_discount`, bands
+  // do ApprovalPolicy, `budget_limit_brl` por campanha). Esta tabela dá um MODELO
+  // único: um LIMITE/POLÍTICA que as decisões devem respeitar. O Context Engine só
+  // LÊ e ANEXA ao pacote (§90, READ+DERIVE) — NÃO faz enforcement (o gate segue no
+  // RBAC/ApprovalPolicy). Isolada por org; inerte até o dono declarar (0 regressão).
+  //   kind       — discount_ceiling|budget_limit|margin_floor|payment_term_max|
+  //                policy|custom (classe da restrição);
+  //   scope_type/scope_ref — a que se aplica (global|product|category|store|…);
+  //   operator   — lte|gte|eq|max|min (como o valor limita);
+  //   value_num/value_unit — o limite numérico (percent|BRL|days|…);
+  //   value_text — restrição textual/política (quando não é numérica);
+  //   source     — origem (owner_declared|policy|imported) — proveniência (§24);
+  //   active     — 1 vigente. NUNCA inventa: só existe o que o dono declarou (§25).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS business_constraints (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        scope_type TEXT,
+        scope_ref TEXT,
+        operator TEXT NOT NULL DEFAULT 'lte',
+        value_num REAL,
+        value_unit TEXT,
+        value_text TEXT,
+        source TEXT NOT NULL DEFAULT 'owner_declared',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_business_constraints_org ON business_constraints(organization_id, active, kind);
+      CREATE INDEX IF NOT EXISTS idx_business_constraints_scope ON business_constraints(organization_id, scope_type, scope_ref);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela business_constraints', e); }
 };
 
 initDb();

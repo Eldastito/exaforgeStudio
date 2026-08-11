@@ -144,7 +144,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | ~~**F1**~~ ✅ | Core Context Model — **ENTREGUE**: `src/server/contextModel.ts` (puro, sem DB/LLM) — `ContextScope`(23 níveis)/`ContextEntity`/`ContextFact`/`ContextRelationship`/`EvidenceReference`/`ContextSource`(+precedência §30/§72)/`ContextFreshness`/`ContextConflict`(+`detectConflict`/`resolveConflictByPriority` §31) + `factTypeFromBasis`(§26)/`confidenceBand`(§27)/`freshnessOf`(§28) + mappers `factFromSignal`/`evidenceFromSignal` (traduz SignalInput≈ContextFact, nunca inventa §25). `test:context-model` (26 checks) | CRIAR (tipos) + ESTENDER | ✅ |
 | ~~**F2**~~ ✅ | Context Graph — **ENTREGUE**: `src/server/ContextGraphService.ts` (read-only, sem tabela/coluna nova). Travessia BFS sobre os FKs que já existem (department↔parent/manager · cost_center↔dept/store/owner · store↔manager/contact · inventory_location↔store/dept/responsible · employee↔user/manager/role · product↔supplier via pedido · X↔organization) → `ContextEntity[]`+`ContextRelationship[]` (contratos F1). Direção canônica filho→pai; dedup por `from\|type\|to`. Guardrails duros testados: RN-CG-1 isolamento (FK cross-tenant não resolve), RN-CG-2 não-inventa (FK pendurada não vira nó), RN-CG-3 read+derive, RN-CG-4 limitado (maxDepth/maxNodes/fanLimit + `truncated`), RN-CG-5 org enumera estrutura só como âncora. `test:context-graph` (38 checks) | COMPOR | ✅ |
 | ~~**F3**~~ ✅ | **Context Resolver** — **ENTREGUE**: `src/server/ContextResolverService.ts` + contratos I/O em `contextModel` (`ContextRequest`/`ContextPacket`/`ContextMoment`/`SkillHint`/`ContextQuality` + `resolveBudget`/`PROFILE_BUDGETS`). `resolve(orgId, request)` monta um `ContextPacket` mínimo-e-relevante por intent (§6): momento←`attention` · fatos←`business_signals`/`factFromSignal`(F1) escopados ao sujeito da âncora · grafo←`ContextGraphService`(F2) · metas←`BusinessGoalService.progress` · pistas←`ImpactPrioritizationService`(recommendedActionType, §21) · qualidade←`dataQuality` (cobertura+confiança+frescor+conflito+lacunas, §75). Âncora vem de `focus` ou da dimensão mais específica do escopo; âncora que não resolve → `anchor:null` (não inventa). Orçamento por perfil (minimal/standard/deep) + overrides + `truncated`. `ContextEngineService.resolve` delega (fachada única, AC-A01). Guardrails RN-CR-1..5. `test:context-resolver` (29 checks) | CRIAR (composição) | ✅ |
-| **F4** | BusinessGoal (rico) + BusinessConstraint + GoalCorrelation | ESTENDER + CRIAR | `goalGapsByDomain` já correlaciona |
+| ~~**F4**~~ ✅ | BusinessGoal (rico) + BusinessConstraint — **ENTREGUE**: (1) `business_goals` +aditivos `title/baseline/deadline/priority/owner/status` (§14); `BusinessGoalService.set` update PARCIAL (preserva o não informado), `list` traz os ricos, `progress` só conta ATIVAS por padrão + ordena por prioridade + `attainmentFromBaselinePct` do baseline. (2) `business_constraints` (tabela nova) + `BusinessConstraintService` (§15): CRUD + `applicable(scope)` (global + escopo), kinds discount_ceiling/budget_limit/margin_floor/payment_term_max/policy/custom, isolado/auditado, READ+DERIVE (sem enforcement — gate no RBAC). (3) `ContextPacket` ganha `constraints: ContextConstraint[]` (aplicáveis à âncora) + metas ricas fluem. Rotas `/api/goals` (rico) e `/api/constraints` (CRUD, gestor). Guardrails RN-BC-1..4. `test:business-constraints` (29 checks); F1/F2/F3/business-goals/goal-aware-priority seguem verdes | ESTENDER + CRIAR | ✅ |
 | **F5** | Signal Enrichment (PRD 2 → contexto) | COMPOR | sinal + resolver + goal/constraint |
 | **F6** | Fala Tu Context Capture — `ContextCandidate` (sem alteração silenciosa de política §36) | ESTENDER | sobre `DecisionActionService`/inbox |
 | **F7** | RAG + Memory como evidência (proveniência estruturada) | ESTENDER | `searchContext` structured |
@@ -164,14 +164,14 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F4 — BusinessGoal (rico) + BusinessConstraint**
+## Fatia recomendada a seguir: **F5 — Signal Enrichment (PRD 2 → contexto)**
 
-Com F1–F3 no lugar (contratos + grafo + resolver), o pacote já entrega momento/
-fatos/grafo/metas/qualidade. O próximo incremento é ESTENDER `business_goals`
-(colunas aditivas `title/baseline/deadline/priority/owner/status`, §14) e CRIAR o
-`BusinessConstraint` de 1ª classe (§15) — hoje só há `negotiator_max_discount`/
-bands/budgets soltos. `goalGapsByDomain` já correlaciona meta↔domínio; a fatia
-amarra constraints ao pacote (o resolver ganha uma seção `constraints`).
+Com F1–F4 no lugar (contratos + grafo + resolver + metas ricas/constraints), o
+pacote já entrega momento/fatos/grafo/metas/constraints/qualidade. O próximo
+incremento (§38/§39) é COMPOR o **enriquecimento de sinal**: dado um sinal do
+Radar (PRD 2), montar seu contexto (resolver ancorado no sujeito do sinal + meta
+ameaçada via `goalGapsByDomain` + constraints aplicáveis) — a ponte percepção→
+contexto que o Maestro consome. Reúso puro; sem tabela nova.
 
 ---
 

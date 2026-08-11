@@ -420,6 +420,25 @@ export interface SkillHint {
   impactLevel?: string | null;
 }
 
+/**
+ * §15 CONTEXT CONSTRAINT — um limite/política que a decisão deve respeitar. O
+ * Context Engine só o LÊ e ANEXA (READ+DERIVE §90) — o enforcement é do RBAC/
+ * ApprovalPolicy. Tradução direta de `business_constraints` (F4).
+ */
+export interface ContextConstraint {
+  id: string;
+  kind: string;                 // discount_ceiling|budget_limit|margin_floor|payment_term_max|policy|custom
+  name: string;
+  scopeType?: string | null;
+  scopeRef?: string | null;
+  operator: string;             // lte|gte|eq|max|min
+  value?: number | null;
+  unit?: string | null;
+  text?: string | null;
+  source: ContextSource;
+  active: boolean;
+}
+
 /** §75 CONTEXT QUALITY — a confiança no próprio contexto (cobertura+conf+frescor+conflito). */
 export interface ContextQuality {
   coveragePct: number | null;                         // % de dados informados (dataQuality)
@@ -440,6 +459,7 @@ export interface ContextPacket {
   entities: ContextEntity[];
   relationships: ContextRelationship[];
   goals: Array<Record<string, unknown>>;
+  constraints: ContextConstraint[];
   skillHints: SkillHint[];
   quality: ContextQuality;
   sources: string[];

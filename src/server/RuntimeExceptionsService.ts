@@ -277,6 +277,13 @@ export class RuntimeExceptionsService {
       confirmationsTimedOut: q(`SELECT COUNT(*) c FROM action_confirmations WHERE organization_id = ? AND status = 'timed_out'`),
       jobsPending: q(`SELECT COUNT(*) c FROM background_jobs WHERE organization_id = ? AND status = 'pending'`),
       jobsFailed: q(`SELECT COUNT(*) c FROM background_jobs WHERE organization_id = ? AND status = 'failed'`),
+      // PRD 4 F9 (§17) — sinal de IA na MESMA Central (sem painel novo). Contagens
+      // ADITIVAS derivadas das AI Runs (F4, `run_id IS NOT NULL`); §30-safe (sem
+      // custo). A visão rica fica em SkillOsObservabilityService.aiRuns.
+      aiRunsTotal: q(`SELECT COUNT(*) c FROM ai_usage_log WHERE organization_id = ? AND run_id IS NOT NULL`),
+      aiRunsFailed: q(`SELECT COUNT(*) c FROM ai_usage_log WHERE organization_id = ? AND run_id IS NOT NULL AND run_status = 'failed'`),
+      aiRunsFallback: q(`SELECT COUNT(*) c FROM ai_usage_log WHERE organization_id = ? AND run_id IS NOT NULL AND fallback_used = 1`),
+      aiRunsUnsupportedGrounding: q(`SELECT COUNT(*) c FROM ai_usage_log WHERE organization_id = ? AND run_id IS NOT NULL AND grounding_status = 'unsupported'`),
     };
   }
 }

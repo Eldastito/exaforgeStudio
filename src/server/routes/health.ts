@@ -5,6 +5,7 @@ import { SurvivalIndexService } from "../SurvivalIndexService.js";
 import { BusinessTutorService } from "../BusinessTutorService.js";
 import { DecisionSimulatorService } from "../DecisionSimulatorService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
+import { SkillOsObservabilityService } from "../SkillOsObservabilityService.js";
 import db from "../db.js";
 
 // Central de Saúde e Decisão (ADR-126) — síntese: status + 3 prioridades do dia.
@@ -108,6 +109,16 @@ router.post("/tutor/test", async (req: AuthRequest, res): Promise<any> => {
   const out = await BusinessTutorService.sendNow(orgId, { send: (target, message) => MessageProviderService.sendMessage(channel.id, target, message) });
   if (!out.ok) return res.status(400).json({ error: out.error });
   res.json({ ok: true, phone: out.phone });
+});
+
+// GET /api/health-center/ai-runs — observabilidade OPERACIONAL das AI Runs do tenant
+// (PRD 4 F9, §17): status/fallback/grounding/validação/confiança + saúde de provider.
+// §30-safe por construção E por guarda em runtime (assertTenantSafe) — NUNCA custo
+// (R$/US$). O custo financeiro vive só em /api/admin/ai-usage (requireMasterAdmin).
+router.get("/ai-runs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SkillOsObservabilityService.aiRuns(orgId, Number(req.query?.days)));
 });
 
 export default router;

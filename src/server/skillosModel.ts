@@ -293,3 +293,66 @@ export function validateSkillManifest(m: unknown): ContractValidation {
   if (o.maxExecutionTimeMs != null && !(typeof o.maxExecutionTimeMs === "number" && o.maxExecutionTimeMs > 0)) errors.push("maxExecutionTimeMs: número >0 ou null");
   return { valid: errors.length === 0, errors };
 }
+
+// ═══════════════════════ §10/§11 Capability Resolution ══════════════════════════
+
+/** Ordem de custo computacional (menor = mais barato). free = sem modelo. */
+export function budgetRank(cls: BudgetClass | null | undefined): number {
+  const i = BUDGET_CLASSES.indexOf(cls as BudgetClass);
+  return i >= 0 ? i : BUDGET_CLASSES.length; // desconhecido = mais caro
+}
+
+/** Ordem de risco (menor = mais seguro). */
+export function riskRank(level: RiskLevel | null | undefined): number {
+  const i = RISK_LEVELS.indexOf(level as RiskLevel);
+  return i >= 0 ? i : RISK_LEVELS.length;
+}
+
+/**
+ * §7/§11 — a Skill é DETERMINÍSTICA (não precisa de modelo probabilístico)? Sim se
+ * é budget `free` OU não declara requisitos de modelo. "Determinístico antes de
+ * probabilístico" (P7) é a 1ª chave de ranqueamento.
+ */
+export function isDeterministicSkill(m: Pick<SkillManifest, "budgetClass" | "modelRequirements">): boolean {
+  if (m.budgetClass === "free") return true;
+  const needs = m.modelRequirements?.needs;
+  return !needs || needs.length === 0;
+}
+
+/**
+ * §11 — ranqueia candidatas (cópia; puro, determinístico). Ordem de preferência:
+ *   1. determinística antes de probabilística (P7);
+ *   2. menor custo computacional (budget);
+ *   3. menor risco;
+ *   4. versão mais nova (desempate);
+ *   5. skillId asc (desempate final estável).
+ * NÃO escolhe "o modelo mais poderoso" (§11). Confiabilidade histórica é critério
+ * FUTURO (evals, F11) — DEFERIDO; por ora o desempate é estável por versão/id.
+ */
+export function rankSkills(candidates: SkillManifest[]): SkillManifest[] {
+  return [...candidates].sort((a, b) => {
+    const det = (isDeterministicSkill(a) ? 0 : 1) - (isDeterministicSkill(b) ? 0 : 1);
+    if (det !== 0) return det;
+    const bud = budgetRank(a.budgetClass) - budgetRank(b.budgetClass);
+    if (bud !== 0) return bud;
+    const rsk = riskRank(a.riskLevel) - riskRank(b.riskLevel);
+    if (rsk !== 0) return rsk;
+    const ver = (b.version || 0) - (a.version || 0);  // versão desc
+    if (ver !== 0) return ver;
+    return String(a.skillId).localeCompare(String(b.skillId));
+  });
+}
+
+/** Por que uma Capability não resolveu (nunca "silêncio", §65). */
+export type UnresolvedReason = "capability_not_found" | "capability_unavailable" | "no_skill_available";
+
+/** §10 — o resultado da resolução: a Skill escolhida + razão + alternativas + fallback. */
+export interface SkillResolution {
+  capabilityId: string;
+  resolved: boolean;
+  skill: SkillManifest | null;         // a escolhida (null se não resolveu)
+  reason: string;                      // por que esta (ou por que nenhuma)
+  alternatives: SkillManifest[];       // demais candidatas ranqueadas
+  fallbackChain: string[];             // skillIds declarados como fallback da escolhida (§25)
+  unresolvedReason?: UnresolvedReason | null;
+}

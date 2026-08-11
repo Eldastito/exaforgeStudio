@@ -524,6 +524,103 @@ export interface ContextPacket {
   schemaVersion: number;
 }
 
+// ═══════════════════ CONTEXT PACKET CONTRACT (AC-A05/§127) — F10 ════════════════
+// O `ContextPacket` é a INTERFACE entre o PRD 3 (Context Engine) e o PRD 4
+// (SkillOS). AC-A05 exige que ela seja ESTÁVEL — qualquer regressão de forma/
+// invariante tem de FALHAR ALTO (não passar em silêncio). Este é o validador
+// determinístico que blinda o contrato: forma + tipos + invariantes de negócio.
+
+/** Versão do contrato do pacote. Sobe SÓ em breaking change (o PRD 4 pina a versão). */
+export const CONTEXT_PACKET_SCHEMA_VERSION = 1;
+
+const CONFIDENCE_BANDS: readonly ConfidenceBand[] = ["very_high", "high", "medium", "low", "unreliable"];
+
+export interface ContextPacketValidation {
+  valid: boolean;
+  errors: string[];    // caminho + motivo, um por violação (vazio ⇒ válido)
+}
+
+const isStr = (v: any) => typeof v === "string";
+const isNum = (v: any) => typeof v === "number" && Number.isFinite(v);
+const isBool = (v: any) => typeof v === "boolean";
+const isArr = (v: any) => Array.isArray(v);
+const isObj = (v: any) => v != null && typeof v === "object" && !Array.isArray(v);
+const isNonNegInt = (v: any) => isNum(v) && v >= 0 && Number.isInteger(v);
+
+/**
+ * §127 — valida um `ContextPacket` contra o contrato. Determinístico e PURO (sem
+ * DB/IA). Junta TODAS as violações (não para na 1ª) pra o caller ver o quadro
+ * inteiro. Cobre: campos obrigatórios + tipos · schemaVersion · budget completo ·
+ * moment/quality bem-formados · e as INVARIANTES: budget RESPEITADO (nenhum array
+ * acima do teto), confiança em [0,1] com banda válida, frescor com inteiros ≥0,
+ * `truncated` booleano coerente. Nunca lança (retorna erros) — use `assert` p/ throw.
+ */
+export function validateContextPacket(packet: unknown): ContextPacketValidation {
+  const errors: string[] = [];
+  const p: any = packet;
+  if (!isObj(p)) return { valid: false, errors: ["packet: não é um objeto"] };
+
+  if (!isStr(p.tenantId) || !p.tenantId.trim()) errors.push("tenantId: string não-vazia obrigatória");
+  if (!isStr(p.intent)) errors.push("intent: string obrigatória");
+  if (!isObj(p.scope)) errors.push("scope: objeto obrigatório");
+  if (!(p.anchor === null || isStr(p.anchor))) errors.push("anchor: string ou null");
+  for (const k of ["facts", "entities", "relationships", "goals", "constraints", "skillHints", "sources"]) {
+    if (!isArr(p[k])) errors.push(`${k}: array obrigatório`);
+  }
+  if (!isBool(p.truncated)) errors.push("truncated: boolean obrigatório");
+  if (!isStr(p.generatedAt)) errors.push("generatedAt: string obrigatória");
+  if (p.schemaVersion !== CONTEXT_PACKET_SCHEMA_VERSION) errors.push(`schemaVersion: esperado ${CONTEXT_PACKET_SCHEMA_VERSION}, veio ${p.schemaVersion}`);
+
+  // budget — Required<ContextBudget>: 5 campos, todos números finitos ≥0.
+  if (!isObj(p.budget)) errors.push("budget: objeto obrigatório");
+  else for (const k of ["maxFacts", "maxEntities", "maxSignals", "graphDepth", "maxGoals"]) {
+    if (!isNum(p.budget[k]) || p.budget[k] < 0) errors.push(`budget.${k}: número ≥0 obrigatório`);
+  }
+
+  // moment — §17.
+  if (!isObj(p.moment)) errors.push("moment: objeto obrigatório");
+  else {
+    if (!isNum(p.moment.total)) errors.push("moment.total: número obrigatório");
+    if (!isObj(p.moment.bySeverity)) errors.push("moment.bySeverity: objeto obrigatório");
+    if (!isObj(p.moment.byDomain)) errors.push("moment.byDomain: objeto obrigatório");
+    if (!isArr(p.moment.top)) errors.push("moment.top: array obrigatório");
+  }
+
+  // quality — §75.
+  if (!isObj(p.quality)) errors.push("quality: objeto obrigatório");
+  else {
+    const q = p.quality;
+    if (!(q.coveragePct === null || isNum(q.coveragePct))) errors.push("quality.coveragePct: número ou null");
+    if (!isObj(q.confidence)) errors.push("quality.confidence: objeto obrigatório");
+    else {
+      if (!isNum(q.confidence.score) || q.confidence.score < 0 || q.confidence.score > 1) errors.push("quality.confidence.score: número em [0,1]");
+      if (!CONFIDENCE_BANDS.includes(q.confidence.band)) errors.push("quality.confidence.band: banda inválida");
+    }
+    if (!isObj(q.freshness)) errors.push("quality.freshness: objeto obrigatório");
+    else for (const k of ["fresh", "stale", "unknown"]) if (!isNonNegInt(q.freshness[k])) errors.push(`quality.freshness.${k}: inteiro ≥0`);
+    if (!isNum(q.conflicts) || q.conflicts < 0) errors.push("quality.conflicts: número ≥0");
+    if (!isArr(q.gaps)) errors.push("quality.gaps: array obrigatório");
+  }
+
+  // INVARIANTE — budget RESPEITADO: nenhum array acima do teto (o corte tem de ter
+  // acontecido; §123 proíbe estourar o orçamento). Só checa se ambos os lados são sãos.
+  if (isObj(p.budget)) {
+    const cap = (arr: any, max: any, name: string) => { if (isArr(arr) && isNum(max) && arr.length > max) errors.push(`${name}: ${arr.length} acima do teto do budget (${max})`); };
+    cap(p.facts, p.budget.maxFacts, "facts");
+    cap(p.entities, p.budget.maxEntities, "entities");
+    cap(p.goals, p.budget.maxGoals, "goals");
+    if (isObj(p.moment)) cap(p.moment.top, p.budget.maxSignals, "moment.top");
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/** Igual ao validate, mas LANÇA no 1º pacote inválido (guarda dura p/ caller/teste). */
+export function assertContextPacket(packet: unknown): asserts packet is ContextPacket {
+  const r = validateContextPacket(packet);
+  if (!r.valid) throw new Error(`ContextPacket inválido (contrato §127): ${r.errors.join("; ")}`);
+}
+
 // ═══════════════════════ CONTEXT CANDIDATE (§36/§37) — F6 ══════════════════════
 // Um candidato de CONTEXTO/REGRA (não de ação): uma mudança PROPOSTA ao contexto
 // (um fato, uma restrição/regra) capturada do Fala Tu / de um detector, que SÓ

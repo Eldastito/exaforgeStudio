@@ -4,7 +4,8 @@ import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { ContextProjectionService, ContextProjectionManifest } from "./ContextProjectionService.js";
 import { ContextResolverService } from "./ContextResolverService.js";
 import { ContextQualityService } from "./ContextQualityService.js";
-import type { ContextRequest, ContextPacket, ContextQualityReport, RagHitLike } from "./contextModel.js";
+import { validateContextPacket } from "./contextModel.js";
+import type { ContextRequest, ContextPacket, ContextQualityReport, RagHitLike, ContextPacketValidation } from "./contextModel.js";
 
 /**
  * Context Engine (ADR-160 D3 / Onda A F3) — CONTRATO ÚNICO de contexto do negócio.
@@ -152,6 +153,15 @@ export class ContextEngineService {
   static resolveFor(orgId: string, user: any, request: ContextRequest, opts: { purpose?: string } = {}): { packet: ContextPacket; manifest: ContextProjectionManifest } {
     const packet = ContextResolverService.resolve(orgId, request);
     return ContextProjectionService.projectPacket(orgId, user, packet, opts);
+  }
+
+  /**
+   * PRD 3 F10 (AC-A05/§127) — valida um `ContextPacket` contra o contrato estável
+   * do PRD 4 (forma + tipos + invariantes). Guarda determinístico contra regressão
+   * SILENCIOSA da interface entre os dois PRDs. Delega ao validador puro.
+   */
+  static validatePacket(packet: unknown): ContextPacketValidation {
+    return validateContextPacket(packet);
   }
 
   static render(orgId: string): string {

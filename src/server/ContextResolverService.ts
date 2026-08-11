@@ -12,6 +12,7 @@ import {
   resolveBudget,
   factFromSignal,
   clampConfidence,
+  CONTEXT_PACKET_SCHEMA_VERSION,
 } from "./contextModel.js";
 import type { ContextConstraint } from "./contextModel.js";
 import { ContextGraphService } from "./ContextGraphService.js";
@@ -141,7 +142,7 @@ export class ContextResolverService {
       truncated,
       budget,
       generatedAt: new Date().toISOString(),
-      schemaVersion: 1,
+      schemaVersion: CONTEXT_PACKET_SCHEMA_VERSION,
     };
   }
 

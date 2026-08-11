@@ -150,7 +150,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | ~~**F7**~~ ✅ | RAG + Memory como evidência — **ENTREGUE**: `geminiRAG` ESTENDIDO (sem tabela nova). `loadOrgChunks` preserva a proveniência que a linha já carregava e era descartada (`document_id`/`chunk_index`/`created_at` + título via join a `knowledge_documents`). Novo `RagHit` (proveniência estruturada: documentId/chunkIndex/title/source/score/observedAt) + `rankChunksToHits` (PURO — filtro canal/área + topK + score, testável sem embed) + `searchContextRich` (I/O em volta). `searchContext` (string[]) segue como projeção retrocompat — 0 quebra nos callers (AIOrchestrator/generateRagResponse). Mapper `evidenceFromRagHit` (contextModel) traduz um hit em `EvidenceReference` (§24) APPROVED_DOCUMENT (sourceId=documentId, field=chunk:N, confidence=score) — RAG/memória viram evidência de 1ª classe rastreável; não inventa (§25). `test:rag-provenance` (21 checks, determinístico sem chave de IA); context-model/falatu-rag/falatu-embeddings + F3/F5/F6 seguem verdes — 0 regressão | ESTENDER | ✅ |
 | ~~**F8**~~ ✅ | Context Quality — **ENTREGUE**: `ContextQualityService.ts` (COMPOR, sem tabela nova) + `ContextQualityReport`/`ContextCoverageItem` em `contextModel`. A matemática do resumo (`assessFromFacts`: cobertura+confiança+banda+frescor+conflitos+lacunas) foi EXTRAÍDA do `ContextResolverService.computeQuality` (F3) pra cá — o resolver agora DELEGA (fonte única, `packet.quality` idêntico → 0 regressão). Sobre isso, o relatório RICO: `coverageByItem` (§34 disponibilidade por-fonte, available true/false) · `conflictsDetailed` (§31 conflito entre fontes REPORTADO com valores em disputa, não só a contagem) · `evidenceSummary` (§24 proveniência agregada por tipo, FUNDINDO a evidência estruturada do RAG/F7 via `evidenceFromRagHit`). `assess()` resolve o pacote (import dinâmico quebra o ciclo) e consolida; exposto pela fachada `ContextEngineService.quality` + rota `GET /api/context/quality`. Guardrails RN-CQ-1..5. `test:context-quality` (19 checks); F1/F3/F5/F6/F7/context-engine seguem verdes — 0 regressão | COMPOR | ✅ |
 | ~~**F9**~~ ✅ | Security — **ENTREGUE** (REUTILIZAR + CRIAR): (1) `ContextGuardService.ts` — a guarda ÚNICA data-vs-instrução (§71): `classify` (heurística de injeção consolidada das cópias do AIOrchestrator+geminiRAG) + `neutralize` (DEFANG: remove chars de controle + DESARMA o sentinela do cerco — sem quebra de cerco, RN-CG-1) + `fence` (embrulha em `<untrusted_external_data>` e propaga `suspicious`; isolar > censurar). (2) `ContextProjectionService.projectPacket` (§68/§70) — projeta o `ContextPacket` (F3) por PAPEL **+ PROPÓSITO**: redige objeto de fato/atributo de entidade/valor de restrição sensível; `redact`→`redactWith` parametrizado; `PURPOSE_FORBIDDEN` (customer_facing redige custo/margem/PII **mesmo pro dono**, §70 além-do-papel); dono full sem propósito → CRU (0 regressão); manifesto de paths redigidos. Fachada `ContextEngineService.resolveFor` (resolve+projeta, porta única entregável). (3) Testes DELIBERADOS de isolamento cross-tenant (§93). Guardrails RN-CG-1..3 + a redação fail-closed reusada. `test:context-security` (21 checks); falatu-context-projection/F1/F3/F7/F8 seguem verdes — 0 regressão | REUTILIZAR + CRIAR | ✅ |
-| **F10** | Contratos SkillOS — validar `ContextPacket` estável pro PRD 4 | validação | sem SkillOS |
+| ~~**F10**~~ ✅ | Contratos SkillOS — **ENTREGUE** (validação): `CONTEXT_PACKET_SCHEMA_VERSION` + `validateContextPacket`/`assertContextPacket` em `contextModel` (puro, determinístico). Blinda o `ContextPacket` como CONTRATO estável do PRD 4 (AC-A05/§127): valida forma + tipos + schemaVersion + budget completo + moment/quality bem-formados + as INVARIANTES (budget RESPEITADO — array acima do teto FALHA; confiança em [0,1] com banda válida; frescor inteiro ≥0; truncated coerente). Junta TODAS as violações (não para na 1ª). O resolver passa a emitir a constante (era literal `1`). Fachada `ContextEngineService.validatePacket` delega. `test:context-contract` (20 checks — todo pacote real resolvido passa em minimal/standard/deep; malformações pegas com erro preciso); F1/F3/F7/F8/F9 seguem verdes — 0 regressão | validação | ✅ |
 | **F11** | Observability — métricas (§55/§120) internas | COMPOR | reusa `ai_usage_log`/health |
 | **F12** | Hardening — testes (unit/integração/multi-tenant/segurança/golden §97) | testes | golden context tests reusáveis no PRD 4 (§98) |
 
@@ -164,15 +164,21 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F10 — Contratos SkillOS (validar `ContextPacket` estável pro PRD 4)**
+## Fatia recomendada a seguir: **F11 — Observability (métricas internas §55/§120)**
 
-Com F1–F9 no lugar (contratos + grafo + resolver + metas/constraints + sinal +
-candidato + RAG-evidência + qualidade + segurança), o próximo incremento (AC-A05/
-§127) é blindar o `ContextPacket` como CONTRATO estável pro PRD 4: um validador
-determinístico (`ContextPacketContract.validate`) que confere forma/versão/
-invariantes (schemaVersion, campos obrigatórios, budget respeitado, `truncated`
-coerente) — o guard-rail que impede regressão silenciosa da interface entre os dois
-PRDs. Validação; sem SkillOS ainda.
+Com F1–F10 no lugar (contratos + grafo + resolver + metas/constraints + sinal +
+candidato + RAG-evidência + qualidade + segurança + contrato blindado), o próximo
+incremento (§55/§120) é COMPOR a observabilidade do Context Engine: métricas
+internas de uso/latência/tamanho do pacote (nº de fatos/entidades, truncated,
+cobertura/confiança, hits de RAG) — reusando `ai_usage_log`/health, sem telemetria
+externa. Um `ContextMetricsService` que DERIVA por query (RN-004), sem tabela nova.
+
+### (histórico) Fatia entregue: **F10 — Contratos SkillOS**
+
+Validador determinístico do `ContextPacket` (`validateContextPacket`/`assert` +
+`CONTEXT_PACKET_SCHEMA_VERSION`) — blinda a interface PRD 3 ↔ PRD 4 (AC-A05/§127)
+contra regressão silenciosa (forma + tipos + invariantes de budget/confiança/
+frescor). Fachada `ContextEngineService.validatePacket`. ✅
 
 ### (histórico) Fatia entregue: **F9 — Security**
 

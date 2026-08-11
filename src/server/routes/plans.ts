@@ -3,6 +3,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { PlanService } from "../PlanService.js";
 import { AsaasService } from "../AsaasService.js";
 import { ConsumptionService } from "../ConsumptionService.js";
+import { SkillOsTenantUsageService } from "../SkillOsTenantUsageService.js";
 import { AddonService } from "../AddonService.js";
 import { ModuleService } from "../ModuleService.js";
 import { PLAN_BUNDLES } from "../plansGrade.js";
@@ -138,6 +139,17 @@ router.post("/consumption/auto-topup", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ConsumptionService.setAutoTopup(orgId, !!req.body?.enabled)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/plans/ai-usage — visão de CONSUMO de IA do tenant (PRD 4 F10): franquia
+// (%-ações), tendência mês a mês, saúde das AI Runs e o alerta plan_near_limit_ai
+// EXISTENTE. §30-safe por construção E por guarda em runtime (assertTenantSafe) —
+// NUNCA R$/US$. O custo financeiro vive só em /api/admin/ai-usage (requireMasterAdmin).
+router.get("/ai-usage", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SkillOsTenantUsageService.summary(orgId, Number(req.query?.days))); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

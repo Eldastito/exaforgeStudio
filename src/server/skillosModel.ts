@@ -356,3 +356,69 @@ export interface SkillResolution {
   fallbackChain: string[];             // skillIds declarados como fallback da escolhida (§25)
   unresolvedReason?: UnresolvedReason | null;
 }
+
+// ═══════════════════════ §22/§26 Model Router + Circuit Breaker ═════════════════
+
+/** §26 — estado do provider/modelo no circuit breaker. */
+export const PROVIDER_HEALTH_STATES = ["healthy", "watch", "degraded", "open", "half_open"] as const;
+export type ProviderHealthState = (typeof PROVIDER_HEALTH_STATES)[number];
+
+/** True se o estado permite ROTEAR pra este modelo (open = barrado; half_open = probe). */
+export function isRoutable(state: ProviderHealthState): boolean {
+  return state !== "open";
+}
+
+/** Candidato de modelo já anotado com sua saúde — o que o ranker consome. */
+export interface ModelCandidate {
+  profile: ModelProfile;
+  budgetClass?: BudgetClass | null;
+  health: ProviderHealthState;
+}
+
+/**
+ * §22/§11 — ranqueia modelos candidatos (cópia; puro, determinístico). Ordem:
+ *   1. mais saudável primeiro (healthy < half_open);
+ *   2. menor custo (budget);
+ *   3. menor latência típica;
+ *   4. nome do modelo (desempate estável).
+ * NÃO prefere "o mais poderoso" (§11). `open` deve ser filtrado ANTES (não roteável).
+ */
+export function rankModelCandidates(candidates: ModelCandidate[]): ModelCandidate[] {
+  const healthRank = (s: ProviderHealthState) => (s === "healthy" ? 0 : s === "watch" ? 1 : s === "degraded" ? 2 : s === "half_open" ? 3 : 4);
+  return [...candidates].sort((a, b) => {
+    const h = healthRank(a.health) - healthRank(b.health);
+    if (h !== 0) return h;
+    const bud = budgetRank(a.budgetClass) - budgetRank(b.budgetClass);
+    if (bud !== 0) return bud;
+    const lat = (a.profile.typicalLatencyMs ?? Infinity) - (b.profile.typicalLatencyMs ?? Infinity);
+    if (lat !== 0) return lat;
+    return String(a.profile.model).localeCompare(String(b.profile.model));
+  });
+}
+
+/** Por que o Router não encontrou modelo (nunca "silêncio", §65). */
+export type NoModelReason = "no_model_meets_requirements" | "all_candidates_open";
+
+/** §22 — o resultado do roteamento: o modelo escolhido + razão + alternativas. */
+export interface ModelRoute {
+  routed: boolean;
+  model: string | null;
+  provider: string | null;
+  health: ProviderHealthState | null;
+  reason: string;
+  alternatives: Array<{ model: string; provider: string; health: ProviderHealthState }>;
+  noModelReason?: NoModelReason | null;
+}
+
+/**
+ * §24 — contrato de um Provider de IA (abstração comum). Os adaptadores concretos
+ * (OpenAI/Google/Anthropic em volta de `llm.ts`) entram na fatia de execução; aqui
+ * fica o CONTRATO pra o Router/Kernel programarem contra a interface, não o SDK.
+ */
+export interface AIProviderContract {
+  name: string;
+  supports(req: ModelRequirements, profile: ModelProfile): boolean;
+  estimateUsage?(inputTokens: number, outputTokens: number, model: string): { costUsd?: number } | null;
+  health?(): ProviderHealthState;
+  invoke?(args: unknown): Promise<unknown>;
+}

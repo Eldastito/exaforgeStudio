@@ -44,6 +44,12 @@ const PRICES: Record<string, { in: number; out: number }> = {
   "gpt-4.1-mini": { in: 0.4, out: 1.6 },
   "text-embedding-3-small": { in: 0.02, out: 0 },
   "text-embedding-3-large": { in: 0.13, out: 0 },
+  // PRD 4 F5 (RISK-3) — modelos Claude/Anthropic, pra o Model Router poder rotear
+  // e a contabilidade não ficar zerada. USD por 1M tokens (in/out). Aditivo.
+  "claude-opus-4-8": { in: 15, out: 75 },
+  "claude-opus-5": { in: 15, out: 75 },
+  "claude-sonnet-5": { in: 3, out: 15 },
+  "claude-haiku-4-5-20251001": { in: 0.8, out: 4 },
 };
 function priceFor(model: string): { in: number; out: number } {
   return PRICES[model] || PRICES[(model || "").split(":")[0]] || { in: 2.5, out: 10 };

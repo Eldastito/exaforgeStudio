@@ -8662,6 +8662,28 @@ const initDb = () => {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_run ON ai_usage_log (organization_id, run_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_skill ON ai_usage_log (organization_id, skill_id, created_at)`);
   } catch(e){ console.error('[DB] Falha ao estender ai_usage_log (AI Run, PRD4 F4)', e); }
+
+  // PRD 4 F5 (SkillOS Model Router) — CATÁLOGO de modelos. Tabela de PLATAFORMA
+  // (universal, sem organization_id — §49): "quais modelos existem e o que fazem" é
+  // config de plataforma, não de tenant. O Router casa `ModelRequirements` (F1) com
+  // as capacidades daqui + a saúde do provider (derivada de ai_usage_log). A saúde
+  // do circuit breaker NÃO fica aqui — é derivada por query (RN-004), sem contador.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS skillos_model_profiles (
+        model TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL DEFAULT '[]',   -- reasoning|structured_output|vision|tool_call|long_context|fast|cheap|high_accuracy
+        context_tokens INTEGER,
+        typical_latency_ms INTEGER,
+        budget_class TEXT,                               -- free|low|standard|high
+        status TEXT NOT NULL DEFAULT 'active',           -- draft|active|deprecated|disabled
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_skillos_models_provider ON skillos_model_profiles(provider, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela skillos_model_profiles', e); }
 };
 
 initDb();

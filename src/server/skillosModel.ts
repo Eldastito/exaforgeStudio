@@ -601,3 +601,141 @@ export function topoSortSteps<T extends { stepId: string; dependsOn?: string[] }
   }
   return out.length === steps.length ? out : steps; // ciclo → ordem original
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRD 4 F11 — Evals + Shadow (contratos puros + scorers DETERMINÍSTICOS)
+// ---------------------------------------------------------------------------
+// P7 (determinístico antes de probabilístico): o núcleo do eval NÃO usa LLM-juiz.
+// Cada caso declara um scorer determinístico e um `expected`; a nota sai de regra
+// pura (match exato, subconjunto JSON, campo igual, grounded, não-vazio, predicado).
+// Assim o eval roda na CI SEM chave de IA (mesma disciplina de todos os testes).
+// O candidato pode vir gravado no caso (`recordedOutput`, replay golden) ou de um
+// `invoke` injetado (mesma técnica testável do Kernel F4) — nunca um provider real
+// embutido aqui. "Simples primeiro; sem plataforma de ML" (auditoria).
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const EVAL_SCORERS = ["exact", "json_subset", "field_equals", "grounded", "non_empty", "predicate"] as const;
+export type EvalScorer = (typeof EVAL_SCORERS)[number];
+
+export interface EvalCase {
+  caseId: string;
+  skillId: string;
+  name: string;
+  input: any;                         // insumo do caso (o que a skill receberia)
+  scorer: EvalScorer;
+  expected?: any;                     // gabarito (exact/json_subset/field_equals)
+  fieldPath?: string;                 // p/ field_equals: "a.b.c"
+  recordedOutput?: any;               // candidato gravado (replay determinístico)
+  weight?: number;                    // peso na agregação (default 1)
+}
+
+export interface EvalCaseScore {
+  caseId: string;
+  scorer: EvalScorer;
+  passed: boolean;
+  score: number;                      // 0..1
+  weight: number;
+  detail: string | null;             // onde divergiu (null se passou)
+}
+
+export interface EvalResult {
+  skillId: string;
+  promptVersion: string | null;
+  total: number;
+  passed: number;
+  failed: number;
+  passRate: number;                   // 0..1 (ponderado por weight)
+  scores: EvalCaseScore[];
+  regressed: boolean;                 // vs baseline (setado pelo serviço)
+}
+
+/** Lê um caminho "a.b.c" de um objeto (sem lançar). */
+export function readPath(obj: any, path: string): any {
+  if (!path) return obj;
+  return path.split(".").reduce((acc, k) => (acc == null ? undefined : acc[k]), obj);
+}
+
+/** `expected` é subconjunto (recursivo) de `candidate`? (arrays: igualdade por índice.) */
+export function isJsonSubset(expected: any, candidate: any): boolean {
+  if (expected === null || typeof expected !== "object") return expected === candidate;
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(candidate) || candidate.length !== expected.length) return false;
+    return expected.every((v, i) => isJsonSubset(v, candidate[i]));
+  }
+  if (candidate === null || typeof candidate !== "object") return false;
+  return Object.keys(expected).every((k) => isJsonSubset(expected[k], candidate[k]));
+}
+
+/**
+ * Pontua UM caso contra um candidato, determinístico. `predicate` opcional só é
+ * usado pelo scorer 'predicate' (o serviço injeta; o modelo puro aceita a função).
+ * Retorna pass/score/detalhe (detail = onde divergiu, pra diagnóstico).
+ */
+export function scoreEvalCase(c: EvalCase, candidate: any, predicate?: (candidate: any, c: EvalCase) => boolean): EvalCaseScore {
+  const weight = c.weight && c.weight > 0 ? c.weight : 1;
+  const mk = (passed: boolean, detail: string | null): EvalCaseScore =>
+    ({ caseId: c.caseId, scorer: c.scorer, passed, score: passed ? 1 : 0, weight, detail });
+
+  if (candidate === undefined) return mk(false, "sem candidato (recordedOutput/invoke ausente)");
+
+  switch (c.scorer) {
+    case "exact": {
+      const ok = JSON.stringify(candidate) === JSON.stringify(c.expected);
+      return mk(ok, ok ? null : "candidato ≠ expected (match exato)");
+    }
+    case "json_subset": {
+      const ok = isJsonSubset(c.expected, candidate);
+      return mk(ok, ok ? null : "expected não é subconjunto do candidato");
+    }
+    case "field_equals": {
+      const got = readPath(candidate, c.fieldPath || "");
+      const ok = JSON.stringify(got) === JSON.stringify(c.expected);
+      return mk(ok, ok ? null : `campo '${c.fieldPath}': ${JSON.stringify(got)} ≠ ${JSON.stringify(c.expected)}`);
+    }
+    case "grounded": {
+      // candidato deve declarar grounding_status = 'grounded' (§19). Aceita o campo
+      // no candidato OU num sub-objeto .grounding.status.
+      const gs = candidate?.grounding_status ?? candidate?.grounding?.status ?? candidate?.groundingStatus;
+      const ok = gs === "grounded";
+      return mk(ok, ok ? null : `grounding_status='${gs}' (esperado 'grounded')`);
+    }
+    case "non_empty": {
+      const ok = candidate !== null && candidate !== undefined && candidate !== "" &&
+        !(Array.isArray(candidate) && candidate.length === 0) &&
+        !(typeof candidate === "object" && !Array.isArray(candidate) && Object.keys(candidate).length === 0);
+      return mk(ok, ok ? null : "candidato vazio");
+    }
+    case "predicate": {
+      const ok = typeof predicate === "function" ? !!predicate(candidate, c) : false;
+      return mk(ok, ok ? null : "predicado retornou falso");
+    }
+    default:
+      return mk(false, `scorer desconhecido: ${c.scorer}`);
+  }
+}
+
+/** Agrega notas de casos num passRate ponderado por weight. */
+export function aggregateEval(skillId: string, promptVersion: string | null, scores: EvalCaseScore[]): EvalResult {
+  const total = scores.length;
+  const passed = scores.filter((s) => s.passed).length;
+  const wSum = scores.reduce((a, s) => a + s.weight, 0);
+  const wPass = scores.reduce((a, s) => a + (s.passed ? s.weight : 0), 0);
+  return {
+    skillId, promptVersion, total, passed, failed: total - passed,
+    passRate: wSum > 0 ? wPass / wSum : 0,
+    scores, regressed: false,
+  };
+}
+
+/**
+ * REGRESSÃO vs baseline (gate simples, sem ML): regrediu se o passRate CAIU, OU se
+ * algum caso que passava no baseline agora falha (mesmo com passRate estável — troca
+ * de acerto por acerto ainda é sinal). `baselinePassRate`/`baselinePassedCaseIds` do
+ * último run registrado.
+ */
+export function detectRegression(current: EvalResult, baseline: { passRate: number; passedCaseIds: string[] } | null): boolean {
+  if (!baseline) return false;                         // primeiro run nunca "regride"
+  if (current.passRate < baseline.passRate - 1e-9) return true;
+  const nowPassing = new Set(current.scores.filter((s) => s.passed).map((s) => s.caseId));
+  return baseline.passedCaseIds.some((id) => !nowPassing.has(id));
+}

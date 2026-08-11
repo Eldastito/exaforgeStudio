@@ -28,6 +28,7 @@
     "test:skillos-execution-bridge": "tsx scripts/test-skillos-execution-bridge.ts",
     "test:skillos-observability": "tsx scripts/test-skillos-observability.ts",
     "test:skillos-tenant-usage": "tsx scripts/test-skillos-tenant-usage.ts",
+    "test:skillos-evals": "tsx scripts/test-skillos-evals.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

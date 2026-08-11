@@ -16,9 +16,10 @@
  *     quem estava no balde menor continua; a 100% é universal), one-time por-percentual
  *     (marker), só sobe (preserva operador com canário maior), pula skill em `shadow`
  *     (percentual não se aplica); os degraus compõem em sequência com markers independentes.
- *   - avançar o estágio pilot → approved_execution (§68): sobe o teto de execution_mode
- *     (ADR-159), preserva o canário, one-time por-estágio (marker), só avança (nunca
- *     rebaixa — skill já em broader é preservada).
+ *   - avançar o estágio pilot → approved_execution → broader (§68): sobe o teto de
+ *     execution_mode (ADR-159), preserva o canário, one-time por-estágio (marker), só
+ *     avança (nunca rebaixa); `broader` é o topo da escada e AINDA mapeia pra
+ *     approved_execution (humano no laço — `autonomous` nunca é semeado por rollout).
  *
  * Uso: npm run test:skillos-pilot-promote
  */
@@ -168,7 +169,20 @@ async function main() {
   const a3 = SEED.advancePilotsToStage("approved_execution");
   check("9.5 skill em broader preservada (nunca rebaixa); a de pilot avança", a3.skipped.includes("collection-intent-classifier-v1") && a3.advanced.includes(ref) && RO.get("collection-intent-classifier-v1").stage === "broader");
 
-  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário 25%→50%→100%→approved_execution) ===\n");
+  // ═══════════════ 10. último degrau: approved_execution → broader (§68) ═══════════════
+  db.prepare(`DELETE FROM skillos_platform_markers WHERE marker = 'pilots_stage_broader_v1'`).run();
+  for (const id of skills) { RO.setStage(id, "approved_execution"); RO.setCanaryPercent(id, 100); }
+  const b1 = SEED.advancePilotsToStage("broader");
+  check("10.1 avançou os 3 pra broader", b1.advanced.length === 3 && b1.alreadyApplied === false && b1.stage === "broader");
+  check("10.2 estágio broader + canário 100% preservado", skills.every((id) => { const s = RO.get(id); return s.stage === "broader" && s.canaryPercent === 100; }));
+  // broader é geral mas AINDA mapeia pra approved_execution (humano no laço — autonomous nunca).
+  const decBr = RO.isLiveForOrg(ref, "org_qualquer");
+  check("10.3 broader ainda executa em approved_execution (autonomous nunca)", decBr.live === true && decBr.executionMode === "approved_execution");
+  // one-time + topo da escada: 2ª chamada no-op; não existe estágio acima de broader.
+  const b2 = SEED.advancePilotsToStage("broader");
+  check("10.4 2ª chamada broader: alreadyApplied, nada avançado", b2.alreadyApplied === true && b2.advanced.length === 0);
+
+  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário→approved_execution→broader) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

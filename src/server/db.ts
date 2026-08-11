@@ -8741,6 +8741,21 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela skillos_rollout', e); }
+
+  // PRD 4 — Onboarding dos 3 pilotos §61 (Collection Intent Classifier, Sales Recovery
+  // Message, Signal Investigation). Seed idempotente (mesmo padrão do BlueprintSeeder):
+  // registra Capability+Skill+casos de eval e coloca cada um em `shadow` (SEM efeito).
+  // Import dinâmico (o seeder importa services que importam db — evita ciclo). Erro
+  // aqui NÃO quebra o boot (seed operacional; admin re-roda pela rota /skillos/seed-pilots).
+  try {
+    const hasSkillos = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skillos_capabilities'").get();
+    if (hasSkillos) {
+      import("./SkillOsPilotSeeder.js").then((m) => {
+        try { m.SkillOsPilotSeeder.seedPilots(); }
+        catch (e) { console.error('[DB] Seed dos pilotos SkillOS falhou', e); }
+      }).catch((e) => { console.error('[DB] Falha ao importar SkillOsPilotSeeder', e); });
+    }
+  } catch(e) { console.error('[DB] Falha ao seedar pilotos SkillOS', e); }
 };
 
 initDb();

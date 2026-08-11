@@ -7,6 +7,7 @@ import { SkillOsProviderHealthService } from "../SkillOsProviderHealthService.js
 import { SkillOsPlannerService } from "../SkillOsPlannerService.js";
 import { SkillOsEvalService } from "../SkillOsEvalService.js";
 import { SkillOsRolloutService } from "../SkillOsRolloutService.js";
+import { SkillOsPilotSeeder } from "../SkillOsPilotSeeder.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -156,6 +157,15 @@ router.post("/kill-switch", requireRole("owner", "admin"), (req: AuthRequest, re
 router.get("/readiness", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SkillOsRolloutService.readiness());
+});
+
+// POST /api/skillos/seed-pilots — onboarding idempotente dos 3 pilotos §61 (Capability+
+// Skill+evals, estágio `shadow`, SEM efeito). Também roda no boot; a rota é o gatilho
+// manual do operador (owner/admin).
+router.post("/seed-pilots", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SkillOsPilotSeeder.seedPilots()); }
+  catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
 });
 
 export default router;

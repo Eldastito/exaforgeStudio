@@ -36,10 +36,14 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 - Executor de skill paralelo violaria ADR-159 (RISK-1). Kernel virar cadeia de 3 LLMs (RISK-2). Pricing sem Claude (RISK-3). Vazamento de R$ via evidência de sinal (RISK-4).
 
+## Onboarding dos pilotos §61 (pós-PRD 4)
+
+- **`SkillOsPilotSeeder.seedPilots`** — onboarding idempotente dos 3 pilotos §61, sem reimplementar comportamento (cada Capability APONTA pro serviço real): **Collection Intent Classifier** (`CollectionIntentClassifier.classify` — intent ∈ enum, degrada p/ `unknown`), **Sales Recovery Message** (`SalesRecoveryMessageGenerator.generate` — texto ≤200, `source: llm|template`), **Signal Investigation** (`SignalInvestigationService.investigate` — DETERMINÍSTICO, `aiUsed:false`, `basis:hypothesis`). Registra 3 Capabilities + 3 Skills + 9 casos de eval golden (travam o contrato real: enum/fallback interno, source, aiUsed=false) e coloca os 3 em **`shadow`** (início da esteira §68 — SEM efeito; nenhum piloto tem `commandType` próprio, então é 100% inerte). Roda no **boot** (padrão `BlueprintSeeder`, import dinâmico, erro não quebra o boot) + rota manual `POST /api/skillos/seed-pilots` (owner/admin). Nota de contrato: `supportsFallback` do manifesto = cadeia de **skill** de fallback (§25), não modo degradado interno → os 3 pilotos são `supportsFallback:false` (a degradação `unknown`/`template` é robustez interna, coberta pelos evals). `test:skillos-pilot-seed` (14): registro+validação, idempotência, Resolver enxerga, evals golden passam sem regressão, estágio shadow. `tsc` limpo; registry/resolver/evals/rollout/observability/execution-bridge/runtime-operations verdes — 0 regressão.
+
 ## Próxima ação
 
-- **PRD 4 FECHADO com a F12.** SkillOS completo (Fase 0 + F1–F12): registry → resolver → reliability kernel → model router/provider health → grounding/confidence → planner → execution bridge (sem bypass) → observability (§30) → tenant usage → evals/shadow → rollout/canary/kill/readiness. Tudo aditivo sobre a Onda 0/ADR-159, determinístico (roda em CI sem chave), reutilizando a infra existente (REUTILIZAR > ESTENDER > COMPOR > CRIAR); zero duplicidade de executor/policy/scheduler/ledger de alerta. Skills reais entram por onboarding (registrar Capability/Skill + casos de eval + subir na esteira via runbook) — sem nova fatia de código.
-- Nenhuma fatia pendente. Próximos passos são de PRODUTO (semear pilotos §61 e operar via runbook), não de código.
+- **PRD 4 FECHADO (F12) + pilotos §61 onboarded em `shadow`.** SkillOS completo e com os 3 pilotos no catálogo, prontos pra promover na esteira via runbook (`docs/skill-os/RUNBOOK-OPERACAO.md`: `shadow` → `pilot 10%` → subir % → `approved_execution` → `broader`).
+- Nenhuma fatia de código pendente. Próximos passos são de PRODUTO: promover os pilotos por decisão humana (subir estágio/canário), observar readiness/evals, e ligar o eval "ao vivo" (opt-in, com chave) quando quiser trocar o golden pelo `invoke` real.
 
 ## Testes / CI
 

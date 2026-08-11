@@ -18,6 +18,9 @@ import { Capability, SkillManifest, rolloutStageRank } from "./skillosModel.js";
  *   - `promotePilotsToPilot()` — PROMOÇÃO §68 (`shadow` → `pilot` @10%). Decisão humana
  *     do operador, aplicada UMA vez (marker), sem brigar com rollback (§69). O sistema
  *     nunca auto-eleva por conta própria (RN-014) — só aplica a decisão tomada.
+ *   - `raisePilotsCanary()` — SUBIR O CANÁRIO §68 (ex.: 10% → 25%). Não mexe no estágio,
+ *     só amplia o cohort (hash estável: subir só ADICIONA orgs). One-time por-percentual
+ *     (marker), só sobe, preserva quem o operador já ajustou. Mesma família da promoção.
  *
  * PRINCÍPIO (PRD §3): NÃO reimplementa comportamento. Cada Capability APONTA (via
  * `description`) pro serviço real que já existe; a Skill é só o manifesto/metadado. Os
@@ -178,6 +181,40 @@ export class SkillOsPilotSeeder {
     }
     this.setMarker(this.PROMO_MARKER);
     return { promoted, skipped, alreadyApplied: false, percent };
+  }
+
+  /**
+   * SUBIR O CANÁRIO §68 dos 3 pilotos pra `percent`% (ex.: 10% → 25%). NÃO mexe no
+   * estágio — só amplia o cohort. Subir o percentual só ADICIONA orgs (hash estável
+   * `hashPercent`): quem já estava dentro do balde de 10% continua dentro no de 25%.
+   *
+   * Mesmas salvaguardas da promoção (idempotente + não briga com o operador):
+   *   - one-time POR-percentual via marker `pilots_canary_<percent>_v1`: aplicada,
+   *     nunca re-dispara (ajuste/rollback do operador fica de pé).
+   *   - só mexe em skill JÁ cohort-gated (stage ≥ `pilot`); pra skill em `shadow`/
+   *     `development` o percentual nem se aplica, então é preservada intacta.
+   *   - só SOBE (nunca abaixa): skill cujo canário o operador já pôs ≥ `percent` é
+   *     preservada (não estreita o cohort de ninguém).
+   */
+  static raisePilotsCanary(percent = 25): { raised: string[]; skipped: string[]; alreadyApplied: boolean; percent: number } {
+    const p = Math.max(0, Math.min(100, Math.floor(percent)));
+    const marker = `pilots_canary_${p}_v1`;
+    if (this.markerApplied(marker)) {
+      return { raised: [], skipped: [...PILOT_SKILL_IDS], alreadyApplied: true, percent: p };
+    }
+    const raised: string[] = [];
+    const skipped: string[] = [];
+    for (const skillId of PILOT_SKILL_IDS) {
+      const cur = SkillOsRolloutService.get(skillId);
+      if (rolloutStageRank(cur.stage) >= rolloutStageRank("pilot") && cur.canaryPercent < p) {
+        SkillOsRolloutService.setCanaryPercent(skillId, p);
+        raised.push(skillId);
+      } else {
+        skipped.push(skillId); // shadow (percentual não se aplica) ou já ≥ p — preserva
+      }
+    }
+    this.setMarker(marker);
+    return { raised, skipped, alreadyApplied: false, percent: p };
   }
 }
 

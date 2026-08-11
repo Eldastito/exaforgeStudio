@@ -180,4 +180,16 @@ router.post("/promote-pilots", requireRole("owner", "admin"), (req: AuthRequest,
   catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
 });
 
+// POST /api/skillos/raise-pilots-canary { percent? } — sobe o canário §68 dos 3 pilotos
+// pra percent% (default 25). Não mexe no estágio, só amplia o cohort (hash estável — só
+// adiciona orgs). One-time por-percentual (marker), só sobe. Também roda no boot.
+router.post("/raise-pilots-canary", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = (req.body || {}).percent;
+  const percent = raw == null ? 25 : Number(raw);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return res.status(400).json({ error: "percent inválido (0..100)" });
+  try { res.json(SkillOsPilotSeeder.raisePilotsCanary(percent)); }
+  catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
 export default router;

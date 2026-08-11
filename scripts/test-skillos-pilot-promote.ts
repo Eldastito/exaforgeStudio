@@ -11,7 +11,10 @@
  *     re-promove (marker de pé);
  *   - só avança de shadow: skill que o operador já subiu além de `pilot` é preservada
  *     (nunca rebaixa, nunca mexe no canário dela);
- *   - o seed (onboarding) NÃO clobbera o estágio corrente em re-runs (RN-RO-5).
+ *   - o seed (onboarding) NÃO clobbera o estágio corrente em re-runs (RN-RO-5);
+ *   - subir o canário 10% → 25% (§68): amplia o cohort (só ADICIONA orgs — quem estava
+ *     no balde de 10% continua), one-time por-percentual (marker), só sobe (preserva
+ *     operador com canário maior), pula skill em `shadow` (percentual não se aplica).
  *
  * Uso: npm run test:skillos-pilot-promote
  */
@@ -90,7 +93,37 @@ async function main() {
   check("6.1 re-seed não rebaixa pilot promovido p/ shadow", RO.get("collection-intent-classifier-v1").stage === "pilot");
   check("6.2 re-seed preserva estágio avançado do operador", RO.get("sales-recovery-message-v1").stage === "approved_execution");
 
-  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%) ===\n");
+  // ═══════════════ 7. subir o canário 10% → 25% (§68) ═══════════════
+  // Estado controlado: os 3 em pilot@10; sem markers de canário.
+  db.prepare(`DELETE FROM skillos_platform_markers WHERE marker LIKE 'pilots_canary_%'`).run();
+  for (const id of skills) { RO.setStage(id, "pilot"); RO.setCanaryPercent(id, 10); }
+  const c1 = SEED.raisePilotsCanary(25);
+  check("7.1 subiu o canário dos 3 pra 25%", c1.raised.length === 3 && c1.alreadyApplied === false && c1.percent === 25);
+  check("7.2 os 3 em pilot @ canário 25% (estágio intacto)", skills.every((id) => { const s = RO.get(id); return s.stage === "pilot" && s.canaryPercent === 25; }));
+
+  // cohort é monotônico: quem estava no balde de 10% continua; e o de 25% ADICIONA orgs.
+  const { inside: only25 } = await findOrgs((org) => inCanaryCohort(ref, org, 25) && !inCanaryCohort(ref, org, 10));
+  check("7.3 org só no cohort de 25% (fora do de 10%) existe", !!only25);
+  RO.setCanaryPercent(ref, 10);
+  const wasLiveAt10 = RO.isLiveForOrg(ref, only25).live;
+  RO.setCanaryPercent(ref, 25);
+  const isLiveAt25 = RO.isLiveForOrg(ref, only25).live;
+  check("7.4 subir 10→25 TORNA a org live (só adiciona, não remove)", wasLiveAt10 === false && isLiveAt25 === true);
+
+  // one-time por-percentual: 2ª chamada em 25% é no-op.
+  const c2 = SEED.raisePilotsCanary(25);
+  check("7.5 2ª chamada @25%: alreadyApplied, nada mudou", c2.alreadyApplied === true && c2.raised.length === 0);
+
+  // só SOBE + pula shadow: operador com canário maior é preservado; shadow intocado.
+  db.prepare(`DELETE FROM skillos_platform_markers WHERE marker LIKE 'pilots_canary_%'`).run();
+  RO.setStage("collection-intent-classifier-v1", "pilot"); RO.setCanaryPercent("collection-intent-classifier-v1", 50);
+  RO.setStage("sales-recovery-message-v1", "shadow");
+  RO.setStage(ref, "pilot"); RO.setCanaryPercent(ref, 10);
+  const c3 = SEED.raisePilotsCanary(25);
+  check("7.6 só sobe (skill @50% preservada), pula shadow, sobe a de 10%", c3.raised.length === 1 && c3.raised.includes(ref) && c3.skipped.includes("collection-intent-classifier-v1") && c3.skipped.includes("sales-recovery-message-v1"));
+  check("7.7 canário @50% do operador intacto; shadow intocado", RO.get("collection-intent-classifier-v1").canaryPercent === 50 && RO.get("sales-recovery-message-v1").stage === "shadow");
+
+  console.log("\n=== TEST: SkillOS Pilot Promotion (§68 shadow→pilot@10%→canário 25%) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

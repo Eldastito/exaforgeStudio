@@ -141,7 +141,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | Fase PRD | Escopo | Tipo dominante | Fatia sugerida |
 | --- | --- | --- | --- |
 | **F0** | Esta reconciliação | doc | **1 PR (este)** |
-| **F1** | Core Context Model — `ContextEntity/Fact/Scope`, `EvidenceReference`, `ContextSource/Freshness`, `ContextConflict` | CRIAR (tipos) + ESTENDER | contratos estáveis; ContextFact≈SignalInput |
+| ~~**F1**~~ ✅ | Core Context Model — **ENTREGUE**: `src/server/contextModel.ts` (puro, sem DB/LLM) — `ContextScope`(23 níveis)/`ContextEntity`/`ContextFact`/`ContextRelationship`/`EvidenceReference`/`ContextSource`(+precedência §30/§72)/`ContextFreshness`/`ContextConflict`(+`detectConflict`/`resolveConflictByPriority` §31) + `factTypeFromBasis`(§26)/`confidenceBand`(§27)/`freshnessOf`(§28) + mappers `factFromSignal`/`evidenceFromSignal` (traduz SignalInput≈ContextFact, nunca inventa §25). `test:context-model` (26 checks) | CRIAR (tipos) + ESTENDER | ✅ |
 | **F2** | Context Graph — relações tenant/unit/user/customer/product/supplier/goal | COMPOR | traversal read-only sobre FKs existentes |
 | **F3** | **Context Resolver** — `ContextRequest → ContextPacket` (poucos domínios) | CRIAR (composição) | o coração; estende `ContextEngineService` |
 | **F4** | BusinessGoal (rico) + BusinessConstraint + GoalCorrelation | ESTENDER + CRIAR | `goalGapsByDomain` já correlaciona |

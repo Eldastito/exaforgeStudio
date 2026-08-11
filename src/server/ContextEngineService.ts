@@ -2,6 +2,8 @@ import db from "./db.js";
 import { BusinessContextService } from "./BusinessContextService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
+import { ContextResolverService } from "./ContextResolverService.js";
+import type { ContextRequest, ContextPacket } from "./contextModel.js";
 
 /**
  * Context Engine (ADR-160 D3 / Onda A F3) — CONTRATO ÚNICO de contexto do negócio.
@@ -117,6 +119,17 @@ export class ContextEngineService {
       generatedAt: base.generatedAt,
       schemaVersion: base.schemaVersion,
     };
+  }
+
+  /**
+   * PRD 3 F3 (§18/§20/AC-A01) — MODO RESOLVER: monta um `ContextPacket` mínimo e
+   * relevante por intent, delegando ao `ContextResolverService` (a pipeline vive
+   * lá, composição-pesada). Fica aqui pra manter o Context Engine como a FACHADA
+   * ÚNICA de contexto (AC-A01 proíbe motor paralelo). `build/render` seguem sendo
+   * o panorama org-wide; `resolve` é o recorte intent-scoped que o PRD 4 consome.
+   */
+  static resolve(orgId: string, request: ContextRequest): ContextPacket {
+    return ContextResolverService.resolve(orgId, request);
   }
 
   static render(orgId: string): string {

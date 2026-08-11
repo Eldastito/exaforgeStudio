@@ -8576,6 +8576,65 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_context_candidates_scope ON context_candidates(organization_id, scope_type, scope_ref);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela context_candidates', e); }
+
+  // PRD 4 F2 (SkillOS) — CATÁLOGO de Capabilities e Skills. Tabelas de PLATAFORMA
+  // (universais, SEM organization_id — §49 "Capability universal"): o catálogo é o
+  // mesmo pra todos os tenants; o que varia por tenant é entitlement (plano) e
+  // vertical, checados na resolução. Prefixo `skillos_` (Decisão D1 — o termo
+  // "skill" já é RH). Inertes até algo registrar (0 regressão). Espelham o contrato
+  // puro de `skillosModel.ts` (F1); a validação de forma vive lá.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS skillos_capabilities (
+        capability_id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 1,
+        name TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL,
+        risk_level TEXT NOT NULL DEFAULT 'low',
+        input_schema_json TEXT,
+        output_schema_json TEXT,
+        required_context TEXT,
+        supported_verticals_json TEXT,     -- null/[] = universal (§88-90)
+        entitlement_key TEXT,              -- gate de plano (EntitlementService)
+        default_timeout_ms INTEGER,
+        default_budget_class TEXT,
+        fallback_policy TEXT,
+        status TEXT NOT NULL DEFAULT 'active',   -- draft|active|deprecated|disabled
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_skillos_capabilities_status ON skillos_capabilities(status, category);
+
+      CREATE TABLE IF NOT EXISTS skillos_skills (
+        skill_id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 1,
+        capability_id TEXT NOT NULL,
+        description TEXT,
+        input_schema_json TEXT,
+        output_schema_json TEXT,
+        risk_level TEXT NOT NULL DEFAULT 'low',
+        allowed_tools_json TEXT NOT NULL DEFAULT '[]',
+        forbidden_tools_json TEXT,
+        required_permissions_json TEXT,
+        required_entitlements_json TEXT,
+        required_context_profile TEXT,
+        model_requirements_json TEXT,
+        max_execution_time_ms INTEGER,
+        max_attempts INTEGER,
+        budget_class TEXT,
+        supports_fallback INTEGER NOT NULL DEFAULT 0,
+        fallback_skills_json TEXT,
+        success_criteria_json TEXT,
+        failure_criteria_json TEXT,
+        supported_verticals_json TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_skillos_skills_capability ON skillos_skills(capability_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas skillos_*', e); }
 };
 
 initDb();

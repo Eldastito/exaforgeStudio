@@ -17,9 +17,11 @@ import {
   clampConfidence,
   detectConflict,
 } from "./contextModel.js";
+import type { ContextConstraint } from "./contextModel.js";
 import { ContextGraphService } from "./ContextGraphService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
+import { BusinessConstraintService } from "./BusinessConstraintService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
 
@@ -113,6 +115,9 @@ export class ContextResolverService {
     // ── 4. Metas (§9/§14) — atrasadas primeiro, limitadas. ────────────────────
     const goals = this.resolveGoals(orgId, domains, budget.maxGoals);
 
+    // ── 4b. Restrições (§15) — aplicáveis à âncora (global + escopo). ──────────
+    const constraints = this.resolveConstraints(orgId, anchor);
+
     // ── 5. Pistas de processo (§21) — de recommendedActionType/ACTION_MAP. ─────
     const skillHints = this.resolveSkillHints(orgId, domains, budget.maxGoals);
 
@@ -133,6 +138,7 @@ export class ContextResolverService {
       entities: graph.entities,
       relationships: graph.relationships,
       goals,
+      constraints,
       skillHints,
       quality,
       sources,
@@ -194,6 +200,39 @@ export class ContextResolverService {
       const order: Record<string, number> = { behind: 0, on_track: 1, reached: 2 };
       const goals = [...prog.goals].sort((a, b) => (order[a.paceStatus] ?? 9) - (order[b.paceStatus] ?? 9) || a.metric.localeCompare(b.metric));
       return goals.slice(0, maxGoals);
+    } catch { return []; }
+  }
+
+  /**
+   * §15 — restrições APLICÁVEIS ao contexto: globais + as escopadas à âncora
+   * (quando a âncora é uma entidade escopável: customer/supplier/product/store/…).
+   * Traduz `business_constraints` → `ContextConstraint` (F1). Best-effort → [].
+   */
+  private static resolveConstraints(orgId: string, anchor: string | null): ContextConstraint[] {
+    try {
+      let scopeType: string | null = null;
+      let scopeRef: string | null = null;
+      if (anchor) {
+        const type = anchor.slice(0, anchor.indexOf(":"));
+        const id = anchor.slice(anchor.indexOf(":") + 1);
+        // o tipo do grafo casa direto com o scope_type da restrição (customer/
+        // supplier/product/store/department); org não escopa (só globais valem).
+        if (type !== "organization") { scopeType = type; scopeRef = id; }
+      }
+      const rows = BusinessConstraintService.applicable(orgId, { scopeType, scopeRef });
+      return rows.map((c: any) => ({
+        id: String(c.id),
+        kind: String(c.kind),
+        name: String(c.name),
+        scopeType: c.scope_type ?? null,
+        scopeRef: c.scope_ref ?? null,
+        operator: String(c.operator || "lte"),
+        value: c.value_num != null ? Number(c.value_num) : null,
+        unit: c.value_unit ?? null,
+        text: c.value_text ?? null,
+        source: { type: "APPROVED_CONFIG", service: "BusinessConstraintService", reference: String(c.source || "owner_declared") },
+        active: !!c.active,
+      }));
     } catch { return []; }
   }
 

@@ -25,12 +25,24 @@ router.get("/progress", (req: AuthRequest, res): any => {
   res.json(BusinessGoalService.progress(orgId));
 });
 
-// PUT /api/goals { metric, targetAmount } — define/atualiza a meta (gestor).
+// PUT /api/goals { metric, targetAmount, title?, baseline?, deadline?, priority?,
+// owner?, status? } — define/atualiza a meta rica (§14, gestor). Campos ricos
+// opcionais; omitidos num update preservam o valor vigente.
 router.put("/", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
   try {
-    const goal = BusinessGoalService.set(orgId, { metric: req.body?.metric, targetAmount: Number(req.body?.targetAmount), actor: actor(req) });
+    const goal = BusinessGoalService.set(orgId, {
+      metric: b.metric, targetAmount: Number(b.targetAmount), actor: actor(req),
+      // só repassa os campos ricos QUE VIERAM (undefined = preserva no update).
+      ...(b.title !== undefined ? { title: b.title } : {}),
+      ...(b.baseline !== undefined ? { baseline: b.baseline != null ? Number(b.baseline) : null } : {}),
+      ...(b.deadline !== undefined ? { deadline: b.deadline } : {}),
+      ...(b.priority !== undefined ? { priority: b.priority } : {}),
+      ...(b.owner !== undefined ? { owner: b.owner } : {}),
+      ...(b.status !== undefined ? { status: b.status } : {}),
+    });
     res.json({ ok: true, goal });
   } catch (e: any) {
     res.status(400).json({ error: String(e?.message || e) });

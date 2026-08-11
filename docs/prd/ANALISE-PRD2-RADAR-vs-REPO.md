@@ -3,6 +3,13 @@
 > Matriz **REUTILIZAR / ESTENDER / CRIAR / DEFERIR** exigida pelo §99 (Fase 1) do PRD 2.
 > Baseline auditado: `main` @ `dad3a50` (após PRD 1 fechado). Data: 2026-08-10.
 
+> **STATUS 2026-08-11 — PRD 2 FECHADO.** Todas as fases entregues (F1–F12) em fatias
+> pequenas (§100), 0 breaking change, aditivas e reversíveis (opt-in). As 20 CAs (§101)
+> atendidas. Runbook operacional em `docs/runbook/radar-operacao.md`. Os incrementos:
+> F2 contract hardening · F3 correlação · F4 anomalia · F5 goal-aware · F6 investigação ·
+> F7 SLA/reversibilidade · F8 roteamento · F9 sinal humano · F10 sinal externo ·
+> F11 calibração · F12 production readiness (health + budget por-detector + runbook).
+
 ## Sumário executivo
 
 O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. A auditoria confirma que o `main` já possui a espinha da percepção — **~80% do contrato e da mecânica já existem**. O trabalho é dar **sensibilidade empresarial** (anomalia + correlação + contexto + metas + impacto + evidência + prioridade) à infraestrutura existente, **sem criar ledger/feed/alerta paralelo** (CA1/CA10).
@@ -122,7 +129,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | ~~**F9**~~ ✅ | Human signals (Fala Tu → radar) — **FECHADA**: `HumanSignalService.observe` (opt-in `radar_human_signals_enabled`) normaliza a observação humana num `business_signal` (`origin:human`, `basis=estimate\|hypothesis`, **nunca fact §13**) com **acúmulo de evidência** (mesmo assunto sobe confiança 0.30→0.85 e severidade info→attention→risk, derivado de `observations.length`, RN-004); atômico (tx); `POST /api/signals/observe`; sem tabela nova (CA1) | ESTENDER | ✅ |
 | ~~**F10**~~ ✅ | External signal contract (molde) — **FECHADA**: `ExternalSignalService.ingest`, proveniência + dedupe por origem, fact só se verificável (§13), `POST /api/signals/ingest-external`, `test:external-signals` (22). CA2 fica **100%** (H/D/E) | CRIAR | ✅ |
 | **F11** | Feedback & calibration | CRIAR | dismiss reason + false-positive rate |
-| **F12** | Production readiness — **EM ANDAMENTO**: ✅ F12.1 radar health (`RadarHealthService`, `test:radar-health` 12) · ✅ F12.2 budget por-detector (`DetectorBudgetService`, `test:detector-budget` 13) · falta F12.3 runbooks (doc) | — | perf/observability/budgets/runbooks |
+| ~~**F12**~~ ✅ | Production readiness — **FECHADA**: ✅ F12.1 radar health (`RadarHealthService`, `test:radar-health` 12) · ✅ F12.2 budget por-detector (`DetectorBudgetService`, `test:detector-budget` 13) · ✅ F12.3 runbook operacional (`docs/runbook/radar-operacao.md`) | — | ✅ |
 
 ## Fatia recomendada a seguir: **F2.1 — basis+hypothesis + subject_id**
 

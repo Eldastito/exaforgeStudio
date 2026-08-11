@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { SkillOsRegistryService } from "../SkillOsRegistryService.js";
+import { SkillOsResolverService } from "../SkillOsResolverService.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -33,6 +34,15 @@ router.get("/skills", requireRole("owner", "admin"), (req: AuthRequest, res): an
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const q = req.query || {};
   res.json({ skills: SkillOsRegistryService.listSkills({ capabilityId: q.capabilityId as any, status: q.status as any, vertical: q.vertical as any }) });
+});
+
+// POST /api/skillos/resolve { capabilityId, vertical?, maxRisk? } — qual Skill o
+// Resolver escolheria (F3). Inspeção/explicabilidade; NÃO executa. Gestor.
+router.post("/resolve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  res.json(SkillOsResolverService.resolve(orgId, req.user, { capabilityId: b.capabilityId, vertical: b.vertical, maxRisk: b.maxRisk, requirePermissions: !!b.requirePermissions }));
 });
 
 export default router;

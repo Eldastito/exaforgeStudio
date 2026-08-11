@@ -4,15 +4,16 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 2 — Capability + Skill Registry (em revisão/PR).
-- **Última fatia:** F2 entregue (catálogo persistido). F1 mergeada (#958).
-- **Baseline:** `main` @ `18f9667` (pós F1).
+- **Fase:** 3 — Capability Resolver (em revisão/PR).
+- **Última fatia:** F3 entregue (resolução determinística). F2 mergeada (#959).
+- **Baseline:** `main` @ `234adfc` (pós F2).
 
 ## Entregue nesta sessão
 
 - **Fase 0 (mergeada #957):** `docs/skill-os/ANALISE-PRD4-vs-CODEBASE.md` — matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR/DEFERIR completa (7 grupos), duplicidades, riscos, decisões (D1–D8), migrations, serviços impactados, compat, rollout/rollback, fatiamento F1–F12.
 - **Fase 1 (mergeada #958):** `src/server/skillosModel.ts` (puro) — contratos + guardas determinísticas + taxonomia AI-FAIL-1..6. `test:skillos-contracts` (31 checks).
-- **Fase 2:** tabelas de plataforma `skillos_capabilities`/`skillos_skills` (sem org_id — §49; prefixo D1) + `SkillOsRegistryService` (registro validado/idempotente, lookup, ciclo de vida enable/disable, `skillsForCapability` p/ o Resolver F3, compat vertical + entitlement via `EntitlementService`). Rota read-only `GET /api/skillos/capabilities[/:id]`,`/skills` (gestor). Catálogo INERTE (nada registrado ainda) → 0 mudança de comportamento. `test:skillos-registry` (21 checks). Guardrails RN-REG-1..5.
+- **Fase 2 (mergeada #959):** tabelas `skillos_capabilities`/`skillos_skills` + `SkillOsRegistryService` (registro/lookup/ciclo de vida/compat vertical+entitlement). Rota read-only. `test:skillos-registry` (21).
+- **Fase 3:** `SkillOsResolverService.resolve(orgId, user, {capabilityId, vertical?, maxRisk?})` — escolhe a Skill DETERMINISTICAMENTE (sem IA, §11): disponibilidade da Capability → candidatas active/vertical → filtro risco/RBAC → `rankSkills` (determinística > barata > menor risco > versão) → vencedora + razão + alternativas + fallbackChain (§25, só declaradas existentes+active). Sem silêncio (§65): inexistente/indisponível/sem-skill → `resolved:false`+razão. Primitivas puras em `skillosModel` (`rankSkills`/`budgetRank`/`riskRank`/`isDeterministicSkill`/`SkillResolution`). Rota `POST /api/skillos/resolve` (inspeção, não executa). `test:skillos-resolver` (17). Guardrails RN-RES-1..5. 0 mudança de comportamento (catálogo inerte).
 
 ## Achados-chave (resumo)
 
@@ -27,8 +28,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aprovada a F2 → **Fase 3 (Capability Resolver)**: resolução conservadora (1 skill → resolve direto; depois ranking por regra — determinístico primeiro, §11). Consome `SkillOsRegistryService.skillsForCapability` + compat vertical/entitlement. **Nada de IA escolhendo skill** nesta fase.
+- Aprovada a F3 → **Fase 4 (Reliability Core)**: AI Run (ESTENDER `ai_usage_log` com run_id/skill/status de validação/grounding/confidence, Decisão D4) + schema validation + error taxonomy + retry (promover `JobQueueService.computeBackoffSeconds`) + correlação (ADR-158). Kernel DENTRO de `llm.ts` (Decisão D2) — ainda sem grounding avançado.
 
 ## Testes / CI
 
-- `test:skillos-contracts` (31) + `test:skillos-registry` (21), determinísticos. Suítes de contexto (PRD 3) + tenant-isolation (13) verdes.
+- `test:skillos-contracts` (31) + `test:skillos-registry` (21) + `test:skillos-resolver` (17), determinísticos. Suítes de contexto (PRD 3) + tenant-isolation (13) verdes.

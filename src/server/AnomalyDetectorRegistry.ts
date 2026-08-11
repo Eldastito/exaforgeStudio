@@ -135,3 +135,19 @@ AnomalyDetectorRegistry.registerPack("retail_floor", [
     subjectType: "store", recommendedProcessType: null, verticals: ["retail", "moda"],
   },
 ]);
+
+// 2º detector REAL migrado (ConsumptionSignalPublisher.consumo_acima_padrao):
+// o 1º SPIKE do registry (o piloto F4.3 provou o DROP; este prova a outra
+// direção pelo mesmo contrato). Consumo recente muito acima da própria base
+// (recentRate ≥ baseRate × 1.5 ⟺ alta relativa ≥ 50%). `ABOVE_FACTOR=1.5`
+// inline vira `threshold: 0.5` aqui. As guardas de massa (recentNet>0,
+// baseRate>0) e o cálculo das taxas continuam no publisher (externos, como no
+// piloto). Universal — consumo controlado existe em clínica, food, serviços etc.
+AnomalyDetectorRegistry.registerPack("consumption", [
+  {
+    name: "consumo_acima_padrao", domain: "consumption", purpose: "Consumo recente muito acima da própria média (pico de demanda/desperdício).",
+    metric: "consumptionRate", method: "relative", direction: "spike", threshold: 0.5, minSample: 1,
+    cooldownMs: 0, ttlMs: 7 * 24 * HOUR, severity: "attention", basis: "fact", confidence: 1,
+    subjectType: "product", recommendedProcessType: null,
+  },
+]);

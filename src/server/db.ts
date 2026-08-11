@@ -8723,6 +8723,24 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_skillos_eval_runs_skill ON skillos_eval_runs(skill_id, created_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas skillos_eval_cases/runs', e); }
+
+  // PRD 4 F12 (SkillOS Canary + Production Readiness) — ESTADO de rollout por skill na
+  // escada §68 + kill switch. Tabela de PLATAFORMA (sem organization_id — §49: onde a
+  // skill está na esteira é config da skill global). A linha reservada
+  // skill_id='__global__' guarda o KILL SWITCH de plataforma (killed=1 → tudo off) —
+  // um único ponto de corte, sem executor/flag paralelos. O gate de execução real
+  // segue no CommandExecutor (ADR-159); aqui só se decide exposição + execution_mode.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS skillos_rollout (
+        skill_id TEXT PRIMARY KEY,            -- ou '__global__' (kill switch de plataforma)
+        stage TEXT NOT NULL DEFAULT 'development', -- development|shadow|pilot|assisted|approved_execution|broader
+        canary_percent INTEGER NOT NULL DEFAULT 0, -- 0..100 (cohort estável por hash)
+        killed INTEGER NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela skillos_rollout', e); }
 };
 
 initDb();

@@ -6,6 +6,7 @@ import { SkillOsModelRouterService } from "../SkillOsModelRouterService.js";
 import { SkillOsProviderHealthService } from "../SkillOsProviderHealthService.js";
 import { SkillOsPlannerService } from "../SkillOsPlannerService.js";
 import { SkillOsEvalService } from "../SkillOsEvalService.js";
+import { SkillOsRolloutService } from "../SkillOsRolloutService.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -106,6 +107,55 @@ router.get("/evals/:skillId", requireRole("owner", "admin"), (req: AuthRequest, 
     passed: last.passed, failed: last.failed, passRate: last.pass_rate,
     regressed: !!last.regressed, at: last.created_at,
   });
+});
+
+// ── Rollout / Canary / Kill switch / Readiness (PRD 4 F12) — controle de PLATAFORMA
+// (owner/admin). Reusa o teto `execution_mode` da ADR-159; o gate de execução real
+// segue no CommandExecutor. ─────────────────────────────────────────────────────
+
+// GET /api/skillos/rollout/:skillId — estágio + canário + kill + decisão pra esta org.
+router.get("/rollout/:skillId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ state: SkillOsRolloutService.get(req.params.skillId), decisionForOrg: SkillOsRolloutService.isLiveForOrg(req.params.skillId, orgId), globalKill: SkillOsRolloutService.isGloballyKilled() });
+});
+
+// POST /api/skillos/rollout/:skillId { stage?, canaryPercent? } — avança/ajusta.
+router.post("/rollout/:skillId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    if (b.stage != null) SkillOsRolloutService.setStage(req.params.skillId, b.stage);
+    if (b.canaryPercent != null) SkillOsRolloutService.setCanaryPercent(req.params.skillId, Number(b.canaryPercent));
+    res.json({ state: SkillOsRolloutService.get(req.params.skillId) });
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/skillos/rollout/:skillId/rollback — desce um degrau (§69).
+router.post("/rollout/:skillId/rollback", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ state: SkillOsRolloutService.stepDown(req.params.skillId) });
+});
+
+// POST /api/skillos/rollout/:skillId/kill { on } — kill switch por-skill.
+router.post("/rollout/:skillId/kill", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const on = req.body?.on !== false; // default true
+  res.json({ state: on ? SkillOsRolloutService.kill(req.params.skillId) : SkillOsRolloutService.revive(req.params.skillId) });
+});
+
+// POST /api/skillos/kill-switch { on } — kill switch de PLATAFORMA (§69: desliga tudo).
+router.post("/kill-switch", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const on = req.body?.on !== false; // default true
+  res.json(on ? SkillOsRolloutService.killAll() : SkillOsRolloutService.reviveAll());
+});
+
+// GET /api/skillos/readiness — prontidão operacional do SkillOS (§30-safe).
+router.get("/readiness", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SkillOsRolloutService.readiness());
 });
 
 export default router;

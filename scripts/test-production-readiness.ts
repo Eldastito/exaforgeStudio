@@ -91,7 +91,9 @@ r = ProductionReadinessService.report();
 check("Evolution parcial → whatsapp.ok false", get(r.checks, "whatsapp").ok === false);
 
 // --- summary coerente ---
-check("summary.optionalTotal === 4 (telephony/whatsapp/push/email)", r.summary.optionalTotal === 4);
+// optionalTotal = 4 canais (telephony/whatsapp/push/email) + skillos (PRD 4 F12, aditivo).
+check("summary.optionalTotal === 5 (canais + skillos)", r.summary.optionalTotal === 5);
+check("os 4 canais opcionais + skillos estão presentes", ["telephony", "whatsapp", "push", "email", "skillos"].every((k) => !!get(r.checks, k)));
 check("report tem generatedAt ISO", typeof r.generatedAt === "string" && r.generatedAt.includes("T"));
 
 // --- Wiring estático das rotas + docs ---

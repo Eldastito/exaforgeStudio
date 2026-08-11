@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import { TelephonyService } from "./TelephonyService.js";
+import { SkillOsRolloutService } from "./SkillOsRolloutService.js";
 
 /**
  * ProductionReadinessService (ADR-154 F10.1 — infra de produção "na prateleira").
@@ -178,6 +179,22 @@ export class ProductionReadinessService {
         : "Sem remetente de plataforma: só orgs com conexão Google enviam o briefing por e-mail; orgs Solo ficam sem esse canal.",
       hint: "RESEND_API_KEY, FALATU_EMAIL_FROM",
     });
+
+    // ---- SkillOS operacional (PRD 4 F12) — nível `optional`: SkillOS é opt-in e
+    // aditivo, então nunca derruba o status geral sozinho; só informa. Derivado do
+    // rollout/eval/health (RN-004), sem custo (§30-safe).
+    try {
+      const r = SkillOsRolloutService.readiness();
+      checks.push({
+        key: "skillos",
+        label: "SkillOS (rollout/evals)",
+        level: "optional",
+        ok: r.ok,
+        detail: r.ok
+          ? "SkillOS operacional — sem kill switch, sem eval regredido, sem provider aberto."
+          : `Atenção: ${r.issues.join(" ")}`,
+      });
+    } catch { /* SkillOS inerte/tabelas ausentes — não quebra o relatório. */ }
 
     const blockersFailing = checks.filter((c) => c.level === "blocker" && !c.ok).length;
     const recommendedFailing = checks.filter((c) => c.level === "recommended" && !c.ok).length;

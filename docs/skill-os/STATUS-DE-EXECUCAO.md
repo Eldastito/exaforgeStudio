@@ -4,9 +4,9 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 7 — Planner (em revisão/PR).
-- **Última fatia:** F7 entregue (objetivo → ExecutionPlan). F6 mergeada (#963).
-- **Baseline:** `main` @ `2b67267` (pós F6).
+- **Fase:** 8 — Policy + Execution Bridge (em revisão/PR).
+- **Última fatia:** F8 entregue (execução governada, sem bypass). F7 mergeada (#964).
+- **Baseline:** `main` @ `8c1d65c` (pós F7).
 
 ## Entregue nesta sessão
 
@@ -17,7 +17,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 - **Fase 4 (mergeada #961):** AI Run estende `ai_usage_log` (D4) + `AiReliabilityKernel.run` (choke-point: validação+taxonomia+retry por política+AI Run). `test:skillos-reliability` (19).
 - **Fase 5 (mergeada #962):** `skillos_model_profiles` + `SkillOsModelRouterService.route` + `SkillOsProviderHealthService` (circuit breaker derivado) + PRICES com Claude. `test:skillos-model-router` (19).
 - **Fase 6 (mergeada #963):** `checkGrounding` (gate UNSUPPORTED_CLAIM §19) + `assessConfidence` (§21) + serviços grounding/confidence + kernel `spec.ground` opt-in. `test:skillos-grounding` (21).
-- **Fase 7:** `SkillOsPlannerService.plan(orgId, user, {goal, steps:[{capabilityId, dependsOn?}]})` — objetivo + capabilities → `ExecutionPlan`: resolve cada passo via Resolver (F3), agrega risco/perfil de contexto, valida deps (dep inexistente/ciclo→blocked). NÃO executa (§12). Sem silêncio (§65): capability sem skill → passo unresolved + plano blocked + `unresolvedCapabilities`. Primitivas puras (`maxRisk`/`deepestProfile`/`validatePlanDeps`/`topoSortSteps`/`ExecutionPlan`). Ponte `toPlaybook` projeta na forma do `ProcessRuntime`/`PlaybookEngine` (reuso F8, sem persistir/executar). Síntese CONSERVADORA (caller declara os passos; decompor objetivo aberto por IA é fase posterior). Rota `POST /api/skillos/plan`. `test:skillos-planner` (18). Guardrails RN-PLN-1..5. 0 mudança de comportamento.
+- **Fase 7 (mergeada #964):** `SkillOsPlannerService.plan` — objetivo→ExecutionPlan (resolve via F3, agrega, valida deps, sem silêncio) + `toPlaybook` (ponte F8). `test:skillos-planner` (18).
+- **Fase 8:** `SkillOsExecutionBridge` — a ponte Skill/Plano → execução GOVERNADA, SEM bypass (ADR-159/§67). `propose` reusa `DecisionActionService.propose` (skill NUNCA executa direto — vira decision_action com política de aprovação); `execute` é passthrough puro pro `CommandExecutorService.execute` (guardas G1 autonomia/G2 execution_mode/G3 aprovado vivem LÁ — não reimplementadas). `proposePlanStep` (F7→F8): plano ready + passo resolvido propõe (correlationId do plano, ADR-158); blocked/unresolved não propõe. Nenhum executor/política paralelos (RN-BR-1..4). Inerte (nenhuma skill ligada ainda) → 0 mudança de comportamento. `test:skillos-execution-bridge` (13): propose reusa, SEM BYPASS (aprovada-sem-policy barrada, rejeitada barrada), cadeia completa (propose→aprovar→policy→execute→handler), proposePlanStep, isolamento. Runtime existente (command-executor/decision-actions/runtime-execute-e2e) verde — 0 regressão.
 
 ## Achados-chave (resumo)
 
@@ -32,8 +33,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aprovada a F7 → **Fase 8 (Policy + Execution Bridge)**: Skill Result → `DecisionActionService`/`ApprovalPolicyService` → `CommandExecutorService` SEM bypass (ADR-159/§67). O plano (F7) vira execução governada — todo efeito de skill é um `command_type` atrás do choke-point único.
+- Aprovada a F8 → **Fase 9 (Observability + Admin Master)**: AI Runs/fallback/grounding/provider-health na Central de Saúde (ESTENDER `routes/health.ts`/`RuntimeExceptionsService.indicators`); custo financeiro SÓ Admin Master (§29/§30 — reusa `AiUsageDashboardService`, formaliza o invariante D5).
 
 ## Testes / CI
 
-- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19) + `-model-router` (19) + `-grounding` (21) + `-planner` (18), determinísticos. AI-usage + billing + context + tenant-isolation verdes — 0 regressão.
+- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19) + `-model-router` (19) + `-grounding` (21) + `-planner` (18) + `-execution-bridge` (13), determinísticos. Runtime governado (command-executor/decision-actions/runtime-execute-e2e) verde. AI-usage + billing + context + tenant-isolation verdes — 0 regressão.

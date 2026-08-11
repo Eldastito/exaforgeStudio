@@ -8635,6 +8635,33 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_skillos_skills_capability ON skillos_skills(capability_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas skillos_*', e); }
+
+  // PRD 4 F4 (SkillOS Reliability Core, Decisão D4) — AI RUN estende `ai_usage_log`
+  // (NÃO cria tabela de tracing paralela). Colunas ADITIVAS, todas NULL por padrão:
+  // o `recordUsage()` legado (llm.ts) segue gravando sem elas (0 regressão); o
+  // AI Reliability Kernel grava a linha rica. `run_id` correlaciona uma execução
+  // de skill; `correlation_id` é o fio ADR-158.
+  try {
+    const cols = db.prepare(`PRAGMA table_info(ai_usage_log)`).all() as any[];
+    const has = (n: string) => cols.some((c: any) => c.name === n);
+    if (!has("run_id"))            db.exec(`ALTER TABLE ai_usage_log ADD COLUMN run_id TEXT`);
+    if (!has("skill_id"))          db.exec(`ALTER TABLE ai_usage_log ADD COLUMN skill_id TEXT`);
+    if (!has("capability_id"))     db.exec(`ALTER TABLE ai_usage_log ADD COLUMN capability_id TEXT`);
+    if (!has("prompt_version"))    db.exec(`ALTER TABLE ai_usage_log ADD COLUMN prompt_version TEXT`);
+    if (!has("context_hash"))      db.exec(`ALTER TABLE ai_usage_log ADD COLUMN context_hash TEXT`);
+    if (!has("context_profile"))   db.exec(`ALTER TABLE ai_usage_log ADD COLUMN context_profile TEXT`);
+    if (!has("provider"))          db.exec(`ALTER TABLE ai_usage_log ADD COLUMN provider TEXT`);
+    if (!has("validation_status")) db.exec(`ALTER TABLE ai_usage_log ADD COLUMN validation_status TEXT`);
+    if (!has("grounding_status"))  db.exec(`ALTER TABLE ai_usage_log ADD COLUMN grounding_status TEXT`);
+    if (!has("confidence"))        db.exec(`ALTER TABLE ai_usage_log ADD COLUMN confidence REAL`);
+    if (!has("failure_class"))     db.exec(`ALTER TABLE ai_usage_log ADD COLUMN failure_class TEXT`);
+    if (!has("retry_count"))       db.exec(`ALTER TABLE ai_usage_log ADD COLUMN retry_count INTEGER DEFAULT 0`);
+    if (!has("fallback_used"))     db.exec(`ALTER TABLE ai_usage_log ADD COLUMN fallback_used INTEGER DEFAULT 0`);
+    if (!has("run_status"))        db.exec(`ALTER TABLE ai_usage_log ADD COLUMN run_status TEXT`);
+    if (!has("correlation_id"))    db.exec(`ALTER TABLE ai_usage_log ADD COLUMN correlation_id TEXT`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_run ON ai_usage_log (organization_id, run_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_usage_skill ON ai_usage_log (organization_id, skill_id, created_at)`);
+  } catch(e){ console.error('[DB] Falha ao estender ai_usage_log (AI Run, PRD4 F4)', e); }
 };
 
 initDb();

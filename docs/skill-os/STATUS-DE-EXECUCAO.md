@@ -4,16 +4,17 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 3 — Capability Resolver (em revisão/PR).
-- **Última fatia:** F3 entregue (resolução determinística). F2 mergeada (#959).
-- **Baseline:** `main` @ `234adfc` (pós F2).
+- **Fase:** 4 — Reliability Core (em revisão/PR).
+- **Última fatia:** F4 entregue (AI Reliability Kernel + AI Run). F3 mergeada (#960).
+- **Baseline:** `main` @ `80cfa07` (pós F3).
 
 ## Entregue nesta sessão
 
 - **Fase 0 (mergeada #957):** `docs/skill-os/ANALISE-PRD4-vs-CODEBASE.md` — matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR/DEFERIR completa (7 grupos), duplicidades, riscos, decisões (D1–D8), migrations, serviços impactados, compat, rollout/rollback, fatiamento F1–F12.
 - **Fase 1 (mergeada #958):** `src/server/skillosModel.ts` (puro) — contratos + guardas determinísticas + taxonomia AI-FAIL-1..6. `test:skillos-contracts` (31 checks).
 - **Fase 2 (mergeada #959):** tabelas `skillos_capabilities`/`skillos_skills` + `SkillOsRegistryService` (registro/lookup/ciclo de vida/compat vertical+entitlement). Rota read-only. `test:skillos-registry` (21).
-- **Fase 3:** `SkillOsResolverService.resolve(orgId, user, {capabilityId, vertical?, maxRisk?})` — escolhe a Skill DETERMINISTICAMENTE (sem IA, §11): disponibilidade da Capability → candidatas active/vertical → filtro risco/RBAC → `rankSkills` (determinística > barata > menor risco > versão) → vencedora + razão + alternativas + fallbackChain (§25, só declaradas existentes+active). Sem silêncio (§65): inexistente/indisponível/sem-skill → `resolved:false`+razão. Primitivas puras em `skillosModel` (`rankSkills`/`budgetRank`/`riskRank`/`isDeterministicSkill`/`SkillResolution`). Rota `POST /api/skillos/resolve` (inspeção, não executa). `test:skillos-resolver` (17). Guardrails RN-RES-1..5. 0 mudança de comportamento (catálogo inerte).
+- **Fase 3 (mergeada #960):** `SkillOsResolverService.resolve` — escolha determinística de Skill (sem IA, §11) + `rankSkills` puro + fallbackChain + sem-silêncio. `test:skillos-resolver` (19).
+- **Fase 4:** AI Run estende `ai_usage_log` (Decisão D4 — colunas aditivas run_id/skill/capability/prompt_version/context_hash/validation/grounding/confidence/failure_class/retry/fallback/run_status/correlation; legado intacto) + `AiReliabilityKernel.run(orgId, spec, invoke)` — o choke-point de confiabilidade (Decisão D2, em volta do primitivo de `llm.ts`): validação de saída (§18) + taxonomia AI-FAIL (§17) + retry por política (§27, reusa `computeBackoffSeconds` do JobQueue) + registro da AI Run (RN-KER-1) + correlação (ADR-158). Grounding/Model Router são F5/F6 (grounding='skipped' aqui). `invoke` INJETADO → testável sem IA real. Opt-in, nenhum caller migrado → 0 mudança de comportamento. `test:skillos-reliability` (19). Guardrails RN-KER-1..4.
 
 ## Achados-chave (resumo)
 
@@ -28,8 +29,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aprovada a F3 → **Fase 4 (Reliability Core)**: AI Run (ESTENDER `ai_usage_log` com run_id/skill/status de validação/grounding/confidence, Decisão D4) + schema validation + error taxonomy + retry (promover `JobQueueService.computeBackoffSeconds`) + correlação (ADR-158). Kernel DENTRO de `llm.ts` (Decisão D2) — ainda sem grounding avançado.
+- Aprovada a F4 → **Fase 5 (Model Router + Provider Health)**: provider abstraction (`invoke/health/estimateUsage/supports`) + model profiles + health + fallback + circuit breaker (a única primitiva de Kernel genuinamente nova — trip-signal de degradedChannels + error_class). Começa com os providers já usados (`llm.ts`: OpenAI/Google). Pricing ESTENDER com Claude (RISK-3).
 
 ## Testes / CI
 
-- `test:skillos-contracts` (31) + `test:skillos-registry` (21) + `test:skillos-resolver` (17), determinísticos. Suítes de contexto (PRD 3) + tenant-isolation (13) verdes.
+- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19), determinísticos. AI-usage ledger(28)/dashboard(40)/quota(33) + billing + context + tenant-isolation verdes — as colunas aditivas em `ai_usage_log` não regridem nada.

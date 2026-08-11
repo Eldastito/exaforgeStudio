@@ -87,8 +87,7 @@ async function main() {
   const reopen = ES.ingest(org, { source: "reclame_aqui", externalId: "RA-100", domain: "reputation", content: "Atualização: resolveram parcialmente.", rating: 3 });
   check("6.1 reingerir o MESMO item ATUALIZA (mesmo id, deduped)", reopen.deduped === true && reopen.signalId === i1.signalId);
   check("6.2 conteúdo/severidade atualizados (rating 3 → attention)", sigOf(i1.signalId!).severity === "attention" && evOf(i1.signalId!).content.includes("parcialmente"));
-  const distinctExternal = db.prepare(`SELECT COUNT(*) n FROM business_signals WHERE organization_id = ? AND source_service = 'ExternalSignalService'`).get(org) as any;
-  check("6.3 sem duplicar linha (RA-100 continua 1 sinal)", db.prepare(`SELECT COUNT(*) n FROM business_signals WHERE organization_id=? AND source_entity_id='RA-100'`).get(org).n === 1);
+  check("6.3 sem duplicar linha (RA-100 continua 1 sinal)", (db.prepare(`SELECT COUNT(*) n FROM business_signals WHERE organization_id=? AND source_entity_id='RA-100'`).get(org) as any).n === 1);
 
   // ===== 7. Aparece no attention feed como sinal normalizado =====
   const att = BS.attention(org, {});

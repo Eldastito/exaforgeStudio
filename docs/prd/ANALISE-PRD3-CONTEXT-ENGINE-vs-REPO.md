@@ -146,7 +146,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | ~~**F3**~~ ✅ | **Context Resolver** — **ENTREGUE**: `src/server/ContextResolverService.ts` + contratos I/O em `contextModel` (`ContextRequest`/`ContextPacket`/`ContextMoment`/`SkillHint`/`ContextQuality` + `resolveBudget`/`PROFILE_BUDGETS`). `resolve(orgId, request)` monta um `ContextPacket` mínimo-e-relevante por intent (§6): momento←`attention` · fatos←`business_signals`/`factFromSignal`(F1) escopados ao sujeito da âncora · grafo←`ContextGraphService`(F2) · metas←`BusinessGoalService.progress` · pistas←`ImpactPrioritizationService`(recommendedActionType, §21) · qualidade←`dataQuality` (cobertura+confiança+frescor+conflito+lacunas, §75). Âncora vem de `focus` ou da dimensão mais específica do escopo; âncora que não resolve → `anchor:null` (não inventa). Orçamento por perfil (minimal/standard/deep) + overrides + `truncated`. `ContextEngineService.resolve` delega (fachada única, AC-A01). Guardrails RN-CR-1..5. `test:context-resolver` (29 checks) | CRIAR (composição) | ✅ |
 | ~~**F4**~~ ✅ | BusinessGoal (rico) + BusinessConstraint — **ENTREGUE**: (1) `business_goals` +aditivos `title/baseline/deadline/priority/owner/status` (§14); `BusinessGoalService.set` update PARCIAL (preserva o não informado), `list` traz os ricos, `progress` só conta ATIVAS por padrão + ordena por prioridade + `attainmentFromBaselinePct` do baseline. (2) `business_constraints` (tabela nova) + `BusinessConstraintService` (§15): CRUD + `applicable(scope)` (global + escopo), kinds discount_ceiling/budget_limit/margin_floor/payment_term_max/policy/custom, isolado/auditado, READ+DERIVE (sem enforcement — gate no RBAC). (3) `ContextPacket` ganha `constraints: ContextConstraint[]` (aplicáveis à âncora) + metas ricas fluem. Rotas `/api/goals` (rico) e `/api/constraints` (CRUD, gestor). Guardrails RN-BC-1..4. `test:business-constraints` (29 checks); F1/F2/F3/business-goals/goal-aware-priority seguem verdes | ESTENDER + CRIAR | ✅ |
 | ~~**F5**~~ ✅ | Signal Enrichment — **ENTREGUE**: `src/server/SignalEnrichmentService.ts` (compose-only, sem tabela/coluna nova). `enrich(orgId, signalId)` monta o CONTEXTO de um sinal do Radar (a ponte percepção→contexto pro Maestro): âncora no SUJEITO do sinal (subject_type→entidade do grafo F2, só quando resolve — senão anchor:null) · pacote do resolver (F3) escopado ao domínio · lente de prioridade (`ImpactPrioritizationService.scoreOne` — MESMO cálculo do feed, exposto p/ 1 sinal, reúso do `scoreSignal` privado) com score/impactLevel/ação recomendada/SLA/irreversibilidade · meta AMEAÇADA (`affectedGoal` do goalGapsByDomain) · restrições aplicáveis (F4, já no pacote) · correlatos do mesmo sujeito (§39). O sinal vira `ContextFact` (F1). Rota `GET /api/signals/:id/context` (`?profile=`). Guardrails RN-SE-1..5 (isolamento→found:false p/ outro tenant · não-inventa âncora · READ+DERIVE · estende não duplica · mínimo). `test:signal-enrichment` (26 checks); F1/F2/F3/business-constraints/goal-aware-priority/impact-prioritization seguem verdes — 0 regressão | COMPOR | ✅ |
-| **F6** | Fala Tu Context Capture — `ContextCandidate` (sem alteração silenciosa de política §36) | ESTENDER | sobre `DecisionActionService`/inbox |
+| ~~**F6**~~ ✅ | Fala Tu Context Capture — **ENTREGUE**: `context_candidates` (tabela nova) + `ContextCandidateService.ts` + contrato `ContextCandidate` em `contextModel` (estados DETECTED→PENDING→CONFIRMED/REJECTED/EXPIRED + `canTransitionCandidate`, §37). Um candidato de CONTEXTO/REGRA (não de ação): mudança PROPOSTA ao contexto (restrição/regra ou fato) capturada do Fala Tu / detector, que só afeta o contexto depois de CONFIRMADA por humano — nunca em silêncio (§36). `confirm` é o ÚNICO ponto que promove: kind=constraint → `BusinessConstraintService.create` (F4); kind=fact → `BusinessSignalService.publish` (ADR-136) — reúso, não duplica (RN-CC-5). `detect`/`reject`/`expireStale` NUNCA promovem. Promovido = EXATAMENTE o `proposed` (não inventa §25). Rotas `/api/context-candidates` (list/get/POST detect/submit/confirm/reject, gestor). Guardrails RN-CC-1..5. `test:context-candidate` (30 checks); F1–F5 + business-constraints/impact-prioritization seguem verdes — 0 regressão | ESTENDER + CRIAR | ✅ |
 | **F7** | RAG + Memory como evidência (proveniência estruturada) | ESTENDER | `searchContext` structured |
 | **F8** | Context Quality — coverage/freshness/confidence/conflicts/gaps | COMPOR | |
 | **F9** | Security — RLS(app-level)/RBAC/redaction/isolamento/audit + guarda data-vs-instrução | REUTILIZAR + CRIAR | |
@@ -164,15 +164,21 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F6 — Fala Tu Context Capture (`ContextCandidate`)**
+## Fatia recomendada a seguir: **F7 — RAG + Memory como evidência**
 
-Com F1–F5 no lugar (contratos + grafo + resolver + metas ricas/constraints +
-enriquecimento de sinal), o pacote já entrega momento/fatos/grafo/metas/
-constraints/qualidade E o contexto de um sinal do Radar. O próximo incremento
-(§37/§36) é ESTENDER sobre `DecisionActionService`/inbox do Fala Tu: formalizar o
-`ContextCandidate` (DETECTED/PENDING/CONFIRMED/REJECTED/EXPIRED) — um candidato de
-CONTEXTO/REGRA (não de ação), SEM alteração silenciosa de política (§36). Reúso
-sobre os dois; net-new mínimo (o contrato de estados do candidato).
+Com F1–F6 no lugar (contratos + grafo + resolver + metas ricas/constraints +
+enriquecimento de sinal + captura de candidato de contexto), o próximo incremento
+(§49) é ESTENDER `geminiRAG.searchContext` pra devolver **proveniência
+estruturada** (`{documentId, chunkIndex, source, title, score}`) em vez de
+`string[]` — RAG/memória viram `EvidenceReference` (F1) de 1ª classe, preservando
+document_id/chunk/source/timestamp que hoje a linha carrega e é descartado.
+
+### (histórico) Fatia entregue: **F6 — Fala Tu Context Capture (`ContextCandidate`)**
+
+ESTENDER sobre `DecisionActionService`/inbox do Fala Tu: `ContextCandidate`
+(DETECTED/PENDING/CONFIRMED/REJECTED/EXPIRED) — candidato de CONTEXTO/REGRA (não de
+ação), SEM alteração silenciosa de política (§36). `confirm` promove pelos serviços
+da 1ª classe (constraint/signal). Net-new mínimo (tabela + contrato de estados). ✅
 
 ### (histórico) Fatia entregue: **F5 — Signal Enrichment (PRD 2 → contexto)**
 

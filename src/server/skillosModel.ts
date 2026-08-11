@@ -497,3 +497,107 @@ export function assessConfidence(score: number, opts: { thresholds?: ConfidenceT
   if (opts.grounding === "unsupported") s = Math.min(s, Math.max(0, t.low - 0.01)); // força abaixo do piso
   return { score: s, band: confidenceBand(s), action: confidenceAction(s, t), groundingStatus: opts.grounding };
 }
+
+// ═══════════════════════════ §12/§13 Execution Plan ═════════════════════════════
+
+/** ready = toda capability resolveu + deps OK; blocked = falta skill ou dep inválida. */
+export type PlanStatus = "ready" | "blocked";
+
+/** Um passo do plano: uma Capability a resolver numa Skill (F3) + dependências. */
+export interface ExecutionPlanStep {
+  stepId: string;
+  capabilityId: string;
+  dependsOn: string[];                          // stepIds
+  resolvedSkillId: string | null;               // via Capability Resolver (F3)
+  resolution: "resolved" | "unresolved";
+  reason: string;
+  riskLevel: RiskLevel | null;
+  requiredContextProfile: ContextProfileName | null;
+}
+
+/** §13 — o plano: passos + risco/contexto agregados + status. NÃO executa (§12). */
+export interface ExecutionPlan {
+  planId: string;
+  correlationId: string;                        // fio ADR-158
+  goal: string;
+  intent: string | null;
+  steps: ExecutionPlanStep[];
+  riskLevel: RiskLevel;                          // máximo dos passos
+  requiredContextProfile: ContextProfileName;   // o mais profundo exigido
+  status: PlanStatus;
+  unresolvedCapabilities: string[];             // capabilities sem skill (→ escalada §45)
+  issues: string[];                             // problemas de dependência (ciclo/inexistente)
+}
+
+/** Maior risco de um conjunto (default 'low'). */
+export function maxRisk(levels: Array<RiskLevel | null | undefined>): RiskLevel {
+  let best: RiskLevel = "low";
+  for (const l of levels) if (l && riskRank(l) > riskRank(best)) best = l;
+  return best;
+}
+
+/** Perfil de contexto mais profundo de um conjunto (default 'minimal'). */
+export function deepestProfile(profiles: Array<ContextProfileName | null | undefined>): ContextProfileName {
+  let best: ContextProfileName = "minimal";
+  for (const p of profiles) {
+    if (p && CONTEXT_PROFILES.indexOf(p) > CONTEXT_PROFILES.indexOf(best)) best = p;
+  }
+  return best;
+}
+
+/**
+ * Valida as dependências dos passos: toda `dependsOn` referencia um stepId existente
+ * e não há CICLO. Retorna a lista de problemas (vazia = DAG válido). Puro.
+ */
+export function validatePlanDeps(steps: Array<{ stepId: string; dependsOn?: string[] }>): string[] {
+  const issues: string[] = [];
+  const ids = new Set(steps.map((s) => s.stepId));
+  const adj = new Map<string, string[]>();
+  for (const s of steps) {
+    adj.set(s.stepId, s.dependsOn || []);
+    for (const d of s.dependsOn || []) if (!ids.has(d)) issues.push(`passo '${s.stepId}' depende de '${d}' inexistente`);
+  }
+  // detecção de ciclo (DFS com cores).
+  const color = new Map<string, number>(); // 0=branco 1=cinza 2=preto
+  const dfs = (u: string): boolean => {
+    color.set(u, 1);
+    for (const v of adj.get(u) || []) {
+      if (!ids.has(v)) continue;
+      const c = color.get(v) || 0;
+      if (c === 1) return true;            // aresta de retorno → ciclo
+      if (c === 0 && dfs(v)) return true;
+    }
+    color.set(u, 2);
+    return false;
+  };
+  for (const s of steps) if ((color.get(s.stepId) || 0) === 0 && dfs(s.stepId)) { issues.push(`ciclo de dependência envolvendo '${s.stepId}'`); break; }
+  return issues;
+}
+
+/**
+ * Ordenação topológica dos passos (deps antes dos dependentes). Se houver ciclo,
+ * cai pra ordem original (o plano já estará `blocked`). Puro/estável.
+ */
+export function topoSortSteps<T extends { stepId: string; dependsOn?: string[] }>(steps: T[]): T[] {
+  const byId = new Map(steps.map((s) => [s.stepId, s]));
+  const indeg = new Map<string, number>();
+  for (const s of steps) indeg.set(s.stepId, 0);
+  for (const s of steps) for (const d of s.dependsOn || []) if (byId.has(d)) indeg.set(s.stepId, (indeg.get(s.stepId) || 0) + 1);
+  const ready = steps.filter((s) => (indeg.get(s.stepId) || 0) === 0).map((s) => s.stepId);
+  const out: T[] = [];
+  const seen = new Set<string>();
+  while (ready.length) {
+    ready.sort(); // desempate estável
+    const id = ready.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(byId.get(id)!);
+    for (const s of steps) {
+      if ((s.dependsOn || []).includes(id)) {
+        indeg.set(s.stepId, (indeg.get(s.stepId) || 0) - 1);
+        if ((indeg.get(s.stepId) || 0) === 0) ready.push(s.stepId);
+      }
+    }
+  }
+  return out.length === steps.length ? out : steps; // ciclo → ordem original
+}

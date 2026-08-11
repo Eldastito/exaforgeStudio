@@ -24,6 +24,7 @@
     "test:skillos-reliability": "tsx scripts/test-skillos-reliability.ts",
     "test:skillos-model-router": "tsx scripts/test-skillos-model-router.ts",
     "test:skillos-grounding": "tsx scripts/test-skillos-grounding.ts",
+    "test:skillos-planner": "tsx scripts/test-skillos-planner.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

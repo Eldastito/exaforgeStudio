@@ -4,14 +4,15 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 1 — Core Contracts (em revisão/PR).
-- **Última fatia:** F1 entregue (contratos puros). Fase 0 mergeada (#957).
-- **Baseline:** `main` @ `e0facfd` (pós Fase 0).
+- **Fase:** 2 — Capability + Skill Registry (em revisão/PR).
+- **Última fatia:** F2 entregue (catálogo persistido). F1 mergeada (#958).
+- **Baseline:** `main` @ `18f9667` (pós F1).
 
 ## Entregue nesta sessão
 
 - **Fase 0 (mergeada #957):** `docs/skill-os/ANALISE-PRD4-vs-CODEBASE.md` — matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR/DEFERIR completa (7 grupos), duplicidades, riscos, decisões (D1–D8), migrations, serviços impactados, compat, rollout/rollback, fatiamento F1–F12.
-- **Fase 1:** `src/server/skillosModel.ts` (puro, sem DB/LLM) — contratos `Capability`, `SkillManifest`, `ModelRequirements`/`ModelProfile`, `SkillResult`, `ReliabilityResult`, `ConfidenceThresholds` + taxonomia de falhas AI-FAIL-1..6 + guardas determinísticas (`toolAllowedBySkill` §44, `retryPolicyFor` §27, `modelMeets` §22/23, `confidenceAction` §21, `validateCapability`/`validateSkillManifest`). REUSA `EvidenceReference` (contextModel) e a semântica `fact/estimate/hypothesis` (§20). `test:skillos-contracts` (31 checks). Zero arquivo existente alterado → 0 mudança de comportamento.
+- **Fase 1 (mergeada #958):** `src/server/skillosModel.ts` (puro) — contratos + guardas determinísticas + taxonomia AI-FAIL-1..6. `test:skillos-contracts` (31 checks).
+- **Fase 2:** tabelas de plataforma `skillos_capabilities`/`skillos_skills` (sem org_id — §49; prefixo D1) + `SkillOsRegistryService` (registro validado/idempotente, lookup, ciclo de vida enable/disable, `skillsForCapability` p/ o Resolver F3, compat vertical + entitlement via `EntitlementService`). Rota read-only `GET /api/skillos/capabilities[/:id]`,`/skills` (gestor). Catálogo INERTE (nada registrado ainda) → 0 mudança de comportamento. `test:skillos-registry` (21 checks). Guardrails RN-REG-1..5.
 
 ## Achados-chave (resumo)
 
@@ -26,8 +27,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aprovada a F1 → **Fase 2 (Capability + Skill Registry)**: `skillos_capabilities`/`skillos_skills` (tabelas prefixadas, Decisão D1), no padrão declarativo de `AnomalyDetectorRegistry`; enable/disable/lookup + compat vertical/entitlement. Ainda sem alterar os agentes existentes.
+- Aprovada a F2 → **Fase 3 (Capability Resolver)**: resolução conservadora (1 skill → resolve direto; depois ranking por regra — determinístico primeiro, §11). Consome `SkillOsRegistryService.skillsForCapability` + compat vertical/entitlement. **Nada de IA escolhendo skill** nesta fase.
 
 ## Testes / CI
 
-- `test:skillos-contracts` (31 checks, determinístico, sem DB/LLM). Suítes de contexto (PRD 3) seguem verdes.
+- `test:skillos-contracts` (31) + `test:skillos-registry` (21), determinísticos. Suítes de contexto (PRD 3) + tenant-isolation (13) verdes.

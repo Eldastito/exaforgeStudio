@@ -19,6 +19,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test:skillos-contracts": "tsx scripts/test-skillos-contracts.ts",
+    "test:skillos-registry": "tsx scripts/test-skillos-registry.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

@@ -73,6 +73,7 @@ import goalsRoutes from "./src/server/routes/goals.js";
 import constraintsRoutes from "./src/server/routes/constraints.js";
 import contextCandidatesRoutes from "./src/server/routes/contextCandidates.js";
 import contextRoutes from "./src/server/routes/context.js";
+import skillosRoutes from "./src/server/routes/skillos.js";
 import gestorRoutes from "./src/server/routes/gestor.js";
 import peopleRoutes from "./src/server/routes/people.js";
 import productionRoutes from "./src/server/routes/production.js";
@@ -608,6 +609,7 @@ async function startServer() {
   protectedApi.use("/constraints", constraintsRoutes);
   protectedApi.use("/context-candidates", contextCandidatesRoutes);
   protectedApi.use("/context", contextRoutes);
+  protectedApi.use("/skillos", skillosRoutes);
   protectedApi.use("/signals", signalsRoutes);
   protectedApi.use("/decision-intelligence", decisionIntelligenceRoutes);
   // ADR-153 F7.3 — recomendações de upgrade + cooldown (LGPD §14 / PRD §15).

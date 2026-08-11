@@ -739,3 +739,95 @@ export function detectRegression(current: EvalResult, baseline: { passRate: numb
   const nowPassing = new Set(current.scores.filter((s) => s.passed).map((s) => s.caseId));
   return baseline.passedCaseIds.some((id) => !nowPassing.has(id));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRD 4 F12 — Canary + Production Readiness (contratos puros do rollout §68/§69)
+// ---------------------------------------------------------------------------
+// A ESCADA de rollout (§68). Ordem = maturidade crescente. `development` = só dev/
+// testes (nunca live pro tenant); a partir de `shadow` a skill "existe" pro runtime,
+// mas o MODO de execução (ADR-159 `execution_mode`) sobe junto — nunca `autonomous`
+// (RN-014/LGPD: humano sempre no laço). O gate real de execução continua no
+// CommandExecutor (G1/G2/G3); aqui só se decide SE a skill está exposta e em que modo.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const ROLLOUT_STAGES = ["development", "shadow", "pilot", "assisted", "approved_execution", "broader"] as const;
+export type RolloutStage = (typeof ROLLOUT_STAGES)[number];
+
+export function rolloutStageRank(stage: RolloutStage): number {
+  const i = ROLLOUT_STAGES.indexOf(stage);
+  return i < 0 ? 0 : i;
+}
+
+/**
+ * Mapeia o estágio §68 pro `execution_mode` da ADR-159 (shadow<assisted<
+ * approved_execution). REUSA o teto existente — NÃO cria escala paralela.
+ * `development` → null (a skill nem se expõe). `broader` ainda é `approved_execution`
+ * (aprovação humana): `autonomous` NUNCA é semeado por rollout (RN-014/LGPD).
+ */
+export function executionModeForStage(stage: RolloutStage): "shadow" | "assisted" | "approved_execution" | null {
+  switch (stage) {
+    case "development": return null;
+    case "shadow": return "shadow";
+    case "pilot": return "assisted";
+    case "assisted": return "assisted";
+    case "approved_execution": return "approved_execution";
+    case "broader": return "approved_execution";
+    default: return null;
+  }
+}
+
+/**
+ * Hash determinístico e portável (FNV-1a 32-bit) → 0..99. Puro (sem crypto/I/O), pra
+ * o cohort de canário ser ESTÁVEL: a mesma (skill, org) cai sempre no mesmo balde,
+ * então subir o percentual só ADICIONA orgs, nunca embaralha quem já estava dentro.
+ */
+export function hashPercent(seed: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % 100;
+}
+
+/** Org está no cohort de canário de `percent`% da skill? (0 = ninguém, 100 = todos.) */
+export function inCanaryCohort(skillId: string, orgId: string, percent: number): boolean {
+  const p = Math.max(0, Math.min(100, Math.floor(percent)));
+  if (p <= 0) return false;
+  if (p >= 100) return true;
+  return hashPercent(`${skillId}:${orgId}`) < p;
+}
+
+export interface RolloutState {
+  skillId: string;
+  stage: RolloutStage;
+  canaryPercent: number;    // 0..100 (só se aplica de `pilot` pra cima)
+  killed: boolean;          // kill switch por-skill
+}
+
+export interface RolloutDecision {
+  live: boolean;
+  executionMode: "shadow" | "assisted" | "approved_execution" | null;
+  stage: RolloutStage;
+  reason: string;
+}
+
+/**
+ * DECISÃO pura de rollout pra uma (skill, org). `globalKilled` = kill switch de
+ * plataforma. Ordem: kill global → kill da skill → development → cohort de canário
+ * (pilot+; shadow/broader ignoram o percentual — shadow é universal-sem-efeito e
+ * broader é geral). Devolve live + o `execution_mode` do estágio.
+ */
+export function evaluateRollout(state: RolloutState, orgId: string, globalKilled: boolean): RolloutDecision {
+  const mode = executionModeForStage(state.stage);
+  if (globalKilled) return { live: false, executionMode: null, stage: state.stage, reason: "kill switch global ativo" };
+  if (state.killed) return { live: false, executionMode: null, stage: state.stage, reason: "skill em kill switch" };
+  if (state.stage === "development") return { live: false, executionMode: null, stage: state.stage, reason: "estágio development (não exposto)" };
+  // shadow e broader não dependem de percentual (universal); pilot/assisted/approved
+  // respeitam o cohort quando canaryPercent < 100.
+  const cohortGated = state.stage === "pilot" || state.stage === "assisted" || state.stage === "approved_execution";
+  if (cohortGated && !inCanaryCohort(state.skillId, orgId, state.canaryPercent)) {
+    return { live: false, executionMode: mode, stage: state.stage, reason: `fora do cohort de canário (${state.canaryPercent}%)` };
+  }
+  return { live: true, executionMode: mode, stage: state.stage, reason: "live" };
+}

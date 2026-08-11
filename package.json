@@ -31,6 +31,7 @@
     "test:skillos-evals": "tsx scripts/test-skillos-evals.ts",
     "test:skillos-rollout": "tsx scripts/test-skillos-rollout.ts",
     "test:skillos-pilot-seed": "tsx scripts/test-skillos-pilot-seed.ts",
+    "test:skillos-pilot-promote": "tsx scripts/test-skillos-pilot-promote.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

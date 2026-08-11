@@ -168,4 +168,16 @@ router.post("/seed-pilots", requireRole("owner", "admin"), (req: AuthRequest, re
   catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
 });
 
+// POST /api/skillos/promote-pilots { percent? } — promoção §68 dos 3 pilotos `shadow`→
+// `pilot` @percent% (default 10). Aplica a DECISÃO do operador; one-time (marker), não
+// re-dispara nem briga com rollback. Também roda no boot; a rota é o gatilho manual.
+router.post("/promote-pilots", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = (req.body || {}).percent;
+  const percent = raw == null ? 10 : Number(raw);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return res.status(400).json({ error: "percent inválido (0..100)" });
+  try { res.json(SkillOsPilotSeeder.promotePilotsToPilot(percent)); }
+  catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
 export default router;

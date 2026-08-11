@@ -51,6 +51,10 @@ A escada de rollout (maturidade crescente): `development → shadow → pilot �
 
 **Sequência recomendada por skill** (pilotos §61 — Collection Intent Classifier, Sales Recovery Message, Signal Investigation): `shadow` (compare notas no eval) → `pilot 10%` → observe readiness/evals → subir % → `approved_execution` → `broader`.
 
+**Promoção dos 3 pilotos pra `pilot 10%` (atalho batch, aplicado no boot):** os 3 pilotos §61 já sobem juntos de `shadow` → `pilot @10%` — automático no deploy (idempotente) ou manual via `POST /api/skillos/promote-pilots { "percent": 10 }`. É **one-time** (marker `pilots_pilot10_v1`): aplica a decisão UMA vez e nunca re-dispara, então um **rollback** posterior (`/rollout/:id/rollback`) fica de pé. Só **avança** de `shadow` — skill que o operador já subiu além é preservada (nunca rebaixa, nunca mexe no canário dela). Daí pra frente, cada piloto segue individualmente pela esteira normal acima.
+
+> **Durabilidade:** o estágio é **estado do operador** — o onboarding (`seedPilots`, roda a cada boot) semeia `shadow` só na 1ª vez e **nunca sobrescreve** promoção/rollback depois. Uma promoção pela rota `/rollout` sobrevive a reboot.
+
 ---
 
 ## 3. Frear / reverter (§69 — do mais leve ao mais duro)

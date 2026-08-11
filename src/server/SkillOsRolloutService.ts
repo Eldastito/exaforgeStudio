@@ -36,6 +36,16 @@ export class SkillOsRolloutService {
     return db.prepare(`SELECT skill_id, stage, canary_percent, killed FROM skillos_rollout WHERE skill_id = ?`).get(skillId) as any;
   }
 
+  /**
+   * A skill já tem estado de rollout PERSISTIDO? (row existe). `get()` devolve defaults
+   * quando ausente, então não dá pra distinguir "nunca configurada" de "development/0" só
+   * por ele — este é o teste usado pelo seed pra semear o estágio inicial UMA vez, sem
+   * clobberar decisão do operador em boots seguintes (RN-RO-5, ver SkillOsPilotSeeder).
+   */
+  static has(skillId: string): boolean {
+    return !!this.row(skillId);
+  }
+
   /** Estado de rollout da skill (defaults se nunca configurada: development/0/vivo). */
   static get(skillId: string): RolloutState {
     const r = this.row(skillId);

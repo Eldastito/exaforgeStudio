@@ -5,6 +5,7 @@ import { SignalCorrelationService } from "../SignalCorrelationService.js";
 import { SignalInvestigationService } from "../SignalInvestigationService.js";
 import { SignalCalibrationService } from "../SignalCalibrationService.js";
 import { HumanSignalService } from "../HumanSignalService.js";
+import { ExternalSignalService } from "../ExternalSignalService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { logAuthEvent } from "../auditLog.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
@@ -97,6 +98,49 @@ router.post("/observe", (req: AuthRequest, res): any => {
     return res.status(code).json({ error: out.reason || "invalid" });
   }
   logAuthEvent(orgId, actor, null, "RADAR_HUMAN_OBSERVATION", { signalId: out.signalId, domain, observationCount: out.observationCount, severity: out.severity });
+  res.json(out);
+});
+
+// PRD 2 F10 (§48-51, CA2) — POST /api/signals/ingest-external — o MOLDE de
+// ingestão da origem EXTERNA: um conector (Reclame AQUI, reviews, market intel)
+// entrega um sinal externo JÁ CAPTURADO e este endpoint o normaliza no ledger,
+// com proveniência (source+externalId) e sem promover a fato não verificado (§13).
+// Opt-in por org. A rota valida a FORMA; o service guarda a invariante.
+router.post("/ingest-external", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const source = typeof b.source === "string" ? b.source.trim() : "";
+  const externalId = typeof b.externalId === "string" ? b.externalId.trim() : "";
+  const domain = typeof b.domain === "string" ? b.domain.trim() : "";
+  const content = typeof b.content === "string" ? b.content.trim() : "";
+  if (!source) return res.status(400).json({ error: "source é obrigatório." });
+  if (!externalId) return res.status(400).json({ error: "externalId é obrigatório." });
+  if (!domain) return res.status(400).json({ error: "domain é obrigatório." });
+  if (!content) return res.status(400).json({ error: "content é obrigatório." });
+  const actor = (req as any).user?.userId || null;
+  const out = ExternalSignalService.ingest(orgId, {
+    source, externalId, domain, content,
+    signalType: typeof b.signalType === "string" ? b.signalType : undefined,
+    subjectType: typeof b.subjectType === "string" ? b.subjectType : null,
+    subjectId: typeof b.subjectId === "string" ? b.subjectId : null,
+    severity: typeof b.severity === "string" ? b.severity : null,
+    basis: b.basis === "fact" || b.basis === "hypothesis" ? b.basis : "estimate",
+    verifiable: b.verifiable === true,
+    url: typeof b.url === "string" ? b.url : null,
+    publishedAt: typeof b.publishedAt === "string" ? b.publishedAt : null,
+    author: typeof b.author === "string" ? b.author : null,
+    sentiment: b.sentiment === "negative" || b.sentiment === "neutral" || b.sentiment === "positive" ? b.sentiment : null,
+    rating: typeof b.rating === "number" ? b.rating : null,
+    ratingScale: typeof b.ratingScale === "number" ? b.ratingScale : null,
+    expiresAt: typeof b.expiresAt === "string" ? b.expiresAt : null,
+    correlationId: typeof b.correlationId === "string" ? b.correlationId : null,
+  });
+  if (!out.ok) {
+    const code = out.reason === "disabled" ? 403 : 400;
+    return res.status(code).json({ error: out.reason || "invalid" });
+  }
+  logAuthEvent(orgId, actor, null, "RADAR_EXTERNAL_INGEST", { signalId: out.signalId, source, externalId, domain, basis: out.basis, severity: out.severity });
   res.json(out);
 });
 

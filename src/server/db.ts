@@ -8463,6 +8463,15 @@ const initDb = () => {
   // §46). Opt-in; sem tabela nova (CA1/§5) — as observações moram no evidence_json
   // do próprio sinal. Nunca é `fact` (§13). Aditivo; default OFF.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_human_signals_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // PRD 2 F10 (§48-51, §10C, CA2) — External signal contract (molde): a origem
+  // EXTERNA da percepção (review/reclamação/menção de mercado SOBRE esta org) vira
+  // um `business_signal` normalizado, com PROVENIÊNCIA obrigatória (source +
+  // externalId → dedupe idempotente por origem) e SEM promover a fato não
+  // verificado (§13). Só o CONTRATO de ingestão — os conectores (Reclame AQUI,
+  // etc.) são PRDs próprios (§50). Opt-in; sem tabela nova (CA1) — proveniência
+  // no evidence_json do sinal. Aditivo; default OFF.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_external_signals_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

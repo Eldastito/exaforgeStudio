@@ -70,7 +70,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **Correlation Engine** (N sinais → 1 situação, multi-evidência) | Inexistente. Só há dedupe (mesmo evento). §16-20 pedem correlação (evento≠evento). **F3.1 ENTREGUE:** `SignalCorrelationService.clusters` — confiança ALTA (mesmo `(subject_type,subject_id)`, multi-domínio, janela), derivado, evidência preservada. `test:signal-correlation` (10 checks). **F3.2 ENTREGUE:** `attention()` colapsa a situação (opt-in flag/param, evidenceCount+signalIds), `test:attention-correlation` (9 checks). **F3.3 ENTREGUE:** confiança MÉDIA (padrão do mesmo signal_type em sujeitos distintos, `related[]`, não colapsa), `test:signal-related` (9 checks). **Fase 3 FECHADA** | F3 |
 | **Investigation pipeline** (causa-candidata + supporting/contradicting evidence + confidence) | `analysisFor` roteia profundidade mas não havia geração de causa. **F6.1 ENTREGUE:** `SignalInvestigationService.investigate` — causas-candidatas determinísticas (evidência a favor/contra + confiança, basis hypothesis, nunca vira fato §13), sem IA. `test:signal-investigation` (11 checks). **F6.2 ENTREGUE:** `investigateDeep` — gate de LLM por nível de impacto (L3+, reusa DI-1), sintetizador injetável, IA nunca é loop principal (§81-83), `test:signal-investigation-deep` (10 checks). **Fase 6 FECHADA** | ✅ |
 | ~~**Feedback & calibration**~~ | ✅ **F11 ENTREGUE** — `dismiss(reason)` (§65) + `SignalCalibrationService.detectorMetrics` (false-positive/dismissal rate + calibração por detector, §66). `test:signal-calibration` (8 checks) | ~~F11~~ ✅ |
-| **External signal contract** (molde p/ Reclame AQUI / External Intelligence) | §10C/§48-51 — só o **contrato**, não os conectores | F10 |
+| ~~**External signal contract**~~ | ✅ **F10 ENTREGUE** — `ExternalSignalService.ingest` (opt-in `radar_external_signals_enabled`): molde provider-agnóstico com proveniência obrigatória (`source`+`externalId`→dedupe idempotente), basis `fact` só com `verifiable` (§13), severidade derivada de rating/sentiment, autor mascarado (LGPD), confiança externa <1. `POST /api/signals/ingest-external`. Conectores seguem PRDs próprios (§50). `test:external-signals` (22 checks) | ~~F10~~ ✅ |
 | **Radar health / métricas** (§94-98) | Observabilidade admin dos detectores | F12 |
 
 ### ⏸️ DEFERIR (fora do escopo deste PRD)
@@ -87,7 +87,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA | Estado hoje | Trabalho |
 | --- | --- | --- |
 | CA1 ledger canônico | ✅ já é | não regredir |
-| CA2 contrato normalizado (H/D/E) | 🟡 parcial | ✅ **F9 (human)** — `HumanSignalService.observe` normaliza observação humana no ledger com acúmulo de evidência; falta F10 (external) |
+| CA2 contrato normalizado (H/D/E) | ✅ **COMPLETO** | ✅ **F9 (human)** `HumanSignalService.observe` (acúmulo de evidência) + ✅ **F10 (external)** `ExternalSignalService.ingest` (proveniência + dedupe por origem, nunca fato não verificado). Digital já existia (detectores). As três origens de percepção normalizadas no ledger canônico |
 | CA3 fato×estimativa distinguível | 🟡 falta `hypothesis` | F2 |
 | CA4 correlação sem destruir evidência | ✅ **F3.1 alta + F3.2 surface + F3.3 média** — evidência sempre preservada | não regredir |
 | CA5 framework de anomalia | ✅ **F4.1+F4.2+F4.3** (primitivas+registry+1 detector migrado) | ✅ |
@@ -120,7 +120,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **F7** | Impact prioritization refino (SLA/reversibility/goal) | ESTENDER | fatores no score |
 | **F8** | Routing expansion (beachhead §71) | ESTENDER | +mapeamentos maduros (collection/sales_recovery) |
 | ~~**F9**~~ ✅ | Human signals (Fala Tu → radar) — **FECHADA**: `HumanSignalService.observe` (opt-in `radar_human_signals_enabled`) normaliza a observação humana num `business_signal` (`origin:human`, `basis=estimate\|hypothesis`, **nunca fact §13**) com **acúmulo de evidência** (mesmo assunto sobe confiança 0.30→0.85 e severidade info→attention→risk, derivado de `observations.length`, RN-004); atômico (tx); `POST /api/signals/observe`; sem tabela nova (CA1) | ESTENDER | ✅ |
-| **F10** | External signal contract (molde) | CRIAR | só contrato de ingestão |
+| ~~**F10**~~ ✅ | External signal contract (molde) — **FECHADA**: `ExternalSignalService.ingest`, proveniência + dedupe por origem, fact só se verificável (§13), `POST /api/signals/ingest-external`, `test:external-signals` (22). CA2 fica **100%** (H/D/E) | CRIAR | ✅ |
 | **F11** | Feedback & calibration | CRIAR | dismiss reason + false-positive rate |
 | **F12** | Production readiness | — | perf/observability/budgets/runbooks |
 

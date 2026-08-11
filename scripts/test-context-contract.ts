@@ -82,9 +82,12 @@ async function main() {
   check("3.12 não-objeto é inválido", !CM.validateContextPacket(null).valid && !CM.validateContextPacket("x").valid);
 
   // ═══════════════ 4. assert LANÇA + fachada delega ═══════════════
-  let threw = false; try { CM.assertContextPacket({ foo: 1 }); } catch { threw = true; }
+  // alias com tipo plano: chamar a assinatura de asserção via namespace import
+  // dispara TS2775 (o binding precisa de tipo explícito) — aqui só queremos o throw.
+  const assertPkt: (p: unknown) => void = CM.assertContextPacket;
+  let threw = false; try { assertPkt({ foo: 1 }); } catch { threw = true; }
   check("4.1 assertContextPacket lança no inválido", threw);
-  let okAssert = true; try { CM.assertContextPacket(pkt); } catch { okAssert = false; }
+  let okAssert = true; try { assertPkt(pkt); } catch { okAssert = false; }
   check("4.2 assertContextPacket não lança no válido", okAssert);
   check("4.3 fachada Engine.validatePacket delega", ENG.validatePacket(pkt).valid && !ENG.validatePacket({}).valid);
 

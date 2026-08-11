@@ -147,7 +147,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | ~~**F4**~~ ✅ | BusinessGoal (rico) + BusinessConstraint — **ENTREGUE**: (1) `business_goals` +aditivos `title/baseline/deadline/priority/owner/status` (§14); `BusinessGoalService.set` update PARCIAL (preserva o não informado), `list` traz os ricos, `progress` só conta ATIVAS por padrão + ordena por prioridade + `attainmentFromBaselinePct` do baseline. (2) `business_constraints` (tabela nova) + `BusinessConstraintService` (§15): CRUD + `applicable(scope)` (global + escopo), kinds discount_ceiling/budget_limit/margin_floor/payment_term_max/policy/custom, isolado/auditado, READ+DERIVE (sem enforcement — gate no RBAC). (3) `ContextPacket` ganha `constraints: ContextConstraint[]` (aplicáveis à âncora) + metas ricas fluem. Rotas `/api/goals` (rico) e `/api/constraints` (CRUD, gestor). Guardrails RN-BC-1..4. `test:business-constraints` (29 checks); F1/F2/F3/business-goals/goal-aware-priority seguem verdes | ESTENDER + CRIAR | ✅ |
 | ~~**F5**~~ ✅ | Signal Enrichment — **ENTREGUE**: `src/server/SignalEnrichmentService.ts` (compose-only, sem tabela/coluna nova). `enrich(orgId, signalId)` monta o CONTEXTO de um sinal do Radar (a ponte percepção→contexto pro Maestro): âncora no SUJEITO do sinal (subject_type→entidade do grafo F2, só quando resolve — senão anchor:null) · pacote do resolver (F3) escopado ao domínio · lente de prioridade (`ImpactPrioritizationService.scoreOne` — MESMO cálculo do feed, exposto p/ 1 sinal, reúso do `scoreSignal` privado) com score/impactLevel/ação recomendada/SLA/irreversibilidade · meta AMEAÇADA (`affectedGoal` do goalGapsByDomain) · restrições aplicáveis (F4, já no pacote) · correlatos do mesmo sujeito (§39). O sinal vira `ContextFact` (F1). Rota `GET /api/signals/:id/context` (`?profile=`). Guardrails RN-SE-1..5 (isolamento→found:false p/ outro tenant · não-inventa âncora · READ+DERIVE · estende não duplica · mínimo). `test:signal-enrichment` (26 checks); F1/F2/F3/business-constraints/goal-aware-priority/impact-prioritization seguem verdes — 0 regressão | COMPOR | ✅ |
 | ~~**F6**~~ ✅ | Fala Tu Context Capture — **ENTREGUE**: `context_candidates` (tabela nova) + `ContextCandidateService.ts` + contrato `ContextCandidate` em `contextModel` (estados DETECTED→PENDING→CONFIRMED/REJECTED/EXPIRED + `canTransitionCandidate`, §37). Um candidato de CONTEXTO/REGRA (não de ação): mudança PROPOSTA ao contexto (restrição/regra ou fato) capturada do Fala Tu / detector, que só afeta o contexto depois de CONFIRMADA por humano — nunca em silêncio (§36). `confirm` é o ÚNICO ponto que promove: kind=constraint → `BusinessConstraintService.create` (F4); kind=fact → `BusinessSignalService.publish` (ADR-136) — reúso, não duplica (RN-CC-5). `detect`/`reject`/`expireStale` NUNCA promovem. Promovido = EXATAMENTE o `proposed` (não inventa §25). Rotas `/api/context-candidates` (list/get/POST detect/submit/confirm/reject, gestor). Guardrails RN-CC-1..5. `test:context-candidate` (30 checks); F1–F5 + business-constraints/impact-prioritization seguem verdes — 0 regressão | ESTENDER + CRIAR | ✅ |
-| **F7** | RAG + Memory como evidência (proveniência estruturada) | ESTENDER | `searchContext` structured |
+| ~~**F7**~~ ✅ | RAG + Memory como evidência — **ENTREGUE**: `geminiRAG` ESTENDIDO (sem tabela nova). `loadOrgChunks` preserva a proveniência que a linha já carregava e era descartada (`document_id`/`chunk_index`/`created_at` + título via join a `knowledge_documents`). Novo `RagHit` (proveniência estruturada: documentId/chunkIndex/title/source/score/observedAt) + `rankChunksToHits` (PURO — filtro canal/área + topK + score, testável sem embed) + `searchContextRich` (I/O em volta). `searchContext` (string[]) segue como projeção retrocompat — 0 quebra nos callers (AIOrchestrator/generateRagResponse). Mapper `evidenceFromRagHit` (contextModel) traduz um hit em `EvidenceReference` (§24) APPROVED_DOCUMENT (sourceId=documentId, field=chunk:N, confidence=score) — RAG/memória viram evidência de 1ª classe rastreável; não inventa (§25). `test:rag-provenance` (21 checks, determinístico sem chave de IA); context-model/falatu-rag/falatu-embeddings + F3/F5/F6 seguem verdes — 0 regressão | ESTENDER | ✅ |
 | **F8** | Context Quality — coverage/freshness/confidence/conflicts/gaps | COMPOR | |
 | **F9** | Security — RLS(app-level)/RBAC/redaction/isolamento/audit + guarda data-vs-instrução | REUTILIZAR + CRIAR | |
 | **F10** | Contratos SkillOS — validar `ContextPacket` estável pro PRD 4 | validação | sem SkillOS |
@@ -164,14 +164,22 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F7 — RAG + Memory como evidência**
+## Fatia recomendada a seguir: **F8 — Context Quality (coverage/freshness/confidence/conflicts/gaps)**
 
-Com F1–F6 no lugar (contratos + grafo + resolver + metas ricas/constraints +
-enriquecimento de sinal + captura de candidato de contexto), o próximo incremento
-(§49) é ESTENDER `geminiRAG.searchContext` pra devolver **proveniência
-estruturada** (`{documentId, chunkIndex, source, title, score}`) em vez de
-`string[]` — RAG/memória viram `EvidenceReference` (F1) de 1ª classe, preservando
-document_id/chunk/source/timestamp que hoje a linha carrega e é descartado.
+Com F1–F7 no lugar (contratos + grafo + resolver + metas/constraints +
+enriquecimento de sinal + captura de candidato + RAG como evidência), o próximo
+incremento (§75) é COMPOR a **qualidade do contexto** como uma superfície de 1ª
+classe: cobertura (`dataQuality`) + confiança (`EvidencePackage`) + frescor +
+contagem de conflitos + lacunas. Boa parte já é montada dentro do resolver
+(`computeQuality`, F3) — a F8 a extrai/consolida como leitura própria (e reusa a
+proveniência estruturada da F7 no cálculo de confiança/frescor).
+
+### (histórico) Fatia entregue: **F7 — RAG + Memory como evidência**
+
+ESTENDER `geminiRAG` pra devolver **proveniência estruturada** (`RagHit` —
+documentId/chunkIndex/source/title/score/observedAt) em vez de só `string[]`, +
+`evidenceFromRagHit` (RAG/memória viram `EvidenceReference` de 1ª classe).
+Retrocompat total: `searchContext` (string[]) segue como projeção. ✅
 
 ### (histórico) Fatia entregue: **F6 — Fala Tu Context Capture (`ContextCandidate`)**
 

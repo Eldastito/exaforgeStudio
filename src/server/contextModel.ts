@@ -349,6 +349,39 @@ export function freshnessFromSignal(s: SignalLike, now = Date.now()): ContextFre
   return freshnessOf({ observedAt: pick(s.occurred_at, s.occurredAt, s.detected_at), validUntil: pick(s.expires_at, s.expiresAt) }, now);
 }
 
+// Forma mínima de um hit de RAG (subset de `RagHit` do geminiRAG) usada só pra
+// tradução — o mapper não depende do serviço de RAG nem do DB (contextModel puro).
+export interface RagHitLike {
+  documentId?: string | null;
+  chunkId?: string | null;
+  chunkIndex?: number | null;
+  title?: string | null;
+  source?: string | null;
+  text?: string | null;
+  score?: number | null;
+  observedAt?: string | null;
+}
+
+/**
+ * §49 (F7) — TRADUZ um hit de RAG/memória num `EvidenceReference` (§24): RAG vira
+ * evidência de 1ª classe, RASTREÁVEL. Um documento da base de conhecimento é um
+ * documento OFICIAL da org (§30.5 → APPROVED_DOCUMENT). Preserva documentId/
+ * chunkIndex/título/timestamp que a linha carrega e antes era descartado. O
+ * `score` de similaridade vira a confiança da referência. Não inventa: campos
+ * ausentes ficam null.
+ */
+export function evidenceFromRagHit(h: RagHitLike): EvidenceReference {
+  return {
+    sourceType: "APPROVED_DOCUMENT",
+    sourceId: pick(h.documentId, h.chunkId),
+    service: "geminiRAG",
+    observedAt: pick(h.observedAt),
+    field: h.chunkIndex != null ? `chunk:${h.chunkIndex}` : pick(h.source, h.title),
+    value: pick(h.text),
+    confidence: h.score != null ? clampConfidence(h.score) : null,
+  };
+}
+
 // ═══════════════════════ RESOLVER I/O (§18/§19/§20/§6) — F3 ════════════════════
 // Os contratos de ENTRADA (`ContextRequest`) e SAÍDA (`ContextPacket`) do Context
 // Resolver. Puros (tipos + orçamento derivável) — a montagem (que lê DB/serviços)

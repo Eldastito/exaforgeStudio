@@ -3,12 +3,35 @@ import { embed, chat } from "./llm.js";
 import db from "./db.js";
 import { topKBySimilarity } from "./vectorSimilarity.js";
 
-interface DocumentChunk {
+export interface DocumentChunk {
   id: string;
   text: string;
   embedding: number[];
   channelId: string;
   areaId: string | null;
+  // PRD 3 F7 (§49) — PROVENIÊNCIA que a linha JÁ carrega e era descartada: de que
+  // documento veio o chunk, sua posição, o título (fonte) e quando foi indexado.
+  documentId: string;
+  chunkIndex: number;
+  title: string | null;
+  observedAt: string | null;
+}
+
+/**
+ * PRD 3 F7 (§49) — um HIT de RAG com proveniência ESTRUTURADA (não só o texto):
+ * de qual documento/chunk veio, a fonte (título), o score de similaridade e
+ * quando o material foi indexado. É o que vira `EvidenceReference` (F1) via
+ * `evidenceFromRagHit` — RAG/memória como evidência de 1ª classe, rastreável.
+ */
+export interface RagHit {
+  chunkId: string;
+  documentId: string;
+  chunkIndex: number;
+  title: string | null;
+  source: string;        // rótulo humano da fonte (título do doc, ou 'knowledge_base')
+  text: string;
+  score: number;         // similaridade de cosseno (0..1)
+  observedAt: string | null;
 }
 
 /**
@@ -23,19 +46,31 @@ function invalidateCache(orgId: string) {
   orgCache.delete(orgId);
 }
 
-function loadOrgChunks(orgId: string): DocumentChunk[] {
+export function loadOrgChunks(orgId: string): DocumentChunk[] {
   const cached = orgCache.get(orgId);
   if (cached) return cached;
 
   let chunks: DocumentChunk[] = [];
   try {
+    // F7 (§49) — preserva a proveniência que a linha já carrega (document_id,
+    // chunk_index, created_at) + junta o título/created_at do documento pra a
+    // FONTE. LEFT JOIN: chunk cujo documento sumiu ainda serve (sem título).
     const rows: any[] = db.prepare(
-      `SELECT id, content, embedding, channel_id, area_id FROM knowledge_chunks WHERE organization_id = ?`
+      `SELECT kc.id, kc.content, kc.embedding, kc.channel_id, kc.area_id, kc.document_id,
+              kc.chunk_index, kc.created_at AS chunk_created_at,
+              kd.title AS doc_title, kd.created_at AS doc_created_at
+         FROM knowledge_chunks kc
+         LEFT JOIN knowledge_documents kd ON kd.id = kc.document_id AND kd.organization_id = kc.organization_id
+        WHERE kc.organization_id = ?`
     ).all(orgId);
     chunks = rows.map((r) => {
       let embedding: number[] = [];
       try { embedding = JSON.parse(r.embedding); } catch (e) { embedding = []; }
-      return { id: r.id, text: r.content, embedding, channelId: r.channel_id || 'global', areaId: r.area_id || null };
+      return {
+        id: r.id, text: r.content, embedding, channelId: r.channel_id || 'global', areaId: r.area_id || null,
+        documentId: r.document_id, chunkIndex: Number(r.chunk_index) || 0, title: r.doc_title ?? null,
+        observedAt: r.doc_created_at || r.chunk_created_at || null,
+      };
     }).filter((c) => c.embedding.length > 0);
   } catch (e) {
     console.error("[RAG] Falha ao carregar chunks do banco:", e);
@@ -130,29 +165,19 @@ export function deleteDocument(docId: string, orgId: string): boolean {
 }
 
 /**
- * Similaridade por cosseno entre dois vetores.
+ * PRD 3 F7 (§49) — PURA: filtra (canal/área) + ranqueia os chunks por
+ * similaridade e monta os `RagHit` COM proveniência. Determinística e sem I/O
+ * (nem DB, nem embed) — o caller injeta o `queryVec` e os `chunks` já carregados.
+ * É onde vive a lógica da F7; o `searchContextRich` só faz o I/O em volta.
  */
-/**
- * Busca os N chunks de contexto mais relevantes para uma organização.
- */
-export async function searchContext(
-  query: string,
-  orgId: string,
-  channelId: string = 'global',
-  topK: number = 3,
-  areaId: string | null = null
-): Promise<string[]> {
-  const chunks = loadOrgChunks(orgId);
-  if (chunks.length === 0) return [];
-
-  let queryVec: number[] | undefined;
-  try {
-    [queryVec] = await embed([query]);
-  } catch (e) {
-    console.error("[RAG] Falha ao embeddar a query:", e);
-    return [];
-  }
-  if (!queryVec) return [];
+export function rankChunksToHits(
+  queryVec: number[],
+  chunks: DocumentChunk[],
+  opts: { channelId?: string; areaId?: string | null; topK?: number } = {}
+): RagHit[] {
+  const channelId = opts.channelId || 'global';
+  const areaId = opts.areaId ?? null;
+  const topK = opts.topK && opts.topK > 0 ? opts.topK : 3;
 
   const relevantDocs = chunks.filter((doc) => {
     const chanOk = doc.channelId === 'global' || doc.channelId === channelId;
@@ -166,7 +191,61 @@ export async function searchContext(
   // ADR-160 F9 — ranqueamento pelo primitivo ÚNICO (dedup de RAG). Os filtros de
   // canal/área acima são específicos deste stack; a matemática da busca é a mesma
   // da memória Fala Tu.
-  return topKBySimilarity(queryVec!, relevantDocs, (doc) => doc.embedding, topK).map((r) => r.item.text);
+  return topKBySimilarity(queryVec, relevantDocs, (doc) => doc.embedding, topK).map((r) => ({
+    chunkId: r.item.id,
+    documentId: r.item.documentId,
+    chunkIndex: r.item.chunkIndex,
+    title: r.item.title,
+    source: r.item.title || 'knowledge_base',
+    text: r.item.text,
+    score: r.score,
+    observedAt: r.item.observedAt,
+  }));
+}
+
+/**
+ * PRD 3 F7 (§49) — busca RAG devolvendo proveniência ESTRUTURADA (`RagHit[]`):
+ * de qual documento/chunk veio, a fonte, o score e quando foi indexado — o que
+ * a `searchContext` (string[]) descartava. É o que o Context Engine consome como
+ * `EvidenceReference` (via `evidenceFromRagHit`). Isolado por org (loadOrgChunks
+ * filtra `organization_id`). Best-effort: falha ao embeddar → [].
+ */
+export async function searchContextRich(
+  query: string,
+  orgId: string,
+  channelId: string = 'global',
+  topK: number = 3,
+  areaId: string | null = null
+): Promise<RagHit[]> {
+  const chunks = loadOrgChunks(orgId);
+  if (chunks.length === 0) return [];
+
+  let queryVec: number[] | undefined;
+  try {
+    [queryVec] = await embed([query]);
+  } catch (e) {
+    console.error("[RAG] Falha ao embeddar a query:", e);
+    return [];
+  }
+  if (!queryVec) return [];
+
+  return rankChunksToHits(queryVec, chunks, { channelId, areaId, topK });
+}
+
+/**
+ * Busca os N chunks de contexto mais relevantes para uma organização. Mantém a
+ * assinatura `string[]` (retrocompat — todos os callers existentes seguem iguais);
+ * é uma projeção do `searchContextRich` que descarta a proveniência (§49 preserva
+ * a proveniência em quem QUER — o Context Engine —, sem quebrar quem só quer texto).
+ */
+export async function searchContext(
+  query: string,
+  orgId: string,
+  channelId: string = 'global',
+  topK: number = 3,
+  areaId: string | null = null
+): Promise<string[]> {
+  return (await searchContextRich(query, orgId, channelId, topK, areaId)).map((h) => h.text);
 }
 
 /**

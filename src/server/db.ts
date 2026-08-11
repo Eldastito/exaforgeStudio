@@ -8535,6 +8535,47 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_business_constraints_scope ON business_constraints(organization_id, scope_type, scope_ref);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela business_constraints', e); }
+
+  // PRD 3 F6 (§36/§37) — CONTEXT CANDIDATES: um candidato de CONTEXTO/REGRA
+  // (não de ação) capturado do Fala Tu / de um detector, que só afeta o contexto
+  // depois de CONFIRMADO por um humano — NUNCA em silêncio (§36). É o contrato de
+  // estados DETECTED→PENDING→CONFIRMED/REJECTED/EXPIRED formalizado como 1ª classe.
+  //   kind         — constraint|fact (o que o candidato viraria ao confirmar);
+  //   status       — detected|pending|confirmed|rejected|expired;
+  //   proposed_json— o payload que MUDARIA o contexto (nunca aplicado até confirmar);
+  //   scope_type/scope_ref — a que a mudança se aplica (customer|product|global|…);
+  //   source/source_ref — proveniência (falatu|signal|detector|manual + id de origem);
+  //   promoted_kind/promoted_ref_id — o que virou ao confirmar (constraint|signal + id).
+  // NÃO inventa: o promovido é EXATAMENTE o proposed (§25). Isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS context_candidates (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'detected',
+        title TEXT NOT NULL,
+        summary TEXT,
+        scope_type TEXT,
+        scope_ref TEXT,
+        proposed_json TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual',
+        source_ref TEXT,
+        confidence REAL,
+        detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT,
+        resolved_at TEXT,
+        resolved_by TEXT,
+        resolution_reason TEXT,
+        promoted_kind TEXT,
+        promoted_ref_id TEXT,
+        correlation_id TEXT,
+        created_by TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_context_candidates_org ON context_candidates(organization_id, status, kind);
+      CREATE INDEX IF NOT EXISTS idx_context_candidates_scope ON context_candidates(organization_id, scope_type, scope_ref);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela context_candidates', e); }
 };
 
 initDb();

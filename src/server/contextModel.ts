@@ -468,3 +468,62 @@ export interface ContextPacket {
   generatedAt: string;
   schemaVersion: number;
 }
+
+// ═══════════════════════ CONTEXT CANDIDATE (§36/§37) — F6 ══════════════════════
+// Um candidato de CONTEXTO/REGRA (não de ação): uma mudança PROPOSTA ao contexto
+// (um fato, uma restrição/regra) capturada do Fala Tu / de um detector, que SÓ
+// afeta o contexto depois de CONFIRMADA por um humano — NUNCA em silêncio (§36).
+// É o contrato de estados que o `ContextCandidateService` (F6) materializa.
+
+/** §37 — ciclo do candidato. CONFIRMED/REJECTED/EXPIRED são terminais. */
+export type ContextCandidateStatus = "DETECTED" | "PENDING" | "CONFIRMED" | "REJECTED" | "EXPIRED";
+
+export const CONTEXT_CANDIDATE_STATUSES: readonly ContextCandidateStatus[] = ["DETECTED", "PENDING", "CONFIRMED", "REJECTED", "EXPIRED"] as const;
+
+/** O que o candidato viraria ao confirmar (o alvo da promoção). */
+export type ContextCandidateKind = "constraint" | "fact";
+
+export const CONTEXT_CANDIDATE_KINDS: readonly ContextCandidateKind[] = ["constraint", "fact"] as const;
+
+/**
+ * §36 — transições VÁLIDAS. A confirmação é um ATO humano: nenhum estado pula pra
+ * CONFIRMED sozinho (só via `confirm`, que promove). DETECTED pode ir direto a
+ * CONFIRMED (o humano triou e confirmou num passo) — ainda é confirmação, não
+ * silêncio. Terminais não transicionam. Usado pra guardar o invariante de estado.
+ */
+export const CONTEXT_CANDIDATE_TRANSITIONS: Record<ContextCandidateStatus, ContextCandidateStatus[]> = {
+  DETECTED: ["PENDING", "CONFIRMED", "REJECTED", "EXPIRED"],
+  PENDING: ["CONFIRMED", "REJECTED", "EXPIRED"],
+  CONFIRMED: [],
+  REJECTED: [],
+  EXPIRED: [],
+};
+
+/** True se `from → to` é uma transição permitida do ciclo (§36). */
+export function canTransitionCandidate(from: ContextCandidateStatus, to: ContextCandidateStatus): boolean {
+  return (CONTEXT_CANDIDATE_TRANSITIONS[from] || []).includes(to);
+}
+
+/** §37 CONTEXT CANDIDATE — a mudança proposta + seu estado + proveniência. */
+export interface ContextCandidate {
+  id: string;
+  tenantId: string;
+  kind: ContextCandidateKind;
+  status: ContextCandidateStatus;
+  title: string;
+  summary?: string | null;
+  scopeType?: string | null;
+  scopeRef?: string | null;
+  proposed: Record<string, unknown>;   // o payload que MUDARIA o contexto (inerte até confirmar)
+  source: string;                      // falatu|signal|detector|manual
+  sourceRef?: string | null;           // id da origem (inbox item / sinal)
+  confidence?: number | null;
+  detectedAt?: string | null;
+  expiresAt?: string | null;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolutionReason?: string | null;
+  promotedKind?: string | null;        // o que virou ao confirmar (constraint|signal)
+  promotedRefId?: string | null;       // id do registro criado na promoção
+  correlationId?: string | null;
+}

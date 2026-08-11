@@ -145,8 +145,8 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | ~~**F2**~~ ✅ | Context Graph — **ENTREGUE**: `src/server/ContextGraphService.ts` (read-only, sem tabela/coluna nova). Travessia BFS sobre os FKs que já existem (department↔parent/manager · cost_center↔dept/store/owner · store↔manager/contact · inventory_location↔store/dept/responsible · employee↔user/manager/role · product↔supplier via pedido · X↔organization) → `ContextEntity[]`+`ContextRelationship[]` (contratos F1). Direção canônica filho→pai; dedup por `from\|type\|to`. Guardrails duros testados: RN-CG-1 isolamento (FK cross-tenant não resolve), RN-CG-2 não-inventa (FK pendurada não vira nó), RN-CG-3 read+derive, RN-CG-4 limitado (maxDepth/maxNodes/fanLimit + `truncated`), RN-CG-5 org enumera estrutura só como âncora. `test:context-graph` (38 checks) | COMPOR | ✅ |
 | ~~**F3**~~ ✅ | **Context Resolver** — **ENTREGUE**: `src/server/ContextResolverService.ts` + contratos I/O em `contextModel` (`ContextRequest`/`ContextPacket`/`ContextMoment`/`SkillHint`/`ContextQuality` + `resolveBudget`/`PROFILE_BUDGETS`). `resolve(orgId, request)` monta um `ContextPacket` mínimo-e-relevante por intent (§6): momento←`attention` · fatos←`business_signals`/`factFromSignal`(F1) escopados ao sujeito da âncora · grafo←`ContextGraphService`(F2) · metas←`BusinessGoalService.progress` · pistas←`ImpactPrioritizationService`(recommendedActionType, §21) · qualidade←`dataQuality` (cobertura+confiança+frescor+conflito+lacunas, §75). Âncora vem de `focus` ou da dimensão mais específica do escopo; âncora que não resolve → `anchor:null` (não inventa). Orçamento por perfil (minimal/standard/deep) + overrides + `truncated`. `ContextEngineService.resolve` delega (fachada única, AC-A01). Guardrails RN-CR-1..5. `test:context-resolver` (29 checks) | CRIAR (composição) | ✅ |
 | ~~**F4**~~ ✅ | BusinessGoal (rico) + BusinessConstraint — **ENTREGUE**: (1) `business_goals` +aditivos `title/baseline/deadline/priority/owner/status` (§14); `BusinessGoalService.set` update PARCIAL (preserva o não informado), `list` traz os ricos, `progress` só conta ATIVAS por padrão + ordena por prioridade + `attainmentFromBaselinePct` do baseline. (2) `business_constraints` (tabela nova) + `BusinessConstraintService` (§15): CRUD + `applicable(scope)` (global + escopo), kinds discount_ceiling/budget_limit/margin_floor/payment_term_max/policy/custom, isolado/auditado, READ+DERIVE (sem enforcement — gate no RBAC). (3) `ContextPacket` ganha `constraints: ContextConstraint[]` (aplicáveis à âncora) + metas ricas fluem. Rotas `/api/goals` (rico) e `/api/constraints` (CRUD, gestor). Guardrails RN-BC-1..4. `test:business-constraints` (29 checks); F1/F2/F3/business-goals/goal-aware-priority seguem verdes | ESTENDER + CRIAR | ✅ |
-| **F5** | Signal Enrichment (PRD 2 → contexto) | COMPOR | sinal + resolver + goal/constraint |
-| **F6** | Fala Tu Context Capture — `ContextCandidate` (sem alteração silenciosa de política §36) | ESTENDER | sobre `DecisionActionService`/inbox |
+| ~~**F5**~~ ✅ | Signal Enrichment — **ENTREGUE**: `src/server/SignalEnrichmentService.ts` (compose-only, sem tabela/coluna nova). `enrich(orgId, signalId)` monta o CONTEXTO de um sinal do Radar (a ponte percepção→contexto pro Maestro): âncora no SUJEITO do sinal (subject_type→entidade do grafo F2, só quando resolve — senão anchor:null) · pacote do resolver (F3) escopado ao domínio · lente de prioridade (`ImpactPrioritizationService.scoreOne` — MESMO cálculo do feed, exposto p/ 1 sinal, reúso do `scoreSignal` privado) com score/impactLevel/ação recomendada/SLA/irreversibilidade · meta AMEAÇADA (`affectedGoal` do goalGapsByDomain) · restrições aplicáveis (F4, já no pacote) · correlatos do mesmo sujeito (§39). O sinal vira `ContextFact` (F1). Rota `GET /api/signals/:id/context` (`?profile=`). Guardrails RN-SE-1..5 (isolamento→found:false p/ outro tenant · não-inventa âncora · READ+DERIVE · estende não duplica · mínimo). `test:signal-enrichment` (26 checks); F1/F2/F3/business-constraints/goal-aware-priority/impact-prioritization seguem verdes — 0 regressão | COMPOR | ✅ |
+| ~~**F6**~~ ✅ | Fala Tu Context Capture — **ENTREGUE**: `context_candidates` (tabela nova) + `ContextCandidateService.ts` + contrato `ContextCandidate` em `contextModel` (estados DETECTED→PENDING→CONFIRMED/REJECTED/EXPIRED + `canTransitionCandidate`, §37). Um candidato de CONTEXTO/REGRA (não de ação): mudança PROPOSTA ao contexto (restrição/regra ou fato) capturada do Fala Tu / detector, que só afeta o contexto depois de CONFIRMADA por humano — nunca em silêncio (§36). `confirm` é o ÚNICO ponto que promove: kind=constraint → `BusinessConstraintService.create` (F4); kind=fact → `BusinessSignalService.publish` (ADR-136) — reúso, não duplica (RN-CC-5). `detect`/`reject`/`expireStale` NUNCA promovem. Promovido = EXATAMENTE o `proposed` (não inventa §25). Rotas `/api/context-candidates` (list/get/POST detect/submit/confirm/reject, gestor). Guardrails RN-CC-1..5. `test:context-candidate` (30 checks); F1–F5 + business-constraints/impact-prioritization seguem verdes — 0 regressão | ESTENDER + CRIAR | ✅ |
 | **F7** | RAG + Memory como evidência (proveniência estruturada) | ESTENDER | `searchContext` structured |
 | **F8** | Context Quality — coverage/freshness/confidence/conflicts/gaps | COMPOR | |
 | **F9** | Security — RLS(app-level)/RBAC/redaction/isolamento/audit + guarda data-vs-instrução | REUTILIZAR + CRIAR | |
@@ -164,14 +164,28 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F5 — Signal Enrichment (PRD 2 → contexto)**
+## Fatia recomendada a seguir: **F7 — RAG + Memory como evidência**
 
-Com F1–F4 no lugar (contratos + grafo + resolver + metas ricas/constraints), o
-pacote já entrega momento/fatos/grafo/metas/constraints/qualidade. O próximo
-incremento (§38/§39) é COMPOR o **enriquecimento de sinal**: dado um sinal do
-Radar (PRD 2), montar seu contexto (resolver ancorado no sujeito do sinal + meta
-ameaçada via `goalGapsByDomain` + constraints aplicáveis) — a ponte percepção→
-contexto que o Maestro consome. Reúso puro; sem tabela nova.
+Com F1–F6 no lugar (contratos + grafo + resolver + metas ricas/constraints +
+enriquecimento de sinal + captura de candidato de contexto), o próximo incremento
+(§49) é ESTENDER `geminiRAG.searchContext` pra devolver **proveniência
+estruturada** (`{documentId, chunkIndex, source, title, score}`) em vez de
+`string[]` — RAG/memória viram `EvidenceReference` (F1) de 1ª classe, preservando
+document_id/chunk/source/timestamp que hoje a linha carrega e é descartado.
+
+### (histórico) Fatia entregue: **F6 — Fala Tu Context Capture (`ContextCandidate`)**
+
+ESTENDER sobre `DecisionActionService`/inbox do Fala Tu: `ContextCandidate`
+(DETECTED/PENDING/CONFIRMED/REJECTED/EXPIRED) — candidato de CONTEXTO/REGRA (não de
+ação), SEM alteração silenciosa de política (§36). `confirm` promove pelos serviços
+da 1ª classe (constraint/signal). Net-new mínimo (tabela + contrato de estados). ✅
+
+### (histórico) Fatia entregue: **F5 — Signal Enrichment (PRD 2 → contexto)**
+
+COMPOR o **enriquecimento de sinal**: dado um sinal do Radar (PRD 2), montar seu
+contexto (resolver ancorado no sujeito do sinal + meta ameaçada via
+`goalGapsByDomain` + constraints aplicáveis + correlatos) — a ponte percepção→
+contexto que o Maestro consome. Reúso puro; sem tabela nova. ✅
 
 ---
 

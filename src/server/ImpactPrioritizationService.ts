@@ -231,6 +231,31 @@ export class ImpactPrioritizationService {
     return { global, byDomain, generatedAt: nowIso() };
   }
 
+  /**
+   * PRD 3 F5 (§38/§39) — expõe a MESMA priorização por-sinal (score + affectedGoal
+   * + SLA/irreversibilidade + ação recomendada) para UM sinal, sem passar pelo
+   * agrupamento/limite do `prioritize`. É o mesmo cálculo (reúso do `scoreSignal`
+   * privado — zero duplicação) com o MESMO contexto de normalização do batch:
+   * `maxByUnit` e `goalGaps` derivam dos sinais ABERTOS da org, então o score de
+   * um sinal isolado é idêntico ao que ele teria no feed. Usado pelo
+   * SignalEnrichmentService (a ponte percepção→contexto pro Maestro). Isolado por
+   * org; devolve null se o sinal não existe, não é da org, ou não está aberto
+   * (só sinal vivo tem prioridade — não inventa lente pra sinal fechado).
+   */
+  static scoreOne(orgId: string, signalId: string, opts: { asOf?: string } = {}): any | null {
+    const signal = db.prepare("SELECT * FROM business_signals WHERE id = ? AND organization_id = ? AND status = 'open'").get(signalId, orgId) as any;
+    if (!signal) return null;
+    const open = db.prepare("SELECT impact_unit, impact_amount FROM business_signals WHERE organization_id = ? AND status = 'open'").all(orgId) as any[];
+    const maxByUnit: Record<string, number> = {};
+    for (const s of open) {
+      const unit = s.impact_unit || "_none";
+      const amt = Math.abs(Number(s.impact_amount) || 0);
+      if (amt > (maxByUnit[unit] || 0)) maxByUnit[unit] = amt;
+    }
+    const goalGaps = this.goalGapsByDomain(orgId, opts.asOf);
+    return this.scoreSignal(orgId, signal, maxByUnit, goalGaps);
+  }
+
   /** Score determinístico de um sinal + a saída obrigatória do §9.3. */
   /**
    * F5 (§30-31) — mapa domínio→{meta, gap} das metas ATRASADAS (paceStatus

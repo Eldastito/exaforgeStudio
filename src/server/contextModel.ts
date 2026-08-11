@@ -348,3 +348,103 @@ export function factFromSignal(s: SignalLike, now = Date.now()): ContextFact {
 export function freshnessFromSignal(s: SignalLike, now = Date.now()): ContextFreshness {
   return freshnessOf({ observedAt: pick(s.occurred_at, s.occurredAt, s.detected_at), validUntil: pick(s.expires_at, s.expiresAt) }, now);
 }
+
+// ═══════════════════════ RESOLVER I/O (§18/§19/§20/§6) — F3 ════════════════════
+// Os contratos de ENTRADA (`ContextRequest`) e SAÍDA (`ContextPacket`) do Context
+// Resolver. Puros (tipos + orçamento derivável) — a montagem (que lê DB/serviços)
+// vive no `ContextResolverService`. É a INTERFACE que o PRD 4 (SkillOS) consome
+// (§84/§127/AC-A05): o pacote é o contrato entre os dois PRDs.
+
+/** §6 — perfil de profundidade (Progressive Disclosure): quanto contexto revelar. */
+export type ContextProfile = "minimal" | "standard" | "deep";
+
+/** Tetos de orçamento por seção — o resolver nunca despeja tudo (§6/§123). */
+export interface ContextBudget {
+  maxFacts?: number;     // fatos traduzidos do ledger
+  maxEntities?: number;  // nós do grafo (F2)
+  maxSignals?: number;   // itens do "momento" (attention)
+  graphDepth?: number;   // profundidade da vizinhança do grafo
+  maxGoals?: number;     // metas incluídas
+}
+
+// Orçamento por perfil (§6). O caller pode sobrescrever campo a campo via
+// `request.budget`. `minimal` = decisão rápida; `deep` = análise L3+ (§41).
+export const PROFILE_BUDGETS: Record<ContextProfile, Required<ContextBudget>> = {
+  minimal:  { maxFacts: 5,  maxEntities: 8,  maxSignals: 5,  graphDepth: 1, maxGoals: 2 },
+  standard: { maxFacts: 15, maxEntities: 25, maxSignals: 15, graphDepth: 2, maxGoals: 4 },
+  deep:     { maxFacts: 40, maxEntities: 60, maxSignals: 40, graphDepth: 3, maxGoals: 8 },
+};
+
+/** §19 CONTEXT REQUEST — a ENTRADA do resolver: intent + escopo + orçamento. */
+export interface ContextRequest {
+  intent: string;               // o que o caller quer decidir/fazer (livre)
+  scope?: ContextScope | null;  // dimensões de escopo (âncora: CUSTOMER/BUSINESS_UNIT/…)
+  focus?: string | null;        // entidade âncora "type:id" — atalho pro grafo (sobrepõe o escopo)
+  profile?: ContextProfile;     // perfil de profundidade (default "standard")
+  budget?: ContextBudget;       // tetos explícitos (sobrescrevem o perfil)
+  domains?: string[] | null;    // domínios de interesse (filtra momento/fatos)
+}
+
+/** Resolve o orçamento efetivo: perfil + overrides do request. Puro/determinístico. */
+export function resolveBudget(request: Pick<ContextRequest, "profile" | "budget">): Required<ContextBudget> {
+  const base = PROFILE_BUDGETS[request.profile || "standard"];
+  const b = request.budget || {};
+  const pos = (v: number | undefined, d: number) => (Number.isFinite(v) && (v as number) > 0 ? Math.floor(v as number) : d);
+  return {
+    maxFacts: pos(b.maxFacts, base.maxFacts),
+    maxEntities: pos(b.maxEntities, base.maxEntities),
+    maxSignals: pos(b.maxSignals, base.maxSignals),
+    graphDepth: Number.isFinite(b.graphDepth) && (b.graphDepth as number) >= 0 ? Math.floor(b.graphDepth as number) : base.graphDepth,
+    maxGoals: pos(b.maxGoals, base.maxGoals),
+  };
+}
+
+/** §17 BUSINESS MOMENT — o "o que está acontecendo agora" (resumo do attention). */
+export interface ContextMoment {
+  total: number;
+  bySeverity: Record<string, number>;
+  byDomain: Record<string, number>;
+  top: Array<Record<string, unknown>>;  // itens trimados ao orçamento
+}
+
+/**
+ * §21 SKILL HINT — PISTA de processo derivada de `recommendedActionType`/ACTION_MAP.
+ * É só uma DICA no pacote: NÃO seleciona nem executa skill (isso é o PRD 4).
+ */
+export interface SkillHint {
+  domain: string;
+  hint: string;          // classe de ação/processo (ex.: "collection", "prepare_purchase")
+  label: string;         // rótulo humano da ação recomendada
+  reason: string;
+  priority: number;      // score de prioridade (0..1)
+  impactLevel?: string | null;
+}
+
+/** §75 CONTEXT QUALITY — a confiança no próprio contexto (cobertura+conf+frescor+conflito). */
+export interface ContextQuality {
+  coveragePct: number | null;                         // % de dados informados (dataQuality)
+  confidence: { score: number; band: ConfidenceBand }; // média dos fatos (ou cobertura, se sem fato)
+  freshness: { fresh: number; stale: number; unknown: number };
+  conflicts: number;                                  // nº de campos com fontes divergentes (§31)
+  gaps: string[];                                     // dados ausentes / domínios available:false
+}
+
+/** §20 CONTEXT PACKET — a SAÍDA: mínimo e relevante ao intent. Contrato pro PRD 4. */
+export interface ContextPacket {
+  tenantId: string;
+  intent: string;
+  scope: ContextScope;
+  anchor: string | null;              // entidade âncora resolvida (ou null → org-wide)
+  moment: ContextMoment;
+  facts: ContextFact[];
+  entities: ContextEntity[];
+  relationships: ContextRelationship[];
+  goals: Array<Record<string, unknown>>;
+  skillHints: SkillHint[];
+  quality: ContextQuality;
+  sources: string[];
+  truncated: boolean;                 // algum orçamento cortou (nunca em silêncio §31/§123)
+  budget: Required<ContextBudget>;
+  generatedAt: string;
+  schemaVersion: number;
+}

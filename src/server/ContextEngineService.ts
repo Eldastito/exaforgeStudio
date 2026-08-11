@@ -3,7 +3,8 @@ import { BusinessContextService } from "./BusinessContextService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
 import { ContextResolverService } from "./ContextResolverService.js";
-import type { ContextRequest, ContextPacket } from "./contextModel.js";
+import { ContextQualityService } from "./ContextQualityService.js";
+import type { ContextRequest, ContextPacket, ContextQualityReport, RagHitLike } from "./contextModel.js";
 
 /**
  * Context Engine (ADR-160 D3 / Onda A F3) — CONTRATO ÚNICO de contexto do negócio.
@@ -130,6 +131,16 @@ export class ContextEngineService {
    */
   static resolve(orgId: string, request: ContextRequest): ContextPacket {
     return ContextResolverService.resolve(orgId, request);
+  }
+
+  /**
+   * PRD 3 F8 (§75/§34) — MODO QUALIDADE: o relatório rico da qualidade do contexto
+   * (cobertura por-fonte + confiança + frescor + conflitos detalhados + proveniência
+   * agregada), delegando ao `ContextQualityService`. Mantém o Engine como fachada
+   * única (AC-A01). `ragHits` (F7) opcional funde a evidência de RAG na proveniência.
+   */
+  static quality(orgId: string, request: ContextRequest, opts: { ragHits?: RagHitLike[] } = {}): Promise<ContextQualityReport> {
+    return ContextQualityService.assess(orgId, request, opts);
   }
 
   static render(orgId: string): string {

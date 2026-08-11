@@ -8472,6 +8472,12 @@ const initDb = () => {
   // etc.) são PRDs próprios (§50). Opt-in; sem tabela nova (CA1) — proveniência
   // no evidence_json do sinal. Aditivo; default OFF.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_external_signals_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // PRD 2 F12.2 (§84, CA17) — teto DIÁRIO de investigações profundas (LLM) POR
+  // DETECTOR: hoje só há teto por-org + budget de plataforma; um detector
+  // barulhento (storm) podia consumir toda a verba de IA sozinho. Override
+  // opcional por org (>0 vale; 0/NULL → default embutido). Aditivo; default 0.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_detector_daily_budget INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

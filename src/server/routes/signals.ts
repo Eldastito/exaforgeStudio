@@ -7,6 +7,7 @@ import { SignalCalibrationService } from "../SignalCalibrationService.js";
 import { HumanSignalService } from "../HumanSignalService.js";
 import { ExternalSignalService } from "../ExternalSignalService.js";
 import { RadarHealthService } from "../RadarHealthService.js";
+import { DetectorBudgetService } from "../DetectorBudgetService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { logAuthEvent } from "../auditLog.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
@@ -65,6 +66,15 @@ router.get("/health", requireRole("owner", "admin"), (req: AuthRequest, res): an
   const staleHours = req.query?.staleHours ? Number(req.query.staleHours) : undefined;
   const calibrationDays = req.query?.calibrationDays !== undefined ? Number(req.query.calibrationDays) : undefined;
   res.json(RadarHealthService.overview(orgId, { windowHours, staleHours, calibrationDays }));
+});
+
+// PRD 2 F12.2 (§84, CA17) — GET /api/signals/detector-budget — teto diário de
+// investigação profunda (LLM) por detector + consumo do dia. Observabilidade
+// admin do custo de IA por detector (evita que um storm drene a verba da org).
+router.get("/detector-budget", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(DetectorBudgetService.overview(orgId));
 });
 
 // PRD 2 F6.1 — GET /api/signals/:id/investigate — causas-candidatas determinísticas

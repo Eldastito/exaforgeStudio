@@ -59,7 +59,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | ~~SLA + reversibility no score~~ | ✅ **F7 ENTREGUE** — `slaPressure` (pressão de prazo via `expires_at`, horizonte 72h) + `irreversibility` (hint `evidence.reversibility`); boosts multiplicativos default-0 (zero regressão); detector declara, scorer honra. `test:impact-sla-reversibility` (21 checks) | ~~F7~~ ✅ |
 | ~~Expansão do TRIGGER_MAP~~ | ✅ **F8 ENTREGUE** — +mapa explícito (stalled_opportunities→sales_recovery) + mecanismo recommendedProcessType com allowlist de processos maduros. `test:signal-routing-expansion` (9 checks) | ~~F8~~ ✅ |
 | ~~`recommendedProcessType` no sinal~~ | ✅ **F8** — o detector declara (F4.2) e o router honra se o processo for maduro (allowlist) | ✅ |
-| Budget por-detector / max-investigations-dia | Só há ceiling por-org + budget de plataforma (§84) | F12 |
+| ~~Budget por-detector / max-investigations-dia~~ | ✅ **F12.2 ENTREGUE** — `DetectorBudgetService` (teto diário de investigação profunda LLM por detector, via marcador no `ai_usage_log` — sem tabela nova; override por org; gate em `investigateDeep` → `budget_exhausted`). `GET /api/signals/detector-budget`. `test:detector-budget` (13) | ~~F12~~ ✅ |
 
 ### 🆕 CRIAR (justificado — capacidade genuinamente ausente)
 
@@ -102,7 +102,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA14 correlationId no ciclo | ✅ **F2.3 fechou o furo em process_instances** | não regredir |
 | CA15 TTL/dedupe/cooldown anti-storm | 🟡 dedupe sim; **TTL agora vale (F2.2 ✅)**; cooldown só PlanFit | F4 (cooldown genérico) |
 | CA16 detector isolado não derruba | ✅ best-effort em cada pass + **F12.1 observabilidade** (detector que parou/storm fica visível) | ✅ |
-| CA17 custo de IA mensurado | ✅ `ai_usage_log` + budgets | F12 (per-detector) |
+| CA17 custo de IA mensurado | ✅ `ai_usage_log` + budgets + **F12.2 teto por-detector** (storm não drena a verba) | ✅ |
 | CA18 tenant isolation | ✅ toda query filtra org | testar em cada fatia |
 | CA19 false-positive metrics | ✅ **F11** (por detector, derivado por query) | ✅ |
 | CA20 2 ciclos reais fecham | 🟡 cobrança/recovery têm runtime | F8 beachhead (§71) |
@@ -122,7 +122,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | ~~**F9**~~ ✅ | Human signals (Fala Tu → radar) — **FECHADA**: `HumanSignalService.observe` (opt-in `radar_human_signals_enabled`) normaliza a observação humana num `business_signal` (`origin:human`, `basis=estimate\|hypothesis`, **nunca fact §13**) com **acúmulo de evidência** (mesmo assunto sobe confiança 0.30→0.85 e severidade info→attention→risk, derivado de `observations.length`, RN-004); atômico (tx); `POST /api/signals/observe`; sem tabela nova (CA1) | ESTENDER | ✅ |
 | ~~**F10**~~ ✅ | External signal contract (molde) — **FECHADA**: `ExternalSignalService.ingest`, proveniência + dedupe por origem, fact só se verificável (§13), `POST /api/signals/ingest-external`, `test:external-signals` (22). CA2 fica **100%** (H/D/E) | CRIAR | ✅ |
 | **F11** | Feedback & calibration | CRIAR | dismiss reason + false-positive rate |
-| **F12** | Production readiness — **EM ANDAMENTO**: ✅ F12.1 radar health (`RadarHealthService`, `test:radar-health` 12) · falta F12.2 budget por-detector (§84) · F12.3 runbooks | — | perf/observability/budgets/runbooks |
+| **F12** | Production readiness — **EM ANDAMENTO**: ✅ F12.1 radar health (`RadarHealthService`, `test:radar-health` 12) · ✅ F12.2 budget por-detector (`DetectorBudgetService`, `test:detector-budget` 13) · falta F12.3 runbooks (doc) | — | perf/observability/budgets/runbooks |
 
 ## Fatia recomendada a seguir: **F2.1 — basis+hypothesis + subject_id**
 

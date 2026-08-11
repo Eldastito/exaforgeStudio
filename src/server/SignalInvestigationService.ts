@@ -15,6 +15,7 @@
 import db from "./db.js";
 import { isAIConfigured, chat } from "./llm.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
+import { DetectorBudgetService } from "./DetectorBudgetService.js";
 
 interface CauseTemplate {
   cause: string;
@@ -106,19 +107,32 @@ export class SignalInvestigationService {
     const base = this.investigate(orgId, signalId, { now: opts.now });
     if (!base.found) return { ...base, synthesis: null, aiGate: "not_found", impactLevel: null };
 
-    const sig = db.prepare(`SELECT severity, impact_amount, impact_unit FROM business_signals WHERE id = ? AND organization_id = ?`).get(signalId, orgId) as any;
+    const sig = db.prepare(`SELECT severity, impact_amount, impact_unit, source_service FROM business_signals WHERE id = ? AND organization_id = ?`).get(signalId, orgId) as any;
     const lvl = ImpactPrioritizationService.levelFor({ severity: sig?.severity, impactAmount: sig?.impact_amount, impactUnit: sig?.impact_unit });
     const deepWarranted = opts.force || !!lvl.analysis?.deepAnalysis; // §83 — só L3+
 
     if (!base.candidateCauses.length) return { ...base, synthesis: null, aiGate: "no_causes", impactLevel: lvl.level };
     if (!deepWarranted) return { ...base, synthesis: null, aiGate: "below_threshold", impactLevel: lvl.level };
 
+    // F12.2 (§84, CA17) — teto diário de investigação por DETECTOR. Antes de
+    // gastar IA, checa o saldo do detector do sinal; esgotado → devolve só o
+    // determinístico (um detector barulhento não drena a verba da org). O teto
+    // NÃO é gate de segurança: em falha de contabilidade o check é fail-safe
+    // (permite), o gate real de execução segue no RBAC (§35).
+    const detector = sig?.source_service || "?";
+    const budget = DetectorBudgetService.check(orgId, detector, opts.now || Date.now());
+    if (!budget.allowed) return { ...base, synthesis: null, aiUsed: false, aiGate: "budget_exhausted", impactLevel: lvl.level, detectorBudget: budget };
+
     const payload = { signalId, headline: base.headline, candidateCauses: base.candidateCauses, impactLevel: lvl.level };
     const synth = opts.synthesize || SignalInvestigationService.defaultSynthesize;
     let synthesis: string | null = null;
     try { synthesis = await synth(payload); } catch { synthesis = null; }
 
-    return { ...base, synthesis: synthesis || null, aiUsed: !!synthesis, aiGate: synthesis ? "synthesized" : "ai_unavailable", impactLevel: lvl.level };
+    // Só consome o budget se a IA de fato rodou (síntese produzida) — falha/
+    // indisponibilidade de IA não gasta a cota do detector.
+    if (synthesis) DetectorBudgetService.consume(orgId, detector);
+
+    return { ...base, synthesis: synthesis || null, aiUsed: !!synthesis, aiGate: synthesis ? "synthesized" : "ai_unavailable", impactLevel: lvl.level, detectorBudget: DetectorBudgetService.check(orgId, detector, opts.now || Date.now()) };
   }
 
   // Sintetizador padrão (§83): só chama o LLM se a IA está configurada; do

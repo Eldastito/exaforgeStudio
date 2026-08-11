@@ -1,7 +1,7 @@
 import db from "./db.js";
 import { BusinessContextService } from "./BusinessContextService.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
-import { ContextProjectionService } from "./ContextProjectionService.js";
+import { ContextProjectionService, ContextProjectionManifest } from "./ContextProjectionService.js";
 import { ContextResolverService } from "./ContextResolverService.js";
 import { ContextQualityService } from "./ContextQualityService.js";
 import type { ContextRequest, ContextPacket, ContextQualityReport, RagHitLike } from "./contextModel.js";
@@ -141,6 +141,17 @@ export class ContextEngineService {
    */
   static quality(orgId: string, request: ContextRequest, opts: { ragHits?: RagHitLike[] } = {}): Promise<ContextQualityReport> {
     return ContextQualityService.assess(orgId, request, opts);
+  }
+
+  /**
+   * PRD 3 F9 (§68/§70) — MODO SEGURO: resolve o pacote e o PROJETA pro papel + o
+   * propósito do usuário ANTES de entregar (redige campos sensíveis, fail-closed).
+   * É a porta única pra montar contexto entregável a uma superfície/modelo — o
+   * `resolve` cru fica pra usos internos. Retorna o pacote projetado + manifesto.
+   */
+  static resolveFor(orgId: string, user: any, request: ContextRequest, opts: { purpose?: string } = {}): { packet: ContextPacket; manifest: ContextProjectionManifest } {
+    const packet = ContextResolverService.resolve(orgId, request);
+    return ContextProjectionService.projectPacket(orgId, user, packet, opts);
   }
 
   static render(orgId: string): string {

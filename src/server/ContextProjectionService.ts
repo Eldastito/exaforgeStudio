@@ -19,6 +19,7 @@
  *  - **Determinístico** (zero IA): roda em CI, é auditável e explicável (§49).
  */
 import { PermissionService } from "./PermissionService.js";
+import type { ContextPacket } from "./contextModel.js";
 
 // Domínio do snapshot → módulo RBAC. Fail-closed: o que não está aqui é descartado.
 export const DOMAIN_MODULE: Record<string, string> = {
@@ -34,9 +35,31 @@ export const DOMAIN_MODULE: Record<string, string> = {
 // Conservador e explícito — não adivinha por valor, só por rótulo do campo.
 const SENSITIVE_FIELD_RE = /(^|_)(custo|custos|margem|margens|lucro|lucros|salario|salarios|remunera\w*|comissao|comissoes|cpf)(_|$)/i;
 
+// PRD 3 F9 (§70) — PROPÓSITO → categoria SEMPRE redigida, mesmo pro dono `full`.
+// Redação POR-PROPÓSITO restringe ALÉM do papel: um contexto montado p/ uma
+// superfície voltada ao cliente nunca leva custo/margem/PII/fornecedor, ainda que
+// quem monte seja o dono. É o "por propósito/skill/execução" do §70.
+export const PURPOSE_FORBIDDEN: Record<string, RegExp> = {
+  customer_facing: /(^|_)(custo|custos|margem|margens|lucro|lucros|salario|salarios|remunera\w*|comissao|comissoes|cpf|fornecedor|fornecedores|preco_de_custo)(_|$)/i,
+};
+
+// Restrições cujo VALOR revela informação sensível (margem/custo/salário/comissão).
+// Detecta pelo vocabulário do kind (inglês: margin_floor…) OU do nome (pt) — não é
+// o mesmo casamento de campo snake_case; por isso é uma regex própria.
+const SENSITIVE_CONSTRAINT_RE = /(margin|margem|cost|custo|salary|salario|commission|comiss|profit|lucro)/i;
+
 export interface ContextProjectionManifest {
   droppedDomains: string[];
   redactedPaths: string[];
+}
+
+/** Combina a regra de PAPEL (sensível quando sem `full`) com a de PROPÓSITO (§70). */
+function activeRedactionRe(roleRedacts: boolean, purposeRe: RegExp | undefined): RegExp | null {
+  const parts: string[] = [];
+  if (roleRedacts) parts.push(SENSITIVE_FIELD_RE.source);
+  if (purposeRe) parts.push(purposeRe.source);
+  if (parts.length === 0) return null; // dono full + sem propósito restritivo → cru
+  return new RegExp(parts.join("|"), "i");
 }
 
 export class ContextProjectionService {
@@ -46,17 +69,67 @@ export class ContextProjectionService {
    * os paths redigidos pro manifesto (explainability + audit).
    */
   private static redact(node: any, pathPrefix: string, out: string[]): any {
-    if (Array.isArray(node)) return node.map((v, i) => this.redact(v, `${pathPrefix}[${i}]`, out));
+    return this.redactWith(node, pathPrefix, SENSITIVE_FIELD_RE, out);
+  }
+
+  /**
+   * Redação recursiva PARAMETRIZADA por qual RegExp marca "sensível" (F9 — permite
+   * combinar papel + propósito). Mesma semântica wholesale (a subtree de uma chave
+   * sensível some inteira) + registro de path pro manifesto. Não muta o input.
+   */
+  private static redactWith(node: any, pathPrefix: string, re: RegExp, out: string[]): any {
+    if (Array.isArray(node)) return node.map((v, i) => this.redactWith(v, `${pathPrefix}[${i}]`, re, out));
     if (node && typeof node === "object") {
       const res: any = {};
       for (const [k, v] of Object.entries(node)) {
         const p = pathPrefix ? `${pathPrefix}.${k}` : k;
-        if (SENSITIVE_FIELD_RE.test(k)) { res[k] = "[redigido]"; out.push(p); }
-        else res[k] = this.redact(v, p, out);
+        if (re.test(k)) { res[k] = "[redigido]"; out.push(p); }
+        else res[k] = this.redactWith(v, p, re, out);
       }
       return res;
     }
     return node;
+  }
+
+  /**
+   * PRD 3 F9 (§68/§70) — projeta um `ContextPacket` (F3) pro que ESTE usuário +
+   * ESTE propósito podem ver, ANTES de qualquer entrega a modelo. Redige (não muta
+   * o input):
+   *  - o OBJETO de cada fato (subtree sensível some); fato cujo PREDICATE é sensível
+   *    tem o objeto redigido inteiro;
+   *  - os ATRIBUTOS de cada entidade;
+   *  - o VALOR de restrições cujo kind/name é sensível (ex.: margin_floor).
+   * Regra de PAPEL: sem `full` em `financeiro` → redige campos sensíveis. Regra de
+   * PROPÓSITO (§70): `opts.purpose` redige categorias sempre (mesmo pro dono). Dono
+   * full + sem propósito restritivo → pacote CRU (0 regressão). Retorna o pacote
+   * projetado + manifesto (o que foi redigido — explainability/audit).
+   */
+  static projectPacket(orgId: string, user: any, packet: ContextPacket, opts: { purpose?: string } = {}): { packet: ContextPacket; manifest: ContextProjectionManifest } {
+    const redactedPaths: string[] = [];
+    const droppedDomains: string[] = [];
+    if (!packet || typeof packet !== "object") return { packet, manifest: { droppedDomains, redactedPaths } };
+
+    const roleRedacts = PermissionService.levelFor(orgId, user, "financeiro") !== "full";
+    const purposeRe = opts.purpose ? PURPOSE_FORBIDDEN[opts.purpose] : undefined;
+    const re = activeRedactionRe(roleRedacts, purposeRe);
+    if (!re) return { packet, manifest: { droppedDomains, redactedPaths } }; // cru
+
+    const facts = (packet.facts || []).map((f, i) => {
+      const path = `facts[${i}]`;
+      if (re.test(String(f.predicate || ""))) { redactedPaths.push(`${path}.object`); return { ...f, object: "[redigido]" }; }
+      return { ...f, object: this.redactWith(f.object, `${path}.object`, re, redactedPaths) };
+    });
+    const entities = (packet.entities || []).map((e, i) => ({
+      ...e, attributes: this.redactWith(e.attributes, `entities[${i}].attributes`, re, redactedPaths),
+    }));
+    const constraints = (packet.constraints || []).map((c, i) => {
+      if (SENSITIVE_CONSTRAINT_RE.test(String(c.kind || "")) || SENSITIVE_CONSTRAINT_RE.test(String(c.name || ""))) {
+        redactedPaths.push(`constraints[${i}].value`);
+        return { ...c, value: c.value != null ? null : c.value, text: c.text != null ? "[redigido]" : c.text };
+      }
+      return c;
+    });
+    return { packet: { ...packet, facts, entities, constraints }, manifest: { droppedDomains, redactedPaths } };
   }
 
   /**

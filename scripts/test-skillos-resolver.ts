@@ -108,6 +108,19 @@ async function main() {
   const rDis = RES.resolve(org, user, { capabilityId: "empty_cap" });
   check("5.3 capability disabled → capability_unavailable", !rDis.resolved && rDis.unresolvedReason === "capability_unavailable");
 
+  // ═══════════════ 6. filtro de permissão RBAC (requirePermissions, reusa PermissionService) ═══════════════
+  const { PermissionService } = await import("../src/server/PermissionService.js");
+  const org2 = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'X', 'active')`).run(randomUUID(), org2);
+  PermissionService.seedSystemProfiles(org2);
+  const vendPid = (db.prepare(`SELECT id FROM role_profiles WHERE organization_id = ? AND system_key = ?`).get(org2, "vendedor") as any)?.id;
+  const vendedor = { userId: randomUUID(), role_profile_id: vendPid, role: "vendedor" };
+  REG.registerCapability({ capabilityId: "perm_cap", version: 1, name: "Perm", category: "x", riskLevel: "low", status: "active" } as any);
+  REG.registerSkill(mkSkill({ skillId: "needs_finance", capabilityId: "perm_cap", requiredPermissions: ["financeiro"] }) as any);
+  check("6.1 sem requirePermissions NÃO filtra por RBAC (vendedor resolve)", RES.resolve(org2, vendedor, { capabilityId: "perm_cap" }).resolved === true);
+  const rPerm = RES.resolve(org2, vendedor, { capabilityId: "perm_cap", requirePermissions: true });
+  check("6.2 requirePermissions filtra skill cuja permissão o usuário não tem", !rPerm.resolved && rPerm.unresolvedReason === "no_skill_available");
+
   console.log("\n=== TEST: SkillOS Resolver (PRD 4 F3) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

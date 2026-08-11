@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalCorrelationService } from "../SignalCorrelationService.js";
 import { SignalInvestigationService } from "../SignalInvestigationService.js";
+import { SignalEnrichmentService } from "../SignalEnrichmentService.js";
 import { SignalCalibrationService } from "../SignalCalibrationService.js";
 import { HumanSignalService } from "../HumanSignalService.js";
 import { ExternalSignalService } from "../ExternalSignalService.js";
@@ -88,6 +89,21 @@ router.get("/:id/investigate", async (req: AuthRequest, res): Promise<any> => {
     return res.json(await SignalInvestigationService.investigateDeep(orgId, req.params.id));
   }
   res.json(SignalInvestigationService.investigate(orgId, req.params.id));
+});
+
+// PRD 3 F5 (§38/§39) — GET /api/signals/:id/context — SIGNAL CONTEXT ENRICHMENT:
+// o contexto DAQUELE sinal (resolver ancorado no sujeito + meta ameaçada + ação
+// recomendada + restrições aplicáveis + correlatos do mesmo sujeito). A ponte
+// percepção→contexto pro Maestro (PRD 4). READ+DERIVE — não executa nada.
+// ?profile=minimal|standard|deep controla a profundidade (default standard).
+router.get("/:id/context", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const p = req.query?.profile;
+  const profile = p === "minimal" || p === "deep" ? p : undefined;
+  const out = SignalEnrichmentService.enrich(orgId, req.params.id, { profile });
+  if (!out.found) return res.status(404).json({ error: "Sinal não encontrado." });
+  res.json(out);
 });
 
 // PRD 2 F9 (§45-46, CA2) — POST /api/signals/observe — a origem HUMANA da

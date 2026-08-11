@@ -4,9 +4,9 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 5 — Model Router + Provider Health (em revisão/PR).
-- **Última fatia:** F5 entregue (router + circuit breaker). F4 mergeada (#961).
-- **Baseline:** `main` @ `b04f161` (pós F4).
+- **Fase:** 6 — Grounding + Confidence (em revisão/PR).
+- **Última fatia:** F6 entregue (gate UNSUPPORTED_CLAIM + Confidence Engine). F5 mergeada (#962).
+- **Baseline:** `main` @ `1d987e7` (pós F5).
 
 ## Entregue nesta sessão
 
@@ -15,7 +15,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 - **Fase 2 (mergeada #959):** tabelas `skillos_capabilities`/`skillos_skills` + `SkillOsRegistryService` (registro/lookup/ciclo de vida/compat vertical+entitlement). Rota read-only. `test:skillos-registry` (21).
 - **Fase 3 (mergeada #960):** `SkillOsResolverService.resolve` — escolha determinística de Skill (sem IA, §11) + `rankSkills` puro + fallbackChain + sem-silêncio. `test:skillos-resolver` (19).
 - **Fase 4 (mergeada #961):** AI Run estende `ai_usage_log` (D4) + `AiReliabilityKernel.run` (choke-point: validação+taxonomia+retry por política+AI Run). `test:skillos-reliability` (19).
-- **Fase 5:** tabela de plataforma `skillos_model_profiles` + `SkillOsModelRouterService` (registra catálogo, `route(requirements)` = casa `modelMeets` + saúde + custo/latência, determinístico, barra `open`, sem-silêncio) + `SkillOsProviderHealthService` (circuit breaker DERIVADO por query de `ai_usage_log.run_status`, RN-004 — healthy/watch/degraded/open/half_open; amostra insuficiente→healthy; open+última OK→half_open) + `PRICES` do `llm.ts` estendido com modelos Claude (RISK-3, aditivo). Primitivas puras (`rankModelCandidates`/`ModelRoute`/`ProviderHealthState`/`AIProviderContract`). Rotas `GET /api/skillos/models`, `POST /api/skillos/route`, `GET /api/skillos/provider-health/:provider`. `test:skillos-model-router` (19). Guardrails RN-MR-1..5 + RN-HLT-1..3. Catálogo inerte → 0 mudança de comportamento.
+- **Fase 5 (mergeada #962):** `skillos_model_profiles` + `SkillOsModelRouterService.route` + `SkillOsProviderHealthService` (circuit breaker derivado) + PRICES com Claude. `test:skillos-model-router` (19).
+- **Fase 6:** GROUNDING + CONFIDENCE (COMPÕE sobre PRD 3). Primitivas puras em `skillosModel`: `checkGrounding` (gate UNSUPPORTED_CLAIM §19 — fato/estimativa tem de citar `EvidenceReference` que EXISTE; determinístico, sem NLP) + `assessConfidence` (§21 — reusa `confidenceBand`; grounding unsupported derruba a confiança → ação fallback). Serviços `SkillOsGroundingService` (check + evidenceFromPacket/evidenceFromRagHits, reusa evidenceFromRagHit) e `SkillOsConfidenceService` (assess + `fromSignal` compondo `ImpactPrioritizationService.scoreOne`). Kernel (F4) ganha `spec.ground` opt-in → grava `grounding_status` REAL na AI Run; `blockOnUnsupported` → AI-FAIL-3 (fallback). Sem `ground` → skipped (F4 inalterado). `test:skillos-grounding` (21). Guardrails RN-GND-1..3 + RN-CONF-1..4. 0 mudança de comportamento.
 
 ## Achados-chave (resumo)
 
@@ -30,8 +31,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aprovada a F5 → **Fase 6 (Grounding + Confidence)**: integra `ContextPacket`/`EvidenceReference` (PRD 3) — o *gate* `UNSUPPORTED_CLAIM` sobre a evidência (COMPOR, primitiva existe) + `groundingStatus` real no AI Run (hoje 'skipped') + Confidence Engine COMPONDO sobre `ImpactPrioritizationService.scoreSignal`/`confidenceBand`. Começa com Skills estruturadas.
+- Aprovada a F6 → **Fase 7 (Planner)**: intent/goal → capabilities → ExecutionPlan. REUTILIZAR `ProcessRuntimeService`/`PlaybookEngine` (planos autorais) + CRIAR a camada de SÍNTESE goal→plano. Consome Context (PRD 3) + Resolver (F3). Não executa — planeja.
 
 ## Testes / CI
 
-- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19) + `-model-router` (19), determinísticos. AI-usage ledger(28)/dashboard(40)/quota(33) + billing + context + tenant-isolation verdes — PRICES/`ai_usage_log` aditivos, 0 regressão.
+- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19) + `-model-router` (19) + `-grounding` (21), determinísticos. AI-usage + billing + context + tenant-isolation verdes — 0 regressão.

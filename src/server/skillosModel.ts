@@ -1,4 +1,5 @@
-import type { EvidenceReference } from "./contextModel.js";
+import type { EvidenceReference, ConfidenceBand } from "./contextModel.js";
+import { confidenceBand, clampConfidence } from "./contextModel.js";
 
 /**
  * skillosModel — PRD 4 F1 (Core Contracts): os CONTRATOS puros do ZapFlow SkillOS.
@@ -421,4 +422,78 @@ export interface AIProviderContract {
   estimateUsage?(inputTokens: number, outputTokens: number, model: string): { costUsd?: number } | null;
   health?(): ProviderHealthState;
   invoke?(args: unknown): Promise<unknown>;
+}
+
+// ═══════════════════════════ §19 Grounding Validator ════════════════════════════
+
+/** §16 — status de grounding de uma execução (também é campo do AI Run, F4). */
+export type GroundingStatus = "grounded" | "unsupported" | "skipped";
+
+/** Uma afirmação da resposta + o tipo + a(s) evidência(s) que a sustentam. */
+export interface GroundedClaim {
+  statement: string;
+  responseType: ResponseType;             // fact/estimate/hypothesis/recommendation (§20)
+  evidence?: EvidenceReference[];         // referências que sustentam a afirmação
+}
+
+export interface GroundingResult {
+  status: GroundingStatus;
+  checkedClaims: number;                  // afirmações que EXIGIAM evidência (fact/estimate)
+  groundedClaims: number;
+  unsupported: string[];                  // statements sem suporte → UNSUPPORTED_CLAIM
+}
+
+/** §19 — só FATO e ESTIMATIVA precisam citar evidência; hipótese/recomendação são interpretativas. */
+export const CLAIM_TYPES_REQUIRING_EVIDENCE: ResponseType[] = ["fact", "estimate"];
+
+/** Chave canônica de uma evidência (pra casar citação × disponível). */
+export function evidenceKey(e: EvidenceReference): string {
+  return `${e.sourceType}|${e.sourceId ?? ""}|${e.service ?? ""}|${e.field ?? ""}`;
+}
+
+/**
+ * §19 — GATE de grounding, DETERMINÍSTICO (sem NLP): toda afirmação factual/estimada
+ * tem de CITAR uma evidência que EXISTA no contexto disponível. Uma citação a uma
+ * evidência ausente (LLM inventando fonte) ou sem citação alguma → UNSUPPORTED_CLAIM.
+ * Casa por chave completa OU por (sourceType,sourceId) — a evidência do pacote pode
+ * ter `field` diferente da citada. Hipótese/recomendação são isentas (§20).
+ */
+export function checkGrounding(claims: GroundedClaim[], available: EvidenceReference[]): GroundingResult {
+  const availKeys = new Set((available || []).map(evidenceKey));
+  const availSids = new Set((available || []).map((e) => `${e.sourceType}|${e.sourceId ?? ""}`));
+  let checked = 0, grounded = 0;
+  const unsupported: string[] = [];
+  for (const c of claims || []) {
+    if (!CLAIM_TYPES_REQUIRING_EVIDENCE.includes(c.responseType)) continue;
+    checked++;
+    const refs = c.evidence || [];
+    const ok = refs.some((r) => availKeys.has(evidenceKey(r)) || availSids.has(`${r.sourceType}|${r.sourceId ?? ""}`));
+    if (ok) grounded++; else unsupported.push(c.statement);
+  }
+  const status: GroundingStatus = checked === 0 ? "skipped" : (unsupported.length ? "unsupported" : "grounded");
+  return { status, checkedClaims: checked, groundedClaims: grounded, unsupported };
+}
+
+// ═══════════════════════════ §21 Confidence Engine ══════════════════════════════
+
+export const DEFAULT_CONFIDENCE_THRESHOLDS: ConfidenceThresholds = { low: 0.4, high: 0.75 };
+
+export interface ConfidenceAssessment {
+  score: number;                 // 0..1
+  band: ConfidenceBand;
+  action: ConfidenceAction;      // continue | seek_context | fallback (§21)
+  groundingStatus?: GroundingStatus;
+}
+
+/**
+ * §21 — avalia a confiança e DERIVA a ação (a confiança altera comportamento). O
+ * grounding ENTRA no cálculo: `unsupported` derruba a confiança abaixo do piso →
+ * ação `fallback` (uma afirmação sem suporte não segue como se fosse verdade, P6).
+ * Determinístico. Reusa `confidenceBand` (§27) — não cria banda incompatível.
+ */
+export function assessConfidence(score: number, opts: { thresholds?: ConfidenceThresholds; grounding?: GroundingStatus } = {}): ConfidenceAssessment {
+  const t = opts.thresholds || DEFAULT_CONFIDENCE_THRESHOLDS;
+  let s = clampConfidence(score);
+  if (opts.grounding === "unsupported") s = Math.min(s, Math.max(0, t.low - 0.01)); // força abaixo do piso
+  return { score: s, band: confidenceBand(s), action: confidenceAction(s, t), groundingStatus: opts.grounding };
 }

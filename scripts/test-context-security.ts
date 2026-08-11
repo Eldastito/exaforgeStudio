@@ -89,19 +89,19 @@ async function main() {
   };
 
   const rawOwner = CP.projectPacket(orgA, owner, pkt);
-  check("2.1 dono full + sem propósito → pacote CRU", rawOwner.manifest.redactedPaths.length === 0 && rawOwner.packet.facts[0].object.custo_medio === 41.2);
+  check("2.1 dono full + sem propósito → pacote CRU", rawOwner.manifest.redactedPaths.length === 0 && (rawOwner.packet.facts[0].object as any).custo_medio === 41.2);
 
   const projVend = CP.projectPacket(orgA, vendedor, pkt);
-  check("2.2 vendedor: campo sensível do fato REDIGIDO", projVend.packet.facts[0].object.custo_medio === "[redigido]" && projVend.packet.facts[0].object.margem === "[redigido]");
-  check("2.3 vendedor: agregado não-sensível preservado", projVend.packet.facts[0].object.qty === 10);
+  check("2.2 vendedor: campo sensível do fato REDIGIDO", (projVend.packet.facts[0].object as any).custo_medio === "[redigido]" && (projVend.packet.facts[0].object as any).margem === "[redigido]");
+  check("2.3 vendedor: agregado não-sensível preservado", (projVend.packet.facts[0].object as any).qty === 10);
   check("2.4 vendedor: fato com PREDICATE sensível → objeto redigido inteiro", projVend.packet.facts[1].object === "[redigido]");
-  check("2.5 vendedor: atributo sensível de entidade redigido", projVend.packet.entities[0].attributes.custo === "[redigido]" && projVend.packet.entities[0].attributes.preco === 89);
+  check("2.5 vendedor: atributo sensível de entidade redigido", (projVend.packet.entities[0].attributes as any).custo === "[redigido]" && (projVend.packet.entities[0].attributes as any).preco === 89);
   check("2.6 vendedor: restrição sensível (margin_floor) com valor redigido", projVend.packet.constraints[0].value === null);
   check("2.7 manifesto registra paths redigidos", projVend.manifest.redactedPaths.length >= 3);
 
   // §70 — propósito redige MESMO pro dono full.
   const projPurpose = CP.projectPacket(orgA, owner, pkt, { purpose: "customer_facing" });
-  check("2.8 propósito customer_facing redige mesmo pro dono", projPurpose.packet.facts[0].object.custo_medio === "[redigido]" && projPurpose.packet.constraints[0].value === null);
+  check("2.8 propósito customer_facing redige mesmo pro dono", (projPurpose.packet.facts[0].object as any).custo_medio === "[redigido]" && projPurpose.packet.constraints[0].value === null);
   check("2.9 não muta o input original", pkt.facts[0].object.custo_medio === 41.2);
 
   // ═══════════════ 3. ISOLAMENTO cross-tenant DELIBERADO (§93) ═══════════════
@@ -122,7 +122,7 @@ async function main() {
   // projeção com user de A aplicada a orgB: o gate de papel é resolvido no tenant
   // correto — user sem perfil em B cai pro default (não full) → redige.
   const projCross = CP.projectPacket(orgB, vendedor, pkt);
-  check("3.5 projeção no tenant B redige (papel não resolve full em B)", projCross.packet.facts[0].object.custo_medio === "[redigido]");
+  check("3.5 projeção no tenant B redige (papel não resolve full em B)", (projCross.packet.facts[0].object as any).custo_medio === "[redigido]");
 
   console.log("\n=== TEST: Context Security (PRD 3 F9) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);

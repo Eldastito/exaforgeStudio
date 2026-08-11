@@ -1,11 +1,12 @@
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalCorrelationService } from "../SignalCorrelationService.js";
 import { SignalInvestigationService } from "../SignalInvestigationService.js";
 import { SignalCalibrationService } from "../SignalCalibrationService.js";
 import { HumanSignalService } from "../HumanSignalService.js";
 import { ExternalSignalService } from "../ExternalSignalService.js";
+import { RadarHealthService } from "../RadarHealthService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { logAuthEvent } from "../auditLog.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
@@ -52,6 +53,18 @@ router.get("/calibration", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const days = req.query?.days !== undefined ? Number(req.query.days) : undefined;
   res.json(SignalCalibrationService.detectorMetrics(orgId, { days }));
+});
+
+// PRD 2 F12.1 (§94-98, CA16) — GET /api/signals/health — saúde OPERACIONAL do
+// Radar pra o admin: volume, freshness (detector que parou), storm, calibração
+// (reusa F11) e status geral. Observabilidade — não publica nem executa nada.
+router.get("/health", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const windowHours = req.query?.windowHours ? Number(req.query.windowHours) : undefined;
+  const staleHours = req.query?.staleHours ? Number(req.query.staleHours) : undefined;
+  const calibrationDays = req.query?.calibrationDays !== undefined ? Number(req.query.calibrationDays) : undefined;
+  res.json(RadarHealthService.overview(orgId, { windowHours, staleHours, calibrationDays }));
 });
 
 // PRD 2 F6.1 — GET /api/signals/:id/investigate — causas-candidatas determinísticas

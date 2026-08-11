@@ -71,7 +71,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **Investigation pipeline** (causa-candidata + supporting/contradicting evidence + confidence) | `analysisFor` roteia profundidade mas não havia geração de causa. **F6.1 ENTREGUE:** `SignalInvestigationService.investigate` — causas-candidatas determinísticas (evidência a favor/contra + confiança, basis hypothesis, nunca vira fato §13), sem IA. `test:signal-investigation` (11 checks). **F6.2 ENTREGUE:** `investigateDeep` — gate de LLM por nível de impacto (L3+, reusa DI-1), sintetizador injetável, IA nunca é loop principal (§81-83), `test:signal-investigation-deep` (10 checks). **Fase 6 FECHADA** | ✅ |
 | ~~**Feedback & calibration**~~ | ✅ **F11 ENTREGUE** — `dismiss(reason)` (§65) + `SignalCalibrationService.detectorMetrics` (false-positive/dismissal rate + calibração por detector, §66). `test:signal-calibration` (8 checks) | ~~F11~~ ✅ |
 | ~~**External signal contract**~~ | ✅ **F10 ENTREGUE** — `ExternalSignalService.ingest` (opt-in `radar_external_signals_enabled`): molde provider-agnóstico com proveniência obrigatória (`source`+`externalId`→dedupe idempotente), basis `fact` só com `verifiable` (§13), severidade derivada de rating/sentiment, autor mascarado (LGPD), confiança externa <1. `POST /api/signals/ingest-external`. Conectores seguem PRDs próprios (§50). `test:external-signals` (22 checks) | ~~F10~~ ✅ |
-| **Radar health / métricas** (§94-98) | Observabilidade admin dos detectores | F12 |
+| **Radar health / métricas** (§94-98) | ✅ **F12.1 ENTREGUE** — `RadarHealthService.overview` (volume + freshness/stale §96 + storm §53 + calibração F11 reusada + status geral, derivado por query). `GET /api/signals/health` (admin). `test:radar-health` (12). Resta budget por-detector (F12.2) + runbooks (F12.3) | F12 |
 
 ### ⏸️ DEFERIR (fora do escopo deste PRD)
 
@@ -101,7 +101,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA13 auto-trigger não bypassa policy | ✅ choke-point garante | não regredir |
 | CA14 correlationId no ciclo | ✅ **F2.3 fechou o furo em process_instances** | não regredir |
 | CA15 TTL/dedupe/cooldown anti-storm | 🟡 dedupe sim; **TTL agora vale (F2.2 ✅)**; cooldown só PlanFit | F4 (cooldown genérico) |
-| CA16 detector isolado não derruba | ✅ best-effort em cada pass | reforçar em F12 |
+| CA16 detector isolado não derruba | ✅ best-effort em cada pass + **F12.1 observabilidade** (detector que parou/storm fica visível) | ✅ |
 | CA17 custo de IA mensurado | ✅ `ai_usage_log` + budgets | F12 (per-detector) |
 | CA18 tenant isolation | ✅ toda query filtra org | testar em cada fatia |
 | CA19 false-positive metrics | ✅ **F11** (por detector, derivado por query) | ✅ |
@@ -122,7 +122,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | ~~**F9**~~ ✅ | Human signals (Fala Tu → radar) — **FECHADA**: `HumanSignalService.observe` (opt-in `radar_human_signals_enabled`) normaliza a observação humana num `business_signal` (`origin:human`, `basis=estimate\|hypothesis`, **nunca fact §13**) com **acúmulo de evidência** (mesmo assunto sobe confiança 0.30→0.85 e severidade info→attention→risk, derivado de `observations.length`, RN-004); atômico (tx); `POST /api/signals/observe`; sem tabela nova (CA1) | ESTENDER | ✅ |
 | ~~**F10**~~ ✅ | External signal contract (molde) — **FECHADA**: `ExternalSignalService.ingest`, proveniência + dedupe por origem, fact só se verificável (§13), `POST /api/signals/ingest-external`, `test:external-signals` (22). CA2 fica **100%** (H/D/E) | CRIAR | ✅ |
 | **F11** | Feedback & calibration | CRIAR | dismiss reason + false-positive rate |
-| **F12** | Production readiness | — | perf/observability/budgets/runbooks |
+| **F12** | Production readiness — **EM ANDAMENTO**: ✅ F12.1 radar health (`RadarHealthService`, `test:radar-health` 12) · falta F12.2 budget por-detector (§84) · F12.3 runbooks | — | perf/observability/budgets/runbooks |
 
 ## Fatia recomendada a seguir: **F2.1 — basis+hypothesis + subject_id**
 

@@ -8456,6 +8456,13 @@ const initDb = () => {
     );
   `);
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_artifacts_org ON artifacts (organization_id, created_at)`); } catch(e){}
+
+  // PRD 2 F9 (§45-46, CA2) — Human signals: uma observação estruturada do humano
+  // (via Fala Tu ou UI) vira um `business_signal` normalizado, com ACÚMULO DE
+  // EVIDÊNCIA (várias observações do mesmo assunto sobem confiança/severidade,
+  // §46). Opt-in; sem tabela nova (CA1/§5) — as observações moram no evidence_json
+  // do próprio sinal. Nunca é `fact` (§13). Aditivo; default OFF.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_human_signals_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

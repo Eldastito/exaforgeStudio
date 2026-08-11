@@ -142,7 +142,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | --- | --- | --- | --- |
 | **F0** | Esta reconciliação | doc | **1 PR (este)** |
 | ~~**F1**~~ ✅ | Core Context Model — **ENTREGUE**: `src/server/contextModel.ts` (puro, sem DB/LLM) — `ContextScope`(23 níveis)/`ContextEntity`/`ContextFact`/`ContextRelationship`/`EvidenceReference`/`ContextSource`(+precedência §30/§72)/`ContextFreshness`/`ContextConflict`(+`detectConflict`/`resolveConflictByPriority` §31) + `factTypeFromBasis`(§26)/`confidenceBand`(§27)/`freshnessOf`(§28) + mappers `factFromSignal`/`evidenceFromSignal` (traduz SignalInput≈ContextFact, nunca inventa §25). `test:context-model` (26 checks) | CRIAR (tipos) + ESTENDER | ✅ |
-| **F2** | Context Graph — relações tenant/unit/user/customer/product/supplier/goal | COMPOR | traversal read-only sobre FKs existentes |
+| ~~**F2**~~ ✅ | Context Graph — **ENTREGUE**: `src/server/ContextGraphService.ts` (read-only, sem tabela/coluna nova). Travessia BFS sobre os FKs que já existem (department↔parent/manager · cost_center↔dept/store/owner · store↔manager/contact · inventory_location↔store/dept/responsible · employee↔user/manager/role · product↔supplier via pedido · X↔organization) → `ContextEntity[]`+`ContextRelationship[]` (contratos F1). Direção canônica filho→pai; dedup por `from\|type\|to`. Guardrails duros testados: RN-CG-1 isolamento (FK cross-tenant não resolve), RN-CG-2 não-inventa (FK pendurada não vira nó), RN-CG-3 read+derive, RN-CG-4 limitado (maxDepth/maxNodes/fanLimit + `truncated`), RN-CG-5 org enumera estrutura só como âncora. `test:context-graph` (38 checks) | COMPOR | ✅ |
 | **F3** | **Context Resolver** — `ContextRequest → ContextPacket` (poucos domínios) | CRIAR (composição) | o coração; estende `ContextEngineService` |
 | **F4** | BusinessGoal (rico) + BusinessConstraint + GoalCorrelation | ESTENDER + CRIAR | `goalGapsByDomain` já correlaciona |
 | **F5** | Signal Enrichment (PRD 2 → contexto) | COMPOR | sinal + resolver + goal/constraint |
@@ -164,7 +164,17 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F1 — Core Context Model**
+## Fatia recomendada a seguir: **F3 — Context Resolver**
+
+Com F1 (contratos) e F2 (grafo) no lugar, o próximo incremento é o **coração**: o
+`ContextResolverService` que recebe um `ContextRequest` e devolve um `ContextPacket`
+mínimo e relevante por intent (§18/§20 + §6 Progressive Disclosure), estendendo o
+`ContextEngineService` (AC-A01 proíbe duplicar). Compõe snapshot + attention + goals
++ o **grafo da F2** (vizinhança da âncora) num pacote só, em shadow mode (§114).
+
+---
+
+## (histórico) Fatia recomendada a seguir: **F1 — Core Context Model**
 
 Menor incremento que destrava tudo, aditivo, risco ~zero, e é literalmente a interface que o
 PRD 4 vai consumir. Define os **tipos estáveis** (`ContextScope`, `ContextEntity`, `ContextFact`,

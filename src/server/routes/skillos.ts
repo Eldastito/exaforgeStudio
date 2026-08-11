@@ -2,6 +2,8 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { SkillOsRegistryService } from "../SkillOsRegistryService.js";
 import { SkillOsResolverService } from "../SkillOsResolverService.js";
+import { SkillOsModelRouterService } from "../SkillOsModelRouterService.js";
+import { SkillOsProviderHealthService } from "../SkillOsProviderHealthService.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -43,6 +45,31 @@ router.post("/resolve", requireRole("owner", "admin"), (req: AuthRequest, res): 
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
   res.json(SkillOsResolverService.resolve(orgId, req.user, { capabilityId: b.capabilityId, vertical: b.vertical, maxRisk: b.maxRisk, requirePermissions: !!b.requirePermissions }));
+});
+
+// GET /api/skillos/models?provider=&status= — catálogo de modelos (F5).
+router.get("/models", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const q = req.query || {};
+  res.json({ models: SkillOsModelRouterService.listModels({ provider: q.provider as any, status: q.status as any }) });
+});
+
+// POST /api/skillos/route { needs:[], prefer?, minContextTokens? } — qual MODELO o
+// Router escolheria (F5). Inspeção; NÃO invoca. Gestor.
+router.post("/route", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  res.json(SkillOsModelRouterService.route({ needs: Array.isArray(b.needs) ? b.needs : [], prefer: b.prefer, minContextTokens: b.minContextTokens, maxLatencyMsTarget: b.maxLatencyMsTarget, riskLevel: b.riskLevel }, { orgId }));
+});
+
+// GET /api/skillos/provider-health/:provider?model= — estado do circuit breaker
+// (F5, derivado). Contagens/taxas — sem custo financeiro (§30). Gestor.
+router.get("/provider-health/:provider", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SkillOsProviderHealthService.stats(req.params.provider, { model: req.query.model as any }));
 });
 
 export default router;

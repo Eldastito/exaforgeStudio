@@ -11,6 +11,9 @@ export function Sidebar() {
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
   // canAccessModule retorna sempre true — o menu fica idêntico ao de hoje.
   const mod = (key: string) => isModuleEnabled(key) && canAccessModule(key);
+  // Gestor da org (dono/admin) — mesmo perfil que os endpoints do Radar exigem
+  // (requireRole owner/admin). Além do master de plataforma. Padrão RadarView.
+  const isManager = isMasterAdmin || user?.role === 'owner' || user?.role === 'admin';
 
   return (
     <>
@@ -92,7 +95,7 @@ export function Sidebar() {
              {isMasterAdmin && (
                <NavItem icon={<Radar />} label="Radar — Consultor" active={viewMode === 'radar_consultant'} onClick={() => setViewMode('radar_consultant')} />
              )}
-             {isMasterAdmin && (
+             {isManager && (
                <NavItem icon={<Activity />} label="Radar — Saúde" active={viewMode === 'radar_health'} onClick={() => setViewMode('radar_health')} />
              )}
              {/* FalaTu (ADR-151 F2): master sempre; org só com a flag ligada E

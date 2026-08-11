@@ -87,7 +87,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA | Estado hoje | Trabalho |
 | --- | --- | --- |
 | CA1 ledger canônico | ✅ já é | não regredir |
-| CA2 contrato normalizado (H/D/E) | 🟡 parcial | F9 (human) + F10 (external) |
+| CA2 contrato normalizado (H/D/E) | 🟡 parcial | ✅ **F9 (human)** — `HumanSignalService.observe` normaliza observação humana no ledger com acúmulo de evidência; falta F10 (external) |
 | CA3 fato×estimativa distinguível | 🟡 falta `hypothesis` | F2 |
 | CA4 correlação sem destruir evidência | ✅ **F3.1 alta + F3.2 surface + F3.3 média** — evidência sempre preservada | não regredir |
 | CA5 framework de anomalia | ✅ **F4.1+F4.2+F4.3** (primitivas+registry+1 detector migrado) | ✅ |
@@ -119,7 +119,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **F6** | Investigation pipeline (causa-candidata) | CRIAR | determinístico→correlação→histórico→LLM-gated |
 | **F7** | Impact prioritization refino (SLA/reversibility/goal) | ESTENDER | fatores no score |
 | **F8** | Routing expansion (beachhead §71) | ESTENDER | +mapeamentos maduros (collection/sales_recovery) |
-| **F9** | Human signals (Fala Tu → radar) | ESTENDER | observação estruturada + evidence accrual |
+| ~~**F9**~~ ✅ | Human signals (Fala Tu → radar) — **FECHADA**: `HumanSignalService.observe` (opt-in `radar_human_signals_enabled`) normaliza a observação humana num `business_signal` (`origin:human`, `basis=estimate\|hypothesis`, **nunca fact §13**) com **acúmulo de evidência** (mesmo assunto sobe confiança 0.30→0.85 e severidade info→attention→risk, derivado de `observations.length`, RN-004); atômico (tx); `POST /api/signals/observe`; sem tabela nova (CA1) | ESTENDER | ✅ |
 | **F10** | External signal contract (molde) | CRIAR | só contrato de ingestão |
 | **F11** | Feedback & calibration | CRIAR | dismiss reason + false-positive rate |
 | **F12** | Production readiness | — | perf/observability/budgets/runbooks |

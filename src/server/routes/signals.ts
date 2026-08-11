@@ -4,7 +4,9 @@ import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalCorrelationService } from "../SignalCorrelationService.js";
 import { SignalInvestigationService } from "../SignalInvestigationService.js";
 import { SignalCalibrationService } from "../SignalCalibrationService.js";
+import { HumanSignalService } from "../HumanSignalService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
+import { logAuthEvent } from "../auditLog.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import db from "../db.js";
 
@@ -62,6 +64,40 @@ router.get("/:id/investigate", async (req: AuthRequest, res): Promise<any> => {
     return res.json(await SignalInvestigationService.investigateDeep(orgId, req.params.id));
   }
   res.json(SignalInvestigationService.investigate(orgId, req.params.id));
+});
+
+// PRD 2 F9 (§45-46, CA2) — POST /api/signals/observe — a origem HUMANA da
+// percepção: uma observação do humano vira um sinal normalizado no ledger, com
+// ACÚMULO DE EVIDÊNCIA (mesmo assunto sobe confiança/severidade). Opt-in por org;
+// nunca vira fato (§13). A rota valida a FORMA; o service guarda a invariante.
+router.post("/observe", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const observation = typeof b.observation === "string" ? b.observation.trim() : "";
+  const domain = typeof b.domain === "string" ? b.domain.trim() : "";
+  if (!observation) return res.status(400).json({ error: "observation é obrigatória." });
+  if (!domain) return res.status(400).json({ error: "domain é obrigatório." });
+  const actor = (req as any).user?.userId || null;
+  const out = HumanSignalService.observe(orgId, {
+    observerId: actor,
+    observation,
+    domain,
+    signalType: typeof b.signalType === "string" ? b.signalType : undefined,
+    subjectType: typeof b.subjectType === "string" ? b.subjectType : null,
+    subjectId: typeof b.subjectId === "string" ? b.subjectId : null,
+    basis: b.basis === "hypothesis" ? "hypothesis" : "estimate",
+    sourceEntityType: typeof b.sourceEntityType === "string" ? b.sourceEntityType : null,
+    sourceEntityId: typeof b.sourceEntityId === "string" ? b.sourceEntityId : null,
+    correlationId: typeof b.correlationId === "string" ? b.correlationId : null,
+  });
+  if (!out.ok) {
+    // 'disabled' → 403 (feature não habilitada); demais formas → 400.
+    const code = out.reason === "disabled" ? 403 : 400;
+    return res.status(code).json({ error: out.reason || "invalid" });
+  }
+  logAuthEvent(orgId, actor, null, "RADAR_HUMAN_OBSERVATION", { signalId: out.signalId, domain, observationCount: out.observationCount, severity: out.severity });
+  res.json(out);
 });
 
 // POST /api/signals/refresh — deriva e publica os sinais financeiros (sob demanda, idempotente).

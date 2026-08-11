@@ -354,6 +354,7 @@
     "test:signal-auto-trigger": "tsx scripts/test-signal-auto-trigger.ts",
     "test:signal-routing-expansion": "tsx scripts/test-signal-routing-expansion.ts",
     "test:signal-calibration": "tsx scripts/test-signal-calibration.ts",
+    "test:human-signals": "tsx scripts/test-human-signals.ts",
     "test:two-step-approval-security": "tsx scripts/test-two-step-approval-security.ts",
     "test:choke-point-hardening": "tsx scripts/test-choke-point-hardening.ts",
     "test:collection-cadence-choke-point": "tsx scripts/test-collection-cadence-choke-point.ts",

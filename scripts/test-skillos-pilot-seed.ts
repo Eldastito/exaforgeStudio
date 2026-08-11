@@ -66,12 +66,21 @@ async function main() {
     check(`4.${id} eval passa (${res.passed}/${res.total}) sem regressão`, res.total === 3 && res.passed === 3 && res.regressed === false);
   }
 
-  // ═══════════════ 5. estágio shadow → SEM efeito ═══════════════
-  check("5.1 os 3 pilotos em shadow", skills.every((id) => RO.get(id).stage === "shadow"));
+  // ═══════════════ 5. estágio inicial shadow + NÃO-clobber (RN-RO-5) ═══════════════
+  // Estado controlado logo antes de asserir (sem await no meio) → determinístico mesmo
+  // com o seed/promoção async do boot em voo.
+  for (const id of skills) RO.setStage(id, "shadow");
+  const s3 = SEED.seedPilots();
+  check("5.1 os 3 pilotos em shadow após re-seed", skills.every((id) => RO.get(id).stage === "shadow"));
+  check("5.2 seed reporta o estágio corrente (shadow)", skills.every((id) => s3.stages[id] === "shadow"));
   const dec = RO.isLiveForOrg("signal-investigation-v1", org);
-  check("5.2 shadow: live=true mas execução em modo shadow (sem efeito)", dec.live === true && dec.executionMode === "shadow");
+  check("5.3 shadow: live=true mas execução em modo shadow (sem efeito)", dec.live === true && dec.executionMode === "shadow");
   // (shadow expõe pra observar, mas o execution_mode 'shadow' não executa efeito — o
   // gate real segue no CommandExecutor; e nenhum piloto tem commandType próprio.)
+  // NÃO-clobber: operador sobe além de shadow → re-seed NÃO rebaixa (bug histórico).
+  RO.setStage("signal-investigation-v1", "assisted");
+  SEED.seedPilots();
+  check("5.4 seedPilots não rebaixa estágio que o operador subiu", RO.get("signal-investigation-v1").stage === "assisted");
 
   console.log("\n=== TEST: SkillOS Pilot Onboarding (§61) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);

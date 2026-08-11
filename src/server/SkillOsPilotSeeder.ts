@@ -1,14 +1,26 @@
+import db from "./db.js";
 import { SkillOsRegistryService } from "./SkillOsRegistryService.js";
 import { SkillOsEvalService } from "./SkillOsEvalService.js";
 import { SkillOsRolloutService } from "./SkillOsRolloutService.js";
-import { Capability, SkillManifest } from "./skillosModel.js";
+import { Capability, SkillManifest, rolloutStageRank } from "./skillosModel.js";
 
 /**
  * SkillOsPilotSeeder — onboarding dos 3 pilotos §61 no SkillOS. Registra Capability +
- * Skill + casos de eval (golden) e coloca cada piloto no estágio `shadow` (início da
- * esteira §68 — SEM efeito). Idempotente (mesmo padrão do `BlueprintSeeder`): upserts
- * por id, roda 2× sem duplicar. Seed OPERACIONAL, não crítico (se falhar, admin roda
- * pela rota) — o boot nunca quebra por causa dele.
+ * Skill + casos de eval (golden) e semeia o estágio INICIAL `shadow` (início da esteira
+ * §68 — SEM efeito). Idempotente (mesmo padrão do `BlueprintSeeder`): upserts por id,
+ * roda 2× sem duplicar. Seed OPERACIONAL, não crítico (se falhar, admin roda pela
+ * rota) — o boot nunca quebra por causa dele.
+ *
+ * DUAS responsabilidades, deliberadamente separadas:
+ *   - `seedPilots()` — ONBOARDING (definições + estágio inicial `shadow`). Roda a cada
+ *     boot; o estágio inicial é semeado só na 1ª vez e NUNCA sobrescreve o operador
+ *     depois (RN-RO-5). Onboarding ≠ promoção.
+ *   - `promotePilotsToPilot()` — PROMOÇÃO §68 (`shadow` → `pilot` @10%). Decisão humana
+ *     do operador, aplicada UMA vez (marker), sem brigar com rollback (§69). O sistema
+ *     nunca auto-eleva por conta própria (RN-014) — só aplica a decisão tomada.
+ *   - `raisePilotsCanary()` — SUBIR O CANÁRIO §68 (ex.: 10% → 25%). Não mexe no estágio,
+ *     só amplia o cohort (hash estável: subir só ADICIONA orgs). One-time por-percentual
+ *     (marker), só sobe, preserva quem o operador já ajustou. Mesma família da promoção.
  *
  * PRINCÍPIO (PRD §3): NÃO reimplementa comportamento. Cada Capability APONTA (via
  * `description`) pro serviço real que já existe; a Skill é só o manifesto/metadado. Os
@@ -109,12 +121,100 @@ export class SkillOsPilotSeeder {
     SkillOsEvalService.registerCase({ caseId: "pilot-investigate-hypothesis", skillId: "signal-investigation-v1", name: "causa é hipótese (nunca fact)", scorer: "json_subset", expected: { found: true, aiUsed: false, candidateCauses: [{ basis: "hypothesis" }] }, input: { signalId: "sig-1" }, recordedOutput: { signalId: "sig-1", found: true, aiUsed: false, headline: "a causa mais provável é queda de estoque", candidateCauses: [{ cause: "queda de estoque", confidence: 0.6, basis: "hypothesis", supportingEvidence: [], contradictingEvidence: [] }], contextSignalCount: 3, note: null, investigatedAt: "2026-08-11T00:00:00Z" } });
     SkillOsEvalService.registerCase({ caseId: "pilot-investigate-not-found", skillId: "signal-investigation-v1", name: "sinal ausente → found=false", scorer: "field_equals", fieldPath: "found", expected: false, input: { signalId: "sig-missing" }, recordedOutput: { signalId: "sig-missing", found: false, aiUsed: false, headline: "sem sinais suficientes p/ investigar", candidateCauses: [], contextSignalCount: 0, note: "sinal não encontrado", investigatedAt: "2026-08-11T00:00:00Z" } });
 
-    // ─────────── Estágio inicial: shadow (SEM efeito) p/ os 3 ───────────
+    // ─────────── Estágio INICIAL: shadow (SEM efeito) — só na 1ª vez ───────────
+    // RN-RO-5 (NÃO CLOBBERAR O OPERADOR): o seed roda a cada boot, mas o estágio é
+    // ESTADO OPERACIONAL — quem manda nele depois do onboarding é o operador (rota
+    // `/rollout` §68/§69). Semeamos `shadow` UMA vez (quando ainda não há linha de
+    // rollout); em boots seguintes preservamos o que o operador deixou (promoção OU
+    // rollback). Antes desta regra o seed forçava `shadow` todo boot, revertendo
+    // qualquer promoção — bug que tornava a esteira não-durável.
     const stages: Record<string, string> = {};
-    for (const skillId of PILOT_SKILL_IDS) stages[skillId] = SkillOsRolloutService.setStage(skillId, "shadow").stage;
+    for (const skillId of PILOT_SKILL_IDS) {
+      if (!SkillOsRolloutService.has(skillId)) SkillOsRolloutService.setStage(skillId, "shadow");
+      stages[skillId] = SkillOsRolloutService.get(skillId).stage;
+    }
 
     const evalCases = PILOT_SKILL_IDS.reduce((n, id) => n + SkillOsEvalService.listCases(id).length, 0);
     return { capabilities: 3, skills: 3, evalCases, stages };
+  }
+
+  // Marker de plataforma: a promoção §68 é uma DECISÃO do operador aplicada UMA vez.
+  // O marker garante que ela não re-dispare a cada boot — em especial, não re-promove
+  // uma skill que o operador rebaixou depois (rollback §69 fica de pé).
+  private static readonly PROMO_MARKER = "pilots_pilot10_v1";
+  private static markerApplied(marker: string): boolean {
+    return !!db.prepare(`SELECT marker FROM skillos_platform_markers WHERE marker = ?`).get(marker);
+  }
+  private static setMarker(marker: string): void {
+    db.prepare(`INSERT OR IGNORE INTO skillos_platform_markers (marker) VALUES (?)`).run(marker);
+  }
+
+  /**
+   * PROMOÇÃO §68 dos 3 pilotos: `shadow` → `pilot` @ `percent`% (execution_mode
+   * `assisted`, cohort de canário). É a DECISÃO HUMANA do operador de subir a esteira
+   * (RN-014: o SISTEMA nunca auto-eleva por conta própria — aqui ele só APLICA, uma
+   * única vez e de forma auditável, a decisão que o operador tomou).
+   *
+   * Segurança (idempotente + não briga com o operador):
+   *   - one-time via `PROMO_MARKER`: aplicada, nunca re-dispara (rollback fica de pé).
+   *   - só AVANÇA de `shadow`/`development` (rank ≤ shadow); skill que o operador já
+   *     subiu além de `pilot` é preservada (nunca rebaixa, nunca mexe no canário dela).
+   *   - só toca o canário das skills que ESTE passo promoveu.
+   *
+   * Reversível pela esteira normal (`/rollout/:id/rollback`, `setStage`, `kill`).
+   */
+  static promotePilotsToPilot(percent = 10): { promoted: string[]; skipped: string[]; alreadyApplied: boolean; percent: number } {
+    if (this.markerApplied(this.PROMO_MARKER)) {
+      return { promoted: [], skipped: [...PILOT_SKILL_IDS], alreadyApplied: true, percent };
+    }
+    const promoted: string[] = [];
+    const skipped: string[] = [];
+    for (const skillId of PILOT_SKILL_IDS) {
+      const cur = SkillOsRolloutService.get(skillId);
+      if (rolloutStageRank(cur.stage) <= rolloutStageRank("shadow")) {
+        SkillOsRolloutService.setStage(skillId, "pilot");
+        SkillOsRolloutService.setCanaryPercent(skillId, percent);
+        promoted.push(skillId);
+      } else {
+        skipped.push(skillId); // operador já subiu além de shadow — preserva
+      }
+    }
+    this.setMarker(this.PROMO_MARKER);
+    return { promoted, skipped, alreadyApplied: false, percent };
+  }
+
+  /**
+   * SUBIR O CANÁRIO §68 dos 3 pilotos pra `percent`% (ex.: 10% → 25%). NÃO mexe no
+   * estágio — só amplia o cohort. Subir o percentual só ADICIONA orgs (hash estável
+   * `hashPercent`): quem já estava dentro do balde de 10% continua dentro no de 25%.
+   *
+   * Mesmas salvaguardas da promoção (idempotente + não briga com o operador):
+   *   - one-time POR-percentual via marker `pilots_canary_<percent>_v1`: aplicada,
+   *     nunca re-dispara (ajuste/rollback do operador fica de pé).
+   *   - só mexe em skill JÁ cohort-gated (stage ≥ `pilot`); pra skill em `shadow`/
+   *     `development` o percentual nem se aplica, então é preservada intacta.
+   *   - só SOBE (nunca abaixa): skill cujo canário o operador já pôs ≥ `percent` é
+   *     preservada (não estreita o cohort de ninguém).
+   */
+  static raisePilotsCanary(percent = 25): { raised: string[]; skipped: string[]; alreadyApplied: boolean; percent: number } {
+    const p = Math.max(0, Math.min(100, Math.floor(percent)));
+    const marker = `pilots_canary_${p}_v1`;
+    if (this.markerApplied(marker)) {
+      return { raised: [], skipped: [...PILOT_SKILL_IDS], alreadyApplied: true, percent: p };
+    }
+    const raised: string[] = [];
+    const skipped: string[] = [];
+    for (const skillId of PILOT_SKILL_IDS) {
+      const cur = SkillOsRolloutService.get(skillId);
+      if (rolloutStageRank(cur.stage) >= rolloutStageRank("pilot") && cur.canaryPercent < p) {
+        SkillOsRolloutService.setCanaryPercent(skillId, p);
+        raised.push(skillId);
+      } else {
+        skipped.push(skillId); // shadow (percentual não se aplica) ou já ≥ p — preserva
+      }
+    }
+    this.setMarker(marker);
+    return { raised, skipped, alreadyApplied: false, percent: p };
   }
 }
 

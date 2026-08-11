@@ -148,7 +148,7 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 | ~~**F5**~~ ✅ | Signal Enrichment — **ENTREGUE**: `src/server/SignalEnrichmentService.ts` (compose-only, sem tabela/coluna nova). `enrich(orgId, signalId)` monta o CONTEXTO de um sinal do Radar (a ponte percepção→contexto pro Maestro): âncora no SUJEITO do sinal (subject_type→entidade do grafo F2, só quando resolve — senão anchor:null) · pacote do resolver (F3) escopado ao domínio · lente de prioridade (`ImpactPrioritizationService.scoreOne` — MESMO cálculo do feed, exposto p/ 1 sinal, reúso do `scoreSignal` privado) com score/impactLevel/ação recomendada/SLA/irreversibilidade · meta AMEAÇADA (`affectedGoal` do goalGapsByDomain) · restrições aplicáveis (F4, já no pacote) · correlatos do mesmo sujeito (§39). O sinal vira `ContextFact` (F1). Rota `GET /api/signals/:id/context` (`?profile=`). Guardrails RN-SE-1..5 (isolamento→found:false p/ outro tenant · não-inventa âncora · READ+DERIVE · estende não duplica · mínimo). `test:signal-enrichment` (26 checks); F1/F2/F3/business-constraints/goal-aware-priority/impact-prioritization seguem verdes — 0 regressão | COMPOR | ✅ |
 | ~~**F6**~~ ✅ | Fala Tu Context Capture — **ENTREGUE**: `context_candidates` (tabela nova) + `ContextCandidateService.ts` + contrato `ContextCandidate` em `contextModel` (estados DETECTED→PENDING→CONFIRMED/REJECTED/EXPIRED + `canTransitionCandidate`, §37). Um candidato de CONTEXTO/REGRA (não de ação): mudança PROPOSTA ao contexto (restrição/regra ou fato) capturada do Fala Tu / detector, que só afeta o contexto depois de CONFIRMADA por humano — nunca em silêncio (§36). `confirm` é o ÚNICO ponto que promove: kind=constraint → `BusinessConstraintService.create` (F4); kind=fact → `BusinessSignalService.publish` (ADR-136) — reúso, não duplica (RN-CC-5). `detect`/`reject`/`expireStale` NUNCA promovem. Promovido = EXATAMENTE o `proposed` (não inventa §25). Rotas `/api/context-candidates` (list/get/POST detect/submit/confirm/reject, gestor). Guardrails RN-CC-1..5. `test:context-candidate` (30 checks); F1–F5 + business-constraints/impact-prioritization seguem verdes — 0 regressão | ESTENDER + CRIAR | ✅ |
 | ~~**F7**~~ ✅ | RAG + Memory como evidência — **ENTREGUE**: `geminiRAG` ESTENDIDO (sem tabela nova). `loadOrgChunks` preserva a proveniência que a linha já carregava e era descartada (`document_id`/`chunk_index`/`created_at` + título via join a `knowledge_documents`). Novo `RagHit` (proveniência estruturada: documentId/chunkIndex/title/source/score/observedAt) + `rankChunksToHits` (PURO — filtro canal/área + topK + score, testável sem embed) + `searchContextRich` (I/O em volta). `searchContext` (string[]) segue como projeção retrocompat — 0 quebra nos callers (AIOrchestrator/generateRagResponse). Mapper `evidenceFromRagHit` (contextModel) traduz um hit em `EvidenceReference` (§24) APPROVED_DOCUMENT (sourceId=documentId, field=chunk:N, confidence=score) — RAG/memória viram evidência de 1ª classe rastreável; não inventa (§25). `test:rag-provenance` (21 checks, determinístico sem chave de IA); context-model/falatu-rag/falatu-embeddings + F3/F5/F6 seguem verdes — 0 regressão | ESTENDER | ✅ |
-| **F8** | Context Quality — coverage/freshness/confidence/conflicts/gaps | COMPOR | |
+| ~~**F8**~~ ✅ | Context Quality — **ENTREGUE**: `ContextQualityService.ts` (COMPOR, sem tabela nova) + `ContextQualityReport`/`ContextCoverageItem` em `contextModel`. A matemática do resumo (`assessFromFacts`: cobertura+confiança+banda+frescor+conflitos+lacunas) foi EXTRAÍDA do `ContextResolverService.computeQuality` (F3) pra cá — o resolver agora DELEGA (fonte única, `packet.quality` idêntico → 0 regressão). Sobre isso, o relatório RICO: `coverageByItem` (§34 disponibilidade por-fonte, available true/false) · `conflictsDetailed` (§31 conflito entre fontes REPORTADO com valores em disputa, não só a contagem) · `evidenceSummary` (§24 proveniência agregada por tipo, FUNDINDO a evidência estruturada do RAG/F7 via `evidenceFromRagHit`). `assess()` resolve o pacote (import dinâmico quebra o ciclo) e consolida; exposto pela fachada `ContextEngineService.quality` + rota `GET /api/context/quality`. Guardrails RN-CQ-1..5. `test:context-quality` (19 checks); F1/F3/F5/F6/F7/context-engine seguem verdes — 0 regressão | COMPOR | ✅ |
 | **F9** | Security — RLS(app-level)/RBAC/redaction/isolamento/audit + guarda data-vs-instrução | REUTILIZAR + CRIAR | |
 | **F10** | Contratos SkillOS — validar `ContextPacket` estável pro PRD 4 | validação | sem SkillOS |
 | **F11** | Observability — métricas (§55/§120) internas | COMPOR | reusa `ai_usage_log`/health |
@@ -164,15 +164,21 @@ seam de provider pro `llm.chat/embed` (hoje acoplado à OpenAI) fica pra quando 
 - **Invisível pro usuário comum** (§124): sem dashboard obrigatório; a complexidade fica embaixo.
 - **`ContextPacket` estável pro PRD 4** (AC-A05) — a interface é o contrato entre os dois PRDs (§127).
 
-## Fatia recomendada a seguir: **F8 — Context Quality (coverage/freshness/confidence/conflicts/gaps)**
+## Fatia recomendada a seguir: **F9 — Security (RLS app-level/RBAC/redaction + guarda data-vs-instrução)**
 
-Com F1–F7 no lugar (contratos + grafo + resolver + metas/constraints +
-enriquecimento de sinal + captura de candidato + RAG como evidência), o próximo
-incremento (§75) é COMPOR a **qualidade do contexto** como uma superfície de 1ª
-classe: cobertura (`dataQuality`) + confiança (`EvidencePackage`) + frescor +
-contagem de conflitos + lacunas. Boa parte já é montada dentro do resolver
-(`computeQuality`, F3) — a F8 a extrai/consolida como leitura própria (e reusa a
-proveniência estruturada da F7 no cálculo de confiança/frescor).
+Com F1–F8 no lugar (contratos + grafo + resolver + metas/constraints + sinal +
+candidato + RAG-evidência + qualidade), o próximo incremento (§66-72) é a camada
+de SEGURANÇA do pacote: projeção por papel/propósito (`ContextProjectionService`
+redaction, hoje só por papel §70) + a guarda ÚNICA data-vs-instrução (§71 — isola
+conteúdo externo não-confiável antes da LLM, reusando `isPromptInjection`+sanitize)
++ os testes deliberados de isolamento cross-tenant (§93). REUTILIZAR + CRIAR.
+
+### (histórico) Fatia entregue: **F8 — Context Quality**
+
+COMPOR a qualidade do contexto como leitura de 1ª classe: `assessFromFacts`
+(extraído do resolver — delegação, 0 regressão) + relatório rico (cobertura
+por-fonte §34 + conflitos detalhados §31 + proveniência agregada §24 fundindo o
+RAG da F7). Fachada `ContextEngineService.quality` + `GET /api/context/quality`. ✅
 
 ### (histórico) Fatia entregue: **F7 — RAG + Memory como evidência**
 

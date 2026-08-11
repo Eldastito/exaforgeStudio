@@ -7,15 +7,11 @@ import {
   ContextMoment,
   ContextQuality,
   SkillHint,
-  ConfidenceBand,
   makeScope,
   scopeRef,
   resolveBudget,
   factFromSignal,
-  freshnessOf,
-  confidenceBand,
   clampConfidence,
-  detectConflict,
 } from "./contextModel.js";
 import type { ContextConstraint } from "./contextModel.js";
 import { ContextGraphService } from "./ContextGraphService.js";
@@ -23,7 +19,7 @@ import { BusinessSignalService } from "./BusinessSignalService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { BusinessConstraintService } from "./BusinessConstraintService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
-import { BusinessHealthService } from "./BusinessHealthService.js";
+import { ContextQualityService } from "./ContextQualityService.js";
 
 /**
  * ContextResolverService — PRD 3 F3 (§18/§19/§20/§6/§73): o CORAÇÃO do Business
@@ -258,49 +254,12 @@ export class ContextResolverService {
   }
 
   /**
-   * §75 — qualidade do próprio contexto: cobertura (dataQuality) + confiança
-   * (média dos fatos, ou cobertura quando não há fato) + frescor + conflitos
-   * (§31, entre fatos do mesmo subject|predicate) + lacunas (dados não informados).
+   * §75 — qualidade do próprio contexto. A partir da F8 é o `ContextQualityService`
+   * quem consolida a matemática (cobertura + confiança + frescor + conflitos +
+   * lacunas); o resolver DELEGA (fonte única, AC-A01) — comportamento idêntico.
    */
   private static computeQuality(orgId: string, facts: ContextFact[]): ContextQuality {
-    let coveragePct: number | null = null;
-    const gaps: string[] = [];
-    try {
-      const dq = BusinessHealthService.dataQuality(orgId);
-      if (dq) {
-        coveragePct = Number(dq.pct);
-        for (const it of dq.items || []) if (!it.ok) gaps.push(String(it.label));
-      }
-    } catch { /* sem dataQuality: cobertura desconhecida (null), não zero falso */ }
-
-    // Confiança: média dos fatos; sem fato → cobertura (se houver) como proxy.
-    const avg = facts.length
-      ? facts.reduce((s, f) => s + clampConfidence(f.confidence), 0) / facts.length
-      : (coveragePct != null ? coveragePct / 100 : 0);
-    const score = clampConfidence(avg);
-    const band: ConfidenceBand = confidenceBand(score);
-
-    // Frescor: conta os fatos por status derivado (reusa freshnessOf da F1).
-    const freshness = { fresh: 0, stale: 0, unknown: 0 };
-    for (const f of facts) {
-      const fr = freshnessOf({ observedAt: f.observedAt, validUntil: f.validUntil });
-      freshness[fr.status] += 1;
-    }
-
-    // Conflitos (§31): fatos com mesmo subject|predicate mas OBJETO divergente.
-    const groups = new Map<string, ContextFact[]>();
-    for (const f of facts) {
-      const k = `${f.subject}|${f.predicate}`;
-      (groups.get(k) || groups.set(k, []).get(k)!).push(f);
-    }
-    let conflicts = 0;
-    for (const [, g] of groups) {
-      if (g.length < 2) continue;
-      const c = detectConflict("object", g.map((f) => ({ source: f.source, value: f.object, confidence: f.confidence, observedAt: f.observedAt })));
-      if (c) conflicts += 1;
-    }
-
-    return { coveragePct, confidence: { score, band }, freshness, conflicts, gaps };
+    return ContextQualityService.assessFromFacts(orgId, facts);
   }
 }
 

@@ -481,6 +481,28 @@ export interface ContextQuality {
   gaps: string[];                                     // dados ausentes / domínios available:false
 }
 
+/** §34 CONTEXT COVERAGE — disponibilidade de uma fonte de dado (available × ausente). */
+export interface ContextCoverageItem {
+  key: string;
+  label: string;
+  available: boolean;
+}
+
+/**
+ * §75+§34+§31+§24 CONTEXT QUALITY REPORT (F8) — a qualidade do contexto como
+ * leitura RICA de 1ª classe: o resumo (`quality`) + cobertura POR-FONTE + os
+ * conflitos DETALHADOS (não só a contagem) + a proveniência AGREGADA por tipo.
+ */
+export interface ContextQualityReport {
+  tenantId: string;
+  quality: ContextQuality;
+  coverage: { pct: number | null; items: ContextCoverageItem[] };
+  conflicts: ContextConflict[];
+  evidence: { total: number; bySourceType: Record<string, number> };
+  generatedAt: string;
+  schemaVersion: number;
+}
+
 /** §20 CONTEXT PACKET — a SAÍDA: mínimo e relevante ao intent. Contrato pro PRD 4. */
 export interface ContextPacket {
   tenantId: string;

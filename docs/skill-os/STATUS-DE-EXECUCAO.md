@@ -4,13 +4,14 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 0 — Auditoria do codebase.
-- **Última fatia:** Fase 0 concluída (auditoria completa).
-- **Baseline:** `main` @ `4df6e9c` (pós PRD 3 F12).
+- **Fase:** 1 — Core Contracts (em revisão/PR).
+- **Última fatia:** F1 entregue (contratos puros). Fase 0 mergeada (#957).
+- **Baseline:** `main` @ `e0facfd` (pós Fase 0).
 
 ## Entregue nesta sessão
 
-- `docs/skill-os/ANALISE-PRD4-vs-CODEBASE.md` — matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR/DEFERIR completa (6 áreas), duplicidades, riscos, decisões (D1–D8), migrations, serviços impactados, compatibilidade, rollout/rollback, fatiamento F1–F12.
+- **Fase 0 (mergeada #957):** `docs/skill-os/ANALISE-PRD4-vs-CODEBASE.md` — matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR/DEFERIR completa (7 grupos), duplicidades, riscos, decisões (D1–D8), migrations, serviços impactados, compat, rollout/rollback, fatiamento F1–F12.
+- **Fase 1:** `src/server/skillosModel.ts` (puro, sem DB/LLM) — contratos `Capability`, `SkillManifest`, `ModelRequirements`/`ModelProfile`, `SkillResult`, `ReliabilityResult`, `ConfidenceThresholds` + taxonomia de falhas AI-FAIL-1..6 + guardas determinísticas (`toolAllowedBySkill` §44, `retryPolicyFor` §27, `modelMeets` §22/23, `confidenceAction` §21, `validateCapability`/`validateSkillManifest`). REUSA `EvidenceReference` (contextModel) e a semântica `fact/estimate/hypothesis` (§20). `test:skillos-contracts` (31 checks). Zero arquivo existente alterado → 0 mudança de comportamento.
 
 ## Achados-chave (resumo)
 
@@ -25,8 +26,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aguardar revisão da matriz. Aprovada → **Fase 1 (Core Contracts)**: tipos puros (`Capability`, `SkillManifest`, `SkillResult`, `ModelRequirements`, `ReliabilityResult`, failure taxonomy) + testes determinísticos, sem alterar comportamento.
+- Aprovada a F1 → **Fase 2 (Capability + Skill Registry)**: `skillos_capabilities`/`skillos_skills` (tabelas prefixadas, Decisão D1), no padrão declarativo de `AnomalyDetectorRegistry`; enable/disable/lookup + compat vertical/entitlement. Ainda sem alterar os agentes existentes.
 
 ## Testes / CI
 
-- Fase 0 é docs-only (sem código, sem teste novo). Suítes de contexto (F1–F12 do PRD 3) permanecem verdes no `main`.
+- `test:skillos-contracts` (31 checks, determinístico, sem DB/LLM). Suítes de contexto (PRD 3) seguem verdes.

@@ -5,7 +5,8 @@ import { ContextProjectionService, ContextProjectionManifest } from "./ContextPr
 import { ContextResolverService } from "./ContextResolverService.js";
 import { ContextQualityService } from "./ContextQualityService.js";
 import { validateContextPacket } from "./contextModel.js";
-import type { ContextRequest, ContextPacket, ContextQualityReport, RagHitLike, ContextPacketValidation } from "./contextModel.js";
+import { ContextMetricsService, ContextMetricsSnapshot } from "./ContextMetricsService.js";
+import type { ContextRequest, ContextPacket, ContextQualityReport, RagHitLike, ContextPacketValidation, ContextProfile } from "./contextModel.js";
 
 /**
  * Context Engine (ADR-160 D3 / Onda A F3) — CONTRATO ÚNICO de contexto do negócio.
@@ -162,6 +163,16 @@ export class ContextEngineService {
    */
   static validatePacket(packet: unknown): ContextPacketValidation {
     return validateContextPacket(packet);
+  }
+
+  /**
+   * PRD 3 F11 (§55/§120) — MODO OBSERVABILIDADE: a leitura interna de métricas do
+   * contexto (tamanho/corte/cobertura/confiança/orçamento do pacote + momento do
+   * ledger + token economy). Delega ao `ContextMetricsService` (deriva por query,
+   * 0 tabela nova). Mantém o Engine como fachada única (AC-A01).
+   */
+  static metrics(orgId: string, opts: { profile?: ContextProfile; intent?: string; sinceDays?: number } = {}): ContextMetricsSnapshot {
+    return ContextMetricsService.snapshot(orgId, opts);
   }
 
   static render(orgId: string): string {

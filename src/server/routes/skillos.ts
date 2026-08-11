@@ -5,6 +5,7 @@ import { SkillOsResolverService } from "../SkillOsResolverService.js";
 import { SkillOsModelRouterService } from "../SkillOsModelRouterService.js";
 import { SkillOsProviderHealthService } from "../SkillOsProviderHealthService.js";
 import { SkillOsPlannerService } from "../SkillOsPlannerService.js";
+import { SkillOsEvalService } from "../SkillOsEvalService.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -84,6 +85,27 @@ router.post("/plan", requireRole("owner", "admin"), (req: AuthRequest, res): any
   } catch (e: any) {
     res.status(400).json({ error: String(e?.message || e) });
   }
+});
+
+// GET /api/skillos/eval-cases/:skillId — casos de eval da skill (F11). Config de
+// PLATAFORMA (skill global) — leitura pra gestor/admin. §30-safe (não carrega custo).
+router.get("/eval-cases/:skillId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ cases: SkillOsEvalService.listCases(req.params.skillId, { includeDisabled: req.query.includeDisabled === "1" }) });
+});
+
+// GET /api/skillos/evals/:skillId — último run de eval + flag de regressão (F11).
+router.get("/evals/:skillId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const last = SkillOsEvalService.lastRun(req.params.skillId, "eval");
+  if (!last) return res.status(404).json({ error: "Nenhum run de eval pra essa skill." });
+  res.json({
+    skillId: last.skill_id, promptVersion: last.prompt_version, total: last.total,
+    passed: last.passed, failed: last.failed, passRate: last.pass_rate,
+    regressed: !!last.regressed, at: last.created_at,
+  });
 });
 
 export default router;

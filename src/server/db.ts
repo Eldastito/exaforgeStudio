@@ -8684,6 +8684,45 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_skillos_models_provider ON skillos_model_profiles(provider, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabela skillos_model_profiles', e); }
+
+  // PRD 4 F11 (SkillOS Evals + Shadow) — CASOS de eval + histórico de RUNS. Tabelas de
+  // PLATAFORMA (sem organization_id — §49): "o que é uma boa saída da skill X" é config
+  // da plataforma/skill, não de tenant (skills são globais desde a F2). O scorer é
+  // DETERMINÍSTICO (P7) — roda na CI sem chave de IA. `skillos_eval_runs.regressed`
+  // é o gate de regressão (simples, sem ML): passRate caiu ou caso que passava falhou.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS skillos_eval_cases (
+        case_id TEXT PRIMARY KEY,
+        skill_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        scorer TEXT NOT NULL,                 -- exact|json_subset|field_equals|grounded|non_empty|predicate
+        input_json TEXT NOT NULL DEFAULT 'null',
+        expected_json TEXT,
+        field_path TEXT,
+        recorded_output_json TEXT,            -- candidato gravado (replay determinístico)
+        weight REAL NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'active',-- active|disabled
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_skillos_eval_cases_skill ON skillos_eval_cases(skill_id, status);
+      CREATE TABLE IF NOT EXISTS skillos_eval_runs (
+        id TEXT PRIMARY KEY,
+        skill_id TEXT NOT NULL,
+        prompt_version TEXT,
+        total INTEGER NOT NULL DEFAULT 0,
+        passed INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        pass_rate REAL NOT NULL DEFAULT 0,
+        regressed INTEGER NOT NULL DEFAULT 0,
+        passed_case_ids_json TEXT NOT NULL DEFAULT '[]',
+        mode TEXT NOT NULL DEFAULT 'eval',    -- eval|shadow
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_skillos_eval_runs_skill ON skillos_eval_runs(skill_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabelas skillos_eval_cases/runs', e); }
 };
 
 initDb();

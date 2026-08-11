@@ -2,7 +2,7 @@ import db from "./db.js";
 import { SkillOsRegistryService } from "./SkillOsRegistryService.js";
 import { SkillOsEvalService } from "./SkillOsEvalService.js";
 import { SkillOsRolloutService } from "./SkillOsRolloutService.js";
-import { Capability, SkillManifest, rolloutStageRank } from "./skillosModel.js";
+import { Capability, SkillManifest, rolloutStageRank, ROLLOUT_STAGES, RolloutStage } from "./skillosModel.js";
 
 /**
  * SkillOsPilotSeeder — onboarding dos 3 pilotos §61 no SkillOS. Registra Capability +
@@ -21,6 +21,9 @@ import { Capability, SkillManifest, rolloutStageRank } from "./skillosModel.js";
  *   - `raisePilotsCanary()` — SUBIR O CANÁRIO §68 (ex.: 10% → 25%). Não mexe no estágio,
  *     só amplia o cohort (hash estável: subir só ADICIONA orgs). One-time por-percentual
  *     (marker), só sobe, preserva quem o operador já ajustou. Mesma família da promoção.
+ *   - `advancePilotsToStage()` — AVANÇAR O ESTÁGIO §68 (ex.: `pilot` → `approved_execution`).
+ *     Sobe o teto de `execution_mode` (ADR-159). One-time por-estágio (marker), só avança
+ *     (nunca rebaixa), preserva canário e quem o operador já subiu. `autonomous` nunca.
  *
  * PRINCÍPIO (PRD §3): NÃO reimplementa comportamento. Cada Capability APONTA (via
  * `description`) pro serviço real que já existe; a Skill é só o manifesto/metadado. Os
@@ -215,6 +218,41 @@ export class SkillOsPilotSeeder {
     }
     this.setMarker(marker);
     return { raised, skipped, alreadyApplied: false, percent: p };
+  }
+
+  /**
+   * AVANÇAR O ESTÁGIO §68 dos 3 pilotos pra `stage` (ex.: `pilot` → `approved_execution`).
+   * Diferente do canário, isto sobe o TETO de `execution_mode` (ADR-159): em
+   * `approved_execution` o efeito só ocorre após aprovação no choke-point. Nos pilotos §61
+   * segue inerte na prática (nenhum tem `commandType` próprio) — mas o teto é real.
+   * `autonomous` NUNCA é semeado por rollout (RN-014/LGPD): o maior estágio é `broader`,
+   * que ainda mapeia pra `approved_execution` (humano no laço).
+   *
+   * Mesmas salvaguardas da família (idempotente + não briga com o operador):
+   *   - one-time POR-estágio via marker `pilots_stage_<stage>_v1`.
+   *   - só AVANÇA (rank do atual < rank do alvo): skill que o operador já pôs em/além
+   *     do alvo é preservada — nunca rebaixa. Canário é preservado (não é tocado aqui).
+   */
+  static advancePilotsToStage(stage: RolloutStage): { advanced: string[]; skipped: string[]; alreadyApplied: boolean; stage: RolloutStage } {
+    if (!ROLLOUT_STAGES.includes(stage)) throw new Error(`estágio inválido: ${stage}`);
+    const marker = `pilots_stage_${stage}_v1`;
+    if (this.markerApplied(marker)) {
+      return { advanced: [], skipped: [...PILOT_SKILL_IDS], alreadyApplied: true, stage };
+    }
+    const target = rolloutStageRank(stage);
+    const advanced: string[] = [];
+    const skipped: string[] = [];
+    for (const skillId of PILOT_SKILL_IDS) {
+      const cur = SkillOsRolloutService.get(skillId);
+      if (rolloutStageRank(cur.stage) < target) {
+        SkillOsRolloutService.setStage(skillId, stage);
+        advanced.push(skillId);
+      } else {
+        skipped.push(skillId); // já em/além do alvo — preserva (nunca rebaixa)
+      }
+    }
+    this.setMarker(marker);
+    return { advanced, skipped, alreadyApplied: false, stage };
   }
 }
 

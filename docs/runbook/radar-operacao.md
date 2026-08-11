@@ -71,6 +71,8 @@ UPDATE organization_settings SET radar_human_signals_enabled = 1 WHERE organizat
 
 `GET /api/signals/health` devolve `overall: ok | watch | degraded` e, por detector: `emittedWindow`, `ageHours`, `stale`, `stormRisk`, `calibration`, `falsePositiveRate`, `dismissalRate`, `status`. É o primeiro lugar a olhar em qualquer incidente do Radar.
 
+> **UI:** o painel **"Radar — Saúde"** (menu Master Admin, `RadarHealthView`) materializa `/health` + `/detector-budget` — verdito geral, volume por severidade, e por detector o status/frescor/calibração + a barra de consumo do budget de IA do dia. Pura leitura.
+
 ### Incidente: detector em **storm** (volume anômalo)
 
 - **Sintoma:** `health.detectors[].stormRisk = true`, `overall = degraded`, pico de sinais de um `source_service`.

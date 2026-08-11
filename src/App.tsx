@@ -37,6 +37,7 @@ import { AdminMasterView } from '@/src/features/AdminMasterView';
 import { AiUsageDashboardView } from '@/src/features/AiUsageDashboardView';
 import { NicheIntelligenceView } from '@/src/features/NicheIntelligenceView';
 import { ProductionReadinessView } from '@/src/features/ProductionReadinessView';
+import { RadarHealthView } from '@/src/features/RadarHealthView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
 import { RetailFloorView } from '@/src/features/RetailFloorView';
 import { LegalAdvisorView } from '@/src/features/LegalAdvisorView';
@@ -321,6 +322,7 @@ export default function App() {
              {viewMode === 'ai_usage' && 'Consumo de IA'}
              {viewMode === 'niche_intel' && 'Inteligência de Nicho'}
              {viewMode === 'production_readiness' && 'Prontidão de Produção'}
+             {viewMode === 'radar_health' && 'Saúde do Radar'}
              {viewMode === 'retailops' && 'Operação da Rede'}
              {viewMode === 'retailfloor' && 'Atendimento de Loja'}
              {viewMode === 'channels' && 'Canais e IA'}
@@ -438,6 +440,7 @@ export default function App() {
           {viewMode === 'ai_usage' && <AiUsageDashboardView />}
           {viewMode === 'niche_intel' && <NicheIntelligenceView />}
           {viewMode === 'production_readiness' && <ProductionReadinessView />}
+          {viewMode === 'radar_health' && <RadarHealthView />}
           {viewMode === 'retailops' && <RetailOpsView />}
           {viewMode === 'retailfloor' && <RetailFloorView />}
           {viewMode === 'comigo' && <ComigoView />}

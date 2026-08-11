@@ -19,6 +19,7 @@ Repositório monolítico (frontend React + backend Node/Express + SQLite via `be
 | ADR-144 | Escola — conector família + resumo diário | em produção |
 | ADR-136 | Decision-Action Ledger (`business_signals`) | em produção — usado por Retail, Escola, Clínica (F47) |
 | **ADR-136/156** | **Decision Intelligence (consolidação transversal)** | **FECHADO — DI-1..DI-4.5 + UI + ADR-156. Aditivo sobre ADR-135/136/152; sem menu novo pro lojista** |
+| **ADR-161** | **Radar Empresarial (percepção transversal + sensibilidade de negócio)** | **FECHADO — PRD 2 em 12 fases (F1–F12) / 20 PRs. Aditivo sobre ADR-136/158; sem ledger/alerta paralelo (CA1). Três origens de percepção (humana/digital/externa) + correlação + anomalia + investigação + priorização goal/SLA/reversibilidade + roteamento + calibração + production readiness (health · budget por-detector · runbook). Runbook em `docs/runbook/radar-operacao.md`** |
 | ADR-132 | Sinais finos | em produção |
 | ADR-081 | Conectores TISS (roadmap TISS XML/WS) | roadmap — molde documentado; aditivo à ADR-145 |
 | ADR-151 | FalaTu — captura multimodal "Fala → Faz → Confere" (porte do repo `Eldastito/FalaTu`) | Núcleo fechado (5 fatias) + F6 aditivo em produção: multi-tenant opt-in + WhatsApp no canal interno + compras com conferência + memória com desambiguação ativa ("qual Carlos?") + briefing diário proativo via `business_signals` + entrega do briefing por WhatsApp (digest, molde ADR-144) |

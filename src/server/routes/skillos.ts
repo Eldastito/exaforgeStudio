@@ -4,6 +4,7 @@ import { SkillOsRegistryService } from "../SkillOsRegistryService.js";
 import { SkillOsResolverService } from "../SkillOsResolverService.js";
 import { SkillOsModelRouterService } from "../SkillOsModelRouterService.js";
 import { SkillOsProviderHealthService } from "../SkillOsProviderHealthService.js";
+import { SkillOsPlannerService } from "../SkillOsPlannerService.js";
 
 /**
  * SkillOS — leitura do CATÁLOGO de Capabilities/Skills (PRD 4 F2). Só lookup nesta
@@ -70,6 +71,19 @@ router.get("/provider-health/:provider", requireRole("owner", "admin"), (req: Au
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SkillOsProviderHealthService.stats(req.params.provider, { model: req.query.model as any }));
+});
+
+// POST /api/skillos/plan { goal, steps:[{capabilityId, dependsOn?}], vertical? } — o
+// Planner monta o ExecutionPlan (F7). PLANEJA, não executa. Gestor.
+router.post("/plan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    res.json(SkillOsPlannerService.plan(orgId, req.user, { goal: b.goal, intent: b.intent, vertical: b.vertical, correlationId: b.correlationId, maxRisk: b.maxRisk, steps: Array.isArray(b.steps) ? b.steps : [] }));
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
 });
 
 export default router;

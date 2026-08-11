@@ -4,9 +4,9 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Estado atual
 
-- **Fase:** 6 — Grounding + Confidence (em revisão/PR).
-- **Última fatia:** F6 entregue (gate UNSUPPORTED_CLAIM + Confidence Engine). F5 mergeada (#962).
-- **Baseline:** `main` @ `1d987e7` (pós F5).
+- **Fase:** 7 — Planner (em revisão/PR).
+- **Última fatia:** F7 entregue (objetivo → ExecutionPlan). F6 mergeada (#963).
+- **Baseline:** `main` @ `2b67267` (pós F6).
 
 ## Entregue nesta sessão
 
@@ -16,7 +16,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 - **Fase 3 (mergeada #960):** `SkillOsResolverService.resolve` — escolha determinística de Skill (sem IA, §11) + `rankSkills` puro + fallbackChain + sem-silêncio. `test:skillos-resolver` (19).
 - **Fase 4 (mergeada #961):** AI Run estende `ai_usage_log` (D4) + `AiReliabilityKernel.run` (choke-point: validação+taxonomia+retry por política+AI Run). `test:skillos-reliability` (19).
 - **Fase 5 (mergeada #962):** `skillos_model_profiles` + `SkillOsModelRouterService.route` + `SkillOsProviderHealthService` (circuit breaker derivado) + PRICES com Claude. `test:skillos-model-router` (19).
-- **Fase 6:** GROUNDING + CONFIDENCE (COMPÕE sobre PRD 3). Primitivas puras em `skillosModel`: `checkGrounding` (gate UNSUPPORTED_CLAIM §19 — fato/estimativa tem de citar `EvidenceReference` que EXISTE; determinístico, sem NLP) + `assessConfidence` (§21 — reusa `confidenceBand`; grounding unsupported derruba a confiança → ação fallback). Serviços `SkillOsGroundingService` (check + evidenceFromPacket/evidenceFromRagHits, reusa evidenceFromRagHit) e `SkillOsConfidenceService` (assess + `fromSignal` compondo `ImpactPrioritizationService.scoreOne`). Kernel (F4) ganha `spec.ground` opt-in → grava `grounding_status` REAL na AI Run; `blockOnUnsupported` → AI-FAIL-3 (fallback). Sem `ground` → skipped (F4 inalterado). `test:skillos-grounding` (21). Guardrails RN-GND-1..3 + RN-CONF-1..4. 0 mudança de comportamento.
+- **Fase 6 (mergeada #963):** `checkGrounding` (gate UNSUPPORTED_CLAIM §19) + `assessConfidence` (§21) + serviços grounding/confidence + kernel `spec.ground` opt-in. `test:skillos-grounding` (21).
+- **Fase 7:** `SkillOsPlannerService.plan(orgId, user, {goal, steps:[{capabilityId, dependsOn?}]})` — objetivo + capabilities → `ExecutionPlan`: resolve cada passo via Resolver (F3), agrega risco/perfil de contexto, valida deps (dep inexistente/ciclo→blocked). NÃO executa (§12). Sem silêncio (§65): capability sem skill → passo unresolved + plano blocked + `unresolvedCapabilities`. Primitivas puras (`maxRisk`/`deepestProfile`/`validatePlanDeps`/`topoSortSteps`/`ExecutionPlan`). Ponte `toPlaybook` projeta na forma do `ProcessRuntime`/`PlaybookEngine` (reuso F8, sem persistir/executar). Síntese CONSERVADORA (caller declara os passos; decompor objetivo aberto por IA é fase posterior). Rota `POST /api/skillos/plan`. `test:skillos-planner` (18). Guardrails RN-PLN-1..5. 0 mudança de comportamento.
 
 ## Achados-chave (resumo)
 
@@ -31,8 +32,8 @@ _Fonte de verdade de estado entre sessões (§71). Nenhuma sessão futura deve d
 
 ## Próxima ação
 
-- Aprovada a F6 → **Fase 7 (Planner)**: intent/goal → capabilities → ExecutionPlan. REUTILIZAR `ProcessRuntimeService`/`PlaybookEngine` (planos autorais) + CRIAR a camada de SÍNTESE goal→plano. Consome Context (PRD 3) + Resolver (F3). Não executa — planeja.
+- Aprovada a F7 → **Fase 8 (Policy + Execution Bridge)**: Skill Result → `DecisionActionService`/`ApprovalPolicyService` → `CommandExecutorService` SEM bypass (ADR-159/§67). O plano (F7) vira execução governada — todo efeito de skill é um `command_type` atrás do choke-point único.
 
 ## Testes / CI
 
-- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19) + `-model-router` (19) + `-grounding` (21), determinísticos. AI-usage + billing + context + tenant-isolation verdes — 0 regressão.
+- `test:skillos-contracts` (31) + `-registry` (21) + `-resolver` (19) + `-reliability` (19) + `-model-router` (19) + `-grounding` (21) + `-planner` (18), determinísticos. AI-usage + billing + context + tenant-isolation verdes — 0 regressão.

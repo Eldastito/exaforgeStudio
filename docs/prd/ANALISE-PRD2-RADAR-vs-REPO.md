@@ -23,7 +23,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | Choke-point de execução | `CommandExecutorService.execute` (G1/G2/G3) | **auto-trigger ≠ auto-execute já garantido** (§43/CA13) |
 | Autonomia L1–L4 | `autonomy_level` (observe/suggest/prepare/execute) + Autonomy Contract + ProgressiveAutonomy | Completo; IA nunca se auto-eleva |
 | Distância à meta / pacing | `BusinessGoalService.progress()` (`:111`) | Existe (remaining/attainment/paceStatus) **mas isolado** — não alimenta prioridade |
-| Prioridade econômica | `ImpactPrioritizationService` (score 5-fatores, L0–L4, `analysisFor` depth-gate) | Forte. Falta SLA/reversibility/**goal-relevance** no score |
+| Prioridade econômica | `ImpactPrioritizationService` (score 5-fatores, L0–L4, `analysisFor` depth-gate) | ✅ Forte + goal-relevance (F5) + **SLA/reversibility (F7)** — boosts situacionais multiplicativos |
 | Impacto esperado×realizado | `OutcomeMeasurementService` + `UnifiedImpactLedgerService` | Valor protegido/capturado derivado por query |
 | Governança de custo de IA | `ResearchBudgetService` (plataforma) + `AiQuotaSignalService` (por-org) + `ai_usage_log` | Falta **budget por-detector / max-investigations-dia** |
 
@@ -56,7 +56,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **Recorrência/reopen** | Republish nunca reabre resolvido (§55). Recorrência precisa de novo ciclo com histórico | F2 |
 | ~~**`process_instances.correlation_id`**~~ | ✅ **F2.3 ENTREGUE** — coluna+índice; `startFromSignal` propaga o correlation do sinal; thread (F6) costura o processo do router. `test:signal-process-spine` (7 checks) | ~~F2~~ ✅ |
 | ~~**Goal-relevance no score**~~ | ✅ **F5 ENTREGUE** — boost multiplicativo (0 sem meta atrasada) via `BusinessGoalService.progress`; `goalRelevance`+`affectedGoal` na saída. `test:goal-aware-priority` (8 checks) | ~~F5~~ ✅ |
-| SLA + reversibility no score | §38 lista fatores ausentes no score atual | F7 |
+| ~~SLA + reversibility no score~~ | ✅ **F7 ENTREGUE** — `slaPressure` (pressão de prazo via `expires_at`, horizonte 72h) + `irreversibility` (hint `evidence.reversibility`); boosts multiplicativos default-0 (zero regressão); detector declara, scorer honra. `test:impact-sla-reversibility` (21 checks) | ~~F7~~ ✅ |
 | ~~Expansão do TRIGGER_MAP~~ | ✅ **F8 ENTREGUE** — +mapa explícito (stalled_opportunities→sales_recovery) + mecanismo recommendedProcessType com allowlist de processos maduros. `test:signal-routing-expansion` (9 checks) | ~~F8~~ ✅ |
 | ~~`recommendedProcessType` no sinal~~ | ✅ **F8** — o detector declara (F4.2) e o router honra se o processo for maduro (allowlist) | ✅ |
 | Budget por-detector / max-investigations-dia | Só há ceiling por-org + budget de plataforma (§84) | F12 |
@@ -94,7 +94,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | CA6 baseline | ✅ **primitiva em uso real (F4.3)** | ✅ |
 | CA7 goal-aware | ✅ **F5 wired** (metas atrasadas boostam a prioridade) | ✅ |
 | CA8 impacto não inventado | ✅ `basis=estimate` + premises | reforçar em F6 |
-| CA9 sinais priorizados | ✅ `ImpactPrioritizationService` | F7 refina |
+| CA9 sinais priorizados | ✅ `ImpactPrioritizationService` + **F7 (SLA/reversibility)** | ✅ |
 | CA10 attention feed único | ✅ já é | não regredir |
 | CA11 Fala Tu consome | ✅ Smart Inbox/Home consomem | não regredir |
 | CA12 sinal→processo | ✅ router (mapa explícito + recommendedProcessType maduro, F8) | ✅ |
@@ -117,7 +117,7 @@ O PRD 2 é **explícito** (§5, §107): **não construir outro Radar do zero**. 
 | **F4** | Anomaly framework + registry | CRIAR | F4.1 primitivas (baseline/deviation/min-sample/cooldown) · F4.2 registry+contrato · F4.3 1 detector piloto migrado |
 | **F5** | Goal-aware prioritization | ESTENDER | wire `BusinessGoalService.progress` → score |
 | **F6** | Investigation pipeline (causa-candidata) | CRIAR | determinístico→correlação→histórico→LLM-gated |
-| **F7** | Impact prioritization refino (SLA/reversibility/goal) | ESTENDER | fatores no score |
+| ~~**F7**~~ ✅ | Impact prioritization refino — **FECHADA**: `slaPressure` (prazo via `expires_at`) + `irreversibility` (hint `evidence.reversibility`), boosts multiplicativos default-0 (§38); goal-relevance já vinha da F5. `test:impact-sla-reversibility` (21) | ESTENDER | ✅ |
 | **F8** | Routing expansion (beachhead §71) | ESTENDER | +mapeamentos maduros (collection/sales_recovery) |
 | ~~**F9**~~ ✅ | Human signals (Fala Tu → radar) — **FECHADA**: `HumanSignalService.observe` (opt-in `radar_human_signals_enabled`) normaliza a observação humana num `business_signal` (`origin:human`, `basis=estimate\|hypothesis`, **nunca fact §13**) com **acúmulo de evidência** (mesmo assunto sobe confiança 0.30→0.85 e severidade info→attention→risk, derivado de `observations.length`, RN-004); atômico (tx); `POST /api/signals/observe`; sem tabela nova (CA1) | ESTENDER | ✅ |
 | ~~**F10**~~ ✅ | External signal contract (molde) — **FECHADA**: `ExternalSignalService.ingest`, proveniência + dedupe por origem, fact só se verificável (§13), `POST /api/signals/ingest-external`, `test:external-signals` (22). CA2 fica **100%** (H/D/E) | CRIAR | ✅ |

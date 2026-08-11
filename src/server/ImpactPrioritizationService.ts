@@ -13,6 +13,8 @@ import { BusinessGoalService } from "./BusinessGoalService.js";
  * Score (PRD §9.2):
  *   priority_score = normalized_impact*0.40 + urgency*0.20 + confidence*0.15
  *                  + strategic_weight*0.15 + actionability*0.10
+ * Sobre o score-base, BOOSTS situacionais MULTIPLICATIVOS (default 0 = identidade):
+ *   F5 (§30-31) goal-relevance · F7 (§38) SLA (pressão de prazo) + irreversibilidade.
  *
  * Regras: impacto normalizado DENTRO da mesma unidade; BRL tem preferência;
  * eventos críticos de segurança/compliance podem ultrapassar o ranking
@@ -29,6 +31,21 @@ const GOAL_DOMAINS: Record<string, string[]> = {
   appointments: ["agenda", "clinic"],
 };
 const GOAL_BOOST = 0.5; // até +50% quando a meta está 100% abaixo do ritmo
+
+// PRD 2 F7 (§38) — dois FATORES SITUACIONAIS que o score de 5 fatores (§9.2) não
+// media: PRESSÃO DE PRAZO (SLA) e IRREVERSIBILIDADE. Ambos são boosts
+// MULTIPLICATIVOS que DEFAULTAM A 0 (identidade) quando o sinal não os carrega —
+// mesma mecânica da F5 (goal), zero regressão pra sinais sem prazo/reversibilidade.
+// Derivam SÓ do que o sinal traz (`expires_at` e um hint `evidence.reversibility`):
+// o detector DECLARA, o scorer HONRA (padrão F4.2/F8) — o scorer não inventa.
+const SLA_BOOST = 0.4;             // até +40% quando o prazo já estourou/está no fio
+const IRREVERSIBILITY_BOOST = 0.3; // até +30% quando a janela de reação fecha (irreversível)
+// Horizonte de pressão de prazo: só o prazo DENTRO desta janela pesa; mais longe
+// que isso → 0 (não é urgência de SLA ainda). Passado do prazo → pressão máxima.
+const SLA_HORIZON_MS = 72 * 3600 * 1000;
+// Hint de reversibilidade → irreversibilidade (0..1). Quanto MENOS reversível a
+// situação, MAIOR a prioridade (a janela pra evitar o dano está fechando).
+const REVERSIBILITY_HINT: Record<string, number> = { low: 1.0, medium: 0.5, high: 0.0, irreversible: 1.0, reversible: 0.0 };
 
 // Peso estratégico por domínio (0..1). Segurança/compliance no topo (podem
 // ultrapassar o financeiro via override abaixo).
@@ -236,6 +253,34 @@ export class ImpactPrioritizationService {
     return out;
   }
 
+  /**
+   * F7 (§38) — pressão de prazo (SLA) de um sinal, 0..1. Deriva do `expires_at`:
+   * já passou → 1 (janela estourou); dentro do horizonte → cresce conforme se
+   * aproxima; além do horizonte (ou sem prazo) → 0. `now` injetável pra teste.
+   */
+  static slaPressure(s: any, now = Date.now()): number {
+    const raw = s?.expires_at || s?.expiresAt;
+    if (!raw) return 0;
+    const exp = Date.parse(String(raw));
+    if (!Number.isFinite(exp)) return 0;
+    const remaining = exp - now;
+    if (remaining <= 0) return 1;                 // prazo estourado → pressão máxima
+    if (remaining >= SLA_HORIZON_MS) return 0;    // ainda distante → sem pressão de SLA
+    return clamp01(1 - remaining / SLA_HORIZON_MS);
+  }
+
+  /**
+   * F7 (§38) — irreversibilidade de um sinal, 0..1. Deriva do hint que o detector
+   * pode declarar em `evidence.reversibility` (low|medium|high|reversible|
+   * irreversible). Ausente/desconhecido → 0 (assume reversível, sem boost —
+   * fail-safe: o scorer NÃO presume irreversibilidade que o detector não afirmou).
+   */
+  static irreversibility(s: any): number {
+    const ev = s && typeof s.evidence_json === "string" ? safeParse(s.evidence_json) : (s?.evidence || {});
+    const hint = String(ev?.reversibility ?? "").toLowerCase();
+    return REVERSIBILITY_HINT[hint] ?? 0;
+  }
+
   private static scoreSignal(orgId: string, s: any, maxByUnit: Record<string, number>, goalGaps?: Map<string, { metric: string; label: string; gap: number }>): any {
     const severity = String(s.severity || "info");
     const urgency = URGENCY[severity] ?? 0.15;
@@ -267,7 +312,11 @@ export class ImpactPrioritizationService {
     // F5 — boost de meta: sinal que ameaça uma meta atrasada sobe. 0 sem meta.
     const goal = goalGaps?.get(s.domain) || null;
     const goalRelevance = goal?.gap || 0;
-    const score = round4(baseScore * (1 + GOAL_BOOST * goalRelevance));
+    // F7 (§38) — pressão de prazo (SLA) + irreversibilidade. Ambos 0 quando o
+    // sinal não os carrega → score idêntico ao pré-F7 (zero regressão).
+    const slaPressure = ImpactPrioritizationService.slaPressure(s);
+    const irreversibility = ImpactPrioritizationService.irreversibility(s);
+    const score = round4(baseScore * (1 + GOAL_BOOST * goalRelevance + SLA_BOOST * slaPressure + IRREVERSIBILITY_BOOST * irreversibility));
 
     // Aprovação necessária p/ a ação recomendada (reusa a política da C2a).
     let approval: any = null;
@@ -296,6 +345,9 @@ export class ImpactPrioritizationService {
         strategicWeight: round4(strategic),
         actionability: round4(actionability),
         goalRelevance: round4(goalRelevance),
+        // F7 (§38) — fatores situacionais (0 quando o sinal não os carrega).
+        slaPressure: round4(slaPressure),
+        irreversibility: round4(irreversibility),
       },
       // F5 — qual meta este sinal ameaça (null se nenhuma atrasada no domínio).
       affectedGoal: goal ? { metric: goal.metric, label: goal.label, gapPct: round2(goal.gap * 100) } : null,

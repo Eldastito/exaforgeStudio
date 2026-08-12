@@ -13,6 +13,7 @@ import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
 import { FalatuSaveOfferService } from "../FalatuSaveOfferService.js";
 import { ProductionReadinessService } from "../ProductionReadinessService.js";
 import { OperationalHealthService } from "../OperationalHealthService.js";
+import { PlatformBaselineService } from "../PlatformBaselineService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -43,6 +44,24 @@ router.get("/operational-health", (_req: AuthRequest, res): any => {
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
+});
+
+// ADR-164 F6 — baseline agregado de uma métrica (master-only). Sem histórico → honesto.
+router.get("/platform-baseline", (req: AuthRequest, res): any => {
+  try {
+    const metric = typeof req.query?.metric === "string" ? req.query.metric : "app.p95";
+    const seasonal = req.query?.seasonal === "1" || req.query?.seasonal === "true";
+    const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+    return res.json(PlatformBaselineService.baseline(metric, { seasonal, days }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F6 — candidatos a anomalia (desvio sustentado vs baseline). Hipótese, não veredito.
+router.get("/platform-anomalies", (req: AuthRequest, res): any => {
+  try {
+    const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+    return res.json(PlatformBaselineService.anomalies({ days }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 
 // Master Admin - SaaS overview (métricas agregadas de todas as empresas)

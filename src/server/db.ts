@@ -7679,6 +7679,29 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar ux_telemetry_events (ADR-163 F10)', e); }
 
+  // PRD 7 F6 (ADR-164 §11/§33/§47) — "Platform Health Event": snapshots AGREGADOS de
+  // saúde de plataforma pra baseline/anomalia. GLOBAL (sem organization_id — molde do
+  // research_usage_log; dado de infra é do Admin Master, RN-PRC-4). §11 permite persistir
+  // AGREGADO (nunca raw time-series). `dow`/`hour` são o seasonality bucket (§33). Retenção
+  // aplicada pelo Scheduler (nunca infla o banco — §19).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS platform_health_snapshots (
+        id TEXT PRIMARY KEY,
+        captured_at DATETIME NOT NULL,
+        metric TEXT NOT NULL,                  -- app.p95 | app.error_rate | proc.rss | host.load1m | queue.pending | ...
+        value REAL NOT NULL,
+        dow INTEGER NOT NULL,                  -- 0-6 (seasonality bucket, hora SP)
+        hour INTEGER NOT NULL,                 -- 0-23 (seasonality bucket, hora SP)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_platform_health_metric
+        ON platform_health_snapshots (metric, captured_at);
+      CREATE INDEX IF NOT EXISTS idx_platform_health_bucket
+        ON platform_health_snapshots (metric, dow, hour);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar platform_health_snapshots (ADR-164 F6)', e); }
+
   // ADR-154 Fatia 1.1 — AI usage ledger estendido com atribuição por
   // USUÁRIO + MÓDULO + OPERAÇÃO + LATÊNCIA + custo em CENTAVOS (INTEGER, pra
   // queries determinísticas — cost_brl REAL fica pra compat com admin

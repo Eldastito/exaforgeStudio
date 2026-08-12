@@ -53,6 +53,8 @@ import { RetailImpactService } from "./RetailImpactService.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
 import { LegacyReductionReminderService } from "./LegacyReductionReminderService.js";
+import { PlatformTelemetryService } from "./PlatformTelemetryService.js";
+import { PlatformBaselineService } from "./PlatformBaselineService.js";
 import { VerticalIntelligenceResearchService } from "./VerticalIntelligenceResearchService.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
 import { BackupService } from "./BackupService.js";
@@ -751,6 +753,12 @@ export class Scheduler {
     // telemetria prova substituição, publica em business_signals pro gestor ver na
     // Smart Inbox. Advisório (nunca remove tela); resolve o sinal quando não há candidato.
     try { LegacyReductionReminderService.maybeWeeklySweep(); } catch (e) { console.error('[Scheduler] lembrete de redução de legado falhou', e); }
+    // ADR-164 F6 — captura horária de snapshot AGREGADO de saúde de plataforma (baseline).
+    // Só quando a telemetria de plataforma está ligada (opt-in). Retenção de 90 dias
+    // pra não inflar o banco (§19). Best-effort; nunca derruba o tick.
+    try {
+      if (PlatformTelemetryService.isEnabled()) { PlatformBaselineService.capture(); PlatformBaselineService.prune(90); }
+    } catch (e) { console.error('[Scheduler] captura de baseline de plataforma falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

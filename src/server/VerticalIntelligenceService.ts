@@ -61,10 +61,17 @@ export class VerticalIntelligenceService {
     // Registra o custo da chamada no ledger de plataforma (derivação do gasto).
     ResearchBudgetService.record({ fingerprint: researchFingerprint(vertical, topic, region || undefined, timeframe || undefined), vertical, topic, provider: provider.name, costCents: Number(result?.costCents) || 0 });
 
-    // Persiste no compartilhado (anonimiza + dedup + audita).
+    // Persiste no compartilhado (anonimiza + dedup + audita). PRD 9 F7: carrega a
+    // PROCEDÊNCIA (evidenceMode + sourceEvidence) junto do conteúdo — a distinção
+    // model_knowledge × live fica gravada e observável (RN-EI-1/6), sem tabela nova.
     return this.publish(actor, {
       vertical, topic, region, timeframe,
-      content: result?.content ?? {},
+      content: {
+        ...(result?.content ?? {}),
+        evidenceMode: result?.evidenceMode ?? "model_knowledge",
+        sourceEvidence: Array.isArray(result?.sourceEvidence) ? result.sourceEvidence : [],
+        retrievedAt: result?.retrievedAt ?? null,
+      },
       sources: Array.isArray(result?.sources) ? result.sources : [],
       confidence: Number(result?.confidence) || 0,
       provider: provider.name, ttlDays: input.ttlDays,

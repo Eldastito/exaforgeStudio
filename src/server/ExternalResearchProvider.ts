@@ -27,11 +27,39 @@ export interface ResearchQuery {
   query: string; // derivada SÓ de (vertical, topic, region, timeframe) — RN-156-2
 }
 
+/**
+ * Procedência de UMA fonte (PRD 9 / ADR-166 F7). Distingue evidência VIVA de
+ * conhecimento do modelo. `tier`: A = fonte primária/oficial verificável; B =
+ * secundária confiável; C = alegada/não-verificada (ex.: fonte que o MODELO citou
+ * sem recuperação real). `retrievedAt` só existe em recuperação de fato (live).
+ */
+export interface SourceEvidence {
+  url?: string | null;
+  title?: string | null;
+  publisher?: string | null;
+  tier: "A" | "B" | "C";
+  retrievedAt?: string | null;   // ISO — só em busca viva; null em model_knowledge
+  freshness?: string | null;     // rótulo de recência quando conhecido
+}
+
+/**
+ * Modo de evidência (PRD 9 / ADR-166 F7, RN-EI-1/6): `model_knowledge` = síntese do
+ * MODELO a partir de conhecimento paramétrico (stub/llm hoje) — NÃO é fonte viva;
+ * `live` = recuperação real de fonte externa (provider de busca viva, F8). A decisão
+ * DEVE ponderar diferente por modo — model_synthesis ≠ live evidence (§53/§54).
+ */
+export type EvidenceMode = "model_knowledge" | "live";
+
 export interface ResearchResult {
   content: any;       // achados do mundo externo (JSON)
   sources: string[];
   confidence: number; // 0..1
   costCents?: number; // custo da chamada (para o orçamento de pesquisa, DI-4.2); stub = 0
+  // PRD 9 F7 — procedência explícita. Sem estes campos a decisão trata síntese do
+  // modelo como se fosse fonte viva; com eles, a distinção é honesta.
+  evidenceMode: EvidenceMode;
+  sourceEvidence: SourceEvidence[];
+  retrievedAt?: string | null;    // quando o pacote foi produzido/recuperado (live)
 }
 
 export interface ExternalResearchProvider {
@@ -57,6 +85,10 @@ export class StubResearchProvider implements ExternalResearchProvider {
       },
       sources: ["stub://vertical-intelligence"],
       confidence: 0.5,
+      // Stub é síntese determinística, não recuperação de fonte — model_knowledge honesto.
+      evidenceMode: "model_knowledge",
+      sourceEvidence: [],
+      retrievedAt: null,
     };
   }
 }
@@ -137,11 +169,22 @@ export function parseLlmResearch(raw: string, q: ResearchQuery): ResearchResult 
     generatedBy: "llm",
   };
   if (!content.summary && content.drivers.length === 0) return null;
+  const sources = Array.isArray(parsed.sources) ? parsed.sources.map((s: any) => String(s)).slice(0, 12) : [];
+  // RN-EI-1/6: a "pesquisa" do LLM é conhecimento PARAMÉTRICO — model_knowledge, nunca
+  // live. As fontes que o modelo cita são ALEGADAS (não recuperadas) → tier 'C', sem
+  // retrievedAt. Isso impede a decisão de tratar síntese do modelo como fonte viva.
+  const sourceEvidence: SourceEvidence[] = sources.map((s) => {
+    const isUrl = /^https?:\/\//i.test(s);
+    return { url: isUrl ? s : null, title: isUrl ? null : s, publisher: null, tier: "C" as const, retrievedAt: null, freshness: null };
+  });
   return {
     content,
-    sources: Array.isArray(parsed.sources) ? parsed.sources.map((s: any) => String(s)).slice(0, 12) : [],
+    sources,
     confidence: clamp01(parsed.confidence),
     costCents: LLM_RESEARCH_COST_CENTS,
+    evidenceMode: "model_knowledge",
+    sourceEvidence,
+    retrievedAt: null,
   };
 }
 

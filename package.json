@@ -53,6 +53,7 @@
     "test:ux-execution-results": "tsx scripts/test-ux-execution-results.ts",
     "test:adaptive-onboarding": "tsx scripts/test-adaptive-onboarding.ts",
     "test:inferred-settings": "tsx scripts/test-inferred-settings.ts",
+    "test:contextual-upgrades": "tsx scripts/test-contextual-upgrades.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

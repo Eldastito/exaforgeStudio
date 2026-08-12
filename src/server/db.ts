@@ -8431,6 +8431,11 @@ const initDb = () => {
   // acontece por confirmação explícita (reusa ApprovalPolicyService.setBands). Flag
   // opt-in (default 0) só diz ao frontend se mostra as sugestões.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN inferred_settings_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 6 F9 (ADR-163 §55-§57, D3) — contextual upgrades: surfacear upgrade SÓ
+  // quando há recomendação situacional E o módulo é genuinamente fora-do-plano
+  // (Entitlement `available_to_buy`+visível). NUNCA catálogo de cadeados. Flag
+  // opt-in (default 0) só diz ao frontend se mostra a recomendação contextual.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN contextual_upgrade_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas

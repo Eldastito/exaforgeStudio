@@ -17,6 +17,7 @@ import { OutcomeCorrectionService } from "../OutcomeCorrectionService.js";
 import { OutcomeAssuranceMetricsService } from "../OutcomeAssuranceMetricsService.js";
 import { PatternLearningFromAssuranceService } from "../PatternLearningFromAssuranceService.js";
 import { LearningEpisodeService } from "../LearningEpisodeService.js";
+import { ResearchNeedService } from "../ResearchNeedService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -141,6 +142,17 @@ router.post("/assurance/learn", (req: AuthRequest, res): any => {
   const lookbackDays = Number(req.body?.lookbackDays) || undefined;
   const limit = Number(req.body?.limit) || undefined;
   res.json(PatternLearningFromAssuranceService.sweep(orgId, { lookbackDays, limit }));
+});
+
+// GET /api/decision-intelligence/research-needs — detecção de necessidade de pesquisa
+// externa (PRD 9 / ADR-166 F11): temas ativos (sinais abertos) sem inteligência de nicho
+// fresca, já mapeados na taxonomia (vertical,topic,region,timeframe). NÃO roda pesquisa.
+router.get("/research-needs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const region = typeof req.query?.region === "string" ? req.query.region : undefined;
+  const timeframe = typeof req.query?.timeframe === "string" ? req.query.timeframe : undefined;
+  res.json(ResearchNeedService.detect(orgId, { region, timeframe }));
 });
 
 // GET /api/decision-intelligence/learning/episodes — Learning Episodes (PRD 9 / ADR-166

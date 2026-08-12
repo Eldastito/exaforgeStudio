@@ -91,6 +91,7 @@
     "test:live-search-provider": "tsx scripts/test-live-search-provider.ts",
     "test:research-curation-gates": "tsx scripts/test-research-curation-gates.ts",
     "test:anonymize-tenant-terms": "tsx scripts/test-anonymize-tenant-terms.ts",
+    "test:research-need": "tsx scripts/test-research-need.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

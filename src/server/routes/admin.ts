@@ -17,6 +17,7 @@ import { PlatformBaselineService } from "../PlatformBaselineService.js";
 import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { CapacityForecastService } from "../CapacityForecastService.js";
 import { VpsSpecProfileService } from "../VpsSpecProfileService.js";
+import { SloDefinitionService } from "../SloDefinitionService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
@@ -180,6 +181,20 @@ router.get("/vps-spec-profile", (_req: AuthRequest, res): any => {
 router.post("/vps-spec-profile", (req: AuthRequest, res): any => {
   try {
     return res.json(VpsSpecProfileService.set(req.body || {}));
+  } catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+
+// ADR-164 F3.4 — SLO por jornada crítica: o Admin Master define o orçamento de latência
+// p95 + teto de erro (global e por rota). Com o SLO, a Operational Health classifica a
+// latência (antes só reportada). Sem SLO → honesto. GLOBAL.
+router.get("/slo", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(SloDefinitionService.get());
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.post("/slo", (req: AuthRequest, res): any => {
+  try {
+    return res.json(SloDefinitionService.set(req.body || {}));
   } catch (error: any) { return res.status(400).json({ error: error.message }); }
 });
 

@@ -19,6 +19,7 @@ import { ProductionReadinessService } from "./ProductionReadinessService.js";
 import { NodeHostTelemetryProvider } from "./NodeHostTelemetryProvider.js";
 import { HttpMetricsCollector } from "./HttpMetricsCollector.js";
 import { DependencyHealthService, HealthState } from "./DependencyHealthService.js";
+import { SloDefinitionService } from "./SloDefinitionService.js";
 
 // Limiares ABSOLUTOS e provisórios (até SLO/baseline os refinarem — §14/F6).
 const EVENTLOOP_WATCH_MS = 50, EVENTLOOP_DEGRADED_MS = 200;
@@ -65,21 +66,34 @@ export class OperationalHealthService {
     // ── Dependências (F4) ──
     const dependencies = DependencyHealthService.snapshot({ now });
 
-    // ── Estado operacional (só o julgável sem baseline) ──
+    // ── SLO (F3.4) — a latência p95 finalmente CLASSIFICA estado, mas só contra um alvo do
+    // operador (§14). Sem SLO definido → sloState 'unknown' (não afeta o estado; a latência
+    // segue só reportada, comportamento pré-F3.4). Com SLO → violação rebaixa o estado.
+    const slo = SloDefinitionService.evaluate({
+      p95Ms: sli.available ? sli.latencyMs!.p95 : null,
+      errorRatePct: sli.available ? sli.errorRatePct : null,
+    });
+    const sloState: HealthState | "unknown" = !slo.defined ? "unknown"
+      : slo.state === "degraded" ? "degraded" : slo.state === "watch" ? "watch"
+      : slo.state === "ok" ? "healthy" : "unknown";
+
+    // ── Estado operacional ──
     const runtimeState: HealthState | "unknown" = runtime.eventLoopLagMs == null ? "unknown"
       : runtime.eventLoopLagMs > EVENTLOOP_DEGRADED_MS ? "degraded"
       : runtime.eventLoopLagMs > EVENTLOOP_WATCH_MS ? "watch" : "healthy";
     const appState: HealthState | "unknown" = !sli.available ? "unknown"
       : sli.errorRatePct > ERR_DEGRADED_PCT ? "degraded"
       : sli.errorRatePct > ERR_WATCH_PCT ? "watch" : "healthy";
-    const operationalState = worstKnown([runtimeState, appState, dependencies.overall]);
+    const operationalState = worstKnown([runtimeState, appState, sloState, dependencies.overall]);
 
     return {
       configuration,
-      operational: { state: operationalState, runtime, application, dependencies },
+      operational: { state: operationalState, runtime, application, dependencies, slo },
       // Capacity Intelligence entra na F7+ e depende de baseline/ambiente — honesto.
       capacity: { state: "not_available", reason: "requires_baseline_and_env" },
-      note: "Operational Health provisório: latência p95/p99 é reportada mas não classifica estado sem SLO/baseline (§14, F3.4/F6).",
+      note: slo.defined
+        ? "Operational Health com SLO: a latência p95 classifica estado contra o alvo do operador (§14, F3.4)."
+        : "Operational Health provisório: latência p95/p99 é reportada mas não classifica estado sem SLO/baseline (§14, F3.4/F6). Defina o SLO em /api/admin/slo.",
       generatedAt: new Date(now).toISOString(),
     };
   }

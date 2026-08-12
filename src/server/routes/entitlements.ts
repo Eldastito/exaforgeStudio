@@ -11,6 +11,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { EntitlementService, type EntitlementAction } from "../EntitlementService.js";
+import { NavigationManifestService } from "../NavigationManifestService.js";
 import { PermissionService } from "../PermissionService.js";
 import { FalaTuService } from "../FalaTuService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -55,6 +56,19 @@ router.get("/modules", (req: AuthRequest, res): any => {
     const map = EntitlementService.overview(orgId, req.user);
     const items = Object.entries(map).map(([resource, d]) => ({ resource, ...d }));
     res.json({ items });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/entitlements/navigation-manifest — PRD 6 F2: nav por NECESSIDADE
+// (Hoje/Fala Tu/Executando/Resultados/Empresa + Explorar filtrado por papel+plano).
+// Consumido pelo Sidebar quando `simplifiedNavEnabled`. Read-only, isolado por org.
+router.get("/navigation-manifest", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(NavigationManifestService.forUser(orgId, req.user));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

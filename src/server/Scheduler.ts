@@ -28,6 +28,7 @@ import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliver
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
 import { PlanFitSignalPublisher } from "./PlanFitSignalPublisher.js";
 import { ChurnRiskDetectorService } from "./ChurnRiskDetectorService.js";
+import { ReputationEscalationRiskDetectorService } from "./ReputationEscalationRiskDetectorService.js";
 import { AiQuotaSignalService } from "./AiQuotaSignalService.js";
 import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 import { FalaTuService } from "./FalaTuService.js";
@@ -823,6 +824,7 @@ export class Scheduler {
     // Best-effort: erro numa org não trava as outras. Dedupe mensal por métrica.
     try { this.planFitPass(); } catch (e: any) { console.error('[Scheduler] plan-fit detector F7.1 falhou', e?.message); }
     try { this.churnRiskPass(); } catch (e: any) { console.error('[Scheduler] churn-risk detector F4.1 falhou', e?.message); }
+    try { this.reputationEscalationPass(); } catch (e: any) { console.error('[Scheduler] reputation escalation detector F11 falhou', e?.message); }
     // ADR-159 F5 — progressive autonomy (propõe elevação por evidência; nunca aplica).
     await this.progressiveAutonomyPass().catch(e => console.error('[Scheduler] progressive autonomy F5 falhou', e));
     // ADR-159 F6 — detector de anomalia (rajada de execuções falhas → business_signals).
@@ -871,6 +873,24 @@ export class Scheduler {
       }
     } catch (e) {
       console.error('[Scheduler] churn-risk falhou', e);
+    }
+  }
+
+  /**
+   * ADR-162 F11 (§39-41) — detector de RISCO DE ESCALADA PÚBLICA (prevenção). Pra cada
+   * org opt-in (`reputation_prevention_enabled=1`), pontua contatos com reclamação aberta
+   * cruzando severidade/high-risk/recorrência/idade/churn(§41)/atrito e publica
+   * `reputational_escalation_risk` em business_signals (sweep resolve quem saiu do risco).
+   * Advisory: sugere priorizar; humano decide (RN-014/RN-CRR-4).
+   */
+  static reputationEscalationPass() {
+    try {
+      const r = ReputationEscalationRiskDetectorService.runAll();
+      if (r.published > 0 || r.resolved > 0) {
+        console.log(`[Scheduler] reputation-escalation: ${r.orgs} orgs, ${r.published} sinais publicados, ${r.resolved} resolvidos.`);
+      }
+    } catch (e) {
+      console.error('[Scheduler] reputation-escalation falhou', e);
     }
   }
 

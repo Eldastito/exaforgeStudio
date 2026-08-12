@@ -8479,6 +8479,9 @@ const initDb = () => {
   // (radar_external_signals_enabled). Todas aditivas, default OFF (convenção #10).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reputation_engine_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reclame_aqui_connector_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 5 F11 (§39-41, D7) — detector de RISCO DE ESCALADA PÚBLICA (prevenção): opt-in,
+  // default OFF. Publica `reputational_escalation_risk` em business_signals (advisory).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reputation_prevention_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // PRD 5 F2 — config + estado por-org de um conector de reputação. Credenciais
   // CIFRADAS (EncryptionService, ADR-054) em `config_enc`; nunca em texto/log.

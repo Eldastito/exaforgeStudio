@@ -10,6 +10,7 @@ import { ReputationHandoffService } from "../ReputationHandoffService.js";
 import { ReputationReplyService } from "../ReputationReplyService.js";
 import { ReputationResolutionService } from "../ReputationResolutionService.js";
 import { ReputationClosureService } from "../ReputationClosureService.js";
+import { ReputationEscalationRiskDetectorService } from "../ReputationEscalationRiskDetectorService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -221,6 +222,22 @@ router.post("/cases/:signalId/close", requireRole("owner", "admin"), (req: AuthR
   const out = ReputationClosureService.close(orgId, req.params.signalId, { resolution, actorId: (req as any).user?.userId || null, note: typeof (req.body || {}).note === "string" ? req.body.note : undefined });
   if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
   logAuthEvent(orgId, (req as any).user?.userId || null, req.params.signalId, "REPUTATION_CASE_CLOSE", { signalId: req.params.signalId, resolution: out.resolution, confirmed: out.confirmed.length, dismissed: out.dismissed.length });
+  res.json(out);
+});
+
+// GET /api/reputation/escalation-risk — candidatos a escalar publicamente (§39-41),
+// derivado por query (advisory). POST /run dispara o detector (publica+sweep). Owner/admin.
+router.get("/escalation-risk", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: ReputationEscalationRiskDetectorService.enabled(orgId), candidates: ReputationEscalationRiskDetectorService.detect(orgId) });
+});
+
+router.post("/escalation-risk/run", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ReputationEscalationRiskDetectorService.publish(orgId);
+  logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_ESCALATION_RUN", out);
   res.json(out);
 });
 

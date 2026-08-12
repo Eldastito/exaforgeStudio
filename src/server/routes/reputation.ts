@@ -11,6 +11,7 @@ import { ReputationReplyService } from "../ReputationReplyService.js";
 import { ReputationResolutionService } from "../ReputationResolutionService.js";
 import { ReputationClosureService } from "../ReputationClosureService.js";
 import { ReputationEscalationRiskDetectorService } from "../ReputationEscalationRiskDetectorService.js";
+import { ReputationRootCauseService } from "../ReputationRootCauseService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -239,6 +240,28 @@ router.post("/escalation-risk/run", requireRole("owner", "admin"), (req: AuthReq
   const out = ReputationEscalationRiskDetectorService.publish(orgId);
   logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_ESCALATION_RUN", out);
   res.json(out);
+});
+
+// GET /api/reputation/root-cause?windowDays=30 — clusters de reclamação por categoria +
+// tendência vs baseline + volume-baseline (§42-46, RN-CRR-8). Read-only. Owner/admin.
+router.get("/root-cause", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const windowDays = Number(req.query?.windowDays) > 0 ? Number(req.query.windowDays) : undefined;
+  res.json(ReputationRootCauseService.analyze(orgId, { windowDays }));
+});
+
+// POST /api/reputation/root-cause/learn { windowDays? } — memoriza os padrões
+// (PatternMemoryService, opt-in pattern_memory). Owner/admin.
+router.post("/root-cause/learn", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const windowDays = Number((req.body || {}).windowDays) > 0 ? Number(req.body.windowDays) : undefined;
+  try {
+    const out = await ReputationRootCauseService.learn(orgId, { windowDays });
+    logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_ROOTCAUSE_LEARN", { detected: out.detected, validated: out.validated, published: out.published, skipped: !!out.skipped });
+    res.json(out);
+  } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
 });
 
 // GET /api/reputation/customer/:contactId/context — customer-360 (§13). Owner/admin;

@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F11 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada · réplica+fechamento · prevenção/escalada)
+**Estado:** Em execução — **F0–F12 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada · réplica+fechamento · prevenção/escalada · root cause+aprendizado)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -152,7 +152,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F9** | **Governed Resolution (reship · ticket_assign · contact_task) (FECHADA)** | COMPOR handlers; REUTILIZAR policy/executor |
 | **F10** | **Réplica + Closure (resposta do consumidor, nova réplica, fechamento) (FECHADA)** | REUTILIZAR dedupe/correlação/confirmação |
 | **F11** | **Prevention (`reputational_escalation_risk`, cruzar sinais internos) (FECHADA)** | ESTENDER molde `ChurnRiskDetector`; REUTILIZAR `SignalCorrelation` |
-| F12 | Root Cause & Learning (cluster, tendência, baseline, pattern memory) | COMPOR query; CRIAR baseline (RN-CRR-8) |
+| **F12** | **Root Cause & Learning (cluster, tendência, baseline, pattern memory) (FECHADA)** | COMPOR query + `PatternMemoryService`; CRIAR baseline (RN-CRR-8) |
 | F13 | Impact (outcomes, Impact Ledger, KPI de recuperação) | REUTILIZAR/ESTENDER `OutcomeMeasurement`/`UnifiedImpactLedger`; ESTENDER INFLUENCED |
 | F14 | Production Hardening (perf, security, rate-limit, fault injection, runbook, rollout) | REUTILIZAR `JobQueue`/health; padrão SkillOS F12 |
 
@@ -226,4 +226,9 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - `src/server/ReputationEscalationRiskDetectorService.ts` — score 0–100 **derivado por query** (RN-004): reclamação aberta (severidade), categoria **high-risk** (F4), **recorrência** (repeat complainer), **idade** (reclamação parada apodrece), **churn↔reputação** no mesmo contato (§41 — reusa `SignalCorrelationService`: cluster de alta confiança cruzando os domínios `reputation`+`churn`) e atrito (ticket `cold`). `detect()` PURO; `publish()` grava `reputational_escalation_risk` em `business_signals` (convenção #12, subject=contact, **advisory** `basis='estimate'` — RN-014/RN-CRR-4, o detector não responde nem escala sozinho) + **sweep** (resolve quem saiu do risco). `runAll()` pras orgs opt-in.
   - Flag `reputation_prevention_enabled` (aditiva, default 0). Wired no `Scheduler.reputationEscalationPass` (espelha o churn). Rotas `GET /api/reputation/escalation-risk` + `POST /api/reputation/escalation-risk/run` (owner/admin).
   - `test:reputation-escalation` (14): scoring (high-risk/recorrência/idade/churn§41/atrito), limite (só ≥60 publica), advisory (estimate + "humano decide"), idempotência, sweep, opt-in gate, multi-tenant. Regressão `churn-risk-detector`/`signal-correlation`/`signals-attention` PASS.
-- **F12..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F12 — FECHADA**. Root Cause & Learning (§42-46) — agrupa reclamações por categoria, mede tendência contra baseline e memoriza padrões (reusa `PatternMemoryService` genérico):
+  - `src/server/ReputationRootCauseService.ts` — `analyze()` PURA: clusters por **categoria (F4)** numa janela + **BASELINE = a fatia da mesma categoria na janela ANTERIOR** (§43); categoria só é "sobre-representada" se a fatia subiu ≥10 p.p. sobre o baseline com massa mínima (≥3). **Volume-baseline** (RN-CRR-8): reclamações por 100 PEDIDOS (atual vs anterior) → `volumeTrend` — o volume de reclamação ancorado no volume de NEGÓCIO. `learn()` transforma as categorias sobre-representadas em `PatternCandidate` e chama `PatternMemoryService.learn(orgId, 'reputation', …)` (recorrência/validação/decay/publicação de sinal, hypothesizer **no-op** → determinístico em CI); padrão validado vira `reputation_category_spike` em `business_signals`. Opt-in pela flag genérica `pattern_memory`.
+  - **Guardrails (RN-CRR-8/§44):** correlação **não** é causa (o padrão é EVIDÊNCIA PARA INVESTIGAR, nunca afirmação de culpa); dimensão = **categoria**, **nunca** ranking punitivo de funcionário (§44) — a `note` carrega os dois.
+  - Rotas `GET /api/reputation/root-cause` + `POST /api/reputation/root-cause/learn` (owner/admin).
+  - `test:reputation-rootcause` (12): clusters+baseline (categoria que subiu × que caiu), volume-baseline/tendência, guardrail na nota, pattern memory (memoriza+valida+publica sinal), opt-in gate, multi-tenant. Regressão `pattern-memory`/`signals-attention` PASS.
+- **F13..F14 — pendentes**, cada uma = 1 fatia/PR.

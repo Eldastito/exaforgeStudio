@@ -13,6 +13,7 @@ import { ContextualUpgradeService } from "../ContextualUpgradeService.js";
 import { ZeroTrainingHelpService } from "../ZeroTrainingHelpService.js";
 import { UxTelemetryService } from "../UxTelemetryService.js";
 import { MobileReadinessService } from "../MobileReadinessService.js";
+import { LegacyReductionService } from "../LegacyReductionService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -111,6 +112,17 @@ router.post("/mobile/readiness", (req: AuthRequest, res): any => {
 // GET /api/ux/mobile/manifest — descritor canônico do PWA (fonte da verdade do backend).
 router.get("/mobile/manifest", (_req: AuthRequest, res): any => {
   res.json(MobileReadinessService.pwaManifest());
+});
+
+// GET /api/ux/legacy-reduction?days=30 — recomendações de aposentadoria de legado
+// guiadas pela telemetria (F10). ADVISÓRIO: nada é removido; só gestor (§73/§112).
+router.get("/legacy-reduction", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+  const r = LegacyReductionService.candidates(orgId, req.user, { sinceDays: days });
+  if ((r as any).restricted) return res.status(403).json({ error: "Recomendações de legado são restritas a gestores." });
+  res.json(r);
 });
 
 export default router;

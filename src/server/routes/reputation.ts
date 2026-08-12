@@ -5,6 +5,7 @@ import { ReputationIngestionService } from "../ReputationIngestionService.js";
 import { ReputationCaseService } from "../ReputationCaseService.js";
 import { ReputationClassificationService } from "../ReputationClassificationService.js";
 import { ReputationInvestigationService } from "../ReputationInvestigationService.js";
+import { ReputationRecoveryService } from "../ReputationRecoveryService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -101,6 +102,21 @@ router.post("/cases/:signalId/investigate", requireRole("owner", "admin"), (req:
   logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_CASE_INVESTIGATE", {
     signalId: out.signalId, category: out.category, highRisk: out.highRisk, escalate: out.escalate,
     grounding: out.grounding.status, corroborated: out.grounding.corroboratedByInternalFact, confidence: out.confidence,
+  });
+  res.json(out);
+});
+
+// POST /api/reputation/cases/:signalId/recommend — recovery playbook (§22-24):
+// investigação → ações RECOMENDADAS no ledger governado, SEM efeito externo. A
+// política de aprovação decide; financeiro nunca auto-aprova; high-risk só encaminha.
+router.post("/cases/:signalId/recommend", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ReputationRecoveryService.recommend(orgId, req.params.signalId);
+  if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+  logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_CASE_RECOMMEND", {
+    signalId: out.signalId, strategy: out.strategy, highRisk: out.highRisk, corroborated: out.corroborated,
+    actions: out.recommendedActions.map((a) => ({ type: a.actionType, status: a.status })),
   });
   res.json(out);
 });

@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F5 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+severidade+high-risk · investigação+grounding)
+**Estado:** Em execução — **F0–F6 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -146,7 +146,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F3** | **Customer Identity & Context (resolve multi-chave + customer-360 + wire ContextGuard + re-sujeitar) (FECHADA)** | ESTENDER `phoneMatch`; COMPOR Customer 360; WIRE `ContextGuardService` |
 | **F4** | **Classification + severity + high-risk gates (FECHADA)** | CRIAR taxonomia determinística; COMPOR case flow |
 | **F5** | **Investigation (causa candidata, evidence, grounding, confidence) (FECHADA)** | REUTILIZAR `SignalInvestigationService` + `checkGrounding` |
-| F6 | Recovery Playbook (investigação → recommended action; sem efeito externo) | REUTILIZAR `DecisionActionService`/`ProcessRuntime` |
+| **F6** | **Recovery Playbook (investigação → recommended action; sem efeito externo) (FECHADA)** | REUTILIZAR `DecisionActionService`/`ApprovalPolicyService` |
 | F7 | Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) | REUTILIZAR Fala Tu inteiro |
 | F8 | Governed Reply (`reputation_publish_reply`, começa `approved_execution`) | CRIAR handler; REUTILIZAR `dispatchGoverned`+`ConfirmationEngine` |
 | F9 | Governed Resolution (poucas ações: reship, reschedule, contact task) | COMPOR handlers; REUTILIZAR policy/executor |
@@ -197,4 +197,10 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - **Grounding (§25/§61)** pelo gate DETERMINÍSTICO `checkGrounding` (o mesmo primitivo que o `AiReliabilityKernel` embrulha): a reclamação só é `grounded` quando **corroborada por fato interno**; sem lastro permanece **`unsupported`** (alegação, não fato) e o caso **escala** quando é sério. **High-risk (F4) nunca é auto-concluído** (RN-CRR-4) — headline de apuração humana, escala. Não age (F5 é investigação).
   - Rota `POST /api/reputation/cases/:signalId/investigate` (owner/admin).
   - `test:reputation-investigation` (20): claim/fact/hypothesis, corroboração (grounded) × sem-lastro (unsupported→escala), reembolso, high-risk (não conclui+escala), reúso da correlação de sinais, multi-tenant/not_found. Regressão `signal-investigation` PASS (template aditivo).
-- **F6..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F6 — FECHADA**. Recovery Playbook (§22-24), **determinístico**, **sem efeito externo**:
+  - `src/server/ReputationRecoveryService.ts` — `recommend()` transforma a investigação (F5) num PLANO de ações RECOMENDADAS via `DecisionActionService.propose` (domínio `recovery`) — que já as submete à `ApprovalPolicyService`/Autonomy Contract. **Nada executa** (propose só grava o ledger; a execução material é F8/F9).
+  - **Estratégia pela epistemologia da F5** (níveis de automação conservadores): **HIGH-RISK** → só `internal_handoff` (RN-CRR-4, nada público/financeiro autônomo); **GROUNDED** (corroborado por fato interno) → remediação material por categoria (`order_reship`/`refund`/`ticket_assign`) + contato privado; **ALEGAÇÃO sem lastro** → contato privado primeiro (`conditional`), + apuração se sério (RN-CRR-2/3).
+  - Guardrails: **não inventa dinheiro** (RN-CRR-7 — refund com `expectedImpact=null` e payload `missing:['amount']`); reship referencia o **pedido real** da evidência (RN-151); **financeiro nunca auto-aprova** (`refund` → `awaiting_approval`; com banda de autonomia `deny` vira `blocked`, capturado sem derrubar o plano — RN-159-1); **idempotente** (reusa ação aberta do mesmo sinal+tipo). Correlação preservada (ADR-158).
+  - Rota `POST /api/reputation/cases/:signalId/recommend` (owner/admin).
+  - `test:reputation-recovery` (23): estratégia por grounding, reship→pedido real, refund não-auto/não-inventa-valor, banda deny→blocked, high-risk só handoff, correlação, idempotência, multi-tenant. Regressão `decision-actions` PASS.
+- **F7..F14 — pendentes**, cada uma = 1 fatia/PR.

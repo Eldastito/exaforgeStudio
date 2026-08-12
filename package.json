@@ -37,6 +37,7 @@
     "test:reputation-identity-context": "tsx scripts/test-reputation-identity-context.ts",
     "test:reputation-classification": "tsx scripts/test-reputation-classification.ts",
     "test:reputation-investigation": "tsx scripts/test-reputation-investigation.ts",
+    "test:reputation-recovery": "tsx scripts/test-reputation-recovery.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

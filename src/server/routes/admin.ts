@@ -16,6 +16,7 @@ import { OperationalHealthService } from "../OperationalHealthService.js";
 import { PlatformBaselineService } from "../PlatformBaselineService.js";
 import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { CapacityForecastService } from "../CapacityForecastService.js";
+import { VpsSpecProfileService } from "../VpsSpecProfileService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
@@ -166,6 +167,20 @@ router.post("/capacity-envelope", (req: AuthRequest, res): any => {
     if (env.established) CapacityEnvelopeService.store(env);
     return res.json(env);
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F2 (host/infra) — VPS Spec Profile: o Admin Master registra os fatos da infra
+// (vCPU/RAM/storage/banda/SO, orquestração, limites de container, .db) uma vez; o headroom
+// passa a usar limites REAIS. Sem perfil → honesto (configured:false). GLOBAL.
+router.get("/vps-spec-profile", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(VpsSpecProfileService.get());
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.post("/vps-spec-profile", (req: AuthRequest, res): any => {
+  try {
+    return res.json(VpsSpecProfileService.set(req.body || {}));
+  } catch (error: any) { return res.status(400).json({ error: error.message }); }
 });
 
 // Master Admin - SaaS overview (métricas agregadas de todas as empresas)

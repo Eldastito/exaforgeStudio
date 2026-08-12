@@ -64,6 +64,7 @@
     "test:platform-telemetry-contract": "tsx scripts/test-platform-telemetry-contract.ts",
     "test:node-host-telemetry": "tsx scripts/test-node-host-telemetry.ts",
     "test:http-metrics": "tsx scripts/test-http-metrics.ts",
+    "test:dependency-health": "tsx scripts/test-dependency-health.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

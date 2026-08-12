@@ -69,9 +69,79 @@ export const CollectionOutcomeResolver: BusinessOutcomeResolver = {
   },
 };
 
+// ── Resolver de RECUPERAÇÃO COMERCIAL (golden loop 2) ─────────────────────
+// System-of-record: `sales_recovery_attributions` (FK action_id). O problema
+// ("negócio parado") só está resolvido quando o ticket virou `ganho` e foi ATRIBUÍDO —
+// enviar mensagem de recuperação não é fechar a venda. `basis` (fact/estimate) vem da linha.
+export const SalesRecoveryOutcomeResolver: BusinessOutcomeResolver = {
+  domain: "sales_recovery",
+  appliesTo(action: any): boolean {
+    return typeof action?.command_type === "string" && action.command_type.startsWith("sales_recovery");
+  },
+  resolve(orgId: string, action: any): ResolverResult {
+    const row = db.prepare("SELECT ticket_id, revenue_recovered, basis, source FROM sales_recovery_attributions WHERE action_id = ? AND organization_id = ?").get(action.id, orgId) as any;
+    if (row) {
+      return { resolved: "confirmed", basis: "system_of_record", domain: "sales_recovery", reason: "deal_won_attributed",
+        evidence: { ticketId: row.ticket_id, revenueRecovered: row.revenue_recovered, measurementBasis: row.basis, source: row.source } };
+    }
+    // Sem atribuição → o negócio ainda não foi ganho por este touch (não é falha — RN-OA-2).
+    return { resolved: "not_confirmed", basis: "system_of_record", domain: "sales_recovery", reason: "not_attributed_yet" };
+  },
+};
+
+// ── Resolver de REPUTAÇÃO (golden loop 3) ─────────────────────────────────
+// System-of-record: `business_signals` do caso. O problema só está resolvido quando o caso
+// foi FECHADO como `resolved` (ReputationClosureService) — publicar resposta ≠ resolver.
+export const ReputationOutcomeResolver: BusinessOutcomeResolver = {
+  domain: "reputation",
+  appliesTo(action: any): boolean {
+    return action?.command_type === "reputation_publish_reply";
+  },
+  resolve(orgId: string, action: any): ResolverResult {
+    let sig: any = null;
+    if (action.signal_id) sig = db.prepare("SELECT status FROM business_signals WHERE id = ? AND organization_id = ?").get(action.signal_id, orgId);
+    if (!sig && action.correlation_id) sig = db.prepare("SELECT status FROM business_signals WHERE correlation_id = ? AND organization_id = ? ORDER BY detected_at DESC LIMIT 1").get(action.correlation_id, orgId);
+    if (!sig) return { resolved: "unknown", basis: "system_of_record", domain: "reputation", reason: "case_not_found" };
+    if (sig.status === "resolved") return { resolved: "confirmed", basis: "system_of_record", domain: "reputation", reason: "case_resolved" };
+    // open/acknowledged/dismissed → respondeu mas não resolveu (ou reabriu).
+    return { resolved: "not_confirmed", basis: "system_of_record", domain: "reputation", reason: `case_${sig.status}` };
+  },
+};
+
+// ── Resolver de FECHAMENTO DE VAREJO (golden loop 4) ──────────────────────
+// System-of-record: `retail_daily_closings`. O problema ("dia sem conferência") só está
+// resolvido quando o fechamento foi RECONCILIADO/aprovado (PDV batido) — `divergent` revela
+// falta de caixa (problema aberto, não resolvido).
+const RETAIL_RESOLVED = new Set(["approved", "reconciled"]);
+export const RetailClosingOutcomeResolver: BusinessOutcomeResolver = {
+  domain: "retail",
+  appliesTo(action: any): boolean {
+    return typeof action?.command_type === "string" && action.command_type.startsWith("retail_");
+  },
+  resolve(orgId: string, action: any): ResolverResult {
+    const payload = safeParse(action?.command_payload_json) || {};
+    let closing: any = null;
+    const closingId = payload.closingId || payload.closing_id;
+    if (closingId) closing = db.prepare("SELECT status, divergence_status FROM retail_daily_closings WHERE id = ? AND organization_id = ?").get(closingId, orgId);
+    else if (payload.storeId && (payload.closingDate || payload.date)) {
+      closing = db.prepare("SELECT status, divergence_status FROM retail_daily_closings WHERE store_id = ? AND closing_date = ? AND organization_id = ?").get(payload.storeId, payload.closingDate || payload.date, orgId);
+    }
+    if (!closing) return { resolved: "unknown", basis: "system_of_record", domain: "retail", reason: "closing_not_linked" };
+    if (RETAIL_RESOLVED.has(closing.status)) return { resolved: "confirmed", basis: "system_of_record", domain: "retail", reason: `closing_${closing.status}` };
+    if (closing.status === "divergent" || closing.divergence_status === "divergent") {
+      return { resolved: "not_confirmed", basis: "system_of_record", domain: "retail", reason: "closing_divergent", evidence: { status: closing.status, divergence: closing.divergence_status } };
+    }
+    return { resolved: "not_confirmed", basis: "system_of_record", domain: "retail", reason: `closing_${closing.status}` };
+  },
+};
+
 // ── Registry ──────────────────────────────────────────────────────────────
+const DEFAULT_RESOLVERS: BusinessOutcomeResolver[] = [
+  CollectionOutcomeResolver, SalesRecoveryOutcomeResolver, ReputationOutcomeResolver, RetailClosingOutcomeResolver,
+];
+
 export class BusinessOutcomeResolverRegistry {
-  private static resolvers: BusinessOutcomeResolver[] = [CollectionOutcomeResolver];
+  private static resolvers: BusinessOutcomeResolver[] = [...DEFAULT_RESOLVERS];
 
   /** Registra um resolver de domínio (idempotente por instância). F4 adiciona os demais. */
   static register(r: BusinessOutcomeResolver): void {
@@ -91,8 +161,8 @@ export class BusinessOutcomeResolverRegistry {
     catch { return { resolved: "unknown", basis: "system_of_record", domain: r.domain, reason: "resolver_error" }; }
   }
 
-  /** Reset pro estado default (só o de cobrança) — usado em teste. */
-  static reset(): void { this.resolvers = [CollectionOutcomeResolver]; }
+  /** Reset pro estado default (os quatro golden loops) — usado em teste. */
+  static reset(): void { this.resolvers = [...DEFAULT_RESOLVERS]; }
 }
 
 export default BusinessOutcomeResolverRegistry;

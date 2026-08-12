@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Proposto — **F0 (Auditoria + Matriz de Reutilização) FECHADA neste documento**
+**Estado:** Em execução — **F0–F4 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+severidade+high-risk)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -144,7 +144,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F1** | **`ReputationProvider` contract + `StubReputationProvider` determinístico (FECHADA)** | REUTILIZAR molde `ExternalResearchProvider` |
 | **F2** | **Conector Reclame AQUI real + ingestão incremental + dedup + External Signals, flag OFF (FECHADA)** | REUTILIZAR `ExternalSignalService`; ESTENDER cursor/health de conector |
 | **F3** | **Customer Identity & Context (resolve multi-chave + customer-360 + wire ContextGuard + re-sujeitar) (FECHADA)** | ESTENDER `phoneMatch`; COMPOR Customer 360; WIRE `ContextGuardService` |
-| F4 | Classification + severity + high-risk gates | CRIAR taxonomia determinística; COMPOR Context Engine |
+| **F4** | **Classification + severity + high-risk gates (FECHADA)** | CRIAR taxonomia determinística; COMPOR case flow |
 | F5 | Investigation (causa candidata, evidence, grounding, confidence) | REUTILIZAR `SignalInvestigationService` + `AiReliabilityKernel` |
 | F6 | Recovery Playbook (investigação → recommended action; sem efeito externo) | REUTILIZAR `DecisionActionService`/`ProcessRuntime` |
 | F7 | Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) | REUTILIZAR Fala Tu inteiro |
@@ -186,4 +186,9 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - `src/server/ReputationCaseService.ts` — orquestra `resolveCase`: extrai pistas (+override do operador) → resolve → **re-sujeita `reputation_item`→`contact`** (habilita correlação churn↔reputação §41) → **FENCE do conteúdo** (`ContextGuardService.fence` — **1º caller de produção**, fecha o gap §11 da F0) → customer-360. Injeção no texto → `suspicious`+`escalate`. Não age (F3 é percepção).
   - Rotas `POST /api/reputation/cases/:signalId/resolve`, `GET /api/reputation/customer/:contactId/context` (owner/admin).
   - `test:reputation-identity-context` (23): resolução por cada chave, ambiguidade/conflito/not_found/protocol, extractHints, customer-360, wire completo (resolve→re-sujeita→fence→360), injeção→escalate, multi-tenant.
-- **F4..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F4 — FECHADA**. Classificação + severidade + high-risk gates (§15-18), **determinística** (sem IA → roda em CI):
+  - `src/server/ReputationClassificationService.ts` — `classify()` PURO: **taxonomia** por score de termos (token/substring normalizado sem acento), base transversal + **extensão por vertical** (§15 — só uma lista a mais mesclada à base, sem motor por vertical); **severidade** LOW/MEDIUM/HIGH/CRITICAL derivada da nota/sentimento (reusa `ExternalSignalService.deriveSeverity`) com bump financeiro, mapeada pro vocabulário do ledger (info/attention/risk/critical); **high-risk gates** (§18/RN-CRR-4) acidente-saúde/fraude/LGPD/jurídico/imprensa → CRITICAL + `escalate` + `improviseAllowed=false`, **conservador** (qualquer indício de high-risk escala e vira manchete).
+  - `classifySignal()` aplica sobre um `business_signal` e PERSISTE **upgrade MONOTÔNICO** de severidade — sobe (attention→critical num caso de acidente com nota mediana), **NUNCA rebaixa**, idempotente; carimba a classificação no `evidence_json` (auditoria). Sem tabela nova (D1/§5); isolado por org.
+  - Composto no `ReputationCaseService.resolveCase` (o caso agora carrega `classification`; `escalate` também dispara em high-risk). Rota `POST /api/reputation/cases/:signalId/classify` (owner/admin).
+  - `test:reputation-classification` (36): taxonomia por categoria + `other`, normalização caixa/acento, high-risk (cada gate + conservador + sem falso-positivo), severidade/bump/mapeamento, extensão por vertical, persistência monotônica (upgrade/não-rebaixa/idempotência/vertical da org), composição no resolveCase, multi-tenant.
+- **F5..F14 — pendentes**, cada uma = 1 fatia/PR.

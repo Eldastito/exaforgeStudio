@@ -13,6 +13,7 @@ import { ReputationClosureService } from "../ReputationClosureService.js";
 import { ReputationEscalationRiskDetectorService } from "../ReputationEscalationRiskDetectorService.js";
 import { ReputationRootCauseService } from "../ReputationRootCauseService.js";
 import { ReputationImpactService } from "../ReputationImpactService.js";
+import { ReputationHealthService } from "../ReputationHealthService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -288,6 +289,14 @@ router.post("/actions/:actionId/impact", requireRole("owner", "admin"), (req: Au
     logAuthEvent(orgId, (req as any).user?.userId || null, req.params.actionId, "REPUTATION_IMPACT_RECORD", { actionId: req.params.actionId, category: b.category, basis: out.basis });
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/reputation/health — prontidão do módulo (§67-69): saúde dos conectores +
+// backlog + rate-limit de resposta + status agregado (healthy/degraded/blocked). Owner/admin.
+router.get("/health", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ReputationHealthService.report(orgId));
 });
 
 // GET /api/reputation/customer/:contactId/context — customer-360 (§13). Owner/admin;

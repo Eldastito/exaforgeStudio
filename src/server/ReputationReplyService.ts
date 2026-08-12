@@ -147,6 +147,11 @@ export class ReputationReplyService {
 
   /** PUBLICA (execute governado) — exige ação APROVADA. Delega ao choke-point (§29). */
   static async publish(orgId: string, actionId: string): Promise<any> {
+    // F14 (§68) — backstop de rate-limit ANTES do efeito externo (runaway de respostas).
+    const { ReputationHealthService } = await import("./ReputationHealthService.js");
+    if (!ReputationHealthService.canReply(orgId)) {
+      throw new Error(`rate_limited: teto diário de respostas públicas atingido (${ReputationHealthService.MAX_REPLIES_PER_DAY}/24h) — segurar publicações até a janela abrir (§68).`);
+    }
     return CommandExecutorService.execute(orgId, actionId);
   }
 }

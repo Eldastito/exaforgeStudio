@@ -85,7 +85,9 @@ router.get("/patterns", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const domain = typeof req.query?.domain === "string" ? req.query.domain : undefined;
   const status = typeof req.query?.status === "string" ? req.query.status : undefined;
-  res.json({ enabled: PatternMemoryService.isEnabled(orgId), patterns: PatternMemoryService.list(orgId, { domain, status }), typeStats: PatternMemoryService.allTypeStats(orgId) });
+  // typeStats já traz o recorte ASSEGURADO anexado (PRD 9 / ADR-166 F2): campos
+  // mistos (effectiveness/acted) + assuredEffectiveness (null sem prova) + assuredActed.
+  res.json({ enabled: PatternMemoryService.isEnabled(orgId), patterns: PatternMemoryService.list(orgId, { domain, status }), typeStats: PatternMemoryService.allEffectiveness(orgId) });
 });
 
 // POST /api/insights/patterns/:id/outcome — fecha o loop: o gestor mede o desfecho

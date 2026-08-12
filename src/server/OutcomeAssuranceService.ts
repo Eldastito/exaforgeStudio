@@ -23,6 +23,7 @@
  *     `resolver_pending`, nunca inferido de "done".
  */
 import db from "./db.js";
+import { BusinessOutcomeResolverRegistry } from "./BusinessOutcomeResolver.js";
 
 export type AssuranceState = "unknown" | "planned" | "executed" | "effect_confirmed" | "impact_measured" | "assured";
 
@@ -49,6 +50,10 @@ export class OutcomeAssuranceService {
     const impactMeasured = outs.length > 0;
     const anyFact = outs.some((o) => o.basis === "fact");
 
+    // OUTCOME DE NEGÓCIO — pergunta ao system-of-record via resolver (F3). Sem resolver
+    // aplicável → resolver_pending (honesto). NUNCA inferido de "done" (RN-OA-1).
+    const boc = BusinessOutcomeResolverRegistry.resolve(orgId, action);
+
     // ── estado derivado (a escada; o topo alcançado) ──
     // "assured" exige efeito confirmado E impacto medido — nunca só "done" (RN-OA-1).
     let assuranceState: AssuranceState = "planned";
@@ -71,8 +76,9 @@ export class OutcomeAssuranceService {
       stages: {
         executed: { reached: executed, evidence: executed ? { execLogDone: (execDone?.c ?? 0) > 0, executedAt: action.executed_at ?? null } : null },
         effectConfirmed: { reached: effectConfirmed, confirmationState, method: conf?.confirmation_method ?? null, confirmedAt: conf?.confirmed_at ?? null },
-        // Business outcome é da F3 (resolver determinístico) — honesto, nunca inferido de "done".
-        businessOutcomeConfirmed: { reached: "unknown", reason: "resolver_pending" },
+        // Business outcome via resolver determinístico (F3) — system-of-record, nunca "done".
+        // Sem resolver aplicável, o registry devolve reason:"resolver_pending" (compatível com a F1).
+        businessOutcomeConfirmed: { reached: boc.resolved, reason: boc.reason ?? null, basis: boc.basis, evidence: boc.evidence ?? null },
         impactMeasured: { reached: impactMeasured, count: outs.length, anyFactBasis: anyFact },
       },
       assuranceState,

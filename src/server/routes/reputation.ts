@@ -8,6 +8,7 @@ import { ReputationInvestigationService } from "../ReputationInvestigationServic
 import { ReputationRecoveryService } from "../ReputationRecoveryService.js";
 import { ReputationHandoffService } from "../ReputationHandoffService.js";
 import { ReputationReplyService } from "../ReputationReplyService.js";
+import { ReputationResolutionService } from "../ReputationResolutionService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -176,6 +177,21 @@ router.post("/actions/:actionId/publish", requireRole("owner", "admin"), async (
   try {
     const out = await ReputationReplyService.publish(orgId, req.params.actionId);
     logAuthEvent(orgId, (req as any).user?.userId || null, req.params.actionId, "REPUTATION_REPLY_PUBLISH", { actionId: req.params.actionId, effect: out?.result?.effect, externalRef: out?.result?.externalRef });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/reputation/actions/:actionId/resolve { overrides? } — RESOLUÇÃO material
+// governada (§28-29): executa order_reship/ticket_assign/contact_task de uma ação
+// APROVADA. `overrides` = dados reais que o operador informa (ticketId/responsável).
+router.post("/actions/:actionId/resolve", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const overrides = (req.body || {}).overrides;
+  if (overrides != null && (typeof overrides !== "object" || Array.isArray(overrides))) return res.status(400).json({ error: "overrides deve ser objeto" });
+  try {
+    const out = await ReputationResolutionService.resolve(orgId, req.params.actionId, overrides || {});
+    logAuthEvent(orgId, (req as any).user?.userId || null, req.params.actionId, "REPUTATION_RESOLVE", { actionId: req.params.actionId, effect: out?.result?.effect, externalRef: out?.result?.externalRef });
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });

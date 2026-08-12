@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F8 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada)
+**Estado:** Em execução — **F0–F9 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -149,7 +149,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F6** | **Recovery Playbook (investigação → recommended action; sem efeito externo) (FECHADA)** | REUTILIZAR `DecisionActionService`/`ApprovalPolicyService` |
 | **F7** | **Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) (FECHADA)** | REUTILIZAR Fala Tu inteiro; CRIAR handoff determinístico |
 | **F8** | **Governed Reply (`reputation_publish_reply`, começa `approved_execution`) (FECHADA)** | CRIAR handler; REUTILIZAR `execute`+`ConfirmationEngine`+`checkGrounding` |
-| F9 | Governed Resolution (poucas ações: reship, reschedule, contact task) | COMPOR handlers; REUTILIZAR policy/executor |
+| **F9** | **Governed Resolution (reship · ticket_assign · contact_task) (FECHADA)** | COMPOR handlers; REUTILIZAR policy/executor |
 | F10 | Réplica + Closure (resposta do consumidor, nova réplica, fechamento) | REUTILIZAR dedupe/correlação/thread |
 | F11 | Prevention (`reputational_escalation_risk`, cruzar sinais internos) | ESTENDER `ChurnRiskDetector`; REUTILIZAR `SignalCorrelation` |
 | F12 | Root Cause & Learning (cluster, tendência, baseline, pattern memory) | COMPOR query; CRIAR baseline (RN-CRR-8) |
@@ -213,4 +213,9 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - `ReputationPublishReplyCommandHandler` (CRIAR §29, registrado no boot) — o provider é tocado **só aqui** (D4, nunca por serviço de IA). Três guardrails antes de publicar: **GROUNDING** (§25/§61, RN-CRR-3 — `checkGrounding` sobre os fatos da investigação F5; afirmação factual sem lastro → `UNSUPPORTED_CLAIM`, **não publica**; empática passa), **IDEMPOTÊNCIA** (§30/§71 — `idempotencyKey=action.id` + o executor barra 2º `execute`), **DEGRADAÇÃO EXPLÍCITA** (§6 — sem capacidade→`manual_required`, indisponível→`unavailable` com retry). Publicado, arma `ConfirmationEngine.expect(method:'reputation_reply')` — a operação não fecha só porque respondeu (§11.10); o fechamento é a F10.
   - Rotas `POST /api/reputation/cases/:signalId/reply/draft` e `POST /api/reputation/actions/:actionId/publish` (owner/admin). Método de confirmação `reputation_reply` aditivo no `ConfirmationEngine`.
   - `test:reputation-reply` (17): grounded publica × sem-lastro bloqueia × empática passa, manual_required (§6), idempotência, guarda sem-aprovação, confirmação armada, multi-tenant. Regressão `command-executor`/`runtime-confirmation`/`runtime-executor-execute`/`decision-actions` PASS.
-- **F9..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F9 — FECHADA**. Governed Resolution (§28-29) — as ações materiais que a F6 recomenda viram EFEITO REAL no domínio canônico, pela mesma cadeia governada da F8:
+  - `src/server/ReputationResolutionService.ts` — 3 handlers (COMPOR sobre serviços canônicos, nunca inventar — RN-151/RN-CRR-7): **`order_reship`** cria tarefa de reexpedição (`TaskService`) referenciando o PEDIDO REAL; **`ticket_assign`** atribui o TICKET REAL a um responsável/estágio (tabela `tickets`); **`contact_task`** cria a tarefa de follow-up. Provider externo NÃO é tocado (isso é a resposta pública, F8) — o efeito é só no domínio interno da própria org.
+  - `resolve(orgId, actionId, overrides?)` — semeia a política (`execute`+`approved_execution`), MESCLA os `overrides` do operador (ticketId/responsável REAIS que a F6 não tinha — RN-151) e chama `CommandExecutorService.execute` (guardas G1/G2/G3). Pedido/ticket inexistente → recusa; comando não-resolução → recusa; idempotência do executor preservada.
+  - Rota `POST /api/reputation/actions/:actionId/resolve` (owner/admin).
+  - `test:reputation-resolution` (12): cada handler (efeito + referência real), recusa de id inventado, overrides do operador, governança (sem-aprovação/não-resolução/idempotência), integração F6→resolve, multi-tenant. Regressão `command-executor`/`runtime-executor-execute`/`task-result` PASS.
+- **F10..F14 — pendentes**, cada uma = 1 fatia/PR.

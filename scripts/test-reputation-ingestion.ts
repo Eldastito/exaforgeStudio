@@ -43,7 +43,7 @@ async function main() {
   const db = (await import("../src/server/db.js")).default;
   const { ReputationIngestionService: ING } = await import("../src/server/ReputationIngestionService.js");
   const { ReputationConnectorService: CONN } = await import("../src/server/ReputationConnectorService.js");
-  const { ReclameAquiProvider } = await import("../src/server/ReclameAquiProvider.js");
+  const { ReclameAquiProvider, mapItem, mapItems, mapReplies } = await import("../src/server/ReclameAquiProvider.js");
 
   const A = "org_rep_A";
   const B = "org_rep_B";
@@ -107,6 +107,19 @@ async function main() {
   const st = CONN.status(A, "reclame_aqui");
   check("7.2 status redige o token (só sinaliza que existe)", st.configured === true && st.hasToken === true && JSON.stringify(st).indexOf("super-secret-token") === -1);
   check("7.3 getConfig interno decifra o token", (CONN.getConfig(A, "reclame_aqui") || {}).token === "super-secret-token");
+
+  // ═══════════════ 8. mapeadores DEFENSIVOS do conector (§6: shape a confirmar) ═══════════════
+  // Puros e exportados justamente pra travar o mapeamento contra uma API de shape
+  // incerto: leem nomes de campo comuns, normalizam status/sentiment, degradam pra
+  // null quando falta proveniência/conteúdo — nunca inventam.
+  const mi = mapItem({ id: "X1", description: "não chegou", consumerName: "Fulano", rating: 1, status: "aberto", sentiment: "negativo", createdAt: "2026-08-01T00:00:00Z", orderId: "999", url: "http://x" });
+  check("8.1 mapItem: campos-comuns + source fixo", !!mi && mi.externalId === "X1" && mi.source === "reclame_aqui" && mi.content === "não chegou" && mi.author === "Fulano" && mi.orderRef === "999");
+  check("8.2 mapItem: normaliza status/sentiment PT→enum", mi!.status === "open" && mi!.sentiment === "negative");
+  check("8.3 mapItem: fallback de nomes de campo (externalId/text)", mapItem({ externalId: "X2", text: "oi" })?.externalId === "X2");
+  check("8.4 mapItem: sem id OU sem conteúdo → null (não inventa)", mapItem({ description: "sem id" }) === null && mapItem({ id: "só id" }) === null && mapItem(null) === null);
+  check("8.5 mapItems: aceita array | {items} | {data} | {complaints}", mapItems([{ id: "a", content: "x" }]).length === 1 && mapItems({ complaints: [{ id: "b", description: "y" }] }).length === 1 && mapItems({ nada: 1 }).length === 0);
+  const reps = mapReplies({ replies: [{ id: "r1", content: "resposta", author: "empresa" }, { text: "" }] }, "X1");
+  check("8.6 mapReplies: mapeia authorType e descarta vazio", reps.length === 1 && reps[0].authorType === "company" && reps[0].itemExternalId === "X1");
 
   console.log("\n=== TEST: Reputation Ingestion + ReclameAqui degradação (PRD 5 F2) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);

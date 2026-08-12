@@ -16,6 +16,7 @@ import { OutcomeReconcilerService } from "../OutcomeReconcilerService.js";
 import { OutcomeCorrectionService } from "../OutcomeCorrectionService.js";
 import { OutcomeAssuranceMetricsService } from "../OutcomeAssuranceMetricsService.js";
 import { PatternLearningFromAssuranceService } from "../PatternLearningFromAssuranceService.js";
+import { LearningEpisodeService } from "../LearningEpisodeService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -140,6 +141,26 @@ router.post("/assurance/learn", (req: AuthRequest, res): any => {
   const lookbackDays = Number(req.body?.lookbackDays) || undefined;
   const limit = Number(req.body?.limit) || undefined;
   res.json(PatternLearningFromAssuranceService.sweep(orgId, { lookbackDays, limit }));
+});
+
+// GET /api/decision-intelligence/learning/episodes — Learning Episodes (PRD 9 / ADR-166
+// F3): o fio padrão→desfechos assured→estado de aprendizado, DERIVADO por query (RN-004).
+// `?onlyAssured=1` restringe aos com prova forte; filtros opcionais domain/status.
+router.get("/learning/episodes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const domain = typeof req.query?.domain === "string" ? req.query.domain : undefined;
+  const status = typeof req.query?.status === "string" ? req.query.status : undefined;
+  const onlyAssured = req.query?.onlyAssured === "1" || req.query?.onlyAssured === "true";
+  const limit = typeof req.query?.limit === "string" ? Number(req.query.limit) : undefined;
+  res.json(LearningEpisodeService.episodes(orgId, { domain, status, onlyAssured, limit }));
+});
+
+// GET /api/decision-intelligence/learning/episode/:patternId — um episódio detalhado.
+router.get("/learning/episode/:patternId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LearningEpisodeService.episode(orgId, req.params.patternId));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

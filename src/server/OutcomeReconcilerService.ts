@@ -42,6 +42,7 @@ export class OutcomeReconcilerService {
          FROM decision_actions a
          WHERE a.organization_id = ? AND a.status = 'done'
            AND COALESCE(a.completed_at, a.created_at) <= ?
+           AND a.action_type NOT LIKE 'outcome_correction:%'
            AND NOT EXISTS (SELECT 1 FROM action_outcomes o WHERE o.action_id = a.id AND o.organization_id = a.organization_id)
          ORDER BY a.completed_at ASC LIMIT ?`
     ).all(orgId, cutoffIso, limit) as any[];

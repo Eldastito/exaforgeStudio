@@ -13,6 +13,7 @@ import { ExecutionTraceService } from "../ExecutionTraceService.js";
 import { OutcomeAssuranceService } from "../OutcomeAssuranceService.js";
 import { ProcessOutcomeContractService } from "../ProcessOutcomeContractService.js";
 import { OutcomeReconcilerService } from "../OutcomeReconcilerService.js";
+import { OutcomeCorrectionService } from "../OutcomeCorrectionService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -104,6 +105,15 @@ router.post("/assurance/reconcile", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(OutcomeReconcilerService.reconcile(orgId));
+});
+
+// POST /api/decision-intelligence/assurance/correct — propõe correções GOVERNADAS pros
+// gaps de garantia abertos (PRD 8 / ADR-165 F10). Só PROPÕE (awaiting_approval); nunca
+// executa — a correção passa por DecisionAction→ApprovalPolicy→CommandExecutor (RN-OA-9).
+router.post("/assurance/correct", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(OutcomeCorrectionService.proposeCorrections(orgId, { actorId: req.user?.userId }));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

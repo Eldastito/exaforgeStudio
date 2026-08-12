@@ -84,6 +84,7 @@
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",
     "test:confirmation-timeout-signal": "tsx scripts/test-confirmation-timeout-signal.ts",
     "test:execution-trace-fullcycle": "tsx scripts/test-execution-trace-fullcycle.ts",
+    "test:outcome-correction": "tsx scripts/test-outcome-correction.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

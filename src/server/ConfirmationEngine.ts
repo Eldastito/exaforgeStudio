@@ -43,6 +43,10 @@ export const CONFIRMATION_METHODS = [
   "channel_reply",
   "alterdata_sync",
   "manual",
+  // ADR-162 F8 — resposta pública de reputação publicada; a confirmação de
+  // FECHAMENTO (réplica do consumidor / caso resolvido) é armada aqui e
+  // confirmada na F10 (réplica + closure). Aditivo, não altera métodos existentes.
+  "reputation_reply",
 ] as const;
 export type ConfirmationMethod = (typeof CONFIRMATION_METHODS)[number];
 

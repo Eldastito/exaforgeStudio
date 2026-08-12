@@ -71,6 +71,7 @@
     "test:capacity-forecast": "tsx scripts/test-capacity-forecast.ts",
     "test:platform-rootcause": "tsx scripts/test-platform-rootcause.ts",
     "test:capacity-recommendation": "tsx scripts/test-capacity-recommendation.ts",
+    "test:platform-protection": "tsx scripts/test-platform-protection.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

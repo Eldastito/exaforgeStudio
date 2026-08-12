@@ -18,6 +18,7 @@ import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { CapacityForecastService } from "../CapacityForecastService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
+import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -107,6 +108,25 @@ router.get("/capacity-recommendations", (req: AuthRequest, res): any => {
     const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
     const horizonDays = typeof req.query?.horizon === "string" ? Number(req.query.horizon) : undefined;
     return res.json(CapacityRecommendationService.recommend({ days, horizonDays }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F11 — Protection Mode: postura de confiabilidade derivada (NORMAL/CAUTIOUS/
+// PROTECTED). SHADOW por padrão (§102) — só reporta; enforcement é opt-in humano. O
+// Guard NUNCA sacrifica operação crítica (CA23).
+router.get("/protection-mode", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(PlatformProtectionModeService.assess());
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F11 — liga/desliga o ENFORCEMENT do Protection Mode (decisão humana explícita,
+// §102). Body: { enforce: boolean }. Master-only (herda requireMasterAdmin).
+router.post("/protection-mode/enforce", (req: AuthRequest, res): any => {
+  try {
+    const enforce = req.body?.enforce === true || req.body?.enforce === "true";
+    PlatformProtectionModeService.setEnforcing(enforce);
+    return res.json({ enforcing: PlatformProtectionModeService.isEnforcing() });
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

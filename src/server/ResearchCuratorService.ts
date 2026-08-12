@@ -93,20 +93,60 @@ export class ResearchCuratorService {
   }
 
   /**
-   * DI-5.3 — GATE DE QUALIDADE determinístico (sem IA). Reprova um pacote de
-   * pesquisa vazio/incoerente ou com confiança abaixo do piso. É o coração da
-   * publicação autônoma (RN-157-3): um pacote reprovado NÃO publica e NÃO
-   * sobrescreve a última versão boa. Puro/testável.
+   * GATE DE QUALIDADE determinístico (sem IA). Um pacote reprovado NÃO publica e
+   * NÃO sobrescreve a última versão boa (RN-157-3). Puro/testável.
+   *
+   * PRD 9 / ADR-166 F9 — GATES 2.0, aproveitando a procedência da F7/F8:
+   *  - GROUNDING (RN-EI-5): pacote `evidenceMode:'live'` SEM `sourceEvidence` → BLOQUEIA
+   *    (`ungrounded_live`). Uma alegação de fonte viva PRECISA de fonte. `model_knowledge`
+   *    é honestamente síntese → não exige fonte (0-regressão para stub/llm).
+   *  - Vazio / confiança abaixo do piso: bloqueiam (como antes).
+   *  Avisos NÃO-bloqueantes (`warnings`) — a decisão pondera, o gate não reprova:
+   *  - `model_knowledge_only` (é síntese, não fonte viva — §53/§54);
+   *  - `low_source_diversity` (live, ≥2 fontes, todas do mesmo host/publisher);
+   *  - `stale_sources` (live, nenhuma fonte com frescor conhecido);
+   *  - `high_churn_vs_prior` (quando `opts.prev` dado e a nova versão vira a maioria
+   *    dos drivers da anterior — sinal de contradição a revisar, não de reprovação).
    */
-  static assessQuality(result: any, floor: number = DEFAULT_CONFIDENCE_FLOOR): { ok: boolean; reasons: string[]; confidence: number; floor: number } {
+  static assessQuality(
+    result: any,
+    floor: number = DEFAULT_CONFIDENCE_FLOOR,
+    opts: { prev?: any } = {},
+  ): { ok: boolean; reasons: string[]; warnings: string[]; confidence: number; floor: number; evidenceMode: string; sourceCount: number } {
     const content = result?.content ?? {};
     const summary = typeof content.summary === "string" ? content.summary.trim() : "";
     const drivers = driversOf(content);
     const confidence = confOf(result); // confidence mora no result (não no content)
+    const evidenceMode = typeof result?.evidenceMode === "string" ? result.evidenceMode : "model_knowledge";
+    const sourceEvidence: any[] = Array.isArray(result?.sourceEvidence) ? result.sourceEvidence : [];
+    const grounded = sourceEvidence.filter((s) => s && (s.url || s.title));
     const reasons: string[] = [];
-    if (!summary && drivers.length === 0) reasons.push("empty");        // nada de conteúdo
-    if (confidence < clampFloor(floor)) reasons.push("low_confidence"); // abaixo do piso
-    return { ok: reasons.length === 0, reasons, confidence, floor: clampFloor(floor) };
+    const warnings: string[] = [];
+
+    // ── bloqueios ──
+    if (!summary && drivers.length === 0) reasons.push("empty");
+    if (confidence < clampFloor(floor)) reasons.push("low_confidence");
+    // GROUNDING: live sem fonte é incoerente com a própria alegação (RN-EI-5).
+    if (evidenceMode === "live" && grounded.length === 0) reasons.push("ungrounded_live");
+
+    // ── avisos (não bloqueiam) ──
+    if (evidenceMode === "model_knowledge") warnings.push("model_knowledge_only");
+    if (evidenceMode === "live" && grounded.length >= 2) {
+      const origins = new Set(grounded.map((s) => hostOrPublisher(s)).filter(Boolean));
+      if (origins.size <= 1) warnings.push("low_source_diversity");
+      if (!grounded.some((s) => s.freshness)) warnings.push("stale_sources");
+    }
+    // CONTRADIÇÃO vs base anterior (quando dada): churn alto = a maioria dos drivers
+    // da versão boa sumiu. Não reprova (mercado muda), mas sinaliza revisão.
+    if (opts.prev != null) {
+      const prevDrivers = driversOf(opts.prev);
+      if (prevDrivers.length >= 2) {
+        const delta = this.computeDelta(opts.prev, content);
+        if (delta.gone.length >= Math.ceil(prevDrivers.length / 2)) warnings.push("high_churn_vs_prior");
+      }
+    }
+
+    return { ok: reasons.length === 0, reasons, warnings, confidence, floor: clampFloor(floor), evidenceMode, sourceCount: grounded.length };
   }
 
   /**
@@ -148,8 +188,10 @@ export class ResearchCuratorService {
     const fingerprint = researchFingerprint(vertical, topic, region, timeframe);
     ResearchBudgetService.record({ fingerprint, vertical, topic, provider: provider.name, costCents: Number(raw?.costCents) || 0 });
 
-    // GATE (RN-157-3): pacote reprovado NÃO publica nem sobrescreve a base boa.
-    const quality = this.assessQuality(raw, opts.confidenceFloor);
+    // GATE (RN-157-3 + gates 2.0 F9): pacote reprovado NÃO publica nem sobrescreve a
+    // base boa. Passa a versão FRESCA anterior p/ o gate de contradição (churn vs prior).
+    const prev = VerticalIntelligenceService.getFresh(vertical, topic, region, timeframe)?.content ?? null;
+    const quality = this.assessQuality(raw, opts.confidenceFloor, { prev });
     if (!quality.ok) return { published: false, reason: "quality_rejected", quality };
 
     // Aprovado → publica (a anonimização roda DENTRO do publish, depois da
@@ -173,6 +215,12 @@ const DEFAULT_CONFIDENCE_FLOOR = (() => {
 function clampFloor(n: number): number { const v = Number(n); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.2; }
 
 function round2(n: number): number { return Math.round(n * 100) / 100; }
+/** Origem de uma fonte p/ o gate de diversidade: host da URL, ou o publisher. */
+function hostOrPublisher(s: any): string {
+  const url = typeof s?.url === "string" ? s.url : "";
+  if (url) { try { return new URL(url).host.toLowerCase().replace(/^www\./, ""); } catch { /* url ruim */ } }
+  return typeof s?.publisher === "string" ? s.publisher.trim().toLowerCase() : "";
+}
 // Comparador estável PT-BR-ish (determinístico entre runs/plataformas).
 function cmp(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
 

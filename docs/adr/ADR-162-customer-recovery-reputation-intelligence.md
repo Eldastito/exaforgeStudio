@@ -143,7 +143,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F0** | **Esta auditoria + matriz de reutilização (FECHADA)** | — |
 | **F1** | **`ReputationProvider` contract + `StubReputationProvider` determinístico (FECHADA)** | REUTILIZAR molde `ExternalResearchProvider` |
 | **F2** | **Conector Reclame AQUI real + ingestão incremental + dedup + External Signals, flag OFF (FECHADA)** | REUTILIZAR `ExternalSignalService`; ESTENDER cursor/health de conector |
-| F3 | Identity & Customer Context (resolve cliente/pedido/ticket → ContextPacket) | ESTENDER `phoneMatch`; COMPOR Customer 360; wire `ContextGuardService` |
+| **F3** | **Customer Identity & Context (resolve multi-chave + customer-360 + wire ContextGuard + re-sujeitar) (FECHADA)** | ESTENDER `phoneMatch`; COMPOR Customer 360; WIRE `ContextGuardService` |
 | F4 | Classification + severity + high-risk gates | CRIAR taxonomia determinística; COMPOR Context Engine |
 | F5 | Investigation (causa candidata, evidence, grounding, confidence) | REUTILIZAR `SignalInvestigationService` + `AiReliabilityKernel` |
 | F6 | Recovery Playbook (investigação → recommended action; sem efeito externo) | REUTILIZAR `DecisionActionService`/`ProcessRuntime` |
@@ -179,5 +179,11 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - `src/server/ReputationConnectorService.ts` — config+estado por-org: credenciais **cifradas** (`config_enc`, EncryptionService), cursor incremental (§70), health (§67), `providerFor(orgId)` resolve stub/real/não-configurado. Status **redige o token**.
   - `src/server/ReputationIngestionService.ts` — domínio (D4): mapeia `ReputationItem`→`ExternalSignalInput` (domain='reputation', signalType='public_complaint', `basis='estimate'`/`verifiable:false` — RN-CRR-2), gate triplo opt-in, sync incremental (cursor watermark), dedup por `external:<source>:<id>`. Publica via `ExternalSignalService` — **sem ledger novo** (D1/§5).
   - Tabela aditiva `reputation_connectors`; flags `reputation_engine_enabled`/`reclame_aqui_connector_enabled` (default 0). Rotas `GET/PUT /api/reputation/connector`, `POST /api/reputation/sync` (owner/admin).
-  - `test:reputation-ingestion` (22): gates, ingestão→business_signals, severidade derivada, autor mascarado, incremental+dedup, multi-tenant, degradação do conector não-configurado, credenciais cifradas em repouso.
-- **F3..F14 — pendentes**, cada uma = 1 fatia/PR.
+  - `test:reputation-ingestion` (28): gates, ingestão→business_signals, severidade derivada, autor mascarado, incremental+dedup, multi-tenant, degradação do conector não-configurado, credenciais cifradas, mapeadores defensivos.
+- **F3 — FECHADA**. Identidade + contexto (sem automação de resposta):
+  - `src/server/IdentityResolutionService.ts` — matching determinístico multi-chave por UNIÃO (contactId>pedido>telefone via `phoneMatches`>email); **conflito/repetição → ambíguo → encaminha, nunca chuta** (RN-CRR-5/§12). `protocol` aceito mas não-suportado hoje (degrada, sem match falso). `extractHints(text)` extrai email/pedido/telefone.
+  - `src/server/CustomerContextService.ts` — customer-360 (§13) COMPONDO `CustomerProfileService` + pedidos/reembolsos (derivado de `orders.status`) + tickets+SLA (`TicketSlaService.displayState`) + reclamações (`business_signals` re-sujeitadas) + memória. Sem motor/tabela nova (D1/§5).
+  - `src/server/ReputationCaseService.ts` — orquestra `resolveCase`: extrai pistas (+override do operador) → resolve → **re-sujeita `reputation_item`→`contact`** (habilita correlação churn↔reputação §41) → **FENCE do conteúdo** (`ContextGuardService.fence` — **1º caller de produção**, fecha o gap §11 da F0) → customer-360. Injeção no texto → `suspicious`+`escalate`. Não age (F3 é percepção).
+  - Rotas `POST /api/reputation/cases/:signalId/resolve`, `GET /api/reputation/customer/:contactId/context` (owner/admin).
+  - `test:reputation-identity-context` (23): resolução por cada chave, ambiguidade/conflito/not_found/protocol, extractHints, customer-360, wire completo (resolve→re-sujeita→fence→360), injeção→escalate, multi-tenant.
+- **F4..F14 — pendentes**, cada uma = 1 fatia/PR.

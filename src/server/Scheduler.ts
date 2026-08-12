@@ -759,6 +759,17 @@ export class Scheduler {
     try {
       if (PlatformTelemetryService.isEnabled()) { PlatformBaselineService.capture(); PlatformBaselineService.prune(90); }
     } catch (e) { console.error('[Scheduler] captura de baseline de plataforma falhou', e); }
+    // ADR-164 F12 — sincroniza alertas de plataforma a partir das recomendações correntes
+    // (F10): alta vira evento (anti-spam por dedupe), recomendação que sumiu → auto-resolve.
+    // Só com a telemetria ligada. Best-effort; nunca derruba o tick.
+    try {
+      if (PlatformTelemetryService.isEnabled()) {
+        import("./CapacityRecommendationService.js").then((rm) => import("./PlatformAlertService.js").then((am) => {
+          try { am.PlatformAlertService.refresh({ recommendations: rm.CapacityRecommendationService.recommend().recommendations }); }
+          catch (e) { console.error('[Scheduler] refresh de alertas de plataforma falhou', e); }
+        })).catch((e) => console.error('[Scheduler] import de alertas de plataforma falhou', e));
+      }
+    } catch (e) { console.error('[Scheduler] sync de alertas de plataforma falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

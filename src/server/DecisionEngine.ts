@@ -35,6 +35,7 @@ export interface DecisionInput {
   expectedValue?: number | null;         // retorno esperado (p/ cenários/advocate)
   premises?: Array<{ label: string; basis?: "fact" | "estimate"; confidence?: number; hasEvidence?: boolean }>;
   decisionId?: string | null;            // liga a uma decision_actions
+  learningDomain?: string;               // PRD 9 F5 — filtra o aprendizado assegurado por domínio
   // Evidência externa (DI-4.3) — nicho/tópico p/ puxar inteligência de mercado.
   vertical?: string;                     // default: organization_settings.vertical
   externalTopic?: string;                // default: decisionType
@@ -102,7 +103,14 @@ export class DecisionEngine {
     if (run.redTeam) out.redTeam = { challenges: this.redTeam(input, evidence) };
     if (run.advocate) out.advocate = this.advocate(input, evidence, scenarios, external);
 
-    out.recommendation = this.synthesize(level, out);
+    // Prior de APRENDIZADO (PRD 9 F5): consome o historicalEvidence (F4) — o que o
+    // negócio APRENDEU com prova assegurada. É EVIDÊNCIA, não ordem: entra pequeno,
+    // aditivo, explicável e reversível, e é ASSIMÉTRICO — só pode ADICIONAR cautela,
+    // nunca relaxa a postura nem toca o hold_for_human (RN-EL-2/8, CA11-14).
+    const learningPrior = this.learningPrior(input, evidence);
+    out.learningPrior = learningPrior;
+
+    out.recommendation = this.synthesize(level, out, learningPrior);
 
     if (opts.persist && run.premortem && out.premortem.risks.length) {
       out.persisted = DecisionRiskService.record(orgId, { decisionId: input.decisionId ?? null, source: "premortem", risks: out.premortem.risks });
@@ -217,8 +225,36 @@ export class DecisionEngine {
     };
   }
 
+  /**
+   * Prior de APRENDIZADO (PRD 9 F5): resume o `historicalEvidence` (F4) — o aprendizado
+   * com prova ASSEGURADA — filtrando por `learningDomain` quando informado. Direção:
+   *   - 'cautionary' — padrões semelhantes já ENFRAQUECERAM/CONTRADISSERAM (peso p/ cautela);
+   *   - 'supportive' — padrões semelhantes se REFORÇARAM (contexto favorável);
+   *   - 'neutral' — sem sinal claro.
+   * DETERMINÍSTICO (RN-EL-3), pequeno e explicável (lista os padrões que pesaram). Não
+   * decide nada aqui — a assimetria (só adiciona cautela) é aplicada na síntese.
+   */
+  private static learningPrior(input: DecisionInput, evidence: any): any {
+    const items: any[] = Array.isArray(evidence?.historicalEvidence) ? evidence.historicalEvidence : [];
+    const dom = input.learningDomain || null;
+    const relevant = dom ? items.filter((e) => e && e.domain === dom) : items;
+    if (!relevant.length) {
+      return { applied: false, direction: "neutral", reinforced: [], cautionary: [], consideredCount: 0, note: dom ? `Sem aprendizado assegurado no domínio "${dom}".` : "Sem aprendizado com prova assegurada para esta org." };
+    }
+    const cautionary = relevant.filter((e) => e.suggestedRefutation || e.learningState === "weakened");
+    const reinforced = relevant.filter((e) => e.learningState === "reinforced");
+    const direction = cautionary.length > reinforced.length ? "cautionary" : reinforced.length > 0 ? "supportive" : "neutral";
+    const fmt = (e: any) => ({ patternType: e.patternType, domain: e.domain, assuredEffectiveness: e.assuredEffectiveness, assuredActed: e.assuredActed, suggestedRefutation: !!e.suggestedRefutation, summary: e.summary ?? null });
+    return {
+      applied: true, direction, consideredCount: relevant.length,
+      reinforced: reinforced.slice(0, 3).map(fmt),
+      cautionary: cautionary.slice(0, 3).map(fmt),
+      note: "Aprendizado é EVIDÊNCIA, não ordem: só ADICIONA cautela, nunca relaxa o gate (RN-EL-2/8).",
+    };
+  }
+
   /** Síntese determinística: postura + porquê (advisória — gate real é o RBAC). */
-  private static synthesize(level: any, out: any): any {
+  private static synthesize(level: any, out: any, learningPrior?: any): any {
     const highRisks = (out.premortem?.risks || []).filter((r: any) => r.probability === "high" || r.severity === "risk" || r.severity === "critical");
     const redFlags = (out.redTeam?.challenges || []).filter((c: any) => c.severity === "risk" || c.severity === "critical");
 
@@ -231,7 +267,29 @@ export class DecisionEngine {
     const why: string[] = [];
     for (const r of highRisks.slice(0, 3)) why.push(r.description);
     for (const c of redFlags.slice(0, 2)) why.push(`${c.premise}: ${c.issue}`);
-    return { stance, headline, why, advisory: true, note: "Recomendação advisória — o gate de execução continua no RBAC/ApprovalPolicy." };
+
+    // Prior de aprendizado — ASSIMÉTRICO (RN-EL-2/8): só pode SUBIR a cautela, jamais
+    // relaxar. Nunca mexe em hold_for_human (L4 é decisão humana — CA13). Explicável:
+    // lista os padrões assegurados que pesaram.
+    let learningApplied = false;
+    if (learningPrior?.applied && learningPrior.direction === "cautionary" && stance === "proceed") {
+      stance = "proceed_with_caution";
+      headline = "Prosseguir com cautela: o aprendizado assegurado mostra padrões semelhantes que já não funcionaram ou contradisseram.";
+      learningApplied = true;
+    }
+    if (learningPrior?.applied && learningPrior.direction === "cautionary") {
+      for (const c of (learningPrior.cautionary || []).slice(0, 2)) {
+        why.push(`Aprendizado assegurado: "${c.patternType}" tem eficácia ${c.assuredEffectiveness ?? "?"} em ${c.assuredActed} caso(s)${c.suggestedRefutation ? " e o resultado contradiz o padrão" : ""} — revisar antes.`);
+      }
+    }
+
+    return {
+      stance, headline, why, advisory: true,
+      learning: learningPrior?.applied
+        ? { direction: learningPrior.direction, considered: learningPrior.consideredCount, changedStance: learningApplied, note: "Prior aditivo/reversível; só adiciona cautela (RN-EL-2/8)." }
+        : null,
+      note: "Recomendação advisória — o gate de execução continua no RBAC/ApprovalPolicy.",
+    };
   }
 }
 

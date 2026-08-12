@@ -14,6 +14,7 @@ import { OutcomeAssuranceService } from "../OutcomeAssuranceService.js";
 import { ProcessOutcomeContractService } from "../ProcessOutcomeContractService.js";
 import { OutcomeReconcilerService } from "../OutcomeReconcilerService.js";
 import { OutcomeCorrectionService } from "../OutcomeCorrectionService.js";
+import { OutcomeAssuranceMetricsService } from "../OutcomeAssuranceMetricsService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -114,6 +115,15 @@ router.post("/assurance/correct", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(OutcomeCorrectionService.proposeCorrections(orgId, { actorId: req.user?.userId }));
+});
+
+// GET /api/decision-intelligence/assurance/metrics — KPIs de garantia (PRD 8 / ADR-165
+// F11): cobertura de outcome, confirmação, assured, gap-rate. Derivado por query (RN-004).
+router.get("/assurance/metrics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+  res.json(OutcomeAssuranceMetricsService.metrics(orgId, { days }));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

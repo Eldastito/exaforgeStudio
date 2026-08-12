@@ -14,6 +14,7 @@ import { FalatuSaveOfferService } from "../FalatuSaveOfferService.js";
 import { ProductionReadinessService } from "../ProductionReadinessService.js";
 import { OperationalHealthService } from "../OperationalHealthService.js";
 import { PlatformBaselineService } from "../PlatformBaselineService.js";
+import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -61,6 +62,14 @@ router.get("/platform-anomalies", (req: AuthRequest, res): any => {
   try {
     const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
     return res.json(PlatformBaselineService.anomalies({ days }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F7 — headroom de capacidade por recurso + zona (§25-27). Recurso que exige
+// o provider de host é declarado not_available; tendência vem do baseline da F6.
+router.get("/capacity-headroom", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(CapacityHeadroomService.snapshot());
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

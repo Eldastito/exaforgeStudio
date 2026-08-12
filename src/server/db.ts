@@ -8924,6 +8924,42 @@ const initDb = () => {
   // evento vira no-op idempotente em vez de gravar dois outcomes (dupla contagem).
   try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN event_key TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_outcomes_event_key ON action_outcomes (organization_id, event_key) WHERE event_key IS NOT NULL`); } catch(e){}
+
+  // ADR-166 F1 (PRD 9) — ledger por-evento do aprendizado: idempotência de recordOutcome
+  // + PROCEDÊNCIA. Hoje `recordOutcome` só muta agregados (`business_pattern_type_stats.acted`
+  // e `business_patterns.confidence`) sem registro por-evento — chamar 2× dobra a contagem
+  // (achado (a) da auditoria F0). Este ledger dá (1) idempotência via `event_key` (mesmo
+  // padrão do `action_outcomes.event_key` da F5/PRD 8 — índice UNIQUE PARCIAL que nunca
+  // constrange linha legada NULL, então a criação jamais falha em dado existente) e (2) a
+  // `source` do desfecho: 'assured' quando vem da escada do PRD 8 (OutcomeAssurance), 'manual'
+  // caso contrário — base do `assuredEffectiveness` da F2 (DONE ≠ EXEMPLO DE SUCESSO). Isolado
+  // por organization_id. Aditivo; nenhum motor novo (§184) — é o registro que faltava ao motor único.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS business_pattern_outcomes (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        pattern_id TEXT NOT NULL,
+        domain TEXT NOT NULL,
+        pattern_type TEXT NOT NULL,
+        outcome TEXT NOT NULL,                  -- worked | no_effect | backfired
+        realized_impact REAL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'manual',  -- assured (escada PRD 8) | manual
+        event_key TEXT,                         -- idempotência opcional (NULL = legado, nunca conflita)
+        correlation_id TEXT,
+        action_id TEXT,
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_business_pattern_outcomes_pattern
+        ON business_pattern_outcomes (organization_id, pattern_id);
+      CREATE INDEX IF NOT EXISTS idx_business_pattern_outcomes_type
+        ON business_pattern_outcomes (organization_id, domain, pattern_type, source);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_business_pattern_outcomes_event_key
+        ON business_pattern_outcomes (organization_id, event_key) WHERE event_key IS NOT NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar business_pattern_outcomes (ADR-166 F1)', e); }
 };
 
 initDb();

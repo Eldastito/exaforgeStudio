@@ -15,6 +15,7 @@ import { ProcessOutcomeContractService } from "../ProcessOutcomeContractService.
 import { OutcomeReconcilerService } from "../OutcomeReconcilerService.js";
 import { OutcomeCorrectionService } from "../OutcomeCorrectionService.js";
 import { OutcomeAssuranceMetricsService } from "../OutcomeAssuranceMetricsService.js";
+import { PatternLearningFromAssuranceService } from "../PatternLearningFromAssuranceService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -124,6 +125,21 @@ router.get("/assurance/metrics", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
   res.json(OutcomeAssuranceMetricsService.metrics(orgId, { days }));
+});
+
+// POST /api/decision-intelligence/assurance/learn — realimenta o motor de aprendizado
+// (PRD 9 / ADR-166 F1): varre ações `assured` nascidas de padrão e registra o desfecho
+// FORTE no PatternMemory (DONE ≠ exemplo — RN-EL-1). Idempotente por ação (RN-EL-4).
+// Opcional `?actionId=` aprende de UMA ação; sem ele, faz o sweep (lookbackDays/limit).
+router.post("/assurance/learn", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const actionId = typeof req.query?.actionId === "string" ? req.query.actionId
+    : (typeof req.body?.actionId === "string" ? req.body.actionId : null);
+  if (actionId) return res.json(PatternLearningFromAssuranceService.learnFromAction(orgId, actionId, req.user?.userId));
+  const lookbackDays = Number(req.body?.lookbackDays) || undefined;
+  const limit = Number(req.body?.limit) || undefined;
+  res.json(PatternLearningFromAssuranceService.sweep(orgId, { lookbackDays, limit }));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

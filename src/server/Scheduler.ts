@@ -781,6 +781,16 @@ export class Scheduler {
         }
       }).catch((e) => console.error('[Scheduler] import do OutcomeReconciler falhou', e));
     } catch (e) { console.error('[Scheduler] pass do OutcomeReconciler falhou', e); }
+    // ADR-166 F1 — realimentação do aprendizado: varre ações `assured` nascidas de padrão e
+    // registra o desfecho FORTE no PatternMemory (DONE ≠ exemplo — RN-EL-1). Idempotente por
+    // ação (RN-EL-4), então rodar todo tick é seguro. Só orgs com o motor ligado. Best-effort.
+    try {
+      import("./PatternLearningFromAssuranceService.js").then((m) => {
+        for (const oid of m.PatternLearningFromAssuranceService.orgsToLearn()) {
+          try { m.PatternLearningFromAssuranceService.sweep(oid, { lookbackDays: 30 }); } catch (e) { console.error('[Scheduler] aprendizado assured falhou', oid, e); }
+        }
+      }).catch((e) => console.error('[Scheduler] import do PatternLearningFromAssurance falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de aprendizado assured falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

@@ -36,6 +36,13 @@ const CAUSE_HYPOTHESES: Record<string, CauseTemplate[]> = {
     { cause: "Fornecedor atrasado", supportsIf: ["supplier_delay", "procurement"], contradictsIf: [], base: 0.5 },
     { cause: "Demanda acima do padrão", supportsIf: ["consumo_acima_padrao", "demand_spike", "sales"], contradictsIf: [], base: 0.4 },
   ],
+  // ADR-162 F5 — reclamação pública (Reputation). Depois que a F3 re-sujeita o
+  // reputation_item→contact, sinais operacionais ABERTOS do MESMO contato viram
+  // evidência correlata da causa. Genérico (a causa por CATEGORIA da reclamação é
+  // derivada no ReputationInvestigationService, que compõe com estas correlações).
+  public_complaint: [
+    { cause: "Problema operacional interno ligado ao cliente", supportsIf: ["churn_risk_high", "receivable_overdue", "promise_broken", "supplier_delay", "delivery_delay", "sla_breach", "stockout_confirmed", "finance", "procurement", "logistics"], contradictsIf: [], base: 0.35 },
+  ],
 };
 function convDrop(): CauseTemplate[] {
   return [

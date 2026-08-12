@@ -89,6 +89,7 @@
     "test:effectiveness-interval": "tsx scripts/test-effectiveness-interval.ts",
     "test:research-provenance": "tsx scripts/test-research-provenance.ts",
     "test:live-search-provider": "tsx scripts/test-live-search-provider.ts",
+    "test:research-curation-gates": "tsx scripts/test-research-curation-gates.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

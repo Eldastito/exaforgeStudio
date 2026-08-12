@@ -18,6 +18,7 @@ import { OutcomeAssuranceMetricsService } from "../OutcomeAssuranceMetricsServic
 import { PatternLearningFromAssuranceService } from "../PatternLearningFromAssuranceService.js";
 import { LearningEpisodeService } from "../LearningEpisodeService.js";
 import { ResearchNeedService } from "../ResearchNeedService.js";
+import { ContextualFusionService } from "../ContextualFusionService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -142,6 +143,15 @@ router.post("/assurance/learn", (req: AuthRequest, res): any => {
   const lookbackDays = Number(req.body?.lookbackDays) || undefined;
   const limit = Number(req.body?.limit) || undefined;
   res.json(PatternLearningFromAssuranceService.sweep(orgId, { lookbackDays, limit }));
+});
+
+// GET /api/decision-intelligence/context-fusion — fusão contextual (PRD 9 / ADR-166
+// F12): por tópico, alinha interno + histórico assegurado + externo com procedência,
+// força categórica (strong/moderate/weak) e caveats. NUNCA soma bases distintas (CA35).
+router.get("/context-fusion", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ContextualFusionService.fuse(orgId));
 });
 
 // GET /api/decision-intelligence/research-needs — detecção de necessidade de pesquisa

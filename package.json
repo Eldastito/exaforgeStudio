@@ -94,6 +94,7 @@
     "test:research-need": "tsx scripts/test-research-need.ts",
     "test:contextual-fusion": "tsx scripts/test-contextual-fusion.ts",
     "test:learning-metrics": "tsx scripts/test-learning-metrics.ts",
+    "test:enterprise-learning-hardening": "tsx scripts/test-enterprise-learning-hardening.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

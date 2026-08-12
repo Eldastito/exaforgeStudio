@@ -62,6 +62,7 @@
     "test:proactive-alert-threshold": "tsx scripts/test-proactive-alert-threshold.ts",
     "test:legacy-reduction-reminder": "tsx scripts/test-legacy-reduction-reminder.ts",
     "test:platform-telemetry-contract": "tsx scripts/test-platform-telemetry-contract.ts",
+    "test:node-host-telemetry": "tsx scripts/test-node-host-telemetry.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

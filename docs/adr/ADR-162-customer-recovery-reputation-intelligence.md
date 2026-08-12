@@ -142,7 +142,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | --- | --- | --- |
 | **F0** | **Esta auditoria + matriz de reutilização (FECHADA)** | — |
 | **F1** | **`ReputationProvider` contract + `StubReputationProvider` determinístico (FECHADA)** | REUTILIZAR molde `ExternalResearchProvider` |
-| F2 | Conector Reclame AQUI real, leitura incremental, dedup, External Signals (flag OFF) | REUTILIZAR `ExternalSignalService`; ESTENDER cursor/health de conector |
+| **F2** | **Conector Reclame AQUI real + ingestão incremental + dedup + External Signals, flag OFF (FECHADA)** | REUTILIZAR `ExternalSignalService`; ESTENDER cursor/health de conector |
 | F3 | Identity & Customer Context (resolve cliente/pedido/ticket → ContextPacket) | ESTENDER `phoneMatch`; COMPOR Customer 360; wire `ContextGuardService` |
 | F4 | Classification + severity + high-risk gates | CRIAR taxonomia determinística; COMPOR Context Engine |
 | F5 | Investigation (causa candidata, evidence, grounding, confidence) | REUTILIZAR `SignalInvestigationService` + `AiReliabilityKernel` |
@@ -173,5 +173,11 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
 ## 10. Status
 
 - **F0 — FECHADA**. Auditoria transversal concluída; matriz de reutilização registrada; validação da API Reclame AQUI deferida com degradação explícita (§6).
-- **F1 — FECHADA**. `src/server/ReputationProvider.ts` — contrato provider-agnóstico (`listNewItems`/`getItem`/`publishReply`/`getReplies`/`getStatus` + `capabilities` §6) + `StubReputationProvider` determinístico (sem rede, dataset fixo, offline em CI). Resolvido por registry + env `REPUTATION_PROVIDER` (default `stub`). Provider é **só transporte** (D4 — não importa db/serviço, não mapeia item→sinal). Idempotência de publicação (§30/§71), cursor incremental (§70) e **degradação explícita** `manual_required` quando falta capacidade (§6/§8) já no contrato. `test:reputation-provider` (21) — puro, sem DB. Nenhuma flag/rota/boot ainda (nada roda; o conector real e o wiring são F2).
-- **F2..F14 — pendentes**, cada uma = 1 fatia/PR (fluxo padrão do repo).
+- **F1 — FECHADA**. `src/server/ReputationProvider.ts` — contrato provider-agnóstico (`listNewItems`/`getItem`/`publishReply`/`getReplies`/`getStatus` + `capabilities` §6) + `StubReputationProvider` determinístico (sem rede, dataset fixo, offline em CI). Resolvido por registry + env `REPUTATION_PROVIDER` (default `stub`). Provider é **só transporte** (D4). Idempotência (§30/§71), cursor (§70), degradação explícita (§6/§8). `test:reputation-provider` (21, puro).
+- **F2 — FECHADA**. Conector real + ingestão, tudo **flag OFF** (D7):
+  - `src/server/ReclameAquiProvider.ts` — conector HTTP real (config-driven, `withTimeout` via AbortController, retry/backoff 429/5xx, mapeadores defensivos). **§6:** paths/mapping são PREMISSA a confirmar; **sem baseUrl+token o provider degrada** (lista vazia, `manual_required`/`unavailable`), nunca fabrica.
+  - `src/server/ReputationConnectorService.ts` — config+estado por-org: credenciais **cifradas** (`config_enc`, EncryptionService), cursor incremental (§70), health (§67), `providerFor(orgId)` resolve stub/real/não-configurado. Status **redige o token**.
+  - `src/server/ReputationIngestionService.ts` — domínio (D4): mapeia `ReputationItem`→`ExternalSignalInput` (domain='reputation', signalType='public_complaint', `basis='estimate'`/`verifiable:false` — RN-CRR-2), gate triplo opt-in, sync incremental (cursor watermark), dedup por `external:<source>:<id>`. Publica via `ExternalSignalService` — **sem ledger novo** (D1/§5).
+  - Tabela aditiva `reputation_connectors`; flags `reputation_engine_enabled`/`reclame_aqui_connector_enabled` (default 0). Rotas `GET/PUT /api/reputation/connector`, `POST /api/reputation/sync` (owner/admin).
+  - `test:reputation-ingestion` (22): gates, ingestão→business_signals, severidade derivada, autor mascarado, incremental+dedup, multi-tenant, degradação do conector não-configurado, credenciais cifradas em repouso.
+- **F3..F14 — pendentes**, cada uma = 1 fatia/PR.

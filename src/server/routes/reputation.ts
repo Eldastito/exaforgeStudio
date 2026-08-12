@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ReputationConnectorService } from "../ReputationConnectorService.js";
 import { ReputationIngestionService } from "../ReputationIngestionService.js";
 import { ReputationCaseService } from "../ReputationCaseService.js";
+import { ReputationClassificationService } from "../ReputationClassificationService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -69,6 +70,21 @@ router.post("/cases/:signalId/resolve", requireRole("owner", "admin"), (req: Aut
   if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
   logAuthEvent(orgId, (req as any).user?.userId || null, out.identity.contactId || null, "REPUTATION_CASE_RESOLVE", {
     signalId: out.signalId, identityStatus: out.identity.status, matchedBy: out.identity.matchedBy, reSubjected: out.reSubjected, escalate: out.escalate, suspicious: out.fenced.suspicious,
+  });
+  res.json(out);
+});
+
+// POST /api/reputation/cases/:signalId/classify — classificação determinística
+// (§15-18): taxonomia + severidade + high-risk gates. PERSISTE upgrade monotônico de
+// severidade (nunca rebaixa). Sem IA (reprodutível). NÃO age (F4 é percepção).
+router.post("/cases/:signalId/classify", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ReputationClassificationService.classifySignal(orgId, req.params.signalId);
+  if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+  logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_CASE_CLASSIFY", {
+    signalId: out.signalId, category: out.classification.category, severityLevel: out.classification.severityLevel,
+    highRisk: out.classification.highRisk, severityUpgraded: out.severityUpgraded, from: out.from, to: out.to,
   });
   res.json(out);
 });

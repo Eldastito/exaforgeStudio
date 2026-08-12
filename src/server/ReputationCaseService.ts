@@ -20,6 +20,7 @@ import db from "./db.js";
 import { IdentityResolutionService, IdentityHints, IdentityResolution } from "./IdentityResolutionService.js";
 import { CustomerContextService, CustomerContext } from "./CustomerContextService.js";
 import { ContextGuardService } from "./ContextGuardService.js";
+import { ReputationClassificationService, ReputationClassification } from "./ReputationClassificationService.js";
 
 export interface ReputationCaseContext {
   signalId: string;
@@ -30,7 +31,9 @@ export interface ReputationCaseContext {
   fenced: { suspicious: boolean; matched: string[]; text: string };
   reSubjected: boolean;
   customerContext: CustomerContext | null;
-  escalate: boolean;   // ambíguo/não-achado ou injeção detectada → humano decide
+  /** Classificação F4 (§15-18): taxonomia + severidade + high-risk. Persiste upgrade monotônico. */
+  classification: ReputationClassification;
+  escalate: boolean;   // ambíguo/não-achado, injeção detectada, OU high-risk (§18) → humano decide
 }
 
 export class ReputationCaseService {
@@ -77,12 +80,19 @@ export class ReputationCaseService {
     // 3) FENCE do conteúdo externo (§11) — untrusted_external_data.
     const f = ContextGuardService.fence(content, { source: String(source || "reputation") });
 
-    // 4) customer-360 quando o cliente é conhecido.
+    // 4) CLASSIFICAÇÃO F4 (§15-18): taxonomia + severidade + high-risk gates, e
+    // persiste o upgrade monotônico de severidade no sinal (o attention feed ranqueia
+    // certo um caso de acidente/fraude mesmo com nota mediana). Determinístico.
+    const classified = ReputationClassificationService.classifySignal(orgId, signalId);
+    const classification = classified!.classification; // sinal existe (loadSignal passou)
+
+    // 5) customer-360 quando o cliente é conhecido.
     const customerContext = identity.status === "resolved" && identity.contactId
       ? CustomerContextService.build(orgId, identity.contactId)
       : null;
 
-    const escalate = identity.status !== "resolved" || f.suspicious;
+    // Escala se: identidade não resolvida, injeção no conteúdo, OU high-risk (§18/RN-CRR-4).
+    const escalate = identity.status !== "resolved" || f.suspicious || classification.escalate;
 
     return {
       signalId, source, externalId,
@@ -90,6 +100,7 @@ export class ReputationCaseService {
       fenced: { suspicious: f.suspicious, matched: f.matched, text: f.fenced },
       reSubjected,
       customerContext,
+      classification,
       escalate,
     };
   }

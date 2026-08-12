@@ -12,6 +12,7 @@ import { InferredSettingsService } from "../InferredSettingsService.js";
 import { ContextualUpgradeService } from "../ContextualUpgradeService.js";
 import { ZeroTrainingHelpService } from "../ZeroTrainingHelpService.js";
 import { UxTelemetryService } from "../UxTelemetryService.js";
+import { MobileReadinessService } from "../MobileReadinessService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -97,6 +98,19 @@ router.get("/telemetry/summary", (req: AuthRequest, res): any => {
   const r = UxTelemetryService.summary(orgId, req.user, { sinceDays: days });
   if ((r as any).restricted) return res.status(403).json({ error: "Resumo de telemetria é restrito a gestores." });
   res.json(r);
+});
+
+// POST /api/ux/mobile/readiness { platform?, browser?, serviceWorker?, mediaRecorder?, pushManager?, fileInput?, standalone? }
+// Avalia os fluxos móveis + fallback garantido (CA1 — nada bloqueia). Dicas sanitizadas, sem UA cru.
+router.post("/mobile/readiness", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  res.json(MobileReadinessService.assess(orgId, req.user, req.body || {}));
+});
+
+// GET /api/ux/mobile/manifest — descritor canônico do PWA (fonte da verdade do backend).
+router.get("/mobile/manifest", (_req: AuthRequest, res): any => {
+  res.json(MobileReadinessService.pwaManifest());
 });
 
 export default router;

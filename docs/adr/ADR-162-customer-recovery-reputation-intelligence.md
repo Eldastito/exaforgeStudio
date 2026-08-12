@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F6 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook)
+**Estado:** Em execução — **F0–F7 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -147,7 +147,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F4** | **Classification + severity + high-risk gates (FECHADA)** | CRIAR taxonomia determinística; COMPOR case flow |
 | **F5** | **Investigation (causa candidata, evidence, grounding, confidence) (FECHADA)** | REUTILIZAR `SignalInvestigationService` + `checkGrounding` |
 | **F6** | **Recovery Playbook (investigação → recommended action; sem efeito externo) (FECHADA)** | REUTILIZAR `DecisionActionService`/`ApprovalPolicyService` |
-| F7 | Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) | REUTILIZAR Fala Tu inteiro |
+| **F7** | **Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) (FECHADA)** | REUTILIZAR Fala Tu inteiro; CRIAR handoff determinístico |
 | F8 | Governed Reply (`reputation_publish_reply`, começa `approved_execution`) | CRIAR handler; REUTILIZAR `dispatchGoverned`+`ConfirmationEngine` |
 | F9 | Governed Resolution (poucas ações: reship, reschedule, contact task) | COMPOR handlers; REUTILIZAR policy/executor |
 | F10 | Réplica + Closure (resposta do consumidor, nova réplica, fechamento) | REUTILIZAR dedupe/correlação/thread |
@@ -203,4 +203,9 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - Guardrails: **não inventa dinheiro** (RN-CRR-7 — refund com `expectedImpact=null` e payload `missing:['amount']`); reship referencia o **pedido real** da evidência (RN-151); **financeiro nunca auto-aprova** (`refund` → `awaiting_approval`; com banda de autonomia `deny` vira `blocked`, capturado sem derrubar o plano — RN-159-1); **idempotente** (reusa ação aberta do mesmo sinal+tipo). Correlação preservada (ADR-158).
   - Rota `POST /api/reputation/cases/:signalId/recommend` (owner/admin).
   - `test:reputation-recovery` (23): estratégia por grounding, reship→pedido real, refund não-auto/não-inventa-valor, banda deny→blocked, high-risk só handoff, correlação, idempotência, multi-tenant. Regressão `decision-actions` PASS.
-- **F7..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F7 — FECHADA**. Approval + Fala Tu (§33/§36), **determinístico**:
+  - REUSO comprovado (§36/CA15): como a F2 publica o sinal e a F6 propõe as ações de recovery **na mesma cadeia** (`correlation_id`, ADR-158), o caso já aparece **de graça** na **Smart Inbox** (risco + precisa-aprovação), no **Approval Center** (`FalaTuApprovalService.pending/decide` — mesma porta RBAC/ledger) e na **Thread** (`FalaTuThreadService.thread` — sinal→decisão→execução→resultado→nota). Nenhuma superfície nova.
+  - CRIAR (§33 internal handoff): `src/server/ReputationHandoffService.ts` — `handoff()` monta um **resumo DETERMINÍSTICO** do caso (categoria/severidade/alegação/causa provável/recomendação corrente, **sem LLM** — o `HandoffSummaryService` canônico depende de ticket+IA) e o posta via `InternalChatService.post` como nota ancorada ao `correlation_id` (do caso ou direcionada) → aparece na Thread (estágio 'nota') e na caixa interna do destinatário. High-risk é marcado no resumo (RN-CRR-4). `caseView()` compõe thread + aprovações pendentes do caso (§36). Não age no caso.
+  - Rotas `GET /api/reputation/cases/:signalId/view`, `POST /api/reputation/cases/:signalId/handoff` (owner/admin).
+  - `test:reputation-falatu` (19): reuso na Smart Inbox/Approval/Thread, handoff (nota→caixa interna+thread, broadcast, high-risk marcado), caseView, multi-tenant/not_found. Regressão `smart-inbox`/`falatu-approval`/`falatu-thread`/`internal-chat` PASS.
+- **F8..F14 — pendentes**, cada uma = 1 fatia/PR.

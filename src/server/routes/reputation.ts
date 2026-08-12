@@ -6,6 +6,7 @@ import { ReputationCaseService } from "../ReputationCaseService.js";
 import { ReputationClassificationService } from "../ReputationClassificationService.js";
 import { ReputationInvestigationService } from "../ReputationInvestigationService.js";
 import { ReputationRecoveryService } from "../ReputationRecoveryService.js";
+import { ReputationHandoffService } from "../ReputationHandoffService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -119,6 +120,34 @@ router.post("/cases/:signalId/recommend", requireRole("owner", "admin"), (req: A
     actions: out.recommendedActions.map((a) => ({ type: a.actionType, status: a.status })),
   });
   res.json(out);
+});
+
+// GET /api/reputation/cases/:signalId/view — central Fala Tu do caso (§36): thread
+// (linha do tempo por correlation_id) + aprovações pendentes deste caso. Owner/admin.
+router.get("/cases/:signalId/view", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ReputationHandoffService.caseView(orgId, (req as any).user, req.params.signalId);
+  if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+  res.json(out);
+});
+
+// POST /api/reputation/cases/:signalId/handoff { toUserId?, note? } — internal handoff
+// (§33): posta um resumo determinístico do caso como nota (do caso ou direcionada),
+// ancorada ao correlation_id. NÃO age no caso. Owner/admin.
+router.post("/cases/:signalId/handoff", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const fromUserId = (req as any).user?.userId || (req as any).user?.id;
+  if (!fromUserId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (b.toUserId != null && typeof b.toUserId !== "string") return res.status(400).json({ error: "toUserId inválido" });
+  try {
+    const out = ReputationHandoffService.handoff(orgId, fromUserId, req.params.signalId, { toUserId: b.toUserId || null, note: typeof b.note === "string" ? b.note : undefined });
+    if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+    logAuthEvent(orgId, fromUserId, out.note?.id || null, "REPUTATION_CASE_HANDOFF", { signalId: req.params.signalId, correlationId: out.correlationId, toUserId: b.toUserId || null });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });
 
 // GET /api/reputation/customer/:contactId/context — customer-360 (§13). Owner/admin;

@@ -8412,6 +8412,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN falatu_bridge_lists_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE falatu_lists ADD COLUMN bridged_requisition_id TEXT`); } catch(e){}
 
+  // PRD 6 F2 (ADR-163 §7/§96-97, D2) — navegação por NECESSIDADE (Hoje/Fala Tu/
+  // Executando/Resultados/Empresa/Explorar), derivada por papel+entitlement. Flag
+  // opt-in (default 0): o backend sempre computa o manifesto; a flag diz ao frontend
+  // se renderiza a nav simplificada. Aditiva, reversível, sem tocar rotas legadas.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN simplified_navigation_enabled INTEGER DEFAULT 0`); } catch(e){}
+
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas
   // fecham os campos que faltavam pra rastrear "de onde veio → o que entendemos

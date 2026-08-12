@@ -112,7 +112,7 @@ Esta seção entrega a Fase 0. As fatias seguintes (F1–F12) implementam sobre 
 | --- | --- | --- |
 | **F0** | **Esta auditoria + matriz (FECHADA)** | — |
 | F1 | UX Information Architecture: definir nav-alvo, comparar com `Sidebar.tsx` (sem remover módulos) | doc/design |
-| F2 | Role-aware navigation: `NavigationManifestService.forUser` (vertical/entitlement/RBAC/função) | REUTILIZAR `EntitlementService.overview` + `ContextProjection` |
+| **F2** | **Role-aware navigation: `NavigationManifestService.forUser` (vertical/entitlement/RBAC/função) (FECHADA)** | REUTILIZAR `EntitlementService.overview` + RBAC embutida |
 | F3 | Today experience: ESTENDER `FalaTuHomeService` (exceção + resultados-desde-ontem + metas) | ESTENDER Home; COMPOR ImpactLedger/Goals |
 | F4 | Progressive disclosure: Decision Card canônico + `humanState()`/`humanError()` | CRIAR shape; COMPOR attention/actions |
 | F5 | Adaptive onboarding: autodiscovery + confirmation-first + ask-only-gaps | ESTENDER onboardingSolo + ContextEngine |
@@ -141,4 +141,5 @@ Nova Home concorrente; mais dashboards; reimplementar Smart Inbox/Context Engine
 ## 9. Status
 
 - **F0 — FECHADA.** Auditoria transversal das 15 superfícies concluída (evidência `file:symbol`); matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR registrada; 3 gaps reais identificados (nav declarativa, preferência de quiet-hours/limiar, telemetria de UX) — todos aditivos. **Nenhum engine canônico será duplicado** (CA17).
-- **F1..F12 — pendentes**, cada uma = 1 fatia/PR, opt-in por flag, reversível, sem remover rotas legadas antes de telemetria (§112).
+- **F2 — FECHADA.** Role-aware navigation. `src/server/NavigationManifestService.ts` `forUser(orgId,user)` — nav por NECESSIDADE (D2): superfícies **Hoje/Fala Tu/Executando/Resultados/Empresa** no 1º nível (Fala Tu gated por `falatu_enabled`; Empresa por papel gestor) + **Explorar** no 2º nível, derivado de `EntitlementService.overview`. **Esconder ≠ desabilitar** (§55-56/D3): só módulos `active` + `visibility:visible` entram; fora do plano (`available_to_buy`)/escondidos NÃO renderizam; módulo no plano mas desligado vira **contagem** (`moreInPlan`), nunca cadeado. RBAC herdado da `overview` (CA14). O backend sempre computa; a flag `simplified_navigation_enabled` (aditiva, default 0) só diz ao frontend se renderiza — legado intacto (§94). Rota `GET /api/entitlements/navigation-manifest`. `test:navigation-manifest` (17 checks). Regressão `entitlement-service`/`entitlements-me`/`entitlement-hidden-via-blueprint` PASS. 0 tabelas novas (1 flag aditiva), 0 breaking changes.
+- **F1, F3..F12 — pendentes**, cada uma = 1 fatia/PR, opt-in por flag, reversível, sem remover rotas legadas antes de telemetria (§112).

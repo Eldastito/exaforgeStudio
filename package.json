@@ -47,6 +47,7 @@
     "test:reputation-impact": "tsx scripts/test-reputation-impact.ts",
     "test:reputation-health": "tsx scripts/test-reputation-health.ts",
     "test:falatu-bridge-recon": "tsx scripts/test-falatu-bridge-recon.ts",
+    "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

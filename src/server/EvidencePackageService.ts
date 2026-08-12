@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
+import { LearningEpisodeService } from "./LearningEpisodeService.js";
 
 /**
  * EvidencePackageService — Evidence Package v1 (INTERNO). Decision Intelligence
@@ -15,9 +16,11 @@ import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
  * `sources`.
  *
  * NÃO DUPLICA agregação: reusa `BusinessSnapshotV2Service.build` (não recalcula
- * nenhum domínio). Evidência EXTERNA e HISTÓRICA são SLOTS VAZIOS nesta v1:
- * `externalEvidence` entra na DI-4 (e depende da decisão de cache cross-tenant —
- * ADR-079 D4); `historicalEvidence` fica adiada.
+ * nenhum domínio). `externalEvidence` entra na DI-4 (contextualizações de vertical
+ * frescas). `historicalEvidence` é PREENCHIDA na F4 do PRD 9 (ADR-166): o que o
+ * negócio APRENDEU com prova ASSEGURADA (Learning Episodes com recorte `assured`) —
+ * é o ponto onde o aprendizado entra no pacote de decisão como EVIDÊNCIA (nunca
+ * ordem). Vazio quando não há aprendizado assegurado (0-regressão).
  *
  * CACHE opt-in por org (convenção nº 10): `organization_settings
  * .evidence_layer_enabled`. Off (default): `build()` computa fresco e NÃO
@@ -40,8 +43,8 @@ export interface EvidencePackage {
   dataQuality: any;
   internalEvidence: any;
   topPriorities: any[];
-  externalEvidence: any[];   // DI-4 (adiado)
-  historicalEvidence: any[]; // adiado
+  externalEvidence: any[];   // DI-4 — contextualizações de vertical frescas
+  historicalEvidence: any[]; // PRD 9 F4 (ADR-166) — aprendizado com prova assegurada
   sources: string[];
   cacheHit?: boolean;
 }
@@ -111,7 +114,7 @@ export class EvidencePackageService {
       internalEvidence: snap?.domains || {},
       topPriorities: snap?.topPriorities || [],
       externalEvidence: collectExternalEvidence(orgId),
-      historicalEvidence: [],
+      historicalEvidence: collectHistoricalEvidence(orgId),
       sources: collectSources(snap?.domains),
     };
   }
@@ -151,6 +154,34 @@ function collectExternalEvidence(orgId: string): any[] {
       let ctx: any = {}; try { ctx = JSON.parse(r.context_json); } catch { /* */ }
       return { source: "vertical_intelligence", vertical: r.vertical, topic: r.topic, fingerprint: r.fingerprint, summary: ctx?.summary ?? null, confidence: r.vi_confidence, validUntil: r.vi_valid_until };
     });
+  } catch { return []; }
+}
+
+/**
+ * Evidência HISTÓRICA do slot `historicalEvidence[]` (PRD 9 / ADR-166 F4): o que o
+ * negócio APRENDEU com prova ASSEGURADA — os Learning Episodes com recorte `assured`
+ * (só padrões cujos desfechos a escada do PRD 8 confirmou E mediu). É read-only e
+ * DERIVADO (RN-004); nunca dispara aprendizado. Cada item carrega a `assuredEffectiveness`
+ * e o `learningState` — o que faz esta evidência ser PONDERÁVEL pela decisão (F5), mas
+ * ela é EVIDÊNCIA, não ordem (RN-EL-2/8). Vazio sem aprendizado assegurado (0-regressão);
+ * isolado por `organization_id`. Padrões com refutação sugerida vêm primeiro (a decisão
+ * precisa saber o que o resultado CONTRADIZ tanto quanto o que confirma).
+ */
+function collectHistoricalEvidence(orgId: string): any[] {
+  try {
+    const { episodes } = LearningEpisodeService.episodes(orgId, { onlyAssured: true, limit: 50 });
+    return (episodes || []).map((e: any) => ({
+      source: "learning",
+      domain: e.domain,
+      patternType: e.patternType,
+      patternId: e.patternId,
+      summary: e.description ?? null,
+      learningState: e.learningState,                    // reinforced|weakened|contested
+      assuredEffectiveness: e.assuredEffectiveness,      // 0..1 (recorte forte)
+      assuredActed: e.assuredActed,                      // nº de desfechos com garantia
+      suggestedRefutation: e.suggestedRefutation,        // prova assegurada contradiz?
+      patternConfidence: e.confidence,
+    }));
   } catch { return []; }
 }
 

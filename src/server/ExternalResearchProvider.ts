@@ -188,9 +188,87 @@ export function parseLlmResearch(raw: string, q: ResearchQuery): ResearchResult 
   };
 }
 
+/** Custo estimado (centavos) de UMA busca VIVA. API real tende a custar mais que a
+ * síntese do modelo — default conservador; configurável por env. */
+const LIVE_RESEARCH_COST_CENTS = Math.max(0, parseInt(process.env.EXTERNAL_RESEARCH_LIVE_COST_CENTS || "8", 10) || 0);
+
+/**
+ * Transforma a resposta CRUA de uma API de busca (string JSON) em `ResearchResult`
+ * com `evidenceMode: 'live'` — função PURA (sem rede), `retrievedAt` injetado (sem
+ * relógio, testável). Aceita `{results:[...]}` ou um array no topo; cada item vira
+ * `sourceEvidence` tier 'B' (RECUPERADA/verificável — não é fonte primária/oficial,
+ * mas foi de fato buscada, ≠ tier C alegado do modelo). Vazio → null (o chamador cai
+ * no stub; RN-EI-6 não inventa fonte). `content` deriva SÓ da taxonomia + snippets
+ * públicos (RN-EI-2) — a anonimização final segue no `persistShared`.
+ */
+export function parseLiveSearch(raw: string, q: ResearchQuery, opts: { retrievedAt: string }): ResearchResult | null {
+  const parsed = safeParse(raw);
+  const rows: any[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.results) ? parsed.results : [];
+  const items = rows.filter((r) => r && (r.url || r.title)).slice(0, 12);
+  if (!items.length) return null;
+  const scope = [q.vertical, q.topic, q.region, q.timeframe].filter(Boolean).join(" · ");
+  const sourceEvidence: SourceEvidence[] = items.map((r) => ({
+    url: typeof r.url === "string" ? r.url : null,
+    title: typeof r.title === "string" ? r.title : null,
+    publisher: typeof r.publisher === "string" ? r.publisher : (typeof r.source === "string" ? r.source : null),
+    tier: "B" as const,
+    retrievedAt: opts.retrievedAt,
+    freshness: typeof r.date === "string" ? r.date : (typeof r.published === "string" ? r.published : null),
+  }));
+  const drivers = items.map((r) => (typeof r.snippet === "string" ? r.snippet : (typeof r.title === "string" ? r.title : ""))).filter(Boolean).slice(0, 8);
+  const content = {
+    summary: `Panorama VIVO do nicho ${q.vertical} sobre "${q.topic}" — ${items.length} fonte(s) recuperada(s).`,
+    drivers, scope, generatedBy: "live_search",
+  };
+  return {
+    content, sources: sourceEvidence.map((e) => e.url || e.title || "").filter(Boolean),
+    confidence: clamp01(0.5 + Math.min(0.3, items.length * 0.05)), // mais fontes → um pouco mais de confiança
+    costCents: LIVE_RESEARCH_COST_CENTS,
+    evidenceMode: "live",
+    sourceEvidence,
+    retrievedAt: opts.retrievedAt,
+  };
+}
+
+/**
+ * LiveSearchResearchProvider (PRD 9 / ADR-166 F8) — busca VIVA de fonte externa atrás
+ * do MESMO contrato (RN-EI-7, sem pipeline paralelo). HONESTO por design:
+ *  - SEM vendor configurado (`EXTERNAL_RESEARCH_SEARCH_URL`) → cai no STUB determinístico
+ *    (evidenceMode model_knowledge). NUNCA fabrica fonte viva (RN-EI-6).
+ *  - Falha de rede/parse → também cai no stub (best-effort, nunca derruba o passe).
+ *  - Query derivada SÓ de (vertical, topic, region, timeframe) (RN-EI-2) — nunca dado
+ *    de tenant. Opt-in + orçamento + master-only são impostos por quem chama
+ *    (`VerticalIntelligenceService.runResearch`); o provider só executa a recuperação.
+ */
+export class LiveSearchResearchProvider implements ExternalResearchProvider {
+  name = "live";
+  static isConfigured(): boolean { return !!(process.env.EXTERNAL_RESEARCH_SEARCH_URL || "").trim(); }
+
+  async research(q: ResearchQuery): Promise<ResearchResult> {
+    const fallback = () => REGISTRY.stub.research(q);
+    const url = (process.env.EXTERNAL_RESEARCH_SEARCH_URL || "").trim();
+    if (!url) return fallback(); // sem vendor → honesto (model_knowledge), não inventa live
+    const apiKey = (process.env.EXTERNAL_RESEARCH_SEARCH_API_KEY || "").trim();
+    const endpoint = `${url}${url.includes("?") ? "&" : "?"}q=${encodeURIComponent(q.query)}`;
+    let raw = "";
+    try {
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+      const resp = await fetch(endpoint, { headers });
+      if (!resp.ok) return fallback();
+      raw = await resp.text();
+    } catch {
+      return fallback(); // falha de rede nunca derruba o passe (convenção nº 7)
+    }
+    const retrievedAt = new Date().toISOString();
+    return parseLiveSearch(raw, q, { retrievedAt }) ?? fallback();
+  }
+}
+
 const REGISTRY: Record<string, ExternalResearchProvider> = {
   stub: new StubResearchProvider(),
   llm: new LlmResearchProvider(),
+  live: new LiveSearchResearchProvider(),
 };
 
 /** Resolve o provider por nome → env `EXTERNAL_RESEARCH_PROVIDER` → 'stub'. */

@@ -15,11 +15,16 @@ import { randomUUID } from "crypto";
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const METHODS = ["self_reported", "manual", "attributed", "derived"] as const;
 type Method = (typeof METHODS)[number];
+// ADR-162 F13 (D6/§54) — 3º estado de ATRIBUIÇÃO, aditivo. `basis` já é TEXT sem
+// CHECK, então aceitar 'influenced' não exige migração. FACT (comprovado) / ESTIMATE
+// (projetado) / INFLUENCED (atribuído — a ação contribuiu, mas não é a causa única):
+// os três NUNCA são somados entre si (§54) — o ledger os separa em buckets próprios.
+const BASES = ["fact", "estimate", "influenced"] as const;
 
 export interface RecordOutcomeInput {
   expectedValue?: number | null;
   realizedValue?: number | null;
-  basis?: string;                       // fact | estimate
+  basis?: string;                       // fact | estimate | influenced (§54 — nunca somados)
   measurementMethod?: string;           // self_reported | manual | attributed | derived
   attributionWindowDays?: number | null;
   evidence?: any;
@@ -42,7 +47,7 @@ export class OutcomeMeasurementService {
     // ADR-158 — o outcome herda o fio da ação (fecha o trace sinal→decisão→outcome).
     const action = db.prepare("SELECT id, correlation_id FROM decision_actions WHERE id = ? AND organization_id = ?").get(actionId, orgId) as any;
     if (!action) throw new Error("Ação não encontrada para medir outcome.");
-    const basis = input.basis === "fact" ? "fact" : "estimate";
+    const basis = (BASES as readonly string[]).includes(String(input.basis)) ? String(input.basis) : "estimate";
     const method: Method = (METHODS as readonly string[]).includes(input.measurementMethod as any) ? (input.measurementMethod as Method) : "manual";
     const id = randomUUID();
     db.prepare(`INSERT INTO action_outcomes
@@ -107,9 +112,11 @@ export class OutcomeMeasurementService {
         expected,
         realized,
         gap: round2(realized - expected),
-        // Separação inegociável (ADR-085 D4): comprovado ≠ estimado.
+        // Separação inegociável (ADR-085 D4 / ADR-162 §54): comprovado ≠ estimado ≠
+        // atribuído. Os três buckets NUNCA são somados entre si.
         fact: { expected: sumExpected("fact"), realized: sumRealized("fact") },
         estimate: { expected: sumExpected("estimate"), realized: sumRealized("estimate") },
+        influenced: { expected: sumExpected("influenced"), realized: sumRealized("influenced") },
         // Categorias explícitas (ADR-152 F3.1) — cada uma na sua unidade.
         categories: {
           timeSavedMinutes: Math.trunc(sumField("time_saved_minutes")),

@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F12 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada · réplica+fechamento · prevenção/escalada · root cause+aprendizado)
+**Estado:** Em execução — **F0–F13 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada · réplica+fechamento · prevenção/escalada · root cause+aprendizado · impacto+KPI+INFLUENCED)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -153,7 +153,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F10** | **Réplica + Closure (resposta do consumidor, nova réplica, fechamento) (FECHADA)** | REUTILIZAR dedupe/correlação/confirmação |
 | **F11** | **Prevention (`reputational_escalation_risk`, cruzar sinais internos) (FECHADA)** | ESTENDER molde `ChurnRiskDetector`; REUTILIZAR `SignalCorrelation` |
 | **F12** | **Root Cause & Learning (cluster, tendência, baseline, pattern memory) (FECHADA)** | COMPOR query + `PatternMemoryService`; CRIAR baseline (RN-CRR-8) |
-| F13 | Impact (outcomes, Impact Ledger, KPI de recuperação) | REUTILIZAR/ESTENDER `OutcomeMeasurement`/`UnifiedImpactLedger`; ESTENDER INFLUENCED |
+| **F13** | **Impact (outcomes, Impact Ledger, KPI de recuperação) (FECHADA)** | REUTILIZAR/ESTENDER `OutcomeMeasurement`/`UnifiedImpactLedger`; ESTENDER INFLUENCED (D6) |
 | F14 | Production Hardening (perf, security, rate-limit, fault injection, runbook, rollout) | REUTILIZAR `JobQueue`/health; padrão SkillOS F12 |
 
 **Ordem de risco (§82):** read-only → recommendation → approved execution → autonomia limitada. **Rollout (§84):** DEV → Shadow (§85: "eu teria classificado/recomendado/escalado assim") → org interna → 1 cliente piloto → approved execution → controlled rollout → autonomia limitada — reusando a esteira §68 do SkillOS (ADR-159/PRD 4).
@@ -231,4 +231,9 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - **Guardrails (RN-CRR-8/§44):** correlação **não** é causa (o padrão é EVIDÊNCIA PARA INVESTIGAR, nunca afirmação de culpa); dimensão = **categoria**, **nunca** ranking punitivo de funcionário (§44) — a `note` carrega os dois.
   - Rotas `GET /api/reputation/root-cause` + `POST /api/reputation/root-cause/learn` (owner/admin).
   - `test:reputation-rootcause` (12): clusters+baseline (categoria que subiu × que caiu), volume-baseline/tendência, guardrail na nota, pattern memory (memoriza+valida+publica sinal), opt-in gate, multi-tenant. Regressão `pattern-memory`/`signals-attention` PASS.
-- **F13..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F13 — FECHADA**. Impact (§51-55, D6) — fecha o loop com os KPIs certos, estendendo o Impact Ledger unificado:
+  - **INFLUENCED (D6)**: `OutcomeMeasurementService` ganha o **3º estado de atribuição** `basis='influenced'` (a ação contribuiu, não é a causa única) — aditivo, sem migração (`basis` já é TEXT). O `ledger` separa **fact / estimate / influenced** em buckets próprios, **nunca somados** (§54).
+  - `src/server/ReputationImpactService.ts` — `kpi()`: **KPI central = problemas RESOLVIDOS (§55)**, não respostas enviadas — deriva por query resolvidos/abertos/total + taxa de recuperação; valor protegido vem dos outcomes das ações `recovery`, **separado por categoria** (revenueRecovered/lossPrevented/costAvoided, nunca somadas — §52) **e por base**. `recordRecoveryValue()` atribui valor a uma ação de recovery como `influenced` (`measurement_method='attributed'`); **§52/RN-CRR-7**: exige valor REAL + evidência — **nunca inventa** dinheiro protegido.
+  - Rotas `GET /api/reputation/impact` + `POST /api/reputation/actions/:actionId/impact` (owner/admin).
+  - `test:reputation-impact` (13): North Star (resolvidos/taxa), INFLUENCED + separação por base (§54), categorias separadas (§52), guardas §52 (sem valor/evidência/categoria/só-recovery), regressão do bucket influenced no ledger genérico, multi-tenant. Regressão `outcome-measurement`/`impact-ledger-unified`/`decision-actions` PASS.
+- **F14 — pendente** (Production Hardening), = 1 fatia/PR.

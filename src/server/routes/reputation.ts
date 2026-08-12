@@ -12,6 +12,7 @@ import { ReputationResolutionService } from "../ReputationResolutionService.js";
 import { ReputationClosureService } from "../ReputationClosureService.js";
 import { ReputationEscalationRiskDetectorService } from "../ReputationEscalationRiskDetectorService.js";
 import { ReputationRootCauseService } from "../ReputationRootCauseService.js";
+import { ReputationImpactService } from "../ReputationImpactService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -262,6 +263,31 @@ router.post("/root-cause/learn", requireRole("owner", "admin"), async (req: Auth
     logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_ROOTCAUSE_LEARN", { detected: out.detected, validated: out.validated, published: out.published, skipped: !!out.skipped });
     res.json(out);
   } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/reputation/impact?windowDays=30 — KPI da recuperação (§51-55): problemas
+// resolvidos (North Star) + taxa + valor protegido por categoria/base (nunca somados).
+router.get("/impact", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const windowDays = Number(req.query?.windowDays) > 0 ? Number(req.query.windowDays) : null;
+  res.json(ReputationImpactService.kpi(orgId, { windowDays }));
+});
+
+// POST /api/reputation/actions/:actionId/impact { realizedValue, category, evidence, basis? }
+// — atribui valor recuperado a uma ação de recovery (§52, default INFLUENCED). Owner/admin.
+router.post("/actions/:actionId/impact", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    const out = ReputationImpactService.recordRecoveryValue(orgId, req.params.actionId, {
+      realizedValue: Number(b.realizedValue), category: String(b.category), evidence: b.evidence,
+      basis: b.basis, attributionWindowDays: b.attributionWindowDays != null ? Number(b.attributionWindowDays) : null,
+    });
+    logAuthEvent(orgId, (req as any).user?.userId || null, req.params.actionId, "REPUTATION_IMPACT_RECORD", { actionId: req.params.actionId, category: b.category, basis: out.basis });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });
 
 // GET /api/reputation/customer/:contactId/context — customer-360 (§13). Owner/admin;

@@ -4,6 +4,7 @@ import { DecisionActionService } from "../DecisionActionService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { CommandExecutorService } from "../CommandExecutorService.js";
 import { StepUpMfaService } from "../StepUpMfaService.js";
+import { UxPresentationService } from "../UxPresentationService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -27,12 +28,34 @@ router.get("/ledger", (req: AuthRequest, res): any => {
   res.json(OutcomeMeasurementService.ledger(orgId, { domain }));
 });
 
+// GET /api/actions/cards — PRD 6 F4: Decision Cards (o-que/por-que/impacto/
+// recomendo/posso-fazer/regra) das ações que pedem atenção, já role-scoped +
+// dinheiro role-gated (§73). Antes de /:id pra não ser capturada como id="cards".
+router.get("/cards", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const statuses = typeof req.query?.status === "string" ? req.query.status.split(",") : undefined;
+  res.json({ cards: UxPresentationService.cards(orgId, req.user, { statuses }) });
+});
+
 router.get("/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const a = DecisionActionService.get(orgId, req.params.id);
   if (!a) return res.status(404).json({ error: "Ação não encontrada." });
   res.json(a);
+});
+
+// GET /api/actions/:id/card — o Decision Card de uma ação (progressive disclosure).
+// 404 quando o domínio é invisível ao papel (RN-UX-2) — não vaza existência.
+router.get("/:id/card", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const a = DecisionActionService.get(orgId, req.params.id);
+  if (!a) return res.status(404).json({ error: "Ação não encontrada." });
+  const card = UxPresentationService.card(orgId, a, req.user);
+  if (!card) return res.status(404).json({ error: "Ação não encontrada." });
+  res.json(card);
 });
 
 // POST /api/actions — propõe uma ação (a política define se exige aprovação).

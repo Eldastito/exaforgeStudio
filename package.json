@@ -87,6 +87,7 @@
     "test:historical-evidence": "tsx scripts/test-historical-evidence.ts",
     "test:learning-prior": "tsx scripts/test-learning-prior.ts",
     "test:effectiveness-interval": "tsx scripts/test-effectiveness-interval.ts",
+    "test:research-provenance": "tsx scripts/test-research-provenance.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

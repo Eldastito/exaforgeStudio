@@ -191,6 +191,47 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
   }
 
   /**
+   * Eficácia ASSEGURADA por tipo (PRD 9 / ADR-166 F2): recorte que conta APENAS
+   * desfechos de procedência 'assured' (a escada do PRD 8 confirmou E mediu — vindos
+   * do `PatternLearningFromAssuranceService` da F1). É DERIVADA por query do ledger
+   * `business_pattern_outcomes` (RN-004), SEPARADA do `effectiveness` de `typeStats`
+   * que MISTURA manual+assured — as duas nunca se fundem (RN-EL-6).
+   *
+   * Sem desfecho assured → `assuredEffectiveness: null`, JAMAIS 0 (RN-EL-5 null ≠ zero):
+   * "nunca agimos com garantia sobre este tipo" é ausência de prova, não fracasso.
+   * Isso é o coração do §9/CA2 — DONE ≠ EXEMPLO DE SUCESSO: o número forte só existe
+   * quando o resultado foi de fato assegurado.
+   */
+  static assuredStats(orgId: string, domain: string, patternType: string): { assuredActed: number; worked: number; no_effect: number; backfired: number; netImpact: number; assuredEffectiveness: number | null } {
+    const r = db.prepare(
+      `SELECT COUNT(*) acted,
+              COALESCE(SUM(CASE WHEN outcome='worked' THEN 1 ELSE 0 END),0) worked,
+              COALESCE(SUM(CASE WHEN outcome='no_effect' THEN 1 ELSE 0 END),0) no_effect,
+              COALESCE(SUM(CASE WHEN outcome='backfired' THEN 1 ELSE 0 END),0) backfired,
+              COALESCE(SUM(realized_impact),0) net_impact
+         FROM business_pattern_outcomes
+        WHERE organization_id = ? AND domain = ? AND pattern_type = ? AND source = 'assured'`
+    ).get(orgId, domain, patternType) as any;
+    const acted = Number(r?.acted) || 0;
+    const worked = Number(r?.worked) || 0, noEffect = Number(r?.no_effect) || 0, backfired = Number(r?.backfired) || 0;
+    const assuredEffectiveness = acted > 0 ? round2((worked * 1 + noEffect * 0.5 + backfired * 0) / acted) : null;
+    return { assuredActed: acted, worked, no_effect: noEffect, backfired, netImpact: round2(Number(r?.net_impact) || 0), assuredEffectiveness };
+  }
+
+  /**
+   * Lista a eficácia por tipo já com o recorte assegurado ANEXADO (aditivo aos campos
+   * de `allTypeStats`): mantém `effectiveness`/`acted` (mistos) e acrescenta
+   * `assuredEffectiveness` (null-safe) + `assuredActed`. Consumidores antigos seguem
+   * lendo os campos originais; o recorte forte fica visível lado a lado, nunca somado.
+   */
+  static allEffectiveness(orgId: string, domain?: string): any[] {
+    return this.allTypeStats(orgId, domain).map((s) => {
+      const a = this.assuredStats(orgId, s.domain, s.pattern_type);
+      return { ...s, assuredEffectiveness: a.assuredEffectiveness, assuredActed: a.assuredActed, assuredNetImpact: a.netImpact };
+    });
+  }
+
+  /**
    * Registra o DESFECHO de uma ação sobre um padrão: `worked|no_effect|backfired`,
    * com impacto realizado opcional. Ajusta (1) a eficácia aprendida do tipo
    * (`effectiveness = Σpeso/acted`; worked=1, no_effect=0,5, backfired=0) e (2) a

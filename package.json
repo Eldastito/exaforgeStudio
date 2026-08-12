@@ -80,6 +80,7 @@
     "test:process-outcome-contract": "tsx scripts/test-process-outcome-contract.ts",
     "test:business-outcome-resolver": "tsx scripts/test-business-outcome-resolver.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
+    "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

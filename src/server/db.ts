@@ -8421,6 +8421,11 @@ const initDb = () => {
   // (framing por exceção + resolvido-desde-ontem + metas). Flag opt-in (default 0) só
   // diz ao frontend se renderiza o framing novo; os campos são aditivos (0 regressão).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN invisible_ux_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 6 F5 (ADR-163 §17-§25, D4/RN-UX-6) — onboarding adaptativo: autodiscovery do
+  // perfil da empresa com fonte+confiança, confirmation-first, perguntar só as lacunas.
+  // Flag opt-in (default 0) só diz ao frontend se roda o fluxo adaptativo; o discover
+  // NUNCA inventa (declara "ainda não sei"), a confirmação só grava campo descritivo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN adaptive_onboarding_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas

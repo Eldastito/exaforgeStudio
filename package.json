@@ -51,6 +51,7 @@
     "test:falatu-home-today": "tsx scripts/test-falatu-home-today.ts",
     "test:ux-presentation": "tsx scripts/test-ux-presentation.ts",
     "test:ux-execution-results": "tsx scripts/test-ux-execution-results.ts",
+    "test:adaptive-onboarding": "tsx scripts/test-adaptive-onboarding.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

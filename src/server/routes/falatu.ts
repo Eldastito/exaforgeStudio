@@ -3,6 +3,7 @@ import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
+import { FalaTuBridgeReconService } from "../FalaTuBridgeReconService.js";
 import { FalaTuCaptureTokenService } from "../FalaTuCaptureTokenService.js";
 import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
 import { FalaTuBriefingTaskService } from "../FalaTuBriefingTaskService.js";
@@ -311,6 +312,18 @@ router.put("/bridge", (req: AuthRequest, res): any => {
   if (hasEvents) FalaTuService.setEventBridge(req.organizationId!, req.body.events);
   if (hasLists) FalaTuService.setListBridge(req.organizationId!, req.body.lists);
   res.json(FalaTuService.bridgeState(req.organizationId!));
+});
+
+// ADR-160 F10 — reconciliação da porta I/O: saúde do dual-write (cobertura, elos
+// quebrados, prontidão) por tipo de bridge. Leitura p/ qualquer papel.
+router.get("/bridge/recon", (req: AuthRequest, res): any => {
+  res.json(FalaTuBridgeReconService.report(req.organizationId!));
+});
+
+// Backfill: liga tarefas históricas ao canônico (só com a flag ligada, idempotente).
+router.post("/bridge/backfill-tasks", (req: AuthRequest, res): any => {
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem rodar o backfill." });
+  res.json(FalaTuBridgeReconService.backfillTasks(req.organizationId!));
 });
 
 // Estado da porta de canal (opt-in de envio proativo, separado da flag do módulo).

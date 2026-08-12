@@ -8417,6 +8417,10 @@ const initDb = () => {
   // opt-in (default 0): o backend sempre computa o manifesto; a flag diz ao frontend
   // se renderiza a nav simplificada. Aditiva, reversível, sem tocar rotas legadas.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN simplified_navigation_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 6 F3 (ADR-163 §11-§13, D1) — "Hoje" por exceção: enriquece a Home do Fala Tu
+  // (framing por exceção + resolvido-desde-ontem + metas). Flag opt-in (default 0) só
+  // diz ao frontend se renderiza o framing novo; os campos são aditivos (0 regressão).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN invisible_ux_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas

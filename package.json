@@ -44,6 +44,7 @@
     "test:reputation-closure": "tsx scripts/test-reputation-closure.ts",
     "test:reputation-escalation": "tsx scripts/test-reputation-escalation.ts",
     "test:reputation-rootcause": "tsx scripts/test-reputation-rootcause.ts",
+    "test:reputation-impact": "tsx scripts/test-reputation-impact.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

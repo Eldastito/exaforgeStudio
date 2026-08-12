@@ -4,6 +4,7 @@ import { ReputationConnectorService } from "../ReputationConnectorService.js";
 import { ReputationIngestionService } from "../ReputationIngestionService.js";
 import { ReputationCaseService } from "../ReputationCaseService.js";
 import { ReputationClassificationService } from "../ReputationClassificationService.js";
+import { ReputationInvestigationService } from "../ReputationInvestigationService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -85,6 +86,21 @@ router.post("/cases/:signalId/classify", requireRole("owner", "admin"), (req: Au
   logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_CASE_CLASSIFY", {
     signalId: out.signalId, category: out.classification.category, severityLevel: out.classification.severityLevel,
     highRisk: out.classification.highRisk, severityUpgraded: out.severityUpgraded, from: out.from, to: out.to,
+  });
+  res.json(out);
+});
+
+// POST /api/reputation/cases/:signalId/investigate — investigação (§19-20): causa
+// candidata + evidência + grounding + confiança, separando alegação/fato/hipótese.
+// Determinística (sem IA). NÃO age (F5 é investigação). Owner/admin.
+router.post("/cases/:signalId/investigate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ReputationInvestigationService.investigate(orgId, req.params.signalId);
+  if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+  logAuthEvent(orgId, (req as any).user?.userId || null, null, "REPUTATION_CASE_INVESTIGATE", {
+    signalId: out.signalId, category: out.category, highRisk: out.highRisk, escalate: out.escalate,
+    grounding: out.grounding.status, corroborated: out.grounding.corroboratedByInternalFact, confidence: out.confidence,
   });
   res.json(out);
 });

@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F4 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+severidade+high-risk)
+**Estado:** Em execução — **F0–F5 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+severidade+high-risk · investigação+grounding)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -145,7 +145,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F2** | **Conector Reclame AQUI real + ingestão incremental + dedup + External Signals, flag OFF (FECHADA)** | REUTILIZAR `ExternalSignalService`; ESTENDER cursor/health de conector |
 | **F3** | **Customer Identity & Context (resolve multi-chave + customer-360 + wire ContextGuard + re-sujeitar) (FECHADA)** | ESTENDER `phoneMatch`; COMPOR Customer 360; WIRE `ContextGuardService` |
 | **F4** | **Classification + severity + high-risk gates (FECHADA)** | CRIAR taxonomia determinística; COMPOR case flow |
-| F5 | Investigation (causa candidata, evidence, grounding, confidence) | REUTILIZAR `SignalInvestigationService` + `AiReliabilityKernel` |
+| **F5** | **Investigation (causa candidata, evidence, grounding, confidence) (FECHADA)** | REUTILIZAR `SignalInvestigationService` + `checkGrounding` |
 | F6 | Recovery Playbook (investigação → recommended action; sem efeito externo) | REUTILIZAR `DecisionActionService`/`ProcessRuntime` |
 | F7 | Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) | REUTILIZAR Fala Tu inteiro |
 | F8 | Governed Reply (`reputation_publish_reply`, começa `approved_execution`) | CRIAR handler; REUTILIZAR `dispatchGoverned`+`ConfirmationEngine` |
@@ -191,4 +191,10 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - `classifySignal()` aplica sobre um `business_signal` e PERSISTE **upgrade MONOTÔNICO** de severidade — sobe (attention→critical num caso de acidente com nota mediana), **NUNCA rebaixa**, idempotente; carimba a classificação no `evidence_json` (auditoria). Sem tabela nova (D1/§5); isolado por org.
   - Composto no `ReputationCaseService.resolveCase` (o caso agora carrega `classification`; `escalate` também dispara em high-risk). Rota `POST /api/reputation/cases/:signalId/classify` (owner/admin).
   - `test:reputation-classification` (36): taxonomia por categoria + `other`, normalização caixa/acento, high-risk (cada gate + conservador + sem falso-positivo), severidade/bump/mapeamento, extensão por vertical, persistência monotônica (upgrade/não-rebaixa/idempotência/vertical da org), composição no resolveCase, multi-tenant.
-- **F5..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F5 — FECHADA**. Investigação (§19-20), **determinística** (roda em CI sem chave de IA), **reusa** (sem motor novo, §5):
+  - `src/server/ReputationInvestigationService.ts` — orquestra a investigação de um caso já ingerido/identificado/classificado (F2/F3/F4), separando com rigor os **três níveis epistêmicos** (§20): **CLAIM** (alegação do cliente → `estimate`, nunca fato — RN-CRR-2), **FACT** (pedidos/tickets do customer-360 F3 + `business_signals` correlatos → `SYSTEM_OF_RECORD`/`INTERNAL_DB`), **HYPOTHESIS** (causa candidata → `hypothesis`, com evidência a favor/contra e confiança).
+  - **Causa por categoria (F4)** corroborada por fato do 360 (entrega↔pedido não-entregue; reembolso↔pedido em reembolso; atendimento↔ticket com SLA estourado) **+** causa por **correlação de sinais** do mesmo contato (reusa `SignalInvestigationService.investigate` — registry estendido com template `public_complaint`).
+  - **Grounding (§25/§61)** pelo gate DETERMINÍSTICO `checkGrounding` (o mesmo primitivo que o `AiReliabilityKernel` embrulha): a reclamação só é `grounded` quando **corroborada por fato interno**; sem lastro permanece **`unsupported`** (alegação, não fato) e o caso **escala** quando é sério. **High-risk (F4) nunca é auto-concluído** (RN-CRR-4) — headline de apuração humana, escala. Não age (F5 é investigação).
+  - Rota `POST /api/reputation/cases/:signalId/investigate` (owner/admin).
+  - `test:reputation-investigation` (20): claim/fact/hypothesis, corroboração (grounded) × sem-lastro (unsupported→escala), reembolso, high-risk (não conclui+escala), reúso da correlação de sinais, multi-tenant/not_found. Regressão `signal-investigation` PASS (template aditivo).
+- **F6..F14 — pendentes**, cada uma = 1 fatia/PR.

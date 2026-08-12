@@ -20,6 +20,7 @@ import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
 import { PlatformAlertService } from "../PlatformAlertService.js";
+import { CapacityEnvelopeService } from "../CapacityEnvelopeService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -146,6 +147,24 @@ router.post("/platform-alerts/refresh", (_req: AuthRequest, res): any => {
   try {
     const recs = CapacityRecommendationService.recommend().recommendations;
     return res.json(PlatformAlertService.refresh({ recommendations: recs }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F13 — Capacity Envelope: limite seguro de operação derivado de teste de carga
+// FORA de produção. Sem teste ainda → awaiting_load_test (§59, não inventa). GET lê o
+// envelope corrente; POST persiste um envelope derivado (revisado por humano).
+router.get("/capacity-envelope", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(CapacityEnvelopeService.current());
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.post("/capacity-envelope", (req: AuthRequest, res): any => {
+  try {
+    const samples = Array.isArray(req.body?.samples) ? req.body.samples : null;
+    if (!samples) return res.status(400).json({ error: "Envie { samples: [{rps,p95Ms,errorRatePct}] } de um teste de carga." });
+    const env = CapacityEnvelopeService.deriveEnvelope(samples, { sloP95Ms: Number(req.body?.sloP95Ms) || undefined, at: Date.now() });
+    if (env.established) CapacityEnvelopeService.store(env);
+    return res.json(env);
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

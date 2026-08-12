@@ -12,6 +12,7 @@ import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js
 import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
 import { FalatuSaveOfferService } from "../FalatuSaveOfferService.js";
 import { ProductionReadinessService } from "../ProductionReadinessService.js";
+import { OperationalHealthService } from "../OperationalHealthService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -28,6 +29,17 @@ const router = Router();
 router.get("/production-readiness", (_req: AuthRequest, res): any => {
   try {
     return res.json(ProductionReadinessService.report());
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ADR-164 F5 — Operational Health: estende a Prontidão de Produção com saúde
+// OPERACIONAL (runtime + SLI HTTP + dependências) além da de configuração. Master-only
+// (herda o requireMasterAdmin do router). Não expõe segredo — só estado + números agregados.
+router.get("/operational-health", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(OperationalHealthService.snapshot());
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

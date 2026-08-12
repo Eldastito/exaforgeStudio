@@ -14,6 +14,7 @@
  */
 import { NodeHostTelemetryProvider } from "./NodeHostTelemetryProvider.js";
 import { PlatformBaselineService } from "./PlatformBaselineService.js";
+import { VpsSpecProfileService } from "./VpsSpecProfileService.js";
 
 export type Zone = "HEALTHY" | "OBSERVE" | "PLAN" | "ACT" | "CRITICAL" | "NOT_AVAILABLE";
 const ZONE_ORDER: Zone[] = ["HEALTHY", "OBSERVE", "PLAN", "ACT", "CRITICAL"];
@@ -46,14 +47,21 @@ export class CapacityHeadroomService {
     return ib > ia ? b : a;
   }
 
-  /** Snapshot de headroom por recurso. `runtime` injetável (determinismo). */
-  static snapshot(opts: { now?: number; runtime?: { memUsedPct?: number | null; load1m?: number | null; cpuCount?: number | null } } = {}): {
-    resources: any[]; firstBottleneck: string | null; generatedAt: string;
+  /** Snapshot de headroom por recurso. `runtime` e `spec` injetáveis (determinismo). */
+  static snapshot(opts: { now?: number; runtime?: { memUsedPct?: number | null; load1m?: number | null; cpuCount?: number | null }; spec?: any } = {}): {
+    resources: any[]; firstBottleneck: string | null; capacityContext: any; generatedAt: string;
   } {
     const now = opts.now ?? Date.now();
+    // ADR-164 F2 (host/infra) — o VPS Spec Profile dá os limites REAIS. `cpuBasis` diz de
+    // onde veio o nº de cores: 'spec' (container/vCPU do operador) > 'node' (os.cpus, que
+    // sob container mente). Sem perfil → comportamento idêntico ao pré-F2 (honesto).
+    const spec = opts.spec ?? VpsSpecProfileService.get();
+    const specCpu = spec?.configured ? (spec.containerCpuLimit ?? spec.vcpu ?? null) : null;
     const memUsedPct = opts.runtime?.memUsedPct ?? rt.queryMetric({ metric: "host.mem.usedPct" }).value;
     const load1m = opts.runtime?.load1m ?? rt.queryMetric({ metric: "host.load.1m" }).value;
-    const cpuCount = opts.runtime?.cpuCount ?? rt.queryMetric({ metric: "host.cpu.count" }).value ?? 1;
+    const nodeCpu = opts.runtime?.cpuCount ?? rt.queryMetric({ metric: "host.cpu.count" }).value ?? 1;
+    const cpuCount = specCpu ?? nodeCpu;
+    const cpuBasis = specCpu != null ? "spec" : "node";
 
     const values: Record<string, number | null> = {
       "host.mem_used_pct": memUsedPct,
@@ -76,16 +84,37 @@ export class CapacityHeadroomService {
         value: Math.round(v * 1000) / 1000, zone, headroomToCritical,
         thresholds: model.thresholds, provisional: true,
         trend: this.trendOf(model.baselineMetric, v, now),
+        ...(key === "host.load_per_core" ? { cpuBasis, cpuCount } : {}),
       });
       if (this.worseZone(worst, zone) === zone && ZONE_ORDER.indexOf(zone) >= ZONE_ORDER.indexOf(worst)) {
         if (firstBottleneck == null || ZONE_ORDER.indexOf(zone) > ZONE_ORDER.indexOf(worst)) { worst = zone; firstBottleneck = key; }
       }
     }
 
-    // Recursos que exigem o provider de host — declarados, não inventados (RN-PRC-6).
-    for (const key of HOST_ONLY) resources.push({ resource: key, available: false, zone: "NOT_AVAILABLE" as Zone, reason: "requires_host_provider" });
+    // Recursos que exigem o provider de host — declarados, não inventados (RN-PRC-6). Com o
+    // VPS Spec Profile, o LIMITE fica conhecido (útil ao operador); o USO corrente ainda exige
+    // provider de host, então segue not_available (honesto — não inventa uso).
+    const limitOf: Record<string, number | null> = spec?.configured
+      ? { "disk.used_pct": spec.storageGb, "container.cpu_limit": spec.containerCpuLimit, "container.mem_limit": spec.containerMemMb }
+      : {};
+    for (const key of HOST_ONLY) {
+      const limit = limitOf[key] ?? null;
+      resources.push({ resource: key, available: false, zone: "NOT_AVAILABLE" as Zone, reason: "requires_host_provider", ...(limit != null ? { configuredLimit: limit } : {}) });
+    }
 
-    return { resources, firstBottleneck, generatedAt: new Date(now).toISOString() };
+    // Contexto de capacidade a partir do VPS Spec Profile (denominadores reais).
+    const capacityContext = spec?.configured
+      ? {
+          configured: true, cpuBasis, effectiveCpuCount: cpuCount,
+          vcpu: spec.vcpu ?? null, ramMb: spec.ramMb ?? null, storageGb: spec.storageGb ?? null,
+          containerCpuLimit: spec.containerCpuLimit ?? null, containerMemMb: spec.containerMemMb ?? null,
+          orchestration: spec.orchestration ?? null,
+          // Uso absoluto de memória DERIVADO do % medido × RAM do perfil (honesto: só se ambos existem).
+          memUsedMb: (memUsedPct != null && spec.ramMb) ? Math.round((memUsedPct / 100) * spec.ramMb) : null,
+        }
+      : { configured: false, cpuBasis, effectiveCpuCount: cpuCount };
+
+    return { resources, firstBottleneck, capacityContext, generatedAt: new Date(now).toISOString() };
   }
 
   /** Tendência vs baseline da F6: rising/below/within; sem histórico → insufficient_history. */

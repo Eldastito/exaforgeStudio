@@ -8915,6 +8915,15 @@ const initDb = () => {
         ON platform_health_events (status, severity, last_seen_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar platform_health_events (ADR-164 F12)', e); }
+
+  // ADR-165 F5 — anti-dupla-contagem em action_outcomes (achado (c) da auditoria PRD 8).
+  // `event_key` opcional identifica o EVENTO de medição; o índice UNIQUE PARCIAL só
+  // constrange linhas que optam por uma chave (WHERE event_key IS NOT NULL) — linhas
+  // legadas (null) nunca conflitam, então a criação jamais falha em dado existente
+  // (mesmo padrão do idx_action_confirmations_extref). Com a chave, medir 2× o mesmo
+  // evento vira no-op idempotente em vez de gravar dois outcomes (dupla contagem).
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN event_key TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_outcomes_event_key ON action_outcomes (organization_id, event_key) WHERE event_key IS NOT NULL`); } catch(e){}
 };
 
 initDb();

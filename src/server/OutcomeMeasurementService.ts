@@ -35,6 +35,10 @@ export interface RecordOutcomeInput {
   costAvoided?: number | null;
   revenueRecovered?: number | null;
   lossPrevented?: number | null;
+  // ADR-165 F5 (achado (c)) — chave IDEMPOTENTE do evento de medição. Quando informada,
+  // medir 2× o MESMO evento não grava dois outcomes (anti-dupla-contagem): a 2ª chamada
+  // devolve o outcome já existente. Opcional — sem chave, o comportamento legado é preservado.
+  eventKey?: string | null;
 }
 
 export class OutcomeMeasurementService {
@@ -49,22 +53,40 @@ export class OutcomeMeasurementService {
     if (!action) throw new Error("Ação não encontrada para medir outcome.");
     const basis = (BASES as readonly string[]).includes(String(input.basis)) ? String(input.basis) : "estimate";
     const method: Method = (METHODS as readonly string[]).includes(input.measurementMethod as any) ? (input.measurementMethod as Method) : "manual";
+    const eventKey = input.eventKey != null && String(input.eventKey).trim() ? String(input.eventKey).trim() : null;
+
+    // Idempotência por evento (F5): se a chave já mediu, devolve o outcome existente —
+    // NÃO grava um segundo (anti-dupla-contagem, achado (c)).
+    if (eventKey) {
+      const dup = db.prepare("SELECT id FROM action_outcomes WHERE organization_id = ? AND event_key = ?").get(orgId, eventKey) as any;
+      if (dup) return this.get(orgId, dup.id);
+    }
+
     const id = randomUUID();
-    db.prepare(`INSERT INTO action_outcomes
-      (id, organization_id, action_id, expected_value, realized_value, basis, measurement_method, attribution_window_days, evidence_json,
-       time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented, correlation_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, orgId, actionId,
-        input.expectedValue != null ? round2(input.expectedValue) : null,
-        input.realizedValue != null ? round2(input.realizedValue) : null,
-        basis, method,
-        input.attributionWindowDays != null ? Math.trunc(Number(input.attributionWindowDays)) : null,
-        input.evidence != null ? JSON.stringify(input.evidence) : null,
-        input.timeSavedMinutes != null ? Math.trunc(Number(input.timeSavedMinutes)) : null,
-        input.costAvoided != null ? round2(input.costAvoided) : null,
-        input.revenueRecovered != null ? round2(input.revenueRecovered) : null,
-        input.lossPrevented != null ? round2(input.lossPrevented) : null,
-        action.correlation_id || null);
+    try {
+      db.prepare(`INSERT INTO action_outcomes
+        (id, organization_id, action_id, expected_value, realized_value, basis, measurement_method, attribution_window_days, evidence_json,
+         time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented, correlation_id, event_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, orgId, actionId,
+          input.expectedValue != null ? round2(input.expectedValue) : null,
+          input.realizedValue != null ? round2(input.realizedValue) : null,
+          basis, method,
+          input.attributionWindowDays != null ? Math.trunc(Number(input.attributionWindowDays)) : null,
+          input.evidence != null ? JSON.stringify(input.evidence) : null,
+          input.timeSavedMinutes != null ? Math.trunc(Number(input.timeSavedMinutes)) : null,
+          input.costAvoided != null ? round2(input.costAvoided) : null,
+          input.revenueRecovered != null ? round2(input.revenueRecovered) : null,
+          input.lossPrevented != null ? round2(input.lossPrevented) : null,
+          action.correlation_id || null, eventKey);
+    } catch (e: any) {
+      // Corrida: outra transação gravou a mesma event_key entre o SELECT e o INSERT.
+      if (eventKey && String(e?.code || "").includes("SQLITE_CONSTRAINT")) {
+        const dup = db.prepare("SELECT id FROM action_outcomes WHERE organization_id = ? AND event_key = ?").get(orgId, eventKey) as any;
+        if (dup) return this.get(orgId, dup.id);
+      }
+      throw e;
+    }
     return this.get(orgId, id);
   }
 
@@ -95,7 +117,11 @@ export class OutcomeMeasurementService {
     if (opts.domain) { sql += " AND a.domain = ?"; params.push(opts.domain); }
     sql += " ORDER BY o.measured_at DESC LIMIT ?";
     params.push(Math.min(Math.max(Number(opts.limit) || 100, 1), 500));
-    const items = (db.prepare(sql).all(...params) as any[]).map((o) => ({ ...o, evidence: o.evidence_json ? safeParse(o.evidence_json) : null }));
+    const raw = (db.prepare(sql).all(...params) as any[]).map((o) => ({ ...o, evidence: o.evidence_json ? safeParse(o.evidence_json) : null }));
+    // ADR-165 F5 — backstop de leitura contra dupla contagem: linhas com a MESMA event_key
+    // (não-nula) contam UMA vez, mesmo que histórico pré-índice tenha duplicado. Linhas sem
+    // event_key não são deduplicadas (não dá pra afirmar que são a mesma medição — RN-OA-2).
+    const items = dedupeByEventKey(raw);
 
     const sumExpected = (b: string) => round2(items.filter((i) => i.basis === b).reduce((s, i) => s + (Number(i.expected_value) || 0), 0));
     const sumRealized = (b: string) => round2(items.filter((i) => i.basis === b).reduce((s, i) => s + (Number(i.realized_value) || 0), 0));
@@ -131,5 +157,17 @@ export class OutcomeMeasurementService {
 }
 
 function safeParse(s: string): any { try { return JSON.parse(s); } catch { return null; } }
+
+/** Colapsa linhas com a mesma `event_key` não-nula (mantém a 1ª). Nulls passam intactos. */
+function dedupeByEventKey(rows: any[]): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const r of rows) {
+    const k = r.event_key;
+    if (k != null && k !== "") { if (seen.has(k)) continue; seen.add(k); }
+    out.push(r);
+  }
+  return out;
+}
 
 export default OutcomeMeasurementService;

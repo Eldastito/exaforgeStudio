@@ -7654,6 +7654,31 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar upgrade_recommendations (ADR-153 F7.3)', e); }
 
+  // PRD 6 F10 (ADR-163 §80-§84, RN-UX-7) — telemetria de UX MINIMIZADA (LGPD §84):
+  // só sinais operacionais de experiência (que tela abriu, que ação clicou, TTFV),
+  // NUNCA conteúdo. Sem texto livre, sem PII além do user_id interno (que já vive no
+  // audit). event_type/surface/module_key são identificadores curtos sanitizados.
+  // Isolado por org; opt-in por flag `ux_telemetry_enabled` (consentimento, §84).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ux_telemetry_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT,                          -- id interno (adoção/abandono); nunca PII de conteúdo
+        event_type TEXT NOT NULL,              -- whitelist: view_opened|action_clicked|approval_completed|clarification_requested|first_value
+        surface TEXT,                          -- id curto da superfície (hoje|executando|resultados|...)
+        module_key TEXT,                       -- id curto do módulo, quando aplicável
+        session_id TEXT,                       -- correlação de sessão (abandono/TTFV); opaco
+        ttfv_ms INTEGER,                       -- só em first_value: time-to-first-value
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ux_telemetry_org_type
+        ON ux_telemetry_events (organization_id, event_type, created_at);
+      CREATE INDEX IF NOT EXISTS idx_ux_telemetry_org_session
+        ON ux_telemetry_events (organization_id, session_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar ux_telemetry_events (ADR-163 F10)', e); }
+
   // ADR-154 Fatia 1.1 — AI usage ledger estendido com atribuição por
   // USUÁRIO + MÓDULO + OPERAÇÃO + LATÊNCIA + custo em CENTAVOS (INTEGER, pra
   // queries determinísticas — cost_brl REAL fica pra compat com admin
@@ -8436,6 +8461,10 @@ const initDb = () => {
   // (Entitlement `available_to_buy`+visível). NUNCA catálogo de cadeados. Flag
   // opt-in (default 0) só diz ao frontend se mostra a recomendação contextual.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN contextual_upgrade_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 6 F10 (ADR-163 §80-§84, RN-UX-7) — telemetria de UX opt-in (consentimento
+  // LGPD §84). Flag default 0: sem ela, `record` é no-op (não coleta nada). Só
+  // eventos minimizados (sem conteúdo) quando o dono liga.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ux_telemetry_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas

@@ -11,6 +11,7 @@ import { AdaptiveOnboardingService } from "../AdaptiveOnboardingService.js";
 import { InferredSettingsService } from "../InferredSettingsService.js";
 import { ContextualUpgradeService } from "../ContextualUpgradeService.js";
 import { ZeroTrainingHelpService } from "../ZeroTrainingHelpService.js";
+import { UxTelemetryService } from "../UxTelemetryService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -77,6 +78,25 @@ router.post("/help", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || "") }));
+});
+
+// POST /api/ux/telemetry { eventType, surface?, moduleKey?, sessionId?, ttfvMs? }
+// Registra evento de UX minimizado (LGPD §84). No-op sem a flag opt-in; nunca conteúdo.
+router.post("/telemetry", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  res.json(UxTelemetryService.record(orgId, req.user, { eventType: b.eventType, surface: b.surface, moduleKey: b.moduleKey, sessionId: b.sessionId, ttfvMs: b.ttfvMs }));
+});
+
+// GET /api/ux/telemetry/summary?days=30 — agregados de UX (só gestor, nunca conteúdo).
+router.get("/telemetry/summary", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+  const r = UxTelemetryService.summary(orgId, req.user, { sinceDays: days });
+  if ((r as any).restricted) return res.status(403).json({ error: "Resumo de telemetria é restrito a gestores." });
+  res.json(r);
 });
 
 export default router;

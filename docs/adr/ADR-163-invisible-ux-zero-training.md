@@ -1,0 +1,144 @@
+# ADR-163 — Invisible UX & Zero-Training Experience (PRD 6)
+
+**Programa:** ZapFlow Execution Intelligence (ZEI)
+**Estado:** Proposto — **F0 (Auditoria + Matriz de Reutilização) FECHADA neste documento**
+**Prioridade:** P0 estratégica
+**Natureza:** **Simplificação sistêmica de UX + onboarding inteligente + configuração progressiva.** Aditivo/reversível sobre a base já existente (Fala Tu Home zero-training, Smart Inbox, Approval Center, Context Engine, Entitlement/Blueprint, proatividade event-driven, browser-first). **Não é redesign visual** e **não abre Home/Inbox/Context Engine concorrente.**
+
+> **Regra de ouro (PRD 6 §2, §115, §123):** *quanto mais poderoso o ZapFlow fica, menos o usuário precisa aprender sobre o ZapFlow.* O melhor menu é o que o usuário não precisa abrir. Toda tela/menu/campo novo precisa **provar** por que não pode ser absorvido pela experiência existente.
+
+---
+
+## 1. Contexto e objetivo
+
+O PRD 6 exige **Fase 0 antes de qualquer código** (§95): auditar o `main`, provar o que já existe, e registrar a matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR/REMOVER-FUTURAMENTE. A instrução final é enfática: *"Não interpretar este PRD como autorização para fazer um redesign completo. Começar pela Fase 0. O trabalho deverá ser predominantemente REUTILIZAR → COMPOR → SIMPLIFICAR → MEDIR → SÓ DEPOIS REMOVER REDUNDÂNCIAS."*
+
+A transformação central **não é visual**. É:
+
+> **Hoje:** o usuário precisa saber ONDE está a funcionalidade.
+> **Estado final:** o ZapFlow precisa saber O QUE o usuário precisa.
+
+Esta seção entrega a Fase 0. As fatias seguintes (F1–F12) implementam sobre a base auditada, cada uma aditiva/reversível sob flag, sem quebrar módulos nem rotas legadas.
+
+---
+
+## 2. F0 — Auditoria do `main` (evidência `file:symbol`)
+
+**Conclusão: a fundação zero-training já existe e é forte.** A Home do Fala Tu já compõe Smart Inbox + aprovações + execução + proatividade, tudo escopado por papel. O trabalho é **estender/compor/simplificar**, não reconstruir.
+
+| # | Superfície | `file:symbol` | Papel atual |
+| --- | --- | --- | --- |
+| 1 | **Home zero-training** | `FalaTuHomeService.ts:27` `home(orgId,user)` | Payload único de abertura: greeting + `summary`(counts) + `highlights`(top-5 por score) + `approvals` + `execution` + `proactiveEnabled`. Pura composição, role-scoped. |
+| 2 | **Smart Inbox** | `SmartInboxService.ts:42` `build()` | Compõe 3 engines canônicos (`DecisionActionService.list` · `BusinessSignalService.attention` · `ProcessRuntimeService.listInstances`) em 7 categorias (needsApproval/needsDecision/risk/opportunity/inExecution/resolved/info), ranqueadas, filtradas por papel (`canSeeDomain`). |
+| 3 | **Navegação (frontend)** | `src/features/Sidebar.tsx:7` `Sidebar()` + `src/store/useStore.ts` (`isModuleEnabled`/`canAccessModule`/`falatuEnabled`) | ~40 itens de nav em **JSX inline** (não é config declarativa), cada um gated por `mod(key)`. Master-only e Manager-only inline. **Gap:** nav é código, não manifesto derivável. |
+| 4 | **Entitlement / plan gating** | `EntitlementService.ts:199` `check/overview/isModuleAvailable/checkRoute` | Porta ÚNICA de decisão de acesso (7 estados: active/available_to_enable/available_to_buy/**hidden**/suspended/deprecated/pilot_only). `overview()` devolve o mapa de TODOS os módulos p/ o usuário. Compõe Module/Plan/Permission/Addon + `blueprint.config.hiddenModules`. |
+| 5 | **Blueprints por vertical** | `VerticalBlueprintService.ts:170`; `verticals.ts:94` `VERTICALS` | SKUs versionados por nicho (`requiredModules/optionalModules/hiddenModules/commercialUpgrades/quickStartPack/runtimePlaybooks`, `mode:suite\|solo`). `assignToOrganization`/`previewEntitlements`. `BlueprintSeeder.ts` semeia. |
+| 6 | **Onboarding** | `routes/onboardingSolo.ts` (`POST /`); `OnboardingTemplateService.ts:511` `PACKS/availablePacks`; `src/features/OnboardingView.tsx` | Onboarding Solo cria org 1-user + aplica blueprint publicado atômico. Template aplica quickstart-pack por vertical. **Gap:** não há autodiscovery/confirmation-first (§17-23). |
+| 7 | **organization_settings** | `db.ts` (ALTER-ADD-COLUMN) | Flags opt-in por org (`diretor_snapshot_v2`, `falatu_briefing_wa_enabled`, `falatu_proactive_alerts_enabled`, clínica notif., …) + `vertical`/`plan_id`/`billing_status`/`falatu_enabled`. **Gap:** sem preferência de quiet-hours/limiar de alerta (§53/§68). |
+| 8 | **Context Engine** | `ContextEngineService.ts:39` `build/buildForUser/resolve/resolveFor/render`; `ContextResolverService` (pipeline); `contextModel.ts` (`validateContextPacket`) | Fachada única: build/render org-wide + dispatch de `resolve`(intent) e `resolveFor`(projetado seguro por purpose). Delega o pipeline e a projeção. Base pra autodiscovery + inferred settings. |
+| 9 | **Projeção por papel (RBAC+purpose)** | `ContextProjectionService.ts:65` `projectPacket/canSeeDomain/projectSnapshot`; `DOMAIN_MODULE`(25); `PURPOSE_FORBIDDEN.customer_facing`(42) | Redação determinística fail-closed (custo/margem/lucro/PII fora do `customer_facing`). É a malha que garante que a UX role-aware nunca vaza. |
+| 10 | **Preferências / quiet hours** | `FalaTuProactiveService.ts:23` `AWAKE_START=7/AWAKE_END=22`; `FalaTuBriefingDigestService.ts:37` | **Quiet hours é CONSTANTE de código, não preferência.** Único gap de persistência genuíno do PRD (§53/§68/§53 config conversacional). |
+| 11 | **Push / notificação** | `FalaTuPushService.ts:38` (Web Push, VAPID, `runDigestPass`); `NotificationService.ts:14` `push()` (in-app + Socket.io, dedupe) | Duas camadas: Web Push (browser) + in-app bell. Anti-spam por dedupe. |
+| 12 | **Fronteira de custo de IA (§50)** | `SkillOsTenantUsageService.ts` (`TenantUsageSummary` em AÇÕES/%, nunca R$); `AiUsageDashboardService.ts` + `AiUsageDashboardView.tsx` (R$, **Admin-only**) | **A fronteira do §50 JÁ EXISTE.** Tenant vê franquia/%; custo financeiro (R$) é exclusivo do Admin Master. Nada a criar aqui. |
+| 13 | **Dashboards / Diretor IA** | `ExecutiveAdvisorService.ts:22` `buildPanorama/goalsBlock/…` (consome `ContextEngineService.render`); `src/features/ExecutiveView.tsx` | Diretor IA (panorama executivo). Não duplicar (§115). |
+| 14 | **Proatividade event-driven** | `FalaTuProactiveService.ts:26` `selectUrgent/compose/deliver` (1 digest agregado, quiet-hours, dedup); `Scheduler.ts` (`falatuProactiveAlertPass`/`falatuPushDigestPass`/`falatuBriefingPass`) | "Fala primeiro" com disciplina: só urgência (needsApproval + risco crítico), 1 push agregado, respeitando janela. |
+| 15 | **Metas + Atenção** | `BusinessGoalService.ts:80` `list/set`; `BusinessSignalService.ts:109` `attention()` | Metas org-wide (F4 Onda A) + leitura transversal de atenção (F1 Onda A). Alimentam Today/Results. |
+
+### 2.1 Fronteiras confirmadas (nada a duplicar)
+- **Cost boundary (§50)** — já implementada (item 12); a UX só consome a view tenant-safe.
+- **RBAC/purpose (§14/§97/CA14)** — `ContextProjectionService` é a malha única; toda superfície role-aware a reusa.
+- **Autonomia/policy material (§27/CA11)** — `ApprovalPolicyService`/Autonomy Contract (ADR-159) decide; inferência nunca autoriza sozinha.
+- **Impact Ledger / outcomes (§48-49)** — `OutcomeMeasurementService`/`UnifiedImpactLedgerService` (ADR-158 F3) já agregam por categoria sem somar; a tela Resultados os consome.
+
+---
+
+## 3. Matriz de Reutilização (entregável obrigatório da F0)
+
+| Capacidade PRD 6 | Veredito | Base / ação concreta |
+| --- | --- | --- |
+| §5/§11/§98 Home "Hoje" | **ESTENDER** | `FalaTuHomeService.home` — adicionar framing por EXCEÇÃO (§12), bloco "resolvido desde ontem / valor recuperado" (compõe `UnifiedImpactLedger`/`OutcomeMeasurement`) e metas (`BusinessGoalService`). **Nunca** nova Home (§115). |
+| §6/§7/§96 Nav por NECESSIDADE (Hoje/Fala Tu/Executando/Resultados/Empresa/Explorar) | **CRIAR (manifesto derivado) + ESTENDER (Sidebar)** | Backend `NavigationManifestService.forUser` deriva a nav-alvo de `EntitlementService.overview` + `ContextProjection`; o `Sidebar.tsx` passa a renderizar o manifesto. Módulos continuam existindo (2º nível "Explorar"). Rotas legadas preservadas (§94). |
+| §55-56/CA3/CA4 Esconder fora de plano/vertical/permissão | **REUTILIZAR** | `EntitlementService` já tem o estado `hidden`; o manifesto **não renderiza** o que está hidden/sem permissão — nunca "catálogo de cadeados". |
+| §9/§39-42 Progressive disclosure + Decision Card | **CRIAR (contrato de shape) + COMPOR** | Função canônica `DecisionCard` (o-que/por-que/impacto/recomendo/posso-fazer/regra) sobre `attention`/`decision_actions` — não é fonte de dado nova; é forma. |
+| §41-44 Estados/erros humanos | **CRIAR (mapa puro)** | `humanState()` mapeia detected/executing/… → Identificado/Precisa de você/Em andamento/Concluído; erros técnicos → mensagem humana + "ver detalhes". Sem esconder erro (§44). |
+| §45-47 "Executando" | **COMPOR** | `ProcessRuntimeService.listInstances`/`FalaTuThreadService.executionStatus` agrupados por objetivo ("Recuperando R$8.400"), drill-down opcional. |
+| §48-49 "Resultados" | **COMPOR** | `UnifiedImpactLedgerService`/`OutcomeMeasurementService` (categorias separadas, base/atribuição) + `BusinessGoalService`. Nunca tokens/custo (§48/§50). |
+| §14-15/§97 Personalização por papel (auto) | **REUTILIZAR** | `ContextProjectionService`+`PermissionService`+`EntitlementService.overview` derivam a experiência de cargo/perfil/permissão/unidade — sem widget manual (§15). |
+| §17-23 Onboarding adaptativo (conectar→observar→inferir→entregar→confirmar) | **ESTENDER** | `onboardingSolo` + `OnboardingTemplateService` + `ContextEngine` autodiscovery; **confirmation-first** ("identifiquei X, correto?"); perguntar só lacunas (§21). |
+| §23-25 Business Profile autodiscovery com fonte+confiança | **COMPOR** | `ContextEngineService.resolve`/`quality` já carregam freshness/confidence; expor "Empresa/Vertical/Unidades/…" com origem rastreável; **§24 nunca inventa** (declara "ainda não sei"). |
+| §26/§101 Inferred settings (observa→infere→sugere→confirma) | **CRIAR (sugestão) + REUTILIZAR (policy)** | Inferência do Context Engine vira **sugestão**; política material só com **confirmação explícita** via `ApprovalPolicyService.setBands` (§27/CA11 — inferência ≠ autorização). |
+| §28-29 Configuração just-in-time | **COMPOR** | Detectar a lacuna no momento (ex.: 1ª compra > R$5.000 sem aprovador) e configurar então — reusa `business_signals` + Approval. |
+| §30-36 Fala Tu como guia / "ensine/mostre/faça" | **REUTILIZAR** | Fala Tu (`FalaTuService`/orchestrator) responde ajuda contextual; "mostre" → evidências (Context Engine/attention); "faça" → capability+policy+autonomia (Runtime). |
+| §50 Custo de IA (fronteira) | **REUTILIZAR** | `SkillOsTenantUsageService` (ações/%) tenant; `AiUsageDashboard` (R$) admin. **Já pronto**, nada a mudar. |
+| §51-54 "Empresa" (config estratégica + conversacional) | **COMPOR + CRIAR (preferências)** | Objetivos(`BusinessGoal`)/Autonomia(`ApprovalPolicy`)/Equipe(`Permission`)/Integrações/Preferências. Config conversacional com preview+confirmação+audit+undo (§54). |
+| §53/§68 Quiet hours + limiar de alerta (preferência) | **CRIAR (aditivo)** | Colunas opt-in em `organization_settings` (quiet-hours + valor mínimo de alerta) — o **único** storage novo; hoje é constante de código (item 10). |
+| §62-65 Empty states / data quality / confidence-aware | **COMPOR** | `ContextEngine.quality`/`attention` dataQuality → "visão parcial porque a Loja B não sincroniza há 5h"; confiança alta/média/baixa em vez de score cru. |
+| §66-70 Proatividade disciplinada / digest / memória | **REUTILIZAR** | `FalaTuProactiveService` (1 digest, quiet-hours, dedup) + memória de interação (`CustomerMemory`/preferências). |
+| §71-74 Continuidade cross-module / deep-link / busca universal | **REUTILIZAR + COMPOR** | `correlationId` (espinha ADR-158) mantém contexto; deep-link abre a entidade certa; busca NL reusa RAG (`geminiRAG`) sem duplicar. |
+| §75-79 Mobile-first / PWA / WhatsApp opcional / zero-config | **REUTILIZAR** | Fala Tu browser-first já é a experiência principal; WhatsApp é conector (nunca bloqueia onboarding — CA1). |
+| §80-84 Telemetria de UX (TTFV, clicks, adoption) | **CRIAR (eventos)** | Eventos de UX minimizados (LGPD): view_opened/action_clicked/approval_completed/clarification_requested + TTFV. Sem conteúdo sensível. |
+| §93-94 Feature flags + migração | **CRIAR (flags) + REUTILIZAR** | `invisible_ux_enabled`/`simplified_navigation_enabled`/`adaptive_onboarding_enabled`/`inferred_settings_enabled`/`contextual_upgrade_enabled` (opt-in, sem inflar). Rotas legadas preservadas até telemetria (§107/§112). |
+
+---
+
+## 4. Decisões de arquitetura (D)
+
+- **D1 — Nada de Home concorrente (§115/CA17).** O "Hoje" é o `FalaTuHomeService.home` ESTENDIDO. Smart Inbox/Context Engine/Impact Ledger são compostos, nunca reimplementados.
+- **D2 — Nav é MANIFESTO DERIVADO, não módulo novo.** Um `NavigationManifestService` deriva a nav-alvo (Hoje/Fala Tu/Executando/Resultados/Empresa/Explorar) de `EntitlementService.overview` + `ContextProjection`; o `Sidebar` renderiza. Os ~40 módulos continuam existindo em "Explorar" (2º nível). Zero rota removida nesta onda.
+- **D3 — Esconder, não desabilitar (§55-56).** Fora de plano/vertical/permissão → não renderiza (reusa o estado `hidden` do Entitlement). Upgrade é contextual/situacional (§57), nunca catálogo de cadeados.
+- **D4 — Inferência ≠ autorização (§27/CA11).** Observa→infere→sugere→**confirma**. Política material (pagamento/desconto/reembolso/compra/exclusão) só nasce por confirmação explícita via `ApprovalPolicyService`. RN dura.
+- **D5 — Fronteira de custo intacta (§50).** Tenant vê ações/% (`SkillOsTenantUsage`); R$ é Admin Master (`AiUsageDashboard`). A UX apenas consome o que já existe.
+- **D6 — Estados/erros HUMANOS por função pura (§41-44).** `humanState()`/`humanError()` — mapeamento determinístico reusado por toda superfície; simplicidade **nunca esconde** erro/custo/risco (§44/§85, sem dark patterns).
+- **D7 — Preferências: o único storage novo (§53/§68).** Quiet-hours + limiar de alerta como colunas opt-in em `organization_settings` (aditivo, CREATE-then-ALTER), com config conversacional (preview/confirm/audit/undo, §54).
+- **D8 — Determinístico antes de LLM (§91-92).** Navegação/roteamento simples é determinístico; LLM só quando necessário (reusa `SkillOsModelRouter`).
+
+---
+
+## 5. Guardrails duros (RN-UX, a testar por fatia)
+
+- **RN-UX-1** — Não criar Home/Inbox/Context Engine/assistente de navegação concorrente; sempre COMPOR (§115/CA17).
+- **RN-UX-2** — RBAC/entitlement sempre respeitado; esconder ≠ burlar permissão (CA14/§85).
+- **RN-UX-3** — Inferência nunca vira autorização de política material sem confirmação explícita (§27/CA11).
+- **RN-UX-4** — Simplicidade não mente: nunca esconder erro, custo, risco, ou confirmar ação perigosa silenciosamente (§44/§85 — sem dark patterns).
+- **RN-UX-5** — Não remover tela/rota legada sem telemetria provando substituição (§94/§107/§112).
+- **RN-UX-6** — Autodiscovery nunca inventa contexto: valor incerto declara fonte+confiança ou diz "ainda não sei" (§24-25/CA10).
+- **RN-UX-7** — Isolamento multi-tenant + LGPD/minimização na telemetria (§84) — sem conteúdo sensível.
+
+---
+
+## 6. Plano de fases (F0–F12) — mapeadas ao PRD §95-107
+
+| Fase | Entrega | Reúso dominante |
+| --- | --- | --- |
+| **F0** | **Esta auditoria + matriz (FECHADA)** | — |
+| F1 | UX Information Architecture: definir nav-alvo, comparar com `Sidebar.tsx` (sem remover módulos) | doc/design |
+| F2 | Role-aware navigation: `NavigationManifestService.forUser` (vertical/entitlement/RBAC/função) | REUTILIZAR `EntitlementService.overview` + `ContextProjection` |
+| F3 | Today experience: ESTENDER `FalaTuHomeService` (exceção + resultados-desde-ontem + metas) | ESTENDER Home; COMPOR ImpactLedger/Goals |
+| F4 | Progressive disclosure: Decision Card canônico + `humanState()`/`humanError()` | CRIAR shape; COMPOR attention/actions |
+| F5 | Adaptive onboarding: autodiscovery + confirmation-first + ask-only-gaps | ESTENDER onboardingSolo + ContextEngine |
+| F6 | Inferred settings: observa→infere→sugere→confirma (nunca auto-aplica política) | CRIAR sugestão; REUTILIZAR ApprovalPolicy |
+| F7 | Zero-training help: Fala Tu assume dúvidas/navegação/explicação | REUTILIZAR Fala Tu/orchestrator |
+| F8 | Executing + Results sobre Runtime + Impact Ledger | COMPOR (sem duplicar) |
+| F9 | Contextual upgrades: esconder fora-de-plano + recomendação situacional | REUTILIZAR Entitlement |
+| F10 | UX telemetry: TTFV/clicks/abandonment/adoption (LGPD) | CRIAR eventos |
+| F11 | Mobile hardening (Safari/Chrome/PWA/voz/anexo/approval) | REUTILIZAR browser-first |
+| F12 | Legacy reduction — **só** após telemetria provar substituição | REMOVER redundâncias |
+
+**Ordem recomendada de execução:** F2 (nav role-aware — maior alívio cognitivo imediato) → F3 (Today) → F4 (Decision Card + estados humanos) → F8 (Executando/Resultados) → F5/F6 (onboarding/inferred) → F9 → F10 → F11 → F12. Cada fatia opt-in por flag (§93), reversível, sem tocar rotas legadas.
+
+---
+
+## 7. Critérios de aceite (§108, CA1–CA20) — rastreados
+
+Os 20 CAs mapeiam a artefatos existentes + gaps: (CA1) onboarding sem WhatsApp — `onboardingSolo` já é browser-first; (CA2/CA5-CA8) Home/Fala Tu respondem "o que precisa/faz/produziu" — `FalaTuHomeService`+`SmartInbox`+`ImpactLedger` (estender F3/F8); (CA3/CA4) só módulos permitidos/relevantes — `EntitlementService`(F2/F9); (CA9/CA10) onboarding sem config completa + não pedir inferível — F5/§21-24; (CA11) política inferida ≠ autorização — `ApprovalPolicy`/D4; (CA12/CA13) significado antes de detalhe + detalhe acessível — Decision Card/F4; (CA14) RBAC — `ContextProjection`; (CA15) mobile — F11; (CA16) ações críticas auditadas — `logAuthEvent`/audit; (CA17) nenhum engine duplicado — D1/RN-UX-1; (CA18/CA19) TTFV + dependência de treinamento medidos — F10; (CA20) jornada completa sem saber o módulo — soma de F2+F3+F7.
+
+## 8. O que NÃO construir (§115)
+
+Nova Home concorrente; mais dashboards; reimplementar Smart Inbox/Context Engine; assistente de navegação separado do Fala Tu; esconder erros/custo/risco; aplicar política inferida sem consentimento; remover telas sem telemetria; transformar simplificação em falta de controle.
+
+---
+
+## 9. Status
+
+- **F0 — FECHADA.** Auditoria transversal das 15 superfícies concluída (evidência `file:symbol`); matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR registrada; 3 gaps reais identificados (nav declarativa, preferência de quiet-hours/limiar, telemetria de UX) — todos aditivos. **Nenhum engine canônico será duplicado** (CA17).
+- **F1..F12 — pendentes**, cada uma = 1 fatia/PR, opt-in por flag, reversível, sem remover rotas legadas antes de telemetria (§112).

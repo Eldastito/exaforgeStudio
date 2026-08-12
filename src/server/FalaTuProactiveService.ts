@@ -45,6 +45,11 @@ export class FalaTuProactiveService {
   static selectUrgent(orgId: string, user: any, now: Date): InboxItem[] {
     const inbox = SmartInboxService.build(orgId, user, { now: now.getTime() });
     return [...inbox.categories.needsApproval, ...inbox.categories.risk.filter((i) => i.severity === "critical")]
+      // ADR-163 F14 — aplica o LIMIAR DE ALERTA do dono (F13): item de valor abaixo
+      // do limiar não vira push proativo (segue na Inbox — só não incomoda). NUNCA
+      // filtra o crítico (§45/D7), e item sem valor conhecido sempre passa
+      // (shouldAlert(null)=true) — não se cala uma decisão de valor desconhecido.
+      .filter((i) => i.severity === "critical" || UxPreferencesService.shouldAlert(orgId, i.impactAmount))
       .sort((a, b) => b.score - a.score);
   }
 

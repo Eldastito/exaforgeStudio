@@ -73,6 +73,8 @@
     "test:capacity-recommendation": "tsx scripts/test-capacity-recommendation.ts",
     "test:platform-protection": "tsx scripts/test-platform-protection.ts",
     "test:platform-alerts": "tsx scripts/test-platform-alerts.ts",
+    "test:capacity-envelope": "tsx scripts/test-capacity-envelope.ts",
+    "loadtest:capacity": "tsx scripts/loadtest-capacity.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

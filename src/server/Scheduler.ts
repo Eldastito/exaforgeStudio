@@ -770,6 +770,17 @@ export class Scheduler {
         })).catch((e) => console.error('[Scheduler] import de alertas de plataforma falhou', e));
       }
     } catch (e) { console.error('[Scheduler] sync de alertas de plataforma falhou', e); }
+    // ADR-165 F6 — Reconciler de outcome: varre ações `done` sem `action_outcome` (fora da
+    // janela de graça) e publica sinal de exceção em business_signals (aparece em attention);
+    // resolve quando a medição atrasada chega. Fecha o achado (b) — o gap engolido pelo catch
+    // vazio do complete. Best-effort; nunca derruba o tick.
+    try {
+      import("./OutcomeReconcilerService.js").then((m) => {
+        for (const oid of m.OutcomeReconcilerService.orgsToReconcile()) {
+          try { m.OutcomeReconcilerService.reconcile(oid); } catch (e) { console.error('[Scheduler] reconcile de outcome falhou', oid, e); }
+        }
+      }).catch((e) => console.error('[Scheduler] import do OutcomeReconciler falhou', e));
+    } catch (e) { console.error('[Scheduler] pass do OutcomeReconciler falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

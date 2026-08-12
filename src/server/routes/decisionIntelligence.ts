@@ -12,6 +12,7 @@ import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceRemi
 import { ExecutionTraceService } from "../ExecutionTraceService.js";
 import { OutcomeAssuranceService } from "../OutcomeAssuranceService.js";
 import { ProcessOutcomeContractService } from "../ProcessOutcomeContractService.js";
+import { OutcomeReconcilerService } from "../OutcomeReconcilerService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -94,6 +95,15 @@ router.get("/assurance/process/:instanceId", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(ProcessOutcomeContractService.evaluate(orgId, req.params.instanceId));
+});
+
+// POST /api/decision-intelligence/assurance/reconcile — roda o Reconciler de outcome
+// (PRD 8 / ADR-165 F6): sinaliza ações done-sem-outcome e resolve as já medidas. Fecha o
+// achado (b) — o gap que o catch vazio do complete engolia. Não muda a FSM (RN-OA-3).
+router.post("/assurance/reconcile", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(OutcomeReconcilerService.reconcile(orgId));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

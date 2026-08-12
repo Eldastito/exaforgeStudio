@@ -1,7 +1,7 @@
 # ADR-165 — Universal Closed Loop & Outcome Assurance (PRD 8)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** **F0–F1 FECHADAS. F0 = auditoria + matriz. F1 = `OutcomeAssuranceService.assess()` read-only (estado derivado executado→efeito→outcome→impacto). Pré-condição atendida: a metade de CÓDIGO do PRD 7 (ADR-164 F0–F14) encerrou — F2+ liberadas.**
+**Estado:** **F0–F2 FECHADAS. F0 = auditoria + matriz. F1 = `OutcomeAssuranceService.assess()` read-only. F2 = `ProcessOutcomeContractService.evaluate()` — avalia `success/failure_conditions` de PROCESSO (antes inertes) via `evaluateCondition`, fechando o achado (a). Pré-condição atendida: metade de código do PRD 7 (ADR-164 F0–F14) encerrou.**
 **Prioridade:** P0 — confiança no dado de resultado (pré-requisito do PRD 9 Enterprise Learning)
 **Acesso:** transversal (opt-in por flag; superfícies role-gated existentes)
 **Natureza:** Garantia de ciclo fechado + Outcome Assurance + Reconciliação de medição
@@ -94,7 +94,7 @@ Quatro conceitos que hoje colapsam e que o PRD 8 separa: **AÇÃO EXECUTADA** �
 | --- | --- | --- |
 | **F0** ✅ | **Auditoria + matriz + este ADR (doc-only)** | — |
 | **F1** ✅ | **`OutcomeAssuranceService.assess()` — estado derivado read-only (executado→efeito→outcome→impacto) por ação e por `correlation_id`. Escada `planned→executed→effect_confirmed→impact_measured→assured`; gaps (`done_without_outcome`, `confirmation_pending/timed_out`); business outcome fica `resolver_pending` (F3). RN-OA-3 (não escreve/não muda FSM), RN-OA-1 (DONE≠assured), RN-OA-2 (null≠zero). Rotas `/assurance/action/:id` + `/assurance/correlation/:cid`. `test:outcome-assurance` (23 checks).** | `decision_actions`, `action_execution_log`, `action_confirmations`, `action_outcomes` |
-| F2 | Avaliar `success/failure_conditions` de **processo** via `evaluateCondition` (mapa de contexto de negócio) | `PlaybookEngine`, `ProcessRuntimeService` |
+| **F2** ✅ | **`ProcessOutcomeContractService.evaluate()` — avalia `success/failure_conditions` de PROCESSO (antes só ARMAZENADAS, achado (a)) via `PlaybookEngine.evaluateCondition` sobre contexto de negócio derivado da instância. `toCondition` normaliza nativo `{op,path,value}` E clausal `{field,operator,value}`/`all`/`any` (Outcome Contract, D2 — sem tabela nova). Falha tem precedência (RN-OA-1); sem contrato → `no_contract` (RN-OA-2); read-only não muda FSM (RN-OA-3). Rota `/assurance/process/:instanceId`. `test:process-outcome-contract` (13 checks).** | `PlaybookEngine`, `process_definitions`, `process_instances` |
 | F3 | `BusinessOutcomeResolver` registry (determinístico, system-of-record) — Cobrança primeiro | `AsaasService`, `receivables` |
 | F4 | Resolvers dos demais golden loops (Comercial, Reputação, Varejo) | `SalesRecoveryAttributionService`, `ReputationClosureService`, `RetailReconciliationService` |
 | F5 | UNIQUE aditivo em `action_outcomes` + dedup cruzado no ledger (anti-double-count) | `OutcomeMeasurementService`, `UnifiedImpactLedgerService` |

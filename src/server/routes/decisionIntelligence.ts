@@ -11,6 +11,7 @@ import { ResearchBudgetService } from "../ResearchBudgetService.js";
 import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceReminderService.js";
 import { ExecutionTraceService } from "../ExecutionTraceService.js";
 import { OutcomeAssuranceService } from "../OutcomeAssuranceService.js";
+import { ProcessOutcomeContractService } from "../ProcessOutcomeContractService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -84,6 +85,15 @@ router.get("/assurance/correlation/:correlationId", (req: AuthRequest, res): any
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(OutcomeAssuranceService.assessCorrelation(orgId, req.params.correlationId));
+});
+
+// GET /api/decision-intelligence/assurance/process/:instanceId — avalia o Outcome
+// Contract de PROCESSO (PRD 8 / ADR-165 F2): success/failure_conditions da definição,
+// antes inertes, agora avaliadas via evaluateCondition. Read-only (RN-OA-3).
+router.get("/assurance/process/:instanceId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProcessOutcomeContractService.evaluate(orgId, req.params.instanceId));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

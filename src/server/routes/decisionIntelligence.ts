@@ -19,6 +19,7 @@ import { PatternLearningFromAssuranceService } from "../PatternLearningFromAssur
 import { LearningEpisodeService } from "../LearningEpisodeService.js";
 import { ResearchNeedService } from "../ResearchNeedService.js";
 import { ContextualFusionService } from "../ContextualFusionService.js";
+import { LearningMetricsService } from "../LearningMetricsService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -143,6 +144,15 @@ router.post("/assurance/learn", (req: AuthRequest, res): any => {
   const lookbackDays = Number(req.body?.lookbackDays) || undefined;
   const limit = Number(req.body?.limit) || undefined;
   res.json(PatternLearningFromAssuranceService.sweep(orgId, { lookbackDays, limit }));
+});
+
+// GET /api/decision-intelligence/learning/metrics — KPIs do aprendizado (PRD 9 /
+// ADR-166 F13): cobertura assegurada, estados, procedência (manual×assured), drift.
+// Tudo derivado por query (RN-004); percentuais null sem denominador (RN-EL-5).
+router.get("/learning/metrics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LearningMetricsService.metrics(orgId));
 });
 
 // GET /api/decision-intelligence/context-fusion — fusão contextual (PRD 9 / ADR-166

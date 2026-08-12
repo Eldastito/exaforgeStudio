@@ -10,6 +10,7 @@ import { ExecutionResultsService } from "../ExecutionResultsService.js";
 import { AdaptiveOnboardingService } from "../AdaptiveOnboardingService.js";
 import { InferredSettingsService } from "../InferredSettingsService.js";
 import { ContextualUpgradeService } from "../ContextualUpgradeService.js";
+import { ZeroTrainingHelpService } from "../ZeroTrainingHelpService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -68,6 +69,14 @@ router.get("/contextual-upgrades", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   res.json(ContextualUpgradeService.forUser(orgId, req.user));
+});
+
+// POST /api/ux/help { text } — ajuda zero-training do Fala Tu (ensine/mostre/faça/onde).
+// Camada determinística (§91-92); é o Fala Tu respondendo, não assistente paralelo (RN-UX-1).
+router.post("/help", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || "") }));
 });
 
 export default router;

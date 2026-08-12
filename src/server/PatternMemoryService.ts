@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { chat, isAIConfigured } from "./llm.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { wilsonInterval, intervalConfidenceLabel, WilsonInterval } from "./statsWilson.js";
 
 /**
  * PatternMemoryService — memória de padrões GENÉRICA (ADR-142 generalizada).
@@ -202,7 +203,7 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
    * Isso é o coração do §9/CA2 — DONE ≠ EXEMPLO DE SUCESSO: o número forte só existe
    * quando o resultado foi de fato assegurado.
    */
-  static assuredStats(orgId: string, domain: string, patternType: string): { assuredActed: number; worked: number; no_effect: number; backfired: number; netImpact: number; assuredEffectiveness: number | null } {
+  static assuredStats(orgId: string, domain: string, patternType: string): { assuredActed: number; worked: number; no_effect: number; backfired: number; netImpact: number; assuredEffectiveness: number | null; workedRate: number | null; interval: WilsonInterval | null; confidence: string } {
     const r = db.prepare(
       `SELECT COUNT(*) acted,
               COALESCE(SUM(CASE WHEN outcome='worked' THEN 1 ELSE 0 END),0) worked,
@@ -215,7 +216,11 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     const acted = Number(r?.acted) || 0;
     const worked = Number(r?.worked) || 0, noEffect = Number(r?.no_effect) || 0, backfired = Number(r?.backfired) || 0;
     const assuredEffectiveness = acted > 0 ? round2((worked * 1 + noEffect * 0.5 + backfired * 0) / acted) : null;
-    return { assuredActed: acted, worked, no_effect: noEffect, backfired, netImpact: round2(Number(r?.net_impact) || 0), assuredEffectiveness };
+    // F6 — banda de Wilson sobre a taxa BINÁRIA "funcionou?" (worked/acted). Distingue
+    // "1/1" (banda larga, pouca prova) de "40/45" (banda estreita). n=0 → null (RN-EL-5).
+    const interval = wilsonInterval(worked, acted);
+    const workedRate = acted > 0 ? round2(worked / acted) : null;
+    return { assuredActed: acted, worked, no_effect: noEffect, backfired, netImpact: round2(Number(r?.net_impact) || 0), assuredEffectiveness, workedRate, interval, confidence: intervalConfidenceLabel(interval) };
   }
 
   /**
@@ -227,7 +232,7 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
   static allEffectiveness(orgId: string, domain?: string): any[] {
     return this.allTypeStats(orgId, domain).map((s) => {
       const a = this.assuredStats(orgId, s.domain, s.pattern_type);
-      return { ...s, assuredEffectiveness: a.assuredEffectiveness, assuredActed: a.assuredActed, assuredNetImpact: a.netImpact };
+      return { ...s, assuredEffectiveness: a.assuredEffectiveness, assuredActed: a.assuredActed, assuredNetImpact: a.netImpact, workedRate: a.workedRate, interval: a.interval, confidence: a.confidence };
     });
   }
 

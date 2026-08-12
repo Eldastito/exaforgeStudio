@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F9 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada)
+**Estado:** Em execução — **F0–F10 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada · resolução material governada · réplica+fechamento)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -150,7 +150,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F7** | **Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) (FECHADA)** | REUTILIZAR Fala Tu inteiro; CRIAR handoff determinístico |
 | **F8** | **Governed Reply (`reputation_publish_reply`, começa `approved_execution`) (FECHADA)** | CRIAR handler; REUTILIZAR `execute`+`ConfirmationEngine`+`checkGrounding` |
 | **F9** | **Governed Resolution (reship · ticket_assign · contact_task) (FECHADA)** | COMPOR handlers; REUTILIZAR policy/executor |
-| F10 | Réplica + Closure (resposta do consumidor, nova réplica, fechamento) | REUTILIZAR dedupe/correlação/thread |
+| **F10** | **Réplica + Closure (resposta do consumidor, nova réplica, fechamento) (FECHADA)** | REUTILIZAR dedupe/correlação/confirmação |
 | F11 | Prevention (`reputational_escalation_risk`, cruzar sinais internos) | ESTENDER `ChurnRiskDetector`; REUTILIZAR `SignalCorrelation` |
 | F12 | Root Cause & Learning (cluster, tendência, baseline, pattern memory) | COMPOR query; CRIAR baseline (RN-CRR-8) |
 | F13 | Impact (outcomes, Impact Ledger, KPI de recuperação) | REUTILIZAR/ESTENDER `OutcomeMeasurement`/`UnifiedImpactLedger`; ESTENDER INFLUENCED |
@@ -218,4 +218,8 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - `resolve(orgId, actionId, overrides?)` — semeia a política (`execute`+`approved_execution`), MESCLA os `overrides` do operador (ticketId/responsável REAIS que a F6 não tinha — RN-151) e chama `CommandExecutorService.execute` (guardas G1/G2/G3). Pedido/ticket inexistente → recusa; comando não-resolução → recusa; idempotência do executor preservada.
   - Rota `POST /api/reputation/actions/:actionId/resolve` (owner/admin).
   - `test:reputation-resolution` (12): cada handler (efeito + referência real), recusa de id inventado, overrides do operador, governança (sem-aprovação/não-resolução/idempotência), integração F6→resolve, multi-tenant. Regressão `command-executor`/`runtime-executor-execute`/`task-result` PASS.
-- **F10..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F10 — FECHADA**. Réplica + Closure (§31, §11.10) — fecha o ciclo aberto na F8 (sem entidade nova, D1/§5):
+  - `src/server/ReputationClosureService.ts` — **`syncReplies`** lê `provider.getReplies/getStatus` do MESMO item e grava as respostas do CONSUMIDOR no próprio caso (evidência do sinal, cercadas como `untrusted_external_data` §11/RN-CRR-1, deduped por externalId da réplica); uma réplica **nova** do consumidor num caso já fechado **REABRE** o caso (`status='open'` → volta ao attention feed) — a réplica pertence ao MESMO caso, nunca abre outro (§31). **`close`** marca o sinal (`BusinessSignalService.resolve`/`acknowledge`) e, em `resolved`, CONFIRMA a `reputation_reply` que a F8 armou (`ConfirmationEngine.confirm` → a `decision_action` da resposta fecha em `done` com outcome — o loop "respondeu → resolveu de fato", §11.10); `not_resolved` reconhece e dispensa a pendência (sem inventar desfecho).
+  - Rotas `POST /api/reputation/cases/:signalId/sync-replies` e `POST /api/reputation/cases/:signalId/close` (owner/admin).
+  - `test:reputation-closure` (14): réplica gravada/cercada/deduped, reabertura por réplica nova em caso fechado, fechamento confirma a resposta da F8 (ação→done), not_resolved dispensa, multi-tenant. Regressão `runtime-confirmation`/`signals-attention` PASS.
+- **F11..F14 — pendentes**, cada uma = 1 fatia/PR.

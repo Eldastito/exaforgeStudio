@@ -20,6 +20,25 @@ import { logAuthEvent } from "./auditLog.js";
 
 const DEFAULT_TTL_DAYS = 7;
 
+/**
+ * PRD 9 F10 — termos identificadores do tenant DE ORIGEM (§94/§129). Colhe do
+ * `organization_settings` os campos que identificam a empresa (nome, CNPJ/CPF,
+ * telefone, e-mail) para `assertNoTenantData` barrar se algum vazar pro pacote
+ * compartilhado. Sem orgId → []; termos < 3 chars são ignorados (o assert já filtra,
+ * mas evitamos ruído). Nunca lança (best-effort).
+ */
+export function tenantTermsFor(orgId?: string | null): string[] {
+  const id = String(orgId || "").trim();
+  if (!id) return [];
+  try {
+    const r = db.prepare("SELECT business_name, cnpj_cpf, phone, email FROM organization_settings WHERE organization_id = ?").get(id) as any;
+    if (!r) return [];
+    return [r.business_name, r.cnpj_cpf, r.phone, r.email]
+      .map((v) => String(v ?? "").trim())
+      .filter((v) => v.length >= 3);
+  } catch { return []; }
+}
+
 /** fingerprint(vertical|topic|region|timeframe) — normalizado, determinístico. */
 export function researchFingerprint(vertical: string, topic: string, region?: string, timeframe?: string): string {
   const norm = (s?: string) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -113,13 +132,19 @@ export class VerticalIntelligenceService {
    */
   static publish(
     actor: { userId?: string | null; organizationId?: string | null } | null,
-    p: { vertical: string; topic: string; region?: string | null; timeframe?: string | null; content: any; sources: string[]; confidence: number; provider: string; ttlDays?: number },
+    p: { vertical: string; topic: string; region?: string | null; timeframe?: string | null; content: any; sources: string[]; confidence: number; provider: string; ttlDays?: number; tenantOrgId?: string | null },
   ): any {
     const region = p.region ?? null;
     const timeframe = p.timeframe ?? null;
     // Anonimização ANTES de persistir no compartilhado (RN-156-3) — vale também
-    // para o texto colado pelo admin no provider manual.
-    const safeContent = sanitizeForShared(p.content ?? {}, []);
+    // para o texto colado pelo admin no provider manual. PRD 9 F10 (achado (f)):
+    // `tenantTerms` deixa de ser vazio — os identificadores do tenant DE ORIGEM
+    // (quando há contexto de org) endurecem a barreira `assertNoTenantData` (§94/§129):
+    // se o nome/CNPJ/e-mail/telefone do tenant tiver vazado pro pacote, publish LANÇA
+    // em vez de gravar no compartilhado. Sem contexto de org (pesquisa pura de master)
+    // → termos vazios, comportamento idêntico ao de hoje (0-regressão).
+    const tenantTerms = tenantTermsFor(p.tenantOrgId ?? actor?.organizationId ?? null);
+    const safeContent = sanitizeForShared(p.content ?? {}, tenantTerms);
     const confidence = Math.max(0, Math.min(1, Number(p.confidence) || 0));
     const fingerprint = researchFingerprint(p.vertical, p.topic, region || undefined, timeframe || undefined);
     const ttlDays = Math.max(1, Math.min(365, Number(p.ttlDays) || DEFAULT_TTL_DAYS));

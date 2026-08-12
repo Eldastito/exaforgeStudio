@@ -19,6 +19,7 @@ import { CapacityForecastService } from "../CapacityForecastService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
+import { PlatformAlertService } from "../PlatformAlertService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -127,6 +128,24 @@ router.post("/protection-mode/enforce", (req: AuthRequest, res): any => {
     const enforce = req.body?.enforce === true || req.body?.enforce === "true";
     PlatformProtectionModeService.setEnforcing(enforce);
     return res.json({ enforcing: PlatformProtectionModeService.isEnforcing() });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F12 — Master Alerts: eventos de saúde de PLATAFORMA abertos (Admin Master).
+// GLOBAL, separado de business_signals per-tenant (RN-PRC). Anti-spam por dedupe.
+router.get("/platform-alerts", (req: AuthRequest, res): any => {
+  try {
+    const severity = typeof req.query?.severity === "string" ? req.query.severity as any : undefined;
+    return res.json({ open: PlatformAlertService.listOpen({ severity }) });
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F12 — sincroniza alertas a partir das recomendações de capacidade correntes
+// (F10): prioridade ALTA vira evento; recomendação que sumiu → auto-resolve (recuperou).
+router.post("/platform-alerts/refresh", (_req: AuthRequest, res): any => {
+  try {
+    const recs = CapacityRecommendationService.recommend().recommendations;
+    return res.json(PlatformAlertService.refresh({ recommendations: recs }));
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

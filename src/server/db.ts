@@ -8889,6 +8889,32 @@ const initDb = () => {
       }).catch((e) => { console.error('[DB] Falha ao importar SkillOsPilotSeeder', e); });
     }
   } catch(e) { console.error('[DB] Falha ao seedar pilotos SkillOS', e); }
+
+  // ADR-164 F12 — Platform Health Events: alertas de PLATAFORMA (Admin Master), o
+  // "Platform Health Event separado de business_signals per-tenant" (RN-PRC). GLOBAL,
+  // sem organization_id (molde do research_usage_log/platform_health_snapshots). Anti-spam
+  // por dedupe_key: um evento aberto por chave; reincidência bumpa occurrences/last_seen_at
+  // em vez de duplicar. `notified_at` guarda a última notificação pra janela anti-spam.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS platform_health_events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,              -- anomaly | capacity_forecast | protection_mode | dependency | ...
+        severity TEXT NOT NULL,                -- info | warning | critical
+        dedupe_key TEXT NOT NULL UNIQUE,       -- anti-spam: 1 evento aberto por chave
+        title TEXT NOT NULL,
+        detail_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'open',   -- open | resolved
+        occurrences INTEGER NOT NULL DEFAULT 1,
+        first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        notified_at DATETIME,                  -- última notificação enviada (janela anti-spam)
+        resolved_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_platform_health_events_status
+        ON platform_health_events (status, severity, last_seen_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar platform_health_events (ADR-164 F12)', e); }
 };
 
 initDb();

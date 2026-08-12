@@ -83,6 +83,7 @@ import decisionIntelligenceRoutes from "./src/server/routes/decisionIntelligence
 import recommendationsRoutes from "./src/server/routes/recommendations.js";
 import actionsRoutes from "./src/server/routes/actions.js";
 import uxRoutes from "./src/server/routes/ux.js";
+import { httpMetricsMiddleware } from "./src/server/HttpMetricsCollector.js";
 import insightsRoutes from "./src/server/routes/insights.js";
 import controlerRoutes from "./src/server/routes/controler.js";
 import plansRoutes from "./src/server/routes/plans.js";
@@ -383,6 +384,11 @@ async function startServer() {
 
   // Middleware for parsing JSON with limit blocker
   app.use(express.json({ limit: '2mb' }));
+
+  // ADR-164 F3 — instrumentação de SLI HTTP (p50/p95/p99, taxa de erro por rota).
+  // Mede em res.on('finish') (sem latência no caminho da resposta), nunca lança, e
+  // só guarda AGREGÁVEIS em memória (rota normalizada, sem PII — RN-PRC-3/5).
+  app.use(httpMetricsMiddleware);
 
   // Servir mídias recebidas (imagens) — rota pública, fora do /api protegido.
   app.use('/media', express.static(MEDIA_DIR));

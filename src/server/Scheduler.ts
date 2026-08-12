@@ -52,6 +52,7 @@ import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
+import { LegacyReductionReminderService } from "./LegacyReductionReminderService.js";
 import { VerticalIntelligenceResearchService } from "./VerticalIntelligenceResearchService.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
 import { BackupService } from "./BackupService.js";
@@ -746,6 +747,10 @@ export class Scheduler {
     // DI-4.5 (ADR-156): lembrete SEMANAL de atualização das pesquisas de nicho
     // vencendo (provider manual — só avisa o admin, nunca roda pesquisa sozinho).
     try { VerticalIntelligenceReminderService.maybeWeeklySweep(); } catch (e) { console.error('[Scheduler] lembrete de inteligência de nicho falhou', e); }
+    // ADR-163 F16 — lembrete SEMANAL do gate de redução de legado (F12): quando a
+    // telemetria prova substituição, publica em business_signals pro gestor ver na
+    // Smart Inbox. Advisório (nunca remove tela); resolve o sinal quando não há candidato.
+    try { LegacyReductionReminderService.maybeWeeklySweep(); } catch (e) { console.error('[Scheduler] lembrete de redução de legado falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

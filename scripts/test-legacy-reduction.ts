@@ -60,7 +60,9 @@ async function main() {
   check("4.2 nota deixa claro que não remove", /nenhuma tela é removida|advis/i.test(r.note));
   // Métodos ESTÁTICOS PRÓPRIOS do service — não deve haver remove/retire/delete/apply de negócio.
   const ownStatics = Object.getOwnPropertyNames(LEG).filter((n) => typeof (LEG as any)[n] === "function" && !["length", "name", "prototype"].includes(n));
-  check("4.3 service só expõe leitura (candidates), sem método de remoção", ownStatics.length === 1 && ownStatics[0] === "candidates");
+  // Só métodos de LEITURA (candidates/readyForOrg); NENHUM de remoção/aplicação.
+  const REMOVERS = ["remove", "retire", "delete", "apply", "drop", "purge"];
+  check("4.3 service só expõe leitura, sem método de remoção", ownStatics.every((n: string) => !REMOVERS.includes(n)) && ownStatics.includes("candidates"));
 
   // ═══════════════ 5. role-gate (§73) ═══════════════
   const rAt = LEG.candidates(A, atendente) as any;

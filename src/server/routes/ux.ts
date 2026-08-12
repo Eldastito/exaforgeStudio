@@ -9,6 +9,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { ExecutionResultsService } from "../ExecutionResultsService.js";
 import { AdaptiveOnboardingService } from "../AdaptiveOnboardingService.js";
 import { InferredSettingsService } from "../InferredSettingsService.js";
+import { ContextualUpgradeService } from "../ContextualUpgradeService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -58,6 +59,15 @@ router.post("/inferred-settings/apply", (req: AuthRequest, res): any => {
   const b = req.body || {};
   const r = InferredSettingsService.apply(orgId, actor(req), { domain: b.domain, actionType: b.actionType, bands: b.bands });
   res.status(r.applied ? 200 : 400).json(r);
+});
+
+// GET /api/ux/contextual-upgrades — upgrades SITUACIONAIS (recomendação ∩ fora-do-plano).
+// Vazio quando não há gatilho — é o comportamento correto (§56, sem catálogo de cadeados).
+// Aceitar/dispensar seguem em /api/billing/recommendations (reuso, sem duplicar).
+router.get("/contextual-upgrades", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ContextualUpgradeService.forUser(orgId, req.user));
 });
 
 export default router;

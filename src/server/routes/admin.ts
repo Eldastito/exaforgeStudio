@@ -17,6 +17,7 @@ import { PlatformBaselineService } from "../PlatformBaselineService.js";
 import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { CapacityForecastService } from "../CapacityForecastService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
+import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -95,6 +96,17 @@ router.get("/platform-root-cause", (req: AuthRequest, res): any => {
   try {
     const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
     return res.json(PlatformRootCauseService.analyze({ days }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F10 — recomendação ADVISÓRIA e explicável: junta headroom (F7) + forecast
+// (F8) + causa provável (F9) em recomendações que o operador LÊ e decide. V1 NUNCA
+// executa (D6/CA16) — toda rec é requiresHuman. Sem sinal → all_clear.
+router.get("/capacity-recommendations", (req: AuthRequest, res): any => {
+  try {
+    const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+    const horizonDays = typeof req.query?.horizon === "string" ? Number(req.query.horizon) : undefined;
+    return res.json(CapacityRecommendationService.recommend({ days, horizonDays }));
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

@@ -9,6 +9,7 @@ import { ReputationRecoveryService } from "../ReputationRecoveryService.js";
 import { ReputationHandoffService } from "../ReputationHandoffService.js";
 import { ReputationReplyService } from "../ReputationReplyService.js";
 import { ReputationResolutionService } from "../ReputationResolutionService.js";
+import { ReputationClosureService } from "../ReputationClosureService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -194,6 +195,33 @@ router.post("/actions/:actionId/resolve", requireRole("owner", "admin"), async (
     logAuthEvent(orgId, (req as any).user?.userId || null, req.params.actionId, "REPUTATION_RESOLVE", { actionId: req.params.actionId, effect: out?.result?.effect, externalRef: out?.result?.externalRef });
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/reputation/cases/:signalId/sync-replies { provider? } — lê réplicas do
+// consumidor (§31): grava no caso (cercadas), reabre se houver réplica nova num caso
+// fechado. Não age externamente. Owner/admin.
+router.post("/cases/:signalId/sync-replies", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const provider = typeof (req.body || {}).provider === "string" ? req.body.provider : undefined;
+  const out = await ReputationClosureService.syncReplies(orgId, req.params.signalId, { provider });
+  if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+  logAuthEvent(orgId, (req as any).user?.userId || null, req.params.signalId, "REPUTATION_SYNC_REPLIES", { signalId: req.params.signalId, newConsumer: out.newConsumerReplies.length, reopened: out.reopened, itemStatus: out.itemStatus });
+  res.json(out);
+});
+
+// POST /api/reputation/cases/:signalId/close { resolution, note? } — fecha o caso
+// (§11.10): resolved → confirma a resposta (F8) e resolve o sinal; not_resolved →
+// reconhece e dispensa a pendência. Owner/admin.
+router.post("/cases/:signalId/close", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const resolution = (req.body || {}).resolution;
+  if (resolution !== "resolved" && resolution !== "not_resolved") return res.status(400).json({ error: "resolution deve ser 'resolved' ou 'not_resolved'" });
+  const out = ReputationClosureService.close(orgId, req.params.signalId, { resolution, actorId: (req as any).user?.userId || null, note: typeof (req.body || {}).note === "string" ? req.body.note : undefined });
+  if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+  logAuthEvent(orgId, (req as any).user?.userId || null, req.params.signalId, "REPUTATION_CASE_CLOSE", { signalId: req.params.signalId, resolution: out.resolution, confirmed: out.confirmed.length, dismissed: out.dismissed.length });
+  res.json(out);
 });
 
 // GET /api/reputation/customer/:contactId/context — customer-360 (§13). Owner/admin;

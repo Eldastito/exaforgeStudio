@@ -1,12 +1,12 @@
 # ADR-165 — Universal Closed Loop & Outcome Assurance (PRD 8)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** **F0 FECHADA (auditoria + matriz de reutilização — este documento). Implementação (F1+) BLOQUEADA até o PRD 7 (ADR-164) encerrar** — disciplina por fatias, sem trabalho concorrente.
+**Estado:** **F0–F1 FECHADAS. F0 = auditoria + matriz. F1 = `OutcomeAssuranceService.assess()` read-only (estado derivado executado→efeito→outcome→impacto). Pré-condição atendida: a metade de CÓDIGO do PRD 7 (ADR-164 F0–F14) encerrou — F2+ liberadas.**
 **Prioridade:** P0 — confiança no dado de resultado (pré-requisito do PRD 9 Enterprise Learning)
 **Acesso:** transversal (opt-in por flag; superfícies role-gated existentes)
 **Natureza:** Garantia de ciclo fechado + Outcome Assurance + Reconciliação de medição
 **Estratégia:** REUTILIZAR → ESTENDER → COMPOR → **só então** CRIAR
-**Dependência dura:** PRD 7 (ADR-164) **encerrado** — pré-condição **não atendida** (PRD 7 em F0–F7). Nada de código PRD 8 antes disso.
+**Dependência dura:** PRD 7 (ADR-164) **encerrado** — pré-condição **ATENDIDA** (metade de código do PRD 7 em F0–F14 na produção; restam só as fatias de ambiente, que não bloqueiam o PRD 8).
 **Não é:** novo Runtime, novo Policy Engine, novo Confirmation Engine, novo Impact Ledger, novo Scheduler, nova tabela de alerta, nem learning engine.
 
 > **Regra de ouro (PRD 8):** *`DONE` não é `RESULTADO`. Um processo só está encerrado quando o **outcome de negócio** que ele prometia foi **confirmado e medido** — não quando a ação foi disparada.*
@@ -88,12 +88,12 @@ Quatro conceitos que hoje colapsam e que o PRD 8 separa: **AÇÃO EXECUTADA** �
 
 ---
 
-## 6. Plano de fatias (F0–F13) — **F1+ bloqueadas até PRD 7 encerrar**
+## 6. Plano de fatias (F0–F13)
 
 | Fatia | Entrega | Reuso principal |
 | --- | --- | --- |
 | **F0** ✅ | **Auditoria + matriz + este ADR (doc-only)** | — |
-| F1 | `OutcomeAssuranceService.assess()` — estado derivado read-only (executado/efeito/outcome/impacto) por `correlation_id` | `ExecutionTraceService`, `ConfirmationEngine`, `OutcomeMeasurementService` |
+| **F1** ✅ | **`OutcomeAssuranceService.assess()` — estado derivado read-only (executado→efeito→outcome→impacto) por ação e por `correlation_id`. Escada `planned→executed→effect_confirmed→impact_measured→assured`; gaps (`done_without_outcome`, `confirmation_pending/timed_out`); business outcome fica `resolver_pending` (F3). RN-OA-3 (não escreve/não muda FSM), RN-OA-1 (DONE≠assured), RN-OA-2 (null≠zero). Rotas `/assurance/action/:id` + `/assurance/correlation/:cid`. `test:outcome-assurance` (23 checks).** | `decision_actions`, `action_execution_log`, `action_confirmations`, `action_outcomes` |
 | F2 | Avaliar `success/failure_conditions` de **processo** via `evaluateCondition` (mapa de contexto de negócio) | `PlaybookEngine`, `ProcessRuntimeService` |
 | F3 | `BusinessOutcomeResolver` registry (determinístico, system-of-record) — Cobrança primeiro | `AsaasService`, `receivables` |
 | F4 | Resolvers dos demais golden loops (Comercial, Reputação, Varejo) | `SalesRecoveryAttributionService`, `ReputationClosureService`, `RetailReconciliationService` |

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /**
  * ConfirmationEngine — peça FINA que fecha o loop "ação disparada → resultado
@@ -231,6 +232,18 @@ export class ConfirmationEngine {
    * Retorna quantas foram fechadas.
    */
   static sweepTimeouts(orgId?: string): number {
+    // ADR-165 F7 — antes de fechar por timeout, CAPTURA as pendentes que vão vencer, pra
+    // publicar a exceção de SLA em business_signals (aparece em attention()). A auditoria
+    // F0 achou que o timeout era marcado mas NÃO fluía pra atenção (gap de integração).
+    let selSql = `SELECT c.id, c.organization_id, c.action_id, c.confirmation_method, c.deadline_at,
+                         a.correlation_id, a.domain, a.title
+                    FROM action_confirmations c
+                    LEFT JOIN decision_actions a ON a.id = c.action_id AND a.organization_id = c.organization_id
+                   WHERE c.status = 'pending' AND c.deadline_at IS NOT NULL AND datetime(c.deadline_at) <= CURRENT_TIMESTAMP`;
+    const selParams: any[] = [];
+    if (orgId) { selSql += ` AND c.organization_id = ?`; selParams.push(orgId); }
+    const timing = db.prepare(selSql).all(...selParams) as any[];
+
     // `datetime(deadline_at)` faz o parse aceitando tanto ISO 8601 (com T e
     // millis) quanto o formato do SQLite (`YYYY-MM-DD HH:MM:SS`). Sem isso a
     // comparação textual direta contra CURRENT_TIMESTAMP falha em ISO.
@@ -238,6 +251,28 @@ export class ConfirmationEngine {
     const params: any[] = [];
     if (orgId) { sql += ` AND organization_id = ?`; params.push(orgId); }
     const r = db.prepare(sql).run(...params);
+
+    // Publica a exceção de SLA (best-effort, nunca quebra o sweep — convenção 7).
+    // dedupeKey por confirmação: idempotente (uma exceção por confirmação vencida).
+    for (const c of timing) {
+      try {
+        BusinessSignalService.publish(c.organization_id, {
+          domain: "outcome_assurance",
+          signalType: "confirmation_timed_out",
+          severity: "risk",                    // SLA de confirmação estourado é risco (efeito não veio)
+          basis: "fact",
+          confidence: 1,
+          sourceService: "ConfirmationEngine.sweepTimeouts",
+          sourceEntityType: "action_confirmation",
+          sourceEntityId: c.id,
+          subjectType: "decision_action",
+          subjectId: c.action_id,
+          correlationId: c.correlation_id || null,
+          evidence: { confirmationId: c.id, actionId: c.action_id, method: c.confirmation_method, deadlineAt: c.deadline_at, domain: c.domain, title: c.title, gap: "confirmation_timed_out" },
+          dedupeKey: `outcome_assurance:confirmation_timed_out:${c.id}`,
+        });
+      } catch { /* best-effort */ }
+    }
     return r.changes || 0;
   }
 }

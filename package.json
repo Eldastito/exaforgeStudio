@@ -39,6 +39,7 @@
     "test:reputation-investigation": "tsx scripts/test-reputation-investigation.ts",
     "test:reputation-recovery": "tsx scripts/test-reputation-recovery.ts",
     "test:reputation-falatu": "tsx scripts/test-reputation-falatu.ts",
+    "test:reputation-reply": "tsx scripts/test-reputation-reply.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

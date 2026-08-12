@@ -1,7 +1,7 @@
 # ADR-162 — Customer Recovery & Reputation Intelligence (PRD 5)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Em execução — **F0–F7 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff)
+**Estado:** Em execução — **F0–F8 FECHADAS** (auditoria/matriz · provider+stub · conector real+ingestão · identidade+contexto · classificação+high-risk · investigação+grounding · recovery playbook · Fala Tu+handoff · resposta pública governada)
 **Prioridade:** P0 estratégica
 **Natureza:** **Aditivo puro** sobre ADR-135 (Snapshot/Evidence), ADR-136 (Decision & Action Ledger), ADR-152 (Execution Runtime), ADR-158 (espinha única/rastreabilidade), ADR-159 (choke-point de execução), ADR-155 (Churn), ADR-047 (Recovery Radar), ADR-085 (Impact Ledger), Context Engine (PRD 3) e SkillOS (PRD 4). **Não abre módulo/motor/policy/runtime/alerta paralelo.**
 **Primeiro sensor externo:** Reclame AQUI.
@@ -148,7 +148,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | **F5** | **Investigation (causa candidata, evidence, grounding, confidence) (FECHADA)** | REUTILIZAR `SignalInvestigationService` + `checkGrounding` |
 | **F6** | **Recovery Playbook (investigação → recommended action; sem efeito externo) (FECHADA)** | REUTILIZAR `DecisionActionService`/`ApprovalPolicyService` |
 | **F7** | **Approval + Fala Tu (Smart Inbox, Approval Center, Internal Handoff) (FECHADA)** | REUTILIZAR Fala Tu inteiro; CRIAR handoff determinístico |
-| F8 | Governed Reply (`reputation_publish_reply`, começa `approved_execution`) | CRIAR handler; REUTILIZAR `dispatchGoverned`+`ConfirmationEngine` |
+| **F8** | **Governed Reply (`reputation_publish_reply`, começa `approved_execution`) (FECHADA)** | CRIAR handler; REUTILIZAR `execute`+`ConfirmationEngine`+`checkGrounding` |
 | F9 | Governed Resolution (poucas ações: reship, reschedule, contact task) | COMPOR handlers; REUTILIZAR policy/executor |
 | F10 | Réplica + Closure (resposta do consumidor, nova réplica, fechamento) | REUTILIZAR dedupe/correlação/thread |
 | F11 | Prevention (`reputational_escalation_risk`, cruzar sinais internos) | ESTENDER `ChurnRiskDetector`; REUTILIZAR `SignalCorrelation` |
@@ -208,4 +208,9 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
   - CRIAR (§33 internal handoff): `src/server/ReputationHandoffService.ts` — `handoff()` monta um **resumo DETERMINÍSTICO** do caso (categoria/severidade/alegação/causa provável/recomendação corrente, **sem LLM** — o `HandoffSummaryService` canônico depende de ticket+IA) e o posta via `InternalChatService.post` como nota ancorada ao `correlation_id` (do caso ou direcionada) → aparece na Thread (estágio 'nota') e na caixa interna do destinatário. High-risk é marcado no resumo (RN-CRR-4). `caseView()` compõe thread + aprovações pendentes do caso (§36). Não age no caso.
   - Rotas `GET /api/reputation/cases/:signalId/view`, `POST /api/reputation/cases/:signalId/handoff` (owner/admin).
   - `test:reputation-falatu` (19): reuso na Smart Inbox/Approval/Thread, handoff (nota→caixa interna+thread, broadcast, high-risk marcado), caseView, multi-tenant/not_found. Regressão `smart-inbox`/`falatu-approval`/`falatu-thread`/`internal-chat` PASS.
-- **F8..F14 — pendentes**, cada uma = 1 fatia/PR.
+- **F8 — FECHADA**. Governed Reply (§29, §25/§61) — o **primeiro efeito externo** do módulo:
+  - `src/server/ReputationReplyService.ts` — a cadeia governada canônica (D4/D5, sem motor paralelo): `draft()` propõe a resposta como ação governada (`awaiting_approval`, começa `approved_execution` — semeia a política `execute`+`approved_execution`); o humano aprova no Approval Center (F7); `publish()` chama `CommandExecutorService.execute` (guardas G1/G2/G3).
+  - `ReputationPublishReplyCommandHandler` (CRIAR §29, registrado no boot) — o provider é tocado **só aqui** (D4, nunca por serviço de IA). Três guardrails antes de publicar: **GROUNDING** (§25/§61, RN-CRR-3 — `checkGrounding` sobre os fatos da investigação F5; afirmação factual sem lastro → `UNSUPPORTED_CLAIM`, **não publica**; empática passa), **IDEMPOTÊNCIA** (§30/§71 — `idempotencyKey=action.id` + o executor barra 2º `execute`), **DEGRADAÇÃO EXPLÍCITA** (§6 — sem capacidade→`manual_required`, indisponível→`unavailable` com retry). Publicado, arma `ConfirmationEngine.expect(method:'reputation_reply')` — a operação não fecha só porque respondeu (§11.10); o fechamento é a F10.
+  - Rotas `POST /api/reputation/cases/:signalId/reply/draft` e `POST /api/reputation/actions/:actionId/publish` (owner/admin). Método de confirmação `reputation_reply` aditivo no `ConfirmationEngine`.
+  - `test:reputation-reply` (17): grounded publica × sem-lastro bloqueia × empática passa, manual_required (§6), idempotência, guarda sem-aprovação, confirmação armada, multi-tenant. Regressão `command-executor`/`runtime-confirmation`/`runtime-executor-execute`/`decision-actions` PASS.
+- **F9..F14 — pendentes**, cada uma = 1 fatia/PR.

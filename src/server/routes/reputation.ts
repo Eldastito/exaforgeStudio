@@ -7,6 +7,7 @@ import { ReputationClassificationService } from "../ReputationClassificationServ
 import { ReputationInvestigationService } from "../ReputationInvestigationService.js";
 import { ReputationRecoveryService } from "../ReputationRecoveryService.js";
 import { ReputationHandoffService } from "../ReputationHandoffService.js";
+import { ReputationReplyService } from "../ReputationReplyService.js";
 import { CustomerContextService } from "../CustomerContextService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -146,6 +147,35 @@ router.post("/cases/:signalId/handoff", requireRole("owner", "admin"), (req: Aut
     const out = ReputationHandoffService.handoff(orgId, fromUserId, req.params.signalId, { toUserId: b.toUserId || null, note: typeof b.note === "string" ? b.note : undefined });
     if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
     logAuthEvent(orgId, fromUserId, out.note?.id || null, "REPUTATION_CASE_HANDOFF", { signalId: req.params.signalId, correlationId: out.correlationId, toUserId: b.toUserId || null });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/reputation/cases/:signalId/reply/draft { content, provider?, claims? } —
+// rascunha a resposta pública como AÇÃO GOVERNADA (awaiting_approval). Não publica;
+// o humano aprova no Approval Center (F7). Devolve prévia de grounding (§25). Owner/admin.
+router.post("/cases/:signalId/reply/draft", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (typeof b.content !== "string" || !b.content.trim()) return res.status(400).json({ error: "content obrigatório" });
+  if (b.claims != null && !Array.isArray(b.claims)) return res.status(400).json({ error: "claims deve ser lista" });
+  try {
+    const out = ReputationReplyService.draft(orgId, req.params.signalId, { content: b.content, provider: typeof b.provider === "string" ? b.provider : undefined, claims: b.claims, createdBy: (req as any).user?.userId });
+    if (!out) return res.status(404).json({ error: "caso de reputação não encontrado" });
+    logAuthEvent(orgId, (req as any).user?.userId || null, out.action.id, "REPUTATION_REPLY_DRAFT", { signalId: req.params.signalId, actionId: out.action.id, grounding: out.grounding.status });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/reputation/actions/:actionId/publish — PUBLICA (execute governado) uma
+// resposta APROVADA. Guardas G1/G2/G3 + grounding no handler; provider só aqui (§29).
+router.post("/actions/:actionId/publish", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = await ReputationReplyService.publish(orgId, req.params.actionId);
+    logAuthEvent(orgId, (req as any).user?.userId || null, req.params.actionId, "REPUTATION_REPLY_PUBLISH", { actionId: req.params.actionId, effect: out?.result?.effect, externalRef: out?.result?.externalRef });
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });

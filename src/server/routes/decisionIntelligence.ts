@@ -10,6 +10,7 @@ import { ResearchBrokerService } from "../ResearchBrokerService.js";
 import { ResearchBudgetService } from "../ResearchBudgetService.js";
 import { VerticalIntelligenceReminderService } from "../VerticalIntelligenceReminderService.js";
 import { ExecutionTraceService } from "../ExecutionTraceService.js";
+import { OutcomeAssuranceService } from "../OutcomeAssuranceService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 
@@ -67,6 +68,22 @@ router.get("/trace/:correlationId", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(ExecutionTraceService.trace(orgId, req.params.correlationId));
+});
+
+// GET /api/decision-intelligence/assurance/action/:actionId — garantia de ciclo fechado
+// de UMA ação (PRD 8 / ADR-165 F1). Read-only, derivado, isolado por org. DONE ≠ RESULTADO.
+router.get("/assurance/action/:actionId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(OutcomeAssuranceService.assessAction(orgId, req.params.actionId));
+});
+
+// GET /api/decision-intelligence/assurance/correlation/:correlationId — garantia do FIO
+// inteiro (todas as ações da correlação). overall = pior estado. Read-only (RN-OA-3).
+router.get("/assurance/correlation/:correlationId", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(OutcomeAssuranceService.assessCorrelation(orgId, req.params.correlationId));
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

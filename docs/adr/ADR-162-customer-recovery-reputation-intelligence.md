@@ -141,7 +141,7 @@ Auditoria transversal (6 frentes, read-only) contra os commits que o PRD cita. *
 | Fase | Entrega | Reúso dominante |
 | --- | --- | --- |
 | **F0** | **Esta auditoria + matriz de reutilização (FECHADA)** | — |
-| F1 | `ReputationProvider` contract + stub determinístico (sem rede) | REUTILIZAR molde `ExternalResearchProvider` |
+| **F1** | **`ReputationProvider` contract + `StubReputationProvider` determinístico (FECHADA)** | REUTILIZAR molde `ExternalResearchProvider` |
 | F2 | Conector Reclame AQUI real, leitura incremental, dedup, External Signals (flag OFF) | REUTILIZAR `ExternalSignalService`; ESTENDER cursor/health de conector |
 | F3 | Identity & Customer Context (resolve cliente/pedido/ticket → ContextPacket) | ESTENDER `phoneMatch`; COMPOR Customer 360; wire `ContextGuardService` |
 | F4 | Classification + severity + high-risk gates | CRIAR taxonomia determinística; COMPOR Context Engine |
@@ -172,5 +172,6 @@ Dashboard isolado de Reclame AQUI como produto; novo policy/alertas/Runtime/RAG;
 
 ## 10. Status
 
-- **F0 — FECHADA** (este documento). Auditoria transversal concluída; matriz de reutilização registrada; validação da API Reclame AQUI deferida com degradação explícita (§6).
-- **F1..F14 — pendentes**, cada uma = 1 fatia/PR (fluxo padrão do repo: ADR → service → rota → teste → CI → merge). Nenhum código antes desta F0, conforme instrução final do PRD.
+- **F0 — FECHADA**. Auditoria transversal concluída; matriz de reutilização registrada; validação da API Reclame AQUI deferida com degradação explícita (§6).
+- **F1 — FECHADA**. `src/server/ReputationProvider.ts` — contrato provider-agnóstico (`listNewItems`/`getItem`/`publishReply`/`getReplies`/`getStatus` + `capabilities` §6) + `StubReputationProvider` determinístico (sem rede, dataset fixo, offline em CI). Resolvido por registry + env `REPUTATION_PROVIDER` (default `stub`). Provider é **só transporte** (D4 — não importa db/serviço, não mapeia item→sinal). Idempotência de publicação (§30/§71), cursor incremental (§70) e **degradação explícita** `manual_required` quando falta capacidade (§6/§8) já no contrato. `test:reputation-provider` (21) — puro, sem DB. Nenhuma flag/rota/boot ainda (nada roda; o conector real e o wiring são F2).
+- **F2..F14 — pendentes**, cada uma = 1 fatia/PR (fluxo padrão do repo).

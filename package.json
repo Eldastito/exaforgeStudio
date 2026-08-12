@@ -86,6 +86,7 @@
     "test:execution-trace-fullcycle": "tsx scripts/test-execution-trace-fullcycle.ts",
     "test:outcome-correction": "tsx scripts/test-outcome-correction.ts",
     "test:outcome-assurance-metrics": "tsx scripts/test-outcome-assurance-metrics.ts",
+    "test:outcome-assurance-hardening": "tsx scripts/test-outcome-assurance-hardening.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

@@ -16,6 +16,7 @@ import { OperationalHealthService } from "../OperationalHealthService.js";
 import { PlatformBaselineService } from "../PlatformBaselineService.js";
 import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { CapacityForecastService } from "../CapacityForecastService.js";
+import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -85,6 +86,15 @@ router.get("/capacity-forecast", (req: AuthRequest, res): any => {
     const horizonDays = typeof req.query?.horizon === "string" ? Number(req.query.horizon) : undefined;
     if (metric) return res.json(CapacityForecastService.forecast(metric, { days, horizonDays }));
     return res.json(CapacityForecastService.forecastCapacity({ days, horizonDays }));
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F9 — correlação de causa provável: compõe as anomalias da F6 em hipóteses
+// ranqueadas (sintoma→causa). Correlação, não veredito (§35). Sem anomalia → vazio.
+router.get("/platform-root-cause", (req: AuthRequest, res): any => {
+  try {
+    const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+    return res.json(PlatformRootCauseService.analyze({ days }));
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

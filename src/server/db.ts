@@ -8465,6 +8465,14 @@ const initDb = () => {
   // LGPD §84). Flag default 0: sem ela, `record` é no-op (não coleta nada). Só
   // eventos minimizados (sem conteúdo) quando o dono liga.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ux_telemetry_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 6 F13 (ADR-163 §53/§68, D7) — preferências de janela "acordado" (quiet-hours)
+  // + limiar de alerta. Único gap de PERSISTÊNCIA genuíno do F0 (item 10): hoje a
+  // janela é constante de código (AWAKE_START=7/END=22 no FalaTuProactiveService). As
+  // colunas guardam a JANELA ACORDADO [start,end) em hora SP 0-23; fora dela é quiet
+  // hours. Opt-in, NULL = default do sistema (0 regressão). Limiar em R$ (>=0).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN proactive_awake_start INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN proactive_awake_end INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN alert_min_amount REAL`); } catch(e){}
 
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas

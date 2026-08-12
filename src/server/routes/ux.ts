@@ -14,6 +14,7 @@ import { ZeroTrainingHelpService } from "../ZeroTrainingHelpService.js";
 import { UxTelemetryService } from "../UxTelemetryService.js";
 import { MobileReadinessService } from "../MobileReadinessService.js";
 import { LegacyReductionService } from "../LegacyReductionService.js";
+import { UxPreferencesService } from "../UxPreferencesService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -123,6 +124,24 @@ router.get("/legacy-reduction", (req: AuthRequest, res): any => {
   const r = LegacyReductionService.candidates(orgId, req.user, { sinceDays: days });
   if ((r as any).restricted) return res.status(403).json({ error: "Recomendações de legado são restritas a gestores." });
   res.json(r);
+});
+
+// GET /api/ux/preferences — quiet-hours + limiar de alerta efetivos (com default).
+router.get("/preferences", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  res.json(UxPreferencesService.effective(orgId));
+});
+
+// PUT /api/ux/preferences { quietStart?, quietEnd?, alertMinAmount? } — grava (gestor).
+// null explícito volta ao default (undo, §54). Só gestor define config da org.
+router.put("/preferences", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores definem as preferências da conta." });
+  try {
+    res.json(UxPreferencesService.set(orgId, actor(req), req.body || {}));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

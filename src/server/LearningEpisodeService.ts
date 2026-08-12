@@ -65,7 +65,7 @@ export class LearningEpisodeService {
       },
       learning: {
         mixed: mixed ? { acted: mixed.acted, worked: mixed.worked, no_effect: mixed.no_effect, backfired: mixed.backfired, effectiveness: mixed.effectiveness } : null,
-        assured: { assuredActed: assured.assuredActed, worked: assured.worked, no_effect: assured.no_effect, backfired: assured.backfired, netImpact: assured.netImpact, assuredEffectiveness: assured.assuredEffectiveness },
+        assured: { assuredActed: assured.assuredActed, worked: assured.worked, no_effect: assured.no_effect, backfired: assured.backfired, netImpact: assured.netImpact, assuredEffectiveness: assured.assuredEffectiveness, workedRate: assured.workedRate, interval: assured.interval, confidence: assured.confidence },
         hasAssuredEvidence: assured.assuredActed > 0,
       },
       outcomes,

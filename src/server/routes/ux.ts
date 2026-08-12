@@ -8,6 +8,7 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { ExecutionResultsService } from "../ExecutionResultsService.js";
 import { AdaptiveOnboardingService } from "../AdaptiveOnboardingService.js";
+import { InferredSettingsService } from "../InferredSettingsService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -38,6 +39,24 @@ router.post("/onboarding/confirm", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   const r = AdaptiveOnboardingService.confirm(orgId, actor(req), { key: req.body?.key, value: req.body?.value });
+  res.status(r.applied ? 200 : 400).json(r);
+});
+
+// GET /api/ux/inferred-settings — sugestões de política inferidas (só gestor).
+router.get("/inferred-settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  res.json(InferredSettingsService.suggestions(orgId, req.user));
+});
+
+// POST /api/ux/inferred-settings/apply { domain, actionType, bands } — confirma e grava.
+// RN-UX-3: aplicar política material exige gestor + confirmação explícita (nunca inferência sozinha).
+router.post("/inferred-settings/apply", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem definir política de aprovação." });
+  const b = req.body || {};
+  const r = InferredSettingsService.apply(orgId, actor(req), { domain: b.domain, actionType: b.actionType, bands: b.bands });
   res.status(r.applied ? 200 : 400).json(r);
 });
 

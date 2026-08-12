@@ -8426,6 +8426,11 @@ const initDb = () => {
   // Flag opt-in (default 0) só diz ao frontend se roda o fluxo adaptativo; o discover
   // NUNCA inventa (declara "ainda não sei"), a confirmação só grava campo descritivo.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN adaptive_onboarding_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // PRD 6 F6 (ADR-163 §26/§101, D4/RN-UX-3) — inferred settings: observa→infere→
+  // SUGERE regra de autonomia; NUNCA auto-aplica política material. A aplicação só
+  // acontece por confirmação explícita (reusa ApprovalPolicyService.setBands). Flag
+  // opt-in (default 0) só diz ao frontend se mostra as sugestões.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN inferred_settings_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // PRD 1 (Fala Tu Universal Interaction Layer) — Fatia de fundação: o
   // `falatu_inbox_items` É o envelope canônico de interação (§9); estas colunas

@@ -81,6 +81,22 @@ async function main() {
   check("5.1 org B sem execução de A", exB.total === 0 && exB.groups.length === 0);
   check("5.2 org B sem resultados de A", Object.keys(resB.impact.categories).length === 0);
 
+  // ═══════════════ 6. F9 (ADR-165) — garantia nas superfícies (garantido × só executado) ═══════════════
+  // Objetivo só PROPOSTO (aVis) → assurance planned; fato sempre visível (não é dinheiro).
+  check("6.1 objetivo só proposto → assurance planned", !!grpVis!.assurance && grpVis!.assurance.state === "planned");
+  // Objetivo com efeito confirmado E impacto medido → assured.
+  const aOk = DA.propose(A, { domain: "operations", actionType: "prepare_campaign", title: "Objetivo garantido", expectedImpact: 100, impactUnit: "BRL" });
+  db.prepare("UPDATE decision_actions SET status='done' WHERE id=?").run(aOk.id);
+  db.prepare("INSERT INTO action_confirmations (id, organization_id, action_id, confirmation_method, status) VALUES (?,?,?,?,?)").run(randomUUID(), A, aOk.id, "manual", "confirmed");
+  db.prepare("INSERT INTO action_outcomes (id, organization_id, action_id, measurement_method, basis, realized_value, correlation_id) VALUES (?,?,?,?,?,?,?)").run(randomUUID(), A, aOk.id, "derived", "fact", 100, aOk.correlation_id);
+  mkProc(A, aOk.correlation_id, "recuperacao_carrinho", "executing", 100);
+  const exF9 = ER.executing(A, owner);
+  const grpOk = exF9.groups.find((g: any) => g.correlationId === aOk.correlation_id);
+  check("6.2 objetivo confirmado+medido → assured, sem gaps", !!grpOk && grpOk.assurance!.state === "assured" && grpOk.assurance!.hasGaps === false);
+  // A garantia (fato) é visível pro atendente também; só o R$ fica restrito (§73).
+  const grpOkAt = ER.executing(A, atendente).groups.find((g: any) => g.correlationId === aOk.correlation_id);
+  check("6.3 assurance visível pro atendente (fato), R$ restrito", !!grpOkAt && grpOkAt.assurance!.state === "assured" && grpOkAt.impact.restricted === true);
+
   // ── relatório ──
   const passed = results.filter((r) => r.ok).length;
   for (const r of results) if (!r.ok) console.log(`  ✗ ${r.name}`);

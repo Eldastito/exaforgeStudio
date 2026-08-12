@@ -26,6 +26,7 @@ import { ContextProjectionService } from "./ContextProjectionService.js";
 import { UnifiedImpactLedgerService } from "./UnifiedImpactLedgerService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { UxPresentationService } from "./UxPresentationService.js";
+import { OutcomeAssuranceService } from "./OutcomeAssuranceService.js";
 
 const PROC_ACTIVE = new Set(["planned", "authorized", "queued", "executing", "waiting_external_response"]);
 const MONEY_UNITS = new Set(["BRL", "R$", "brl"]);
@@ -36,6 +37,10 @@ interface ExecObjective {
   count: number;
   states: Array<{ key: string; label: string; tone: string; count: number }>;
   processes: Array<{ id: string; processType: string; status: string; state: string; startedAt: string | null; riskLevel: string | null }>;
+  // ADR-165 F9 — garantia do objetivo: `assured` (efeito confirmado E impacto medido) vs
+  // só `executed`/`planned` (DONE ≠ RESULTADO). NÃO é dinheiro — o FATO da garantia é
+  // sempre visível (RN-OA-2/§73); só o valor em R$ é role-gated (campo `impact`).
+  assurance: { state: string; hasGaps: boolean; gaps: string[] } | null;
   drillDown: string | null;
 }
 
@@ -65,10 +70,16 @@ export class ExecutionResultsService {
           ? (full ? { amount: Number(rawAmount), unit: unit || "BRL", restricted: false }
                   : { amount: null, unit: unit || "BRL", restricted: true })
           : { amount: null, unit: null, restricted: false };
+        // Garantia derivada do fio (F1) — read-only, sempre visível (não é dinheiro).
+        let assurance: { state: string; hasGaps: boolean; gaps: string[] } | null = null;
+        if (cid) {
+          const a = OutcomeAssuranceService.assessCorrelation(orgId, cid);
+          if (a.actionCount > 0) assurance = { state: a.overall, hasGaps: a.gaps.length > 0, gaps: a.gaps };
+        }
         groups.set(key, {
           key, correlationId: cid,
           objective: obj?.title || this.humanizeType(p.process_type),
-          domain, impact, count: 0, states: [], processes: [],
+          domain, impact, count: 0, states: [], processes: [], assurance,
           drillDown: cid ? `/api/falatu/thread/${cid}` : null,
         });
       }

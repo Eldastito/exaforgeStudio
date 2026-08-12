@@ -15,6 +15,7 @@ import { ProductionReadinessService } from "../ProductionReadinessService.js";
 import { OperationalHealthService } from "../OperationalHealthService.js";
 import { PlatformBaselineService } from "../PlatformBaselineService.js";
 import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
+import { CapacityForecastService } from "../CapacityForecastService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
@@ -70,6 +71,20 @@ router.get("/platform-anomalies", (req: AuthRequest, res): any => {
 router.get("/capacity-headroom", (_req: AuthRequest, res): any => {
   try {
     return res.json(CapacityHeadroomService.snapshot());
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+
+// ADR-164 F8 — forecast de capacidade: projeta a trajetória de uma métrica e estima
+// quando cruza o limiar crítico, com confiança. Sem histórico suficiente → honesto
+// (insufficient_history, §59). `?metric=`, `?days=`, `?horizon=`; sem metric → visão de
+// capacidade (métricas conhecidas + primeiro gargalo).
+router.get("/capacity-forecast", (req: AuthRequest, res): any => {
+  try {
+    const metric = typeof req.query?.metric === "string" ? req.query.metric : undefined;
+    const days = typeof req.query?.days === "string" ? Number(req.query.days) : undefined;
+    const horizonDays = typeof req.query?.horizon === "string" ? Number(req.query.horizon) : undefined;
+    if (metric) return res.json(CapacityForecastService.forecast(metric, { days, horizonDays }));
+    return res.json(CapacityForecastService.forecastCapacity({ days, horizonDays }));
   } catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
 

@@ -68,6 +68,7 @@
     "test:operational-health": "tsx scripts/test-operational-health.ts",
     "test:platform-baseline": "tsx scripts/test-platform-baseline.ts",
     "test:capacity-headroom": "tsx scripts/test-capacity-headroom.ts",
+    "test:capacity-forecast": "tsx scripts/test-capacity-forecast.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

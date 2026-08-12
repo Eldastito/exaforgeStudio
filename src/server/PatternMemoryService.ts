@@ -195,34 +195,83 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
    * com impacto realizado opcional. Ajusta (1) a eficácia aprendida do tipo
    * (`effectiveness = Σpeso/acted`; worked=1, no_effect=0,5, backfired=0) e (2) a
    * confiança do próprio padrão. É assim que o sistema aprende O QUE FUNCIONA.
+   *
+   * PRD 9 / ADR-166 F1:
+   *  - IDEMPOTÊNCIA (RN-EL-4, achado (a) da auditoria F0): antes o método fazia
+   *    `acted+1` sem registro por-evento — chamar 2× dobrava a contagem. Agora grava
+   *    um `business_pattern_outcome` por desfecho; um `eventKey` repetido vira no-op
+   *    (retorna `idempotent:true`, sem tocar agregados). O índice UNIQUE PARCIAL é a
+   *    guarda dura contra corrida; a pré-checagem só evita o custo do rollback.
+   *  - PROCEDÊNCIA (`source`): 'assured' quando o desfecho vem da escada do PRD 8
+   *    (`OutcomeAssuranceService` — via `PatternLearningFromAssuranceService` na F1),
+   *    'manual' caso contrário. Base do `assuredEffectiveness` da F2 (DONE ≠ EXEMPLO
+   *    DE SUCESSO — §9/CA2). O ledger + agregados são atômicos (uma transação).
    */
-  static recordOutcome(orgId: string, patternId: string, input: { outcome: string; realizedImpact?: number; note?: string }, actorId?: string): { ok: boolean; error?: string; effectiveness?: number; patternConfidence?: number } {
+  static recordOutcome(
+    orgId: string,
+    patternId: string,
+    input: { outcome: string; realizedImpact?: number; note?: string; eventKey?: string | null; source?: string; correlationId?: string | null; actionId?: string | null },
+    actorId?: string,
+  ): { ok: boolean; error?: string; idempotent?: boolean; outcomeId?: string; effectiveness?: number; patternConfidence?: number } {
     const outcome = String(input?.outcome || "") as Outcome;
     if (!OUTCOMES.includes(outcome)) return { ok: false, error: "outcome inválido (worked|no_effect|backfired)" };
     const p = db.prepare("SELECT * FROM business_patterns WHERE organization_id = ? AND id = ?").get(orgId, patternId) as any;
     if (!p) return { ok: false, error: "padrão não encontrado" };
     const impact = Number(input?.realizedImpact) || 0;
+    const eventKey = input?.eventKey ? String(input.eventKey) : null;
+    const source = input?.source === "assured" ? "assured" : "manual";
 
-    const existing = db.prepare("SELECT * FROM business_pattern_type_stats WHERE organization_id = ? AND domain = ? AND pattern_type = ?").get(orgId, p.domain, p.pattern_type) as any;
-    const acted = (existing ? Number(existing.acted) : 0) + 1;
-    const worked = (existing ? Number(existing.worked) : 0) + (outcome === "worked" ? 1 : 0);
-    const noEffect = (existing ? Number(existing.no_effect) : 0) + (outcome === "no_effect" ? 1 : 0);
-    const backfired = (existing ? Number(existing.backfired) : 0) + (outcome === "backfired" ? 1 : 0);
-    const netImpact = round2((existing ? Number(existing.net_impact) : 0) + impact);
-    const effectiveness = round2((worked * 1 + noEffect * 0.5 + backfired * 0) / Math.max(1, acted));
-    if (existing) {
-      db.prepare("UPDATE business_pattern_type_stats SET acted=?, worked=?, no_effect=?, backfired=?, net_impact=?, effectiveness=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(acted, worked, noEffect, backfired, netImpact, effectiveness, existing.id);
-    } else {
-      db.prepare("INSERT INTO business_pattern_type_stats (id, organization_id, domain, pattern_type, acted, worked, no_effect, backfired, net_impact, effectiveness) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(randomUUID(), orgId, p.domain, p.pattern_type, acted, worked, noEffect, backfired, netImpact, effectiveness);
+    // Pré-checagem de idempotência (RN-EL-4): mesmo evento não conta 2×.
+    if (eventKey) {
+      const dup = db.prepare("SELECT id FROM business_pattern_outcomes WHERE organization_id = ? AND event_key = ?").get(orgId, eventKey) as any;
+      if (dup) {
+        const st = this.typeStats(orgId, p.domain, p.pattern_type);
+        return { ok: true, idempotent: true, outcomeId: dup.id, effectiveness: st?.effectiveness, patternConfidence: Number(p.confidence) };
+      }
     }
 
-    const patternConfidence = clamp01(round2(Number(p.confidence) + OUTCOME_CONF_DELTA[outcome]));
-    db.prepare("UPDATE business_patterns SET confidence=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(patternConfidence, p.id);
+    const outcomeId = randomUUID();
+    let effectiveness = 0, patternConfidence = clamp01(round2(Number(p.confidence) + OUTCOME_CONF_DELTA[outcome]));
+    try {
+      const tx = db.transaction(() => {
+        // 1. Ledger por-evento — o INSERT no índice UNIQUE é a guarda dura de idempotência.
+        db.prepare(
+          `INSERT INTO business_pattern_outcomes (id, organization_id, pattern_id, domain, pattern_type, outcome, realized_impact, source, event_key, correlation_id, action_id, note, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(outcomeId, orgId, p.id, p.domain, p.pattern_type, outcome, impact, source, eventKey, input?.correlationId ?? null, input?.actionId ?? null, input?.note ?? null, actorId ?? null);
 
-    try { logAuthEvent(orgId, actorId || "system", p.id, "BUSINESS_PATTERN_OUTCOME", { domain: p.domain, patternType: p.pattern_type, outcome, impact, effectiveness }); } catch { /* noop */ }
-    return { ok: true, effectiveness, patternConfidence };
+        // 2. Eficácia aprendida do tipo (agregado).
+        const existing = db.prepare("SELECT * FROM business_pattern_type_stats WHERE organization_id = ? AND domain = ? AND pattern_type = ?").get(orgId, p.domain, p.pattern_type) as any;
+        const acted = (existing ? Number(existing.acted) : 0) + 1;
+        const worked = (existing ? Number(existing.worked) : 0) + (outcome === "worked" ? 1 : 0);
+        const noEffect = (existing ? Number(existing.no_effect) : 0) + (outcome === "no_effect" ? 1 : 0);
+        const backfired = (existing ? Number(existing.backfired) : 0) + (outcome === "backfired" ? 1 : 0);
+        const netImpact = round2((existing ? Number(existing.net_impact) : 0) + impact);
+        effectiveness = round2((worked * 1 + noEffect * 0.5 + backfired * 0) / Math.max(1, acted));
+        if (existing) {
+          db.prepare("UPDATE business_pattern_type_stats SET acted=?, worked=?, no_effect=?, backfired=?, net_impact=?, effectiveness=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+            .run(acted, worked, noEffect, backfired, netImpact, effectiveness, existing.id);
+        } else {
+          db.prepare("INSERT INTO business_pattern_type_stats (id, organization_id, domain, pattern_type, acted, worked, no_effect, backfired, net_impact, effectiveness) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .run(randomUUID(), orgId, p.domain, p.pattern_type, acted, worked, noEffect, backfired, netImpact, effectiveness);
+        }
+
+        // 3. Confiança do próprio padrão.
+        db.prepare("UPDATE business_patterns SET confidence=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(patternConfidence, p.id);
+      });
+      tx();
+    } catch (e: any) {
+      // Corrida: outro passe gravou o mesmo event_key primeiro → idempotente (RN-EL-4).
+      if (eventKey && (e?.code === "SQLITE_CONSTRAINT_UNIQUE" || /UNIQUE/i.test(String(e?.message)))) {
+        const dup = db.prepare("SELECT id FROM business_pattern_outcomes WHERE organization_id = ? AND event_key = ?").get(orgId, eventKey) as any;
+        const st = this.typeStats(orgId, p.domain, p.pattern_type);
+        return { ok: true, idempotent: true, outcomeId: dup?.id, effectiveness: st?.effectiveness, patternConfidence: Number(p.confidence) };
+      }
+      return { ok: false, error: String(e?.message || e) };
+    }
+
+    try { logAuthEvent(orgId, actorId || "system", p.id, "BUSINESS_PATTERN_OUTCOME", { domain: p.domain, patternType: p.pattern_type, outcome, impact, source, effectiveness }); } catch { /* noop */ }
+    return { ok: true, outcomeId, effectiveness, patternConfidence };
   }
 
   /**

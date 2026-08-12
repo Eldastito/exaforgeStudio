@@ -1,7 +1,7 @@
 # ADR-164 — Platform Trust, Reliability & Capacity Intelligence (PRD 7)
 
 **Programa:** ZapFlow Execution Intelligence (ZEI)
-**Estado:** Proposto — **F0 (Auditoria de codebase + Matriz de Reutilização) FECHADA neste documento; metade de AMBIENTE pendente de dados do operador**
+**Estado:** Em implementação — **F0 (auditoria) + F1 (Telemetry Contract) FECHADAS; F2 (host/container metrics) bloqueada por dados de AMBIENTE do operador**
 **Prioridade:** P0 — crítica para escala comercial
 **Acesso:** Admin Master
 **Natureza:** Observabilidade + Reliability Engineering + Capacity Intelligence + Trust
@@ -101,7 +101,7 @@ Esta seção entrega a **metade de codebase** da F0 (§7/§117): auditoria do `m
 | Fase | Entrega | Reúso dominante |
 | --- | --- | --- |
 | **F0** | **Esta auditoria (codebase) + matriz; metade de ambiente pendente (§13)** | doc/auditoria |
-| F1 | Telemetry Contract (`PlatformTelemetryProvider`) + instrumentação mínima | CRIAR contrato |
+| **F1** | **Telemetry Contract (`PlatformTelemetryProvider`) + Null provider + fachada (FECHADA)** | CRIAR contrato |
 | F2 | Host & Container metrics (C1/C2) via provider | COMPOR provider |
 | F3 | Application SLI/SLO (p50/p95/p99, rps, 5xx, event-loop) — fatiado (§99) | CRIAR instrumentação |
 | F4 | Database + Queue + Provider health | REUTILIZAR + ESTENDER |
@@ -148,5 +148,6 @@ Sem esses dados, os recursos ficam marcados como pendentes (`operator_configured
 ## 10. Status
 
 - **F0 — FECHADA (metade codebase).** Auditoria das 10 superfícies com evidência `file:symbol` + matriz REUTILIZAR/ESTENDER/COMPOR/CRIAR. Confirmado: *Action Trust* e hooks operacionais existem; instrumentação time-series de *Delivery Trust* é nova (sem prom-client/OTel). Análise comparativa em `docs/prd/ANALISE-PRD7-vs-CODEBASE-E-INFRA.md`.
-- **F0 — metade AMBIENTE: PENDENTE** de dados do operador (§9 acima) — **bloqueia a F1**.
-- **F1–F14 — pendentes**, cada uma = 1 fatia/PR, opt-in por flag (§100), Admin Master only, sem duplicar engine (CA20). Rollout shadow-first (§101/§102).
+- **F1 — FECHADA.** Telemetry Contract provider-agnóstico. `src/server/PlatformTelemetryContract.ts` (tipos `MetricPoint/MetricQuery/MetricResult/MetricRangeResult/TelemetryProviderHealth` + interface `PlatformTelemetryProvider` `queryMetric/queryRange/health` + `NullTelemetryProvider`) e `src/server/PlatformTelemetryService.ts` (fachada única + registry + flag). O domínio consulta métricas **normalizadas** sem conhecer o provider (§9). **Guardrails:** o Null é o padrão e responde **honestamente `available:false`/`not_configured`** (RN-PRC-6 — ausência nunca vira saúde); flag `platform_telemetry_enabled` + provider ativo vivem em `platform_settings` (**GLOBAL, não per-tenant** — RN-PRC-4); só leitura, nada de raw no SQLite (RN-PRC-3). Registrar/ativar provider real é da F2+. `test:platform-telemetry-contract` (15 checks). **0 tabelas novas, 0 flags per-tenant** (reusa `platform_settings`), 0 breaking changes.
+- **F0 — metade AMBIENTE: PENDENTE** de dados do operador (§9 acima). Refinamento: **a F1 (contrato) NÃO dependia desses dados** — a abstração existe justamente pra construir o domínio antes de escolher o provider (§9). O que os dados de ambiente destravam é o **provider REAL** (host/container metrics) a partir da **F2**.
+- **F2–F14 — pendentes**, cada uma = 1 fatia/PR, opt-in por flag (§100), Admin Master only, sem duplicar engine (CA20). Rollout shadow-first (§101/§102). **F2 bloqueada pelos dados de ambiente** (§9).

@@ -58,6 +58,7 @@
     "test:ux-telemetry": "tsx scripts/test-ux-telemetry.ts",
     "test:mobile-readiness": "tsx scripts/test-mobile-readiness.ts",
     "test:legacy-reduction": "tsx scripts/test-legacy-reduction.ts",
+    "test:ux-preferences": "tsx scripts/test-ux-preferences.ts",
     "test:isolation": "tsx scripts/test-tenant-isolation.ts",
     "test:grimoire-copy": "tsx scripts/test-grimoire-copy.ts",
     "test:grimoire-service": "tsx scripts/test-grimoire-service.ts",

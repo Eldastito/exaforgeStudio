@@ -19,9 +19,11 @@ import { randomUUID } from "crypto";
 import { SmartInboxService, InboxItem } from "./SmartInboxService.js";
 import { FalaTuPushService } from "./FalaTuPushService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
+import { UxPreferencesService } from "./UxPreferencesService.js";
 
-const AWAKE_START = 7;   // 07h SP
-const AWAKE_END = 22;    // 22h SP (exclusivo) — §45
+// ADR-163 F13 (§53/§68) — a janela "acordado" virou preferência
+// (`UxPreferencesService`, defaults `DEFAULT_AWAKE_START/END` = 07h..22h SP).
+// Sem config do dono, o comportamento é idêntico ao histórico (0 regressão).
 
 export class FalaTuProactiveService {
   static enabled(orgId: string): boolean {
@@ -68,7 +70,8 @@ export class FalaTuProactiveService {
     const now = opts.now || new Date();
     const userId = user?.userId || user?.id;
     const { hourSP } = FalaTuBriefingDigestService.spParts(now);
-    if (!opts.force && (hourSP < AWAKE_START || hourSP >= AWAKE_END)) return { delivered: 0, items: 0, skipped: "quiet_hours" };
+    // F13 — respeita a janela do dono (default = AWAKE_START/END quando não configurada).
+    if (!opts.force && !UxPreferencesService.isAwake(orgId, hourSP)) return { delivered: 0, items: 0, skipped: "quiet_hours" };
 
     const urgent = this.selectUrgent(orgId, user, now);
     const fresh = urgent.filter((i) => !this.alreadySent(orgId, userId, this.itemKey(i)));

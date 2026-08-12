@@ -8473,6 +8473,36 @@ const initDb = () => {
   // no evidence_json do sinal. Aditivo; default OFF.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN radar_external_signals_enabled INTEGER DEFAULT 0`); } catch(e){}
 
+  // PRD 5 F2 (ADR-162 §83, D7) — flags opt-in do Customer Recovery & Reputation.
+  // `reputation_engine_enabled` = guarda-chuva do módulo; `reclame_aqui_connector_enabled`
+  // = liga o conector Reclame AQUI. A INGESTÃO em si ainda exige o contrato externo
+  // (radar_external_signals_enabled). Todas aditivas, default OFF (convenção #10).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reputation_engine_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reclame_aqui_connector_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // PRD 5 F2 — config + estado por-org de um conector de reputação. Credenciais
+  // CIFRADAS (EncryptionService, ADR-054) em `config_enc`; nunca em texto/log.
+  // `cursor`/`last_synced_at` = leitura incremental (§70); `health_*` = saúde do
+  // conector (§67). UNIQUE(org, provider). Aditivo; sem tocar tabela existente.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS reputation_connectors (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        config_enc TEXT,
+        cursor TEXT,
+        last_synced_at DATETIME,
+        health_status TEXT DEFAULT 'unknown',
+        health_detail TEXT,
+        enabled INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, provider)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar tabela reputation_connectors', e); }
+
   // PRD 2 F12.2 (§84, CA17) — teto DIÁRIO de investigações profundas (LLM) POR
   // DETECTOR: hoje só há teto por-org + budget de plataforma; um detector
   // barulhento (storm) podia consumir toda a verba de IA sozinho. Override
